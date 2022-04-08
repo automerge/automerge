@@ -13,12 +13,12 @@
 #include "group_state.h"
 #include "macro_utils.h"
 
-#define test_AMmapSet(suffix) test_AMmapSet ## suffix
+#define test_AMmapPut(suffix) test_AMmapPut ## suffix
 
-#define static_void_test_AMmapSet(suffix, member, scalar_value)               \
-static void test_AMmapSet ## suffix(void **state) {                           \
+#define static_void_test_AMmapPut(suffix, member, scalar_value)               \
+static void test_AMmapPut ## suffix(void **state) {                           \
     GroupState* group_state = *state;                                         \
-    AMresult* res = AMmapSet ## suffix(                                       \
+    AMresult* res = AMmapPut ## suffix(                                       \
         group_state->doc,                                                     \
         AM_ROOT,                                                              \
         #suffix,                                                              \
@@ -30,7 +30,7 @@ static void test_AMmapSet ## suffix(void **state) {                           \
     assert_int_equal(AMresultSize(res), 0);                                   \
     AMvalue value = AMresultValue(res, 0);                                    \
     assert_int_equal(value.tag, AM_VALUE_NOTHING);                            \
-    AMclear(res);                                                             \
+    AMfreeResult(res);                                                        \
     res = AMmapGet(group_state->doc, AM_ROOT, #suffix);                       \
     if (AMresultStatus(res) != AM_STATUS_OK) {                                \
         fail_msg("%s", AMerrorMessage(res));                                  \
@@ -39,15 +39,15 @@ static void test_AMmapSet ## suffix(void **state) {                           \
     value = AMresultValue(res, 0);                                            \
     assert_int_equal(value.tag, AMvalue_discriminant(#suffix));               \
     assert_true(value.member == scalar_value);                                \
-    AMclear(res);                                                             \
+    AMfreeResult(res);                                                        \
 }
 
-#define test_AMmapSetObject(label) test_AMmapSetObject_ ## label
+#define test_AMmapPutObject(label) test_AMmapPutObject_ ## label
 
-#define static_void_test_AMmapSetObject(label)                                \
-static void test_AMmapSetObject_ ## label(void **state) {                     \
+#define static_void_test_AMmapPutObject(label)                                \
+static void test_AMmapPutObject_ ## label(void **state) {                     \
     GroupState* group_state = *state;                                         \
-    AMresult* res = AMmapSetObject(                                           \
+    AMresult* res = AMmapPutObject(                                           \
         group_state->doc,                                                     \
         AM_ROOT,                                                              \
         #label,                                                               \
@@ -58,19 +58,25 @@ static void test_AMmapSetObject_ ## label(void **state) {                     \
     }                                                                         \
     assert_int_equal(AMresultSize(res), 1);                                   \
     AMvalue value = AMresultValue(res, 0);                                    \
-    assert_int_equal(value.tag, AM_VALUE_OBJ);                                \
-    assert_int_equal(value.obj.tag, AM_OBJ_ID);                               \
-    assert_int_equal(AMobjSize(group_state->doc, &value.obj), 0);             \
-    AMclear(res);                                                             \
+    assert_int_equal(value.tag, AM_VALUE_OBJ_ID);                             \
+    /**                                                                       \
+     * \note The `AMresult` struct can be deallocated immediately when its    \
+     *       value is a pointer to an opaque struct because its lifetime      \
+     *       is tied to the `AMdoc` struct instead.                           \
+     */                                                                       \
+    AMfreeResult(res);                                                        \
+    assert_non_null(value.obj_id);                                            \
+    assert_int_equal(AMobjSize(group_state->doc, value.obj_id), 0);           \
+    AMfreeObjId(group_state->doc, value.obj_id);                                                             \
 }
 
-static void test_AMmapSetBytes(void **state) {
+static void test_AMmapPutBytes(void **state) {
     static char const* const KEY = "Bytes";
     static uint8_t const BYTES_VALUE[] = {INT8_MIN, INT8_MAX / 2, INT8_MAX};
     static size_t const BYTES_SIZE = sizeof(BYTES_VALUE) / sizeof(uint8_t);
 
     GroupState* group_state = *state;
-    AMresult* res = AMmapSetBytes(
+    AMresult* res = AMmapPutBytes(
         group_state->doc,
         AM_ROOT,
         KEY,
@@ -83,7 +89,7 @@ static void test_AMmapSetBytes(void **state) {
     assert_int_equal(AMresultSize(res), 0);
     AMvalue value = AMresultValue(res, 0);
     assert_int_equal(value.tag, AM_VALUE_NOTHING);
-    AMclear(res);
+    AMfreeResult(res);
     res = AMmapGet(group_state->doc, AM_ROOT, KEY);
     if (AMresultStatus(res) != AM_STATUS_OK) {
         fail_msg("%s", AMerrorMessage(res));
@@ -93,27 +99,27 @@ static void test_AMmapSetBytes(void **state) {
     assert_int_equal(value.tag, AM_VALUE_BYTES);
     assert_int_equal(value.bytes.count, BYTES_SIZE);
     assert_memory_equal(value.bytes.src, BYTES_VALUE, BYTES_SIZE);
-    AMclear(res);
+    AMfreeResult(res);
 }
 
-static_void_test_AMmapSet(Counter, counter, INT64_MAX)
+static_void_test_AMmapPut(Counter, counter, INT64_MAX)
 
-static_void_test_AMmapSet(F64, f64, DBL_MAX)
+static_void_test_AMmapPut(F64, f64, DBL_MAX)
 
-static_void_test_AMmapSet(Int, int_, INT64_MAX)
+static_void_test_AMmapPut(Int, int_, INT64_MAX)
 
-static void test_AMmapSetNull(void **state) {
+static void test_AMmapPutNull(void **state) {
     static char const* const KEY = "Null";
 
     GroupState* group_state = *state;
-    AMresult* res = AMmapSetNull(group_state->doc, AM_ROOT, KEY);
+    AMresult* res = AMmapPutNull(group_state->doc, AM_ROOT, KEY);
     if (AMresultStatus(res) != AM_STATUS_OK) {
         fail_msg("%s", AMerrorMessage(res));
     }
     assert_int_equal(AMresultSize(res), 0);
     AMvalue value = AMresultValue(res, 0);
     assert_int_equal(value.tag, AM_VALUE_NOTHING);
-    AMclear(res);
+    AMfreeResult(res);
     res = AMmapGet(group_state->doc, AM_ROOT, KEY);
     if (AMresultStatus(res) != AM_STATUS_OK) {
         fail_msg("%s", AMerrorMessage(res));
@@ -121,22 +127,22 @@ static void test_AMmapSetNull(void **state) {
     assert_int_equal(AMresultSize(res), 1);
     value = AMresultValue(res, 0);
     assert_int_equal(value.tag, AM_VALUE_NULL);
-    AMclear(res);
+    AMfreeResult(res);
 }
 
-static_void_test_AMmapSetObject(List)
+static_void_test_AMmapPutObject(List)
 
-static_void_test_AMmapSetObject(Map)
+static_void_test_AMmapPutObject(Map)
 
-static_void_test_AMmapSetObject(Text)
+static_void_test_AMmapPutObject(Text)
 
-static void test_AMmapSetStr(void **state) {
+static void test_AMmapPutStr(void **state) {
     static char const* const KEY = "Str";
     static char const* const STR_VALUE = "Hello, world!";
     size_t const STR_LEN = strlen(STR_VALUE);
 
     GroupState* group_state = *state;
-    AMresult* res = AMmapSetStr(
+    AMresult* res = AMmapPutStr(
         group_state->doc,
         AM_ROOT,
         KEY,
@@ -148,7 +154,7 @@ static void test_AMmapSetStr(void **state) {
     assert_int_equal(AMresultSize(res), 0);
     AMvalue value = AMresultValue(res, 0);
     assert_int_equal(value.tag, AM_VALUE_NOTHING);
-    AMclear(res);
+    AMfreeResult(res);
     res = AMmapGet(group_state->doc, AM_ROOT, KEY);
     if (AMresultStatus(res) != AM_STATUS_OK) {
         fail_msg("%s", AMerrorMessage(res));
@@ -158,26 +164,26 @@ static void test_AMmapSetStr(void **state) {
     assert_int_equal(value.tag, AM_VALUE_STR);
     assert_int_equal(strlen(value.str), STR_LEN);
     assert_memory_equal(value.str, STR_VALUE, STR_LEN + 1);
-    AMclear(res);
+    AMfreeResult(res);
 }
 
-static_void_test_AMmapSet(Timestamp, timestamp, INT64_MAX)
+static_void_test_AMmapPut(Timestamp, timestamp, INT64_MAX)
 
-static_void_test_AMmapSet(Uint, uint, UINT64_MAX)
+static_void_test_AMmapPut(Uint, uint, UINT64_MAX)
 
-int run_AMmapSet_tests(void) {
+int run_AMmapPut_tests(void) {
     const struct CMUnitTest tests[] = {
-        cmocka_unit_test(test_AMmapSetBytes),
-        cmocka_unit_test(test_AMmapSet(Counter)),
-        cmocka_unit_test(test_AMmapSet(F64)),
-        cmocka_unit_test(test_AMmapSet(Int)),
-        cmocka_unit_test(test_AMmapSetNull),
-        cmocka_unit_test(test_AMmapSetObject(List)),
-        cmocka_unit_test(test_AMmapSetObject(Map)),
-        cmocka_unit_test(test_AMmapSetObject(Text)),
-        cmocka_unit_test(test_AMmapSetStr),
-        cmocka_unit_test(test_AMmapSet(Timestamp)),
-        cmocka_unit_test(test_AMmapSet(Uint)),
+        cmocka_unit_test(test_AMmapPutBytes),
+        cmocka_unit_test(test_AMmapPut(Counter)),
+        cmocka_unit_test(test_AMmapPut(F64)),
+        cmocka_unit_test(test_AMmapPut(Int)),
+        cmocka_unit_test(test_AMmapPutNull),
+        cmocka_unit_test(test_AMmapPutObject(List)),
+        cmocka_unit_test(test_AMmapPutObject(Map)),
+        cmocka_unit_test(test_AMmapPutObject(Text)),
+        cmocka_unit_test(test_AMmapPutStr),
+        cmocka_unit_test(test_AMmapPut(Timestamp)),
+        cmocka_unit_test(test_AMmapPut(Uint)),
     };
 
     return cmocka_run_group_tests(tests, group_setup, group_teardown);

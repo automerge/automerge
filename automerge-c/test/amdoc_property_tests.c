@@ -47,10 +47,10 @@ static int teardown(void** state) {
     return 0;
 }
 
-static void test_AMsetActor(void **state) {
+static void test_AMputActor(void **state) {
     TestState* test_state = *state;
     GroupState* group_state = test_state->group_state;
-    AMresult* res = AMsetActor(
+    AMresult* res = AMputActor(
         group_state->doc,
         test_state->actor_id_bytes,
         test_state->actor_id_size
@@ -61,7 +61,7 @@ static void test_AMsetActor(void **state) {
     assert_int_equal(AMresultSize(res), 0);
     AMvalue value = AMresultValue(res, 0);
     assert_int_equal(value.tag, AM_VALUE_NOTHING);
-    AMclear(res);
+    AMfreeResult(res);
     res = AMgetActor(group_state->doc);
     if (AMresultStatus(res) != AM_STATUS_OK) {
         fail_msg("%s", AMerrorMessage(res));
@@ -71,13 +71,13 @@ static void test_AMsetActor(void **state) {
     assert_int_equal(value.tag, AM_VALUE_ACTOR_ID);
     assert_int_equal(value.actor_id.count, test_state->actor_id_size);
     assert_memory_equal(value.actor_id.src, test_state->actor_id_bytes, value.actor_id.count);
-    AMclear(res);
+    AMfreeResult(res);
 }
 
-static void test_AMsetActorHex(void **state) {
+static void test_AMputActorHex(void **state) {
     TestState* test_state = *state;
     GroupState* group_state = test_state->group_state;
-    AMresult* res = AMsetActorHex(
+    AMresult* res = AMputActorHex(
         group_state->doc,
         test_state->actor_id_str
     );
@@ -87,7 +87,7 @@ static void test_AMsetActorHex(void **state) {
     assert_int_equal(AMresultSize(res), 0);
     AMvalue value = AMresultValue(res, 0);
     assert_int_equal(value.tag, AM_VALUE_NOTHING);
-    AMclear(res);
+    AMfreeResult(res);
     res = AMgetActorHex(group_state->doc);
     if (AMresultStatus(res) != AM_STATUS_OK) {
         fail_msg("%s", AMerrorMessage(res));
@@ -97,13 +97,13 @@ static void test_AMsetActorHex(void **state) {
     assert_int_equal(value.tag, AM_VALUE_STR);
     assert_int_equal(strlen(value.str), test_state->actor_id_size * 2);
     assert_string_equal(value.str, test_state->actor_id_str);
-    AMclear(res);
+    AMfreeResult(res);
 }
 
 int run_AMdoc_property_tests(void) {
     const struct CMUnitTest tests[] = {
-        cmocka_unit_test_setup_teardown(test_AMsetActor, setup, teardown),
-        cmocka_unit_test_setup_teardown(test_AMsetActorHex, setup, teardown),
+        cmocka_unit_test_setup_teardown(test_AMputActor, setup, teardown),
+        cmocka_unit_test_setup_teardown(test_AMputActorHex, setup, teardown),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);
