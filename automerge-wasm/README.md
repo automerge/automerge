@@ -14,7 +14,7 @@ The term Actor, Object Id and Heads are used through this documentation.  Detail
 
 An Actor is a unique id that distinguishes a single writer to a document.  It can be any hex string.
 
-An Object id uniquely identifies a Map, List or Text object within a document.  This id comes as a string in the form of `{number}@{actor}` - so `"10@aabbcc"` for example.  The string `"_root"` or `"/"` can also be used to refer to the document root.  These strings are durable and can be used on any descendant or copy of the document that generated them.
+An Object id uniquely identifies a Map, List or Text object within a document.  It can be treated as an opaque string and can be used across documents.  This id comes as a string in the form of `{number}@{actor}` - so `"10@aabbcc"` for example.  The string `"_root"` or `"/"` can also be used to refer to the document root.  These strings are durable and can be used on any descendant or copy of the document that generated them.
 
 Heads refers to a set of hashes that uniquely identifies a point in time in a document's history.  Heads are useful for comparing documents state or retrieving past states from the document.
 
@@ -89,7 +89,7 @@ While int vs uint vs f64 matters little in javascript, Automerge is a cross plat
 
 ### Automerge Object Types
 
-Automerge WASM supports 3 object types.  Maps, lists, and text.  Maps are key value stores where the values can be any scalar type or any object type.  Lists are numerically indexed sets of data that can hold any scalar or any object type.  Text is numerically indexed sets of grapheme clusters.
+Automerge WASM supports 3 object types.  Maps, lists, and text.  Maps are key value stores where the values can be any scalar type or any object type.  Lists are numerically indexed sets of data that can hold any scalar or any object type.
 
 ```javascript
   import { create } from "automerge-wasm"
@@ -187,7 +187,7 @@ Lists are index addressable sets of values.  These values can be any scalar or o
 
 ### Text
 
-Text is a specialized list type intended for modifying a text document.  The primary way to interact with a text document is via the slice operation.  Non text can be inserted into a text document and will be represented with the unicode object replacement character.
+Text is a specialized list type intended for modifying a text document.  The primary way to interact with a text document is via the `splice()` method. Spliced strings will be indexable by character (important to note for platforms that index by graphmeme cluster).  Non text can be inserted into a text document and will be represented with the unicode object replacement character.
 
 ```javascript
     let doc = create("aaaaaa")
@@ -381,6 +381,22 @@ The `load()` function takes a `Uint8Array()` of bytes produced in this way and c
   doc4.materialize("_root")  // returns { key1: "value1", key2: "value2" }
 
   doc1.free(); doc2.free(); doc3.free(); doc4.free()
+```
+
+One interesting feature of automerge binary saves is that they can be concatenated together in any order and can still be loaded into a coherent merged document.
+
+```javascript
+import { load } from "automerge-wasm"
+import * as fs from "fs"
+
+let file1 = fs.readFileSync("automerge_save_1");
+let file2 = fs.readFileSync("automerge_save_2");
+
+let docA = load(file1).merge(load(file2))
+let docB = load(Buffer.concat([ file1, file2 ]))
+
+assert.deepEqual(docA.materialize("/"), docB.materialize("/"))
+assert.equal(docA.save(), docB.save())
 ```
 
 ### Syncing
