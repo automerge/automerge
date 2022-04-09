@@ -9,21 +9,6 @@ use crate::types::{Op, OpId};
 use crate::Prop;
 use crate::{query::Keys, query::KeysAt, ObjType};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum MapType {
-    Map,
-    Table,
-}
-
-impl From<MapType> for ObjType {
-    fn from(m: MapType) -> Self {
-        match m {
-            MapType::Map => ObjType::Map,
-            MapType::Table => ObjType::Table,
-        }
-    }
-}
-
 #[derive(Debug, Default, Clone, PartialEq)]
 pub(crate) struct MapOpsCache {}
 
@@ -35,21 +20,6 @@ impl MapOpsCache {
     fn update<'a, Q: TreeQuery<'a>>(&mut self, query: &Q) {
         query.cache_update_map(self);
         // TODO: fixup the cache (reordering etc.)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum SeqType {
-    List,
-    Text,
-}
-
-impl From<SeqType> for ObjType {
-    fn from(s: SeqType) -> Self {
-        match s {
-            SeqType::List => ObjType::List,
-            SeqType::Text => ObjType::Text,
-        }
     }
 }
 
@@ -74,7 +44,9 @@ impl SeqOpsCache {
 /// Stores the data for an object.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ObjectData {
-    internal: ObjectDataInternal,
+    cache: ObjectDataCache,
+    /// The type of this object.
+    typ: ObjType,
     /// The operations pertaining to this object.
     pub(crate) ops: OpTreeInternal,
     /// The id of the parent object, root has no parent.
@@ -82,50 +54,18 @@ pub(crate) struct ObjectData {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum ObjectDataInternal {
-    Map {
-        /// The type of this object.
-        typ: MapType,
-        cache: Arc<Mutex<MapOpsCache>>,
-    },
-    Seq {
-        /// The type of this object.
-        typ: SeqType,
-        cache: Arc<Mutex<SeqOpsCache>>,
-    },
+pub(crate) enum ObjectDataCache {
+    Map(Arc<Mutex<MapOpsCache>>),
+    Seq(Arc<Mutex<SeqOpsCache>>),
 }
 
-impl PartialEq for ObjectDataInternal {
-    fn eq(&self, other: &ObjectDataInternal) -> bool {
+impl PartialEq for ObjectDataCache {
+    fn eq(&self, other: &ObjectDataCache) -> bool {
         match (self, other) {
-            (
-                ObjectDataInternal::Map {
-                    typ: typ1,
-                    cache: _,
-                },
-                ObjectDataInternal::Map {
-                    typ: typ2,
-                    cache: _,
-                },
-            ) => typ1 == typ2,
-            (
-                ObjectDataInternal::Map { typ: _, cache: _ },
-                ObjectDataInternal::Seq { typ: _, cache: _ },
-            ) => false,
-            (
-                ObjectDataInternal::Seq { typ: _, cache: _ },
-                ObjectDataInternal::Map { typ: _, cache: _ },
-            ) => false,
-            (
-                ObjectDataInternal::Seq {
-                    typ: typ1,
-                    cache: _,
-                },
-                ObjectDataInternal::Seq {
-                    typ: typ2,
-                    cache: _,
-                },
-            ) => typ1 == typ2,
+            (ObjectDataCache::Map(_), ObjectDataCache::Map(_)) => true,
+            (ObjectDataCache::Map(_), ObjectDataCache::Seq(_)) => false,
+            (ObjectDataCache::Seq(_), ObjectDataCache::Map(_)) => false,
+            (ObjectDataCache::Seq(_), ObjectDataCache::Seq(_)) => true,
         }
     }
 }
@@ -133,10 +73,8 @@ impl PartialEq for ObjectDataInternal {
 impl ObjectData {
     pub fn root() -> Self {
         ObjectData {
-            internal: ObjectDataInternal::Map {
-                typ: MapType::Map,
-                cache: Default::default(),
-            },
+            cache: ObjectDataCache::Map(Default::default()),
+            typ: ObjType::Map,
             ops: Default::default(),
             parent: None,
         }
@@ -144,25 +82,12 @@ impl ObjectData {
 
     pub fn new(typ: ObjType, parent: Option<ObjId>) -> Self {
         let internal = match typ {
-            ObjType::Map => ObjectDataInternal::Map {
-                typ: MapType::Map,
-                cache: Default::default(),
-            },
-            ObjType::Table => ObjectDataInternal::Map {
-                typ: MapType::Table,
-                cache: Default::default(),
-            },
-            ObjType::List => ObjectDataInternal::Seq {
-                typ: SeqType::List,
-                cache: Default::default(),
-            },
-            ObjType::Text => ObjectDataInternal::Seq {
-                typ: SeqType::Text,
-                cache: Default::default(),
-            },
+            ObjType::Map | ObjType::Table => ObjectDataCache::Map(Default::default()),
+            ObjType::List | ObjType::Text => ObjectDataCache::Seq(Default::default()),
         };
         ObjectData {
-            internal,
+            cache: internal,
+            typ,
             ops: Default::default(),
             parent,
         }
@@ -200,7 +125,7 @@ impl ObjectData {
         match self {
             ObjectData {
                 ops,
-                internal: ObjectDataInternal::Map { cache, .. },
+                cache: ObjectDataCache::Map(cache),
                 ..
             } => {
                 let mut cache = cache.lock().unwrap();
@@ -212,7 +137,7 @@ impl ObjectData {
             }
             ObjectData {
                 ops,
-                internal: ObjectDataInternal::Seq { cache, .. },
+                cache: ObjectDataCache::Seq(cache),
                 ..
             } => {
                 let mut cache = cache.lock().unwrap();
@@ -241,10 +166,7 @@ impl ObjectData {
     }
 
     pub fn typ(&self) -> ObjType {
-        match &self.internal {
-            ObjectDataInternal::Map { typ, .. } => (*typ).into(),
-            ObjectDataInternal::Seq { typ, .. } => (*typ).into(),
-        }
+        self.typ
     }
 
     pub fn get(&self, index: usize) -> Option<&Op> {
