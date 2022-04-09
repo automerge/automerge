@@ -1,12 +1,12 @@
+use std::ops::RangeBounds;
 use std::sync::{Arc, Mutex};
 
 use crate::clock::Clock;
 use crate::op_tree::{OpSetMetadata, OpTreeInternal};
-use crate::query::TreeQuery;
+use crate::query::{self, TreeQuery};
 use crate::types::ObjId;
-use crate::types::Op;
 use crate::types::{Op, OpId};
-use crate::ObjType;
+use crate::Prop;
 use crate::{query::Keys, query::KeysAt, ObjType};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -28,11 +28,11 @@ impl From<MapType> for ObjType {
 pub(crate) struct MapOpsCache {}
 
 impl MapOpsCache {
-    fn lookup<Q: TreeQuery>(&self, query: &mut Q) -> bool {
+    fn lookup<'a, Q: TreeQuery<'a>>(&self, query: &mut Q) -> bool {
         query.cache_lookup_map(self)
     }
 
-    fn update<Q: TreeQuery>(&mut self, query: &Q) {
+    fn update<'a, Q: TreeQuery<'a>>(&mut self, query: &Q) {
         query.cache_update_map(self);
         // TODO: fixup the cache (reordering etc.)
     }
@@ -61,11 +61,11 @@ pub(crate) struct SeqOpsCache {
 }
 
 impl SeqOpsCache {
-    fn lookup<Q: TreeQuery>(&self, query: &mut Q) -> bool {
+    fn lookup<'a, Q: TreeQuery<'a>>(&self, query: &mut Q) -> bool {
         query.cache_lookup_seq(self)
     }
 
-    fn update<Q: TreeQuery>(&mut self, query: &Q) {
+    fn update<'a, Q: TreeQuery<'a>>(&mut self, query: &Q) {
         query.cache_update_seq(self);
         // TODO: fixup the cache (reordering etc.)
     }
@@ -76,12 +76,12 @@ impl SeqOpsCache {
 pub(crate) struct ObjectData {
     internal: ObjectDataInternal,
     /// The operations pertaining to this object.
-    ops: OpTreeInternal,
+    pub(crate) ops: OpTreeInternal,
     /// The id of the parent object, root has no parent.
     pub parent: Option<ObjId>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub(crate) enum ObjectDataInternal {
     Map {
         /// The type of this object.
@@ -95,34 +95,37 @@ pub(crate) enum ObjectDataInternal {
     },
 }
 
-impl PartialEq for ObjectData {
-    fn eq(&self, other: &Self) -> bool {
+impl PartialEq for ObjectDataInternal {
+    fn eq(&self, other: &ObjectDataInternal) -> bool {
         match (self, other) {
             (
-                Self::Map {
-                    typ: l_typ,
-                    ops: l_ops,
+                ObjectDataInternal::Map {
+                    typ: typ1,
                     cache: _,
                 },
-                Self::Map {
-                    typ: r_typ,
-                    ops: r_ops,
+                ObjectDataInternal::Map {
+                    typ: typ2,
                     cache: _,
                 },
-            ) => l_typ == r_typ && l_ops == r_ops,
+            ) => typ1 == typ2,
             (
-                Self::Seq {
-                    typ: l_typ,
-                    ops: l_ops,
+                ObjectDataInternal::Map { typ: _, cache: _ },
+                ObjectDataInternal::Seq { typ: _, cache: _ },
+            ) => false,
+            (
+                ObjectDataInternal::Seq { typ: _, cache: _ },
+                ObjectDataInternal::Map { typ: _, cache: _ },
+            ) => false,
+            (
+                ObjectDataInternal::Seq {
+                    typ: typ1,
                     cache: _,
                 },
-                Self::Seq {
-                    typ: r_typ,
-                    ops: r_ops,
+                ObjectDataInternal::Seq {
+                    typ: typ2,
                     cache: _,
                 },
-            ) => l_typ == r_typ && l_ops == r_ops,
-            _ => false,
+            ) => typ1 == typ2,
         }
     }
 }
@@ -141,12 +144,22 @@ impl ObjectData {
 
     pub fn new(typ: ObjType, parent: Option<ObjId>) -> Self {
         let internal = match typ {
-            ObjType::Map => ObjectDataInternal::Map { typ: MapType::Map },
+            ObjType::Map => ObjectDataInternal::Map {
+                typ: MapType::Map,
+                cache: Default::default(),
+            },
             ObjType::Table => ObjectDataInternal::Map {
                 typ: MapType::Table,
+                cache: Default::default(),
             },
-            ObjType::List => ObjectDataInternal::Seq { typ: SeqType::List },
-            ObjType::Text => ObjectDataInternal::Seq { typ: SeqType::Text },
+            ObjType::List => ObjectDataInternal::Seq {
+                typ: SeqType::List,
+                cache: Default::default(),
+            },
+            ObjType::Text => ObjectDataInternal::Seq {
+                typ: SeqType::Text,
+                cache: Default::default(),
+            },
         };
         ObjectData {
             internal,
@@ -163,26 +176,33 @@ impl ObjectData {
         self.ops.keys_at(clock)
     }
 
-    pub(crate) fn ops(&self) -> &OpTreeInternal {
-        match self {
-            ObjectData::Map { ops, .. } => ops,
-            ObjectData::Seq { ops, .. } => ops,
-        }
+    pub fn range<'a, R: RangeBounds<Prop>>(
+        &'a self,
+        range: R,
+        meta: &'a OpSetMetadata,
+    ) -> Option<query::Range<'a, R>> {
+        self.ops.range(range, meta)
     }
 
-    fn ops_mut(&mut self) -> &mut OpTreeInternal {
-        match self {
-            ObjectData::Map { ops, .. } => ops,
-            ObjectData::Seq { ops, .. } => ops,
-        }
+    pub fn range_at<'a, R: RangeBounds<Prop>>(
+        &'a self,
+        range: R,
+        meta: &'a OpSetMetadata,
+        clock: Clock,
+    ) -> Option<query::RangeAt<'a, R>> {
+        self.ops.range_at(range, meta, clock)
     }
 
-    pub fn search<Q>(&self, mut query: Q, metadata: &OpSetMetadata) -> Q
+    pub fn search<'a, 'b: 'a, Q>(&'b self, mut query: Q, metadata: &OpSetMetadata) -> Q
     where
-        Q: TreeQuery,
+        Q: TreeQuery<'a>,
     {
         match self {
-            ObjectData::Map { cache, ops, .. } => {
+            ObjectData {
+                ops,
+                internal: ObjectDataInternal::Map { cache, .. },
+                ..
+            } => {
                 let mut cache = cache.lock().unwrap();
                 if !cache.lookup(&mut query) {
                     query = ops.search(query, metadata);
@@ -190,7 +210,11 @@ impl ObjectData {
                 cache.update(&query);
                 query
             }
-            ObjectData::Seq { cache, ops, .. } => {
+            ObjectData {
+                ops,
+                internal: ObjectDataInternal::Seq { cache, .. },
+                ..
+            } => {
                 let mut cache = cache.lock().unwrap();
                 if !cache.lookup(&mut query) {
                     query = ops.search(query, metadata);
@@ -205,25 +229,25 @@ impl ObjectData {
     where
         F: FnOnce(&mut Op),
     {
-        self.ops_mut().update(index, f)
+        self.ops.update(index, f)
     }
 
     pub fn remove(&mut self, index: usize) -> Op {
-        self.ops_mut().remove(index)
+        self.ops.remove(index)
     }
 
     pub fn insert(&mut self, index: usize, op: Op) {
-        self.ops_mut().insert(index, op)
+        self.ops.insert(index, op)
     }
 
     pub fn typ(&self) -> ObjType {
-        match self {
-            ObjectData::Map { typ, .. } => (*typ).into(),
-            ObjectData::Seq { typ, .. } => (*typ).into(),
+        match &self.internal {
+            ObjectDataInternal::Map { typ, .. } => (*typ).into(),
+            ObjectDataInternal::Seq { typ, .. } => (*typ).into(),
         }
     }
 
     pub fn get(&self, index: usize) -> Option<&Op> {
-        self.ops().get(index)
+        self.ops.get(index)
     }
 }

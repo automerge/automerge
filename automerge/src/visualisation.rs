@@ -48,7 +48,7 @@ impl<'a> GraphVisualisation<'a> {
     ) -> GraphVisualisation<'a> {
         let mut nodes = HashMap::new();
         for (obj_id, object_data) in objects {
-            if let Some(root_node) = &object_data.ops().root_node {
+            if let Some(root_node) = &object_data.ops.root_node {
                 let tree_id = Self::construct_nodes(root_node, obj_id, &mut nodes, metadata);
                 let obj_tree_id = NodeId::default();
                 nodes.insert(

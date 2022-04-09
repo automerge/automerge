@@ -692,36 +692,36 @@ mod tests {
 
     #[test]
     fn insert() {
-        let mut t: OpTree = OpTree::new();
+        let mut t = OpTreeInternal::new();
 
-        t.internal.insert(0, op());
-        t.internal.insert(1, op());
-        t.internal.insert(0, op());
-        t.internal.insert(0, op());
-        t.internal.insert(0, op());
-        t.internal.insert(3, op());
-        t.internal.insert(4, op());
+        t.insert(0, op());
+        t.insert(1, op());
+        t.insert(0, op());
+        t.insert(0, op());
+        t.insert(0, op());
+        t.insert(3, op());
+        t.insert(4, op());
     }
 
     #[test]
     fn insert_book() {
-        let mut t: OpTree = OpTree::new();
+        let mut t = OpTreeInternal::new();
 
         for i in 0..100 {
-            t.internal.insert(i % 2, op());
+            t.insert(i % 2, op());
         }
     }
 
     #[test]
     fn insert_book_vec() {
-        let mut t: OpTree = OpTree::new();
+        let mut t = OpTreeInternal::new();
         let mut v = Vec::new();
 
         for i in 0..100 {
-            t.internal.insert(i % 3, op());
+            t.insert(i % 3, op());
             v.insert(i % 3, op());
 
-            assert_eq!(v, t.internal.iter().cloned().collect::<Vec<_>>())
+            assert_eq!(v, t.iter().cloned().collect::<Vec<_>>())
         }
     }
 }
