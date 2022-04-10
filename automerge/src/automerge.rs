@@ -239,7 +239,12 @@ impl Automerge {
         }
     }
 
-    pub(crate) fn insert_patch(&mut self, obj: &ObjId, op: &Op) -> (usize, Vec<usize>) {
+    pub(crate) fn insert_patch(
+        &mut self,
+        obj: &ObjId,
+        op: &Op,
+        prop: Option<Prop>,
+    ) -> (usize, Vec<usize>) {
         let q = self.ops.search(obj, query::SeekOpWithPatch::new(op));
 
         let query::SeekOpWithPatch {
@@ -252,10 +257,10 @@ impl Automerge {
         } = q;
 
         let ex_obj = self.id_to_exid(obj.0);
-        let key = match op.key {
+        let key = prop.unwrap_or_else(|| match op.key {
             Key::Map(index) => self.ops.m.props[index].clone().into(),
             Key::Seq(_) => seen.into(),
-        };
+        });
 
         let patch = if op.insert {
             let value = (op.clone_value(), self.id_to_exid(op.id));
@@ -304,7 +309,7 @@ impl Automerge {
     }
 
     fn insert_op_with_patch(&mut self, obj: &ObjId, op: Op) {
-        let (pos, succ) = self.insert_patch(obj, &op);
+        let (pos, succ) = self.insert_patch(obj, &op, None);
 
         for i in succ {
             self.ops.replace(obj, i, |old_op| old_op.add_succ(&op));

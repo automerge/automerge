@@ -17,7 +17,7 @@ pub struct TransactionInner {
     pub(crate) extra_bytes: Vec<u8>,
     pub(crate) hash: Option<ChangeHash>,
     pub(crate) deps: Vec<ChangeHash>,
-    pub(crate) operations: Vec<(ObjId, Op)>,
+    pub(crate) operations: Vec<(ObjId, Op, Prop)>,
 }
 
 impl TransactionInner {
@@ -43,8 +43,8 @@ impl TransactionInner {
 
         let num_ops = self.pending_ops();
         if doc.patches.is_some() {
-            for (obj, op) in self.operations.iter() {
-                doc.insert_patch(obj, op);
+            for (obj, op, prop) in self.operations.iter() {
+                doc.insert_patch(obj, op, Some(prop.clone()));
             }
         }
         let change = export_change(self, &doc.ops.m.actors, &doc.ops.m.props);
@@ -65,7 +65,7 @@ impl TransactionInner {
 
         let num = self.pending_ops();
         // remove in reverse order so sets are removed before makes etc...
-        for (obj, op) in self.operations.iter().rev() {
+        for (obj, op, _) in self.operations.iter().rev() {
             for pred_id in &op.pred {
                 if let Some(p) = doc.ops.search(obj, OpIdSearch::new(*pred_id)).index() {
                     doc.ops.replace(obj, p, |o| o.remove_succ(op));
@@ -139,6 +139,7 @@ impl TransactionInner {
         op: Op,
         pos: usize,
         obj: ObjId,
+        prop: Prop,
         succ_pos: &[usize],
     ) {
         for succ in succ_pos {
@@ -151,7 +152,7 @@ impl TransactionInner {
             doc.ops.insert(pos, &obj, op.clone());
         }
 
-        self.operations.push((obj, op));
+        self.operations.push((obj, op, prop));
     }
 
     pub fn insert<V: Into<ScalarValue>>(
@@ -203,7 +204,7 @@ impl TransactionInner {
         };
 
         doc.ops.insert(query.pos(), &obj, op.clone());
-        self.operations.push((obj, op));
+        self.operations.push((obj, op, Prop::Seq(index)));
 
         if is_make {
             Ok(Some(id))
@@ -237,8 +238,8 @@ impl TransactionInner {
         }
 
         let id = self.next_id();
-        let prop = doc.ops.m.props.cache(prop);
-        let query = doc.ops.search(&obj, query::Prop::new(prop));
+        let cached_prop = doc.ops.m.props.cache(prop.clone());
+        let query = doc.ops.search(&obj, query::Prop::new(cached_prop));
 
         // no key present to delete
         if query.ops.is_empty() && action == OpType::Delete {
@@ -256,7 +257,7 @@ impl TransactionInner {
         let op = Op {
             id,
             action,
-            key: Key::Map(prop),
+            key: Key::Map(cached_prop),
             succ: Default::default(),
             pred,
             insert: false,
@@ -264,7 +265,7 @@ impl TransactionInner {
 
         let pos = query.pos;
         let ops_pos = query.ops_pos;
-        self.insert_local_op(doc, op, pos, obj, &ops_pos);
+        self.insert_local_op(doc, op, pos, obj, Prop::Map(prop), &ops_pos);
 
         if is_make {
             Ok(Some(id))
@@ -303,7 +304,7 @@ impl TransactionInner {
 
         let pos = query.pos;
         let ops_pos = query.ops_pos;
-        self.insert_local_op(doc, op, pos, obj, &ops_pos);
+        self.insert_local_op(doc, op, pos, obj, Prop::Seq(index), &ops_pos);
 
         if is_make {
             Ok(Some(id))
