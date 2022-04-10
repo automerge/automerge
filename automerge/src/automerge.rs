@@ -2117,4 +2117,69 @@ mod tests {
         let len = doc.length(&text);
         assert_eq!(len, 4); // 4 chars
     }
+
+    #[test]
+    fn patches_are_populated() {
+        let mut doc = Automerge::new();
+        doc.enable_patches(true);
+
+        let new_key = Prop::Map("foo".into());
+        doc.transact::<_, _, AutomergeError>(|tx| {
+            tx.put(ROOT, new_key.clone(), "bar")?;
+            Ok(())
+        })
+        .unwrap();
+
+        let patches = doc.pop_patches();
+        println!("patches: {patches:?}");
+        assert!(matches!(patches[0], Patch::Assign(_)));
+
+        match patches[0].clone() {
+            Patch::Assign(AssignPatch {
+                obj, key, value, ..
+            }) => {
+                assert_eq!(obj, ROOT);
+                assert_eq!(key, new_key);
+                assert!(matches!(value.0, Value::Scalar(_)));
+            }
+            _ => unreachable!(),
+        }
+
+        let new_key = Prop::Map("hello".into());
+        let list_oid = doc
+            .transact::<_, _, AutomergeError>(|tx| {
+                let oid = tx.put_object(ROOT, new_key.clone(), ObjType::List)?;
+                tx.insert(&oid, 0, "world")?;
+                Ok(oid)
+            })
+            .unwrap()
+            .result;
+
+        let patches = doc.pop_patches();
+        println!("patches: {patches:?}");
+
+        assert!(matches!(patches[0], Patch::Assign(_)));
+
+        match patches[0].clone() {
+            Patch::Assign(AssignPatch {
+                obj, key, value, ..
+            }) => {
+                assert_eq!(obj, ROOT);
+                assert_eq!(key, new_key);
+                assert!(matches!(value.0, Value::Object(ObjType::List)));
+            }
+            _ => unreachable!(),
+        }
+
+        assert!(matches!(patches[1], Patch::Insert(_, _, _)));
+
+        match patches[1].clone() {
+            Patch::Insert(obj, index, (value, _)) => {
+                assert_eq!(obj, list_oid);
+                assert_eq!(index, 0);
+                assert!(matches!(value, Value::Scalar(_)));
+            }
+            _ => unreachable!(),
+        }
+    }
 }
