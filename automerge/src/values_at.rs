@@ -15,13 +15,13 @@ impl<'a> ValuesAt<'a> {
 }
 
 impl<'a> Iterator for ValuesAt<'a> {
-    type Item = (String, Value<'a>, ExId);
+    type Item = (&'a str, Value<'a>, ExId);
 
     fn next(&mut self) -> Option<Self::Item> {
         self.range
             .as_mut()?
             .next()
-            .map(|(key, value, id)| (self.doc.to_string(key), value, self.doc.id_to_exid(id)))
+            .map(|(key, value, id)| (key, value, self.doc.id_to_exid(id)))
     }
 }
 
@@ -30,6 +30,6 @@ impl<'a> DoubleEndedIterator for ValuesAt<'a> {
         self.range
             .as_mut()?
             .next_back()
-            .map(|(key, value, id)| (self.doc.to_string(key), value, self.doc.id_to_exid(id)))
+            .map(|(key, value, id)| (key, value, self.doc.id_to_exid(id)))
     }
 }

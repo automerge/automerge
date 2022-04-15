@@ -45,21 +45,21 @@ impl<'a, R: RangeBounds<String>> RangeAt<'a, R> {
 }
 
 impl<'a, R: RangeBounds<String>> Iterator for RangeAt<'a, R> {
-    type Item = (Key, Value<'a>, OpId);
+    type Item = (&'a str, Value<'a>, OpId);
 
     fn next(&mut self) -> Option<Self::Item> {
         for i in self.index..self.index_back {
             let op = self.root_child.get(i)?;
             let visible = self.window.visible_at(op, i, &self.clock);
             self.index += 1;
-            if Some(op.elemid_or_key()) != self.last_key && visible {
-                self.last_key = Some(op.elemid_or_key());
-                let contains = match op.key {
-                    Key::Map(m) => self.range.contains(self.meta.props.get(m)),
+            if Some(op.key) != self.last_key && visible {
+                self.last_key = Some(op.key);
+                let prop = match op.key {
+                    Key::Map(m) => self.meta.props.get(m),
                     Key::Seq(_) => panic!("found list op in range query"),
                 };
-                if contains {
-                    return Some((op.elemid_or_key(), op.value(), op.id));
+                if self.range.contains(prop) {
+                    return Some((prop, op.value(), op.id));
                 }
             }
         }
@@ -72,14 +72,14 @@ impl<'a, R: RangeBounds<String>> DoubleEndedIterator for RangeAt<'a, R> {
         for i in (self.index..self.index_back).rev() {
             let op = self.root_child.get(i)?;
             self.index_back -= 1;
-            if Some(op.elemid_or_key()) != self.last_key_back && op.visible() {
-                self.last_key_back = Some(op.elemid_or_key());
-                let contains = match op.key {
-                    Key::Map(m) => self.range.contains(self.meta.props.get(m)),
+            if Some(op.key) != self.last_key_back && op.visible() {
+                self.last_key_back = Some(op.key);
+                let prop = match op.key {
+                    Key::Map(m) => self.meta.props.get(m),
                     Key::Seq(_) => panic!("can't iterate through lists backwards"),
                 };
-                if contains {
-                    return Some((op.elemid_or_key(), op.value(), op.id));
+                if self.range.contains(prop) {
+                    return Some((prop, op.value(), op.id));
                 }
             }
         }

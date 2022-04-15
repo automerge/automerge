@@ -1565,41 +1565,41 @@ mod tests {
         let mut range = doc.range(ROOT, "b".to_owned().."d".into());
         assert_eq!(
             range.next(),
-            Some(("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)))
+            Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0)))
         );
         assert_eq!(
             range.next(),
-            Some(("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)))
+            Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0)))
         );
         assert_eq!(range.next(), None);
 
         let mut range = doc.range(ROOT, "b".to_owned()..="d".into());
         assert_eq!(
             range.next(),
-            Some(("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)))
+            Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0)))
         );
         assert_eq!(
             range.next(),
-            Some(("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)))
+            Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0)))
         );
         assert_eq!(
             range.next(),
-            Some(("d".into(), 9.into(), ExId::Id(7, actor.clone(), 0)))
+            Some(("d", 9.into(), ExId::Id(7, actor.clone(), 0)))
         );
         assert_eq!(range.next(), None);
 
         let mut range = doc.range(ROOT, ..="c".to_owned());
         assert_eq!(
             range.next(),
-            Some(("a".into(), 8.into(), ExId::Id(6, actor.clone(), 0)))
+            Some(("a", 8.into(), ExId::Id(6, actor.clone(), 0)))
         );
         assert_eq!(
             range.next(),
-            Some(("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)))
+            Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0)))
         );
         assert_eq!(
             range.next(),
-            Some(("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)))
+            Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0)))
         );
         assert_eq!(range.next(), None);
 
@@ -1607,10 +1607,10 @@ mod tests {
         assert_eq!(
             range.collect::<Vec<_>>(),
             vec![
-                ("a".into(), 8.into(), ExId::Id(6, actor.clone(), 0)),
-                ("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)),
-                ("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)),
-                ("d".into(), 9.into(), ExId::Id(7, actor.clone(), 0)),
+                ("a", 8.into(), ExId::Id(6, actor.clone(), 0)),
+                ("b", 4.into(), ExId::Id(2, actor.clone(), 0)),
+                ("c", 5.into(), ExId::Id(3, actor.clone(), 0)),
+                ("d", 9.into(), ExId::Id(7, actor.clone(), 0)),
             ]
         );
     }
@@ -1637,41 +1637,41 @@ mod tests {
         let mut range = doc.range(ROOT, "b".to_owned().."d".into()).rev();
         assert_eq!(
             range.next(),
-            Some(("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)))
+            Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0)))
         );
         assert_eq!(
             range.next(),
-            Some(("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)))
+            Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0)))
         );
         assert_eq!(range.next(), None);
 
         let mut range = doc.range(ROOT, "b".to_owned()..="d".into()).rev();
         assert_eq!(
             range.next(),
-            Some(("d".into(), 9.into(), ExId::Id(7, actor.clone(), 0)))
+            Some(("d", 9.into(), ExId::Id(7, actor.clone(), 0)))
         );
         assert_eq!(
             range.next(),
-            Some(("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)))
+            Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0)))
         );
         assert_eq!(
             range.next(),
-            Some(("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)))
+            Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0)))
         );
         assert_eq!(range.next(), None);
 
         let mut range = doc.range(ROOT, ..="c".to_owned()).rev();
         assert_eq!(
             range.next(),
-            Some(("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)))
+            Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0)))
         );
         assert_eq!(
             range.next(),
-            Some(("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)))
+            Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0)))
         );
         assert_eq!(
             range.next(),
-            Some(("a".into(), 8.into(), ExId::Id(6, actor.clone(), 0)))
+            Some(("a", 8.into(), ExId::Id(6, actor.clone(), 0)))
         );
         assert_eq!(range.next(), None);
 
@@ -1679,10 +1679,10 @@ mod tests {
         assert_eq!(
             range.collect::<Vec<_>>(),
             vec![
-                ("d".into(), 9.into(), ExId::Id(7, actor.clone(), 0)),
-                ("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)),
-                ("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)),
-                ("a".into(), 8.into(), ExId::Id(6, actor.clone(), 0)),
+                ("d", 9.into(), ExId::Id(7, actor.clone(), 0)),
+                ("c", 5.into(), ExId::Id(3, actor.clone(), 0)),
+                ("b", 4.into(), ExId::Id(2, actor.clone(), 0)),
+                ("a", 8.into(), ExId::Id(6, actor.clone(), 0)),
             ]
         );
     }
