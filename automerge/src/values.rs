@@ -24,3 +24,12 @@ impl<'a> Iterator for Values<'a> {
             .map(|(key, value, id)| (self.doc.to_string(key), value, self.doc.id_to_exid(id)))
     }
 }
+
+impl<'a> DoubleEndedIterator for Values<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.range
+            .as_mut()?
+            .next_back()
+            .map(|(key, value, id)| (self.doc.to_string(key), value, self.doc.id_to_exid(id)))
+    }
+}

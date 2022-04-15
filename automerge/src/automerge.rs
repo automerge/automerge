@@ -1619,6 +1619,78 @@ mod tests {
     }
 
     #[test]
+    fn range_iter_map_rev() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "a", 3).unwrap();
+        tx.put(ROOT, "b", 4).unwrap();
+        tx.put(ROOT, "c", 5).unwrap();
+        tx.put(ROOT, "d", 6).unwrap();
+        tx.commit();
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "a", 7).unwrap();
+        tx.commit();
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "a", 8).unwrap();
+        tx.put(ROOT, "d", 9).unwrap();
+        tx.commit();
+        let actor = doc.get_actor();
+        assert_eq!(doc.range(ROOT, ..).rev().count(), 4);
+
+        let mut range = doc.range(ROOT, Prop::Map("b".into()).."d".into()).rev();
+        assert_eq!(
+            range.next(),
+            Some(("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)))
+        );
+        assert_eq!(
+            range.next(),
+            Some(("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)))
+        );
+        assert_eq!(range.next(), None);
+
+        let mut range = doc.range(ROOT, Prop::Map("b".into())..="d".into()).rev();
+        assert_eq!(
+            range.next(),
+            Some(("d".into(), 9.into(), ExId::Id(7, actor.clone(), 0)))
+        );
+        assert_eq!(
+            range.next(),
+            Some(("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)))
+        );
+        assert_eq!(
+            range.next(),
+            Some(("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)))
+        );
+        assert_eq!(range.next(), None);
+
+        let mut range = doc.range(ROOT, ..=Prop::Map("c".into())).rev();
+        assert_eq!(
+            range.next(),
+            Some(("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)))
+        );
+        assert_eq!(
+            range.next(),
+            Some(("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)))
+        );
+        assert_eq!(
+            range.next(),
+            Some(("a".into(), 8.into(), ExId::Id(6, actor.clone(), 0)))
+        );
+        assert_eq!(range.next(), None);
+
+        let range = doc.range(ROOT, Prop::Map("a".into())..).rev();
+        assert_eq!(
+            range.collect::<Vec<_>>(),
+            vec![
+                ("d".into(), 9.into(), ExId::Id(7, actor.clone(), 0)),
+                ("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)),
+                ("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)),
+                ("a".into(), 8.into(), ExId::Id(6, actor.clone(), 0)),
+            ]
+        );
+    }
+
+    #[test]
     fn range_iter_seq() {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
