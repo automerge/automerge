@@ -380,11 +380,8 @@ impl Automerge {
         }
     }
 
-    /// Iterate over the keys and values of the object `obj` in the given range.
-    ///
-    /// For a map the keys are the keys of the map.
-    /// For a list the keys are the element ids (opids) encoded as strings.
-    pub fn range<O: AsRef<ExId>, R: RangeBounds<Prop>>(&self, obj: O, range: R) -> Range<R> {
+    /// Iterate over the keys and values of the map `obj` in the given range.
+    pub fn range<O: AsRef<ExId>, R: RangeBounds<String>>(&self, obj: O, range: R) -> Range<R> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
             let iter_range = self.ops.range(obj, range);
             Range::new(self, iter_range)
@@ -394,7 +391,7 @@ impl Automerge {
     }
 
     /// Historical version of [`range`](Self::range).
-    pub fn range_at<O: AsRef<ExId>, R: RangeBounds<Prop>>(
+    pub fn range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
         &self,
         obj: O,
         range: R,
@@ -1565,7 +1562,7 @@ mod tests {
         let actor = doc.get_actor();
         assert_eq!(doc.range(ROOT, ..).count(), 4);
 
-        let mut range = doc.range(ROOT, Prop::Map("b".into()).."d".into());
+        let mut range = doc.range(ROOT, "b".to_owned().."d".into());
         assert_eq!(
             range.next(),
             Some(("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)))
@@ -1576,7 +1573,7 @@ mod tests {
         );
         assert_eq!(range.next(), None);
 
-        let mut range = doc.range(ROOT, Prop::Map("b".into())..="d".into());
+        let mut range = doc.range(ROOT, "b".to_owned()..="d".into());
         assert_eq!(
             range.next(),
             Some(("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)))
@@ -1591,7 +1588,7 @@ mod tests {
         );
         assert_eq!(range.next(), None);
 
-        let mut range = doc.range(ROOT, ..=Prop::Map("c".into()));
+        let mut range = doc.range(ROOT, ..="c".to_owned());
         assert_eq!(
             range.next(),
             Some(("a".into(), 8.into(), ExId::Id(6, actor.clone(), 0)))
@@ -1606,7 +1603,7 @@ mod tests {
         );
         assert_eq!(range.next(), None);
 
-        let range = doc.range(ROOT, Prop::Map("a".into())..);
+        let range = doc.range(ROOT, "a".to_owned()..);
         assert_eq!(
             range.collect::<Vec<_>>(),
             vec![
@@ -1637,7 +1634,7 @@ mod tests {
         let actor = doc.get_actor();
         assert_eq!(doc.range(ROOT, ..).rev().count(), 4);
 
-        let mut range = doc.range(ROOT, Prop::Map("b".into()).."d".into()).rev();
+        let mut range = doc.range(ROOT, "b".to_owned().."d".into()).rev();
         assert_eq!(
             range.next(),
             Some(("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)))
@@ -1648,7 +1645,7 @@ mod tests {
         );
         assert_eq!(range.next(), None);
 
-        let mut range = doc.range(ROOT, Prop::Map("b".into())..="d".into()).rev();
+        let mut range = doc.range(ROOT, "b".to_owned()..="d".into()).rev();
         assert_eq!(
             range.next(),
             Some(("d".into(), 9.into(), ExId::Id(7, actor.clone(), 0)))
@@ -1663,7 +1660,7 @@ mod tests {
         );
         assert_eq!(range.next(), None);
 
-        let mut range = doc.range(ROOT, ..=Prop::Map("c".into())).rev();
+        let mut range = doc.range(ROOT, ..="c".to_owned()).rev();
         assert_eq!(
             range.next(),
             Some(("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)))
@@ -1678,7 +1675,7 @@ mod tests {
         );
         assert_eq!(range.next(), None);
 
-        let range = doc.range(ROOT, Prop::Map("a".into())..).rev();
+        let range = doc.range(ROOT, "a".to_owned()..).rev();
         assert_eq!(
             range.collect::<Vec<_>>(),
             vec![
@@ -1686,127 +1683,6 @@ mod tests {
                 ("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)),
                 ("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)),
                 ("a".into(), 8.into(), ExId::Id(6, actor.clone(), 0)),
-            ]
-        );
-    }
-
-    #[test]
-    fn range_iter_seq() {
-        let mut doc = Automerge::new();
-        let mut tx = doc.transaction();
-        let list = tx.put_object(ROOT, "list", ObjType::List).unwrap();
-        tx.insert(&list, 0, 3).unwrap();
-        tx.insert(&list, 1, 4).unwrap();
-        tx.insert(&list, 2, 5).unwrap();
-        tx.insert(&list, 3, 6).unwrap();
-        tx.commit();
-        let mut tx = doc.transaction();
-        tx.put(&list, 0, 7).unwrap();
-        tx.commit();
-        let mut tx = doc.transaction();
-        tx.put(&list, 0, 8).unwrap();
-        tx.put(&list, 3, 9).unwrap();
-        tx.commit();
-        let actor = doc.get_actor();
-        assert_eq!(doc.range(&list, ..).count(), 4);
-
-        let mut range = doc.range(&list, Prop::Seq(1)..3.into());
-        assert_eq!(
-            range.next(),
-            Some((
-                format!("3@{}", actor),
-                4.into(),
-                ExId::Id(3, actor.clone(), 0)
-            ))
-        );
-        assert_eq!(
-            range.next(),
-            Some((
-                format!("4@{}", actor),
-                5.into(),
-                ExId::Id(4, actor.clone(), 0)
-            ))
-        );
-        assert_eq!(range.next(), None);
-
-        let mut range = doc.range(&list, Prop::Seq(1)..=3.into());
-        assert_eq!(
-            range.next(),
-            Some((
-                format!("3@{}", actor),
-                4.into(),
-                ExId::Id(3, actor.clone(), 0)
-            ))
-        );
-        assert_eq!(
-            range.next(),
-            Some((
-                format!("4@{}", actor),
-                5.into(),
-                ExId::Id(4, actor.clone(), 0)
-            ))
-        );
-        assert_eq!(
-            range.next(),
-            Some((
-                format!("5@{}", actor),
-                9.into(),
-                ExId::Id(8, actor.clone(), 0)
-            ))
-        );
-        assert_eq!(range.next(), None);
-
-        let mut range = doc.range(&list, ..Prop::Seq(3));
-        assert_eq!(
-            range.next(),
-            Some((
-                format!("2@{}", actor),
-                8.into(),
-                ExId::Id(7, actor.clone(), 0)
-            ))
-        );
-        assert_eq!(
-            range.next(),
-            Some((
-                format!("3@{}", actor),
-                4.into(),
-                ExId::Id(3, actor.clone(), 0)
-            ))
-        );
-        assert_eq!(
-            range.next(),
-            Some((
-                format!("4@{}", actor),
-                5.into(),
-                ExId::Id(4, actor.clone(), 0)
-            ))
-        );
-        assert_eq!(range.next(), None);
-
-        let range = doc.range(&list, ..);
-        assert_eq!(
-            range.collect::<Vec<_>>(),
-            vec![
-                (
-                    format!("2@{}", actor),
-                    8.into(),
-                    ExId::Id(7, actor.clone(), 0)
-                ),
-                (
-                    format!("3@{}", actor),
-                    4.into(),
-                    ExId::Id(3, actor.clone(), 0)
-                ),
-                (
-                    format!("4@{}", actor),
-                    5.into(),
-                    ExId::Id(4, actor.clone(), 0)
-                ),
-                (
-                    format!("5@{}", actor),
-                    9.into(),
-                    ExId::Id(8, actor.clone(), 0)
-                ),
             ]
         );
     }

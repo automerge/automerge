@@ -184,11 +184,11 @@ impl<'a> Transactable for Transaction<'a> {
         self.doc.keys_at(obj, heads)
     }
 
-    fn range<O: AsRef<ExId>, R: RangeBounds<Prop>>(&self, obj: O, range: R) -> Range<R> {
+    fn range<O: AsRef<ExId>, R: RangeBounds<String>>(&self, obj: O, range: R) -> Range<R> {
         self.doc.range(obj, range)
     }
 
-    fn range_at<O: AsRef<ExId>, R: RangeBounds<Prop>>(
+    fn range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
         &self,
         obj: O,
         range: R,

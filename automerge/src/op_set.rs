@@ -3,7 +3,7 @@ use crate::indexed_cache::IndexedCache;
 use crate::op_tree::OpTree;
 use crate::query::{self, OpIdSearch, TreeQuery};
 use crate::types::{ActorId, Key, ObjId, Op, OpId, OpType};
-use crate::{ObjType, Prop};
+use crate::ObjType;
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -68,7 +68,7 @@ impl OpSetInternal {
         }
     }
 
-    pub fn range<R: RangeBounds<Prop>>(&self, obj: ObjId, range: R) -> Option<query::Range<R>> {
+    pub fn range<R: RangeBounds<String>>(&self, obj: ObjId, range: R) -> Option<query::Range<R>> {
         if let Some(tree) = self.trees.get(&obj) {
             tree.internal.range(range, &self.m)
         } else {
@@ -76,7 +76,7 @@ impl OpSetInternal {
         }
     }
 
-    pub fn range_at<R: RangeBounds<Prop>>(
+    pub fn range_at<R: RangeBounds<String>>(
         &self,
         obj: ObjId,
         range: R,
