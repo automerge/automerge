@@ -41,7 +41,7 @@ impl TransactionInner {
             self.time = t;
         }
 
-        let num_ops = self.operations.len();
+        let num_ops = self.pending_ops();
         let change = export_change(self, &doc.ops.m.actors, &doc.ops.m.props);
         let hash = change.hash;
         doc.update_history(change, num_ops);
@@ -58,7 +58,7 @@ impl TransactionInner {
             doc.actor = Actor::Unused(actor);
         }
 
-        let num = self.operations.len();
+        let num = self.pending_ops();
         // remove in reverse order so sets are removed before makes etc...
         for (obj, op) in self.operations.iter().rev() {
             for pred_id in &op.pred {
@@ -86,7 +86,7 @@ impl TransactionInner {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    pub fn set<P: Into<Prop>, V: Into<ScalarValue>>(
+    pub fn put<P: Into<Prop>, V: Into<ScalarValue>>(
         &mut self,
         doc: &mut Automerge,
         obj: &ExId,
@@ -112,7 +112,7 @@ impl TransactionInner {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    pub fn set_object<P: Into<Prop>>(
+    pub fn put_object<P: Into<Prop>>(
         &mut self,
         doc: &mut Automerge,
         obj: &ExId,
@@ -125,10 +125,7 @@ impl TransactionInner {
     }
 
     fn next_id(&mut self) -> OpId {
-        OpId(
-            self.start_op.get() + self.operations.len() as u64,
-            self.actor,
-        )
+        OpId(self.start_op.get() + self.pending_ops() as u64, self.actor)
     }
 
     fn insert_local_op(
@@ -145,7 +142,7 @@ impl TransactionInner {
             });
         }
 
-        if !op.is_del() {
+        if !op.is_delete() {
             doc.ops.insert(pos, &obj, op.clone());
         }
 
@@ -187,7 +184,7 @@ impl TransactionInner {
         let markid = doc.exid_to_obj(mark.as_ref())?.0;
         let op1 = Op {
             id: self.next_id(),
-            action: OpType::Del,
+            action: OpType::Delete,
             key: markid.into(),
             succ: Default::default(),
             pred: vec![markid],
@@ -202,7 +199,7 @@ impl TransactionInner {
         let markid = markid.next();
         let op2 = Op {
             id: self.next_id(),
-            action: OpType::Del,
+            action: OpType::Delete,
             key: markid.into(),
             succ: Default::default(),
             pred: vec![markid],
@@ -305,7 +302,7 @@ impl TransactionInner {
         let query = doc.ops.search(&obj, query::Prop::new(prop));
 
         // no key present to delete
-        if query.ops.is_empty() && action == OpType::Del {
+        if query.ops.is_empty() && action == OpType::Delete {
             return Ok(None);
         }
 
@@ -326,7 +323,9 @@ impl TransactionInner {
             insert: false,
         };
 
-        self.insert_local_op(doc, op, query.pos, obj, &query.ops_pos);
+        let pos = query.pos;
+        let ops_pos = query.ops_pos;
+        self.insert_local_op(doc, op, pos, obj, &ops_pos);
 
         if is_make {
             Ok(Some(id))
@@ -363,7 +362,9 @@ impl TransactionInner {
             insert: false,
         };
 
-        self.insert_local_op(doc, op, query.pos, obj, &query.ops_pos);
+        let pos = query.pos;
+        let ops_pos = query.ops_pos;
+        self.insert_local_op(doc, op, pos, obj, &ops_pos);
 
         if is_make {
             Ok(Some(id))
@@ -372,7 +373,7 @@ impl TransactionInner {
         }
     }
 
-    pub fn inc<P: Into<Prop>>(
+    pub fn increment<P: Into<Prop>>(
         &mut self,
         doc: &mut Automerge,
         obj: &ExId,
@@ -380,18 +381,18 @@ impl TransactionInner {
         value: i64,
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(obj)?;
-        self.local_op(doc, obj, prop.into(), OpType::Inc(value))?;
+        self.local_op(doc, obj, prop.into(), OpType::Increment(value))?;
         Ok(())
     }
 
-    pub fn del<P: Into<Prop>>(
+    pub fn delete<P: Into<Prop>>(
         &mut self,
         doc: &mut Automerge,
         obj: &ExId,
         prop: P,
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(obj)?;
-        self.local_op(doc, obj, prop.into(), OpType::Del)?;
+        self.local_op(doc, obj, prop.into(), OpType::Delete)?;
         Ok(())
     }
 
@@ -408,7 +409,7 @@ impl TransactionInner {
         let obj = doc.exid_to_obj(obj)?;
         for _ in 0..del {
             // del()
-            self.local_op(doc, obj, pos.into(), OpType::Del)?;
+            self.local_op(doc, obj, pos.into(), OpType::Delete)?;
         }
         for v in vals {
             // insert()
@@ -430,8 +431,8 @@ mod tests {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
 
-        let a = tx.set_object(ROOT, "a", ObjType::Map).unwrap();
-        tx.set(&a, "b", 1).unwrap();
-        assert!(tx.value(&a, "b").unwrap().is_some());
+        let a = tx.put_object(ROOT, "a", ObjType::Map).unwrap();
+        tx.put(&a, "b", 1).unwrap();
+        assert!(tx.get(&a, "b").unwrap().is_some());
     }
 }

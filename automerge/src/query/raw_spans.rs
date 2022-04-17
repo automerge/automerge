@@ -3,7 +3,7 @@ use crate::types::{ElemId, Op, OpId, OpType, ScalarValue};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct RawSpans<const B: usize> {
+pub(crate) struct RawSpans {
     pos: usize,
     seen: usize,
     last_seen: Option<ElemId>,
@@ -21,7 +21,7 @@ pub(crate) struct RawSpan {
     pub value: ScalarValue,
 }
 
-impl<const B: usize> RawSpans<B> {
+impl RawSpans {
     pub fn new() -> Self {
         RawSpans {
             pos: 0,
@@ -34,7 +34,7 @@ impl<const B: usize> RawSpans<B> {
     }
 }
 
-impl<const B: usize> TreeQuery<B> for RawSpans<B> {
+impl<'a> TreeQuery<'a> for RawSpans {
     fn query_element_with_metadata(&mut self, element: &Op, m: &OpSetMetadata) -> QueryResult {
         // find location to insert
         // mark or set

@@ -12,7 +12,7 @@ use helpers::{
 #[test]
 fn simple_attribute_text() -> Result<(), AutomergeError> {
     let mut doc = AutoCommit::new();
-    let note = doc.set_object(&ROOT, "note", automerge::ObjType::Text)?;
+    let note = doc.put_object(&ROOT, "note", automerge::ObjType::Text)?;
     doc.splice_text(&note, 0, 0, "hello little world")?;
     let baseline = doc.get_heads();
     assert!(doc.text(&note).unwrap() == "hello little world");

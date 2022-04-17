@@ -1,29 +1,30 @@
 use crate::query::{OpSetMetadata, QueryResult, TreeQuery};
 use crate::types::{ElemId, Op, OpType, ScalarValue};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Spans<const B: usize> {
+pub(crate) struct Spans<'a> {
     pos: usize,
     seen: usize,
     last_seen: Option<ElemId>,
     last_insert: Option<ElemId>,
     seen_at_this_mark: Option<ElemId>,
     seen_at_last_mark: Option<ElemId>,
-    ops: Vec<Op>,
-    marks: HashMap<String, ScalarValue>,
+    ops: Vec<&'a Op>,
+    marks: HashMap<String, &'a ScalarValue>,
     changed: bool,
-    pub spans: Vec<Span>,
+    pub spans: Vec<Span<'a>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Span {
+pub struct Span<'a> {
     pub pos: usize,
-    pub marks: Vec<(String, ScalarValue)>,
+    pub marks: Vec<(String, Cow<'a, ScalarValue>)>,
 }
 
-impl<const B: usize> Spans<B> {
+impl<'a> Spans<'a> {
     pub fn new() -> Self {
         Spans {
             pos: 0,
@@ -43,7 +44,7 @@ impl<const B: usize> Spans<B> {
         let mut new_marks = HashMap::new();
         for op in &self.ops {
             if let OpType::MarkBegin(m) = &op.action {
-                new_marks.insert(m.name.clone(), m.value.clone());
+                new_marks.insert(m.name.clone(), &m.value);
             }
         }
         if new_marks != self.marks {
@@ -59,7 +60,7 @@ impl<const B: usize> Spans<B> {
             let mut marks: Vec<_> = self
                 .marks
                 .iter()
-                .map(|(key, val)| (key.clone(), val.clone()))
+                .map(|(key, val)| (key.clone(), Cow::Borrowed(*val)))
                 .collect();
             marks.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
             self.spans.push(Span {
@@ -70,14 +71,14 @@ impl<const B: usize> Spans<B> {
     }
 }
 
-impl<const B: usize> TreeQuery<B> for Spans<B> {
+impl<'a> TreeQuery<'a> for Spans<'a> {
     /*
-    fn query_node(&mut self, _child: &OpTreeNode<B>) -> QueryResult {
+    fn query_node(&mut self, _child: &OpTreeNode) -> QueryResult {
         unimplemented!()
     }
     */
 
-    fn query_element_with_metadata(&mut self, element: &Op, m: &OpSetMetadata) -> QueryResult {
+    fn query_element_with_metadata(&mut self, element: &'a Op, m: &OpSetMetadata) -> QueryResult {
         // find location to insert
         // mark or set
         if element.succ.is_empty() {
@@ -86,7 +87,7 @@ impl<const B: usize> TreeQuery<B> for Spans<B> {
                     .ops
                     .binary_search_by(|probe| m.lamport_cmp(probe.id, element.id))
                     .unwrap_err();
-                self.ops.insert(pos, element.clone());
+                self.ops.insert(pos, element);
             }
             if let OpType::MarkEnd(_) = &element.action {
                 self.ops.retain(|op| op.id != element.id.prev());

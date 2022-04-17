@@ -4,18 +4,18 @@ use crate::types::{Clock, Key};
 use std::fmt::Debug;
 
 #[derive(Debug)]
-pub(crate) struct KeysAt<'a, const B: usize> {
+pub(crate) struct KeysAt<'a> {
     clock: Clock,
     window: VisWindow,
     index: usize,
     last_key: Option<Key>,
     index_back: usize,
     last_key_back: Option<Key>,
-    root_child: &'a OpTreeNode<B>,
+    root_child: &'a OpTreeNode,
 }
 
-impl<'a, const B: usize> KeysAt<'a, B> {
-    pub(crate) fn new(root_child: &'a OpTreeNode<B>, clock: Clock) -> Self {
+impl<'a> KeysAt<'a> {
+    pub(crate) fn new(root_child: &'a OpTreeNode, clock: Clock) -> Self {
         Self {
             clock,
             window: VisWindow::default(),
@@ -28,32 +28,32 @@ impl<'a, const B: usize> KeysAt<'a, B> {
     }
 }
 
-impl<'a, const B: usize> Iterator for KeysAt<'a, B> {
+impl<'a> Iterator for KeysAt<'a> {
     type Item = Key;
 
     fn next(&mut self) -> Option<Self::Item> {
-        for i in self.index..self.root_child.len() {
+        for i in self.index..self.index_back {
             let op = self.root_child.get(i)?;
             let visible = self.window.visible_at(op, i, &self.clock);
             self.index += 1;
-            if Some(op.key) != self.last_key && visible {
-                self.last_key = Some(op.key);
-                return Some(op.key);
+            if Some(op.elemid_or_key()) != self.last_key && visible {
+                self.last_key = Some(op.elemid_or_key());
+                return Some(op.elemid_or_key());
             }
         }
         None
     }
 }
 
-impl<'a, const B: usize> DoubleEndedIterator for KeysAt<'a, B> {
+impl<'a> DoubleEndedIterator for KeysAt<'a> {
     fn next_back(&mut self) -> Option<Self::Item> {
         for i in self.index..self.index_back {
             let op = self.root_child.get(i)?;
             let visible = self.window.visible_at(op, i, &self.clock);
             self.index_back -= 1;
-            if Some(op.key) != self.last_key_back && visible {
-                self.last_key_back = Some(op.key);
-                return Some(op.key);
+            if Some(op.elemid_or_key()) != self.last_key_back && visible {
+                self.last_key_back = Some(op.elemid_or_key());
+                return Some(op.elemid_or_key());
             }
         }
         None

@@ -99,7 +99,7 @@ function emptyChange(doc, options) {
 }
 
 function load(data, actor) {
-  const state = AutomergeWASM.loadDoc(data, actor)
+  const state = AutomergeWASM.load(data, actor)
   return rootProxy(state, true);
 }
 
@@ -127,7 +127,7 @@ function getActorId(doc) {
 }
 
 function conflictAt(context, objectId, prop) {
-      let values = context.values(objectId, prop)
+      let values = context.getAll(objectId, prop)
       if (values.length <= 1) {
         return
       }

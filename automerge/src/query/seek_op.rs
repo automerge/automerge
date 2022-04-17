@@ -5,9 +5,9 @@ use std::cmp::Ordering;
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct SeekOp {
+pub(crate) struct SeekOp<'a> {
     /// the op we are looking for
-    op: Op,
+    op: &'a Op,
     /// The position to insert at
     pub pos: usize,
     /// The indices of ops that this op overwrites
@@ -16,10 +16,10 @@ pub(crate) struct SeekOp {
     found: bool,
 }
 
-impl SeekOp {
-    pub fn new(op: &Op) -> Self {
+impl<'a> SeekOp<'a> {
+    pub fn new(op: &'a Op) -> Self {
         SeekOp {
-            op: op.clone(),
+            op,
             succ: vec![],
             pos: 0,
             found: false,
@@ -35,23 +35,12 @@ impl SeekOp {
     }
 
     fn is_target_insert(&self, op: &Op) -> bool {
-        if !op.insert {
-            return false;
-        }
-        if self.op.insert {
-            op.elemid() == self.op.key.elemid()
-        } else {
-            op.elemid() == self.op.elemid()
-        }
+        op.insert && op.elemid() == self.op.key.elemid()
     }
 }
 
-impl<const B: usize> TreeQuery<B> for SeekOp {
-    fn query_node_with_metadata(
-        &mut self,
-        child: &OpTreeNode<B>,
-        m: &OpSetMetadata,
-    ) -> QueryResult {
+impl<'a> TreeQuery<'a> for SeekOp<'a> {
+    fn query_node_with_metadata(&mut self, child: &OpTreeNode, m: &OpSetMetadata) -> QueryResult {
         if self.found {
             return QueryResult::Descend;
         }
@@ -59,9 +48,6 @@ impl<const B: usize> TreeQuery<B> for SeekOp {
             Key::Seq(HEAD) => {
                 while self.pos < child.len() {
                     let op = child.get(self.pos).unwrap();
-                    if self.op.overwrites(op) {
-                        self.succ.push(self.pos);
-                    }
                     if op.insert && m.lamport_cmp(op.id, self.op.id) == Ordering::Less {
                         break;
                     }

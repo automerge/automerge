@@ -1,5 +1,5 @@
+use automerge::ObjType;
 use automerge::{transaction::Transactable, Automerge, AutomergeError, ROOT};
-use automerge::{ObjType, ScalarValue};
 use std::time::Instant;
 
 fn main() -> Result<(), AutomergeError> {
@@ -9,10 +9,10 @@ fn main() -> Result<(), AutomergeError> {
     for i in 0..edits.len() {
         let pos: usize = edits[i][0].as_usize().unwrap();
         let del: usize = edits[i][1].as_usize().unwrap();
-        let mut vals = vec![];
+        let mut vals = String::new();
         for j in 2..edits[i].len() {
             let v = edits[i][j].as_str().unwrap();
-            vals.push(ScalarValue::Str(v.into()));
+            vals.push_str(v);
         }
         commands.push((pos, del, vals));
     }
@@ -20,12 +20,12 @@ fn main() -> Result<(), AutomergeError> {
 
     let now = Instant::now();
     let mut tx = doc.transaction();
-    let text = tx.set_object(ROOT, "text", ObjType::Text).unwrap();
+    let text = tx.put_object(ROOT, "text", ObjType::Text).unwrap();
     for (i, (pos, del, vals)) in commands.into_iter().enumerate() {
         if i % 1000 == 0 {
             println!("Processed {} edits in {} ms", i, now.elapsed().as_millis());
         }
-        tx.splice(&text, pos, del, vals)?;
+        tx.splice_text(&text, pos, del, &vals)?;
     }
     tx.commit();
     let save = Instant::now();

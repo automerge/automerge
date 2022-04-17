@@ -61,8 +61,8 @@ impl InsertNth {
     }
 }
 
-impl<const B: usize> TreeQuery<B> for InsertNth {
-    fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
+impl<'a> TreeQuery<'a> for InsertNth {
+    fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
         // if this node has some visible elements then we may find our target within
         let mut num_vis = child.index.visible_len();
         if child.index.has_visible(&self.last_seen) {

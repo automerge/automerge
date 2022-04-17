@@ -1,8 +1,11 @@
 use crate::error;
+use crate::exid::ExId;
 use crate::legacy as amp;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::cmp::Eq;
 use std::fmt;
+use std::fmt::Display;
 use std::str::FromStr;
 use tinyvec::{ArrayVec, TinyVec};
 
@@ -168,9 +171,9 @@ impl fmt::Display for ObjType {
 pub enum OpType {
     Make(ObjType),
     /// Perform a deletion, expanding the operation to cover `n` deletions (multiOp).
-    Del,
-    Inc(i64),
-    Set(ScalarValue),
+    Delete,
+    Increment(i64),
+    Put(ScalarValue),
     MarkBegin(MarkData),
     MarkEnd(bool),
 }
@@ -200,7 +203,7 @@ impl From<ObjType> for OpType {
 
 impl From<ScalarValue> for OpType {
     fn from(v: ScalarValue) -> Self {
-        OpType::Set(v)
+        OpType::Put(v)
     }
 }
 
@@ -357,6 +360,15 @@ pub enum Prop {
     Seq(usize),
 }
 
+impl Display for Prop {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Prop::Map(s) => write!(f, "{}", s),
+            Prop::Seq(i) => write!(f, "{}", i),
+        }
+    }
+}
+
 impl Key {
     pub fn elemid(&self) -> Option<ElemId> {
         match self {
@@ -373,7 +385,7 @@ pub(crate) struct OpId(pub u64, pub usize);
 pub(crate) struct ObjId(pub OpId);
 
 impl ObjId {
-    pub fn root() -> Self {
+    pub const fn root() -> Self {
         ObjId(OpId(0, 0))
     }
 }
@@ -394,13 +406,13 @@ pub(crate) struct Op {
 impl Op {
     pub(crate) fn add_succ(&mut self, op: &Op) {
         self.succ.push(op.id);
-        if let OpType::Set(ScalarValue::Counter(Counter {
+        if let OpType::Put(ScalarValue::Counter(Counter {
             current,
             increments,
             ..
         })) = &mut self.action
         {
-            if let OpType::Inc(n) = &op.action {
+            if let OpType::Increment(n) = &op.action {
                 *current += *n;
                 *increments += 1;
             }
@@ -409,13 +421,13 @@ impl Op {
 
     pub(crate) fn remove_succ(&mut self, op: &Op) {
         self.succ.retain(|id| id != &op.id);
-        if let OpType::Set(ScalarValue::Counter(Counter {
+        if let OpType::Put(ScalarValue::Counter(Counter {
             current,
             increments,
             ..
         })) = &mut self.action
         {
-            if let OpType::Inc(n) = &op.action {
+            if let OpType::Increment(n) = &op.action {
                 *current -= *n;
                 *increments -= 1;
             }
@@ -433,19 +445,19 @@ impl Op {
     }
 
     pub fn incs(&self) -> usize {
-        if let OpType::Set(ScalarValue::Counter(Counter { increments, .. })) = &self.action {
+        if let OpType::Put(ScalarValue::Counter(Counter { increments, .. })) = &self.action {
             *increments
         } else {
             0
         }
     }
 
-    pub fn is_del(&self) -> bool {
-        matches!(&self.action, OpType::Del)
+    pub fn is_delete(&self) -> bool {
+        matches!(&self.action, OpType::Delete)
     }
 
     pub fn is_inc(&self) -> bool {
-        matches!(&self.action, OpType::Inc(_))
+        matches!(&self.action, OpType::Increment(_))
     }
 
     pub fn valid_mark_anchor(&self) -> bool {
@@ -461,11 +473,15 @@ impl Op {
     }
 
     pub fn is_counter(&self) -> bool {
-        matches!(&self.action, OpType::Set(ScalarValue::Counter(_)))
+        matches!(&self.action, OpType::Put(ScalarValue::Counter(_)))
     }
 
     pub fn is_noop(&self, action: &OpType) -> bool {
-        matches!((&self.action, action), (OpType::Set(n), OpType::Set(m)) if n == m)
+        matches!((&self.action, action), (OpType::Put(n), OpType::Put(m)) if n == m)
+    }
+
+    pub fn is_list_op(&self) -> bool {
+        matches!(&self.key, Key::Seq(_))
     }
 
     pub fn overwrites(&self, other: &Op) -> bool {
@@ -473,16 +489,20 @@ impl Op {
     }
 
     pub fn elemid(&self) -> Option<ElemId> {
+        self.elemid_or_key().elemid()
+    }
+
+    pub fn elemid_or_key(&self) -> Key {
         if self.insert {
-            Some(ElemId(self.id))
+            Key::Seq(ElemId(self.id))
         } else {
-            self.key.elemid()
+            self.key
         }
     }
 
     pub fn as_string(&self) -> Option<String> {
         match &self.action {
-            OpType::Set(scalar) => scalar.as_string(),
+            OpType::Put(scalar) => scalar.as_string(),
             _ => None,
         }
     }
@@ -490,7 +510,15 @@ impl Op {
     pub fn value(&self) -> Value {
         match &self.action {
             OpType::Make(obj_type) => Value::Object(*obj_type),
-            OpType::Set(scalar) => Value::Scalar(scalar.clone()),
+            OpType::Put(scalar) => Value::Scalar(Cow::Borrowed(scalar)),
+            _ => panic!("cant convert op into a value - {:?}", self),
+        }
+    }
+
+    pub fn clone_value(&self) -> Value<'static> {
+        match &self.action {
+            OpType::Make(obj_type) => Value::Object(*obj_type),
+            OpType::Put(scalar) => Value::Scalar(Cow::Owned(scalar.clone())),
             _ => panic!("cant convert op into a value - {:?}", self),
         }
     }
@@ -498,13 +526,13 @@ impl Op {
     #[allow(dead_code)]
     pub fn dump(&self) -> String {
         match &self.action {
-            OpType::Set(value) if self.insert => format!("i:{}", value),
-            OpType::Set(value) => format!("s:{}", value),
+            OpType::Put(value) if self.insert => format!("i:{}", value),
+            OpType::Put(value) => format!("s:{}", value),
             OpType::Make(obj) => format!("make{}", obj),
             OpType::MarkBegin(m) => format!("mark{}={}", m.name, m.value),
             OpType::MarkEnd(_) => "unmark".into(),
-            OpType::Inc(val) => format!("inc:{}", val),
-            OpType::Del => "del".to_string(),
+            OpType::Increment(val) => format!("inc:{}", val),
+            OpType::Delete => "del".to_string(),
         }
     }
 }
@@ -563,6 +591,36 @@ impl TryFrom<&[u8]> for ChangeHash {
             let mut array = [0; 32];
             array.copy_from_slice(bytes);
             Ok(ChangeHash(array))
+        }
+    }
+}
+
+/// Properties of `Patch::Assign`
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssignPatch {
+    pub obj: ExId,
+    pub key: Prop,
+    pub value: (Value<'static>, ExId),
+    pub conflict: bool,
+}
+
+/// A notification to the application that something has changed in a document.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Patch {
+    /// Associating a new value with a key in a map, or an existing list element
+    Assign(AssignPatch),
+    /// Inserting a new element into a list/text
+    Insert(ExId, usize, (Value<'static>, ExId)),
+    /// Deleting an element from a list/text
+    Delete(ExId, Prop),
+}
+
+#[cfg(feature = "wasm")]
+impl From<Prop> for wasm_bindgen::JsValue {
+    fn from(prop: Prop) -> Self {
+        match prop {
+            Prop::Map(key) => key.into(),
+            Prop::Seq(index) => (index as f64).into(),
         }
     }
 }

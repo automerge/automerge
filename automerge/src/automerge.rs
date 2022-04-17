@@ -1,18 +1,21 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::num::NonZeroU64;
+use std::ops::RangeBounds;
 
 use crate::change::encode_document;
 use crate::exid::ExId;
 use crate::keys::Keys;
 use crate::op_set::OpSet;
+use crate::range::Range;
 use crate::transaction::{self, CommitOptions, Failure, Success, Transaction, TransactionInner};
 use crate::types::{
-    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType,
-    ScalarValue, Value,
+    ActorId, AssignPatch, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId,
+    OpType, Patch, ScalarValue, Value,
 };
-use crate::KeysAt;
-use crate::{legacy, query, types, ObjType};
+use crate::{legacy, query, types, ObjType, RangeAt, ValuesAt};
 use crate::{AutomergeError, Change, Prop};
+use crate::{KeysAt, Values};
+use std::cmp::Ordering;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Actor {
@@ -23,15 +26,25 @@ pub(crate) enum Actor {
 /// An automerge document.
 #[derive(Debug, Clone)]
 pub struct Automerge {
+    /// The list of unapplied changes that are not causally ready.
     pub(crate) queue: Vec<Change>,
+    /// The history of changes that form this document, topologically sorted too.
     pub(crate) history: Vec<Change>,
+    /// Mapping from change hash to index into the history list.
     pub(crate) history_index: HashMap<ChangeHash, usize>,
+    /// Mapping from actor index to list of seqs seen for them.
     pub(crate) states: HashMap<usize, Vec<usize>>,
+    /// Current dependencies of this document (heads hashes).
     pub(crate) deps: HashSet<ChangeHash>,
+    /// Heads at the last save.
     pub(crate) saved: Vec<ChangeHash>,
+    /// The set of operations that form this document.
     pub(crate) ops: OpSet,
+    /// The current actor.
     pub(crate) actor: Actor,
+    /// The maximum operation counter this document has seen.
     pub(crate) max_op: u64,
+    pub(crate) patches: Option<Vec<Patch>>,
 }
 
 impl Automerge {
@@ -47,6 +60,7 @@ impl Automerge {
             saved: Default::default(),
             actor: Actor::Unused(ActorId::random()),
             max_op: 0,
+            patches: None,
         }
     }
 
@@ -82,6 +96,23 @@ impl Automerge {
                 index
             }
             Actor::Cached(index) => *index,
+        }
+    }
+
+    pub fn enable_patches(&mut self, enable: bool) {
+        match (enable, &self.patches) {
+            (true, None) => self.patches = Some(vec![]),
+            (false, Some(_)) => self.patches = None,
+            _ => (),
+        }
+    }
+
+    pub fn pop_patches(&mut self) -> Vec<Patch> {
+        if let Some(patches) = self.patches.take() {
+            self.patches = Some(Vec::new());
+            patches
+        } else {
+            Vec::new()
         }
     }
 
@@ -168,23 +199,162 @@ impl Automerge {
         f
     }
 
-    fn insert_op(&mut self, obj: &ObjId, op: Op) -> Op {
+    /// Fork this document at the give heads
+    pub fn fork_at(&self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
+        let mut seen = heads.iter().cloned().collect::<HashSet<_>>();
+        let mut heads = heads.to_vec();
+        let mut changes = vec![];
+        while let Some(hash) = heads.pop() {
+            if let Some(idx) = self.history_index.get(&hash) {
+                let change = &self.history[*idx];
+                for dep in &change.deps {
+                    if !seen.contains(dep) {
+                        heads.push(*dep);
+                    }
+                }
+                changes.push(change);
+                seen.insert(hash);
+            } else {
+                return Err(AutomergeError::InvalidHash(hash));
+            }
+        }
+        let mut f = Self::new();
+        f.set_actor(ActorId::random());
+        f.apply_changes(changes.into_iter().rev().cloned())?;
+        Ok(f)
+    }
+
+    fn insert_op(&mut self, obj: &ObjId, op: Op) {
         let q = self.ops.search(obj, query::SeekOp::new(&op));
 
-        for i in q.succ {
+        let succ = q.succ;
+        let pos = q.pos;
+        for i in succ {
             self.ops.replace(obj, i, |old_op| old_op.add_succ(&op));
         }
 
-        if !op.is_del() {
-            self.ops.insert(q.pos, obj, op.clone());
+        if !op.is_delete() {
+            self.ops.insert(pos, obj, op);
         }
-        op
+    }
+
+    fn insert_op_with_patch(&mut self, obj: &ObjId, op: Op) {
+        let q = self.ops.search(obj, query::SeekOpWithPatch::new(&op));
+
+        let query::SeekOpWithPatch {
+            pos,
+            succ,
+            seen,
+            values,
+            had_value_before,
+            ..
+        } = q;
+
+        let ex_obj = self.id_to_exid(obj.0);
+        let key = match op.key {
+            Key::Map(index) => self.ops.m.props[index].clone().into(),
+            Key::Seq(_) => seen.into(),
+        };
+
+        let patch = if op.insert {
+            let value = (op.clone_value(), self.id_to_exid(op.id));
+            Patch::Insert(ex_obj, seen, value)
+        } else if op.is_delete() {
+            if let Some(winner) = &values.last() {
+                let value = (winner.clone_value(), self.id_to_exid(winner.id));
+                let conflict = values.len() > 1;
+                Patch::Assign(AssignPatch {
+                    obj: ex_obj,
+                    key,
+                    value,
+                    conflict,
+                })
+            } else {
+                Patch::Delete(ex_obj, key)
+            }
+        } else {
+            let winner = if let Some(last_value) = values.last() {
+                if self.ops.m.lamport_cmp(op.id, last_value.id) == Ordering::Greater {
+                    &op
+                } else {
+                    last_value
+                }
+            } else {
+                &op
+            };
+            let value = (winner.clone_value(), self.id_to_exid(winner.id));
+            if op.is_list_op() && !had_value_before {
+                Patch::Insert(ex_obj, seen, value)
+            } else {
+                Patch::Assign(AssignPatch {
+                    obj: ex_obj,
+                    key,
+                    value,
+                    conflict: !values.is_empty(),
+                })
+            }
+        };
+
+        if let Some(patches) = &mut self.patches {
+            patches.push(patch);
+        }
+
+        for i in succ {
+            self.ops.replace(obj, i, |old_op| old_op.add_succ(&op));
+        }
+
+        if !op.is_delete() {
+            self.ops.insert(pos, obj, op);
+        }
     }
 
     // KeysAt::()
     // LenAt::()
     // PropAt::()
     // NthAt::()
+
+    /// Get the object id of the object that contains this object and the prop that this object is
+    /// at in that object.
+    pub fn parent_object<O: AsRef<ExId>>(&self, obj: O) -> Option<(ExId, Prop)> {
+        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
+            if obj == ObjId::root() {
+                // root has no parent
+                None
+            } else {
+                self.ops
+                    .parent_object(&obj)
+                    .map(|(id, key)| (self.id_to_exid(id.0), self.export_key(id, key)))
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Vec<(ExId, Prop)> {
+        let mut path = Vec::new();
+        let mut obj = obj.as_ref().clone();
+        while let Some(parent) = self.parent_object(obj) {
+            obj = parent.0.clone();
+            path.push(parent);
+        }
+        path.reverse();
+        path
+    }
+
+    /// Export a key to a prop.
+    fn export_key(&self, obj: ObjId, key: Key) -> Prop {
+        match key {
+            Key::Map(m) => Prop::Map(self.ops.m.props.get(m).into()),
+            Key::Seq(opid) => {
+                let i = self
+                    .ops
+                    .search(&obj, query::ElemIdPos::new(opid))
+                    .index()
+                    .unwrap();
+                Prop::Seq(i)
+            }
+        }
+    }
 
     /// Get the keys of the object `obj`.
     ///
@@ -206,6 +376,59 @@ impl Automerge {
             KeysAt::new(self, self.ops.keys_at(obj, clock))
         } else {
             KeysAt::new(self, None)
+        }
+    }
+
+    /// Iterate over the keys and values of the object `obj` in the given range.
+    ///
+    /// For a map the keys are the keys of the map.
+    /// For a list the keys are the element ids (opids) encoded as strings.
+    pub fn range<O: AsRef<ExId>, R: RangeBounds<Prop>>(&self, obj: O, range: R) -> Range<R> {
+        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
+            let iter_range = self.ops.range(obj, range);
+            Range::new(self, iter_range)
+        } else {
+            Range::new(self, None)
+        }
+    }
+
+    /// Historical version of [`range`](Self::range).
+    pub fn range_at<O: AsRef<ExId>, R: RangeBounds<Prop>>(
+        &self,
+        obj: O,
+        range: R,
+        heads: &[ChangeHash],
+    ) -> RangeAt<R> {
+        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
+            let clock = self.clock_at(heads);
+            let iter_range = self.ops.range_at(obj, range, clock);
+            RangeAt::new(self, iter_range)
+        } else {
+            RangeAt::new(self, None)
+        }
+    }
+
+    /// Iterate over all the keys and values of the object `obj`.
+    ///
+    /// For a map the keys are the keys of the map.
+    /// For a list the keys are the element ids (opids) encoded as strings.
+    pub fn values<O: AsRef<ExId>>(&self, obj: O) -> Values {
+        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
+            let iter_range = self.ops.range(obj, ..);
+            Values::new(self, iter_range)
+        } else {
+            Values::new(self, None)
+        }
+    }
+
+    /// Historical version of [`values`](Self::values).
+    pub fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> ValuesAt {
+        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
+            let clock = self.clock_at(heads);
+            let iter_range = self.ops.range_at(obj, .., clock);
+            ValuesAt::new(self, iter_range)
+        } else {
+            ValuesAt::new(self, None)
         }
     }
 
@@ -240,6 +463,7 @@ impl Automerge {
         }
     }
 
+    /// Get the type of this object, if it is an object.
     pub fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Option<ObjType> {
         let obj = self.exid_to_obj(obj.as_ref()).ok()?;
         self.ops.object_type(&obj)
@@ -281,7 +505,7 @@ impl Automerge {
         let query = self.ops.search(&obj, query::ListVals::new());
         let mut buffer = String::new();
         for q in &query.ops {
-            if let OpType::Set(ScalarValue::Str(s)) = &q.action {
+            if let OpType::Put(ScalarValue::Str(s)) = &q.action {
                 buffer.push_str(s);
             } else {
                 buffer.push('\u{fffc}');
@@ -301,8 +525,10 @@ impl Automerge {
         let query = self.ops.search(&obj, query::ListValsAt::new(clock));
         let mut buffer = String::new();
         for q in &query.ops {
-            if let OpType::Set(ScalarValue::Str(s)) = &q.action {
+            if let OpType::Put(ScalarValue::Str(s)) = &q.action {
                 buffer.push_str(s);
+            } else {
+                buffer.push('\u{fffc}');
             }
         }
         Ok(buffer)
@@ -311,11 +537,12 @@ impl Automerge {
     pub fn list<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<(Value, ExId)>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
         let query = self.ops.search(&obj, query::ListVals::new());
-        Ok(query
+        let result = query
             .ops
-            .iter()
+            .into_iter()
             .map(|o| (o.value(), self.id_to_exid(o.id)))
-            .collect())
+            .collect();
+        Ok(result)
     }
 
     pub fn list_at<O: AsRef<ExId>>(
@@ -329,7 +556,7 @@ impl Automerge {
         Ok(query
             .ops
             .iter()
-            .map(|o| (o.value(), self.id_to_exid(o.id)))
+            .map(|o| (o.clone_value(), self.id_to_exid(o.id)))
             .collect())
     }
 
@@ -399,29 +626,29 @@ impl Automerge {
     ///
     /// Returns both the value and the id of the operation that created it, useful for handling
     /// conflicts and serves as the object id if the value is an object.
-    pub fn value<O: AsRef<ExId>, P: Into<Prop>>(
+    pub fn get<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
     ) -> Result<Option<(Value, ExId)>, AutomergeError> {
-        Ok(self.values(obj, prop.into())?.last().cloned())
+        Ok(self.get_all(obj, prop.into())?.last().cloned())
     }
 
-    /// Historical version of [`value`](Self::value).
-    pub fn value_at<O: AsRef<ExId>, P: Into<Prop>>(
+    /// Historical version of [`get`](Self::get).
+    pub fn get_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Option<(Value, ExId)>, AutomergeError> {
-        Ok(self.values_at(obj, prop, heads)?.last().cloned())
+        Ok(self.get_all_at(obj, prop, heads)?.last().cloned())
     }
 
-    /// Get all values out of the document at this prop that conflict.
+    /// Get all conflicting values out of the document at this prop that conflict.
     ///
     /// Returns both the value and the id of the operation that created it, useful for handling
     /// conflicts and serves as the object id if the value is an object.
-    pub fn values<O: AsRef<ExId>, P: Into<Prop>>(
+    pub fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
@@ -452,8 +679,8 @@ impl Automerge {
         Ok(result)
     }
 
-    /// Historical version of [`values`](Self::values).
-    pub fn values_at<O: AsRef<ExId>, P: Into<Prop>>(
+    /// Historical version of [`get_all`](Self::get_all).
+    pub fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
@@ -470,7 +697,7 @@ impl Automerge {
                         .search(&obj, query::PropAt::new(p, clock))
                         .ops
                         .into_iter()
-                        .map(|o| (o.value(), self.id_to_exid(o.id)))
+                        .map(|o| (o.clone_value(), self.id_to_exid(o.id)))
                         .collect()
                 } else {
                     vec![]
@@ -481,7 +708,7 @@ impl Automerge {
                 .search(&obj, query::NthAt::new(n, clock))
                 .ops
                 .into_iter()
-                .map(|o| (o.value(), self.id_to_exid(o.id)))
+                .map(|o| (o.clone_value(), self.id_to_exid(o.id)))
                 .collect(),
         };
         Ok(result)
@@ -512,7 +739,10 @@ impl Automerge {
     }
 
     /// Apply changes to this document.
-    pub fn apply_changes(&mut self, changes: Vec<Change>) -> Result<Vec<ExId>, AutomergeError> {
+    pub fn apply_changes(
+        &mut self,
+        changes: impl IntoIterator<Item = Change>,
+    ) -> Result<Vec<ExId>, AutomergeError> {
         let mut objs = HashSet::new();
         for c in changes {
             if !self.history_index.contains_key(&c.hash) {
@@ -539,9 +769,16 @@ impl Automerge {
     fn apply_change(&mut self, change: Change, objs: &mut HashSet<ObjId>) {
         let ops = self.import_ops(&change);
         self.update_history(change, ops.len());
-        for (obj, op) in ops {
-            objs.insert(obj);
-            self.insert_op(&obj, op);
+        if self.patches.is_some() {
+            for (obj, op) in ops {
+                objs.insert(obj);
+                self.insert_op_with_patch(&obj, op);
+            }
+        } else {
+            for (obj, op) in ops {
+                objs.insert(obj);
+                self.insert_op(&obj, op);
+            }
         }
     }
 
@@ -894,17 +1131,17 @@ impl Automerge {
         } else {
             let n = s
                 .find('@')
-                .ok_or_else(|| AutomergeError::InvalidOpId(s.to_owned()))?;
+                .ok_or_else(|| AutomergeError::InvalidObjIdFormat(s.to_owned()))?;
             let counter = s[0..n]
                 .parse()
-                .map_err(|_| AutomergeError::InvalidOpId(s.to_owned()))?;
+                .map_err(|_| AutomergeError::InvalidObjIdFormat(s.to_owned()))?;
             let actor = ActorId::from(hex::decode(&s[(n + 1)..]).unwrap());
             let actor = self
                 .ops
                 .m
                 .actors
                 .lookup(&actor)
-                .ok_or_else(|| AutomergeError::ForeignObjId(s.to_owned()))?;
+                .ok_or_else(|| AutomergeError::InvalidObjId(s.to_owned()))?;
             Ok(ExId::Id(
                 counter,
                 self.ops.m.actors.cache[actor].clone(),
@@ -939,12 +1176,12 @@ impl Automerge {
                 Key::Seq(n) => self.to_string(n),
             };
             let value: String = match &op.action {
-                OpType::Set(value) => format!("{}", value),
+                OpType::Put(value) => format!("{}", value),
                 OpType::Make(obj) => format!("make({})", obj),
-                OpType::Inc(obj) => format!("inc({})", obj),
+                OpType::Increment(obj) => format!("inc({})", obj),
                 OpType::MarkBegin(m) => format!("mark({}={})", m.name, m.value),
                 OpType::MarkEnd(_) => "/mark".into(),
-                OpType::Del => format!("del{}", 0),
+                OpType::Delete => format!("del{}", 0),
             };
             let pred: Vec<_> = op.pred.iter().map(|id| self.to_string(*id)).collect();
             let succ: Vec<_> = op.succ.iter().map(|id| self.to_string(*id)).collect();
@@ -978,7 +1215,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
-    use crate::op_set::B;
+    use crate::op_tree::B;
     use crate::transaction::Transactable;
     use crate::*;
     use std::convert::TryInto;
@@ -988,8 +1225,8 @@ mod tests {
         let mut doc = Automerge::new();
         doc.set_actor(ActorId::random());
         let mut tx = doc.transaction();
-        tx.set(ROOT, "hello", "world")?;
-        tx.value(ROOT, "hello")?;
+        tx.put(ROOT, "hello", "world")?;
+        tx.get(ROOT, "hello")?;
         tx.commit();
         Ok(())
     }
@@ -999,22 +1236,22 @@ mod tests {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
         // setting a scalar value shouldn't return an opid as no object was created.
-        tx.set(ROOT, "a", 1)?;
+        tx.put(ROOT, "a", 1)?;
 
         // setting the same value shouldn't return an opid as there is no change.
-        tx.set(ROOT, "a", 1)?;
+        tx.put(ROOT, "a", 1)?;
 
         assert_eq!(tx.pending_ops(), 1);
 
-        let map = tx.set_object(ROOT, "b", ObjType::Map)?;
+        let map = tx.put_object(ROOT, "b", ObjType::Map)?;
         // object already exists at b but setting a map again overwrites it so we get an opid.
-        tx.set(map, "a", 2)?;
+        tx.put(map, "a", 2)?;
 
-        tx.set_object(ROOT, "b", ObjType::Map)?;
+        tx.put_object(ROOT, "b", ObjType::Map)?;
 
         assert_eq!(tx.pending_ops(), 4);
-        let map = tx.value(ROOT, "b").unwrap().unwrap().1;
-        assert_eq!(tx.value(&map, "a")?, None);
+        let map = tx.get(ROOT, "b").unwrap().unwrap().1;
+        assert_eq!(tx.get(&map, "a")?, None);
 
         tx.commit();
         Ok(())
@@ -1025,17 +1262,17 @@ mod tests {
         let mut doc = Automerge::new();
         doc.set_actor(ActorId::random());
         let mut tx = doc.transaction();
-        let list_id = tx.set_object(ROOT, "items", ObjType::List)?;
-        tx.set(ROOT, "zzz", "zzzval")?;
-        assert!(tx.value(ROOT, "items")?.unwrap().1 == list_id);
+        let list_id = tx.put_object(ROOT, "items", ObjType::List)?;
+        tx.put(ROOT, "zzz", "zzzval")?;
+        assert!(tx.get(ROOT, "items")?.unwrap().1 == list_id);
         tx.insert(&list_id, 0, "a")?;
         tx.insert(&list_id, 0, "b")?;
         tx.insert(&list_id, 2, "c")?;
         tx.insert(&list_id, 1, "d")?;
-        assert!(tx.value(&list_id, 0)?.unwrap().0 == "b".into());
-        assert!(tx.value(&list_id, 1)?.unwrap().0 == "d".into());
-        assert!(tx.value(&list_id, 2)?.unwrap().0 == "a".into());
-        assert!(tx.value(&list_id, 3)?.unwrap().0 == "c".into());
+        assert!(tx.get(&list_id, 0)?.unwrap().0 == "b".into());
+        assert!(tx.get(&list_id, 1)?.unwrap().0 == "d".into());
+        assert!(tx.get(&list_id, 2)?.unwrap().0 == "a".into());
+        assert!(tx.get(&list_id, 3)?.unwrap().0 == "c".into());
         assert!(tx.length(&list_id) == 4);
         tx.commit();
         doc.save();
@@ -1047,10 +1284,10 @@ mod tests {
         let mut doc = Automerge::new();
         doc.set_actor(ActorId::random());
         let mut tx = doc.transaction();
-        tx.set(ROOT, "xxx", "xxx")?;
-        assert!(!tx.values(ROOT, "xxx")?.is_empty());
-        tx.del(ROOT, "xxx")?;
-        assert!(tx.values(ROOT, "xxx")?.is_empty());
+        tx.put(ROOT, "xxx", "xxx")?;
+        assert!(tx.get(ROOT, "xxx")?.is_some());
+        tx.delete(ROOT, "xxx")?;
+        assert!(tx.get(ROOT, "xxx")?.is_none());
         tx.commit();
         Ok(())
     }
@@ -1059,12 +1296,12 @@ mod tests {
     fn test_inc() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
-        tx.set(ROOT, "counter", ScalarValue::counter(10))?;
-        assert!(tx.value(ROOT, "counter")?.unwrap().0 == Value::counter(10));
-        tx.inc(ROOT, "counter", 10)?;
-        assert!(tx.value(ROOT, "counter")?.unwrap().0 == Value::counter(20));
-        tx.inc(ROOT, "counter", -5)?;
-        assert!(tx.value(ROOT, "counter")?.unwrap().0 == Value::counter(15));
+        tx.put(ROOT, "counter", ScalarValue::counter(10))?;
+        assert!(tx.get(ROOT, "counter")?.unwrap().0 == Value::counter(10));
+        tx.increment(ROOT, "counter", 10)?;
+        assert!(tx.get(ROOT, "counter")?.unwrap().0 == Value::counter(20));
+        tx.increment(ROOT, "counter", -5)?;
+        assert!(tx.get(ROOT, "counter")?.unwrap().0 == Value::counter(15));
         tx.commit();
         Ok(())
     }
@@ -1074,19 +1311,19 @@ mod tests {
         let mut doc = Automerge::new();
 
         let mut tx = doc.transaction();
-        tx.set(ROOT, "foo", 1)?;
+        tx.put(ROOT, "foo", 1)?;
         tx.commit();
 
         let save1 = doc.save();
 
         let mut tx = doc.transaction();
-        tx.set(ROOT, "bar", 2)?;
+        tx.put(ROOT, "bar", 2)?;
         tx.commit();
 
         let save2 = doc.save_incremental();
 
         let mut tx = doc.transaction();
-        tx.set(ROOT, "baz", 3)?;
+        tx.put(ROOT, "baz", 3)?;
         tx.commit();
 
         let save3 = doc.save_incremental();
@@ -1105,7 +1342,7 @@ mod tests {
         let mut doc_a = Automerge::load(&save_a)?;
         let mut doc_b = Automerge::load(&save_b)?;
 
-        assert!(doc_a.values(ROOT, "baz")? == doc_b.values(ROOT, "baz")?);
+        assert!(doc_a.get_all(ROOT, "baz")? == doc_b.get_all(ROOT, "baz")?);
 
         assert!(doc_a.save() == doc_b.save());
 
@@ -1116,7 +1353,7 @@ mod tests {
     fn test_save_text() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
-        let text = tx.set_object(ROOT, "text", ObjType::Text)?;
+        let text = tx.put_object(ROOT, "text", ObjType::Text)?;
         tx.commit();
         let heads1 = doc.get_heads();
         let mut tx = doc.transaction();
@@ -1141,56 +1378,56 @@ mod tests {
         let mut doc = Automerge::new();
         doc.set_actor("aaaa".try_into().unwrap());
         let mut tx = doc.transaction();
-        tx.set(ROOT, "prop1", "val1")?;
+        tx.put(ROOT, "prop1", "val1")?;
         tx.commit();
         doc.get_heads();
         let heads1 = doc.get_heads();
         let mut tx = doc.transaction();
-        tx.set(ROOT, "prop1", "val2")?;
+        tx.put(ROOT, "prop1", "val2")?;
         tx.commit();
         doc.get_heads();
         let heads2 = doc.get_heads();
         let mut tx = doc.transaction();
-        tx.set(ROOT, "prop2", "val3")?;
+        tx.put(ROOT, "prop2", "val3")?;
         tx.commit();
         doc.get_heads();
         let heads3 = doc.get_heads();
         let mut tx = doc.transaction();
-        tx.del(ROOT, "prop1")?;
+        tx.delete(ROOT, "prop1")?;
         tx.commit();
         doc.get_heads();
         let heads4 = doc.get_heads();
         let mut tx = doc.transaction();
-        tx.set(ROOT, "prop3", "val4")?;
+        tx.put(ROOT, "prop3", "val4")?;
         tx.commit();
         doc.get_heads();
         let heads5 = doc.get_heads();
         assert!(doc.keys_at(ROOT, &heads1).collect_vec() == vec!["prop1".to_owned()]);
         assert_eq!(doc.length_at(ROOT, &heads1), 1);
-        assert!(doc.value_at(ROOT, "prop1", &heads1)?.unwrap().0 == Value::str("val1"));
-        assert!(doc.value_at(ROOT, "prop2", &heads1)? == None);
-        assert!(doc.value_at(ROOT, "prop3", &heads1)? == None);
+        assert!(doc.get_at(ROOT, "prop1", &heads1)?.unwrap().0 == Value::str("val1"));
+        assert!(doc.get_at(ROOT, "prop2", &heads1)? == None);
+        assert!(doc.get_at(ROOT, "prop3", &heads1)? == None);
 
         assert!(doc.keys_at(ROOT, &heads2).collect_vec() == vec!["prop1".to_owned()]);
         assert_eq!(doc.length_at(ROOT, &heads2), 1);
-        assert!(doc.value_at(ROOT, "prop1", &heads2)?.unwrap().0 == Value::str("val2"));
-        assert!(doc.value_at(ROOT, "prop2", &heads2)? == None);
-        assert!(doc.value_at(ROOT, "prop3", &heads2)? == None);
+        assert!(doc.get_at(ROOT, "prop1", &heads2)?.unwrap().0 == Value::str("val2"));
+        assert!(doc.get_at(ROOT, "prop2", &heads2)? == None);
+        assert!(doc.get_at(ROOT, "prop3", &heads2)? == None);
 
         assert!(
             doc.keys_at(ROOT, &heads3).collect_vec()
                 == vec!["prop1".to_owned(), "prop2".to_owned()]
         );
         assert_eq!(doc.length_at(ROOT, &heads3), 2);
-        assert!(doc.value_at(ROOT, "prop1", &heads3)?.unwrap().0 == Value::str("val2"));
-        assert!(doc.value_at(ROOT, "prop2", &heads3)?.unwrap().0 == Value::str("val3"));
-        assert!(doc.value_at(ROOT, "prop3", &heads3)? == None);
+        assert!(doc.get_at(ROOT, "prop1", &heads3)?.unwrap().0 == Value::str("val2"));
+        assert!(doc.get_at(ROOT, "prop2", &heads3)?.unwrap().0 == Value::str("val3"));
+        assert!(doc.get_at(ROOT, "prop3", &heads3)? == None);
 
         assert!(doc.keys_at(ROOT, &heads4).collect_vec() == vec!["prop2".to_owned()]);
         assert_eq!(doc.length_at(ROOT, &heads4), 1);
-        assert!(doc.value_at(ROOT, "prop1", &heads4)? == None);
-        assert!(doc.value_at(ROOT, "prop2", &heads4)?.unwrap().0 == Value::str("val3"));
-        assert!(doc.value_at(ROOT, "prop3", &heads4)? == None);
+        assert!(doc.get_at(ROOT, "prop1", &heads4)? == None);
+        assert!(doc.get_at(ROOT, "prop2", &heads4)?.unwrap().0 == Value::str("val3"));
+        assert!(doc.get_at(ROOT, "prop3", &heads4)? == None);
 
         assert!(
             doc.keys_at(ROOT, &heads5).collect_vec()
@@ -1198,15 +1435,15 @@ mod tests {
         );
         assert_eq!(doc.length_at(ROOT, &heads5), 2);
         assert_eq!(doc.length(ROOT), 2);
-        assert!(doc.value_at(ROOT, "prop1", &heads5)? == None);
-        assert!(doc.value_at(ROOT, "prop2", &heads5)?.unwrap().0 == Value::str("val3"));
-        assert!(doc.value_at(ROOT, "prop3", &heads5)?.unwrap().0 == Value::str("val4"));
+        assert!(doc.get_at(ROOT, "prop1", &heads5)? == None);
+        assert!(doc.get_at(ROOT, "prop2", &heads5)?.unwrap().0 == Value::str("val3"));
+        assert!(doc.get_at(ROOT, "prop3", &heads5)?.unwrap().0 == Value::str("val4"));
 
         assert_eq!(doc.keys_at(ROOT, &[]).count(), 0);
         assert_eq!(doc.length_at(ROOT, &[]), 0);
-        assert!(doc.value_at(ROOT, "prop1", &[])? == None);
-        assert!(doc.value_at(ROOT, "prop2", &[])? == None);
-        assert!(doc.value_at(ROOT, "prop3", &[])? == None);
+        assert!(doc.get_at(ROOT, "prop1", &[])? == None);
+        assert!(doc.get_at(ROOT, "prop2", &[])? == None);
+        assert!(doc.get_at(ROOT, "prop3", &[])? == None);
         Ok(())
     }
 
@@ -1216,7 +1453,7 @@ mod tests {
         doc.set_actor("aaaa".try_into().unwrap());
 
         let mut tx = doc.transaction();
-        let list = tx.set_object(ROOT, "list", ObjType::List)?;
+        let list = tx.put_object(ROOT, "list", ObjType::List)?;
         tx.commit();
         let heads1 = doc.get_heads();
 
@@ -1226,69 +1463,69 @@ mod tests {
         let heads2 = doc.get_heads();
 
         let mut tx = doc.transaction();
-        tx.set(&list, 0, 20)?;
+        tx.put(&list, 0, 20)?;
         tx.insert(&list, 0, 30)?;
         tx.commit();
         let heads3 = doc.get_heads();
 
         let mut tx = doc.transaction();
-        tx.set(&list, 1, 40)?;
+        tx.put(&list, 1, 40)?;
         tx.insert(&list, 1, 50)?;
         tx.commit();
         let heads4 = doc.get_heads();
 
         let mut tx = doc.transaction();
-        tx.del(&list, 2)?;
+        tx.delete(&list, 2)?;
         tx.commit();
         let heads5 = doc.get_heads();
 
         let mut tx = doc.transaction();
-        tx.del(&list, 0)?;
+        tx.delete(&list, 0)?;
         tx.commit();
         let heads6 = doc.get_heads();
 
         assert!(doc.length_at(&list, &heads1) == 0);
-        assert!(doc.value_at(&list, 0, &heads1)?.is_none());
+        assert!(doc.get_at(&list, 0, &heads1)?.is_none());
 
         assert!(doc.length_at(&list, &heads2) == 1);
-        assert!(doc.value_at(&list, 0, &heads2)?.unwrap().0 == Value::int(10));
+        assert!(doc.get_at(&list, 0, &heads2)?.unwrap().0 == Value::int(10));
 
         assert!(doc.length_at(&list, &heads3) == 2);
 
-        assert!(doc.value_at(&list, 0, &heads3)?.unwrap().0 == Value::int(30));
-        assert!(doc.value_at(&list, 1, &heads3)?.unwrap().0 == Value::int(20));
+        assert!(doc.get_at(&list, 0, &heads3)?.unwrap().0 == Value::int(30));
+        assert!(doc.get_at(&list, 1, &heads3)?.unwrap().0 == Value::int(20));
 
         assert!(doc.length_at(&list, &heads4) == 3);
-        assert!(doc.value_at(&list, 0, &heads4)?.unwrap().0 == Value::int(30));
-        assert!(doc.value_at(&list, 1, &heads4)?.unwrap().0 == Value::int(50));
-        assert!(doc.value_at(&list, 2, &heads4)?.unwrap().0 == Value::int(40));
+        assert!(doc.get_at(&list, 0, &heads4)?.unwrap().0 == Value::int(30));
+        assert!(doc.get_at(&list, 1, &heads4)?.unwrap().0 == Value::int(50));
+        assert!(doc.get_at(&list, 2, &heads4)?.unwrap().0 == Value::int(40));
 
         assert!(doc.length_at(&list, &heads5) == 2);
-        assert!(doc.value_at(&list, 0, &heads5)?.unwrap().0 == Value::int(30));
-        assert!(doc.value_at(&list, 1, &heads5)?.unwrap().0 == Value::int(50));
+        assert!(doc.get_at(&list, 0, &heads5)?.unwrap().0 == Value::int(30));
+        assert!(doc.get_at(&list, 1, &heads5)?.unwrap().0 == Value::int(50));
 
         assert!(doc.length_at(&list, &heads6) == 1);
         assert!(doc.length(&list) == 1);
-        assert!(doc.value_at(&list, 0, &heads6)?.unwrap().0 == Value::int(50));
+        assert!(doc.get_at(&list, 0, &heads6)?.unwrap().0 == Value::int(50));
 
         Ok(())
     }
 
     #[test]
-    fn keys_iter() {
+    fn keys_iter_map() {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
-        tx.set(ROOT, "a", 3).unwrap();
-        tx.set(ROOT, "b", 4).unwrap();
-        tx.set(ROOT, "c", 5).unwrap();
-        tx.set(ROOT, "d", 6).unwrap();
+        tx.put(ROOT, "a", 3).unwrap();
+        tx.put(ROOT, "b", 4).unwrap();
+        tx.put(ROOT, "c", 5).unwrap();
+        tx.put(ROOT, "d", 6).unwrap();
         tx.commit();
         let mut tx = doc.transaction();
-        tx.set(ROOT, "a", 7).unwrap();
+        tx.put(ROOT, "a", 7).unwrap();
         tx.commit();
         let mut tx = doc.transaction();
-        tx.set(ROOT, "a", 8).unwrap();
-        tx.set(ROOT, "d", 9).unwrap();
+        tx.put(ROOT, "a", 8).unwrap();
+        tx.put(ROOT, "d", 9).unwrap();
         tx.commit();
         assert_eq!(doc.keys(ROOT).count(), 4);
 
@@ -1324,6 +1561,259 @@ mod tests {
     }
 
     #[test]
+    fn keys_iter_seq() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let list = tx.put_object(ROOT, "list", ObjType::List).unwrap();
+        tx.insert(&list, 0, 3).unwrap();
+        tx.insert(&list, 1, 4).unwrap();
+        tx.insert(&list, 2, 5).unwrap();
+        tx.insert(&list, 3, 6).unwrap();
+        tx.commit();
+        let mut tx = doc.transaction();
+        tx.put(&list, 0, 7).unwrap();
+        tx.commit();
+        let mut tx = doc.transaction();
+        tx.put(&list, 0, 8).unwrap();
+        tx.put(&list, 3, 9).unwrap();
+        tx.commit();
+        let actor = doc.get_actor();
+        assert_eq!(doc.keys(&list).count(), 4);
+
+        let mut keys = doc.keys(&list);
+        assert_eq!(keys.next(), Some(format!("2@{}", actor)));
+        assert_eq!(keys.next(), Some(format!("3@{}", actor)));
+        assert_eq!(keys.next(), Some(format!("4@{}", actor)));
+        assert_eq!(keys.next(), Some(format!("5@{}", actor)));
+        assert_eq!(keys.next(), None);
+
+        let mut keys = doc.keys(&list);
+        assert_eq!(keys.next_back(), Some(format!("5@{}", actor)));
+        assert_eq!(keys.next_back(), Some(format!("4@{}", actor)));
+        assert_eq!(keys.next_back(), Some(format!("3@{}", actor)));
+        assert_eq!(keys.next_back(), Some(format!("2@{}", actor)));
+        assert_eq!(keys.next_back(), None);
+
+        let mut keys = doc.keys(&list);
+        assert_eq!(keys.next(), Some(format!("2@{}", actor)));
+        assert_eq!(keys.next_back(), Some(format!("5@{}", actor)));
+        assert_eq!(keys.next_back(), Some(format!("4@{}", actor)));
+        assert_eq!(keys.next_back(), Some(format!("3@{}", actor)));
+        assert_eq!(keys.next_back(), None);
+
+        let mut keys = doc.keys(&list);
+        assert_eq!(keys.next_back(), Some(format!("5@{}", actor)));
+        assert_eq!(keys.next(), Some(format!("2@{}", actor)));
+        assert_eq!(keys.next(), Some(format!("3@{}", actor)));
+        assert_eq!(keys.next(), Some(format!("4@{}", actor)));
+        assert_eq!(keys.next(), None);
+
+        let keys = doc.keys(&list);
+        assert_eq!(
+            keys.collect::<Vec<_>>(),
+            vec![
+                format!("2@{}", actor),
+                format!("3@{}", actor),
+                format!("4@{}", actor),
+                format!("5@{}", actor)
+            ]
+        );
+    }
+
+    #[test]
+    fn range_iter_map() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "a", 3).unwrap();
+        tx.put(ROOT, "b", 4).unwrap();
+        tx.put(ROOT, "c", 5).unwrap();
+        tx.put(ROOT, "d", 6).unwrap();
+        tx.commit();
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "a", 7).unwrap();
+        tx.commit();
+        let mut tx = doc.transaction();
+        tx.put(ROOT, "a", 8).unwrap();
+        tx.put(ROOT, "d", 9).unwrap();
+        tx.commit();
+        let actor = doc.get_actor();
+        assert_eq!(doc.range(ROOT, ..).count(), 4);
+
+        let mut range = doc.range(ROOT, Prop::Map("b".into()).."d".into());
+        assert_eq!(
+            range.next(),
+            Some(("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)))
+        );
+        assert_eq!(
+            range.next(),
+            Some(("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)))
+        );
+        assert_eq!(range.next(), None);
+
+        let mut range = doc.range(ROOT, Prop::Map("b".into())..="d".into());
+        assert_eq!(
+            range.next(),
+            Some(("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)))
+        );
+        assert_eq!(
+            range.next(),
+            Some(("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)))
+        );
+        assert_eq!(
+            range.next(),
+            Some(("d".into(), 9.into(), ExId::Id(7, actor.clone(), 0)))
+        );
+        assert_eq!(range.next(), None);
+
+        let mut range = doc.range(ROOT, ..=Prop::Map("c".into()));
+        assert_eq!(
+            range.next(),
+            Some(("a".into(), 8.into(), ExId::Id(6, actor.clone(), 0)))
+        );
+        assert_eq!(
+            range.next(),
+            Some(("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)))
+        );
+        assert_eq!(
+            range.next(),
+            Some(("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)))
+        );
+        assert_eq!(range.next(), None);
+
+        let range = doc.range(ROOT, Prop::Map("a".into())..);
+        assert_eq!(
+            range.collect::<Vec<_>>(),
+            vec![
+                ("a".into(), 8.into(), ExId::Id(6, actor.clone(), 0)),
+                ("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)),
+                ("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)),
+                ("d".into(), 9.into(), ExId::Id(7, actor.clone(), 0)),
+            ]
+        );
+    }
+
+    #[test]
+    fn range_iter_seq() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let list = tx.put_object(ROOT, "list", ObjType::List).unwrap();
+        tx.insert(&list, 0, 3).unwrap();
+        tx.insert(&list, 1, 4).unwrap();
+        tx.insert(&list, 2, 5).unwrap();
+        tx.insert(&list, 3, 6).unwrap();
+        tx.commit();
+        let mut tx = doc.transaction();
+        tx.put(&list, 0, 7).unwrap();
+        tx.commit();
+        let mut tx = doc.transaction();
+        tx.put(&list, 0, 8).unwrap();
+        tx.put(&list, 3, 9).unwrap();
+        tx.commit();
+        let actor = doc.get_actor();
+        assert_eq!(doc.range(&list, ..).count(), 4);
+
+        let mut range = doc.range(&list, Prop::Seq(1)..3.into());
+        assert_eq!(
+            range.next(),
+            Some((
+                format!("3@{}", actor),
+                4.into(),
+                ExId::Id(3, actor.clone(), 0)
+            ))
+        );
+        assert_eq!(
+            range.next(),
+            Some((
+                format!("4@{}", actor),
+                5.into(),
+                ExId::Id(4, actor.clone(), 0)
+            ))
+        );
+        assert_eq!(range.next(), None);
+
+        let mut range = doc.range(&list, Prop::Seq(1)..=3.into());
+        assert_eq!(
+            range.next(),
+            Some((
+                format!("3@{}", actor),
+                4.into(),
+                ExId::Id(3, actor.clone(), 0)
+            ))
+        );
+        assert_eq!(
+            range.next(),
+            Some((
+                format!("4@{}", actor),
+                5.into(),
+                ExId::Id(4, actor.clone(), 0)
+            ))
+        );
+        assert_eq!(
+            range.next(),
+            Some((
+                format!("5@{}", actor),
+                9.into(),
+                ExId::Id(8, actor.clone(), 0)
+            ))
+        );
+        assert_eq!(range.next(), None);
+
+        let mut range = doc.range(&list, ..Prop::Seq(3));
+        assert_eq!(
+            range.next(),
+            Some((
+                format!("2@{}", actor),
+                8.into(),
+                ExId::Id(7, actor.clone(), 0)
+            ))
+        );
+        assert_eq!(
+            range.next(),
+            Some((
+                format!("3@{}", actor),
+                4.into(),
+                ExId::Id(3, actor.clone(), 0)
+            ))
+        );
+        assert_eq!(
+            range.next(),
+            Some((
+                format!("4@{}", actor),
+                5.into(),
+                ExId::Id(4, actor.clone(), 0)
+            ))
+        );
+        assert_eq!(range.next(), None);
+
+        let range = doc.range(&list, ..);
+        assert_eq!(
+            range.collect::<Vec<_>>(),
+            vec![
+                (
+                    format!("2@{}", actor),
+                    8.into(),
+                    ExId::Id(7, actor.clone(), 0)
+                ),
+                (
+                    format!("3@{}", actor),
+                    4.into(),
+                    ExId::Id(3, actor.clone(), 0)
+                ),
+                (
+                    format!("4@{}", actor),
+                    5.into(),
+                    ExId::Id(4, actor.clone(), 0)
+                ),
+                (
+                    format!("5@{}", actor),
+                    9.into(),
+                    ExId::Id(8, actor.clone(), 0)
+                ),
+            ]
+        );
+    }
+
+    #[test]
     fn rolling_back_transaction_has_no_effect() {
         let mut doc = Automerge::new();
         let old_states = doc.states.clone();
@@ -1341,30 +1831,30 @@ mod tests {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
         // create a map
-        let map1 = tx.set_object(ROOT, "a", ObjType::Map).unwrap();
-        tx.set(&map1, "b", 1).unwrap();
+        let map1 = tx.put_object(ROOT, "a", ObjType::Map).unwrap();
+        tx.put(&map1, "b", 1).unwrap();
         // overwrite the first map with a new one
-        let map2 = tx.set_object(ROOT, "a", ObjType::Map).unwrap();
-        tx.set(&map2, "c", 2).unwrap();
+        let map2 = tx.put_object(ROOT, "a", ObjType::Map).unwrap();
+        tx.put(&map2, "c", 2).unwrap();
         tx.commit();
 
         // we can get the new map by traversing the tree
-        let map = doc.value(&ROOT, "a").unwrap().unwrap().1;
-        assert_eq!(doc.value(&map, "b").unwrap(), None);
+        let map = doc.get(&ROOT, "a").unwrap().unwrap().1;
+        assert_eq!(doc.get(&map, "b").unwrap(), None);
         // and get values from it
         assert_eq!(
-            doc.value(&map, "c").unwrap().map(|s| s.0),
+            doc.get(&map, "c").unwrap().map(|s| s.0),
             Some(ScalarValue::Int(2).into())
         );
 
         // but we can still access the old one if we know the ID!
-        assert_eq!(doc.value(&map1, "b").unwrap().unwrap().0, Value::int(1));
+        assert_eq!(doc.get(&map1, "b").unwrap().unwrap().0, Value::int(1));
         // and even set new things in it!
         let mut tx = doc.transaction();
-        tx.set(&map1, "c", 3).unwrap();
+        tx.put(&map1, "c", 3).unwrap();
         tx.commit();
 
-        assert_eq!(doc.value(&map1, "c").unwrap().unwrap().0, Value::int(3));
+        assert_eq!(doc.get(&map1, "c").unwrap().unwrap().0, Value::int(3));
     }
 
     #[test]
@@ -1372,7 +1862,7 @@ mod tests {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
         // deleting a missing key in a map should just be a noop
-        assert!(tx.del(ROOT, "a").is_ok());
+        assert!(tx.delete(ROOT, "a").is_ok());
         tx.commit();
         let last_change = doc.get_last_local_change().unwrap();
         assert_eq!(last_change.len(), 0);
@@ -1381,16 +1871,16 @@ mod tests {
         assert!(Automerge::load(&bytes).is_ok());
 
         let mut tx = doc.transaction();
-        tx.set(ROOT, "a", 1).unwrap();
+        tx.put(ROOT, "a", 1).unwrap();
         tx.commit();
         let last_change = doc.get_last_local_change().unwrap();
         assert_eq!(last_change.len(), 1);
 
         let mut tx = doc.transaction();
         // a real op
-        tx.del(ROOT, "a").unwrap();
+        tx.delete(ROOT, "a").unwrap();
         // a no-op
-        tx.del(ROOT, "a").unwrap();
+        tx.delete(ROOT, "a").unwrap();
         tx.commit();
         let last_change = doc.get_last_local_change().unwrap();
         assert_eq!(last_change.len(), 1);
@@ -1401,14 +1891,14 @@ mod tests {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
         // deleting an element in a list that does not exist is an error
-        assert!(tx.del(ROOT, 0).is_err());
+        assert!(tx.delete(ROOT, 0).is_err());
     }
 
     #[test]
     fn loaded_doc_changes_have_hash() {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
-        tx.set(ROOT, "a", 1).unwrap();
+        tx.put(ROOT, "a", 1).unwrap();
         tx.commit();
         let hash = doc.get_last_local_change().unwrap().hash;
         let bytes = doc.save();
@@ -1489,7 +1979,7 @@ mod tests {
         ];
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
-        let list = tx.set_object(ROOT, "list", ObjType::List).unwrap();
+        let list = tx.put_object(ROOT, "list", ObjType::List).unwrap();
         for action in actions {
             match action {
                 Action::InsertText(index, c) => {
@@ -1498,7 +1988,7 @@ mod tests {
                 }
                 Action::DelText(index) => {
                     println!("deleting at {} ", index);
-                    tx.del(&list, index).unwrap();
+                    tx.delete(&list, index).unwrap();
                 }
             }
         }
@@ -1542,7 +2032,7 @@ mod tests {
         ];
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
-        let list = tx.set_object(ROOT, "list", ObjType::List).unwrap();
+        let list = tx.put_object(ROOT, "list", ObjType::List).unwrap();
         for action in actions {
             match action {
                 Action::InsertText(index, c) => {
@@ -1551,7 +2041,7 @@ mod tests {
                 }
                 Action::DelText(index) => {
                     println!("deleting at {} ", index);
-                    tx.del(&list, index).unwrap();
+                    tx.delete(&list, index).unwrap();
                 }
             }
         }
@@ -1581,14 +2071,14 @@ mod tests {
         let mut doc1 = AutoCommit::new().with_actor(actor1.clone());
         let actor2 = ActorId::from(b"bbbb");
         let mut doc2 = AutoCommit::new().with_actor(actor2.clone());
-        let list = doc1.set_object(ROOT, "list", ObjType::List).unwrap();
+        let list = doc1.put_object(ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, 0).unwrap();
         doc2.load_incremental(&doc1.save_incremental()).unwrap();
         for i in 1..=max {
-            doc1.set(&list, 0, i).unwrap()
+            doc1.put(&list, 0, i).unwrap()
         }
         for i in 1..=max {
-            doc2.set(&list, 0, i).unwrap()
+            doc2.put(&list, 0, i).unwrap()
         }
         let change1 = doc1.save_incremental();
         let change2 = doc2.save_incremental();
@@ -1597,20 +2087,102 @@ mod tests {
         assert_eq!(doc1.length(&list), 1);
         assert_eq!(doc2.length(&list), 1);
         assert_eq!(
-            doc1.values(&list, 0).unwrap(),
+            doc1.get_all(&list, 0).unwrap(),
             vec![
                 (max.into(), ExId::Id(max + 2, actor1.clone(), 0)),
                 (max.into(), ExId::Id(max + 2, actor2.clone(), 1))
             ]
         );
         assert_eq!(
-            doc2.values(&list, 0).unwrap(),
+            doc2.get_all(&list, 0).unwrap(),
             vec![
                 (max.into(), ExId::Id(max + 2, actor1, 0)),
                 (max.into(), ExId::Id(max + 2, actor2, 1))
             ]
         );
-        assert!(doc1.value(&list, 1).unwrap().is_none());
-        assert!(doc2.value(&list, 1).unwrap().is_none());
+        assert!(doc1.get(&list, 1).unwrap().is_none());
+        assert!(doc2.get(&list, 1).unwrap().is_none());
+    }
+
+    #[test]
+    fn get_parent_objects() {
+        let mut doc = AutoCommit::new();
+        let map = doc.put_object(ROOT, "a", ObjType::Map).unwrap();
+        let list = doc.insert_object(&map, 0, ObjType::List).unwrap();
+        doc.insert(&list, 0, 2).unwrap();
+        let text = doc.put_object(&list, 0, ObjType::Text).unwrap();
+
+        assert_eq!(doc.parent_object(&map), Some((ROOT, Prop::Map("a".into()))));
+        assert_eq!(doc.parent_object(&list), Some((map, Prop::Seq(0))));
+        assert_eq!(doc.parent_object(&text), Some((list, Prop::Seq(0))));
+    }
+
+    #[test]
+    fn get_path_to_object() {
+        let mut doc = AutoCommit::new();
+        let map = doc.put_object(ROOT, "a", ObjType::Map).unwrap();
+        let list = doc.insert_object(&map, 0, ObjType::List).unwrap();
+        doc.insert(&list, 0, 2).unwrap();
+        let text = doc.put_object(&list, 0, ObjType::Text).unwrap();
+
+        assert_eq!(
+            doc.path_to_object(&map),
+            vec![(ROOT, Prop::Map("a".into()))]
+        );
+        assert_eq!(
+            doc.path_to_object(&list),
+            vec![(ROOT, Prop::Map("a".into())), (map.clone(), Prop::Seq(0)),]
+        );
+        assert_eq!(
+            doc.path_to_object(&text),
+            vec![
+                (ROOT, Prop::Map("a".into())),
+                (map, Prop::Seq(0)),
+                (list, Prop::Seq(0)),
+            ]
+        );
+    }
+
+    #[test]
+    fn can_insert_a_grapheme_into_text() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let text = tx.put_object(ROOT, "text", ObjType::Text).unwrap();
+        let polar_bear = "🐻‍❄️";
+        tx.insert(&text, 0, polar_bear).unwrap();
+        tx.commit();
+        let s = doc.text(&text).unwrap();
+        assert_eq!(s, polar_bear);
+        let len = doc.length(&text);
+        assert_eq!(len, 1); // just one grapheme
+    }
+
+    #[test]
+    fn can_insert_long_string_into_text() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let text = tx.put_object(ROOT, "text", ObjType::Text).unwrap();
+        let polar_bear = "🐻‍❄️";
+        let polar_bear_army = polar_bear.repeat(100);
+        tx.insert(&text, 0, &polar_bear_army).unwrap();
+        tx.commit();
+        let s = doc.text(&text).unwrap();
+        assert_eq!(s, polar_bear_army);
+        let len = doc.length(&text);
+        assert_eq!(len, 1); // many graphemes
+    }
+
+    #[test]
+    fn splice_text_uses_unicode_scalars() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let text = tx.put_object(ROOT, "text", ObjType::Text).unwrap();
+        let polar_bear = "🐻‍❄️";
+        tx.splice_text(&text, 0, 0, polar_bear).unwrap();
+        tx.commit();
+        let s = doc.text(&text).unwrap();
+        assert_eq!(s, polar_bear);
+        let len = doc.length(&text);
+        assert_eq!(len, 4); // 4 chars
     }
 }

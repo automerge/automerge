@@ -3,16 +3,16 @@ use crate::types::Key;
 use std::fmt::Debug;
 
 #[derive(Debug)]
-pub(crate) struct Keys<'a, const B: usize> {
+pub(crate) struct Keys<'a> {
     index: usize,
     last_key: Option<Key>,
     index_back: usize,
     last_key_back: Option<Key>,
-    root_child: &'a OpTreeNode<B>,
+    root_child: &'a OpTreeNode,
 }
 
-impl<'a, const B: usize> Keys<'a, B> {
-    pub(crate) fn new(root_child: &'a OpTreeNode<B>) -> Self {
+impl<'a> Keys<'a> {
+    pub(crate) fn new(root_child: &'a OpTreeNode) -> Self {
         Self {
             index: 0,
             last_key: None,
@@ -23,30 +23,30 @@ impl<'a, const B: usize> Keys<'a, B> {
     }
 }
 
-impl<'a, const B: usize> Iterator for Keys<'a, B> {
+impl<'a> Iterator for Keys<'a> {
     type Item = Key;
 
     fn next(&mut self) -> Option<Self::Item> {
         for i in self.index..self.index_back {
             let op = self.root_child.get(i)?;
             self.index += 1;
-            if Some(op.key) != self.last_key && op.visible() {
-                self.last_key = Some(op.key);
-                return Some(op.key);
+            if Some(op.elemid_or_key()) != self.last_key && op.visible() {
+                self.last_key = Some(op.elemid_or_key());
+                return Some(op.elemid_or_key());
             }
         }
         None
     }
 }
 
-impl<'a, const B: usize> DoubleEndedIterator for Keys<'a, B> {
+impl<'a> DoubleEndedIterator for Keys<'a> {
     fn next_back(&mut self) -> Option<Self::Item> {
         for i in (self.index..self.index_back).rev() {
             let op = self.root_child.get(i)?;
             self.index_back -= 1;
-            if Some(op.key) != self.last_key_back && op.visible() {
-                self.last_key_back = Some(op.key);
-                return Some(op.key);
+            if Some(op.elemid_or_key()) != self.last_key_back && op.visible() {
+                self.last_key_back = Some(op.elemid_or_key());
+                return Some(op.elemid_or_key());
             }
         }
         None

@@ -316,10 +316,10 @@ pub fn realize_prop<P: Into<automerge::Prop>>(
     obj_id: &automerge::ObjId,
     prop: P,
 ) -> RealizedObject {
-    let (val, obj_id) = doc.value(obj_id, prop).unwrap().unwrap();
+    let (val, obj_id) = doc.get(obj_id, prop).unwrap().unwrap();
     match val {
         automerge::Value::Object(obj_type) => realize_obj(doc, &obj_id, obj_type),
-        automerge::Value::Scalar(v) => RealizedObject::Value(OrdScalarValue::from(v)),
+        automerge::Value::Scalar(v) => RealizedObject::Value(OrdScalarValue::from(v.into_owned())),
     }
 }
 
@@ -353,10 +353,12 @@ fn realize_values<K: Into<automerge::Prop>>(
     key: K,
 ) -> BTreeSet<RealizedObject> {
     let mut values = BTreeSet::new();
-    for (value, objid) in doc.values(obj_id, key).unwrap() {
+    for (value, objid) in doc.get_all(obj_id, key).unwrap() {
         let realized = match value {
             automerge::Value::Object(objtype) => realize_obj(doc, &objid, objtype),
-            automerge::Value::Scalar(v) => RealizedObject::Value(OrdScalarValue::from(v)),
+            automerge::Value::Scalar(v) => {
+                RealizedObject::Value(OrdScalarValue::from(v.into_owned()))
+            }
         };
         values.insert(realized);
     }

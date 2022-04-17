@@ -23,8 +23,8 @@ impl LenAt {
     }
 }
 
-impl<const B: usize> TreeQuery<B> for LenAt {
-    fn query_element(&mut self, op: &Op) -> QueryResult {
+impl<'a> TreeQuery<'a> for LenAt {
+    fn query_element(&mut self, op: &'a Op) -> QueryResult {
         if op.insert {
             self.last = None;
         }

@@ -40,10 +40,14 @@ mod legacy;
 mod op_set;
 mod op_tree;
 mod query;
+mod range;
+mod range_at;
 pub mod sync;
 pub mod transaction;
 mod types;
 mod value;
+mod values;
+mod values_at;
 #[cfg(feature = "optree-visualisation")]
 mod visualisation;
 
@@ -58,7 +62,11 @@ pub use exid::ExId as ObjId;
 pub use keys::Keys;
 pub use keys_at::KeysAt;
 pub use legacy::Change as ExpandedChange;
-pub use types::{ActorId, ChangeHash, ObjType, OpType, Prop};
+pub use range::Range;
+pub use range_at::RangeAt;
+pub use types::{ActorId, AssignPatch, ChangeHash, ObjType, OpType, Patch, Prop};
 pub use value::{ScalarValue, Value};
+pub use values::Values;
+pub use values_at::ValuesAt;
 
 pub const ROOT: ObjId = ObjId::Root;

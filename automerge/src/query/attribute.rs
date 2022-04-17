@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use std::ops::Range;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Attribute<const B: usize> {
+pub(crate) struct Attribute {
     pos: usize,
     seen: usize,
     last_seen: Option<ElemId>,
@@ -48,7 +48,7 @@ impl ChangeSet {
     }
 }
 
-impl<const B: usize> Attribute<B> {
+impl Attribute {
     pub fn new(baseline: Clock, change_sets: Vec<Clock>) -> Self {
         Attribute {
             pos: 0,
@@ -110,7 +110,7 @@ impl<const B: usize> Attribute<B> {
     }
 }
 
-impl<const B: usize> TreeQuery<B> for Attribute<B> {
+impl<'a> TreeQuery<'a> for Attribute {
     fn query_element_with_metadata(&mut self, element: &Op, _m: &OpSetMetadata) -> QueryResult {
         if element.insert {
             self.last_seen = None;

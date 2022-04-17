@@ -130,13 +130,13 @@ impl<'a> Iterator for OperationIterator<'a> {
         let pred = self.pred.next()?;
         let value = self.value.next()?;
         let action = match action {
-            Action::Set => OpType::Set(value),
+            Action::Set => OpType::Put(value),
             Action::MakeList => OpType::Make(ObjType::List),
             Action::MakeText => OpType::Make(ObjType::Text),
             Action::MakeMap => OpType::Make(ObjType::Map),
             Action::MakeTable => OpType::Make(ObjType::Table),
-            Action::Del => OpType::Del,
-            Action::Inc => OpType::Inc(value.to_i64()?),
+            Action::Del => OpType::Delete,
+            Action::Inc => OpType::Increment(value.to_i64()?),
             Action::MarkBegin => {
                 // mark has 3 things in the val column
                 let name = value.as_string()?;
@@ -180,13 +180,13 @@ impl<'a> Iterator for DocOpIterator<'a> {
         let succ = self.succ.next()?;
         let value = self.value.next()?;
         let action = match action {
-            Action::Set => OpType::Set(value),
+            Action::Set => OpType::Put(value),
             Action::MakeList => OpType::Make(ObjType::List),
             Action::MakeText => OpType::Make(ObjType::Text),
             Action::MakeMap => OpType::Make(ObjType::Map),
             Action::MakeTable => OpType::Make(ObjType::Table),
-            Action::Del => OpType::Del,
-            Action::Inc => OpType::Inc(value.to_i64()?),
+            Action::Del => OpType::Delete,
+            Action::Inc => OpType::Increment(value.to_i64()?),
             Action::MarkBegin => {
                 // mark has 3 things in the val column
                 let name = value.as_string()?;
@@ -1069,15 +1069,15 @@ impl DocOpEncoder {
             self.insert.append(op.insert);
             self.succ.append(&op.succ, actors);
             let action = match &op.action {
-                amp::OpType::Set(value) => {
+                amp::OpType::Put(value) => {
                     self.val.append_value(value, actors);
                     Action::Set
                 }
-                amp::OpType::Inc(val) => {
+                amp::OpType::Increment(val) => {
                     self.val.append_value(&ScalarValue::Int(*val), actors);
                     Action::Inc
                 }
-                amp::OpType::Del => {
+                amp::OpType::Delete => {
                     self.val.append_null();
                     Action::Del
                 }
@@ -1185,15 +1185,15 @@ impl ColumnEncoder {
 
         self.pred.append(&op.pred, actors);
         let action = match &op.action {
-            OpType::Set(value) => {
+            OpType::Put(value) => {
                 self.val.append_value2(value, actors);
                 Action::Set
             }
-            OpType::Inc(val) => {
+            OpType::Increment(val) => {
                 self.val.append_value2(&ScalarValue::Int(*val), actors);
                 Action::Inc
             }
-            OpType::Del => {
+            OpType::Delete => {
                 self.val.append_null();
                 Action::Del
             }

@@ -1,6 +1,11 @@
+use std::ops::RangeBounds;
+
 use crate::exid::ExId;
-use crate::AutomergeError;
-use crate::{query, Automerge, ChangeHash, Keys, KeysAt, ObjType, Prop, ScalarValue, Value};
+use crate::{
+    query, Automerge, ChangeHash, KeysAt, ObjType, Prop, Range, RangeAt, ScalarValue, Value,
+    Values, ValuesAt,
+};
+use crate::{AutomergeError, Keys};
 
 use super::{CommitOptions, Transactable, TransactionInner};
 
@@ -47,7 +52,7 @@ impl<'a> Transaction<'a> {
     /// # use std::time::SystemTime;
     /// let mut doc = Automerge::new();
     /// let mut tx = doc.transaction();
-    /// tx.set_object(ROOT, "todos", ObjType::List).unwrap();
+    /// tx.put_object(ROOT, "todos", ObjType::List).unwrap();
     /// let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as
     /// i64;
     /// tx.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
@@ -85,7 +90,7 @@ impl<'a> Transactable for Transaction<'a> {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    fn set<O: AsRef<ExId>, P: Into<Prop>, V: Into<ScalarValue>>(
+    fn put<O: AsRef<ExId>, P: Into<Prop>, V: Into<ScalarValue>>(
         &mut self,
         obj: O,
         prop: P,
@@ -94,10 +99,10 @@ impl<'a> Transactable for Transaction<'a> {
         self.inner
             .as_mut()
             .unwrap()
-            .set(self.doc, obj.as_ref(), prop, value)
+            .put(self.doc, obj.as_ref(), prop, value)
     }
 
-    fn set_object<O: AsRef<ExId>, P: Into<Prop>>(
+    fn put_object<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,
@@ -106,7 +111,7 @@ impl<'a> Transactable for Transaction<'a> {
         self.inner
             .as_mut()
             .unwrap()
-            .set_object(self.doc, obj.as_ref(), prop, value)
+            .put_object(self.doc, obj.as_ref(), prop, value)
     }
 
     fn insert<O: AsRef<ExId>, V: Into<ScalarValue>>(
@@ -160,7 +165,7 @@ impl<'a> Transactable for Transaction<'a> {
             .insert_object(self.doc, obj, index, value)
     }
 
-    fn inc<O: AsRef<ExId>, P: Into<Prop>>(
+    fn increment<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,
@@ -169,10 +174,10 @@ impl<'a> Transactable for Transaction<'a> {
         self.inner
             .as_mut()
             .unwrap()
-            .inc(self.doc, obj.as_ref(), prop, value)
+            .increment(self.doc, obj.as_ref(), prop, value)
     }
 
-    fn del<O: AsRef<ExId>, P: Into<Prop>>(
+    fn delete<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,
@@ -180,7 +185,7 @@ impl<'a> Transactable for Transaction<'a> {
         self.inner
             .as_mut()
             .unwrap()
-            .del(self.doc, obj.as_ref(), prop)
+            .delete(self.doc, obj.as_ref(), prop)
     }
 
     /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
@@ -204,6 +209,27 @@ impl<'a> Transactable for Transaction<'a> {
 
     fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt {
         self.doc.keys_at(obj, heads)
+    }
+
+    fn range<O: AsRef<ExId>, R: RangeBounds<Prop>>(&self, obj: O, range: R) -> Range<R> {
+        self.doc.range(obj, range)
+    }
+
+    fn range_at<O: AsRef<ExId>, R: RangeBounds<Prop>>(
+        &self,
+        obj: O,
+        range: R,
+        heads: &[ChangeHash],
+    ) -> RangeAt<R> {
+        self.doc.range_at(obj, range, heads)
+    }
+
+    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values {
+        self.doc.values(obj)
+    }
+
+    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> ValuesAt {
+        self.doc.values_at(obj, heads)
     }
 
     fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
@@ -268,38 +294,46 @@ impl<'a> Transactable for Transaction<'a> {
         self.doc.attribute2(obj, baseline, change_sets)
     }
 
-    fn value<O: AsRef<ExId>, P: Into<Prop>>(
+    fn get<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
     ) -> Result<Option<(Value, ExId)>, AutomergeError> {
-        self.doc.value(obj, prop)
+        self.doc.get(obj, prop)
     }
 
-    fn value_at<O: AsRef<ExId>, P: Into<Prop>>(
+    fn get_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Option<(Value, ExId)>, AutomergeError> {
-        self.doc.value_at(obj, prop, heads)
+        self.doc.get_at(obj, prop, heads)
     }
 
-    fn values<O: AsRef<ExId>, P: Into<Prop>>(
+    fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
     ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
-        self.doc.values(obj, prop)
+        self.doc.get_all(obj, prop)
     }
 
-    fn values_at<O: AsRef<ExId>, P: Into<Prop>>(
+    fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
-        self.doc.values_at(obj, prop, heads)
+        self.doc.get_all_at(obj, prop, heads)
+    }
+
+    fn parent_object<O: AsRef<ExId>>(&self, obj: O) -> Option<(ExId, Prop)> {
+        self.doc.parent_object(obj)
+    }
+
+    fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Vec<(ExId, Prop)> {
+        self.doc.path_to_object(obj)
     }
 }
 

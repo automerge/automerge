@@ -2,13 +2,13 @@ import { describe, it } from 'mocha';
 //@ts-ignore
 import assert from 'assert'
 //@ts-ignore
-import { create, loadDoc, Automerge, encodeChange, decodeChange } from '..'
+import { create, load, Automerge, encodeChange, decodeChange } from '..'
 
 describe('Automerge', () => {
   describe('marks', () => {
     it('should handle marks [..]', () => {
       let doc = create()
-      let list = doc.set_object("_root", "list", "")
+      let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "[3..6]", "bold" , true)
       let spans = doc.spans(list);
@@ -21,7 +21,7 @@ describe('Automerge', () => {
 
     it('should handle marks [..] at the beginning of a string', () => {
       let doc = create()
-      let list = doc.set_object("_root", "list", "")
+      let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "[0..3]", "bold", true)
       let spans = doc.spans(list);
@@ -37,7 +37,7 @@ describe('Automerge', () => {
 
     it('should handle marks [..] with splice', () => {
       let doc = create()
-      let list = doc.set_object("_root", "list", "")
+      let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "[0..3]", "bold", true)
       let spans = doc.spans(list);
@@ -53,7 +53,7 @@ describe('Automerge', () => {
 
     it('should handle marks across multiple forks', () => {
       let doc = create()
-      let list = doc.set_object("_root", "list", "")
+      let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "[0..3]", "bold", true)
       let spans = doc.spans(list);
@@ -75,16 +75,16 @@ describe('Automerge', () => {
 
     it('should handle marks with deleted ends [..]', () => {
       let doc = create()
-      let list = doc.set_object("_root", "list", "")
+      let list = doc.putObject("_root", "list", "")
 
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "[3..6]", "bold" , true)
       let spans = doc.spans(list);
       assert.deepStrictEqual(spans, [ 'aaa', [ [ 'bold', 'boolean', true ] ], 'bbb', [], 'ccc' ]);
-      doc.del(list,5);
-      doc.del(list,5);
-      doc.del(list,2);
-      doc.del(list,2);
+      doc.delete(list,5);
+      doc.delete(list,5);
+      doc.delete(list,2);
+      doc.delete(list,2);
       spans = doc.spans(list);
       assert.deepStrictEqual(spans, [ 'aa', [ [ 'bold', 'boolean', true ] ], 'b', [], 'cc' ])
       doc.insert(list, 3, "A")
@@ -95,7 +95,7 @@ describe('Automerge', () => {
 
     it('should handle sticky marks (..)', () => {
       let doc = create()
-      let list = doc.set_object("_root", "list", "")
+      let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "(3..6)", "bold" , true)
       let spans = doc.spans(list);
@@ -108,15 +108,15 @@ describe('Automerge', () => {
 
     it('should handle sticky marks with deleted ends (..)', () => {
       let doc = create()
-      let list = doc.set_object("_root", "list", "")
+      let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "(3..6)", "bold" , true)
       let spans = doc.spans(list);
       assert.deepStrictEqual(spans, [ 'aaa', [ [ 'bold', 'boolean', true ] ], 'bbb', [], 'ccc' ]);
-      doc.del(list,5);
-      doc.del(list,5);
-      doc.del(list,2);
-      doc.del(list,2);
+      doc.delete(list,5);
+      doc.delete(list,5);
+      doc.delete(list,2);
+      doc.delete(list,2);
       spans = doc.spans(list);
       assert.deepStrictEqual(spans, [ 'aa', [ [ 'bold', 'boolean', true ] ], 'b', [], 'cc' ])
       doc.insert(list, 3, "A")
@@ -126,7 +126,7 @@ describe('Automerge', () => {
 
       // make sure save/load can handle marks
 
-      let doc2 = loadDoc(doc.save())
+      let doc2 = load(doc.save())
       spans = doc2.spans(list);
       assert.deepStrictEqual(spans, [ 'aa', [ [ 'bold', 'boolean', true ] ], 'AbA', [], 'cc' ])
 
@@ -136,7 +136,7 @@ describe('Automerge', () => {
 
     it('should handle overlapping marks', () => {
       let doc : Automerge = create("aabbcc")
-      let list = doc.set_object("_root", "list", "")
+      let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
       doc.mark(list, "[0..37]", "bold" , true)
       doc.mark(list, "[4..19]", "itallic" , true)
@@ -194,8 +194,6 @@ describe('Automerge', () => {
       let doc2 = create();
       doc2.applyChanges(encoded)
 
-      doc.dump()
-      doc2.dump()
       assert.deepStrictEqual(doc.spans(list) , doc2.spans(list))
       assert.deepStrictEqual(doc.save(), doc2.save())
     })

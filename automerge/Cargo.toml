@@ -20,11 +20,10 @@ itertools = "^0.10.3"
 flate2 = "^1.0.22"
 nonzero_ext = "^0.2.0"
 uuid = { version = "^0.8.2", features=["v4", "wasm-bindgen", "serde"] }
-smol_str = "^0.1.21"
+smol_str = { version = "^0.1.21", features=["serde"] }
 tracing = { version = "^0.1.29", features = ["log"] }
 fxhash = "^0.2.1"
 tinyvec = { version = "^1.5.1", features = ["alloc"] }
-unicode-segmentation = "1.7.1"
 serde = { version = "^1.0", features=["derive"] }
 dot = { version = "0.1.4", optional = true }
 js-sys = { version = "^0.3", optional = true }

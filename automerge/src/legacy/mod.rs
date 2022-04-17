@@ -216,8 +216,8 @@ pub struct Op {
 impl Op {
     pub fn primitive_value(&self) -> Option<ScalarValue> {
         match &self.action {
-            OpType::Set(v) => Some(v.clone()),
-            OpType::Inc(i) => Some(ScalarValue::Int(*i)),
+            OpType::Put(v) => Some(v.clone()),
+            OpType::Increment(i) => Some(ScalarValue::Int(*i)),
             _ => None,
         }
     }

@@ -1,23 +1,23 @@
-use automerge::{transaction::Transactable, AutoCommit, Automerge, ObjType, ScalarValue, ROOT};
+use automerge::{transaction::Transactable, AutoCommit, Automerge, ObjType, ROOT};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::fs;
 
-fn replay_trace_tx(commands: Vec<(usize, usize, Vec<ScalarValue>)>) -> Automerge {
+fn replay_trace_tx(commands: Vec<(usize, usize, String)>) -> Automerge {
     let mut doc = Automerge::new();
     let mut tx = doc.transaction();
-    let text = tx.set_object(ROOT, "text", ObjType::Text).unwrap();
+    let text = tx.put_object(ROOT, "text", ObjType::Text).unwrap();
     for (pos, del, vals) in commands {
-        tx.splice(&text, pos, del, vals).unwrap();
+        tx.splice_text(&text, pos, del, &vals).unwrap();
     }
     tx.commit();
     doc
 }
 
-fn replay_trace_autotx(commands: Vec<(usize, usize, Vec<ScalarValue>)>) -> AutoCommit {
+fn replay_trace_autotx(commands: Vec<(usize, usize, String)>) -> AutoCommit {
     let mut doc = AutoCommit::new();
-    let text = doc.set_object(ROOT, "text", ObjType::Text).unwrap();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     for (pos, del, vals) in commands {
-        doc.splice(&text, pos, del, vals).unwrap();
+        doc.splice_text(&text, pos, del, &vals).unwrap();
     }
     doc.commit();
     doc
@@ -46,10 +46,10 @@ fn bench(c: &mut Criterion) {
     for i in 0..edits.len() {
         let pos: usize = edits[i][0].as_usize().unwrap();
         let del: usize = edits[i][1].as_usize().unwrap();
-        let mut vals = vec![];
+        let mut vals = String::new();
         for j in 2..edits[i].len() {
             let v = edits[i][j].as_str().unwrap();
-            vals.push(ScalarValue::Str(v.into()));
+            vals.push_str(v);
         }
         commands.push((pos, del, vals));
     }

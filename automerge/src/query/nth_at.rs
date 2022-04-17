@@ -29,8 +29,8 @@ impl NthAt {
     }
 }
 
-impl<const B: usize> TreeQuery<B> for NthAt {
-    fn query_element(&mut self, element: &Op) -> QueryResult {
+impl<'a> TreeQuery<'a> for NthAt {
+    fn query_element(&mut self, element: &'a Op) -> QueryResult {
         if element.insert {
             if self.seen > self.target {
                 return QueryResult::Finish;

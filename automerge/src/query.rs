@@ -9,6 +9,7 @@ use std::fmt::Debug;
 
 mod attribute;
 mod attribute2;
+mod elem_id_pos;
 mod insert;
 mod keys;
 mod keys_at;
@@ -21,12 +22,16 @@ mod nth_at;
 mod opid;
 mod prop;
 mod prop_at;
+mod range;
+mod range_at;
 mod raw_spans;
 mod seek_op;
+mod seek_op_with_patch;
 mod spans;
 
 pub(crate) use attribute::{Attribute, ChangeSet};
 pub(crate) use attribute2::{Attribute2, ChangeSet2};
+pub(crate) use elem_id_pos::ElemIdPos;
 pub(crate) use insert::InsertNth;
 pub(crate) use keys::Keys;
 pub(crate) use keys_at::KeysAt;
@@ -39,8 +44,11 @@ pub(crate) use nth_at::NthAt;
 pub(crate) use opid::OpIdSearch;
 pub(crate) use prop::Prop;
 pub(crate) use prop_at::PropAt;
+pub(crate) use range::Range;
+pub(crate) use range_at::RangeAt;
 pub(crate) use raw_spans::RawSpans;
 pub(crate) use seek_op::SeekOp;
+pub(crate) use seek_op_with_patch::SeekOpWithPatch;
 pub(crate) use spans::{Span, Spans};
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
@@ -61,26 +69,26 @@ pub(crate) struct CounterData {
     op: Op,
 }
 
-pub(crate) trait TreeQuery<const B: usize> {
+pub(crate) trait TreeQuery<'a> {
     #[inline(always)]
     fn query_node_with_metadata(
         &mut self,
-        child: &OpTreeNode<B>,
+        child: &'a OpTreeNode,
         _m: &OpSetMetadata,
     ) -> QueryResult {
         self.query_node(child)
     }
 
-    fn query_node(&mut self, _child: &OpTreeNode<B>) -> QueryResult {
+    fn query_node(&mut self, _child: &'a OpTreeNode) -> QueryResult {
         QueryResult::Descend
     }
 
     #[inline(always)]
-    fn query_element_with_metadata(&mut self, element: &Op, _m: &OpSetMetadata) -> QueryResult {
+    fn query_element_with_metadata(&mut self, element: &'a Op, _m: &OpSetMetadata) -> QueryResult {
         self.query_element(element)
     }
 
-    fn query_element(&mut self, _element: &Op) -> QueryResult {
+    fn query_element(&mut self, _element: &'a Op) -> QueryResult {
         panic!("invalid element query")
     }
 }
@@ -94,6 +102,7 @@ pub(crate) enum QueryResult {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Index {
+    /// The map of visible elements to the number of operations targetting them.
     pub visible: HashMap<ElemId, usize, FxBuildHasher>,
     /// Set of opids found in this node and below.
     pub ops: HashSet<OpId, FxBuildHasher>,
@@ -138,14 +147,7 @@ impl Index {
                 }
                 None => panic!("remove overun in index"),
             },
-            (true, false, Some(elem)) => match self.visible.get(&elem).copied() {
-                Some(n) => {
-                    self.visible.insert(elem, n + 1);
-                }
-                None => {
-                    self.visible.insert(elem, 1);
-                }
-            },
+            (true, false, Some(elem)) => *self.visible.entry(elem).or_default() += 1,
             _ => {}
         }
     }
@@ -154,14 +156,7 @@ impl Index {
         self.ops.insert(op.id);
         if op.visible() {
             if let Some(elem) = op.elemid() {
-                match self.visible.get(&elem).copied() {
-                    Some(n) => {
-                        self.visible.insert(elem, n + 1);
-                    }
-                    None => {
-                        self.visible.insert(elem, 1);
-                    }
-                }
+                *self.visible.entry(elem).or_default() += 1;
             }
         }
     }
@@ -188,14 +183,7 @@ impl Index {
             self.ops.insert(*id);
         }
         for (elem, n) in other.visible.iter() {
-            match self.visible.get(elem).cloned() {
-                None => {
-                    self.visible.insert(*elem, 1);
-                }
-                Some(m) => {
-                    self.visible.insert(*elem, m + n);
-                }
-            }
+            *self.visible.entry(*elem).or_default() += n;
         }
     }
 }
@@ -219,7 +207,7 @@ impl VisWindow {
 
         let mut visible = false;
         match op.action {
-            OpType::Set(ScalarValue::Counter(Counter { start, .. })) => {
+            OpType::Put(ScalarValue::Counter(Counter { start, .. })) => {
                 self.counters.insert(
                     op.id,
                     CounterData {
@@ -233,13 +221,13 @@ impl VisWindow {
                     visible = true;
                 }
             }
-            OpType::Inc(inc_val) => {
+            OpType::Increment(inc_val) => {
                 for id in &op.pred {
                     // pred is always before op.id so we can see them
                     if let Some(mut entry) = self.counters.get_mut(id) {
                         entry.succ.remove(&op.id);
                         entry.val += inc_val;
-                        entry.op.action = OpType::Set(ScalarValue::counter(entry.val));
+                        entry.op.action = OpType::Put(ScalarValue::counter(entry.val));
                         if !entry.succ.iter().any(|i| clock.covers(i)) {
                             visible = true;
                         }
@@ -263,14 +251,13 @@ impl VisWindow {
             }
         }
         if result.is_empty() {
-            vec![(pos, op.clone())]
-        } else {
-            result
+            result.push((pos, op.clone()));
         }
+        result
     }
 }
 
-pub(crate) fn binary_search_by<F, const B: usize>(node: &OpTreeNode<B>, f: F) -> usize
+pub(crate) fn binary_search_by<F>(node: &OpTreeNode, f: F) -> usize
 where
     F: Fn(&Op) -> Ordering,
 {

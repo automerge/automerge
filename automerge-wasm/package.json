@@ -13,22 +13,22 @@
     "package.json",
     "index.d.ts",
     "node/index.js",
-    "node/index_bg.wasm",
+    "node/bindgen.js",
+    "node/bindgen_bg.wasm",
     "web/index.js",
-    "web/index_bg.wasm"
+    "web/bindgen.js",
+    "web/bindgen_bg.wasm"
   ],
   "types": "index.d.ts",
   "module": "./web/index.js",
   "main": "./node/index.js",
   "scripts": {
-    "build": "rimraf ./node && wasm-pack build --target nodejs --dev --out-name index -d node && cp index.d.ts node",
-    "release-w": "rimraf ./web && wasm-pack build --target web --release --out-name index -d web && cp index.d.ts web",
-    "release-n": "rimraf ./node && wasm-pack build --target nodejs --release --out-name index -d node && cp index.d.ts node",
+    "build": "rimraf ./node && wasm-pack build --target nodejs --dev --out-name bindgen -d node && cp node-index.js node/index.js",
+    "release-w": "rimraf ./web && wasm-pack build --target web --release --out-name bindgen -d web && cp web-index.js web/index.js",
+    "release-n": "rimraf ./node && wasm-pack build --target nodejs --release --out-name bindgen -d node && cp node-index.js node/index.js",
     "release": "yarn release-w && yarn release-n",
-    "opt-node": "wasm-opt -Oz ./node/index_bg.wasm -o tmp.wasm && mv tmp.wasm ./node/index_bg.wasm",
-    "opt-web": "wasm-opt -Oz ./web/index_bg.wasm -o tmp.wasm && mv tmp.wasm ./web/index_bg.wasm",
-    "opt": "yarn opt-node && yarn opt-web",
-    "test": "yarn build && ts-mocha -p tsconfig.json --type-check --bail --full-trace test/*.ts"
+    "opt": "wasm-opt -Oz ./node/index_bg.wasm -o tmp.wasm && mv tmp.wasm ./node/index_bg.wasm",
+    "test": "ts-mocha -p tsconfig.json --type-check --bail --full-trace test/*.ts"
   },
   "dependencies": {},
   "devDependencies": {

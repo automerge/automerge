@@ -5,18 +5,18 @@ use crate::types::{ElemId, Key, Op};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Nth {
+pub(crate) struct Nth<'a> {
     target: usize,
     seen: usize,
     /// last_seen is the target elemid of the last `seen` operation.
     /// It is used to avoid double counting visible elements (which arise through conflicts) that are split across nodes.
     last_seen: Option<ElemId>,
-    pub ops: Vec<Op>,
+    pub ops: Vec<&'a Op>,
     pub ops_pos: Vec<usize>,
     pub pos: usize,
 }
 
-impl Nth {
+impl<'a> Nth<'a> {
     pub fn new(target: usize) -> Self {
         Nth {
             target,
@@ -39,8 +39,8 @@ impl Nth {
     }
 }
 
-impl<const B: usize> TreeQuery<B> for Nth {
-    fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
+impl<'a> TreeQuery<'a> for Nth<'a> {
+    fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
         let mut num_vis = child.index.visible_len();
         if child.index.has_visible(&self.last_seen) {
             num_vis -= 1;
@@ -67,7 +67,7 @@ impl<const B: usize> TreeQuery<B> for Nth {
         }
     }
 
-    fn query_element(&mut self, element: &Op) -> QueryResult {
+    fn query_element(&mut self, element: &'a Op) -> QueryResult {
         if element.insert {
             if self.seen > self.target {
                 return QueryResult::Finish;
@@ -82,7 +82,7 @@ impl<const B: usize> TreeQuery<B> for Nth {
             self.last_seen = element.elemid()
         }
         if self.seen == self.target + 1 && visible {
-            self.ops.push(element.clone());
+            self.ops.push(element);
             self.ops_pos.push(self.pos);
         }
         self.pos += 1;

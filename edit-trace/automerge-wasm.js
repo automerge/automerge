@@ -1,9 +1,8 @@
 
-// make sure to 
+// make sure to
 
 // # cd ../automerge-wasm
 // # yarn release
-// # yarn opt
 
 const { edits, finalText } = require('./editing-trace')
 const Automerge = require('../automerge-wasm')
@@ -11,11 +10,11 @@ const Automerge = require('../automerge-wasm')
 const start = new Date()
 
 let doc = Automerge.create();
-let text = doc.set("_root", "text", "", "text")
+let text = doc.putObject("_root", "text", "", "text")
 
 for (let i = 0; i < edits.length; i++) {
   let edit = edits[i]
-  if (i % 1000 === 0) {
+  if (i % 10000 === 0) {
     console.log(`Processed ${i} edits in ${new Date() - start} ms`)
   }
   doc.splice(text, ...edit)

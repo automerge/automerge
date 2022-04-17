@@ -2,33 +2,54 @@ use std::{
     cmp::{min, Ordering},
     fmt::Debug,
     mem,
+    ops::RangeBounds,
 };
 
 pub(crate) use crate::op_set::OpSetMetadata;
-use crate::types::{Op, OpId};
 use crate::{
     clock::Clock,
     query::{self, Index, QueryResult, TreeQuery},
 };
+use crate::{
+    types::{ObjId, Op, OpId},
+    ObjType, Prop,
+};
 use std::collections::HashSet;
 
-#[allow(dead_code)]
-pub(crate) type OpTree = OpTreeInternal<16>;
+pub(crate) const B: usize = 16;
 
-#[derive(Clone, Debug)]
-pub(crate) struct OpTreeInternal<const B: usize> {
-    pub(crate) root_node: Option<OpTreeNode<B>>,
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct OpTree {
+    pub internal: OpTreeInternal,
+    pub objtype: ObjType,
+    /// The id of the parent object, root has no parent.
+    pub parent: Option<ObjId>,
+}
+
+impl OpTree {
+    pub fn new() -> Self {
+        Self {
+            internal: Default::default(),
+            objtype: ObjType::Map,
+            parent: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct OpTreeNode<const B: usize> {
+pub(crate) struct OpTreeInternal {
+    pub(crate) root_node: Option<OpTreeNode>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct OpTreeNode {
     pub(crate) elements: Vec<Op>,
-    pub(crate) children: Vec<OpTreeNode<B>>,
+    pub(crate) children: Vec<OpTreeNode>,
     pub index: Index,
     length: usize,
 }
 
-impl<const B: usize> OpTreeInternal<B> {
+impl OpTreeInternal {
     /// Construct a new, empty, sequence.
     pub fn new() -> Self {
         Self { root_node: None }
@@ -39,19 +60,40 @@ impl<const B: usize> OpTreeInternal<B> {
         self.root_node.as_ref().map_or(0, |n| n.len())
     }
 
-    pub fn keys(&self) -> Option<query::Keys<B>> {
+    pub fn keys(&self) -> Option<query::Keys> {
         self.root_node.as_ref().map(query::Keys::new)
     }
 
-    pub fn keys_at(&self, clock: Clock) -> Option<query::KeysAt<B>> {
+    pub fn keys_at(&self, clock: Clock) -> Option<query::KeysAt> {
         self.root_node
             .as_ref()
             .map(|root| query::KeysAt::new(root, clock))
     }
 
-    pub fn search<Q>(&self, mut query: Q, m: &OpSetMetadata) -> Q
+    pub fn range<'a, R: RangeBounds<Prop>>(
+        &'a self,
+        range: R,
+        meta: &'a OpSetMetadata,
+    ) -> Option<query::Range<'a, R>> {
+        self.root_node
+            .as_ref()
+            .map(|node| query::Range::new(range, node, meta))
+    }
+
+    pub fn range_at<'a, R: RangeBounds<Prop>>(
+        &'a self,
+        range: R,
+        meta: &'a OpSetMetadata,
+        clock: Clock,
+    ) -> Option<query::RangeAt<'a, R>> {
+        self.root_node
+            .as_ref()
+            .map(|node| query::RangeAt::new(range, node, meta, clock))
+    }
+
+    pub fn search<'a, 'b: 'a, Q>(&'b self, mut query: Q, m: &OpSetMetadata) -> Q
     where
-        Q: TreeQuery<B>,
+        Q: TreeQuery<'a>,
     {
         self.root_node
             .as_ref()
@@ -63,7 +105,7 @@ impl<const B: usize> OpTreeInternal<B> {
     }
 
     /// Create an iterator through the sequence.
-    pub fn iter(&self) -> Iter<'_, B> {
+    pub fn iter(&self) -> Iter {
         Iter {
             inner: self,
             index: 0,
@@ -123,15 +165,12 @@ impl<const B: usize> OpTreeInternal<B> {
     }
 
     // this replaces get_mut() because it allows the indexes to update correctly
-    pub fn replace<F>(&mut self, index: usize, mut f: F)
+    pub fn update<F>(&mut self, index: usize, f: F)
     where
         F: FnMut(&mut Op),
     {
         if self.len() > index {
-            let op = self.get(index).unwrap();
-            let mut new_op = op.clone();
-            f(&mut new_op);
-            self.set(index, new_op);
+            self.root_node.as_mut().unwrap().update(index, f);
         }
     }
 
@@ -161,18 +200,9 @@ impl<const B: usize> OpTreeInternal<B> {
             panic!("remove from empty tree")
         }
     }
-
-    /// Update the `element` at `index` in the sequence, returning the old value.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `index > len`
-    pub fn set(&mut self, index: usize, element: Op) -> Op {
-        self.root_node.as_mut().unwrap().set(index, element)
-    }
 }
 
-impl<const B: usize> OpTreeNode<B> {
+impl OpTreeNode {
     fn new() -> Self {
         Self {
             elements: Vec::new(),
@@ -182,9 +212,9 @@ impl<const B: usize> OpTreeNode<B> {
         }
     }
 
-    pub fn search<Q>(&self, query: &mut Q, m: &OpSetMetadata) -> bool
+    pub fn search<'a, 'b: 'a, Q>(&'b self, query: &mut Q, m: &OpSetMetadata) -> bool
     where
-        Q: TreeQuery<B>,
+        Q: TreeQuery<'a>,
     {
         if self.is_leaf() {
             for e in &self.elements {
@@ -509,7 +539,7 @@ impl<const B: usize> OpTreeNode<B> {
         }
     }
 
-    fn merge(&mut self, middle: Op, successor_sibling: OpTreeNode<B>) {
+    fn merge(&mut self, middle: Op, successor_sibling: OpTreeNode) {
         self.index.insert(&middle);
         self.index.merge(&successor_sibling.index);
         self.elements.push(middle);
@@ -519,31 +549,42 @@ impl<const B: usize> OpTreeNode<B> {
         assert!(self.is_full());
     }
 
-    pub fn set(&mut self, index: usize, element: Op) -> Op {
+    /// Update the operation at the given index using the provided function.
+    ///
+    /// This handles updating the indices after the update.
+    pub fn update<F>(&mut self, index: usize, f: F) -> (Op, &Op)
+    where
+        F: FnOnce(&mut Op),
+    {
         if self.is_leaf() {
-            let old_element = self.elements.get_mut(index).unwrap();
-            self.index.replace(old_element, &element);
-            mem::replace(old_element, element)
+            let new_element = self.elements.get_mut(index).unwrap();
+            let old_element = new_element.clone();
+            f(new_element);
+            self.index.replace(&old_element, new_element);
+            (old_element, new_element)
         } else {
             let mut cumulative_len = 0;
+            let len = self.len();
             for (child_index, child) in self.children.iter_mut().enumerate() {
                 match (cumulative_len + child.len()).cmp(&index) {
                     Ordering::Less => {
                         cumulative_len += child.len() + 1;
                     }
                     Ordering::Equal => {
-                        let old_element = self.elements.get_mut(child_index).unwrap();
-                        self.index.replace(old_element, &element);
-                        return mem::replace(old_element, element);
+                        let new_element = self.elements.get_mut(child_index).unwrap();
+                        let old_element = new_element.clone();
+                        f(new_element);
+                        self.index.replace(&old_element, new_element);
+                        return (old_element, new_element);
                     }
                     Ordering::Greater => {
-                        let old_element = child.set(index - cumulative_len, element.clone());
-                        self.index.replace(&old_element, &element);
-                        return old_element;
+                        let (old_element, new_element) = child.update(index - cumulative_len, f);
+                        self.index.replace(&old_element, new_element);
+                        return (old_element, new_element);
                     }
                 }
             }
-            panic!("Invalid index to set: {} but len was {}", index, self.len())
+            panic!("Invalid index to set: {} but len was {}", index, len)
         }
     }
 
@@ -578,22 +619,22 @@ impl<const B: usize> OpTreeNode<B> {
     }
 }
 
-impl<const B: usize> Default for OpTreeInternal<B> {
+impl Default for OpTreeInternal {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<const B: usize> PartialEq for OpTreeInternal<B> {
+impl PartialEq for OpTreeInternal {
     fn eq(&self, other: &Self) -> bool {
         self.len() == other.len() && self.iter().zip(other.iter()).all(|(a, b)| a == b)
     }
 }
 
-impl<'a, const B: usize> IntoIterator for &'a OpTreeInternal<B> {
+impl<'a> IntoIterator for &'a OpTreeInternal {
     type Item = &'a Op;
 
-    type IntoIter = Iter<'a, B>;
+    type IntoIter = Iter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
         Iter {
@@ -603,12 +644,12 @@ impl<'a, const B: usize> IntoIterator for &'a OpTreeInternal<B> {
     }
 }
 
-pub(crate) struct Iter<'a, const B: usize> {
-    inner: &'a OpTreeInternal<B>,
+pub(crate) struct Iter<'a> {
+    inner: &'a OpTreeInternal,
     index: usize,
 }
 
-impl<'a, const B: usize> Iterator for Iter<'a, B> {
+impl<'a> Iterator for Iter<'a> {
     type Item = &'a Op;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -641,7 +682,7 @@ mod tests {
         let zero = OpId(0, 0);
         Op {
             id: zero,
-            action: amp::OpType::Set(0.into()),
+            action: amp::OpType::Put(0.into()),
             key: zero.into(),
             succ: vec![],
             pred: vec![],
@@ -651,36 +692,36 @@ mod tests {
 
     #[test]
     fn insert() {
-        let mut t = OpTree::new();
+        let mut t: OpTree = OpTree::new();
 
-        t.insert(0, op());
-        t.insert(1, op());
-        t.insert(0, op());
-        t.insert(0, op());
-        t.insert(0, op());
-        t.insert(3, op());
-        t.insert(4, op());
+        t.internal.insert(0, op());
+        t.internal.insert(1, op());
+        t.internal.insert(0, op());
+        t.internal.insert(0, op());
+        t.internal.insert(0, op());
+        t.internal.insert(3, op());
+        t.internal.insert(4, op());
     }
 
     #[test]
     fn insert_book() {
-        let mut t = OpTree::new();
+        let mut t: OpTree = OpTree::new();
 
         for i in 0..100 {
-            t.insert(i % 2, op());
+            t.internal.insert(i % 2, op());
         }
     }
 
     #[test]
     fn insert_book_vec() {
-        let mut t = OpTree::new();
+        let mut t: OpTree = OpTree::new();
         let mut v = Vec::new();
 
         for i in 0..100 {
-            t.insert(i % 3, op());
+            t.internal.insert(i % 3, op());
             v.insert(i % 3, op());
 
-            assert_eq!(v, t.iter().cloned().collect::<Vec<_>>())
+            assert_eq!(v, t.internal.iter().cloned().collect::<Vec<_>>())
         }
     }
 }

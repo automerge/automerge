@@ -24,10 +24,10 @@ impl PropAt {
     }
 }
 
-impl<const B: usize> TreeQuery<B> for PropAt {
+impl<'a> TreeQuery<'a> for PropAt {
     fn query_node_with_metadata(
         &mut self,
-        child: &OpTreeNode<B>,
+        child: &'a OpTreeNode,
         m: &OpSetMetadata,
     ) -> QueryResult {
         let start = binary_search_by(child, |op| m.key_cmp(&op.key, &self.key));

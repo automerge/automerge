@@ -3,14 +3,14 @@ import { describe, it } from 'mocha';
 import assert from 'assert'
 //@ts-ignore
 import { BloomFilter } from './helpers/sync'
-import { create, loadDoc, SyncState, Automerge, encodeChange, decodeChange, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState, encodeSyncMessage } from '..'
+import { create, load, SyncState, Automerge, encodeChange, decodeChange, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState, encodeSyncMessage } from '..'
 import { DecodedSyncMessage, Hash } from '..'
 
 describe('Automerge', () => {
   describe('attribute', () => {
     it('should be able to attribute text segments on change sets', () => {
       let doc1 = create()
-      let text = doc1.set_object("_root", "notes","hello little world")
+      let text = doc1.putObject("_root", "notes","hello little world")
       let h1 = doc1.getHeads();
 
       let doc2 = doc1.fork();
@@ -37,7 +37,7 @@ describe('Automerge', () => {
 
     it('should be able to hand complex attribute change sets', () => {
       let doc1 = create("aaaa")
-      let text = doc1.set_object("_root", "notes","AAAAAA")
+      let text = doc1.putObject("_root", "notes","AAAAAA")
       let h1 = doc1.getHeads();
 
       let doc2 = doc1.fork("bbbb");
@@ -82,7 +82,7 @@ describe('Automerge', () => {
 
     it('should not include attribution of text that is inserted and deleted only within change sets', () => {
       let doc1 = create()
-      let text = doc1.set_object("_root", "notes","hello little world")
+      let text = doc1.putObject("_root", "notes","hello little world")
       let h1 = doc1.getHeads();
 
       let doc2 = doc1.fork();
@@ -114,7 +114,7 @@ describe('Automerge', () => {
   describe('attribute2', () => {
     it('should be able to attribute text segments on change sets', () => {
       let doc1 = create("aaaa")
-      let text = doc1.set_object("_root", "notes","hello little world")
+      let text = doc1.putObject("_root", "notes","hello little world")
       let h1 = doc1.getHeads();
 
       let doc2 = doc1.fork("bbbb");
@@ -143,7 +143,7 @@ describe('Automerge', () => {
 
     it('should not include attribution of text that is inserted and deleted only within change sets', () => {
       let doc1 = create("aaaa")
-      let text = doc1.set_object("_root", "notes","hello little world")
+      let text = doc1.putObject("_root", "notes","hello little world")
       let h1 = doc1.getHeads();
 
       let doc2 = doc1.fork("bbbb");

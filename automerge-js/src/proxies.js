@@ -19,7 +19,7 @@ function parseListIndex(key) {
 
 function valueAt(target, prop) {
       const { context, objectId, path, readonly, heads} = target
-      let value = context.value(objectId, prop, heads)
+      let value = context.get(objectId, prop, heads)
       if (value === undefined) {
         return
       }
@@ -134,28 +134,28 @@ const MapHandler = {
     }
     switch (datatype) {
       case "list":
-        const list = context.set_object(objectId, key, [])
+        const list = context.putObject(objectId, key, [])
         const proxyList = listProxy(context, list, [ ... path, key ], readonly );
         for (let i = 0; i < value.length; i++) {
           proxyList[i] = value[i]
         }
         break;
       case "text":
-        const text = context.set_object(objectId, key, "", "text")
+        const text = context.putObject(objectId, key, "", "text")
         const proxyText = textProxy(context, text, [ ... path, key ], readonly );
         for (let i = 0; i < value.length; i++) {
           proxyText[i] = value.get(i)
         }
         break;
       case "map":
-        const map = context.set_object(objectId, key, {})
+        const map = context.putObject(objectId, key, {})
         const proxyMap = mapProxy(context, map, [ ... path, key ], readonly );
         for (const key in value) {
           proxyMap[key] = value[key]
         }
         break;
       default:
-        context.set(objectId, key, value, datatype)
+        context.put(objectId, key, value, datatype)
     }
     return true
   },
@@ -166,7 +166,7 @@ const MapHandler = {
     if (readonly) {
       throw new RangeError(`Object property "${key}" cannot be modified`)
     }
-    context.del(objectId, key)
+    context.delete(objectId, key)
     return true
   },
 
@@ -251,9 +251,9 @@ const ListHandler = {
       case "list":
         let list
         if (index >= context.length(objectId)) {
-          list = context.insert_object(objectId, index, [])
+          list = context.insertObject(objectId, index, [])
         } else {
-          list = context.set_object(objectId, index, [])
+          list = context.putObject(objectId, index, [])
         }
         const proxyList = listProxy(context, list, [ ... path, index ], readonly);
         proxyList.splice(0,0,...value)
@@ -261,9 +261,9 @@ const ListHandler = {
       case "text":
         let text
         if (index >= context.length(objectId)) {
-          text = context.insert_object(objectId, index, "", "text")
+          text = context.insertObject(objectId, index, "", "text")
         } else {
-          text = context.set_object(objectId, index, "", "text")
+          text = context.putObject(objectId, index, "", "text")
         }
         const proxyText = textProxy(context, text, [ ... path, index ], readonly);
         proxyText.splice(0,0,...value)
@@ -271,9 +271,9 @@ const ListHandler = {
       case "map":
         let map
         if (index >= context.length(objectId)) {
-          map = context.insert_object(objectId, index, {})
+          map = context.insertObject(objectId, index, {})
         } else {
-          map = context.set_object(objectId, index, {})
+          map = context.putObject(objectId, index, {})
         }
         const proxyMap = mapProxy(context, map, [ ... path, index ], readonly);
         for (const key in value) {
@@ -284,7 +284,7 @@ const ListHandler = {
         if (index >= context.length(objectId)) {
           context.insert(objectId, index, value, datatype)
         } else {
-          context.set(objectId, index, value, datatype)
+          context.put(objectId, index, value, datatype)
         }
     }
     return true
@@ -293,10 +293,10 @@ const ListHandler = {
   deleteProperty (target, index) {
     const {context, objectId} = target
     index = parseListIndex(index)
-    if (context.value(objectId, index)[0] == "counter") {
+    if (context.get(objectId, index)[0] == "counter") {
       throw new TypeError('Unsupported operation: deleting a counter from a list')
     }
-    context.del(objectId, index)
+    context.delete(objectId, index)
     return true
   },
 
@@ -395,7 +395,7 @@ function listMethods(target) {
       if (typeof numDelete === 'number') {
         context.splice(objectId, index, numDelete)
       } else {
-        context.del(objectId, index)
+        context.delete(objectId, index)
       }
       return this
     },
@@ -405,7 +405,7 @@ function listMethods(target) {
       let list = context.getObject(objectId)
       let [value, datatype] = valueAt(target, index)
       for (let index = parseListIndex(start || 0); index < parseListIndex(end || list.length); index++) {
-        context.set(objectId, index, value, datatype)
+        context.put(objectId, index, value, datatype)
       }
       return this
     },
@@ -437,7 +437,7 @@ function listMethods(target) {
         return undefined
       }
       let last = valueAt(target, length - 1)
-      context.del(objectId, length - 1)
+      context.delete(objectId, length - 1)
       return last
     },
 
@@ -450,7 +450,7 @@ function listMethods(target) {
     shift() {
       if (context.length(objectId) == 0) return
       const first = valueAt(target, 0)
-      context.del(objectId, 0)
+      context.delete(objectId, 0)
       return first
     },
 
@@ -472,23 +472,23 @@ function listMethods(target) {
       for (let i = 0; i < del; i++) {
         let value = valueAt(target, index)
         result.push(value)
-        context.del(objectId, index)
+        context.delete(objectId, index)
       }
       const values = vals.map((val) => import_value(val))
       for (let [value,datatype] of values) {
         switch (datatype) {
           case "list":
-            const list = context.insert_object(objectId, index, [])
+            const list = context.insertObject(objectId, index, [])
             const proxyList = listProxy(context, list, [ ... path, index ], readonly);
             proxyList.splice(0,0,...value)
             break;
           case "text":
-            const text = context.insert_object(objectId, index, "", "text")
+            const text = context.insertObject(objectId, index, "", "text")
             const proxyText = textProxy(context, text, [ ... path, index ], readonly);
             proxyText.splice(0,0,...value)
             break;
           case "map":
-            const map = context.insert_object(objectId, index, {})
+            const map = context.insertObject(objectId, index, {})
             const proxyMap = mapProxy(context, map, [ ... path, index ], readonly);
             for (const key in value) {
               proxyMap[key] = value[key]
@@ -574,7 +574,7 @@ function listMethods(target) {
 }
 
 function textMethods(target) {
-  const {context, objectId, path, readonly, frozen} = target
+  const {context, objectId, path, readonly, frozen, heads } = target
   const methods = {
     set (index, value) {
       return this[index] = value
@@ -583,13 +583,7 @@ function textMethods(target) {
       return this[index]
     },
     toString () {
-      let str = ''
-      let length = this.length
-      for (let i = 0; i < length; i++) {
-        const value = this.get(i)
-        if (typeof value === 'string') str += value
-      }
-      return str
+      return context.text(objectId, heads).replace(/￼/g,'')
     },
     toSpans () {
       let spans = []
