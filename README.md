@@ -1,8 +1,15 @@
-# Automerge - NEXT
+# Automerge RS
 
-This is pretty much a ground up rewrite of automerge-rs. The objective of this
-rewrite is to radically simplify the API. The end goal being to produce a library
-which is easy to work with both in Rust and from FFI.
+This is a rust implementation of the [Automerge](https://github.com/automerge/automerge) file format and network protocol.
+
+## Status
+
+This project has 4 components:
+
+1. *automerge* - a rust implementation of the library.  This project is the most mature and being used in a handful of small applications.
+2. *automerge-wasm* - a js/wasm interface to the underlying rust library.  This api is generally mature and in use in a handful of projects as well.
+3. *automerge-js* - this is a javascript library using the wasm interface to export the same public api of the primary automerge project.  Currently this project passes all of automerge's tests but has not been used in any real project or packaged as an NPM.  Alpha testers welcome.
+4. *automerge-c* - this is a c library intended to be an ffi integration point for all other languages.  It is currently a work in progress and not yet ready for any testing.
 
 ## How?
 
@@ -21,12 +28,9 @@ optree and producing state of some kind. User facing operations are exposed on
 an `Automerge` object, under the covers these operations typically instantiate
 some `TreeQuery` and run it over the `OpTree`.
 
-## Status
-
-We have working code which passes all of the tests in the JS test suite. We're
-now working on writing a bunch more tests and cleaning up the API.
-
 ## Development
+
+Please feel free to open issues and pull requests.
 
 ### Running CI
 
@@ -61,7 +65,6 @@ To build and test the wasm library:
 
   ## cutting a release or doing benchmarking
   $ yarn release
-  $ yarn opt ## or set `wasm-opt = false` in Cargo.toml on supported platforms (not arm64 osx)
 ```
 
 And finally to test the js library. This is where most of the tests reside.
