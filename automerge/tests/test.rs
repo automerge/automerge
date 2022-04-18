@@ -820,6 +820,26 @@ fn save_restore_complex() {
 }
 
 #[test]
+fn handle_repeated_out_of_order_changes() -> Result<(), automerge::AutomergeError> {
+    let mut doc1 = new_doc();
+    let list = doc1.put_object(ROOT, "list", ObjType::List)?;
+    doc1.insert(&list, 0, "a")?;
+    let mut doc2 = doc1.fork();
+    doc1.insert(&list, 1, "b")?;
+    doc1.commit();
+    doc1.insert(&list, 2, "c")?;
+    doc1.commit();
+    doc1.insert(&list, 3, "d")?;
+    doc1.commit();
+    let changes = doc1.get_changes(&[]);
+    doc2.apply_changes(changes[2..].iter().cloned().cloned().collect())?;
+    doc2.apply_changes(changes[2..].iter().cloned().cloned().collect())?;
+    doc2.apply_changes(changes.iter().cloned().cloned().collect())?;
+    assert_eq!(doc1.save(), doc2.save());
+    Ok(())
+}
+
+#[test]
 fn list_counter_del() -> Result<(), automerge::AutomergeError> {
     let mut v = vec![ActorId::random(), ActorId::random(), ActorId::random()];
     v.sort();

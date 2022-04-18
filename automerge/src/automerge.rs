@@ -678,7 +678,9 @@ impl Automerge {
             }
         }
         while let Some(c) = self.pop_next_causally_ready_change() {
-            self.apply_change(c);
+            if !self.history_index.contains_key(&c.hash) {
+                self.apply_change(c);
+            }
         }
         Ok(())
     }
