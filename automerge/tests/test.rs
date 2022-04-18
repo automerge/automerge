@@ -831,10 +831,10 @@ fn handle_repeated_out_of_order_changes() -> Result<(), automerge::AutomergeErro
     doc1.commit();
     doc1.insert(&list, 3, "d")?;
     doc1.commit();
-    let changes = doc1.get_changes(&[]);
-    doc2.apply_changes(changes[2..].iter().cloned().cloned().collect())?;
-    doc2.apply_changes(changes[2..].iter().cloned().cloned().collect())?;
-    doc2.apply_changes(changes.iter().cloned().cloned().collect())?;
+    let changes = doc1.get_changes(&[]).into_iter().cloned().collect::<Vec<_>>();
+    doc2.apply_changes(changes[2..].iter().cloned().collect())?;
+    doc2.apply_changes(changes[2..].iter().cloned().collect())?;
+    doc2.apply_changes(changes)?;
     assert_eq!(doc1.save(), doc2.save());
     Ok(())
 }
