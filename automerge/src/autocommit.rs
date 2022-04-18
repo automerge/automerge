@@ -3,7 +3,7 @@ use std::ops::RangeBounds;
 use crate::exid::ExId;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::Patch;
-use crate::{sync, Keys, KeysAt, ObjType, Range, RangeAt, ScalarValue, Values, ValuesAt};
+use crate::{sync, Keys, KeysAt, ObjType, Parents, Range, RangeAt, ScalarValue, Values, ValuesAt};
 use crate::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop,
     Value,
@@ -424,7 +424,7 @@ impl Transactable for AutoCommit {
         self.doc.parent_object(obj)
     }
 
-    fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Vec<(ExId, Prop)> {
-        self.doc.path_to_object(obj)
+    fn parents(&self, obj: ExId) -> Parents {
+        self.doc.parents(obj)
     }
 }

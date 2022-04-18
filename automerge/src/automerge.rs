@@ -6,6 +6,7 @@ use crate::change::encode_document;
 use crate::exid::ExId;
 use crate::keys::Keys;
 use crate::op_set::OpSet;
+use crate::parents::Parents;
 use crate::range::Range;
 use crate::transaction::{self, CommitOptions, Failure, Success, Transaction, TransactionInner};
 use crate::types::{
@@ -331,13 +332,13 @@ impl Automerge {
         }
     }
 
+    /// Get an iterator over the parents of an object.
+    pub fn parents(&self, obj: ExId) -> Parents {
+        Parents { obj, doc: self }
+    }
+
     pub fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Vec<(ExId, Prop)> {
-        let mut path = Vec::new();
-        let mut obj = obj.as_ref().clone();
-        while let Some(parent) = self.parent_object(obj) {
-            obj = parent.0.clone();
-            path.push(parent);
-        }
+        let mut path = self.parents(obj.as_ref().clone()).collect::<Vec<_>>();
         path.reverse();
         path
     }
@@ -2067,6 +2068,21 @@ mod tests {
                 (list, Prop::Seq(0)),
             ]
         );
+    }
+
+    #[test]
+    fn parents_iterator() {
+        let mut doc = AutoCommit::new();
+        let map = doc.put_object(ROOT, "a", ObjType::Map).unwrap();
+        let list = doc.insert_object(&map, 0, ObjType::List).unwrap();
+        doc.insert(&list, 0, 2).unwrap();
+        let text = doc.put_object(&list, 0, ObjType::Text).unwrap();
+
+        let mut parents = doc.parents(text);
+        assert_eq!(parents.next(), Some((list, Prop::Seq(0))));
+        assert_eq!(parents.next(), Some((map, Prop::Seq(0))));
+        assert_eq!(parents.next(), Some((ROOT, Prop::Map("a".into()))));
+        assert_eq!(parents.next(), None);
     }
 
     #[test]
