@@ -52,8 +52,11 @@ impl VecOpObserver {
 
 impl OpObserver for VecOpObserver {
     fn insert(&mut self, obj_id: ExId, index: usize, (value, id): (Value, ExId)) {
-        self.patches
-            .push(Patch::Insert(obj_id, index, (value.into_owned(), id)));
+        self.patches.push(Patch::Insert {
+            obj: obj_id,
+            index,
+            value: (value.into_owned(), id),
+        });
     }
 
     fn put(&mut self, objid: ExId, key: Prop, (value, id): (Value, ExId), conflict: bool) {
@@ -66,7 +69,7 @@ impl OpObserver for VecOpObserver {
     }
 
     fn delete(&mut self, objid: ExId, key: Prop) {
-        self.patches.push(Patch::Delete(objid, key))
+        self.patches.push(Patch::Delete { obj: objid, key })
     }
 }
 
@@ -81,7 +84,11 @@ pub enum Patch {
         conflict: bool,
     },
     /// Inserting a new element into a list/text
-    Insert(ExId, usize, (Value<'static>, ExId)),
+    Insert {
+        obj: ExId,
+        index: usize,
+        value: (Value<'static>, ExId),
+    },
     /// Deleting an element from a list/text
-    Delete(ExId, Prop),
+    Delete { obj: ExId, key: Prop },
 }

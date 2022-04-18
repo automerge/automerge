@@ -442,7 +442,7 @@ impl Automerge {
                     js_set(&patch, "conflict", conflict)?;
                 }
 
-                Patch::Insert(obj, index, value) => {
+                Patch::Insert { obj, index, value } => {
                     js_set(&patch, "action", "insert")?;
                     js_set(&patch, "obj", obj.to_string())?;
                     js_set(&patch, "key", index as f64)?;
@@ -458,7 +458,7 @@ impl Automerge {
                     };
                 }
 
-                Patch::Delete(obj, key) => {
+                Patch::Delete { obj, key } => {
                     js_set(&patch, "action", "delete")?;
                     js_set(&patch, "obj", obj.to_string())?;
                     js_set(&patch, "key", key)?;
