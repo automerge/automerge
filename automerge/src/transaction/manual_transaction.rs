@@ -267,8 +267,8 @@ impl<'a> Transactable for Transaction<'a> {
         self.doc.parent_object(obj)
     }
 
-    fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Vec<(ExId, Prop)> {
-        self.doc.path_to_object(obj)
+    fn parents(&self, obj: ExId) -> crate::Parents {
+        self.doc.parents(obj)
     }
 }
 
