@@ -12,7 +12,7 @@ use crate::{
 };
 use crate::{
     types::{ObjId, Op, OpId},
-    ObjType, Prop,
+    ObjType,
 };
 use std::collections::HashSet;
 
@@ -70,7 +70,7 @@ impl OpTreeInternal {
             .map(|root| query::KeysAt::new(root, clock))
     }
 
-    pub fn range<'a, R: RangeBounds<Prop>>(
+    pub fn range<'a, R: RangeBounds<String>>(
         &'a self,
         range: R,
         meta: &'a OpSetMetadata,
@@ -80,7 +80,7 @@ impl OpTreeInternal {
             .map(|node| query::Range::new(range, node, meta))
     }
 
-    pub fn range_at<'a, R: RangeBounds<Prop>>(
+    pub fn range_at<'a, R: RangeBounds<String>>(
         &'a self,
         range: R,
         meta: &'a OpSetMetadata,

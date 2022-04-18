@@ -102,9 +102,9 @@ pub trait Transactable {
     /// Get the keys of the given object at a point in history.
     fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt;
 
-    fn range<O: AsRef<ExId>, R: RangeBounds<Prop>>(&self, obj: O, range: R) -> Range<R>;
+    fn range<O: AsRef<ExId>, R: RangeBounds<String>>(&self, obj: O, range: R) -> Range<R>;
 
-    fn range_at<O: AsRef<ExId>, R: RangeBounds<Prop>>(
+    fn range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
         &self,
         obj: O,
         range: R,
