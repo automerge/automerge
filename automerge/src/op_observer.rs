@@ -38,13 +38,15 @@ impl OpObserver for () {
 
 pub const NULL_OBSERVER: Option<&mut ()> = None;
 
-/// Capture operations and store them as patches.
+/// Capture operations into a [`Vec`] and store them as patches.
 #[derive(Default, Debug, Clone)]
 pub struct VecOpObserver {
     patches: Vec<Patch>,
 }
 
 impl VecOpObserver {
+    /// Take the current list of patches, leaving the internal list empty and ready for new
+    /// patches.
     pub fn take_patches(&mut self) -> Vec<Patch> {
         std::mem::take(&mut self.patches)
     }
@@ -78,17 +80,29 @@ impl OpObserver for VecOpObserver {
 pub enum Patch {
     /// Associating a new value with a key in a map, or an existing list element
     Put {
+        /// The object that was put into.
         obj: ExId,
+        /// The key that the new value was put at.
         key: Prop,
+        /// The value that was put, and the id of the operation that put it there.
         value: (Value<'static>, ExId),
+        /// Whether this put conflicts with another.
         conflict: bool,
     },
     /// Inserting a new element into a list/text
     Insert {
+        /// The object that was inserted into.
         obj: ExId,
+        /// The index that the new value was inserted at.
         index: usize,
+        /// The value that was inserted, and the id of the operation that inserted it there.
         value: (Value<'static>, ExId),
     },
     /// Deleting an element from a list/text
-    Delete { obj: ExId, key: Prop },
+    Delete {
+        /// The object that was deleted from.
+        obj: ExId,
+        /// The key that was deleted.
+        key: Prop,
+    },
 }
