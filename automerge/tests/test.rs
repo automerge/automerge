@@ -836,8 +836,8 @@ fn handle_repeated_out_of_order_changes() -> Result<(), automerge::AutomergeErro
         .into_iter()
         .cloned()
         .collect::<Vec<_>>();
-    doc2.apply_changes(changes[2..].iter().cloned().collect())?;
-    doc2.apply_changes(changes[2..].iter().cloned().collect())?;
+    doc2.apply_changes(changes[2..].to_vec())?;
+    doc2.apply_changes(changes[2..].to_vec())?;
     doc2.apply_changes(changes)?;
     assert_eq!(doc1.save(), doc2.save());
     Ok(())
