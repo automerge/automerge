@@ -657,13 +657,17 @@ impl Automerge {
         dup
     }
 
+    fn history_indexed_or_queued(&self, hash: &ChangeHash) -> bool {
+        self.history_index.contains_key(hash) || self.queue.iter().any(|c| hash == &c.hash)
+    }
+
     /// Apply changes to this document.
     pub fn apply_changes(
         &mut self,
         changes: impl IntoIterator<Item = Change>,
     ) -> Result<(), AutomergeError> {
         for c in changes {
-            if !self.history_index.contains_key(&c.hash) {
+            if !self.history_indexed_or_queued(&c.hash) {
                 if self.duplicate_seq(&c) {
                     return Err(AutomergeError::DuplicateSeqNumber(
                         c.seq,
