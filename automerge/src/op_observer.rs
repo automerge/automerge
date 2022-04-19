@@ -36,8 +36,6 @@ impl OpObserver for () {
     fn delete(&mut self, _objid: ExId, _key: Prop) {}
 }
 
-pub const NULL_OBSERVER: Option<&mut ()> = None;
-
 /// Capture operations into a [`Vec`] and store them as patches.
 #[derive(Default, Debug, Clone)]
 pub struct VecOpObserver {

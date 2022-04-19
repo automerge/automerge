@@ -1,6 +1,7 @@
 #![allow(clippy::unused_unit)]
 use am::transaction::CommitOptions;
 use am::transaction::Transactable;
+use am::ApplyOptions;
 use automerge as am;
 use automerge::Patch;
 use automerge::VecOpObserver;
@@ -128,9 +129,12 @@ impl Automerge {
 
     pub fn merge(&mut self, other: &mut Automerge) -> Result<Array, JsValue> {
         self.ensure_transaction_closed();
-        let heads = self
-            .doc
-            .merge_with(&mut other.doc, self.observer.as_mut())?;
+        let options = if let Some(observer) = self.observer.as_mut() {
+            ApplyOptions::default().with_op_observer(observer)
+        } else {
+            ApplyOptions::default()
+        };
+        let heads = self.doc.merge_with(&mut other.doc, options)?;
         let heads: Array = heads
             .iter()
             .map(|h| JsValue::from_str(&hex::encode(&h.0)))
@@ -503,9 +507,14 @@ impl Automerge {
     pub fn load_incremental(&mut self, data: Uint8Array) -> Result<f64, JsValue> {
         self.ensure_transaction_closed();
         let data = data.to_vec();
+        let options = if let Some(observer) = self.observer.as_mut() {
+            ApplyOptions::default().with_op_observer(observer)
+        } else {
+            ApplyOptions::default()
+        };
         let len = self
             .doc
-            .load_incremental_with(&data, self.observer.as_mut())
+            .load_incremental_with(&data, options)
             .map_err(to_js_err)?;
         Ok(len as f64)
     }
@@ -514,8 +523,13 @@ impl Automerge {
     pub fn apply_changes(&mut self, changes: JsValue) -> Result<(), JsValue> {
         self.ensure_transaction_closed();
         let changes: Vec<_> = JS(changes).try_into()?;
+        let options = if let Some(observer) = self.observer.as_mut() {
+            ApplyOptions::default().with_op_observer(observer)
+        } else {
+            ApplyOptions::default()
+        };
         self.doc
-            .apply_changes_with(changes, self.observer.as_mut())
+            .apply_changes_with(changes, options)
             .map_err(to_js_err)?;
         Ok(())
     }
@@ -608,8 +622,13 @@ impl Automerge {
         self.ensure_transaction_closed();
         let message = message.to_vec();
         let message = am::sync::Message::decode(message.as_slice()).map_err(to_js_err)?;
+        let options = if let Some(observer) = self.observer.as_mut() {
+            ApplyOptions::default().with_op_observer(observer)
+        } else {
+            ApplyOptions::default()
+        };
         self.doc
-            .receive_sync_message_with(&mut state.0, message, self.observer.as_mut())
+            .receive_sync_message_with(&mut state.0, message, options)
             .map_err(to_js_err)?;
         Ok(())
     }
@@ -776,8 +795,9 @@ pub fn init(actor: Option<String>) -> Result<Automerge, JsValue> {
 #[wasm_bindgen(js_name = loadDoc)]
 pub fn load(data: Uint8Array, actor: Option<String>) -> Result<Automerge, JsValue> {
     let data = data.to_vec();
-    let mut observer = None;
-    let mut automerge = am::AutoCommit::load_with(&data, observer.as_mut()).map_err(to_js_err)?;
+    let observer = None;
+    let options = ApplyOptions::<()>::default();
+    let mut automerge = am::AutoCommit::load_with(&data, options).map_err(to_js_err)?;
     if let Some(s) = actor {
         let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
         automerge.set_actor(actor);

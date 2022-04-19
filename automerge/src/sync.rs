@@ -7,8 +7,8 @@ use std::{
 };
 
 use crate::{
-    decoding, decoding::Decoder, encoding::Encodable, Automerge, AutomergeError, Change,
-    ChangeHash, OpObserver, NULL_OBSERVER,
+    decoding, decoding::Decoder, encoding::Encodable, ApplyOptions, Automerge, AutomergeError,
+    Change, ChangeHash, OpObserver,
 };
 
 mod bloom;
@@ -99,14 +99,14 @@ impl Automerge {
         sync_state: &mut State,
         message: Message,
     ) -> Result<(), AutomergeError> {
-        self.receive_sync_message_with(sync_state, message, NULL_OBSERVER)
+        self.receive_sync_message_with::<()>(sync_state, message, ApplyOptions::default())
     }
 
-    pub fn receive_sync_message_with<Obs: OpObserver>(
+    pub fn receive_sync_message_with<'a, Obs: OpObserver>(
         &mut self,
         sync_state: &mut State,
         message: Message,
-        op_observer: Option<&mut Obs>,
+        options: ApplyOptions<'a, Obs>,
     ) -> Result<(), AutomergeError> {
         let before_heads = self.get_heads();
 
@@ -119,7 +119,7 @@ impl Automerge {
 
         let changes_is_empty = message_changes.is_empty();
         if !changes_is_empty {
-            self.apply_changes_with(message_changes, op_observer)?;
+            self.apply_changes_with(message_changes, options)?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
                 &self.get_heads().into_iter().collect(),
