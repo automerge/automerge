@@ -4,13 +4,15 @@ use std::sync::{Arc, Mutex};
 use crate::clock::Clock;
 use crate::op_tree::{OpSetMetadata, OpTreeInternal};
 use crate::query::{self, TreeQuery};
-use crate::types::ObjId;
+use crate::types::{Key, ObjId};
 use crate::types::{Op, OpId};
 use crate::Prop;
 use crate::{query::Keys, query::KeysAt, ObjType};
 
 #[derive(Debug, Default, Clone, PartialEq)]
-pub(crate) struct MapOpsCache {}
+pub(crate) struct MapOpsCache {
+    pub(crate) last: Option<(Key, usize)>,
+}
 
 impl MapOpsCache {
     fn lookup<'a, Q: TreeQuery<'a>>(&self, query: &mut Q) -> bool {
