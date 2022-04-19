@@ -1,8 +1,9 @@
 [workspace]
 members = [
     "automerge",
-    "automerge-wasm",
+    "automerge-c",
     "automerge-cli",
+    "automerge-wasm",
     "edit-trace",
 ]
 

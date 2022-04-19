@@ -1,0 +1,19 @@
+[package]
+name = "automerge-c"
+version = "0.1.0"
+authors = ["Orion Henry <orion.henry@gmail.com>", "Jason Kankiewicz <jason.kankiewicz@gmail.com>"]
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "automerge"
+crate-type = ["cdylib", "staticlib"]
+bench = false
+doc = false
+
+[dependencies]
+automerge = { path = "../automerge" }
+libc = "^0.2"
+
+[build-dependencies]
+cbindgen = "^0.20"
