@@ -128,7 +128,9 @@ impl Automerge {
 
     pub fn merge(&mut self, other: &mut Automerge) -> Result<Array, JsValue> {
         self.ensure_transaction_closed();
-        let heads = self.doc.merge(&mut other.doc, self.observer.as_mut())?;
+        let heads = self
+            .doc
+            .merge_with(&mut other.doc, self.observer.as_mut())?;
         let heads: Array = heads
             .iter()
             .map(|h| JsValue::from_str(&hex::encode(&h.0)))
@@ -503,7 +505,7 @@ impl Automerge {
         let data = data.to_vec();
         let len = self
             .doc
-            .load_incremental(&data, self.observer.as_mut())
+            .load_incremental_with(&data, self.observer.as_mut())
             .map_err(to_js_err)?;
         Ok(len as f64)
     }
@@ -513,7 +515,7 @@ impl Automerge {
         self.ensure_transaction_closed();
         let changes: Vec<_> = JS(changes).try_into()?;
         self.doc
-            .apply_changes(changes, self.observer.as_mut())
+            .apply_changes_with(changes, self.observer.as_mut())
             .map_err(to_js_err)?;
         Ok(())
     }
@@ -607,7 +609,7 @@ impl Automerge {
         let message = message.to_vec();
         let message = am::sync::Message::decode(message.as_slice()).map_err(to_js_err)?;
         self.doc
-            .receive_sync_message(&mut state.0, message, self.observer.as_mut())
+            .receive_sync_message_with(&mut state.0, message, self.observer.as_mut())
             .map_err(to_js_err)?;
         Ok(())
     }
@@ -775,7 +777,7 @@ pub fn init(actor: Option<String>) -> Result<Automerge, JsValue> {
 pub fn load(data: Uint8Array, actor: Option<String>) -> Result<Automerge, JsValue> {
     let data = data.to_vec();
     let mut observer = None;
-    let mut automerge = am::AutoCommit::load(&data, observer.as_mut()).map_err(to_js_err)?;
+    let mut automerge = am::AutoCommit::load_with(&data, observer.as_mut()).map_err(to_js_err)?;
     if let Some(s) = actor {
         let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
         automerge.set_actor(actor);

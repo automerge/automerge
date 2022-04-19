@@ -1,5 +1,5 @@
+use automerge::ObjType;
 use automerge::{transaction::Transactable, Automerge, AutomergeError, ROOT};
-use automerge::{ObjType, NULL_OBSERVER};
 use std::time::Instant;
 
 fn main() -> Result<(), AutomergeError> {
@@ -33,7 +33,7 @@ fn main() -> Result<(), AutomergeError> {
     println!("Saved in {} ms", save.elapsed().as_millis());
 
     let load = Instant::now();
-    let _ = Automerge::load(&bytes, NULL_OBSERVER).unwrap();
+    let _ = Automerge::load(&bytes).unwrap();
     println!("Loaded in {} ms", load.elapsed().as_millis());
 
     println!("Done in {} ms", now.elapsed().as_millis());

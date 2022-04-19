@@ -2,7 +2,6 @@ use automerge::transaction::CommitOptions;
 use automerge::transaction::Transactable;
 use automerge::AutomergeError;
 use automerge::ObjType;
-use automerge::NULL_OBSERVER;
 use automerge::{Automerge, ROOT};
 
 // Based on https://automerge.github.io/docs/quickstart
@@ -26,10 +25,10 @@ fn main() {
         .result;
 
     let mut doc2 = Automerge::new();
-    doc2.merge(&mut doc1, NULL_OBSERVER).unwrap();
+    doc2.merge(&mut doc1).unwrap();
 
     let binary = doc1.save();
-    let mut doc2 = Automerge::load(&binary, NULL_OBSERVER).unwrap();
+    let mut doc2 = Automerge::load(&binary).unwrap();
 
     doc1.transact_with::<_, _, AutomergeError, _, ()>(
         |_| CommitOptions::default().with_message("Mark card as done".to_owned()),
@@ -49,7 +48,7 @@ fn main() {
     )
     .unwrap();
 
-    doc1.merge(&mut doc2, NULL_OBSERVER).unwrap();
+    doc1.merge(&mut doc2).unwrap();
 
     for change in doc1.get_changes(&[]) {
         let length = doc1.length_at(&cards, &[change.hash]);

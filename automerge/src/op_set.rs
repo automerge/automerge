@@ -4,7 +4,6 @@ use crate::indexed_cache::IndexedCache;
 use crate::op_tree::OpTree;
 use crate::query::{self, OpIdSearch, TreeQuery};
 use crate::types::{self, ActorId, Key, ObjId, Op, OpId, OpType};
-use crate::Prop;
 use crate::{ObjType, OpObserver};
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;

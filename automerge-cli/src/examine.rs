@@ -29,7 +29,7 @@ pub fn examine(
     input
         .read_to_end(&mut buf)
         .map_err(|e| ExamineError::ReadingChanges { source: e })?;
-    let doc = am::Automerge::load(&buf, am::NULL_OBSERVER)
+    let doc = am::Automerge::load(&buf)
         .map_err(|e| ExamineError::ApplyingInitialChanges { source: e })?;
     let uncompressed_changes: Vec<_> = doc.get_changes(&[]).iter().map(|c| c.decode()).collect();
     if is_tty {

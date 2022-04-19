@@ -203,7 +203,7 @@ impl Automerge {
         }
         let mut f = Self::new();
         f.set_actor(ActorId::random());
-        f.apply_changes(changes.into_iter().rev().cloned(), NULL_OBSERVER)?;
+        f.apply_changes_with(changes.into_iter().rev().cloned(), NULL_OBSERVER)?;
         Ok(f)
     }
 
@@ -522,25 +522,35 @@ impl Automerge {
     }
 
     /// Load a document.
-    pub fn load<Obs: OpObserver>(
+    pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {
+        Self::load_with(data, NULL_OBSERVER)
+    }
+
+    /// Load a document.
+    pub fn load_with<Obs: OpObserver>(
         data: &[u8],
         op_observer: Option<&mut Obs>,
     ) -> Result<Self, AutomergeError> {
         let changes = Change::load_document(data)?;
         let mut doc = Self::new();
-        doc.apply_changes(changes, op_observer)?;
+        doc.apply_changes_with(changes, op_observer)?;
         Ok(doc)
     }
 
     /// Load an incremental save of a document.
-    pub fn load_incremental<Obs: OpObserver>(
+    pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
+        self.load_incremental_with(data, NULL_OBSERVER)
+    }
+
+    /// Load an incremental save of a document.
+    pub fn load_incremental_with<Obs: OpObserver>(
         &mut self,
         data: &[u8],
         op_observer: Option<&mut Obs>,
     ) -> Result<usize, AutomergeError> {
         let changes = Change::load_document(data)?;
         let start = self.ops.len();
-        self.apply_changes(changes, op_observer)?;
+        self.apply_changes_with(changes, op_observer)?;
         let delta = self.ops.len() - start;
         Ok(delta)
     }
@@ -556,7 +566,15 @@ impl Automerge {
     }
 
     /// Apply changes to this document.
-    pub fn apply_changes<Obs: OpObserver>(
+    pub fn apply_changes(
+        &mut self,
+        changes: impl IntoIterator<Item = Change>,
+    ) -> Result<(), AutomergeError> {
+        self.apply_changes_with(changes, NULL_OBSERVER)
+    }
+
+    /// Apply changes to this document.
+    pub fn apply_changes_with<Obs: OpObserver>(
         &mut self,
         changes: impl IntoIterator<Item = Change>,
         mut observer: Option<&mut Obs>,
@@ -655,7 +673,12 @@ impl Automerge {
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
-    pub fn merge<Obs: OpObserver>(
+    pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
+        self.merge_with(other, NULL_OBSERVER)
+    }
+
+    /// Takes all the changes in `other` which are not in `self` and applies them
+    pub fn merge_with<Obs: OpObserver>(
         &mut self,
         other: &mut Self,
         op_observer: Option<&mut Obs>,
@@ -666,7 +689,7 @@ impl Automerge {
             .into_iter()
             .cloned()
             .collect::<Vec<_>>();
-        self.apply_changes(changes, op_observer)?;
+        self.apply_changes_with(changes, op_observer)?;
         Ok(self.get_heads())
     }
 
@@ -1169,8 +1192,8 @@ mod tests {
 
         assert!(save_b.len() < save_a.len());
 
-        let mut doc_a = Automerge::load(&save_a, NULL_OBSERVER)?;
-        let mut doc_b = Automerge::load(&save_b, NULL_OBSERVER)?;
+        let mut doc_a = Automerge::load(&save_a)?;
+        let mut doc_b = Automerge::load(&save_b)?;
 
         assert!(doc_a.get_all(ROOT, "baz")? == doc_b.get_all(ROOT, "baz")?);
 
@@ -1650,7 +1673,7 @@ mod tests {
         assert_eq!(last_change.len(), 0);
 
         let bytes = doc.save();
-        assert!(Automerge::load(&bytes, NULL_OBSERVER).is_ok());
+        assert!(Automerge::load(&bytes,).is_ok());
 
         let mut tx = doc.transaction();
         tx.put(ROOT, "a", 1).unwrap();
@@ -1684,7 +1707,7 @@ mod tests {
         tx.commit();
         let hash = doc.get_last_local_change().unwrap().hash;
         let bytes = doc.save();
-        let doc = Automerge::load(&bytes, NULL_OBSERVER).unwrap();
+        let doc = Automerge::load(&bytes).unwrap();
         assert_eq!(doc.get_change_by_hash(&hash).unwrap().hash, hash);
     }
 
@@ -1699,7 +1722,7 @@ mod tests {
             157, 157, 157, 157, 157, 157, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
             255, 255, 255, 255, 255, 255, 255, 48, 254, 208,
         ];
-        let _ = Automerge::load(bytes, NULL_OBSERVER);
+        let _ = Automerge::load(bytes);
     }
 
     #[test]
@@ -1777,7 +1800,7 @@ mod tests {
         tx.commit();
         let bytes = doc.save();
         println!("doc2 time");
-        let mut doc2 = Automerge::load(&bytes, NULL_OBSERVER).unwrap();
+        let mut doc2 = Automerge::load(&bytes).unwrap();
         let bytes2 = doc2.save();
         assert_eq!(doc.text(&list).unwrap(), doc2.text(&list).unwrap());
 
@@ -1830,7 +1853,7 @@ mod tests {
         tx.commit();
         let bytes = doc.save();
         println!("doc2 time");
-        let mut doc2 = Automerge::load(&bytes, NULL_OBSERVER).unwrap();
+        let mut doc2 = Automerge::load(&bytes).unwrap();
         let bytes2 = doc2.save();
         assert_eq!(doc.text(&list).unwrap(), doc2.text(&list).unwrap());
 
@@ -1855,8 +1878,7 @@ mod tests {
         let mut doc2 = AutoCommit::new().with_actor(actor2.clone());
         let list = doc1.put_object(ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, 0).unwrap();
-        doc2.load_incremental(&doc1.save_incremental(), NULL_OBSERVER)
-            .unwrap();
+        doc2.load_incremental(&doc1.save_incremental()).unwrap();
         for i in 1..=max {
             doc1.put(&list, 0, i).unwrap()
         }
@@ -1865,8 +1887,8 @@ mod tests {
         }
         let change1 = doc1.save_incremental();
         let change2 = doc2.save_incremental();
-        doc2.load_incremental(&change1, NULL_OBSERVER).unwrap();
-        doc1.load_incremental(&change2, NULL_OBSERVER).unwrap();
+        doc2.load_incremental(&change1).unwrap();
+        doc1.load_incremental(&change2).unwrap();
         assert_eq!(doc1.length(&list), 1);
         assert_eq!(doc2.length(&list), 1);
         assert_eq!(
