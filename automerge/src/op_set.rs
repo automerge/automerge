@@ -1,9 +1,10 @@
 use crate::clock::Clock;
+use crate::exid::ExId;
 use crate::indexed_cache::IndexedCache;
 use crate::op_tree::OpTree;
 use crate::query::{self, OpIdSearch, TreeQuery};
-use crate::types::{ActorId, Key, ObjId, Op, OpId, OpType};
-use crate::ObjType;
+use crate::types::{self, ActorId, Key, ObjId, Op, OpId, OpType};
+use crate::{ObjType, OpObserver};
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -32,6 +33,14 @@ impl OpSetInternal {
                 actors: IndexedCache::new(),
                 props: IndexedCache::new(),
             },
+        }
+    }
+
+    pub(crate) fn id_to_exid(&self, id: OpId) -> ExId {
+        if id == types::ROOT {
+            ExId::Root
+        } else {
+            ExId::Id(id.0, self.m.actors.cache[id.1].clone(), id.1)
         }
     }
 
@@ -141,6 +150,86 @@ impl OpSetInternal {
             tree.internal.insert(index, element);
             self.length += 1;
         }
+    }
+
+    pub(crate) fn insert_op(&mut self, obj: &ObjId, op: Op) -> Op {
+        let q = self.search(obj, query::SeekOp::new(&op));
+
+        let succ = q.succ;
+        let pos = q.pos;
+
+        for i in succ {
+            self.replace(obj, i, |old_op| old_op.add_succ(&op));
+        }
+
+        if !op.is_delete() {
+            self.insert(pos, obj, op.clone());
+        }
+        op
+    }
+
+    pub(crate) fn insert_op_with_observer<Obs: OpObserver>(
+        &mut self,
+        obj: &ObjId,
+        op: Op,
+        observer: &mut Obs,
+    ) -> Op {
+        let q = self.search(obj, query::SeekOpWithPatch::new(&op));
+
+        let query::SeekOpWithPatch {
+            pos,
+            succ,
+            seen,
+            values,
+            had_value_before,
+            ..
+        } = q;
+
+        let ex_obj = self.id_to_exid(obj.0);
+        let key = match op.key {
+            Key::Map(index) => self.m.props[index].clone().into(),
+            Key::Seq(_) => seen.into(),
+        };
+
+        if op.insert {
+            let value = (op.value(), self.id_to_exid(op.id));
+            observer.insert(ex_obj, seen, value);
+        } else if op.is_delete() {
+            if let Some(winner) = &values.last() {
+                let value = (winner.value(), self.id_to_exid(winner.id));
+                let conflict = values.len() > 1;
+                observer.put(ex_obj, key, value, conflict);
+            } else {
+                observer.delete(ex_obj, key);
+            }
+        } else {
+            let winner = if let Some(last_value) = values.last() {
+                if self.m.lamport_cmp(op.id, last_value.id) == Ordering::Greater {
+                    &op
+                } else {
+                    last_value
+                }
+            } else {
+                &op
+            };
+            let value = (winner.value(), self.id_to_exid(winner.id));
+            if op.is_list_op() && !had_value_before {
+                observer.insert(ex_obj, seen, value);
+            } else {
+                let conflict = !values.is_empty();
+                observer.put(ex_obj, key, value, conflict);
+            }
+        }
+
+        for i in succ {
+            self.replace(obj, i, |old_op| old_op.add_succ(&op));
+        }
+
+        if !op.is_delete() {
+            self.insert(pos, obj, op.clone());
+        }
+
+        op
     }
 
     pub fn object_type(&self, id: &ObjId) -> Option<ObjType> {

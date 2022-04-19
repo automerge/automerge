@@ -5,7 +5,7 @@ use crate::exid::ExId;
 use crate::query::{self, OpIdSearch};
 use crate::types::{Key, ObjId, OpId};
 use crate::{change::export_change, types::Op, Automerge, ChangeHash, Prop};
-use crate::{AutomergeError, ObjType, OpType, ScalarValue};
+use crate::{AutomergeError, ObjType, OpObserver, OpType, ScalarValue};
 
 #[derive(Debug, Clone)]
 pub struct TransactionInner {
@@ -17,7 +17,7 @@ pub struct TransactionInner {
     pub(crate) extra_bytes: Vec<u8>,
     pub(crate) hash: Option<ChangeHash>,
     pub(crate) deps: Vec<ChangeHash>,
-    pub(crate) operations: Vec<(ObjId, Op)>,
+    pub(crate) operations: Vec<(ObjId, Prop, Op)>,
 }
 
 impl TransactionInner {
@@ -27,11 +27,12 @@ impl TransactionInner {
 
     /// Commit the operations performed in this transaction, returning the hashes corresponding to
     /// the new heads.
-    pub fn commit(
+    pub fn commit<Obs: OpObserver>(
         mut self,
         doc: &mut Automerge,
         message: Option<String>,
         time: Option<i64>,
+        op_observer: Option<&mut Obs>,
     ) -> ChangeHash {
         if message.is_some() {
             self.message = message;
@@ -39,6 +40,24 @@ impl TransactionInner {
 
         if let Some(t) = time {
             self.time = t;
+        }
+
+        if let Some(observer) = op_observer {
+            for (obj, prop, op) in &self.operations {
+                let ex_obj = doc.ops.id_to_exid(obj.0);
+                if op.insert {
+                    let value = (op.value(), doc.id_to_exid(op.id));
+                    match prop {
+                        Prop::Map(_) => panic!("insert into a map"),
+                        Prop::Seq(index) => observer.insert(ex_obj, *index, value),
+                    }
+                } else if op.is_delete() {
+                    observer.delete(ex_obj, prop.clone());
+                } else {
+                    let value = (op.value(), doc.ops.id_to_exid(op.id));
+                    observer.put(ex_obj, prop.clone(), value, false);
+                }
+            }
         }
 
         let num_ops = self.pending_ops();
@@ -52,24 +71,25 @@ impl TransactionInner {
     /// Undo the operations added in this transaction, returning the number of cancelled
     /// operations.
     pub fn rollback(self, doc: &mut Automerge) -> usize {
+        let num = self.pending_ops();
+        // remove in reverse order so sets are removed before makes etc...
+        for (obj, _prop, op) in self.operations.into_iter().rev() {
+            for pred_id in &op.pred {
+                if let Some(p) = doc.ops.search(&obj, OpIdSearch::new(*pred_id)).index() {
+                    doc.ops.replace(&obj, p, |o| o.remove_succ(&op));
+                }
+            }
+            if let Some(pos) = doc.ops.search(&obj, OpIdSearch::new(op.id)).index() {
+                doc.ops.remove(&obj, pos);
+            }
+        }
+
         // remove the actor from the cache so that it doesn't end up in the saved document
         if doc.states.get(&self.actor).is_none() {
             let actor = doc.ops.m.actors.remove_last();
             doc.actor = Actor::Unused(actor);
         }
 
-        let num = self.pending_ops();
-        // remove in reverse order so sets are removed before makes etc...
-        for (obj, op) in self.operations.iter().rev() {
-            for pred_id in &op.pred {
-                if let Some(p) = doc.ops.search(obj, OpIdSearch::new(*pred_id)).index() {
-                    doc.ops.replace(obj, p, |o| o.remove_succ(op));
-                }
-            }
-            if let Some(pos) = doc.ops.search(obj, OpIdSearch::new(op.id)).index() {
-                doc.ops.remove(obj, pos);
-            }
-        }
         num
     }
 
@@ -89,13 +109,14 @@ impl TransactionInner {
     pub fn put<P: Into<Prop>, V: Into<ScalarValue>>(
         &mut self,
         doc: &mut Automerge,
-        obj: &ExId,
+        ex_obj: &ExId,
         prop: P,
         value: V,
     ) -> Result<(), AutomergeError> {
-        let obj = doc.exid_to_obj(obj)?;
+        let obj = doc.exid_to_obj(ex_obj)?;
         let value = value.into();
-        self.local_op(doc, obj, prop.into(), value.into())?;
+        let prop = prop.into();
+        self.local_op(doc, obj, prop, value.into())?;
         Ok(())
     }
 
@@ -115,13 +136,15 @@ impl TransactionInner {
     pub fn put_object<P: Into<Prop>>(
         &mut self,
         doc: &mut Automerge,
-        obj: &ExId,
+        ex_obj: &ExId,
         prop: P,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
-        let obj = doc.exid_to_obj(obj)?;
-        let id = self.local_op(doc, obj, prop.into(), value.into())?.unwrap();
-        Ok(doc.id_to_exid(id))
+        let obj = doc.exid_to_obj(ex_obj)?;
+        let prop = prop.into();
+        let id = self.local_op(doc, obj, prop, value.into())?.unwrap();
+        let id = doc.id_to_exid(id);
+        Ok(id)
     }
 
     fn next_id(&mut self) -> OpId {
@@ -131,6 +154,7 @@ impl TransactionInner {
     fn insert_local_op(
         &mut self,
         doc: &mut Automerge,
+        prop: Prop,
         op: Op,
         pos: usize,
         obj: ObjId,
@@ -146,17 +170,17 @@ impl TransactionInner {
             doc.ops.insert(pos, &obj, op.clone());
         }
 
-        self.operations.push((obj, op));
+        self.operations.push((obj, prop, op));
     }
 
     pub fn insert<V: Into<ScalarValue>>(
         &mut self,
         doc: &mut Automerge,
-        obj: &ExId,
+        ex_obj: &ExId,
         index: usize,
         value: V,
     ) -> Result<(), AutomergeError> {
-        let obj = doc.exid_to_obj(obj)?;
+        let obj = doc.exid_to_obj(ex_obj)?;
         let value = value.into();
         self.do_insert(doc, obj, index, value.into())?;
         Ok(())
@@ -165,13 +189,14 @@ impl TransactionInner {
     pub fn insert_object(
         &mut self,
         doc: &mut Automerge,
-        obj: &ExId,
+        ex_obj: &ExId,
         index: usize,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
-        let obj = doc.exid_to_obj(obj)?;
-        let id = self.do_insert(doc, obj, index, value.into())?.unwrap();
-        Ok(doc.id_to_exid(id))
+        let obj = doc.exid_to_obj(ex_obj)?;
+        let id = self.do_insert(doc, obj, index, value.into())?;
+        let id = doc.id_to_exid(id);
+        Ok(id)
     }
 
     fn do_insert(
@@ -180,13 +205,12 @@ impl TransactionInner {
         obj: ObjId,
         index: usize,
         action: OpType,
-    ) -> Result<Option<OpId>, AutomergeError> {
+    ) -> Result<OpId, AutomergeError> {
         let id = self.next_id();
 
         let query = doc.ops.search(&obj, query::InsertNth::new(index));
 
         let key = query.key()?;
-        let is_make = matches!(&action, OpType::Make(_));
 
         let op = Op {
             id,
@@ -198,13 +222,9 @@ impl TransactionInner {
         };
 
         doc.ops.insert(query.pos(), &obj, op.clone());
-        self.operations.push((obj, op));
+        self.operations.push((obj, Prop::Seq(index), op));
 
-        if is_make {
-            Ok(Some(id))
-        } else {
-            Ok(None)
-        }
+        Ok(id)
     }
 
     pub(crate) fn local_op(
@@ -232,8 +252,8 @@ impl TransactionInner {
         }
 
         let id = self.next_id();
-        let prop = doc.ops.m.props.cache(prop);
-        let query = doc.ops.search(&obj, query::Prop::new(prop));
+        let prop_index = doc.ops.m.props.cache(prop.clone());
+        let query = doc.ops.search(&obj, query::Prop::new(prop_index));
 
         // no key present to delete
         if query.ops.is_empty() && action == OpType::Delete {
@@ -244,14 +264,12 @@ impl TransactionInner {
             return Ok(None);
         }
 
-        let is_make = matches!(&action, OpType::Make(_));
-
         let pred = query.ops.iter().map(|op| op.id).collect();
 
         let op = Op {
             id,
             action,
-            key: Key::Map(prop),
+            key: Key::Map(prop_index),
             succ: Default::default(),
             pred,
             insert: false,
@@ -259,13 +277,9 @@ impl TransactionInner {
 
         let pos = query.pos;
         let ops_pos = query.ops_pos;
-        self.insert_local_op(doc, op, pos, obj, &ops_pos);
+        self.insert_local_op(doc, Prop::Map(prop), op, pos, obj, &ops_pos);
 
-        if is_make {
-            Ok(Some(id))
-        } else {
-            Ok(None)
-        }
+        Ok(Some(id))
     }
 
     fn local_list_op(
@@ -285,8 +299,6 @@ impl TransactionInner {
             return Ok(None);
         }
 
-        let is_make = matches!(&action, OpType::Make(_));
-
         let op = Op {
             id,
             action,
@@ -298,13 +310,9 @@ impl TransactionInner {
 
         let pos = query.pos;
         let ops_pos = query.ops_pos;
-        self.insert_local_op(doc, op, pos, obj, &ops_pos);
+        self.insert_local_op(doc, Prop::Seq(index), op, pos, obj, &ops_pos);
 
-        if is_make {
-            Ok(Some(id))
-        } else {
-            Ok(None)
-        }
+        Ok(Some(id))
     }
 
     pub fn increment<P: Into<Prop>>(
@@ -322,11 +330,12 @@ impl TransactionInner {
     pub fn delete<P: Into<Prop>>(
         &mut self,
         doc: &mut Automerge,
-        obj: &ExId,
+        ex_obj: &ExId,
         prop: P,
     ) -> Result<(), AutomergeError> {
-        let obj = doc.exid_to_obj(obj)?;
-        self.local_op(doc, obj, prop.into(), OpType::Delete)?;
+        let obj = doc.exid_to_obj(ex_obj)?;
+        let prop = prop.into();
+        self.local_op(doc, obj, prop, OpType::Delete)?;
         Ok(())
     }
 
@@ -335,19 +344,19 @@ impl TransactionInner {
     pub fn splice(
         &mut self,
         doc: &mut Automerge,
-        obj: &ExId,
+        ex_obj: &ExId,
         mut pos: usize,
         del: usize,
         vals: impl IntoIterator<Item = ScalarValue>,
     ) -> Result<(), AutomergeError> {
-        let obj = doc.exid_to_obj(obj)?;
+        let obj = doc.exid_to_obj(ex_obj)?;
         for _ in 0..del {
             // del()
             self.local_op(doc, obj, pos.into(), OpType::Delete)?;
         }
         for v in vals {
             // insert()
-            self.do_insert(doc, obj, pos, v.into())?;
+            self.do_insert(doc, obj, pos, v.clone().into())?;
             pos += 1;
         }
         Ok(())

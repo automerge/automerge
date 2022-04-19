@@ -1,11 +1,9 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
-use crate::{
-    Automerge, ChangeHash, KeysAt, ObjType, Prop, Range, RangeAt, ScalarValue, Value, Values,
-    ValuesAt,
-};
+use crate::{Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, ScalarValue, Value};
 use crate::{AutomergeError, Keys};
+use crate::{Range, RangeAt, Values, ValuesAt};
 
 use super::{CommitOptions, Transactable, TransactionInner};
 
@@ -38,7 +36,10 @@ impl<'a> Transaction<'a> {
     /// Commit the operations performed in this transaction, returning the hashes corresponding to
     /// the new heads.
     pub fn commit(mut self) -> ChangeHash {
-        self.inner.take().unwrap().commit(self.doc, None, None)
+        self.inner
+            .take()
+            .unwrap()
+            .commit::<()>(self.doc, None, None, None)
     }
 
     /// Commit the operations in this transaction with some options.
@@ -55,13 +56,15 @@ impl<'a> Transaction<'a> {
     /// tx.put_object(ROOT, "todos", ObjType::List).unwrap();
     /// let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as
     /// i64;
-    /// tx.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
+    /// tx.commit_with::<()>(CommitOptions::default().with_message("Create todos list").with_time(now));
     /// ```
-    pub fn commit_with(mut self, options: CommitOptions) -> ChangeHash {
-        self.inner
-            .take()
-            .unwrap()
-            .commit(self.doc, options.message, options.time)
+    pub fn commit_with<Obs: OpObserver>(mut self, options: CommitOptions<Obs>) -> ChangeHash {
+        self.inner.take().unwrap().commit(
+            self.doc,
+            options.message,
+            options.time,
+            options.op_observer,
+        )
     }
 
     /// Undo the operations added in this transaction, returning the number of cancelled
@@ -126,16 +129,16 @@ impl<'a> Transactable for Transaction<'a> {
             .insert(self.doc, obj.as_ref(), index, value)
     }
 
-    fn insert_object(
+    fn insert_object<O: AsRef<ExId>>(
         &mut self,
-        obj: &ExId,
+        obj: O,
         index: usize,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
         self.inner
             .as_mut()
             .unwrap()
-            .insert_object(self.doc, obj, index, value)
+            .insert_object(self.doc, obj.as_ref(), index, value)
     }
 
     fn increment<O: AsRef<ExId>, P: Into<Prop>>(

@@ -1,5 +1,4 @@
 use crate::error;
-use crate::exid::ExId;
 use crate::legacy as amp;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -544,26 +543,6 @@ impl TryFrom<&[u8]> for ChangeHash {
             Ok(ChangeHash(array))
         }
     }
-}
-
-/// Properties of `Patch::Assign`
-#[derive(Debug, Clone, PartialEq)]
-pub struct AssignPatch {
-    pub obj: ExId,
-    pub key: Prop,
-    pub value: (Value<'static>, ExId),
-    pub conflict: bool,
-}
-
-/// A notification to the application that something has changed in a document.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Patch {
-    /// Associating a new value with a key in a map, or an existing list element
-    Assign(AssignPatch),
-    /// Inserting a new element into a list/text
-    Insert(ExId, usize, (Value<'static>, ExId)),
-    /// Deleting an element from a list/text
-    Delete(ExId, Prop),
 }
 
 #[cfg(feature = "wasm")]
