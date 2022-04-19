@@ -1,1 +1,0 @@
-initSidebarItems({"enum":[["ValueRef","A ValueRef represents a way to interact with the frontend’s state lazily rather than creating a full `Value` from the internal state."]],"struct":[["ListRef",""],["MapRef",""],["RootRef",""],["TableRef",""],["TextRef",""]]});

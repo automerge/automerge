@@ -1,3 +1,0 @@
-(function() {var implementors = {};
-implementors["automerge_backend_wasm"] = [{"text":"impl <a class=\"trait\" href=\"https://docs.rs/wasm-bindgen/0.2/wasm_bindgen/cast/trait.JsCast.html\" title=\"trait wasm_bindgen::cast::JsCast\">JsCast</a> for <a class=\"struct\" href=\"automerge_backend_wasm/struct.Object.html\" title=\"struct automerge_backend_wasm::Object\">Object</a>","synthetic":false,"types":["automerge_backend_wasm::Object"]}];
-if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

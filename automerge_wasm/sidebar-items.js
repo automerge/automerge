@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["decode_change",""],["decode_sync_message",""],["decode_sync_state",""],["encode_change",""],["encode_sync_message",""],["encode_sync_state",""],["export_sync_state",""],["import_sync_state",""],["init",""],["init_sync_state",""],["load",""]],"struct":[["Automerge",""]]});
