@@ -1,19 +1,20 @@
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
 use crate::query::{binary_search_by, QueryResult, TreeQuery};
 use crate::types::{Key, Op};
+use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Prop<'a> {
+pub(crate) struct InsertProp<'a> {
     key: Key,
-    pub(crate) ops: Vec<&'a Op>,
-    pub(crate) ops_pos: Vec<usize>,
-    pub(crate) pos: usize,
+    pub ops: Vec<&'a Op>,
+    pub ops_pos: Vec<usize>,
+    pub pos: usize,
     start: Option<usize>,
 }
 
-impl<'a> Prop<'a> {
-    pub(crate) fn new(prop: usize) -> Self {
-        Prop {
+impl<'a> InsertProp<'a> {
+    pub fn new(prop: usize) -> Self {
+        InsertProp {
             key: Key::Map(prop),
             ops: vec![],
             ops_pos: vec![],
@@ -23,7 +24,7 @@ impl<'a> Prop<'a> {
     }
 }
 
-impl<'a> TreeQuery<'a> for Prop<'a> {
+impl<'a> TreeQuery<'a> for InsertProp<'a> {
     fn cache_lookup_map(&mut self, cache: &crate::object_data::MapOpsCache) -> bool {
         if let Some((last_key, last_pos)) = cache.last {
             if last_key == self.key {
@@ -35,7 +36,7 @@ impl<'a> TreeQuery<'a> for Prop<'a> {
     }
 
     fn cache_update_map(&self, cache: &mut crate::object_data::MapOpsCache) {
-        cache.last = self.start.map(|start| (self.key, start));
+        cache.last = None
     }
 
     fn query_node_with_metadata(

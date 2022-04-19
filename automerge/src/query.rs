@@ -8,6 +8,7 @@ use std::fmt::Debug;
 
 mod elem_id_pos;
 mod insert;
+mod insert_prop;
 mod keys;
 mod keys_at;
 mod len;
@@ -26,6 +27,7 @@ mod seek_op_with_patch;
 
 pub(crate) use elem_id_pos::ElemIdPos;
 pub(crate) use insert::InsertNth;
+pub(crate) use insert_prop::InsertProp;
 pub(crate) use keys::Keys;
 pub(crate) use keys_at::KeysAt;
 pub(crate) use len::Len;
