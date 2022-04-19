@@ -1,9 +1,24 @@
 use automerge::{transaction::Transactable, Automerge, ROOT};
 use criterion::{criterion_group, criterion_main, Criterion};
 
-fn query_doc(doc: &Automerge, key: &str, rounds: u32) {
+fn query_single(doc: &Automerge, rounds: u32) {
     for _ in 0..rounds {
-        doc.get(ROOT, key).unwrap();
+        // repeatedly get the last key
+        doc.get(ROOT, (rounds - 1).to_string()).unwrap();
+    }
+}
+
+fn query_range(doc: &Automerge, rounds: u32) {
+    for i in 0..rounds {
+        doc.get(ROOT, i.to_string()).unwrap();
+    }
+}
+
+fn put_doc(doc: &mut Automerge, rounds: u32) {
+    for i in 0..rounds {
+        let mut tx = doc.transaction();
+        tx.put(ROOT, i.to_string(), "value").unwrap();
+        tx.commit();
     }
 }
 
@@ -12,14 +27,18 @@ fn bench(c: &mut Criterion) {
 
     let rounds = 10_000;
     let mut doc = Automerge::new();
-    let mut tx = doc.transaction();
-    for i in 0..rounds {
-        tx.put(ROOT, i.to_string(), vec![0, 1, 2, 3, 4, 5]).unwrap();
-    }
-    tx.commit();
+    put_doc(&mut doc, rounds);
 
-    group.bench_function("query", |b| {
-        b.iter(|| query_doc(&doc, &(rounds - 1).to_string(), rounds))
+    group.bench_function("query single", |b| b.iter(|| query_single(&doc, rounds)));
+
+    group.bench_function("query range", |b| b.iter(|| query_range(&doc, rounds)));
+
+    group.bench_function("put", |b| {
+        b.iter_batched(
+            Automerge::new,
+            |mut doc| put_doc(&mut doc, rounds),
+            criterion::BatchSize::LargeInput,
+        )
     });
 
     group.finish();
