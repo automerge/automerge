@@ -2,6 +2,8 @@
 
 This is a rust implementation of the [Automerge](https://github.com/automerge/automerge) file format and network protocol.
 
+If you are looking for the origional `automerge-rs` project that can be used as a wasm backend to the javascript implementation, it can be found [here](https://github.com/automerge/automerge-rs/tree/automerge-1.0).
+
 ## Status
 
 This project has 4 components:

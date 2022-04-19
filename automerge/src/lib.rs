@@ -1,3 +1,4 @@
+#[doc(hidden)]
 #[macro_export]
 macro_rules! log {
      ( $( $t:tt )* ) => {
@@ -9,6 +10,7 @@ macro_rules! log {
  }
 
 #[cfg(all(feature = "wasm", target_family = "wasm"))]
+#[doc(hidden)]
 #[macro_export]
 macro_rules! __log {
      ( $( $t:tt )* ) => {
@@ -17,6 +19,7 @@ macro_rules! __log {
  }
 
 #[cfg(not(all(feature = "wasm", target_family = "wasm")))]
+#[doc(hidden)]
 #[macro_export]
 macro_rules! __log {
      ( $( $t:tt )* ) => {
