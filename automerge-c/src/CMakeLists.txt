@@ -27,8 +27,7 @@ set(CARGO_CURRENT_BINARY_DIR "${CARGO_TARGET_DIR}/${CARGO_BUILD_TYPE}")
 
 set(
     CARGO_OUTPUT
-        # \note cbindgen won't regenerate a missing header so it can't be cleaned.
-        #${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
+        ${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
         ${CARGO_CURRENT_BINARY_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}
         ${CARGO_CURRENT_BINARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}
 )
@@ -42,10 +41,18 @@ endif()
 add_custom_command(
     OUTPUT ${CARGO_OUTPUT}
     COMMAND
+        # \note cbindgen won't regenerate its output header file after it's
+        #       been removed but it will after its configuration file has been
+        #       updated.
+        ${CMAKE_COMMAND} -DCONDITION=NOT_EXISTS -P ${CMAKE_SOURCE_DIR}/cmake/file_touch.cmake -- ${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h ${CMAKE_SOURCE_DIR}/cbindgen.toml
+    COMMAND
         ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${CARGO_TARGET_DIR} ${CARGO_CMD} build ${CARGO_FLAG}
     MAIN_DEPENDENCY
         lib.rs
     DEPENDS
+        doc.rs
+        result.rs
+        utils.rs
         ${CMAKE_SOURCE_DIR}/build.rs
         ${CMAKE_SOURCE_DIR}/Cargo.toml
         ${CMAKE_SOURCE_DIR}/cbindgen.toml
@@ -56,12 +63,29 @@ add_custom_command(
     VERBATIM
 )
 
-# \note This target is only necessary because cbindgen won't allow the
-#       generated header to be listed in the Cargo command's output, being
-#       another target's source file would've been enough otherwise.
 add_custom_target(
     ${LIBRARY_NAME}_artifacts
     DEPENDS ${CARGO_OUTPUT}
+)
+
+# \note cbindgen's naming behavior isn't fully configurable.
+add_custom_command(
+    TARGET ${LIBRARY_NAME}_artifacts
+    POST_BUILD
+    COMMAND
+        # Compensate for cbindgen's variant struct naming.
+        ${CMAKE_COMMAND} -DMATCH_REGEX=AM\([^_]+_[^_]+\)_Body -DREPLACE_EXPR=AM\\1 -P ${CMAKE_SOURCE_DIR}/cmake/file_regex_replace.cmake -- ${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
+    COMMAND
+        # Compensate for cbindgen's union tag enum type naming.
+        ${CMAKE_COMMAND} -DMATCH_REGEX=AM\([^_]+\)_Tag -DREPLACE_EXPR=AM\\1Variant -P ${CMAKE_SOURCE_DIR}/cmake/file_regex_replace.cmake -- ${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
+    COMMAND
+        # Compensate for cbindgen's translation of consecutive uppercase letters to "ScreamingSnakeCase".
+        ${CMAKE_COMMAND} -DMATCH_REGEX=A_M\([^_]+\)_ -DREPLACE_EXPR=AM_\\1_ -P ${CMAKE_SOURCE_DIR}/cmake/file_regex_replace.cmake -- ${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
+    WORKING_DIRECTORY
+        ${CMAKE_SOURCE_DIR}
+    COMMENT
+        "Compensating for hard-coded cbindgen naming behaviors..."
+    VERBATIM
 )
 
 if(BUILD_SHARED_LIBS)
@@ -101,8 +125,6 @@ else()
 endif()
 
 add_library(${LIBRARY_NAME} ${LIBRARY_TYPE} IMPORTED GLOBAL)
-
-add_dependencies(${LIBRARY_NAME} ${LIBRARY_NAME}_artifacts)
 
 set_target_properties(
     ${LIBRARY_NAME}
@@ -186,9 +208,13 @@ if(DOXYGEN_FOUND)
         ${LIBRARY_NAME}_docs
         "${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h"
         "${CMAKE_SOURCE_DIR}/README.md"
+        USE_STAMP_FILE
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         COMMENT "Producing documentation with Doxygen..."
     )
 
+    # \note A Doxygen input file isn't a file-level dependency so the Doxygen
+    #       command must instead depend upon a target that outputs the file or
+    #       it will just output an error message when it can't be found.
     add_dependencies(${LIBRARY_NAME}_docs ${LIBRARY_NAME}_artifacts)
 endif()

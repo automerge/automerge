@@ -1,8 +1,8 @@
-use crate::{AMobj, AMresult};
+use crate::{AMobjId, AMresult};
 use automerge as am;
 use std::ops::Deref;
 
-impl Deref for AMobj {
+impl Deref for AMobjId {
     type Target = am::ObjId;
 
     fn deref(&self) -> &Self::Target {
@@ -11,14 +11,14 @@ impl Deref for AMobj {
 }
 
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
-impl From<*const AMobj> for AMobj {
-    fn from(obj: *const AMobj) -> Self {
-        unsafe { obj.as_ref().cloned().unwrap_or(AMobj(am::ROOT)) }
+impl From<*const AMobjId> for AMobjId {
+    fn from(obj_id: *const AMobjId) -> Self {
+        unsafe { obj_id.as_ref().unwrap_or(AMobjId(am::ROOT)) }
     }
 }
 
-impl From<AMresult> for *mut AMresult {
-    fn from(b: AMresult) -> Self {
+impl<'a> From<AMresult<'a>> for *mut AMresult<'a> {
+    fn from(b: AMresult<'a>) -> Self {
         Box::into_raw(Box::new(b))
     }
 }
