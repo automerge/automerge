@@ -66,6 +66,15 @@ fn get_changes(doc: &Automerge, patches: Vec<Patch>) {
                     doc.path_to_object(&obj)
                 )
             }
+            Patch::Increment { obj, key, value } => {
+                println!(
+                    "increment {:?} in obj {:?} by {:?}, object path {:?}",
+                    key,
+                    obj,
+                    value,
+                    doc.path_to_object(&obj)
+                )
+            }
             Patch::Delete { obj, key } => println!(
                 "delete {:?} in obj {:?}, object path {:?}",
                 key,

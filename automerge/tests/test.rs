@@ -1,5 +1,7 @@
 use automerge::transaction::Transactable;
-use automerge::{ActorId, AutoCommit, Automerge, ObjType, ScalarValue, Value, ROOT};
+use automerge::{
+    ActorId, ApplyOptions, AutoCommit, Automerge, ObjType, ScalarValue, Value, VecOpObserver, ROOT,
+};
 
 mod helpers;
 #[allow(unused_imports)]
@@ -924,4 +926,21 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
     assert_eq!(doc5.length(&list), 1);
 
     Ok(())
+}
+
+#[test]
+fn observe_counter_change_application() {
+    let mut doc = AutoCommit::new();
+    doc.put(ROOT, "counter", ScalarValue::counter(1)).unwrap();
+    doc.increment(ROOT, "counter", 2).unwrap();
+    doc.increment(ROOT, "counter", 5).unwrap();
+    let changes = doc.get_changes(&[]).into_iter().cloned().collect();
+
+    let mut doc = AutoCommit::new();
+    let mut observer = VecOpObserver::default();
+    doc.apply_changes_with(
+        changes,
+        ApplyOptions::default().with_op_observer(&mut observer),
+    )
+    .unwrap();
 }

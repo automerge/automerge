@@ -1004,7 +1004,7 @@ impl Automerge {
 
     pub fn dump(&self) {
         log!(
-            "  {:12} {:12} {:12} {} {} {}",
+            "  {:12} {:12} {:12} {:12} {:12} {:12}",
             "id",
             "obj",
             "key",
@@ -1028,7 +1028,7 @@ impl Automerge {
             let pred: Vec<_> = op.pred.iter().map(|id| self.to_string(*id)).collect();
             let succ: Vec<_> = op.succ.iter().map(|id| self.to_string(*id)).collect();
             log!(
-                "  {:12} {:12} {:12} {} {:?} {:?}",
+                "  {:12} {:12} {:12} {:12} {:12?} {:12?}",
                 id,
                 obj,
                 key,
@@ -2004,5 +2004,97 @@ mod tests {
         assert_eq!(s, polar_bear);
         let len = doc.length(&text);
         assert_eq!(len, 4); // 4 chars
+    }
+
+    #[test]
+    fn observe_counter_change_application_overwrite() {
+        let mut doc1 = AutoCommit::new();
+        doc1.set_actor(ActorId::from([1]));
+        doc1.put(ROOT, "counter", ScalarValue::counter(1)).unwrap();
+        doc1.commit();
+
+        let mut doc2 = doc1.fork();
+        doc2.set_actor(ActorId::from([2]));
+        doc2.put(ROOT, "counter", "mystring").unwrap();
+        doc2.commit();
+
+        doc1.increment(ROOT, "counter", 2).unwrap();
+        doc1.commit();
+        doc1.increment(ROOT, "counter", 5).unwrap();
+        doc1.commit();
+
+        let mut observer = VecOpObserver::default();
+        let mut doc3 = doc1.clone();
+        doc3.merge_with(
+            &mut doc2,
+            ApplyOptions::default().with_op_observer(&mut observer),
+        )
+        .unwrap();
+
+        assert_eq!(
+            observer.take_patches(),
+            vec![Patch::Put {
+                obj: ExId::Root,
+                key: Prop::Map("counter".into()),
+                value: (
+                    ScalarValue::Str("mystring".into()).into(),
+                    ExId::Id(2, doc2.get_actor().clone(), 1)
+                ),
+                conflict: false
+            }]
+        );
+
+        let mut observer = VecOpObserver::default();
+        let mut doc4 = doc2.clone();
+        doc4.merge_with(
+            &mut doc1,
+            ApplyOptions::default().with_op_observer(&mut observer),
+        )
+        .unwrap();
+
+        // no patches as the increments operate on an invisible counter
+        assert_eq!(observer.take_patches(), vec![]);
+    }
+
+    #[test]
+    fn observe_counter_change_application() {
+        let mut doc = AutoCommit::new();
+        doc.put(ROOT, "counter", ScalarValue::counter(1)).unwrap();
+        doc.increment(ROOT, "counter", 2).unwrap();
+        doc.increment(ROOT, "counter", 5).unwrap();
+        let changes = doc.get_changes(&[]).into_iter().cloned().collect();
+
+        let mut new_doc = AutoCommit::new();
+        let mut observer = VecOpObserver::default();
+        new_doc
+            .apply_changes_with(
+                changes,
+                ApplyOptions::default().with_op_observer(&mut observer),
+            )
+            .unwrap();
+        assert_eq!(
+            observer.take_patches(),
+            vec![
+                Patch::Put {
+                    obj: ExId::Root,
+                    key: Prop::Map("counter".into()),
+                    value: (
+                        ScalarValue::counter(1).into(),
+                        ExId::Id(1, doc.get_actor().clone(), 0)
+                    ),
+                    conflict: false
+                },
+                Patch::Increment {
+                    obj: ExId::Root,
+                    key: Prop::Map("counter".into()),
+                    value: (2, ExId::Id(2, doc.get_actor().clone(), 0)),
+                },
+                Patch::Increment {
+                    obj: ExId::Root,
+                    key: Prop::Map("counter".into()),
+                    value: (5, ExId::Id(3, doc.get_actor().clone(), 0)),
+                }
+            ]
+        );
     }
 }

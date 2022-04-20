@@ -202,6 +202,13 @@ impl OpSetInternal {
             } else {
                 observer.delete(ex_obj, key);
             }
+        } else if let Some(value) = op.get_increment_value() {
+            // only observe this increment if the counter is visible, i.e. the counter's
+            // create op is in the values
+            if values.iter().any(|value| op.pred.contains(&value.id)) {
+                // we have observed the value
+                observer.increment(ex_obj, key, (value, self.id_to_exid(op.id)));
+            }
         } else {
             let winner = if let Some(last_value) = values.last() {
                 if self.m.lamport_cmp(op.id, last_value.id) == Ordering::Greater {

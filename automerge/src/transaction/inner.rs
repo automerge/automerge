@@ -53,6 +53,8 @@ impl TransactionInner {
                     }
                 } else if op.is_delete() {
                     observer.delete(ex_obj, prop.clone());
+                } else if let Some(value) = op.get_increment_value() {
+                    observer.increment(ex_obj, prop.clone(), (value, doc.id_to_exid(op.id)));
                 } else {
                     let value = (op.value(), doc.ops.id_to_exid(op.id));
                     observer.put(ex_obj, prop.clone(), value, false);
