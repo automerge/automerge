@@ -63,6 +63,16 @@ impl TryFrom<&str> for ActorId {
     }
 }
 
+impl TryFrom<String> for ActorId {
+    type Error = error::InvalidActorId;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        hex::decode(&s)
+            .map(ActorId::from)
+            .map_err(|_| error::InvalidActorId(s))
+    }
+}
+
 impl From<uuid::Uuid> for ActorId {
     fn from(u: uuid::Uuid) -> Self {
         ActorId(TinyVec::from(*u.as_bytes()))
