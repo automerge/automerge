@@ -189,7 +189,9 @@ impl<'a> From<Result<(), am::AutomergeError>> for AMresult<'a> {
     }
 }
 
-impl<'a> From<Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>> for AMresult<'a> {
+impl<'a> From<Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>>
+    for AMresult<'a>
+{
     fn from(maybe: Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>) -> Self {
         match maybe {
             // \todo Ensure that it's alright to ignore the `am::ObjId` value.
