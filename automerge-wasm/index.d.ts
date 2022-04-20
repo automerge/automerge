@@ -187,4 +187,4 @@ export class SyncState {
   readonly sharedHeads: any;
 }
 
-export default function init (): Promise<()>;
+export default function init (): Promise<any>;
