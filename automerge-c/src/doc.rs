@@ -40,13 +40,13 @@ impl AMdoc {
         }
     }
 
-    pub fn set_object<O: AsRef<am::ObjId>, P: Into<am::Prop>>(
+    pub fn put_object<O: AsRef<am::ObjId>, P: Into<am::Prop>>(
         &mut self,
         obj: O,
         prop: P,
         value: am::ObjType,
     ) -> Result<&AMobjId, am::AutomergeError> {
-        match self.body.set_object(obj, prop, value) {
+        match self.body.put_object(obj, prop, value) {
             Ok(ex_id) => {
                 let obj_id = AMobjId::new(ex_id);
                 self.obj_ids.insert(obj_id.clone());

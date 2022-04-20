@@ -50,7 +50,7 @@ static int teardown(void** state) {
 static void test_AMputActor(void **state) {
     TestState* test_state = *state;
     GroupState* group_state = test_state->group_state;
-    AMresult* res = AMputActor(
+    AMresult* res = AMsetActor(
         group_state->doc,
         test_state->actor_id_bytes,
         test_state->actor_id_size
@@ -77,7 +77,7 @@ static void test_AMputActor(void **state) {
 static void test_AMputActorHex(void **state) {
     TestState* test_state = *state;
     GroupState* group_state = test_state->group_state;
-    AMresult* res = AMputActorHex(
+    AMresult* res = AMsetActorHex(
         group_state->doc,
         test_state->actor_id_str
     );

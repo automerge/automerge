@@ -1,7 +1,7 @@
 use automerge as am;
 use hex;
 use smol_str::SmolStr;
-use std::{ffi::CStr, ffi::CString, os::raw::c_char};
+use std::{borrow::Cow, ffi::CStr, ffi::CString, os::raw::c_char};
 
 mod doc;
 mod result;
@@ -66,7 +66,7 @@ macro_rules! to_doc {
 macro_rules! to_obj_id {
     ($handle:expr) => {{
         match $handle.as_ref() {
-            Some(am_obj_id) => am_obj_id,
+            Some(obj_id) => obj_id,
             None => &am::ROOT,
         }
     }};
@@ -160,7 +160,7 @@ pub unsafe extern "C" fn AMgetActor<'a>(doc: *mut AMdoc) -> *mut AMresult<'a> {
 pub unsafe extern "C" fn AMgetActorHex<'a>(doc: *mut AMdoc) -> *mut AMresult<'a> {
     let doc = to_doc!(doc);
     let hex_str = doc.get_actor().to_hex_string();
-    let value = am::Value::Scalar(am::ScalarValue::Str(SmolStr::new(hex_str)));
+    let value = am::Value::Scalar(Cow::Owned(am::ScalarValue::Str(SmolStr::new(hex_str))));
     to_result(Ok(value))
 }
 
@@ -220,7 +220,7 @@ pub unsafe extern "C" fn AMsetActorHex<'a>(
             doc.set_actor(vec.into());
             Ok(())
         }
-        Err(_) => Err(am::AutomergeError::Decoding),
+        Err(error) => Err(am::AutomergeError::HexDecode(error)),
     })
 }
 
@@ -296,7 +296,7 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult<'a>, index: usi
             AMresult::Scalars(vec, hosted_str) => {
                 if let Some(element) = vec.get(index) {
                     match element {
-                        am::Value::Scalar(scalar) => match scalar {
+                        am::Value::Scalar(scalar) => match scalar.as_ref() {
                             am::ScalarValue::Boolean(flag) => {
                                 value = AMvalue::Boolean(*flag as i8);
                             }
@@ -638,7 +638,7 @@ pub unsafe extern "C" fn AMlistGet<'a>(
     index: usize,
 ) -> *mut AMresult<'a> {
     let doc = to_doc!(doc);
-    to_result(doc.value(to_obj_id!(obj_id), index))
+    to_result(doc.get(to_obj_id!(obj_id), index))
 }
 
 /// \memberof AMdoc
@@ -665,7 +665,7 @@ pub unsafe extern "C" fn AMmapGet<'a>(
     key: *const c_char,
 ) -> *mut AMresult<'a> {
     let doc = to_doc!(doc);
-    to_result(doc.value(to_obj_id!(obj_id), to_str(key)))
+    to_result(doc.get(to_obj_id!(obj_id), to_str(key)))
 }
 
 /// \memberof AMdoc

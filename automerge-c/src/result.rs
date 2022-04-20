@@ -1,5 +1,6 @@
 use automerge as am;
 use std::ffi::CString;
+use std::ops::Deref;
 
 /// \struct AMobjId
 /// \brief An object's unique identifier.
@@ -14,6 +15,14 @@ impl AMobjId {
 
 impl AsRef<am::ObjId> for AMobjId {
     fn as_ref(&self) -> &am::ObjId {
+        &self.0
+    }
+}
+
+impl Deref for AMobjId {
+    type Target = am::ObjId;
+
+    fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
@@ -180,8 +189,8 @@ impl<'a> From<Result<(), am::AutomergeError>> for AMresult<'a> {
     }
 }
 
-impl<'a> From<Result<Option<(am::Value, am::ObjId)>, am::AutomergeError>> for AMresult<'a> {
-    fn from(maybe: Result<Option<(am::Value, am::ObjId)>, am::AutomergeError>) -> Self {
+impl<'a> From<Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>> for AMresult<'a> {
+    fn from(maybe: Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>) -> Self {
         match maybe {
             // \todo Ensure that it's alright to ignore the `am::ObjId` value.
             Ok(Some((value, _))) => AMresult::Scalars(vec![value], None),
@@ -191,8 +200,8 @@ impl<'a> From<Result<Option<(am::Value, am::ObjId)>, am::AutomergeError>> for AM
     }
 }
 
-impl<'a> From<Result<am::Value, am::AutomergeError>> for AMresult<'a> {
-    fn from(maybe: Result<am::Value, am::AutomergeError>) -> Self {
+impl<'a> From<Result<am::Value<'static>, am::AutomergeError>> for AMresult<'a> {
+    fn from(maybe: Result<am::Value<'static>, am::AutomergeError>) -> Self {
         match maybe {
             Ok(value) => AMresult::Scalars(vec![value], None),
             Err(e) => AMresult::Error(CString::new(e.to_string()).unwrap()),
