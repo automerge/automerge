@@ -21,6 +21,14 @@ pub enum Error {
     Io(#[from] io::Error),
 }
 
+impl PartialEq<Error> for Error {
+    fn eq(&self, other: &Error) -> bool {
+        match (self, other) {
+            (Self::Io(error1), Self::Io(error2)) => error1.kind() == error2.kind(),
+        }
+    }
+}
+
 /// Encodes booleans by storing the count of the same value.
 ///
 /// The sequence of numbers describes the count of false values on even indices (0-indexed) and the
