@@ -425,6 +425,59 @@
 <span id="420">420</span>
 <span id="421">421</span>
 <span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">core::fmt::Debug</span>;
 <span class="kw">use</span> <span class="ident">std::num::NonZeroU64</span>;
 <span class="kw">use</span> <span class="ident">std</span>::{<span class="ident">borrow::Cow</span>, <span class="ident">io</span>, <span class="ident">io::Read</span>, <span class="ident">str</span>};
@@ -479,7 +532,60 @@
     <span class="ident">Io</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident">io::Error</span>),
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">thiserror::Error</span>, <span class="ident">Debug</span>)]</span>
+<span class="kw">impl</span> <span class="ident">PartialEq</span><span class="op">&lt;</span><span class="ident">Error</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Error</span> {
+    <span class="kw">fn</span> <span class="ident">eq</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="ident">Error</span>) -&gt; <span class="ident">bool</span> {
+        <span class="kw">match</span> (<span class="self">self</span>, <span class="ident">other</span>) {
+            (
+                <span class="ident"><span class="self">Self</span>::WrongType</span> {
+                    <span class="ident">expected_one_of</span>: <span class="ident">l_expected_one_of</span>,
+                    <span class="ident">found</span>: <span class="ident">l_found</span>,
+                },
+                <span class="ident"><span class="self">Self</span>::WrongType</span> {
+                    <span class="ident">expected_one_of</span>: <span class="ident">r_expected_one_of</span>,
+                    <span class="ident">found</span>: <span class="ident">r_found</span>,
+                },
+            ) =&gt; <span class="ident">l_expected_one_of</span> <span class="op">==</span> <span class="ident">r_expected_one_of</span> <span class="op">&amp;&amp;</span> <span class="ident">l_found</span> <span class="op">==</span> <span class="ident">r_found</span>,
+            (<span class="ident"><span class="self">Self</span>::BadChangeFormat</span>(<span class="ident">l0</span>), <span class="ident"><span class="self">Self</span>::BadChangeFormat</span>(<span class="ident">r0</span>)) =&gt; <span class="ident">l0</span> <span class="op">==</span> <span class="ident">r0</span>,
+            (
+                <span class="ident"><span class="self">Self</span>::WrongByteLength</span> {
+                    <span class="ident">expected</span>: <span class="ident">l_expected</span>,
+                    <span class="ident">found</span>: <span class="ident">l_found</span>,
+                },
+                <span class="ident"><span class="self">Self</span>::WrongByteLength</span> {
+                    <span class="ident">expected</span>: <span class="ident">r_expected</span>,
+                    <span class="ident">found</span>: <span class="ident">r_found</span>,
+                },
+            ) =&gt; <span class="ident">l_expected</span> <span class="op">==</span> <span class="ident">r_expected</span> <span class="op">&amp;&amp;</span> <span class="ident">l_found</span> <span class="op">==</span> <span class="ident">r_found</span>,
+            (
+                <span class="ident"><span class="self">Self</span>::ColumnsNotInAscendingOrder</span> {
+                    <span class="ident">last</span>: <span class="ident">l_last</span>,
+                    <span class="ident">found</span>: <span class="ident">l_found</span>,
+                },
+                <span class="ident"><span class="self">Self</span>::ColumnsNotInAscendingOrder</span> {
+                    <span class="ident">last</span>: <span class="ident">r_last</span>,
+                    <span class="ident">found</span>: <span class="ident">r_found</span>,
+                },
+            ) =&gt; <span class="ident">l_last</span> <span class="op">==</span> <span class="ident">r_last</span> <span class="op">&amp;&amp;</span> <span class="ident">l_found</span> <span class="op">==</span> <span class="ident">r_found</span>,
+            (
+                <span class="ident"><span class="self">Self</span>::InvalidChecksum</span> {
+                    <span class="ident">found</span>: <span class="ident">l_found</span>,
+                    <span class="ident">calculated</span>: <span class="ident">l_calculated</span>,
+                },
+                <span class="ident"><span class="self">Self</span>::InvalidChecksum</span> {
+                    <span class="ident">found</span>: <span class="ident">r_found</span>,
+                    <span class="ident">calculated</span>: <span class="ident">r_calculated</span>,
+                },
+            ) =&gt; <span class="ident">l_found</span> <span class="op">==</span> <span class="ident">r_found</span> <span class="op">&amp;&amp;</span> <span class="ident">l_calculated</span> <span class="op">==</span> <span class="ident">r_calculated</span>,
+            (<span class="ident"><span class="self">Self</span>::InvalidChange</span>(<span class="ident">l0</span>), <span class="ident"><span class="self">Self</span>::InvalidChange</span>(<span class="ident">r0</span>)) =&gt; <span class="ident">l0</span> <span class="op">==</span> <span class="ident">r0</span>,
+            (<span class="ident"><span class="self">Self</span>::ChangeDecompressFailed</span>(<span class="ident">l0</span>), <span class="ident"><span class="self">Self</span>::ChangeDecompressFailed</span>(<span class="ident">r0</span>)) =&gt; <span class="ident">l0</span> <span class="op">==</span> <span class="ident">r0</span>,
+            (<span class="ident"><span class="self">Self</span>::Leb128</span>(<span class="ident">_l0</span>), <span class="ident"><span class="self">Self</span>::Leb128</span>(<span class="ident">_r0</span>)) =&gt; <span class="bool-val">true</span>,
+            (<span class="ident"><span class="self">Self</span>::Io</span>(<span class="ident">l0</span>), <span class="ident"><span class="self">Self</span>::Io</span>(<span class="ident">r0</span>)) =&gt; <span class="ident">l0</span>.<span class="ident">kind</span>() <span class="op">==</span> <span class="ident">r0</span>.<span class="ident">kind</span>(),
+            <span class="kw">_</span> =&gt; <span class="ident">core::mem::discriminant</span>(<span class="self">self</span>) <span class="op">==</span> <span class="ident">core::mem::discriminant</span>(<span class="ident">other</span>),
+        }
+    }
+}
+
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">thiserror::Error</span>, <span class="ident">PartialEq</span>, <span class="ident">Debug</span>)]</span>
 <span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">InvalidChangeError</span> {
     <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;Change contained an operation with action &#39;set&#39; which did not have a &#39;value&#39;&quot;</span>)]</span>
     <span class="ident">SetOpWithoutValue</span>,
