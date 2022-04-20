@@ -279,7 +279,7 @@ pub unsafe extern "C" fn AMresultSize(result: *mut AMresult) -> usize {
 /// # Safety
 /// result must be a pointer to a valid AMresult
 #[no_mangle]
-pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult<'a>, index: usize) -> AMvalue<'a> {
+pub unsafe extern "C" fn AMresultValue(result: *mut AMresult, index: usize) -> AMvalue {
     let mut value = AMvalue::Nothing;
     if let Some(result) = result.as_mut() {
         match result {
