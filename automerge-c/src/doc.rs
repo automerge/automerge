@@ -16,7 +16,7 @@ pub struct AMdoc {
 impl AMdoc {
     pub fn new(body: am::AutoCommit) -> Self {
         Self {
-            body: body,
+            body,
             obj_ids: BTreeSet::new(),
         }
     }

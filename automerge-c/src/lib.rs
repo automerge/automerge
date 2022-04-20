@@ -1,5 +1,4 @@
 use automerge as am;
-use hex;
 use smol_str::SmolStr;
 use std::{borrow::Cow, ffi::CStr, ffi::CString, os::raw::c_char};
 
@@ -207,7 +206,7 @@ pub unsafe extern "C" fn AMsetActor<'a>(
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// hex_str must be a null-terminated array of `c_char`.
+/// hex_str must be a null-terminated array of `c_char`
 #[no_mangle]
 pub unsafe extern "C" fn AMsetActorHex<'a>(
     doc: *mut AMdoc,
@@ -249,6 +248,10 @@ pub unsafe extern "C" fn AMresultStatus(result: *mut AMresult) -> AMstatus {
 /// \param[in] result A pointer to an `AMresult` struct.
 /// \return The count of values in \p result.
 /// \pre \p result must be a valid address.
+/// \internal
+///
+/// # Safety
+/// result must be a pointer to a valid AMresult
 #[no_mangle]
 pub unsafe extern "C" fn AMresultSize(result: *mut AMresult) -> usize {
     if let Some(result) = result.as_mut() {
@@ -355,7 +358,7 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult<'a>, index: usi
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// obj must be a pointer to a valid AMobjId or NULL
+/// obj_id must be a pointer to a valid AMobjId or NULL
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutInt<'a>(
@@ -384,7 +387,7 @@ pub unsafe extern "C" fn AMmapPutInt<'a>(
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// obj must be a pointer to a valid AMobjId or NULL
+/// obj_id must be a pointer to a valid AMobjId or NULL
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutUint<'a>(
@@ -414,8 +417,9 @@ pub unsafe extern "C" fn AMmapPutUint<'a>(
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// obj must be a pointer to a valid AMobjId or NULL
+/// obj_id must be a pointer to a valid AMobjId or NULL
 /// key must be a c string of the map key to be used
+/// value must be a null-terminated array of `c_char`
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutStr<'a>(
     doc: *mut AMdoc,
@@ -446,9 +450,9 @@ pub unsafe extern "C" fn AMmapPutStr<'a>(
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// obj must be a pointer to a valid AMobjId or NULL
-/// value must be a byte array of length `count`
+/// obj_id must be a pointer to a valid AMobjId or NULL
 /// key must be a c string of the map key to be used
+/// value must be a byte array of length `count`
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutBytes<'a>(
     doc: *mut AMdoc,
@@ -480,7 +484,7 @@ pub unsafe extern "C" fn AMmapPutBytes<'a>(
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// obj must be a pointer to a valid AMobjId or NULL
+/// obj_id must be a pointer to a valid AMobjId or NULL
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutF64<'a>(
@@ -509,7 +513,7 @@ pub unsafe extern "C" fn AMmapPutF64<'a>(
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// obj must be a pointer to a valid AMobjId or NULL
+/// obj_id must be a pointer to a valid AMobjId or NULL
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutCounter<'a>(
@@ -542,7 +546,7 @@ pub unsafe extern "C" fn AMmapPutCounter<'a>(
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// obj must be a pointer to a valid AMobjId or NULL
+/// obj_id must be a pointer to a valid AMobjId or NULL
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutTimestamp<'a>(
@@ -574,7 +578,7 @@ pub unsafe extern "C" fn AMmapPutTimestamp<'a>(
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// obj must be a pointer to a valid AMobjId or NULL
+/// obj_id must be a pointer to a valid AMobjId or NULL
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutNull<'a>(
@@ -602,7 +606,7 @@ pub unsafe extern "C" fn AMmapPutNull<'a>(
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// obj must be a pointer to a valid AMobjId or NULL
+/// obj_id must be a pointer to a valid AMobjId or NULL
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutObject<'a>(
@@ -630,7 +634,7 @@ pub unsafe extern "C" fn AMmapPutObject<'a>(
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// obj must be a pointer to a valid AMobjId or NULL
+/// obj_id must be a pointer to a valid AMobjId or NULL
 #[no_mangle]
 pub unsafe extern "C" fn AMlistGet<'a>(
     doc: *mut AMdoc,
@@ -656,7 +660,7 @@ pub unsafe extern "C" fn AMlistGet<'a>(
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// obj must be a pointer to a valid AMobjId or NULL
+/// obj_id must be a pointer to a valid AMobjId or NULL
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapGet<'a>(
@@ -688,9 +692,8 @@ pub unsafe extern "C" fn AMmapGet<'a>(
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// obj must be a pointer to a valid AMobjId or NULL
+/// obj_id must be a pointer to a valid AMobjId or NULL
 /// value must be a byte array of length `count`
-/// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMlistPutBytes<'a>(
     doc: *mut AMdoc,
@@ -729,7 +732,7 @@ pub unsafe extern "C" fn AMlistPutBytes<'a>(
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// obj must be a pointer to a valid AMobjId or NULL
+/// obj_id must be a pointer to a valid AMobjId or NULL
 #[no_mangle]
 pub unsafe extern "C" fn AMlistPutCounter<'a>(
     doc: *mut AMdoc,
@@ -765,7 +768,7 @@ pub unsafe extern "C" fn AMlistPutCounter<'a>(
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// obj must be a pointer to a valid AMobjId or NULL
+/// obj_id must be a pointer to a valid AMobjId or NULL
 #[no_mangle]
 pub unsafe extern "C" fn AMlistPutF64<'a>(
     doc: *mut AMdoc,
@@ -800,7 +803,7 @@ pub unsafe extern "C" fn AMlistPutF64<'a>(
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// obj must be a pointer to a valid AMobjId or NULL
+/// obj_id must be a pointer to a valid AMobjId or NULL
 #[no_mangle]
 pub unsafe extern "C" fn AMlistPutInt<'a>(
     doc: *mut AMdoc,
@@ -834,7 +837,7 @@ pub unsafe extern "C" fn AMlistPutInt<'a>(
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// obj must be a pointer to a valid AMobjId or NULL
+/// obj_id must be a pointer to a valid AMobjId or NULL
 #[no_mangle]
 pub unsafe extern "C" fn AMlistPutNull<'a>(
     doc: *mut AMdoc,
@@ -869,7 +872,7 @@ pub unsafe extern "C" fn AMlistPutNull<'a>(
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// obj must be a pointer to a valid AMobjId or NULL
+/// obj_id must be a pointer to a valid AMobjId or NULL
 #[no_mangle]
 pub unsafe extern "C" fn AMlistPutObject<'a>(
     doc: *mut AMdoc,
@@ -882,7 +885,7 @@ pub unsafe extern "C" fn AMlistPutObject<'a>(
     let obj_id = to_obj_id!(obj_id);
     let value = obj_type.into();
     to_result(if insert {
-        doc.insert_object(&obj_id, index, value)
+        doc.insert_object(obj_id, index, value)
     } else {
         doc.put_object(&obj_id, index, value)
     })
@@ -906,8 +909,8 @@ pub unsafe extern "C" fn AMlistPutObject<'a>(
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// obj must be a pointer to a valid AMobjId or NULL
-/// value must be a pointer to a valid address.
+/// obj_id must be a pointer to a valid AMobjId or NULL
+/// value must be a null-terminated array of `c_char`
 #[no_mangle]
 pub unsafe extern "C" fn AMlistPutStr<'a>(
     doc: *mut AMdoc,
@@ -943,7 +946,7 @@ pub unsafe extern "C" fn AMlistPutStr<'a>(
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// obj must be a pointer to a valid AMobjId or NULL
+/// obj_id must be a pointer to a valid AMobjId or NULL
 #[no_mangle]
 pub unsafe extern "C" fn AMlistPutTimestamp<'a>(
     doc: *mut AMdoc,
@@ -979,7 +982,7 @@ pub unsafe extern "C" fn AMlistPutTimestamp<'a>(
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// obj must be a pointer to a valid AMobjId or NULL
+/// obj_id must be a pointer to a valid AMobjId or NULL
 #[no_mangle]
 pub unsafe extern "C" fn AMlistPutUint<'a>(
     doc: *mut AMdoc,
@@ -1039,6 +1042,11 @@ pub unsafe extern "C" fn AMerrorMessage(result: *mut AMresult) -> *const c_char 
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
 /// \return The count of values in \p obj.
 /// \pre \p doc must be a valid address.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj_id must be a pointer to a valid AMobjId or NULL
 #[no_mangle]
 pub unsafe extern "C" fn AMobjSize(doc: *const AMdoc, obj_id: *const AMobjId) -> usize {
     if let Some(doc) = doc.as_ref() {
@@ -1061,8 +1069,8 @@ pub unsafe extern "C" fn AMobjSize(doc: *const AMdoc, obj_id: *const AMobjId) ->
 /// \internal
 ///
 /// # Safety
-/// doc must be a pointer to a valid AMresult
-/// obj_id must be a pointer to a valid AMobjId
+/// doc must be a pointer to a valid AMdoc
+/// obj_id must be a pointer to a valid AMobjId or NULL
 #[no_mangle]
 pub unsafe extern "C" fn AMfreeObjId(doc: *mut AMdoc, obj_id: *const AMobjId) {
     if let Some(doc) = doc.as_mut() {
