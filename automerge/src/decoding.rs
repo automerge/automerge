@@ -52,7 +52,60 @@ pub enum Error {
     Io(#[from] io::Error),
 }
 
-#[derive(thiserror::Error, Debug)]
+impl PartialEq<Error> for Error {
+    fn eq(&self, other: &Error) -> bool {
+        match (self, other) {
+            (
+                Self::WrongType {
+                    expected_one_of: l_expected_one_of,
+                    found: l_found,
+                },
+                Self::WrongType {
+                    expected_one_of: r_expected_one_of,
+                    found: r_found,
+                },
+            ) => l_expected_one_of == r_expected_one_of && l_found == r_found,
+            (Self::BadChangeFormat(l0), Self::BadChangeFormat(r0)) => l0 == r0,
+            (
+                Self::WrongByteLength {
+                    expected: l_expected,
+                    found: l_found,
+                },
+                Self::WrongByteLength {
+                    expected: r_expected,
+                    found: r_found,
+                },
+            ) => l_expected == r_expected && l_found == r_found,
+            (
+                Self::ColumnsNotInAscendingOrder {
+                    last: l_last,
+                    found: l_found,
+                },
+                Self::ColumnsNotInAscendingOrder {
+                    last: r_last,
+                    found: r_found,
+                },
+            ) => l_last == r_last && l_found == r_found,
+            (
+                Self::InvalidChecksum {
+                    found: l_found,
+                    calculated: l_calculated,
+                },
+                Self::InvalidChecksum {
+                    found: r_found,
+                    calculated: r_calculated,
+                },
+            ) => l_found == r_found && l_calculated == r_calculated,
+            (Self::InvalidChange(l0), Self::InvalidChange(r0)) => l0 == r0,
+            (Self::ChangeDecompressFailed(l0), Self::ChangeDecompressFailed(r0)) => l0 == r0,
+            (Self::Leb128(_l0), Self::Leb128(_r0)) => true,
+            (Self::Io(l0), Self::Io(r0)) => l0.kind() == r0.kind(),
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
+}
+
+#[derive(thiserror::Error, PartialEq, Debug)]
 pub enum InvalidChangeError {
     #[error("Change contained an operation with action 'set' which did not have a 'value'")]
     SetOpWithoutValue,
