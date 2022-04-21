@@ -396,6 +396,8 @@
 <span id="391">391</span>
 <span id="392">392</span>
 <span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::num::NonZeroU64</span>;
 
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::automerge::Actor</span>;
@@ -451,6 +453,8 @@
                     }
                 } <span class="kw">else</span> <span class="kw">if</span> <span class="ident">op</span>.<span class="ident">is_delete</span>() {
                     <span class="ident">observer</span>.<span class="ident">delete</span>(<span class="ident">ex_obj</span>, <span class="ident">prop</span>.<span class="ident">clone</span>());
+                } <span class="kw">else</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">value</span>) <span class="op">=</span> <span class="ident">op</span>.<span class="ident">get_increment_value</span>() {
+                    <span class="ident">observer</span>.<span class="ident">increment</span>(<span class="ident">ex_obj</span>, <span class="ident">prop</span>.<span class="ident">clone</span>(), (<span class="ident">value</span>, <span class="ident">doc</span>.<span class="ident">id_to_exid</span>(<span class="ident">op</span>.<span class="ident">id</span>)));
                 } <span class="kw">else</span> {
                     <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> (<span class="ident">op</span>.<span class="ident">value</span>(), <span class="ident">doc</span>.<span class="ident">ops</span>.<span class="ident">id_to_exid</span>(<span class="ident">op</span>.<span class="ident">id</span>));
                     <span class="ident">observer</span>.<span class="ident">put</span>(<span class="ident">ex_obj</span>, <span class="ident">prop</span>.<span class="ident">clone</span>(), <span class="ident">value</span>, <span class="bool-val">false</span>);

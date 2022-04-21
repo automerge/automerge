@@ -109,6 +109,34 @@
 <span id="104">104</span>
 <span id="105">105</span>
 <span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::exid::ExId</span>;
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::Prop</span>;
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::Value</span>;
@@ -132,6 +160,14 @@
     <span class="doccomment">/// - `conflict`: whether this put conflicts with other operations.</span>
     <span class="kw">fn</span> <span class="ident">put</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">objid</span>: <span class="ident">ExId</span>, <span class="ident">key</span>: <span class="ident">Prop</span>, <span class="ident">tagged_value</span>: (<span class="ident">Value</span>, <span class="ident">ExId</span>), <span class="ident">conflict</span>: <span class="ident">bool</span>);
 
+    <span class="doccomment">/// A counter has been incremented.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// - `objid`: the object that contains the counter.</span>
+    <span class="doccomment">/// - `key`: they key that the chounter is at.</span>
+    <span class="doccomment">/// - `tagged_value`: the amount the counter has been incremented by, and the the id of the</span>
+    <span class="doccomment">/// increment operation.</span>
+    <span class="kw">fn</span> <span class="ident">increment</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">objid</span>: <span class="ident">ExId</span>, <span class="ident">key</span>: <span class="ident">Prop</span>, <span class="ident">tagged_value</span>: (<span class="ident">i64</span>, <span class="ident">ExId</span>));
+
     <span class="doccomment">/// A value has beeen deleted.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// - `objid`: the object that has been deleted in.</span>
@@ -143,6 +179,8 @@
     <span class="kw">fn</span> <span class="ident">insert</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">_objid</span>: <span class="ident">ExId</span>, <span class="ident">_index</span>: <span class="ident">usize</span>, <span class="ident">_tagged_value</span>: (<span class="ident">Value</span>, <span class="ident">ExId</span>)) {}
 
     <span class="kw">fn</span> <span class="ident">put</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">_objid</span>: <span class="ident">ExId</span>, <span class="ident">_key</span>: <span class="ident">Prop</span>, <span class="ident">_tagged_value</span>: (<span class="ident">Value</span>, <span class="ident">ExId</span>), <span class="ident">_conflict</span>: <span class="ident">bool</span>) {}
+
+    <span class="kw">fn</span> <span class="ident">increment</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">_objid</span>: <span class="ident">ExId</span>, <span class="ident">_key</span>: <span class="ident">Prop</span>, <span class="ident">_tagged_value</span>: (<span class="ident">i64</span>, <span class="ident">ExId</span>)) {}
 
     <span class="kw">fn</span> <span class="ident">delete</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">_objid</span>: <span class="ident">ExId</span>, <span class="ident">_key</span>: <span class="ident">Prop</span>) {}
 }
@@ -179,6 +217,14 @@
         });
     }
 
+    <span class="kw">fn</span> <span class="ident">increment</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">objid</span>: <span class="ident">ExId</span>, <span class="ident">key</span>: <span class="ident">Prop</span>, <span class="ident">tagged_value</span>: (<span class="ident">i64</span>, <span class="ident">ExId</span>)) {
+        <span class="self">self</span>.<span class="ident">patches</span>.<span class="ident">push</span>(<span class="ident">Patch::Increment</span> {
+            <span class="ident">obj</span>: <span class="ident">objid</span>,
+            <span class="ident">key</span>,
+            <span class="ident">value</span>: <span class="ident">tagged_value</span>,
+        });
+    }
+
     <span class="kw">fn</span> <span class="ident">delete</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">objid</span>: <span class="ident">ExId</span>, <span class="ident">key</span>: <span class="ident">Prop</span>) {
         <span class="self">self</span>.<span class="ident">patches</span>.<span class="ident">push</span>(<span class="ident">Patch::Delete</span> { <span class="ident">obj</span>: <span class="ident">objid</span>, <span class="ident">key</span> })
     }
@@ -206,6 +252,16 @@
         <span class="ident">index</span>: <span class="ident">usize</span>,
         <span class="doccomment">/// The value that was inserted, and the id of the operation that inserted it there.</span>
         <span class="ident">value</span>: (<span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;static</span><span class="op">&gt;</span>, <span class="ident">ExId</span>),
+    },
+    <span class="doccomment">/// Incrementing a counter.</span>
+    <span class="ident">Increment</span> {
+        <span class="doccomment">/// The object that was incremented in.</span>
+        <span class="ident">obj</span>: <span class="ident">ExId</span>,
+        <span class="doccomment">/// The key that was incremented.</span>
+        <span class="ident">key</span>: <span class="ident">Prop</span>,
+        <span class="doccomment">/// The amount that the counter was incremented by, and the id of the operation that</span>
+        <span class="doccomment">/// did the increment.</span>
+        <span class="ident">value</span>: (<span class="ident">i64</span>, <span class="ident">ExId</span>),
     },
     <span class="doccomment">/// Deleting an element from a list/text</span>
     <span class="ident">Delete</span> {

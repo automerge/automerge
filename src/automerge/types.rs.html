@@ -559,6 +559,14 @@
 <span id="554">554</span>
 <span id="555">555</span>
 <span id="556">556</span>
+<span id="557">557</span>
+<span id="558">558</span>
+<span id="559">559</span>
+<span id="560">560</span>
+<span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::error</span>;
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::legacy</span> <span class="kw">as</span> <span class="ident">amp</span>;
 <span class="kw">use</span> <span class="ident">serde</span>::{<span class="ident">Deserialize</span>, <span class="ident">Serialize</span>};
@@ -1017,6 +1025,14 @@
             <span class="ident">Key::Seq</span>(<span class="ident">ElemId</span>(<span class="self">self</span>.<span class="ident">id</span>))
         } <span class="kw">else</span> {
             <span class="self">self</span>.<span class="ident">key</span>
+        }
+    }
+
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_increment_value</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">i64</span><span class="op">&gt;</span> {
+        <span class="kw">if</span> <span class="kw">let</span> <span class="ident">OpType::Increment</span>(<span class="ident">i</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">action</span> {
+            <span class="prelude-val">Some</span>(<span class="ident">i</span>)
+        } <span class="kw">else</span> {
+            <span class="prelude-val">None</span>
         }
     }
 
