@@ -266,6 +266,12 @@ impl TransactionInner {
             return Ok(None);
         }
 
+        // increment operations are only valid against counter values.
+        // if there are multiple values (from conflicts) then we just need one of them to be a counter.
+        if matches!(action, OpType::Increment(_)) && query.ops.iter().all(|op| !op.is_counter()) {
+            return Err(AutomergeError::MissingCounter);
+        }
+
         let pred = query.ops.iter().map(|op| op.id).collect();
 
         let op = Op {
@@ -299,6 +305,12 @@ impl TransactionInner {
 
         if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
             return Ok(None);
+        }
+
+        // increment operations are only valid against counter values.
+        // if there are multiple values (from conflicts) then we just need one of them to be a counter.
+        if matches!(action, OpType::Increment(_)) && query.ops.iter().all(|op| !op.is_counter()) {
+            return Err(AutomergeError::MissingCounter);
         }
 
         let op = Op {
