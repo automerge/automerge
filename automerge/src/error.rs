@@ -3,7 +3,7 @@ use crate::value::DataType;
 use crate::{decoding, encoding, ChangeHash};
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum AutomergeError {
     #[error("invalid obj id format `{0}`")]
     InvalidObjIdFormat(String),
@@ -23,6 +23,8 @@ pub enum AutomergeError {
     DuplicateSeqNumber(u64, ActorId),
     #[error("invalid hash {0}")]
     InvalidHash(ChangeHash),
+    #[error("increment operations must be against a counter value")]
+    MissingCounter,
     #[error("general failure")]
     Fail,
 }

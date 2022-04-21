@@ -1,5 +1,7 @@
 use automerge::transaction::Transactable;
-use automerge::{ActorId, AutoCommit, Automerge, ObjType, ScalarValue, Value, ROOT};
+use automerge::{
+    ActorId, AutoCommit, Automerge, AutomergeError, ObjType, ScalarValue, Value, ROOT,
+};
 
 mod helpers;
 #[allow(unused_imports)]
@@ -7,6 +9,8 @@ use helpers::{
     mk_counter, new_doc, new_doc_with_actor, pretty_print, realize, realize_obj, sorted_actors,
     RealizedObject,
 };
+use pretty_assertions::assert_eq;
+
 #[test]
 fn no_conflict_on_repeated_assignment() {
     let mut doc = AutoCommit::new();
@@ -820,6 +824,30 @@ fn save_restore_complex() {
 }
 
 #[test]
+fn handle_repeated_out_of_order_changes() -> Result<(), automerge::AutomergeError> {
+    let mut doc1 = new_doc();
+    let list = doc1.put_object(ROOT, "list", ObjType::List)?;
+    doc1.insert(&list, 0, "a")?;
+    let mut doc2 = doc1.fork();
+    doc1.insert(&list, 1, "b")?;
+    doc1.commit();
+    doc1.insert(&list, 2, "c")?;
+    doc1.commit();
+    doc1.insert(&list, 3, "d")?;
+    doc1.commit();
+    let changes = doc1
+        .get_changes(&[])
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    doc2.apply_changes(changes[2..].to_vec())?;
+    doc2.apply_changes(changes[2..].to_vec())?;
+    doc2.apply_changes(changes)?;
+    assert_eq!(doc1.save(), doc2.save());
+    Ok(())
+}
+
+#[test]
 fn list_counter_del() -> Result<(), automerge::AutomergeError> {
     let mut v = vec![ActorId::random(), ActorId::random(), ActorId::random()];
     v.sort();
@@ -900,4 +928,68 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
     assert_eq!(doc5.length(&list), 1);
 
     Ok(())
+}
+
+#[test]
+fn increment_non_counter_map() {
+    let mut doc = AutoCommit::new();
+    // can't increment nothing
+    assert_eq!(
+        doc.increment(ROOT, "nothing", 2),
+        Err(AutomergeError::MissingCounter)
+    );
+
+    // can't increment a non-counter
+    doc.put(ROOT, "non-counter", "mystring").unwrap();
+    assert_eq!(
+        doc.increment(ROOT, "non-counter", 2),
+        Err(AutomergeError::MissingCounter)
+    );
+
+    // can increment a counter still
+    doc.put(ROOT, "counter", ScalarValue::counter(1)).unwrap();
+    assert_eq!(doc.increment(ROOT, "counter", 2), Ok(()));
+
+    // can increment a counter that is part of a conflict
+    let mut doc1 = AutoCommit::new();
+    doc1.set_actor(ActorId::from([1]));
+    let mut doc2 = AutoCommit::new();
+    doc2.set_actor(ActorId::from([2]));
+
+    doc1.put(ROOT, "key", ScalarValue::counter(1)).unwrap();
+    doc2.put(ROOT, "key", "mystring").unwrap();
+    doc1.merge(&mut doc2).unwrap();
+
+    assert_eq!(doc1.increment(ROOT, "key", 2), Ok(()));
+}
+
+#[test]
+fn increment_non_counter_list() {
+    let mut doc = AutoCommit::new();
+    let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
+
+    // can't increment a non-counter
+    doc.insert(&list, 0, "mystring").unwrap();
+    assert_eq!(
+        doc.increment(&list, 0, 2),
+        Err(AutomergeError::MissingCounter)
+    );
+
+    // can increment a counter
+    doc.insert(&list, 0, ScalarValue::counter(1)).unwrap();
+    assert_eq!(doc.increment(&list, 0, 2), Ok(()));
+
+    // can increment a counter that is part of a conflict
+    let mut doc1 = AutoCommit::new();
+    doc1.set_actor(ActorId::from([1]));
+    let list = doc1.put_object(ROOT, "list", ObjType::List).unwrap();
+    doc1.insert(&list, 0, ()).unwrap();
+    let mut doc2 = doc1.fork();
+    doc2.set_actor(ActorId::from([2]));
+
+    doc1.put(&list, 0, ScalarValue::counter(1)).unwrap();
+    doc2.put(&list, 0, "mystring").unwrap();
+    doc1.merge(&mut doc2).unwrap();
+
+    assert_eq!(doc1.increment(&list, 0, 2), Ok(()));
 }

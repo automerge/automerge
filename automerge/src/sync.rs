@@ -10,6 +10,8 @@ use std::{
     io::Write,
 };
 
+use crate::{ApplyOptions, OpObserver};
+
 mod bloom;
 mod state;
 
@@ -98,6 +100,15 @@ impl Automerge {
         sync_state: &mut State,
         message: Message,
     ) -> Result<Vec<ExId>, AutomergeError> {
+        self.receive_sync_message_with::<()>(sync_state, message, ApplyOptions::default())
+    }
+
+    pub fn receive_sync_message_with<'a, Obs: OpObserver>(
+        &mut self,
+        sync_state: &mut State,
+        message: Message,
+        options: ApplyOptions<'a, Obs>,
+    ) -> Result<Vec<ExId>, AutomergeError> {
         let mut result = vec![];
         let before_heads = self.get_heads();
 
@@ -110,7 +121,7 @@ impl Automerge {
 
         let changes_is_empty = message_changes.is_empty();
         if !changes_is_empty {
-            result = self.apply_changes(message_changes)?;
+            result = self.apply_changes_with(message_changes, options)?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
                 &self.get_heads().into_iter().collect(),

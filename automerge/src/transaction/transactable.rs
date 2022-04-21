@@ -3,8 +3,8 @@ use std::ops::RangeBounds;
 use crate::exid::ExId;
 use crate::query;
 use crate::{
-    AutomergeError, ChangeHash, Keys, KeysAt, ObjType, Prop, Range, RangeAt, ScalarValue, Value,
-    Values, ValuesAt,
+    AutomergeError, ChangeHash, Keys, KeysAt, ObjType, Parents, Prop, Range, RangeAt, ScalarValue,
+    Value, Values, ValuesAt,
 };
 
 /// A way of mutating a document within a single change.
@@ -55,9 +55,9 @@ pub trait Transactable {
     ) -> Result<(), AutomergeError>;
 
     /// Insert an object into a list at the given index.
-    fn insert_object(
+    fn insert_object<O: AsRef<ExId>>(
         &mut self,
-        obj: &ExId,
+        obj: O,
         index: usize,
         object: ObjType,
     ) -> Result<ExId, AutomergeError>;
@@ -118,9 +118,9 @@ pub trait Transactable {
     /// Get the keys of the given object at a point in history.
     fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt;
 
-    fn range<O: AsRef<ExId>, R: RangeBounds<Prop>>(&self, obj: O, range: R) -> Range<R>;
+    fn range<O: AsRef<ExId>, R: RangeBounds<String>>(&self, obj: O, range: R) -> Range<R>;
 
-    fn range_at<O: AsRef<ExId>, R: RangeBounds<Prop>>(
+    fn range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
         &self,
         obj: O,
         range: R,
@@ -214,5 +214,11 @@ pub trait Transactable {
     /// at in that object.
     fn parent_object<O: AsRef<ExId>>(&self, obj: O) -> Option<(ExId, Prop)>;
 
-    fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Vec<(ExId, Prop)>;
+    fn parents(&self, obj: ExId) -> Parents;
+
+    fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Vec<(ExId, Prop)> {
+        let mut path = self.parents(obj.as_ref().clone()).collect::<Vec<_>>();
+        path.reverse();
+        path
+    }
 }

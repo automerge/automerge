@@ -1,3 +1,4 @@
+#[doc(hidden)]
 #[macro_export]
 macro_rules! log {
      ( $( $t:tt )* ) => {
@@ -9,6 +10,7 @@ macro_rules! log {
  }
 
 #[cfg(all(feature = "wasm", target_family = "wasm"))]
+#[doc(hidden)]
 #[macro_export]
 macro_rules! __log {
      ( $( $t:tt )* ) => {
@@ -17,6 +19,7 @@ macro_rules! __log {
  }
 
 #[cfg(not(all(feature = "wasm", target_family = "wasm")))]
+#[doc(hidden)]
 #[macro_export]
 macro_rules! __log {
      ( $( $t:tt )* ) => {
@@ -37,8 +40,11 @@ mod indexed_cache;
 mod keys;
 mod keys_at;
 mod legacy;
+mod op_observer;
 mod op_set;
 mod op_tree;
+mod options;
+mod parents;
 mod query;
 mod range;
 mod range_at;
@@ -62,9 +68,14 @@ pub use exid::ExId as ObjId;
 pub use keys::Keys;
 pub use keys_at::KeysAt;
 pub use legacy::Change as ExpandedChange;
+pub use op_observer::OpObserver;
+pub use op_observer::Patch;
+pub use op_observer::VecOpObserver;
+pub use options::ApplyOptions;
+pub use parents::Parents;
 pub use range::Range;
 pub use range_at::RangeAt;
-pub use types::{ActorId, AssignPatch, ChangeHash, ObjType, OpType, Patch, Prop};
+pub use types::{ActorId, ChangeHash, ObjType, OpType, Prop};
 pub use value::{ScalarValue, Value};
 pub use values::Values;
 pub use values_at::ValuesAt;
