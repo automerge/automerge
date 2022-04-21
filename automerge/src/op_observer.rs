@@ -21,6 +21,14 @@ pub trait OpObserver {
     /// - `conflict`: whether this put conflicts with other operations.
     fn put(&mut self, objid: ExId, key: Prop, tagged_value: (Value, ExId), conflict: bool);
 
+    /// A counter has been incremented.
+    ///
+    /// - `objid`: the object that contains the counter.
+    /// - `key`: they key that the chounter is at.
+    /// - `tagged_value`: the amount the counter has been incremented by, and the the id of the
+    /// increment operation.
+    fn increment(&mut self, objid: ExId, key: Prop, tagged_value: (i64, ExId));
+
     /// A value has beeen deleted.
     ///
     /// - `objid`: the object that has been deleted in.
@@ -32,6 +40,8 @@ impl OpObserver for () {
     fn insert(&mut self, _objid: ExId, _index: usize, _tagged_value: (Value, ExId)) {}
 
     fn put(&mut self, _objid: ExId, _key: Prop, _tagged_value: (Value, ExId), _conflict: bool) {}
+
+    fn increment(&mut self, _objid: ExId, _key: Prop, _tagged_value: (i64, ExId)) {}
 
     fn delete(&mut self, _objid: ExId, _key: Prop) {}
 }
@@ -68,6 +78,14 @@ impl OpObserver for VecOpObserver {
         });
     }
 
+    fn increment(&mut self, objid: ExId, key: Prop, tagged_value: (i64, ExId)) {
+        self.patches.push(Patch::Increment {
+            obj: objid,
+            key,
+            value: tagged_value,
+        });
+    }
+
     fn delete(&mut self, objid: ExId, key: Prop) {
         self.patches.push(Patch::Delete { obj: objid, key })
     }
@@ -95,6 +113,16 @@ pub enum Patch {
         index: usize,
         /// The value that was inserted, and the id of the operation that inserted it there.
         value: (Value<'static>, ExId),
+    },
+    /// Incrementing a counter.
+    Increment {
+        /// The object that was incremented in.
+        obj: ExId,
+        /// The key that was incremented.
+        key: Prop,
+        /// The amount that the counter was incremented by, and the id of the operation that
+        /// did the increment.
+        value: (i64, ExId),
     },
     /// Deleting an element from a list/text
     Delete {

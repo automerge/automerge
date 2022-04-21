@@ -464,6 +464,13 @@ impl Automerge {
                     };
                 }
 
+                Patch::Increment { obj, key, value } => {
+                    js_set(&patch, "action", "increment")?;
+                    js_set(&patch, "obj", obj.to_string())?;
+                    js_set(&patch, "key", key)?;
+                    js_set(&patch, "value", value.0)?;
+                }
+
                 Patch::Delete { obj, key } => {
                     js_set(&patch, "action", "delete")?;
                     js_set(&patch, "obj", obj.to_string())?;

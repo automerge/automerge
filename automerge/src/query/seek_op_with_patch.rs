@@ -135,6 +135,11 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
 
                     // Keep track of any ops we're overwriting and any conflicts on this key
                     if self.op.overwrites(op) {
+                        // when we encounter an increment op we also want to find the counter for
+                        // it.
+                        if self.op.is_inc() && op.is_counter() && op.visible() {
+                            self.values.push(op);
+                        }
                         self.succ.push(self.pos);
                     } else if op.visible() {
                         self.values.push(op);
@@ -145,6 +150,7 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                     if m.lamport_cmp(op.id, self.op.id) == Ordering::Greater {
                         break;
                     }
+
                     self.pos += 1;
                 }
 
@@ -178,6 +184,11 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
             if self.is_target_insert(e) {
                 self.found = true;
                 if self.op.overwrites(e) {
+                    // when we encounter an increment op we also want to find the counter for
+                    // it.
+                    if self.op.is_inc() && e.is_counter() && e.visible() {
+                        self.values.push(e);
+                    }
                     self.succ.push(self.pos);
                 }
                 if e.visible() {
@@ -190,6 +201,11 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
             // Once we've found the reference element, keep track of any ops that we're overwriting
             let overwritten = self.op.overwrites(e);
             if overwritten {
+                // when we encounter an increment op we also want to find the counter for
+                // it.
+                if self.op.is_inc() && e.is_counter() && e.visible() {
+                    self.values.push(e);
+                }
                 self.succ.push(self.pos);
             }
 

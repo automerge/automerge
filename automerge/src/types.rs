@@ -459,6 +459,14 @@ impl Op {
         }
     }
 
+    pub fn get_increment_value(&self) -> Option<i64> {
+        if let OpType::Increment(i) = self.action {
+            Some(i)
+        } else {
+            None
+        }
+    }
+
     pub fn value(&self) -> Value {
         match &self.action {
             OpType::Make(obj_type) => Value::Object(*obj_type),
