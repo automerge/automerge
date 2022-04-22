@@ -34,8 +34,16 @@ impl<'a> TreeQuery<'a> for Prop<'a> {
         if self.start.is_none() {
             let start = binary_search_by(child, |op| m.key_cmp(&op.key, &self.key));
             self.start = Some(start);
-        };
-        QueryResult::Descend
+            QueryResult::Descend
+        } else {
+            // skip empty nodes
+            if child.index.visible_len() == 0 {
+                self.pos += child.len();
+                QueryResult::Next
+            } else {
+                QueryResult::Descend
+            }
+        }
     }
 
     fn query_element(&mut self, op: &'a Op) -> QueryResult {
