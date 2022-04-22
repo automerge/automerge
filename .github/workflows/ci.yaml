@@ -2,10 +2,10 @@ name: ci
 on:
   push:
     branches:
-    - experiment
+    - main
   pull_request:
     branches:
-    - experiment
+    - main
 jobs:
   fmt:
     runs-on: ubuntu-latest
