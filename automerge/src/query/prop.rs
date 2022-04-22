@@ -9,6 +9,7 @@ pub(crate) struct Prop<'a> {
     pub(crate) ops: Vec<&'a Op>,
     pub(crate) ops_pos: Vec<usize>,
     pub(crate) pos: usize,
+    start: Option<usize>,
 }
 
 impl<'a> Prop<'a> {
@@ -18,6 +19,7 @@ impl<'a> Prop<'a> {
             ops: vec![],
             ops_pos: vec![],
             pos: 0,
+            start: None,
         }
     }
 }
@@ -28,19 +30,29 @@ impl<'a> TreeQuery<'a> for Prop<'a> {
         child: &'a OpTreeNode,
         m: &OpSetMetadata,
     ) -> QueryResult {
-        let start = binary_search_by(child, |op| m.key_cmp(&op.key, &self.key));
-        self.pos = start;
-        for pos in start..child.len() {
-            let op = child.get(pos).unwrap();
-            if op.key != self.key {
-                break;
-            }
-            if op.visible() {
-                self.ops.push(op);
-                self.ops_pos.push(pos);
-            }
+        // in the root node find the first op position for the key
+        if self.start.is_none() {
+            let start = binary_search_by(child, |op| m.key_cmp(&op.key, &self.key));
+            self.start = Some(start);
+        };
+        QueryResult::Descend
+    }
+
+    fn query_element(&mut self, op: &'a Op) -> QueryResult {
+        // skip to our start
+        if self.pos < self.start.unwrap() {
             self.pos += 1;
+            return QueryResult::Next;
         }
-        QueryResult::Finish
+        // don't bother looking at things past our key
+        if op.key != self.key {
+            return QueryResult::Finish;
+        }
+        if op.visible() {
+            self.ops.push(op);
+            self.ops_pos.push(self.pos);
+        }
+        self.pos += 1;
+        QueryResult::Next
     }
 }
