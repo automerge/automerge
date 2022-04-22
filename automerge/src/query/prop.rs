@@ -30,19 +30,24 @@ impl<'a> TreeQuery<'a> for Prop<'a> {
         child: &'a OpTreeNode,
         m: &OpSetMetadata,
     ) -> QueryResult {
-        // in the root node find the first op position for the key
-        if self.start.is_none() {
+        if let Some(start) = self.start {
+            if self.pos + child.len() >= start {
+                // skip empty nodes
+                if child.index.visible_len() == 0 {
+                    self.pos += child.len();
+                    QueryResult::Next
+                } else {
+                    QueryResult::Descend
+                }
+            } else {
+                self.pos += child.len();
+                QueryResult::Next
+            }
+        } else {
+            // in the root node find the first op position for the key
             let start = binary_search_by(child, |op| m.key_cmp(&op.key, &self.key));
             self.start = Some(start);
             QueryResult::Descend
-        } else {
-            // skip empty nodes
-            if child.index.visible_len() == 0 {
-                self.pos += child.len();
-                QueryResult::Next
-            } else {
-                QueryResult::Descend
-            }
         }
     }
 
