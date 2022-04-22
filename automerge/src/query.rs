@@ -41,6 +41,16 @@ pub(crate) use range_at::RangeAt;
 pub(crate) use seek_op::SeekOp;
 pub(crate) use seek_op_with_patch::SeekOpWithPatch;
 
+// use a struct for the args for clarity as they are passed up the update chain in the optree
+#[derive(Debug, Clone)]
+pub(crate) struct ReplaceArgs {
+    pub(crate) old_id: OpId,
+    pub(crate) new_id: OpId,
+    pub(crate) old_visible: bool,
+    pub(crate) new_visible: bool,
+    pub(crate) new_key: Key,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CounterData {
     pos: usize,
@@ -105,25 +115,32 @@ impl Index {
         self.visible.contains_key(seen)
     }
 
-    pub(crate) fn replace(&mut self, old: &Op, new: &Op) {
-        if old.id != new.id {
-            self.ops.remove(&old.id);
-            self.ops.insert(new.id);
+    pub(crate) fn replace(
+        &mut self,
+        ReplaceArgs {
+            old_id,
+            new_id,
+            old_visible,
+            new_visible,
+            new_key,
+        }: &ReplaceArgs,
+    ) {
+        if old_id != new_id {
+            self.ops.remove(old_id);
+            self.ops.insert(*new_id);
         }
 
-        assert!(new.key == old.key);
-
-        match (new.visible(), old.visible(), new.elemid_or_key()) {
-            (false, true, key) => match self.visible.get(&key).copied() {
+        match (new_visible, old_visible, new_key) {
+            (false, true, key) => match self.visible.get(key).copied() {
                 Some(n) if n == 1 => {
-                    self.visible.remove(&key);
+                    self.visible.remove(key);
                 }
                 Some(n) => {
-                    self.visible.insert(key, n - 1);
+                    self.visible.insert(*key, n - 1);
                 }
                 None => panic!("remove overun in index"),
             },
-            (true, false, key) => *self.visible.entry(key).or_default() += 1,
+            (true, false, key) => *self.visible.entry(*key).or_default() += 1,
             _ => {}
         }
     }
