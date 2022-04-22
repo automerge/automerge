@@ -1,5 +1,5 @@
 use automerge::{transaction::Transactable, Automerge, ScalarValue, ROOT};
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 
 fn repeated_increment(n: u64) -> Automerge {
     let mut doc = Automerge::new();
@@ -43,41 +43,35 @@ fn decreasing_put(n: u64) -> Automerge {
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let small = 1_000;
+    let sizes = [100, 1_000, 10_000];
 
-    c.bench_function(&format!("repeated increment {}", small), |b| {
-        b.iter(|| repeated_increment(black_box(small)))
-    });
+    let mut group = c.benchmark_group("map");
+    for size in &sizes {
+        group.throughput(criterion::Throughput::Elements(*size));
+        group.bench_with_input(BenchmarkId::new("repeated put", size), size, |b, &size| {
+            b.iter(|| repeated_put(size))
+        });
+        group.bench_with_input(
+            BenchmarkId::new("repeated increment", size),
+            size,
+            |b, &size| b.iter(|| repeated_increment(size)),
+        );
 
-    c.bench_function(&format!("repeated put {}", small), |b| {
-        b.iter(|| repeated_put(black_box(small)))
-    });
+        group.throughput(criterion::Throughput::Elements(*size));
+        group.bench_with_input(
+            BenchmarkId::new("increasing put", size),
+            size,
+            |b, &size| b.iter(|| increasing_put(size)),
+        );
 
-    c.bench_function(&format!("increasing put {}", small), |b| {
-        b.iter(|| increasing_put(black_box(small)))
-    });
-
-    c.bench_function(&format!("decreasing put {}", small), |b| {
-        b.iter(|| decreasing_put(black_box(small)))
-    });
-
-    let large = 10_000;
-
-    c.bench_function(&format!("repeated increment {}", large), |b| {
-        b.iter(|| repeated_increment(black_box(large)))
-    });
-
-    c.bench_function(&format!("repeated put {}", large), |b| {
-        b.iter(|| repeated_put(black_box(large)))
-    });
-
-    c.bench_function(&format!("increasing put {}", large), |b| {
-        b.iter(|| increasing_put(black_box(large)))
-    });
-
-    c.bench_function(&format!("decreasing put {}", large), |b| {
-        b.iter(|| decreasing_put(black_box(large)))
-    });
+        group.throughput(criterion::Throughput::Elements(*size));
+        group.bench_with_input(
+            BenchmarkId::new("decreasing put", size),
+            size,
+            |b, &size| b.iter(|| decreasing_put(size)),
+        );
+    }
+    group.finish();
 }
 
 criterion_group!(benches, criterion_benchmark);
