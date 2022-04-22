@@ -1,5 +1,5 @@
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
-use crate::types::{Clock, Counter, ElemId, Op, OpId, OpType, ScalarValue};
+use crate::types::{Clock, Counter, Key, Op, OpId, OpType, ScalarValue};
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -83,7 +83,7 @@ pub(crate) enum QueryResult {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Index {
     /// The map of visible elements to the number of operations targetting them.
-    pub(crate) visible: HashMap<ElemId, usize, FxBuildHasher>,
+    pub(crate) visible: HashMap<Key, usize, FxBuildHasher>,
     /// Set of opids found in this node and below.
     pub(crate) ops: HashSet<OpId, FxBuildHasher>,
 }
@@ -101,12 +101,8 @@ impl Index {
         self.visible.len()
     }
 
-    pub(crate) fn has_visible(&self, e: &Option<ElemId>) -> bool {
-        if let Some(seen) = e {
-            self.visible.contains_key(seen)
-        } else {
-            false
-        }
+    pub(crate) fn has_visible(&self, seen: &Key) -> bool {
+        self.visible.contains_key(seen)
     }
 
     pub(crate) fn replace(&mut self, old: &Op, new: &Op) {
@@ -117,17 +113,17 @@ impl Index {
 
         assert!(new.key == old.key);
 
-        match (new.visible(), old.visible(), new.elemid()) {
-            (false, true, Some(elem)) => match self.visible.get(&elem).copied() {
+        match (new.visible(), old.visible(), new.elemid_or_key()) {
+            (false, true, key) => match self.visible.get(&key).copied() {
                 Some(n) if n == 1 => {
-                    self.visible.remove(&elem);
+                    self.visible.remove(&key);
                 }
                 Some(n) => {
-                    self.visible.insert(elem, n - 1);
+                    self.visible.insert(key, n - 1);
                 }
                 None => panic!("remove overun in index"),
             },
-            (true, false, Some(elem)) => *self.visible.entry(elem).or_default() += 1,
+            (true, false, key) => *self.visible.entry(key).or_default() += 1,
             _ => {}
         }
     }
@@ -135,25 +131,22 @@ impl Index {
     pub(crate) fn insert(&mut self, op: &Op) {
         self.ops.insert(op.id);
         if op.visible() {
-            if let Some(elem) = op.elemid() {
-                *self.visible.entry(elem).or_default() += 1;
-            }
+            *self.visible.entry(op.elemid_or_key()).or_default() += 1;
         }
     }
 
     pub(crate) fn remove(&mut self, op: &Op) {
         self.ops.remove(&op.id);
         if op.visible() {
-            if let Some(elem) = op.elemid() {
-                match self.visible.get(&elem).copied() {
-                    Some(n) if n == 1 => {
-                        self.visible.remove(&elem);
-                    }
-                    Some(n) => {
-                        self.visible.insert(elem, n - 1);
-                    }
-                    None => panic!("remove overun in index"),
+            let key = op.elemid_or_key();
+            match self.visible.get(&key).copied() {
+                Some(n) if n == 1 => {
+                    self.visible.remove(&key);
                 }
+                Some(n) => {
+                    self.visible.insert(key, n - 1);
+                }
+                None => panic!("remove overun in index"),
             }
         }
     }

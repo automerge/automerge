@@ -1,6 +1,6 @@
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
 use crate::query::{binary_search_by, QueryResult, TreeQuery};
-use crate::types::{ElemId, Key, Op, HEAD};
+use crate::types::{Key, Op, HEAD};
 use std::cmp::Ordering;
 use std::fmt::Debug;
 
@@ -11,7 +11,7 @@ pub(crate) struct SeekOpWithPatch<'a> {
     pub(crate) succ: Vec<usize>,
     found: bool,
     pub(crate) seen: usize,
-    last_seen: Option<ElemId>,
+    last_seen: Option<Key>,
     pub(crate) values: Vec<&'a Op>,
     pub(crate) had_value_before: bool,
 }
@@ -55,7 +55,7 @@ impl<'a> SeekOpWithPatch<'a> {
         }
         if e.visible() && self.last_seen.is_none() {
             self.seen += 1;
-            self.last_seen = e.elemid()
+            self.last_seen = Some(e.elemid_or_key())
         }
     }
 }
@@ -104,8 +104,10 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                         // subtree contains a *visible* (i.e. empty succs) operation for the list
                         // element with elemId `last_seen`; this will subtract one even if all
                         // values for this list element have been deleted in this subtree.
-                        if child.index.has_visible(&self.last_seen) {
-                            num_vis -= 1;
+                        if let Some(last_seen) = self.last_seen {
+                            if child.index.has_visible(&last_seen) {
+                                num_vis -= 1;
+                            }
                         }
                         self.seen += num_vis;
 
@@ -114,7 +116,7 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                         // the last operation's elemId regardless of whether it's visible or not.
                         // This will lead to incorrect counting if `last_seen` is not visible: it's
                         // not counted towards `num_vis`, so we shouldn't be subtracting 1.
-                        self.last_seen = child.last().elemid();
+                        self.last_seen = Some(child.last().elemid_or_key());
                     }
                     QueryResult::Next
                 }

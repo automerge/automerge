@@ -1,7 +1,7 @@
 use crate::error::AutomergeError;
 use crate::op_tree::OpTreeNode;
 use crate::query::{QueryResult, TreeQuery};
-use crate::types::{ElemId, Key, Op};
+use crate::types::{Key, Op};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -10,7 +10,7 @@ pub(crate) struct Nth<'a> {
     seen: usize,
     /// last_seen is the target elemid of the last `seen` operation.
     /// It is used to avoid double counting visible elements (which arise through conflicts) that are split across nodes.
-    last_seen: Option<ElemId>,
+    last_seen: Option<Key>,
     pub(crate) ops: Vec<&'a Op>,
     pub(crate) ops_pos: Vec<usize>,
     pub(crate) pos: usize,
@@ -42,8 +42,10 @@ impl<'a> Nth<'a> {
 impl<'a> TreeQuery<'a> for Nth<'a> {
     fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
         let mut num_vis = child.index.visible_len();
-        if child.index.has_visible(&self.last_seen) {
-            num_vis -= 1;
+        if let Some(last_seen) = self.last_seen {
+            if child.index.has_visible(&last_seen) {
+                num_vis -= 1;
+            }
         }
 
         if self.seen + num_vis > self.target {
@@ -59,9 +61,9 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
             // - the insert was at a previous node and this is a long run of overwrites so last_seen should already be set correctly
             // - the visible op is in this node and the elemid references it so it can be set here
             // - the visible op is in a future node and so it will be counted as seen there
-            let last_elemid = child.last().elemid();
+            let last_elemid = child.last().elemid_or_key();
             if child.index.has_visible(&last_elemid) {
-                self.last_seen = last_elemid;
+                self.last_seen = Some(last_elemid);
             }
             QueryResult::Next
         }
@@ -79,7 +81,7 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
         if visible && self.last_seen.is_none() {
             self.seen += 1;
             // we have a new visible element
-            self.last_seen = element.elemid()
+            self.last_seen = Some(element.elemid_or_key())
         }
         if self.seen == self.target + 1 && visible {
             self.ops.push(element);
