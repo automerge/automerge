@@ -49,7 +49,7 @@
 <span id="42">42</span>
 <span id="43">43</span>
 </pre><pre class="rust"><code><span class="doccomment">/// Optional metadata for a commit.</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Default</span>)]</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Default</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">CommitOptions</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Obs</span><span class="op">&gt;</span> {
     <span class="kw">pub</span> <span class="ident">message</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>,
     <span class="kw">pub</span> <span class="ident">time</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">i64</span><span class="op">&gt;</span>,

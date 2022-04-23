@@ -109,13 +109,13 @@
     <span class="doccomment">/// last_seen is the target elemid of the last `seen` operation.</span>
     <span class="doccomment">/// It is used to avoid double counting visible elements (which arise through conflicts) that are split across nodes.</span>
     <span class="ident">last_seen</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ElemId</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span> <span class="ident">ops</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Op</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span> <span class="ident">ops_pos</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span> <span class="ident">pos</span>: <span class="ident">usize</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">ops</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Op</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">ops_pos</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">pos</span>: <span class="ident">usize</span>,
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Nth</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">target</span>: <span class="ident">usize</span>) -&gt; <span class="self">Self</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">target</span>: <span class="ident">usize</span>) -&gt; <span class="self">Self</span> {
         <span class="ident">Nth</span> {
             <span class="ident">target</span>,
             <span class="ident">seen</span>: <span class="number">0</span>,
@@ -127,7 +127,7 @@
     }
 
     <span class="doccomment">/// Get the key</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Key</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Key</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
         <span class="comment">// the query collects the ops so we can use that to get the key they all use</span>
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">e</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">ops</span>.<span class="ident">first</span>().<span class="ident">and_then</span>(<span class="op">|</span><span class="ident">op</span><span class="op">|</span> <span class="ident">op</span>.<span class="ident">elemid</span>()) {
             <span class="prelude-val">Ok</span>(<span class="ident">Key::Seq</span>(<span class="ident">e</span>))

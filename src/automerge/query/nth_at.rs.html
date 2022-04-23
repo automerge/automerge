@@ -81,13 +81,13 @@
     <span class="ident">seen</span>: <span class="ident">usize</span>,
     <span class="ident">last_seen</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ElemId</span><span class="op">&gt;</span>,
     <span class="ident">window</span>: <span class="ident">VisWindow</span>,
-    <span class="kw">pub</span> <span class="ident">ops</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Op</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span> <span class="ident">ops_pos</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span> <span class="ident">pos</span>: <span class="ident">usize</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">ops</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Op</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">ops_pos</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">pos</span>: <span class="ident">usize</span>,
 }
 
 <span class="kw">impl</span> <span class="ident">NthAt</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">target</span>: <span class="ident">usize</span>, <span class="ident">clock</span>: <span class="ident">Clock</span>) -&gt; <span class="self">Self</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">target</span>: <span class="ident">usize</span>, <span class="ident">clock</span>: <span class="ident">Clock</span>) -&gt; <span class="self">Self</span> {
         <span class="ident">NthAt</span> {
             <span class="ident">clock</span>,
             <span class="ident">target</span>,

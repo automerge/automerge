@@ -583,7 +583,7 @@
 
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">load_with</span><span class="op">&lt;</span><span class="ident">Obs</span>: <span class="ident">OpObserver</span><span class="op">&gt;</span>(
         <span class="ident">data</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
-        <span class="ident">options</span>: <span class="ident">ApplyOptions</span><span class="op">&lt;</span><span class="ident">Obs</span><span class="op">&gt;</span>,
+        <span class="ident">options</span>: <span class="ident">ApplyOptions</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">Obs</span><span class="op">&gt;</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">doc</span> <span class="op">=</span> <span class="ident">Automerge::load_with</span>(<span class="ident">data</span>, <span class="ident">options</span>)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(<span class="self">Self</span> {
@@ -614,7 +614,7 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">apply_changes_with</span><span class="op">&lt;</span><span class="ident">Obs</span>: <span class="ident">OpObserver</span><span class="op">&gt;</span>(
         <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
         <span class="ident">changes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Change</span><span class="op">&gt;</span>,
-        <span class="ident">options</span>: <span class="ident">ApplyOptions</span><span class="op">&lt;</span><span class="ident">Obs</span><span class="op">&gt;</span>,
+        <span class="ident">options</span>: <span class="ident">ApplyOptions</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">Obs</span><span class="op">&gt;</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">ensure_transaction_closed</span>();
         <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">apply_changes_with</span>(<span class="ident">changes</span>, <span class="ident">options</span>)
@@ -741,7 +741,7 @@
     <span class="doccomment">/// i64;</span>
     <span class="doccomment">/// doc.commit_with::&lt;()&gt;(CommitOptions::default().with_message(&quot;Create todos list&quot;).with_time(now));</span>
     <span class="doccomment">/// ```</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">commit_with</span><span class="op">&lt;</span><span class="ident">Obs</span>: <span class="ident">OpObserver</span><span class="op">&gt;</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">options</span>: <span class="ident">CommitOptions</span><span class="op">&lt;</span><span class="ident">Obs</span><span class="op">&gt;</span>) -&gt; <span class="ident">ChangeHash</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">commit_with</span><span class="op">&lt;</span><span class="ident">Obs</span>: <span class="ident">OpObserver</span><span class="op">&gt;</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">options</span>: <span class="ident">CommitOptions</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">Obs</span><span class="op">&gt;</span>) -&gt; <span class="ident">ChangeHash</span> {
         <span class="comment">// ensure that even no changes triggers a change</span>
         <span class="self">self</span>.<span class="ident">ensure_transaction_open</span>();
         <span class="kw">let</span> <span class="ident">tx</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">transaction</span>.<span class="ident">take</span>().<span class="ident">unwrap</span>();
@@ -774,15 +774,15 @@
     <span class="comment">// PropAt::()</span>
     <span class="comment">// NthAt::()</span>
 
-    <span class="kw">fn</span> <span class="ident">keys</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>) -&gt; <span class="ident">Keys</span> {
+    <span class="kw">fn</span> <span class="ident">keys</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>) -&gt; <span class="ident">Keys</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">keys</span>(<span class="ident">obj</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">keys_at</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>, <span class="ident">heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>]) -&gt; <span class="ident">KeysAt</span> {
+    <span class="kw">fn</span> <span class="ident">keys_at</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>, <span class="ident">heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>]) -&gt; <span class="ident">KeysAt</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">keys_at</span>(<span class="ident">obj</span>, <span class="ident">heads</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">range</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">R</span>: <span class="ident">RangeBounds</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>, <span class="ident">range</span>: <span class="ident">R</span>) -&gt; <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">range</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">R</span>: <span class="ident">RangeBounds</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>, <span class="ident">range</span>: <span class="ident">R</span>) -&gt; <span class="ident">Range</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">R</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">range</span>(<span class="ident">obj</span>, <span class="ident">range</span>)
     }
 
@@ -791,15 +791,15 @@
         <span class="ident">obj</span>: <span class="ident">O</span>,
         <span class="ident">range</span>: <span class="ident">R</span>,
         <span class="ident">heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>],
-    ) -&gt; <span class="ident">RangeAt</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="ident">RangeAt</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">R</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">range_at</span>(<span class="ident">obj</span>, <span class="ident">range</span>, <span class="ident">heads</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">values</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>) -&gt; <span class="ident">Values</span> {
+    <span class="kw">fn</span> <span class="ident">values</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>) -&gt; <span class="ident">Values</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">values</span>(<span class="ident">obj</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">values_at</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>, <span class="ident">heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>]) -&gt; <span class="ident">ValuesAt</span> {
+    <span class="kw">fn</span> <span class="ident">values_at</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>, <span class="ident">heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>]) -&gt; <span class="ident">ValuesAt</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">values_at</span>(<span class="ident">obj</span>, <span class="ident">heads</span>)
     }
 
@@ -931,7 +931,7 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">obj</span>: <span class="ident">O</span>,
         <span class="ident">prop</span>: <span class="ident">P</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">Value</span>, <span class="ident">ExId</span>)<span class="op">&gt;</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>, <span class="ident">ExId</span>)<span class="op">&gt;</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get</span>(<span class="ident">obj</span>, <span class="ident">prop</span>)
     }
 
@@ -940,7 +940,7 @@
         <span class="ident">obj</span>: <span class="ident">O</span>,
         <span class="ident">prop</span>: <span class="ident">P</span>,
         <span class="ident">heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>],
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">Value</span>, <span class="ident">ExId</span>)<span class="op">&gt;</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>, <span class="ident">ExId</span>)<span class="op">&gt;</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_at</span>(<span class="ident">obj</span>, <span class="ident">prop</span>, <span class="ident">heads</span>)
     }
 
@@ -948,7 +948,7 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">obj</span>: <span class="ident">O</span>,
         <span class="ident">prop</span>: <span class="ident">P</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">Value</span>, <span class="ident">ExId</span>)<span class="op">&gt;</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>, <span class="ident">ExId</span>)<span class="op">&gt;</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_all</span>(<span class="ident">obj</span>, <span class="ident">prop</span>)
     }
 
@@ -957,7 +957,7 @@
         <span class="ident">obj</span>: <span class="ident">O</span>,
         <span class="ident">prop</span>: <span class="ident">P</span>,
         <span class="ident">heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>],
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">Value</span>, <span class="ident">ExId</span>)<span class="op">&gt;</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>, <span class="ident">ExId</span>)<span class="op">&gt;</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_all_at</span>(<span class="ident">obj</span>, <span class="ident">prop</span>, <span class="ident">heads</span>)
     }
 
@@ -965,7 +965,7 @@
         <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">parent_object</span>(<span class="ident">obj</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">parents</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">ExId</span>) -&gt; <span class="ident">Parents</span> {
+    <span class="kw">fn</span> <span class="ident">parents</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">ExId</span>) -&gt; <span class="ident">Parents</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">parents</span>(<span class="ident">obj</span>)
     }
 }

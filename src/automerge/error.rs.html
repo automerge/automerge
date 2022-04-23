@@ -116,10 +116,10 @@
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Error</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>)]</span>
 <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;Invalid scalar value, expected {expected} but received {unexpected}&quot;</span>)]</span>
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">InvalidScalarValue</span> {
-    <span class="kw">pub</span> <span class="ident">raw_value</span>: <span class="ident">ScalarValue</span>,
-    <span class="kw">pub</span> <span class="ident">datatype</span>: <span class="ident">DataType</span>,
-    <span class="kw">pub</span> <span class="ident">unexpected</span>: <span class="ident">String</span>,
-    <span class="kw">pub</span> <span class="ident">expected</span>: <span class="ident">String</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">raw_value</span>: <span class="ident">ScalarValue</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">datatype</span>: <span class="ident">DataType</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">unexpected</span>: <span class="ident">String</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">expected</span>: <span class="ident">String</span>,
 }
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Error</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>)]</span>

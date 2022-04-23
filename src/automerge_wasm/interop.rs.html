@@ -449,8 +449,8 @@
 
 <span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">ObjId</span>, <span class="ident">ScalarValue</span>, <span class="ident">Value</span>};
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">JS</span>(<span class="kw">pub</span> <span class="ident">JsValue</span>);
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">AR</span>(<span class="kw">pub</span> <span class="ident">Array</span>);
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">JS</span>(<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">JsValue</span>);
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">AR</span>(<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">Array</span>);
 
 <span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">AR</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">JsValue</span> {
     <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">ar</span>: <span class="ident">AR</span>) -&gt; <span class="self">Self</span> {

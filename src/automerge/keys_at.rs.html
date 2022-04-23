@@ -37,8 +37,10 @@
 <span id="30">30</span>
 <span id="31">31</span>
 <span id="32">32</span>
+<span id="33">33</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">query</span>, <span class="ident">Automerge</span>};
 
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">KeysAt</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;k</span><span class="op">&gt;</span> {
     <span class="ident">keys</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">query::KeysAt</span><span class="op">&lt;</span><span class="lifetime">&#39;k</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="ident">doc</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Automerge</span>,

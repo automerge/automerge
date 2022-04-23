@@ -142,7 +142,7 @@
 }
 
 <span class="kw">impl</span> <span class="ident">InsertNth</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">target</span>: <span class="ident">usize</span>) -&gt; <span class="self">Self</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">target</span>: <span class="ident">usize</span>) -&gt; <span class="self">Self</span> {
         <span class="kw">let</span> (<span class="ident">valid</span>, <span class="ident">last_valid_insert</span>) <span class="op">=</span> <span class="kw">if</span> <span class="ident">target</span> <span class="op">==</span> <span class="number">0</span> {
             (<span class="prelude-val">Some</span>(<span class="number">0</span>), <span class="prelude-val">Some</span>(<span class="ident">HEAD</span>))
         } <span class="kw">else</span> {
@@ -159,11 +159,11 @@
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">pos</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">pos</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
         <span class="self">self</span>.<span class="ident">valid</span>.<span class="ident">unwrap_or</span>(<span class="self">self</span>.<span class="ident">n</span>)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Key</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Key</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
         <span class="prelude-val">Ok</span>(<span class="self">self</span>
             .<span class="ident">last_valid_insert</span>
             .<span class="ident">ok_or</span>(<span class="ident">AutomergeError::InvalidIndex</span>(<span class="self">self</span>.<span class="ident">target</span>))<span class="question-mark">?</span>

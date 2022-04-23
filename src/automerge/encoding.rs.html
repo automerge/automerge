@@ -440,7 +440,7 @@
 }
 
 <span class="kw">impl</span> <span class="ident">BooleanEncoder</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>() -&gt; <span class="ident">BooleanEncoder</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>() -&gt; <span class="ident">BooleanEncoder</span> {
         <span class="ident">BooleanEncoder</span> {
             <span class="ident">buf</span>: <span class="ident">Vec::new</span>(),
             <span class="ident">last</span>: <span class="bool-val">false</span>,
@@ -448,7 +448,7 @@
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">append</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">value</span>: <span class="ident">bool</span>) {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">append</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">value</span>: <span class="ident">bool</span>) {
         <span class="kw">if</span> <span class="ident">value</span> <span class="op">==</span> <span class="self">self</span>.<span class="ident">last</span> {
             <span class="self">self</span>.<span class="ident">count</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
         } <span class="kw">else</span> {
@@ -458,7 +458,7 @@
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">finish</span>(<span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">col</span>: <span class="ident">u32</span>) -&gt; <span class="ident">ColData</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">finish</span>(<span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">col</span>: <span class="ident">u32</span>) -&gt; <span class="ident">ColData</span> {
         <span class="kw">if</span> <span class="self">self</span>.<span class="ident">count</span> <span class="op">&gt;</span> <span class="number">0</span> {
             <span class="self">self</span>.<span class="ident">count</span>.<span class="ident">encode</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">buf</span>).<span class="ident">ok</span>();
         }
@@ -477,24 +477,24 @@
 }
 
 <span class="kw">impl</span> <span class="ident">DeltaEncoder</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>() -&gt; <span class="ident">DeltaEncoder</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>() -&gt; <span class="ident">DeltaEncoder</span> {
         <span class="ident">DeltaEncoder</span> {
             <span class="ident">rle</span>: <span class="ident">RleEncoder::new</span>(),
             <span class="ident">absolute_value</span>: <span class="number">0</span>,
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">append_value</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">value</span>: <span class="ident">u64</span>) {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">append_value</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">value</span>: <span class="ident">u64</span>) {
         <span class="self">self</span>.<span class="ident">rle</span>
             .<span class="ident">append_value</span>(<span class="ident">value</span> <span class="kw">as</span> <span class="ident">i64</span> <span class="op">-</span> <span class="self">self</span>.<span class="ident">absolute_value</span> <span class="kw">as</span> <span class="ident">i64</span>);
         <span class="self">self</span>.<span class="ident">absolute_value</span> <span class="op">=</span> <span class="ident">value</span>;
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">append_null</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">append_null</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="self">self</span>.<span class="ident">rle</span>.<span class="ident">append_null</span>();
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">finish</span>(<span class="self">self</span>, <span class="ident">col</span>: <span class="ident">u32</span>) -&gt; <span class="ident">ColData</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">finish</span>(<span class="self">self</span>, <span class="ident">col</span>: <span class="ident">u32</span>) -&gt; <span class="ident">ColData</span> {
         <span class="self">self</span>.<span class="ident">rle</span>.<span class="ident">finish</span>(<span class="ident">col</span>)
     }
 }
@@ -533,14 +533,14 @@
 <span class="kw">where</span>
     <span class="ident">T</span>: <span class="ident">Encodable</span> <span class="op">+</span> <span class="ident">PartialEq</span> <span class="op">+</span> <span class="ident">Clone</span>,
 {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>() -&gt; <span class="ident">RleEncoder</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>() -&gt; <span class="ident">RleEncoder</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
         <span class="ident">RleEncoder</span> {
             <span class="ident">buf</span>: <span class="ident">Vec::new</span>(),
             <span class="ident">state</span>: <span class="ident">RleState::Empty</span>,
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">finish</span>(<span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">col</span>: <span class="ident">u32</span>) -&gt; <span class="ident">ColData</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">finish</span>(<span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">col</span>: <span class="ident">u32</span>) -&gt; <span class="ident">ColData</span> {
         <span class="kw">match</span> <span class="self">self</span>.<span class="ident">take_state</span>() {
             <span class="comment">// this covers `only_nulls`</span>
             <span class="ident">RleState::NullRun</span>(<span class="ident">size</span>) =&gt; {
@@ -582,7 +582,7 @@
         <span class="ident">state</span>
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">append_null</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">append_null</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="self">self</span>.<span class="ident">state</span> <span class="op">=</span> <span class="kw">match</span> <span class="self">self</span>.<span class="ident">take_state</span>() {
             <span class="ident">RleState::Empty</span> =&gt; <span class="ident">RleState::NullRun</span>(<span class="number">1</span>),
             <span class="ident">RleState::NullRun</span>(<span class="ident">size</span>) =&gt; <span class="ident">RleState::NullRun</span>(<span class="ident">size</span> <span class="op">+</span> <span class="number">1</span>),
@@ -602,7 +602,7 @@
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">append_value</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">value</span>: <span class="ident">T</span>) {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">append_value</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">value</span>: <span class="ident">T</span>) {
         <span class="self">self</span>.<span class="ident">state</span> <span class="op">=</span> <span class="kw">match</span> <span class="self">self</span>.<span class="ident">take_state</span>() {
             <span class="ident">RleState::Empty</span> =&gt; <span class="ident">RleState::LoneVal</span>(<span class="ident">value</span>),
             <span class="ident">RleState::LoneVal</span>(<span class="ident">other</span>) =&gt; {
@@ -746,14 +746,14 @@
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">ColData</span> {
-    <span class="kw">pub</span> <span class="ident">col</span>: <span class="ident">u32</span>,
-    <span class="kw">pub</span> <span class="ident">data</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">col</span>: <span class="ident">u32</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">data</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">debug_assertions</span>)]</span>
     <span class="ident">has_been_deflated</span>: <span class="ident">bool</span>,
 }
 
 <span class="kw">impl</span> <span class="ident">ColData</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">col_id</span>: <span class="ident">u32</span>, <span class="ident">data</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) -&gt; <span class="ident">ColData</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">col_id</span>: <span class="ident">u32</span>, <span class="ident">data</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) -&gt; <span class="ident">ColData</span> {
         <span class="ident">ColData</span> {
             <span class="ident">col</span>: <span class="ident">col_id</span>,
             <span class="ident">data</span>,
@@ -762,7 +762,7 @@
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">encode_col_len</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">buf</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">encode_col_len</span><span class="op">&lt;</span><span class="ident">R</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">buf</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">len</span> <span class="op">=</span> <span class="number">0</span>;
         <span class="kw">if</span> <span class="op">!</span><span class="self">self</span>.<span class="ident">data</span>.<span class="ident">is_empty</span>() {
             <span class="ident">len</span> <span class="op">+</span><span class="op">=</span> <span class="self">self</span>.<span class="ident">col</span>.<span class="ident">encode</span>(<span class="ident">buf</span>)<span class="question-mark">?</span>;
@@ -771,7 +771,7 @@
         <span class="prelude-val">Ok</span>(<span class="ident">len</span>)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">deflate</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">deflate</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">debug_assertions</span>)]</span>
         {
             <span class="macro">debug_assert!</span>(<span class="op">!</span><span class="self">self</span>.<span class="ident">has_been_deflated</span>);

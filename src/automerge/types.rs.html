@@ -770,11 +770,11 @@
 
 <span class="kw">impl</span> <span class="ident">OpId</span> {
     <span class="attribute">#[<span class="ident">inline</span>]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">counter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u64</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">counter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u64</span> {
         <span class="self">self</span>.<span class="number">0</span>
     }
     <span class="attribute">#[<span class="ident">inline</span>]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">actor</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">actor</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
         <span class="self">self</span>.<span class="number">1</span>
     }
 }
@@ -912,7 +912,7 @@
 }
 
 <span class="kw">impl</span> <span class="ident">Key</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">elemid</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ElemId</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">elemid</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ElemId</span><span class="op">&gt;</span> {
         <span class="kw">match</span> <span class="self">self</span> {
             <span class="ident">Key::Map</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
             <span class="ident">Key::Seq</span>(<span class="ident">id</span>) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span><span class="ident">id</span>),
@@ -921,28 +921,28 @@
 }
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialOrd</span>, <span class="ident">Ord</span>, <span class="ident">Eq</span>, <span class="ident">PartialEq</span>, <span class="ident">Copy</span>, <span class="ident">Hash</span>, <span class="ident">Default</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">OpId</span>(<span class="kw">pub</span> <span class="ident">u64</span>, <span class="kw">pub</span> <span class="ident">usize</span>);
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">OpId</span>(<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">u64</span>, <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">usize</span>);
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">Copy</span>, <span class="ident">PartialOrd</span>, <span class="ident">Eq</span>, <span class="ident">PartialEq</span>, <span class="ident">Ord</span>, <span class="ident">Hash</span>, <span class="ident">Default</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">ObjId</span>(<span class="kw">pub</span> <span class="ident">OpId</span>);
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">ObjId</span>(<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">OpId</span>);
 
 <span class="kw">impl</span> <span class="ident">ObjId</span> {
-    <span class="kw">pub</span> <span class="kw">const</span> <span class="kw">fn</span> <span class="ident">root</span>() -&gt; <span class="self">Self</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const</span> <span class="kw">fn</span> <span class="ident">root</span>() -&gt; <span class="self">Self</span> {
         <span class="ident">ObjId</span>(<span class="ident">OpId</span>(<span class="number">0</span>, <span class="number">0</span>))
     }
 }
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">Copy</span>, <span class="ident">PartialOrd</span>, <span class="ident">Eq</span>, <span class="ident">PartialEq</span>, <span class="ident">Ord</span>, <span class="ident">Hash</span>, <span class="ident">Default</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">ElemId</span>(<span class="kw">pub</span> <span class="ident">OpId</span>);
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">ElemId</span>(<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">OpId</span>);
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>)]</span>
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">Op</span> {
-    <span class="kw">pub</span> <span class="ident">id</span>: <span class="ident">OpId</span>,
-    <span class="kw">pub</span> <span class="ident">action</span>: <span class="ident">OpType</span>,
-    <span class="kw">pub</span> <span class="ident">key</span>: <span class="ident">Key</span>,
-    <span class="kw">pub</span> <span class="ident">succ</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">OpId</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span> <span class="ident">pred</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">OpId</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span> <span class="ident">insert</span>: <span class="ident">bool</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">id</span>: <span class="ident">OpId</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">action</span>: <span class="ident">OpType</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">key</span>: <span class="ident">Key</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">succ</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">OpId</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">pred</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">OpId</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">insert</span>: <span class="ident">bool</span>,
 }
 
 <span class="kw">impl</span> <span class="ident">Op</span> {
@@ -976,7 +976,7 @@
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">visible</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">visible</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
         <span class="kw">if</span> <span class="self">self</span>.<span class="ident">is_inc</span>() {
             <span class="bool-val">false</span>
         } <span class="kw">else</span> <span class="kw">if</span> <span class="self">self</span>.<span class="ident">is_counter</span>() {
@@ -986,7 +986,7 @@
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">incs</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">incs</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
         <span class="kw">if</span> <span class="kw">let</span> <span class="ident">OpType::Put</span>(<span class="ident">ScalarValue::Counter</span>(<span class="ident">Counter</span> { <span class="ident">increments</span>, .. })) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">action</span> {
             <span class="kw-2">*</span><span class="ident">increments</span>
         } <span class="kw">else</span> {
@@ -994,35 +994,35 @@
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_delete</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">is_delete</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
         <span class="macro">matches!</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">action</span>, <span class="ident">OpType::Delete</span>)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_inc</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">is_inc</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
         <span class="macro">matches!</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">action</span>, <span class="ident">OpType::Increment</span>(<span class="kw">_</span>))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_counter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">is_counter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
         <span class="macro">matches!</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">action</span>, <span class="ident">OpType::Put</span>(<span class="ident">ScalarValue::Counter</span>(<span class="kw">_</span>)))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_noop</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">action</span>: <span class="kw-2">&amp;</span><span class="ident">OpType</span>) -&gt; <span class="ident">bool</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">is_noop</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">action</span>: <span class="kw-2">&amp;</span><span class="ident">OpType</span>) -&gt; <span class="ident">bool</span> {
         <span class="macro">matches!</span>((<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">action</span>, <span class="ident">action</span>), (<span class="ident">OpType::Put</span>(<span class="ident">n</span>), <span class="ident">OpType::Put</span>(<span class="ident">m</span>)) <span class="kw">if</span> <span class="ident">n</span> <span class="op">==</span> <span class="ident">m</span>)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_list_op</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">is_list_op</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
         <span class="macro">matches!</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">key</span>, <span class="ident">Key::Seq</span>(<span class="kw">_</span>))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">overwrites</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="ident">Op</span>) -&gt; <span class="ident">bool</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">overwrites</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="ident">Op</span>) -&gt; <span class="ident">bool</span> {
         <span class="self">self</span>.<span class="ident">pred</span>.<span class="ident">iter</span>().<span class="ident">any</span>(<span class="op">|</span><span class="ident">i</span><span class="op">|</span> <span class="ident">i</span> <span class="op">==</span> <span class="kw-2">&amp;</span><span class="ident">other</span>.<span class="ident">id</span>)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">elemid</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ElemId</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">elemid</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ElemId</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">elemid_or_key</span>().<span class="ident">elemid</span>()
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">elemid_or_key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Key</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">elemid_or_key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Key</span> {
         <span class="kw">if</span> <span class="self">self</span>.<span class="ident">insert</span> {
             <span class="ident">Key::Seq</span>(<span class="ident">ElemId</span>(<span class="self">self</span>.<span class="ident">id</span>))
         } <span class="kw">else</span> {
@@ -1030,7 +1030,7 @@
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_increment_value</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">i64</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">get_increment_value</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">i64</span><span class="op">&gt;</span> {
         <span class="kw">if</span> <span class="kw">let</span> <span class="ident">OpType::Increment</span>(<span class="ident">i</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">action</span> {
             <span class="prelude-val">Some</span>(<span class="ident">i</span>)
         } <span class="kw">else</span> {
@@ -1038,7 +1038,7 @@
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">value</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Value</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">value</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span> {
         <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">action</span> {
             <span class="ident">OpType::Make</span>(<span class="ident">obj_type</span>) =&gt; <span class="ident">Value::Object</span>(<span class="kw-2">*</span><span class="ident">obj_type</span>),
             <span class="ident">OpType::Put</span>(<span class="ident">scalar</span>) =&gt; <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Borrowed</span>(<span class="ident">scalar</span>)),
@@ -1046,7 +1046,7 @@
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clone_value</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;static</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">clone_value</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;static</span><span class="op">&gt;</span> {
         <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">action</span> {
             <span class="ident">OpType::Make</span>(<span class="ident">obj_type</span>) =&gt; <span class="ident">Value::Object</span>(<span class="kw-2">*</span><span class="ident">obj_type</span>),
             <span class="ident">OpType::Put</span>(<span class="ident">scalar</span>) =&gt; <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">scalar</span>.<span class="ident">clone</span>())),
@@ -1055,7 +1055,7 @@
     }
 
     <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">dead_code</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">dump</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">String</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">dump</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">String</span> {
         <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">action</span> {
             <span class="ident">OpType::Put</span>(<span class="ident">value</span>) <span class="kw">if</span> <span class="self">self</span>.<span class="ident">insert</span> =&gt; <span class="macro">format!</span>(<span class="string">&quot;i:{}&quot;</span>, <span class="ident">value</span>),
             <span class="ident">OpType::Put</span>(<span class="ident">value</span>) =&gt; <span class="macro">format!</span>(<span class="string">&quot;s:{}&quot;</span>, <span class="ident">value</span>),
@@ -1067,7 +1067,7 @@
 }
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>)]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Peer</span> {}
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">Peer</span> {}
 
 <span class="doccomment">/// The sha256 hash of a change.</span>
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Eq</span>, <span class="ident">PartialEq</span>, <span class="ident">Hash</span>, <span class="ident">Clone</span>, <span class="ident">PartialOrd</span>, <span class="ident">Ord</span>, <span class="ident">Copy</span>)]</span>

@@ -40,11 +40,13 @@
 <span id="33">33</span>
 <span id="34">34</span>
 <span id="35">35</span>
+<span id="36">36</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">exid::ExId</span>, <span class="ident">Value</span>};
 <span class="kw">use</span> <span class="ident">std::ops::RangeFull</span>;
 
 <span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">query</span>, <span class="ident">Automerge</span>};
 
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Values</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
     <span class="ident">range</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">query::Range</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">RangeFull</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="ident">doc</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Automerge</span>,

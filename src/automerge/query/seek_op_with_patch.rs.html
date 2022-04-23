@@ -269,17 +269,17 @@
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>)]</span>
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">SeekOpWithPatch</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
     <span class="ident">op</span>: <span class="ident">Op</span>,
-    <span class="kw">pub</span> <span class="ident">pos</span>: <span class="ident">usize</span>,
-    <span class="kw">pub</span> <span class="ident">succ</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">pos</span>: <span class="ident">usize</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">succ</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
     <span class="ident">found</span>: <span class="ident">bool</span>,
-    <span class="kw">pub</span> <span class="ident">seen</span>: <span class="ident">usize</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">seen</span>: <span class="ident">usize</span>,
     <span class="ident">last_seen</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ElemId</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span> <span class="ident">values</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Op</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span> <span class="ident">had_value_before</span>: <span class="ident">bool</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">values</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Op</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">had_value_before</span>: <span class="ident">bool</span>,
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">SeekOpWithPatch</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">op</span>: <span class="kw-2">&amp;</span><span class="ident">Op</span>) -&gt; <span class="self">Self</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">op</span>: <span class="kw-2">&amp;</span><span class="ident">Op</span>) -&gt; <span class="self">Self</span> {
         <span class="ident">SeekOpWithPatch</span> {
             <span class="ident">op</span>: <span class="ident">op</span>.<span class="ident">clone</span>(),
             <span class="ident">succ</span>: <span class="macro">vec!</span>[],

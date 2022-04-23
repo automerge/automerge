@@ -139,6 +139,7 @@
 <span id="132">132</span>
 <span id="133">133</span>
 <span id="134">134</span>
+<span id="135">135</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::exid::ExId</span>;
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::Prop</span>;
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::Value</span>;
@@ -151,7 +152,7 @@
     <span class="doccomment">/// - `index`: the index the new value has been inserted at.</span>
     <span class="doccomment">/// - `tagged_value`: the value that has been inserted and the id of the operation that did the</span>
     <span class="doccomment">/// insert.</span>
-    <span class="kw">fn</span> <span class="ident">insert</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">objid</span>: <span class="ident">ExId</span>, <span class="ident">index</span>: <span class="ident">usize</span>, <span class="ident">tagged_value</span>: (<span class="ident">Value</span>, <span class="ident">ExId</span>));
+    <span class="kw">fn</span> <span class="ident">insert</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">objid</span>: <span class="ident">ExId</span>, <span class="ident">index</span>: <span class="ident">usize</span>, <span class="ident">tagged_value</span>: (<span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>, <span class="ident">ExId</span>));
 
     <span class="doccomment">/// A new value has been put into the given object.</span>
     <span class="doccomment">///</span>
@@ -160,7 +161,7 @@
     <span class="doccomment">/// - `tagged_value`: the value that has been put into the object and the id of the operation</span>
     <span class="doccomment">/// that did the put.</span>
     <span class="doccomment">/// - `conflict`: whether this put conflicts with other operations.</span>
-    <span class="kw">fn</span> <span class="ident">put</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">objid</span>: <span class="ident">ExId</span>, <span class="ident">key</span>: <span class="ident">Prop</span>, <span class="ident">tagged_value</span>: (<span class="ident">Value</span>, <span class="ident">ExId</span>), <span class="ident">conflict</span>: <span class="ident">bool</span>);
+    <span class="kw">fn</span> <span class="ident">put</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">objid</span>: <span class="ident">ExId</span>, <span class="ident">key</span>: <span class="ident">Prop</span>, <span class="ident">tagged_value</span>: (<span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>, <span class="ident">ExId</span>), <span class="ident">conflict</span>: <span class="ident">bool</span>);
 
     <span class="doccomment">/// A counter has been incremented.</span>
     <span class="doccomment">///</span>
@@ -178,9 +179,10 @@
 }
 
 <span class="kw">impl</span> <span class="ident">OpObserver</span> <span class="kw">for</span> () {
-    <span class="kw">fn</span> <span class="ident">insert</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">_objid</span>: <span class="ident">ExId</span>, <span class="ident">_index</span>: <span class="ident">usize</span>, <span class="ident">_tagged_value</span>: (<span class="ident">Value</span>, <span class="ident">ExId</span>)) {}
+    <span class="kw">fn</span> <span class="ident">insert</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">_objid</span>: <span class="ident">ExId</span>, <span class="ident">_index</span>: <span class="ident">usize</span>, <span class="ident">_tagged_value</span>: (<span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>, <span class="ident">ExId</span>)) {}
 
-    <span class="kw">fn</span> <span class="ident">put</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">_objid</span>: <span class="ident">ExId</span>, <span class="ident">_key</span>: <span class="ident">Prop</span>, <span class="ident">_tagged_value</span>: (<span class="ident">Value</span>, <span class="ident">ExId</span>), <span class="ident">_conflict</span>: <span class="ident">bool</span>) {}
+    <span class="kw">fn</span> <span class="ident">put</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">_objid</span>: <span class="ident">ExId</span>, <span class="ident">_key</span>: <span class="ident">Prop</span>, <span class="ident">_tagged_value</span>: (<span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>, <span class="ident">ExId</span>), <span class="ident">_conflict</span>: <span class="ident">bool</span>) {
+    }
 
     <span class="kw">fn</span> <span class="ident">increment</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">_objid</span>: <span class="ident">ExId</span>, <span class="ident">_key</span>: <span class="ident">Prop</span>, <span class="ident">_tagged_value</span>: (<span class="ident">i64</span>, <span class="ident">ExId</span>)) {}
 
@@ -202,7 +204,7 @@
 }
 
 <span class="kw">impl</span> <span class="ident">OpObserver</span> <span class="kw">for</span> <span class="ident">VecOpObserver</span> {
-    <span class="kw">fn</span> <span class="ident">insert</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">obj_id</span>: <span class="ident">ExId</span>, <span class="ident">index</span>: <span class="ident">usize</span>, (<span class="ident">value</span>, <span class="ident">id</span>): (<span class="ident">Value</span>, <span class="ident">ExId</span>)) {
+    <span class="kw">fn</span> <span class="ident">insert</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">obj_id</span>: <span class="ident">ExId</span>, <span class="ident">index</span>: <span class="ident">usize</span>, (<span class="ident">value</span>, <span class="ident">id</span>): (<span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>, <span class="ident">ExId</span>)) {
         <span class="self">self</span>.<span class="ident">patches</span>.<span class="ident">push</span>(<span class="ident">Patch::Insert</span> {
             <span class="ident">obj</span>: <span class="ident">obj_id</span>,
             <span class="ident">index</span>,
@@ -210,7 +212,7 @@
         });
     }
 
-    <span class="kw">fn</span> <span class="ident">put</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">objid</span>: <span class="ident">ExId</span>, <span class="ident">key</span>: <span class="ident">Prop</span>, (<span class="ident">value</span>, <span class="ident">id</span>): (<span class="ident">Value</span>, <span class="ident">ExId</span>), <span class="ident">conflict</span>: <span class="ident">bool</span>) {
+    <span class="kw">fn</span> <span class="ident">put</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">objid</span>: <span class="ident">ExId</span>, <span class="ident">key</span>: <span class="ident">Prop</span>, (<span class="ident">value</span>, <span class="ident">id</span>): (<span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>, <span class="ident">ExId</span>), <span class="ident">conflict</span>: <span class="ident">bool</span>) {
         <span class="self">self</span>.<span class="ident">patches</span>.<span class="ident">push</span>(<span class="ident">Patch::Put</span> {
             <span class="ident">obj</span>: <span class="ident">objid</span>,
             <span class="ident">key</span>,

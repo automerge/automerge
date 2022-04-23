@@ -754,14 +754,14 @@
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>)]</span>
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">OpTree</span> {
-    <span class="kw">pub</span> <span class="ident">internal</span>: <span class="ident">OpTreeInternal</span>,
-    <span class="kw">pub</span> <span class="ident">objtype</span>: <span class="ident">ObjType</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">internal</span>: <span class="ident">OpTreeInternal</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">objtype</span>: <span class="ident">ObjType</span>,
     <span class="doccomment">/// The id of the parent object, root has no parent.</span>
-    <span class="kw">pub</span> <span class="ident">parent</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ObjId</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">parent</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ObjId</span><span class="op">&gt;</span>,
 }
 
 <span class="kw">impl</span> <span class="ident">OpTree</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>() -&gt; <span class="self">Self</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>() -&gt; <span class="self">Self</span> {
         <span class="self">Self</span> {
             <span class="ident">internal</span>: <span class="ident">Default::default</span>(),
             <span class="ident">objtype</span>: <span class="ident">ObjType::Map</span>,
@@ -777,34 +777,34 @@
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>)]</span>
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">OpTreeNode</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">elements</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Op</span><span class="op">&gt;</span>,
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">children</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">OpTreeNode</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span> <span class="ident">index</span>: <span class="ident">Index</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">elements</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Op</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">index</span>: <span class="ident">Index</span>,
     <span class="ident">length</span>: <span class="ident">usize</span>,
 }
 
 <span class="kw">impl</span> <span class="ident">OpTreeInternal</span> {
     <span class="doccomment">/// Construct a new, empty, sequence.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>() -&gt; <span class="self">Self</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>() -&gt; <span class="self">Self</span> {
         <span class="self">Self</span> { <span class="ident">root_node</span>: <span class="prelude-val">None</span> }
     }
 
     <span class="doccomment">/// Get the length of the sequence.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">len</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">len</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
         <span class="self">self</span>.<span class="ident">root_node</span>.<span class="ident">as_ref</span>().<span class="ident">map_or</span>(<span class="number">0</span>, <span class="op">|</span><span class="ident">n</span><span class="op">|</span> <span class="ident">n</span>.<span class="ident">len</span>())
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">keys</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">query::Keys</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">keys</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">query::Keys</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">root_node</span>.<span class="ident">as_ref</span>().<span class="ident">map</span>(<span class="ident">query::Keys::new</span>)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">keys_at</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">clock</span>: <span class="ident">Clock</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">query::KeysAt</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">keys_at</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">clock</span>: <span class="ident">Clock</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">query::KeysAt</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">root_node</span>
             .<span class="ident">as_ref</span>()
             .<span class="ident">map</span>(<span class="op">|</span><span class="ident">root</span><span class="op">|</span> <span class="ident">query::KeysAt::new</span>(<span class="ident">root</span>, <span class="ident">clock</span>))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">range</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">R</span>: <span class="ident">RangeBounds</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span><span class="op">&gt;</span>(
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">range</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">R</span>: <span class="ident">RangeBounds</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span><span class="op">&gt;</span>(
         <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="self">self</span>,
         <span class="ident">range</span>: <span class="ident">R</span>,
         <span class="ident">meta</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">OpSetMetadata</span>,
@@ -814,7 +814,7 @@
             .<span class="ident">map</span>(<span class="op">|</span><span class="ident">node</span><span class="op">|</span> <span class="ident">query::Range::new</span>(<span class="ident">range</span>, <span class="ident">node</span>, <span class="ident">meta</span>))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">range_at</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">R</span>: <span class="ident">RangeBounds</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span><span class="op">&gt;</span>(
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">range_at</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">R</span>: <span class="ident">RangeBounds</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span><span class="op">&gt;</span>(
         <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="self">self</span>,
         <span class="ident">range</span>: <span class="ident">R</span>,
         <span class="ident">meta</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">OpSetMetadata</span>,
@@ -825,7 +825,7 @@
             .<span class="ident">map</span>(<span class="op">|</span><span class="ident">node</span><span class="op">|</span> <span class="ident">query::RangeAt::new</span>(<span class="ident">range</span>, <span class="ident">node</span>, <span class="ident">meta</span>, <span class="ident">clock</span>))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">search</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>: <span class="lifetime">&#39;a</span>, <span class="ident">Q</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="lifetime">&#39;b</span> <span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">query</span>: <span class="ident">Q</span>, <span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">OpSetMetadata</span>) -&gt; <span class="ident">Q</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">search</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>: <span class="lifetime">&#39;a</span>, <span class="ident">Q</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="lifetime">&#39;b</span> <span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">query</span>: <span class="ident">Q</span>, <span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">OpSetMetadata</span>) -&gt; <span class="ident">Q</span>
     <span class="kw">where</span>
         <span class="ident">Q</span>: <span class="ident">TreeQuery</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
     {
@@ -839,7 +839,7 @@
     }
 
     <span class="doccomment">/// Create an iterator through the sequence.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">iter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Iter</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">iter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Iter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span> {
         <span class="ident">Iter</span> {
             <span class="ident">inner</span>: <span class="self">self</span>,
             <span class="ident">index</span>: <span class="number">0</span>,
@@ -851,7 +851,7 @@
     <span class="doccomment">/// # Panics</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// Panics if `index &gt; len`.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">insert</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">index</span>: <span class="ident">usize</span>, <span class="ident">element</span>: <span class="ident">Op</span>) {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">insert</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">index</span>: <span class="ident">usize</span>, <span class="ident">element</span>: <span class="ident">Op</span>) {
         <span class="kw">let</span> <span class="ident">old_len</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">len</span>();
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">root</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">root_node</span>.<span class="ident">as_mut</span>() {
             <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">debug_assertions</span>)]</span>
@@ -894,12 +894,12 @@
     }
 
     <span class="doccomment">/// Get the `element` at `index` in the sequence.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">index</span>: <span class="ident">usize</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">Op</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">get</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">index</span>: <span class="ident">usize</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">Op</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">root_node</span>.<span class="ident">as_ref</span>().<span class="ident">and_then</span>(<span class="op">|</span><span class="ident">n</span><span class="op">|</span> <span class="ident">n</span>.<span class="ident">get</span>(<span class="ident">index</span>))
     }
 
     <span class="comment">// this replaces get_mut() because it allows the indexes to update correctly</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">update</span><span class="op">&lt;</span><span class="ident">F</span><span class="op">&gt;</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">index</span>: <span class="ident">usize</span>, <span class="ident">f</span>: <span class="ident">F</span>)
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">update</span><span class="op">&lt;</span><span class="ident">F</span><span class="op">&gt;</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">index</span>: <span class="ident">usize</span>, <span class="ident">f</span>: <span class="ident">F</span>)
     <span class="kw">where</span>
         <span class="ident">F</span>: <span class="ident">FnMut</span>(<span class="kw-2">&amp;mut</span> <span class="ident">Op</span>),
     {
@@ -913,7 +913,7 @@
     <span class="doccomment">/// # Panics</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// Panics if `index` is out of bounds.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">remove</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">index</span>: <span class="ident">usize</span>) -&gt; <span class="ident">Op</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">remove</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">index</span>: <span class="ident">usize</span>) -&gt; <span class="ident">Op</span> {
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">root</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">root_node</span>.<span class="ident">as_mut</span>() {
             <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">debug_assertions</span>)]</span>
             <span class="kw">let</span> <span class="ident">len</span> <span class="op">=</span> <span class="ident">root</span>.<span class="ident">check</span>();
@@ -946,7 +946,7 @@
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">search</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>: <span class="lifetime">&#39;a</span>, <span class="ident">Q</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="lifetime">&#39;b</span> <span class="self">self</span>, <span class="ident">query</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Q</span>, <span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">OpSetMetadata</span>) -&gt; <span class="ident">bool</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">search</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>: <span class="lifetime">&#39;a</span>, <span class="ident">Q</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="lifetime">&#39;b</span> <span class="self">self</span>, <span class="ident">query</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Q</span>, <span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">OpSetMetadata</span>) -&gt; <span class="ident">bool</span>
     <span class="kw">where</span>
         <span class="ident">Q</span>: <span class="ident">TreeQuery</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
     {
@@ -978,7 +978,7 @@
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">len</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">len</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
         <span class="self">self</span>.<span class="ident">length</span>
     }
 
@@ -1227,7 +1227,7 @@
         <span class="ident">l</span>
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">remove</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">index</span>: <span class="ident">usize</span>) -&gt; <span class="ident">Op</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">remove</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">index</span>: <span class="ident">usize</span>) -&gt; <span class="ident">Op</span> {
         <span class="kw">let</span> <span class="ident">original_len</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">len</span>();
         <span class="kw">if</span> <span class="self">self</span>.<span class="ident">is_leaf</span>() {
             <span class="kw">let</span> <span class="ident">v</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">remove_from_leaf</span>(<span class="ident">index</span>);
@@ -1286,7 +1286,7 @@
     <span class="doccomment">/// Update the operation at the given index using the provided function.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// This handles updating the indices after the update.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">update</span><span class="op">&lt;</span><span class="ident">F</span><span class="op">&gt;</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">index</span>: <span class="ident">usize</span>, <span class="ident">f</span>: <span class="ident">F</span>) -&gt; (<span class="ident">Op</span>, <span class="kw-2">&amp;</span><span class="ident">Op</span>)
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">update</span><span class="op">&lt;</span><span class="ident">F</span><span class="op">&gt;</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">index</span>: <span class="ident">usize</span>, <span class="ident">f</span>: <span class="ident">F</span>) -&gt; (<span class="ident">Op</span>, <span class="kw-2">&amp;</span><span class="ident">Op</span>)
     <span class="kw">where</span>
         <span class="ident">F</span>: <span class="ident">FnOnce</span>(<span class="kw-2">&amp;mut</span> <span class="ident">Op</span>),
     {
@@ -1322,7 +1322,7 @@
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">last</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">Op</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">last</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">Op</span> {
         <span class="kw">if</span> <span class="self">self</span>.<span class="ident">is_leaf</span>() {
             <span class="comment">// node is never empty so this is safe</span>
             <span class="self">self</span>.<span class="ident">elements</span>.<span class="ident">last</span>().<span class="ident">unwrap</span>()
@@ -1332,7 +1332,7 @@
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">index</span>: <span class="ident">usize</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">Op</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">get</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">index</span>: <span class="ident">usize</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">Op</span><span class="op">&gt;</span> {
         <span class="kw">if</span> <span class="self">self</span>.<span class="ident">is_leaf</span>() {
             <span class="kw">return</span> <span class="self">self</span>.<span class="ident">elements</span>.<span class="ident">get</span>(<span class="ident">index</span>);
         } <span class="kw">else</span> {

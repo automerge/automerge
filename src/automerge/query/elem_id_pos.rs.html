@@ -70,7 +70,7 @@
 }
 
 <span class="kw">impl</span> <span class="ident">ElemIdPos</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">elemid</span>: <span class="ident">ElemId</span>) -&gt; <span class="self">Self</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">elemid</span>: <span class="ident">ElemId</span>) -&gt; <span class="self">Self</span> {
         <span class="self">Self</span> {
             <span class="ident">elemid</span>,
             <span class="ident">pos</span>: <span class="number">0</span>,
@@ -78,7 +78,7 @@
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">index</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">index</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
         <span class="kw">if</span> <span class="self">self</span>.<span class="ident">found</span> {
             <span class="prelude-val">Some</span>(<span class="self">self</span>.<span class="ident">pos</span>)
         } <span class="kw">else</span> {
