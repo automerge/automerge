@@ -12,6 +12,10 @@ criterion = "0.3.5"
 json = "0.12.4"
 rand = "^0.8"
 
+[[bin]]
+name = "edit-trace"
+doc = false
+
 [[bench]]
 name = "main"
 harness = false
