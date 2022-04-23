@@ -6,13 +6,13 @@ use std::fmt::Debug;
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Prop<'a> {
     key: Key,
-    pub ops: Vec<&'a Op>,
-    pub ops_pos: Vec<usize>,
-    pub pos: usize,
+    pub(crate) ops: Vec<&'a Op>,
+    pub(crate) ops_pos: Vec<usize>,
+    pub(crate) pos: usize,
 }
 
 impl<'a> Prop<'a> {
-    pub fn new(prop: usize) -> Self {
+    pub(crate) fn new(prop: usize) -> Self {
         Prop {
             key: Key::Map(prop),
             ops: vec![],

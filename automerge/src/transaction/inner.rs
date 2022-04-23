@@ -8,7 +8,7 @@ use crate::{change::export_change, types::Op, Automerge, ChangeHash, Prop};
 use crate::{AutomergeError, ObjType, OpObserver, OpType, ScalarValue};
 
 #[derive(Debug, Clone)]
-pub struct TransactionInner {
+pub(crate) struct TransactionInner {
     pub(crate) actor: usize,
     pub(crate) seq: u64,
     pub(crate) start_op: NonZeroU64,
@@ -21,13 +21,13 @@ pub struct TransactionInner {
 }
 
 impl TransactionInner {
-    pub fn pending_ops(&self) -> usize {
+    pub(crate) fn pending_ops(&self) -> usize {
         self.operations.len()
     }
 
     /// Commit the operations performed in this transaction, returning the hashes corresponding to
     /// the new heads.
-    pub fn commit<Obs: OpObserver>(
+    pub(crate) fn commit<Obs: OpObserver>(
         mut self,
         doc: &mut Automerge,
         message: Option<String>,
@@ -72,7 +72,7 @@ impl TransactionInner {
 
     /// Undo the operations added in this transaction, returning the number of cancelled
     /// operations.
-    pub fn rollback(self, doc: &mut Automerge) -> usize {
+    pub(crate) fn rollback(self, doc: &mut Automerge) -> usize {
         let num = self.pending_ops();
         // remove in reverse order so sets are removed before makes etc...
         for (obj, _prop, op) in self.operations.into_iter().rev() {
@@ -108,7 +108,7 @@ impl TransactionInner {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    pub fn put<P: Into<Prop>, V: Into<ScalarValue>>(
+    pub(crate) fn put<P: Into<Prop>, V: Into<ScalarValue>>(
         &mut self,
         doc: &mut Automerge,
         ex_obj: &ExId,
@@ -135,7 +135,7 @@ impl TransactionInner {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    pub fn put_object<P: Into<Prop>>(
+    pub(crate) fn put_object<P: Into<Prop>>(
         &mut self,
         doc: &mut Automerge,
         ex_obj: &ExId,
@@ -175,7 +175,7 @@ impl TransactionInner {
         self.operations.push((obj, prop, op));
     }
 
-    pub fn insert<V: Into<ScalarValue>>(
+    pub(crate) fn insert<V: Into<ScalarValue>>(
         &mut self,
         doc: &mut Automerge,
         ex_obj: &ExId,
@@ -188,7 +188,7 @@ impl TransactionInner {
         Ok(())
     }
 
-    pub fn insert_object(
+    pub(crate) fn insert_object(
         &mut self,
         doc: &mut Automerge,
         ex_obj: &ExId,
@@ -329,7 +329,7 @@ impl TransactionInner {
         Ok(Some(id))
     }
 
-    pub fn increment<P: Into<Prop>>(
+    pub(crate) fn increment<P: Into<Prop>>(
         &mut self,
         doc: &mut Automerge,
         obj: &ExId,
@@ -341,7 +341,7 @@ impl TransactionInner {
         Ok(())
     }
 
-    pub fn delete<P: Into<Prop>>(
+    pub(crate) fn delete<P: Into<Prop>>(
         &mut self,
         doc: &mut Automerge,
         ex_obj: &ExId,
@@ -355,7 +355,7 @@ impl TransactionInner {
 
     /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
     /// the new elements
-    pub fn splice(
+    pub(crate) fn splice(
         &mut self,
         doc: &mut Automerge,
         ex_obj: &ExId,

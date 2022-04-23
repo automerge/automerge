@@ -43,10 +43,10 @@ pub struct InvalidActorId(pub String);
 #[derive(Error, Debug, PartialEq)]
 #[error("Invalid scalar value, expected {expected} but received {unexpected}")]
 pub(crate) struct InvalidScalarValue {
-    pub raw_value: ScalarValue,
-    pub datatype: DataType,
-    pub unexpected: String,
-    pub expected: String,
+    pub(crate) raw_value: ScalarValue,
+    pub(crate) datatype: DataType,
+    pub(crate) unexpected: String,
+    pub(crate) expected: String,
 }
 
 #[derive(Error, Debug, PartialEq)]

@@ -125,13 +125,13 @@ pub enum InvalidChangeError {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Decoder<'a> {
-    pub offset: usize,
-    pub last_read: usize,
+    pub(crate) offset: usize,
+    pub(crate) last_read: usize,
     data: Cow<'a, [u8]>,
 }
 
 impl<'a> Decoder<'a> {
-    pub fn new(data: Cow<'a, [u8]>) -> Self {
+    pub(crate) fn new(data: Cow<'a, [u8]>) -> Self {
         Decoder {
             offset: 0,
             last_read: 0,
@@ -139,7 +139,7 @@ impl<'a> Decoder<'a> {
         }
     }
 
-    pub fn read<T: Decodable + Debug>(&mut self) -> Result<T, Error> {
+    pub(crate) fn read<T: Decodable + Debug>(&mut self) -> Result<T, Error> {
         let mut buf = &self.data[self.offset..];
         let init_len = buf.len();
         let val = T::decode::<&[u8]>(&mut buf).ok_or(Error::NoDecodedValue)?;
@@ -153,7 +153,7 @@ impl<'a> Decoder<'a> {
         }
     }
 
-    pub fn read_bytes(&mut self, index: usize) -> Result<&[u8], Error> {
+    pub(crate) fn read_bytes(&mut self, index: usize) -> Result<&[u8], Error> {
         if self.offset + index > self.data.len() {
             Err(Error::TryingToReadPastEnd)
         } else {
@@ -164,7 +164,7 @@ impl<'a> Decoder<'a> {
         }
     }
 
-    pub fn done(&self) -> bool {
+    pub(crate) fn done(&self) -> bool {
         self.offset >= self.data.len()
     }
 }
@@ -212,7 +212,7 @@ impl<'a> Iterator for BooleanDecoder<'a> {
 /// See discussion on [`crate::encoding::RleEncoder`] for the format data is stored in.
 #[derive(Debug)]
 pub(crate) struct RleDecoder<'a, T> {
-    pub decoder: Decoder<'a>,
+    pub(crate) decoder: Decoder<'a>,
     last_value: Option<T>,
     count: isize,
     literal: bool,

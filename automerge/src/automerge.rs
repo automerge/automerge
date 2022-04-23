@@ -101,7 +101,7 @@ impl Automerge {
     }
 
     /// Start a transaction.
-    pub fn transaction(&mut self) -> Transaction {
+    pub fn transaction(&mut self) -> Transaction<'_> {
         Transaction {
             inner: Some(self.transaction_inner()),
             doc: self,
@@ -137,7 +137,7 @@ impl Automerge {
     /// afterwards.
     pub fn transact<F, O, E>(&mut self, f: F) -> transaction::Result<O, E>
     where
-        F: FnOnce(&mut Transaction) -> Result<O, E>,
+        F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
     {
         let mut tx = self.transaction();
         let result = f(&mut tx);
@@ -156,7 +156,7 @@ impl Automerge {
     /// Like [`Self::transact`] but with a function for generating the commit options.
     pub fn transact_with<'a, F, O, E, C, Obs>(&mut self, c: C, f: F) -> transaction::Result<O, E>
     where
-        F: FnOnce(&mut Transaction) -> Result<O, E>,
+        F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
         C: FnOnce(&O) -> CommitOptions<'a, Obs>,
         Obs: 'a + OpObserver,
     {
@@ -230,7 +230,7 @@ impl Automerge {
     }
 
     /// Get an iterator over the parents of an object.
-    pub fn parents(&self, obj: ExId) -> Parents {
+    pub fn parents(&self, obj: ExId) -> Parents<'_> {
         Parents { obj, doc: self }
     }
 
@@ -259,7 +259,7 @@ impl Automerge {
     ///
     /// For a map this returns the keys of the map.
     /// For a list this returns the element ids (opids) encoded as strings.
-    pub fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys {
+    pub fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_, '_> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
             let iter_keys = self.ops.keys(obj);
             Keys::new(self, iter_keys)
@@ -269,7 +269,7 @@ impl Automerge {
     }
 
     /// Historical version of [`keys`](Self::keys).
-    pub fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt {
+    pub fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt<'_, '_> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
             let clock = self.clock_at(heads);
             KeysAt::new(self, self.ops.keys_at(obj, clock))
@@ -279,7 +279,7 @@ impl Automerge {
     }
 
     /// Iterate over the keys and values of the map `obj` in the given range.
-    pub fn range<O: AsRef<ExId>, R: RangeBounds<String>>(&self, obj: O, range: R) -> Range<R> {
+    pub fn range<O: AsRef<ExId>, R: RangeBounds<String>>(&self, obj: O, range: R) -> Range<'_, R> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
             let iter_range = self.ops.range(obj, range);
             Range::new(self, iter_range)
@@ -294,7 +294,7 @@ impl Automerge {
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> RangeAt<R> {
+    ) -> RangeAt<'_, R> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
             let clock = self.clock_at(heads);
             let iter_range = self.ops.range_at(obj, range, clock);
@@ -308,7 +308,7 @@ impl Automerge {
     ///
     /// For a map the keys are the keys of the map.
     /// For a list the keys are the element ids (opids) encoded as strings.
-    pub fn values<O: AsRef<ExId>>(&self, obj: O) -> Values {
+    pub fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
             let iter_range = self.ops.range(obj, ..);
             Values::new(self, iter_range)
@@ -318,7 +318,7 @@ impl Automerge {
     }
 
     /// Historical version of [`values`](Self::values).
-    pub fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> ValuesAt {
+    pub fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> ValuesAt<'_> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
             let clock = self.clock_at(heads);
             let iter_range = self.ops.range_at(obj, .., clock);
@@ -437,7 +437,7 @@ impl Automerge {
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Option<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
         Ok(self.get_all(obj, prop.into())?.last().cloned())
     }
 
@@ -447,7 +447,7 @@ impl Automerge {
         obj: O,
         prop: P,
         heads: &[ChangeHash],
-    ) -> Result<Option<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
         Ok(self.get_all_at(obj, prop, heads)?.last().cloned())
     }
 
@@ -459,7 +459,7 @@ impl Automerge {
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
         let result = match prop.into() {
             Prop::Map(p) => {
@@ -492,7 +492,7 @@ impl Automerge {
         obj: O,
         prop: P,
         heads: &[ChangeHash],
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         let prop = prop.into();
         let obj = self.exid_to_obj(obj.as_ref())?;
         let clock = self.clock_at(heads);
@@ -529,7 +529,7 @@ impl Automerge {
     /// Load a document.
     pub fn load_with<Obs: OpObserver>(
         data: &[u8],
-        options: ApplyOptions<Obs>,
+        options: ApplyOptions<'_, Obs>,
     ) -> Result<Self, AutomergeError> {
         let changes = Change::load_document(data)?;
         let mut doc = Self::new();
@@ -546,7 +546,7 @@ impl Automerge {
     pub fn load_incremental_with<Obs: OpObserver>(
         &mut self,
         data: &[u8],
-        options: ApplyOptions<Obs>,
+        options: ApplyOptions<'_, Obs>,
     ) -> Result<usize, AutomergeError> {
         let changes = Change::load_document(data)?;
         let start = self.ops.len();
@@ -577,7 +577,7 @@ impl Automerge {
     pub fn apply_changes_with<I: IntoIterator<Item = Change>, Obs: OpObserver>(
         &mut self,
         changes: I,
-        mut options: ApplyOptions<Obs>,
+        mut options: ApplyOptions<'_, Obs>,
     ) -> Result<(), AutomergeError> {
         for c in changes {
             if !self.history_index.contains_key(&c.hash) {
@@ -1052,14 +1052,14 @@ impl Default for Automerge {
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
-pub struct SpanInfo {
-    pub id: ExId,
-    pub time: i64,
-    pub start: usize,
-    pub end: usize,
+pub(crate) struct SpanInfo {
+    pub(crate) id: ExId,
+    pub(crate) time: i64,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
     #[serde(rename = "type")]
-    pub span_type: String,
-    pub value: ScalarValue,
+    pub(crate) span_type: String,
+    pub(crate) value: ScalarValue,
 }
 
 #[cfg(test)]

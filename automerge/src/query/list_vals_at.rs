@@ -6,13 +6,13 @@ use std::fmt::Debug;
 pub(crate) struct ListValsAt {
     clock: Clock,
     last_elem: Option<ElemId>,
-    pub ops: Vec<Op>,
+    pub(crate) ops: Vec<Op>,
     window: VisWindow,
     pos: usize,
 }
 
 impl ListValsAt {
-    pub fn new(clock: Clock) -> Self {
+    pub(crate) fn new(clock: Clock) -> Self {
         ListValsAt {
             clock,
             last_elem: None,

@@ -9,15 +9,15 @@ pub(crate) struct SeekOp<'a> {
     /// the op we are looking for
     op: &'a Op,
     /// The position to insert at
-    pub pos: usize,
+    pub(crate) pos: usize,
     /// The indices of ops that this op overwrites
-    pub succ: Vec<usize>,
+    pub(crate) succ: Vec<usize>,
     /// whether a position has been found
     found: bool,
 }
 
 impl<'a> SeekOp<'a> {
-    pub fn new(op: &'a Op) -> Self {
+    pub(crate) fn new(op: &'a Op) -> Self {
         SeekOp {
             op,
             succ: vec![],

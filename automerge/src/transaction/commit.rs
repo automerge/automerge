@@ -1,5 +1,5 @@
 /// Optional metadata for a commit.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct CommitOptions<'a, Obs> {
     pub message: Option<String>,
     pub time: Option<i64>,

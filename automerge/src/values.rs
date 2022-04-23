@@ -3,6 +3,7 @@ use std::ops::RangeFull;
 
 use crate::{query, Automerge};
 
+#[derive(Debug)]
 pub struct Values<'a> {
     range: Option<query::Range<'a, RangeFull>>,
     doc: &'a Automerge,

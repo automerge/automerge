@@ -338,7 +338,7 @@ impl Encodable for &[ChangeHash] {
     }
 }
 
-fn decode_hashes(decoder: &mut Decoder) -> Result<Vec<ChangeHash>, decoding::Error> {
+fn decode_hashes(decoder: &mut Decoder<'_>) -> Result<Vec<ChangeHash>, decoding::Error> {
     let length = decoder.read::<u32>()?;
     let mut hashes = Vec::with_capacity(length as usize);
 

@@ -9,13 +9,13 @@ pub(crate) struct NthAt {
     seen: usize,
     last_seen: Option<ElemId>,
     window: VisWindow,
-    pub ops: Vec<Op>,
-    pub ops_pos: Vec<usize>,
-    pub pos: usize,
+    pub(crate) ops: Vec<Op>,
+    pub(crate) ops_pos: Vec<usize>,
+    pub(crate) pos: usize,
 }
 
 impl NthAt {
-    pub fn new(target: usize, clock: Clock) -> Self {
+    pub(crate) fn new(target: usize, clock: Clock) -> Self {
         NthAt {
             clock,
             target,

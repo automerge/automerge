@@ -4,7 +4,7 @@ use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LenAt {
-    pub len: usize,
+    pub(crate) len: usize,
     clock: Clock,
     pos: usize,
     last: Option<ElemId>,
@@ -12,7 +12,7 @@ pub(crate) struct LenAt {
 }
 
 impl LenAt {
-    pub fn new(clock: Clock) -> Self {
+    pub(crate) fn new(clock: Clock) -> Self {
         LenAt {
             clock,
             pos: 0,

@@ -97,23 +97,23 @@ pub trait Transactable {
     }
 
     /// Get the keys of the given object, it should be a map.
-    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys;
+    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_, '_>;
 
     /// Get the keys of the given object at a point in history.
-    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt;
+    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt<'_, '_>;
 
-    fn range<O: AsRef<ExId>, R: RangeBounds<String>>(&self, obj: O, range: R) -> Range<R>;
+    fn range<O: AsRef<ExId>, R: RangeBounds<String>>(&self, obj: O, range: R) -> Range<'_, R>;
 
     fn range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
         &self,
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> RangeAt<R>;
+    ) -> RangeAt<'_, R>;
 
-    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values;
+    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_>;
 
-    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> ValuesAt;
+    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> ValuesAt<'_>;
 
     /// Get the length of the given object.
     fn length<O: AsRef<ExId>>(&self, obj: O) -> usize;
@@ -139,7 +139,7 @@ pub trait Transactable {
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Option<(Value, ExId)>, AutomergeError>;
+    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError>;
 
     /// Get the value at this prop in the object at a point in history.
     fn get_at<O: AsRef<ExId>, P: Into<Prop>>(
@@ -147,26 +147,26 @@ pub trait Transactable {
         obj: O,
         prop: P,
         heads: &[ChangeHash],
-    ) -> Result<Option<(Value, ExId)>, AutomergeError>;
+    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError>;
 
     fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError>;
+    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError>;
 
     fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
         heads: &[ChangeHash],
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError>;
+    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError>;
 
     /// Get the object id of the object that contains this object and the prop that this object is
     /// at in that object.
     fn parent_object<O: AsRef<ExId>>(&self, obj: O) -> Option<(ExId, Prop)>;
 
-    fn parents(&self, obj: ExId) -> Parents;
+    fn parents(&self, obj: ExId) -> Parents<'_>;
 
     fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Vec<(ExId, Prop)> {
         let mut path = self.parents(obj.as_ref().clone()).collect::<Vec<_>>();

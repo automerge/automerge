@@ -289,7 +289,7 @@ pub(crate) struct DepsIterator<'a> {
 }
 
 impl<'a> DepsIterator<'a> {
-    pub fn new(bytes: &'a [u8], ops: &'a HashMap<u32, Range<usize>>) -> Self {
+    pub(crate) fn new(bytes: &'a [u8], ops: &'a HashMap<u32, Range<usize>>) -> Self {
         Self {
             num: col_iter(bytes, ops, DOC_DEPS_NUM),
             dep: col_iter(bytes, ops, DOC_DEPS_INDEX),
@@ -491,25 +491,25 @@ impl<'a> Iterator for ObjIterator<'a> {
 
 #[derive(PartialEq, Debug, Clone)]
 pub(crate) struct DocChange {
-    pub actor: usize,
-    pub seq: u64,
-    pub max_op: u64,
-    pub time: i64,
-    pub message: Option<String>,
-    pub extra_bytes: Vec<u8>,
-    pub ops: Vec<DocOp>,
+    pub(crate) actor: usize,
+    pub(crate) seq: u64,
+    pub(crate) max_op: u64,
+    pub(crate) time: i64,
+    pub(crate) message: Option<String>,
+    pub(crate) extra_bytes: Vec<u8>,
+    pub(crate) ops: Vec<DocOp>,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct DocOp {
-    pub actor: usize,
-    pub ctr: u64,
-    pub action: OpType,
-    pub obj: amp::ObjectId,
-    pub key: amp::Key,
-    pub succ: Vec<(u64, usize)>,
-    pub pred: Vec<(u64, usize)>,
-    pub insert: bool,
+    pub(crate) actor: usize,
+    pub(crate) ctr: u64,
+    pub(crate) action: OpType,
+    pub(crate) obj: amp::ObjectId,
+    pub(crate) key: amp::Key,
+    pub(crate) succ: Vec<(u64, usize)>,
+    pub(crate) pred: Vec<(u64, usize)>,
+    pub(crate) insert: bool,
 }
 
 impl Ord for DocOp {
@@ -1121,7 +1121,10 @@ pub(crate) struct ColumnEncoder {
 }
 
 impl ColumnEncoder {
-    pub fn encode_ops<'a, I>(ops: I, actors: &[ActorId]) -> (Vec<u8>, HashMap<u32, Range<usize>>)
+    pub(crate) fn encode_ops<'a, I>(
+        ops: I,
+        actors: &[ActorId],
+    ) -> (Vec<u8>, HashMap<u32, Range<usize>>)
     where
         I: IntoIterator<Item = &'a amp::Op>,
     {
