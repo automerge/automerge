@@ -1,6 +1,7 @@
 use automerge::transaction::Transactable;
 use automerge::{
-    ActorId, ApplyOptions, AutoCommit, Automerge, AutomergeError, ObjType, ScalarValue, Value, VecOpObserver, ROOT,
+    ActorId, ApplyOptions, AutoCommit, Automerge, AutomergeError, ObjType, ScalarValue, Value,
+    VecOpObserver, ROOT,
 };
 
 mod helpers;
