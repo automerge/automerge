@@ -3,6 +3,7 @@ use std::ops::RangeBounds;
 
 use crate::{query, Automerge};
 
+#[derive(Debug)]
 pub struct Range<'a, R: RangeBounds<String>> {
     range: Option<query::Range<'a, R>>,
     doc: &'a Automerge,
