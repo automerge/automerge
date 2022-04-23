@@ -22,7 +22,7 @@ pub(crate) struct InsertNth {
 }
 
 impl InsertNth {
-    pub fn new(target: usize) -> Self {
+    pub(crate) fn new(target: usize) -> Self {
         let (valid, last_valid_insert) = if target == 0 {
             (Some(0), Some(HEAD))
         } else {
@@ -39,11 +39,11 @@ impl InsertNth {
         }
     }
 
-    pub fn pos(&self) -> usize {
+    pub(crate) fn pos(&self) -> usize {
         self.valid.unwrap_or(self.n)
     }
 
-    pub fn key(&self) -> Result<Key, AutomergeError> {
+    pub(crate) fn key(&self) -> Result<Key, AutomergeError> {
         Ok(self
             .last_valid_insert
             .ok_or(AutomergeError::InvalidIndex(self.target))?

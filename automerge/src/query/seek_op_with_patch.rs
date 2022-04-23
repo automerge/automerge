@@ -7,17 +7,17 @@ use std::fmt::Debug;
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SeekOpWithPatch<'a> {
     op: Op,
-    pub pos: usize,
-    pub succ: Vec<usize>,
+    pub(crate) pos: usize,
+    pub(crate) succ: Vec<usize>,
     found: bool,
-    pub seen: usize,
+    pub(crate) seen: usize,
     last_seen: Option<ElemId>,
-    pub values: Vec<&'a Op>,
-    pub had_value_before: bool,
+    pub(crate) values: Vec<&'a Op>,
+    pub(crate) had_value_before: bool,
 }
 
 impl<'a> SeekOpWithPatch<'a> {
-    pub fn new(op: &Op) -> Self {
+    pub(crate) fn new(op: &Op) -> Self {
         SeekOpWithPatch {
             op: op.clone(),
             succ: vec![],

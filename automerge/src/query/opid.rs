@@ -13,7 +13,7 @@ pub(crate) struct OpIdSearch {
 }
 
 impl OpIdSearch {
-    pub fn new(target: OpId) -> Self {
+    pub(crate) fn new(target: OpId) -> Self {
         OpIdSearch {
             target,
             pos: 0,
@@ -23,7 +23,7 @@ impl OpIdSearch {
     }
 
     /// Get the index of the operation, if found.
-    pub fn index(&self) -> Option<usize> {
+    pub(crate) fn index(&self) -> Option<usize> {
         if self.found {
             Some(self.pos)
         } else {
@@ -31,7 +31,7 @@ impl OpIdSearch {
         }
     }
 
-    pub fn key(&self) -> &Option<Key> {
+    pub(crate) fn key(&self) -> &Option<Key> {
         &self.key
     }
 }

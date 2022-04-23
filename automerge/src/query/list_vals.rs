@@ -6,11 +6,11 @@ use std::fmt::Debug;
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ListVals {
     last_elem: Option<ElemId>,
-    pub ops: Vec<Op>,
+    pub(crate) ops: Vec<Op>,
 }
 
 impl ListVals {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         ListVals {
             last_elem: None,
             ops: vec![],

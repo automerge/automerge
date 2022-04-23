@@ -9,8 +9,8 @@ use wasm_bindgen::JsCast;
 
 use crate::{ObjId, ScalarValue, Value};
 
-pub(crate) struct JS(pub JsValue);
-pub(crate) struct AR(pub Array);
+pub(crate) struct JS(pub(crate) JsValue);
+pub(crate) struct AR(pub(crate) Array);
 
 impl From<AR> for JsValue {
     fn from(ar: AR) -> Self {

@@ -20,14 +20,14 @@ pub(crate) const B: usize = 16;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct OpTree {
-    pub internal: OpTreeInternal,
-    pub objtype: ObjType,
+    pub(crate) internal: OpTreeInternal,
+    pub(crate) objtype: ObjType,
     /// The id of the parent object, root has no parent.
-    pub parent: Option<ObjId>,
+    pub(crate) parent: Option<ObjId>,
 }
 
 impl OpTree {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             internal: Default::default(),
             objtype: ObjType::Map,
@@ -43,34 +43,34 @@ pub(crate) struct OpTreeInternal {
 
 #[derive(Clone, Debug)]
 pub(crate) struct OpTreeNode {
-    pub(crate) elements: Vec<Op>,
     pub(crate) children: Vec<OpTreeNode>,
-    pub index: Index,
+    pub(crate) elements: Vec<Op>,
+    pub(crate) index: Index,
     length: usize,
 }
 
 impl OpTreeInternal {
     /// Construct a new, empty, sequence.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { root_node: None }
     }
 
     /// Get the length of the sequence.
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.root_node.as_ref().map_or(0, |n| n.len())
     }
 
-    pub fn keys(&self) -> Option<query::Keys> {
+    pub(crate) fn keys(&self) -> Option<query::Keys<'_>> {
         self.root_node.as_ref().map(query::Keys::new)
     }
 
-    pub fn keys_at(&self, clock: Clock) -> Option<query::KeysAt> {
+    pub fn keys_at(&self, clock: Clock) -> Option<query::KeysAt<'_>> {
         self.root_node
             .as_ref()
             .map(|root| query::KeysAt::new(root, clock))
     }
 
-    pub fn range<'a, R: RangeBounds<String>>(
+    pub(crate) fn range<'a, R: RangeBounds<String>>(
         &'a self,
         range: R,
         meta: &'a OpSetMetadata,
@@ -80,7 +80,7 @@ impl OpTreeInternal {
             .map(|node| query::Range::new(range, node, meta))
     }
 
-    pub fn range_at<'a, R: RangeBounds<String>>(
+    pub(crate) fn range_at<'a, R: RangeBounds<String>>(
         &'a self,
         range: R,
         meta: &'a OpSetMetadata,
@@ -91,7 +91,7 @@ impl OpTreeInternal {
             .map(|node| query::RangeAt::new(range, node, meta, clock))
     }
 
-    pub fn search<'a, 'b: 'a, Q>(&'b self, mut query: Q, m: &OpSetMetadata) -> Q
+    pub(crate) fn search<'a, 'b: 'a, Q>(&'b self, mut query: Q, m: &OpSetMetadata) -> Q
     where
         Q: TreeQuery<'a>,
     {
@@ -105,7 +105,7 @@ impl OpTreeInternal {
     }
 
     /// Create an iterator through the sequence.
-    pub fn iter(&self) -> Iter {
+    pub fn iter(&self) -> Iter<'_> {
         Iter {
             inner: self,
             index: 0,
@@ -117,7 +117,7 @@ impl OpTreeInternal {
     /// # Panics
     ///
     /// Panics if `index > len`.
-    pub fn insert(&mut self, index: usize, element: Op) {
+    pub(crate) fn insert(&mut self, index: usize, element: Op) {
         let old_len = self.len();
         if let Some(root) = self.root_node.as_mut() {
             #[cfg(debug_assertions)]
@@ -160,12 +160,12 @@ impl OpTreeInternal {
     }
 
     /// Get the `element` at `index` in the sequence.
-    pub fn get(&self, index: usize) -> Option<&Op> {
+    pub(crate) fn get(&self, index: usize) -> Option<&Op> {
         self.root_node.as_ref().and_then(|n| n.get(index))
     }
 
     // this replaces get_mut() because it allows the indexes to update correctly
-    pub fn update<F>(&mut self, index: usize, f: F)
+    pub(crate) fn update<F>(&mut self, index: usize, f: F)
     where
         F: FnMut(&mut Op),
     {
@@ -179,7 +179,7 @@ impl OpTreeInternal {
     /// # Panics
     ///
     /// Panics if `index` is out of bounds.
-    pub fn remove(&mut self, index: usize) -> Op {
+    pub(crate) fn remove(&mut self, index: usize) -> Op {
         if let Some(root) = self.root_node.as_mut() {
             #[cfg(debug_assertions)]
             let len = root.check();
@@ -212,7 +212,7 @@ impl OpTreeNode {
         }
     }
 
-    pub fn search<'a, 'b: 'a, Q>(&'b self, query: &mut Q, m: &OpSetMetadata) -> bool
+    pub(crate) fn search<'a, 'b: 'a, Q>(&'b self, query: &mut Q, m: &OpSetMetadata) -> bool
     where
         Q: TreeQuery<'a>,
     {

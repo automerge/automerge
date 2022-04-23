@@ -10,7 +10,7 @@ pub(crate) struct ElemIdPos {
 }
 
 impl ElemIdPos {
-    pub fn new(elemid: ElemId) -> Self {
+    pub(crate) fn new(elemid: ElemId) -> Self {
         Self {
             elemid,
             pos: 0,
@@ -18,7 +18,7 @@ impl ElemIdPos {
         }
     }
 
-    pub fn index(&self) -> Option<usize> {
+    pub(crate) fn index(&self) -> Option<usize> {
         if self.found {
             Some(self.pos)
         } else {

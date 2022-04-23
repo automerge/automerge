@@ -4,11 +4,11 @@ use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Len {
-    pub len: usize,
+    pub(crate) len: usize,
 }
 
 impl Len {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Len { len: 0 }
     }
 }

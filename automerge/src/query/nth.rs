@@ -11,13 +11,13 @@ pub(crate) struct Nth<'a> {
     /// last_seen is the target elemid of the last `seen` operation.
     /// It is used to avoid double counting visible elements (which arise through conflicts) that are split across nodes.
     last_seen: Option<ElemId>,
-    pub ops: Vec<&'a Op>,
-    pub ops_pos: Vec<usize>,
-    pub pos: usize,
+    pub(crate) ops: Vec<&'a Op>,
+    pub(crate) ops_pos: Vec<usize>,
+    pub(crate) pos: usize,
 }
 
 impl<'a> Nth<'a> {
-    pub fn new(target: usize) -> Self {
+    pub(crate) fn new(target: usize) -> Self {
         Nth {
             target,
             seen: 0,
@@ -29,7 +29,7 @@ impl<'a> Nth<'a> {
     }
 
     /// Get the key
-    pub fn key(&self) -> Result<Key, AutomergeError> {
+    pub(crate) fn key(&self) -> Result<Key, AutomergeError> {
         // the query collects the ops so we can use that to get the key they all use
         if let Some(e) = self.ops.first().and_then(|op| op.elemid()) {
             Ok(Key::Seq(e))

@@ -94,7 +94,7 @@ impl AutoCommit {
 
     pub fn load_with<Obs: OpObserver>(
         data: &[u8],
-        options: ApplyOptions<Obs>,
+        options: ApplyOptions<'_, Obs>,
     ) -> Result<Self, AutomergeError> {
         let doc = Automerge::load_with(data, options)?;
         Ok(Self {
@@ -125,7 +125,7 @@ impl AutoCommit {
     pub fn apply_changes_with<Obs: OpObserver>(
         &mut self,
         changes: Vec<Change>,
-        options: ApplyOptions<Obs>,
+        options: ApplyOptions<'_, Obs>,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.apply_changes_with(changes, options)
@@ -252,7 +252,7 @@ impl AutoCommit {
     /// i64;
     /// doc.commit_with::<()>(CommitOptions::default().with_message("Create todos list").with_time(now));
     /// ```
-    pub fn commit_with<Obs: OpObserver>(&mut self, options: CommitOptions<Obs>) -> ChangeHash {
+    pub fn commit_with<Obs: OpObserver>(&mut self, options: CommitOptions<'_, Obs>) -> ChangeHash {
         // ensure that even no changes triggers a change
         self.ensure_transaction_open();
         let tx = self.transaction.take().unwrap();
@@ -285,15 +285,15 @@ impl Transactable for AutoCommit {
     // PropAt::()
     // NthAt::()
 
-    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys {
+    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_, '_> {
         self.doc.keys(obj)
     }
 
-    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt {
+    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt<'_, '_> {
         self.doc.keys_at(obj, heads)
     }
 
-    fn range<O: AsRef<ExId>, R: RangeBounds<String>>(&self, obj: O, range: R) -> Range<R> {
+    fn range<O: AsRef<ExId>, R: RangeBounds<String>>(&self, obj: O, range: R) -> Range<'_, R> {
         self.doc.range(obj, range)
     }
 
@@ -302,15 +302,15 @@ impl Transactable for AutoCommit {
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> RangeAt<R> {
+    ) -> RangeAt<'_, R> {
         self.doc.range_at(obj, range, heads)
     }
 
-    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values {
+    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
         self.doc.values(obj)
     }
 
-    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> ValuesAt {
+    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> ValuesAt<'_> {
         self.doc.values_at(obj, heads)
     }
 
@@ -442,7 +442,7 @@ impl Transactable for AutoCommit {
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Option<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
         self.doc.get(obj, prop)
     }
 
@@ -451,7 +451,7 @@ impl Transactable for AutoCommit {
         obj: O,
         prop: P,
         heads: &[ChangeHash],
-    ) -> Result<Option<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
         self.doc.get_at(obj, prop, heads)
     }
 
@@ -459,7 +459,7 @@ impl Transactable for AutoCommit {
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         self.doc.get_all(obj, prop)
     }
 
@@ -468,7 +468,7 @@ impl Transactable for AutoCommit {
         obj: O,
         prop: P,
         heads: &[ChangeHash],
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         self.doc.get_all_at(obj, prop, heads)
     }
 
@@ -476,7 +476,7 @@ impl Transactable for AutoCommit {
         self.doc.parent_object(obj)
     }
 
-    fn parents(&self, obj: ExId) -> Parents {
+    fn parents(&self, obj: ExId) -> Parents<'_> {
         self.doc.parents(obj)
     }
 }

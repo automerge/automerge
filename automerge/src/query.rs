@@ -83,13 +83,13 @@ pub(crate) enum QueryResult {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Index {
     /// The map of visible elements to the number of operations targetting them.
-    pub visible: HashMap<ElemId, usize, FxBuildHasher>,
+    pub(crate) visible: HashMap<ElemId, usize, FxBuildHasher>,
     /// Set of opids found in this node and below.
-    pub ops: HashSet<OpId, FxBuildHasher>,
+    pub(crate) ops: HashSet<OpId, FxBuildHasher>,
 }
 
 impl Index {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Index {
             visible: Default::default(),
             ops: Default::default(),
@@ -97,11 +97,11 @@ impl Index {
     }
 
     /// Get the number of visible elements in this index.
-    pub fn visible_len(&self) -> usize {
+    pub(crate) fn visible_len(&self) -> usize {
         self.visible.len()
     }
 
-    pub fn has_visible(&self, e: &Option<ElemId>) -> bool {
+    pub(crate) fn has_visible(&self, e: &Option<ElemId>) -> bool {
         if let Some(seen) = e {
             self.visible.contains_key(seen)
         } else {
@@ -109,7 +109,7 @@ impl Index {
         }
     }
 
-    pub fn replace(&mut self, old: &Op, new: &Op) {
+    pub(crate) fn replace(&mut self, old: &Op, new: &Op) {
         if old.id != new.id {
             self.ops.remove(&old.id);
             self.ops.insert(new.id);
@@ -132,7 +132,7 @@ impl Index {
         }
     }
 
-    pub fn insert(&mut self, op: &Op) {
+    pub(crate) fn insert(&mut self, op: &Op) {
         self.ops.insert(op.id);
         if op.visible() {
             if let Some(elem) = op.elemid() {
@@ -141,7 +141,7 @@ impl Index {
         }
     }
 
-    pub fn remove(&mut self, op: &Op) {
+    pub(crate) fn remove(&mut self, op: &Op) {
         self.ops.remove(&op.id);
         if op.visible() {
             if let Some(elem) = op.elemid() {
@@ -158,7 +158,7 @@ impl Index {
         }
     }
 
-    pub fn merge(&mut self, other: &Index) {
+    pub(crate) fn merge(&mut self, other: &Index) {
         for id in &other.ops {
             self.ops.insert(*id);
         }
@@ -223,7 +223,7 @@ impl VisWindow {
         visible
     }
 
-    pub fn seen_op(&self, op: &Op, pos: usize) -> Vec<(usize, Op)> {
+    pub(crate) fn seen_op(&self, op: &Op, pos: usize) -> Vec<(usize, Op)> {
         let mut result = vec![];
         for pred in &op.pred {
             if let Some(entry) = self.counters.get(pred) {
