@@ -1,3 +1,7 @@
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg"
+)]
+
 #[doc(hidden)]
 #[macro_export]
 macro_rules! log {

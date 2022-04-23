@@ -1,3 +1,6 @@
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg"
+)]
 #![allow(clippy::unused_unit)]
 use am::transaction::CommitOptions;
 use am::transaction::Transactable;
