@@ -1,4 +1,4 @@
-name: ci
+name: Advisories
 on:
   schedule:
     - cron: '0 18 * * *'
