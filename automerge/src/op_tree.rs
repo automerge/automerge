@@ -64,7 +64,7 @@ impl OpTreeInternal {
         self.root_node.as_ref().map(query::Keys::new)
     }
 
-    pub fn keys_at(&self, clock: Clock) -> Option<query::KeysAt<'_>> {
+    pub(crate) fn keys_at(&self, clock: Clock) -> Option<query::KeysAt<'_>> {
         self.root_node
             .as_ref()
             .map(|root| query::KeysAt::new(root, clock))
@@ -105,7 +105,7 @@ impl OpTreeInternal {
     }
 
     /// Create an iterator through the sequence.
-    pub fn iter(&self) -> Iter<'_> {
+    pub(crate) fn iter(&self) -> Iter<'_> {
         Iter {
             inner: self,
             index: 0,
@@ -244,7 +244,7 @@ impl OpTreeNode {
         }
     }
 
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.length
     }
 
@@ -493,7 +493,7 @@ impl OpTreeNode {
         l
     }
 
-    pub fn remove(&mut self, index: usize) -> Op {
+    pub(crate) fn remove(&mut self, index: usize) -> Op {
         let original_len = self.len();
         if self.is_leaf() {
             let v = self.remove_from_leaf(index);
@@ -552,7 +552,7 @@ impl OpTreeNode {
     /// Update the operation at the given index using the provided function.
     ///
     /// This handles updating the indices after the update.
-    pub fn update<F>(&mut self, index: usize, f: F) -> (Op, &Op)
+    pub(crate) fn update<F>(&mut self, index: usize, f: F) -> (Op, &Op)
     where
         F: FnOnce(&mut Op),
     {
@@ -588,7 +588,7 @@ impl OpTreeNode {
         }
     }
 
-    pub fn last(&self) -> &Op {
+    pub(crate) fn last(&self) -> &Op {
         if self.is_leaf() {
             // node is never empty so this is safe
             self.elements.last().unwrap()
@@ -598,7 +598,7 @@ impl OpTreeNode {
         }
     }
 
-    pub fn get(&self, index: usize) -> Option<&Op> {
+    pub(crate) fn get(&self, index: usize) -> Option<&Op> {
         if self.is_leaf() {
             return self.elements.get(index);
         } else {

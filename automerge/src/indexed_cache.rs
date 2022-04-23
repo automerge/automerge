@@ -5,7 +5,7 @@ use std::ops::Index;
 
 #[derive(Debug, Clone)]
 pub(crate) struct IndexedCache<T> {
-    pub cache: Vec<T>,
+    pub(crate) cache: Vec<T>,
     lookup: HashMap<T, usize>,
 }
 
@@ -22,14 +22,14 @@ impl<T> IndexedCache<T>
 where
     T: Clone + Eq + Hash + Ord,
 {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         IndexedCache {
             cache: Default::default(),
             lookup: Default::default(),
         }
     }
 
-    pub fn cache(&mut self, item: T) -> usize {
+    pub(crate) fn cache(&mut self, item: T) -> usize {
         if let Some(n) = self.lookup.get(&item) {
             *n
         } else {
@@ -40,15 +40,15 @@ where
         }
     }
 
-    pub fn lookup(&self, item: &T) -> Option<usize> {
+    pub(crate) fn lookup(&self, item: &T) -> Option<usize> {
         self.lookup.get(item).cloned()
     }
 
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.cache.len()
     }
 
-    pub fn get(&self, index: usize) -> &T {
+    pub(crate) fn get(&self, index: usize) -> &T {
         &self.cache[index]
     }
 
@@ -58,14 +58,14 @@ where
     /// # Panics
     ///
     /// Panics on an empty cache.
-    pub fn remove_last(&mut self) -> T {
+    pub(crate) fn remove_last(&mut self) -> T {
         let last = self.cache.len() - 1;
         let t = self.cache.remove(last);
         self.lookup.remove(&t);
         t
     }
 
-    pub fn sorted(&self) -> IndexedCache<T> {
+    pub(crate) fn sorted(&self) -> IndexedCache<T> {
         let mut sorted = Self::new();
         self.cache.iter().sorted().cloned().for_each(|item| {
             let n = sorted.cache.len();
@@ -75,7 +75,7 @@ where
         sorted
     }
 
-    pub fn encode_index(&self) -> Vec<usize> {
+    pub(crate) fn encode_index(&self) -> Vec<usize> {
         let sorted: Vec<_> = self.cache.iter().sorted().cloned().collect();
         self.cache
             .iter()

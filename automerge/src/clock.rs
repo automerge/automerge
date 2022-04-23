@@ -7,18 +7,18 @@ use std::collections::HashMap;
 pub(crate) struct Clock(HashMap<usize, u64, FxBuildHasher>);
 
 impl Clock {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Clock(Default::default())
     }
 
-    pub fn include(&mut self, key: usize, n: u64) {
+    pub(crate) fn include(&mut self, key: usize, n: u64) {
         self.0
             .entry(key)
             .and_modify(|m| *m = cmp::max(n, *m))
             .or_insert(n);
     }
 
-    pub fn covers(&self, id: &OpId) -> bool {
+    pub(crate) fn covers(&self, id: &OpId) -> bool {
         if let Some(val) = self.0.get(&id.1) {
             val >= &id.0
         } else {

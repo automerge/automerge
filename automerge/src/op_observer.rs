@@ -10,7 +10,7 @@ pub trait OpObserver {
     /// - `index`: the index the new value has been inserted at.
     /// - `tagged_value`: the value that has been inserted and the id of the operation that did the
     /// insert.
-    fn insert(&mut self, objid: ExId, index: usize, tagged_value: (Value, ExId));
+    fn insert(&mut self, objid: ExId, index: usize, tagged_value: (Value<'_>, ExId));
 
     /// A new value has been put into the given object.
     ///
@@ -19,7 +19,7 @@ pub trait OpObserver {
     /// - `tagged_value`: the value that has been put into the object and the id of the operation
     /// that did the put.
     /// - `conflict`: whether this put conflicts with other operations.
-    fn put(&mut self, objid: ExId, key: Prop, tagged_value: (Value, ExId), conflict: bool);
+    fn put(&mut self, objid: ExId, key: Prop, tagged_value: (Value<'_>, ExId), conflict: bool);
 
     /// A counter has been incremented.
     ///
@@ -37,9 +37,9 @@ pub trait OpObserver {
 }
 
 impl OpObserver for () {
-    fn insert(&mut self, _objid: ExId, _index: usize, _tagged_value: (Value, ExId)) {}
+    fn insert(&mut self, _objid: ExId, _index: usize, _tagged_value: (Value<'_>, ExId)) {}
 
-    fn put(&mut self, _objid: ExId, _key: Prop, _tagged_value: (Value, ExId), _conflict: bool) {}
+    fn put(&mut self, _objid: ExId, _key: Prop, _tagged_value: (Value<'_>, ExId), _conflict: bool) {}
 
     fn increment(&mut self, _objid: ExId, _key: Prop, _tagged_value: (i64, ExId)) {}
 
@@ -61,7 +61,7 @@ impl VecOpObserver {
 }
 
 impl OpObserver for VecOpObserver {
-    fn insert(&mut self, obj_id: ExId, index: usize, (value, id): (Value, ExId)) {
+    fn insert(&mut self, obj_id: ExId, index: usize, (value, id): (Value<'_>, ExId)) {
         self.patches.push(Patch::Insert {
             obj: obj_id,
             index,
@@ -69,7 +69,7 @@ impl OpObserver for VecOpObserver {
         });
     }
 
-    fn put(&mut self, objid: ExId, key: Prop, (value, id): (Value, ExId), conflict: bool) {
+    fn put(&mut self, objid: ExId, key: Prop, (value, id): (Value<'_>, ExId), conflict: bool) {
         self.patches.push(Patch::Put {
             obj: objid,
             key,

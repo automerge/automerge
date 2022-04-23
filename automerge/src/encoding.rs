@@ -42,7 +42,7 @@ pub(crate) struct BooleanEncoder {
 }
 
 impl BooleanEncoder {
-    pub fn new() -> BooleanEncoder {
+    pub(crate) fn new() -> BooleanEncoder {
         BooleanEncoder {
             buf: Vec::new(),
             last: false,
@@ -50,7 +50,7 @@ impl BooleanEncoder {
         }
     }
 
-    pub fn append(&mut self, value: bool) {
+    pub(crate) fn append(&mut self, value: bool) {
         if value == self.last {
             self.count += 1;
         } else {
@@ -60,7 +60,7 @@ impl BooleanEncoder {
         }
     }
 
-    pub fn finish(mut self, col: u32) -> ColData {
+    pub(crate) fn finish(mut self, col: u32) -> ColData {
         if self.count > 0 {
             self.count.encode(&mut self.buf).ok();
         }
@@ -79,24 +79,24 @@ pub(crate) struct DeltaEncoder {
 }
 
 impl DeltaEncoder {
-    pub fn new() -> DeltaEncoder {
+    pub(crate) fn new() -> DeltaEncoder {
         DeltaEncoder {
             rle: RleEncoder::new(),
             absolute_value: 0,
         }
     }
 
-    pub fn append_value(&mut self, value: u64) {
+    pub(crate) fn append_value(&mut self, value: u64) {
         self.rle
             .append_value(value as i64 - self.absolute_value as i64);
         self.absolute_value = value;
     }
 
-    pub fn append_null(&mut self) {
+    pub(crate) fn append_null(&mut self) {
         self.rle.append_null();
     }
 
-    pub fn finish(self, col: u32) -> ColData {
+    pub(crate) fn finish(self, col: u32) -> ColData {
         self.rle.finish(col)
     }
 }
@@ -135,14 +135,14 @@ impl<T> RleEncoder<T>
 where
     T: Encodable + PartialEq + Clone,
 {
-    pub fn new() -> RleEncoder<T> {
+    pub(crate) fn new() -> RleEncoder<T> {
         RleEncoder {
             buf: Vec::new(),
             state: RleState::Empty,
         }
     }
 
-    pub fn finish(mut self, col: u32) -> ColData {
+    pub(crate) fn finish(mut self, col: u32) -> ColData {
         match self.take_state() {
             // this covers `only_nulls`
             RleState::NullRun(size) => {
@@ -184,7 +184,7 @@ where
         state
     }
 
-    pub fn append_null(&mut self) {
+    pub(crate) fn append_null(&mut self) {
         self.state = match self.take_state() {
             RleState::Empty => RleState::NullRun(1),
             RleState::NullRun(size) => RleState::NullRun(size + 1),
@@ -204,7 +204,7 @@ where
         }
     }
 
-    pub fn append_value(&mut self, value: T) {
+    pub(crate) fn append_value(&mut self, value: T) {
         self.state = match self.take_state() {
             RleState::Empty => RleState::LoneVal(value),
             RleState::LoneVal(other) => {
@@ -348,14 +348,14 @@ impl Encodable for i32 {
 
 #[derive(Debug)]
 pub(crate) struct ColData {
-    pub col: u32,
-    pub data: Vec<u8>,
+    pub(crate) col: u32,
+    pub(crate) data: Vec<u8>,
     #[cfg(debug_assertions)]
     has_been_deflated: bool,
 }
 
 impl ColData {
-    pub fn new(col_id: u32, data: Vec<u8>) -> ColData {
+    pub(crate) fn new(col_id: u32, data: Vec<u8>) -> ColData {
         ColData {
             col: col_id,
             data,
@@ -364,7 +364,7 @@ impl ColData {
         }
     }
 
-    pub fn encode_col_len<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+    pub(crate) fn encode_col_len<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
         let mut len = 0;
         if !self.data.is_empty() {
             len += self.col.encode(buf)?;
@@ -373,7 +373,7 @@ impl ColData {
         Ok(len)
     }
 
-    pub fn deflate(&mut self) {
+    pub(crate) fn deflate(&mut self) {
         #[cfg(debug_assertions)]
         {
             debug_assert!(!self.has_been_deflated);
