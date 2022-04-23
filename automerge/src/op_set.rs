@@ -77,7 +77,11 @@ impl OpSetInternal {
         }
     }
 
-    pub(crate) fn range<R: RangeBounds<String>>(&self, obj: ObjId, range: R) -> Option<query::Range<'_, R>> {
+    pub(crate) fn range<R: RangeBounds<String>>(
+        &self,
+        obj: ObjId,
+        range: R,
+    ) -> Option<query::Range<'_, R>> {
         if let Some(tree) = self.trees.get(&obj) {
             tree.internal.range(range, &self.m)
         } else {
@@ -244,7 +248,7 @@ impl OpSetInternal {
     }
 
     #[cfg(feature = "optree-visualisation")]
-    pub fn visualise(&self) -> String {
+    pub(crate) fn visualise(&self) -> String {
         let mut out = Vec::new();
         let graph = super::visualisation::GraphVisualisation::construct(&self.trees, &self.m);
         dot::render(&graph, &mut out).unwrap();

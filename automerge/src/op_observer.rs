@@ -39,7 +39,8 @@ pub trait OpObserver {
 impl OpObserver for () {
     fn insert(&mut self, _objid: ExId, _index: usize, _tagged_value: (Value<'_>, ExId)) {}
 
-    fn put(&mut self, _objid: ExId, _key: Prop, _tagged_value: (Value<'_>, ExId), _conflict: bool) {}
+    fn put(&mut self, _objid: ExId, _key: Prop, _tagged_value: (Value<'_>, ExId), _conflict: bool) {
+    }
 
     fn increment(&mut self, _objid: ExId, _key: Prop, _tagged_value: (i64, ExId)) {}
 

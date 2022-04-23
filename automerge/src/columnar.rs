@@ -1121,7 +1121,10 @@ pub(crate) struct ColumnEncoder {
 }
 
 impl ColumnEncoder {
-    pub(crate) fn encode_ops<'a, I>(ops: I, actors: &[ActorId]) -> (Vec<u8>, HashMap<u32, Range<usize>>)
+    pub(crate) fn encode_ops<'a, I>(
+        ops: I,
+        actors: &[ActorId],
+    ) -> (Vec<u8>, HashMap<u32, Range<usize>>)
     where
         I: IntoIterator<Item = &'a amp::Op>,
     {
