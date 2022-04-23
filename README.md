@@ -1,5 +1,7 @@
 # Automerge RS
 
+<img src='./img/sign.svg' width='500' alt='Automerge logo' />
+
 [![main docs](https://img.shields.io/badge/docs--main-published-informational)](https://automerge.org/automerge-rs/automerge/)
 [![ci](https://github.com/automerge/automerge-rs/actions/workflows/ci.yaml/badge.svg)](https://github.com/automerge/automerge-rs/actions/workflows/ci.yaml)
 [![homepage](https://img.shields.io/badge/homepage-published-informational)](https://automerge.org/)
