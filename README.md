@@ -1,6 +1,7 @@
 # Automerge RS
 
 [![main docs](https://img.shields.io/badge/docs--main-published-brightgreen)](https://automerge.org/automerge-rs/automerge/)
+[![ci](https://github.com/automerge/automerge-rs/actions/workflows/ci.yaml/badge.svg)](https://github.com/automerge/automerge-rs/actions/workflows/ci.yaml)
 
 This is a rust implementation of the [Automerge](https://github.com/automerge/automerge) file format and network protocol.
 
