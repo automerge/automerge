@@ -1,1 +1,1 @@
-window.ALL_CRATES = ["automerge","automerge_wasm","edit_trace"];
+window.ALL_CRATES = ["automerge","automerge_wasm"];
