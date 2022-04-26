@@ -72,6 +72,106 @@ fn criterion_benchmark(c: &mut Criterion) {
         );
     }
     group.finish();
+
+    let mut group = c.benchmark_group("map save");
+    for size in &sizes {
+        group.throughput(criterion::Throughput::Elements(*size));
+        group.bench_with_input(BenchmarkId::new("repeated put", size), size, |b, &size| {
+            b.iter_batched(
+                || repeated_put(size),
+                |mut doc| doc.save(),
+                criterion::BatchSize::LargeInput,
+            )
+        });
+        group.bench_with_input(
+            BenchmarkId::new("repeated increment", size),
+            size,
+            |b, &size| {
+                b.iter_batched(
+                    || repeated_increment(size),
+                    |mut doc| doc.save(),
+                    criterion::BatchSize::LargeInput,
+                )
+            },
+        );
+
+        group.throughput(criterion::Throughput::Elements(*size));
+        group.bench_with_input(
+            BenchmarkId::new("increasing put", size),
+            size,
+            |b, &size| {
+                b.iter_batched(
+                    || increasing_put(size),
+                    |mut doc| doc.save(),
+                    criterion::BatchSize::LargeInput,
+                )
+            },
+        );
+
+        group.throughput(criterion::Throughput::Elements(*size));
+        group.bench_with_input(
+            BenchmarkId::new("decreasing put", size),
+            size,
+            |b, &size| {
+                b.iter_batched(
+                    || decreasing_put(size),
+                    |mut doc| doc.save(),
+                    criterion::BatchSize::LargeInput,
+                )
+            },
+        );
+    }
+    group.finish();
+
+    let mut group = c.benchmark_group("map load");
+    for size in &sizes {
+        group.throughput(criterion::Throughput::Elements(*size));
+        group.bench_with_input(BenchmarkId::new("repeated put", size), size, |b, &size| {
+            b.iter_batched(
+                || repeated_put(size).save(),
+                |bytes| Automerge::load(&bytes).unwrap(),
+                criterion::BatchSize::LargeInput,
+            )
+        });
+        group.bench_with_input(
+            BenchmarkId::new("repeated increment", size),
+            size,
+            |b, &size| {
+                b.iter_batched(
+                    || repeated_increment(size).save(),
+                    |bytes| Automerge::load(&bytes).unwrap(),
+                    criterion::BatchSize::LargeInput,
+                )
+            },
+        );
+
+        group.throughput(criterion::Throughput::Elements(*size));
+        group.bench_with_input(
+            BenchmarkId::new("increasing put", size),
+            size,
+            |b, &size| {
+                b.iter_batched(
+                    || increasing_put(size).save(),
+                    |bytes| Automerge::load(&bytes).unwrap(),
+                    criterion::BatchSize::LargeInput,
+                )
+            },
+        );
+
+        group.throughput(criterion::Throughput::Elements(*size));
+        group.bench_with_input(
+            BenchmarkId::new("decreasing put", size),
+            size,
+            |b, &size| {
+                b.iter_batched(
+                    || decreasing_put(size).save(),
+                    |bytes| Automerge::load(&bytes).unwrap(),
+                    criterion::BatchSize::LargeInput,
+                )
+            },
+        );
+    }
+    group.finish();
 }
 
 criterion_group!(benches, criterion_benchmark);
