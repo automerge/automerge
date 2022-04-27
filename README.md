@@ -75,7 +75,7 @@ To build and test the wasm library:
   $ yarn release
 ```
 
-And finally to test the js library. This is where most of the tests reside.
+To test the js library. This is where most of the tests reside.
 
 ```shell
   ## setup
@@ -86,6 +86,24 @@ And finally to test the js library. This is where most of the tests reside.
   ## testing
   $ yarn test
 ```
+
+And finally, to build and test the C bindings with CMake:
+
+```shell
+## setup
+$ cd automerge-c
+$ mkdir -p build
+$ cd build
+$ cmake -S .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
+## building and testing
+$ cmake --build .
+```
+To add debugging symbols, replace `Release` with `Debug`.
+To build a shared library instead of a static one, replace `OFF` with `ON`.
+
+The C bindings can be built and tested on any platform for which CMake is
+available but the steps for doing so vary across platforms and are too numerous
+to list here.
 
 ## Benchmarking
 
