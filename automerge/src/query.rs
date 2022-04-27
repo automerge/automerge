@@ -86,6 +86,8 @@ pub(crate) trait TreeQuery<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum QueryResult {
     Next,
+    /// Skip this many elements, only allowed from the root node.
+    Skip(usize),
     Descend,
     Finish,
 }

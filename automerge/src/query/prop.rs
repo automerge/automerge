@@ -47,16 +47,12 @@ impl<'a> TreeQuery<'a> for Prop<'a> {
             // in the root node find the first op position for the key
             let start = binary_search_by(child, |op| m.key_cmp(&op.key, &self.key));
             self.start = Some(start);
-            QueryResult::Descend
+            self.pos = start;
+            QueryResult::Skip(start)
         }
     }
 
     fn query_element(&mut self, op: &'a Op) -> QueryResult {
-        // skip to our start
-        if self.pos < self.start.unwrap() {
-            self.pos += 1;
-            return QueryResult::Next;
-        }
         // don't bother looking at things past our key
         if op.key != self.key {
             return QueryResult::Finish;
