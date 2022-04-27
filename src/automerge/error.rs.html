@@ -71,6 +71,8 @@
 <span id="64">64</span>
 <span id="65">65</span>
 <span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::types</span>::{<span class="ident">ActorId</span>, <span class="ident">ScalarValue</span>};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::value::DataType</span>;
 <span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">decoding</span>, <span class="ident">encoding</span>, <span class="ident">ChangeHash</span>};
@@ -100,6 +102,8 @@
     <span class="ident">MissingCounter</span>,
     <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;general failure&quot;</span>)]</span>
     <span class="ident">Fail</span>,
+    <span class="attribute">#[<span class="ident">error</span>(<span class="ident">transparent</span>)]</span>
+    <span class="ident">HexDecode</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident">hex::FromHexError</span>),
 }
 
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;wasm&quot;</span>)]</span>
