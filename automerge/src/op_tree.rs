@@ -6,35 +6,14 @@ use std::{
 };
 
 pub(crate) use crate::op_set::OpSetMetadata;
+use crate::types::{Op, OpId};
 use crate::{
     clock::Clock,
     query::{self, Index, QueryResult, TreeQuery},
 };
-use crate::{
-    types::{ObjId, Op, OpId},
-    ObjType,
-};
 use std::collections::HashSet;
 
 pub(crate) const B: usize = 16;
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct OpTree {
-    pub(crate) internal: OpTreeInternal,
-    pub(crate) objtype: ObjType,
-    /// The id of the parent object, root has no parent.
-    pub(crate) parent: Option<ObjId>,
-}
-
-impl OpTree {
-    pub(crate) fn new() -> Self {
-        Self {
-            internal: Default::default(),
-            objtype: ObjType::Map,
-            parent: None,
-        }
-    }
-}
 
 #[derive(Clone, Debug)]
 pub(crate) struct OpTreeInternal {

@@ -6,14 +6,14 @@ use std::fmt::Debug;
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct InsertProp<'a> {
     key: Key,
-    pub ops: Vec<&'a Op>,
-    pub ops_pos: Vec<usize>,
-    pub pos: usize,
+    pub(crate) ops: Vec<&'a Op>,
+    pub(crate) ops_pos: Vec<usize>,
+    pub(crate) pos: usize,
     start: Option<usize>,
 }
 
 impl<'a> InsertProp<'a> {
-    pub fn new(prop: usize) -> Self {
+    pub(crate) fn new(prop: usize) -> Self {
         InsertProp {
             key: Key::Map(prop),
             ops: vec![],

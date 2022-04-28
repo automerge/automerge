@@ -6,7 +6,6 @@ use crate::op_tree::{OpSetMetadata, OpTreeInternal};
 use crate::query::{self, TreeQuery};
 use crate::types::{Key, ObjId};
 use crate::types::{Op, OpId};
-use crate::Prop;
 use crate::{query::Keys, query::KeysAt, ObjType};
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -52,7 +51,7 @@ pub(crate) struct ObjectData {
     /// The operations pertaining to this object.
     pub(crate) ops: OpTreeInternal,
     /// The id of the parent object, root has no parent.
-    pub parent: Option<ObjId>,
+    pub(crate) parent: Option<ObjId>,
 }
 
 #[derive(Debug, Clone)]
@@ -73,7 +72,7 @@ impl PartialEq for ObjectDataCache {
 }
 
 impl ObjectData {
-    pub fn root() -> Self {
+    pub(crate) fn root() -> Self {
         ObjectData {
             cache: ObjectDataCache::Map(Default::default()),
             typ: ObjType::Map,
@@ -82,7 +81,7 @@ impl ObjectData {
         }
     }
 
-    pub fn new(typ: ObjType, parent: Option<ObjId>) -> Self {
+    pub(crate) fn new(typ: ObjType, parent: Option<ObjId>) -> Self {
         let internal = match typ {
             ObjType::Map | ObjType::Table => ObjectDataCache::Map(Default::default()),
             ObjType::List | ObjType::Text => ObjectDataCache::Seq(Default::default()),
@@ -95,15 +94,15 @@ impl ObjectData {
         }
     }
 
-    pub fn keys(&self) -> Option<Keys> {
+    pub(crate) fn keys(&self) -> Option<Keys<'_>> {
         self.ops.keys()
     }
 
-    pub fn keys_at(&self, clock: Clock) -> Option<KeysAt> {
+    pub(crate) fn keys_at(&self, clock: Clock) -> Option<KeysAt<'_>> {
         self.ops.keys_at(clock)
     }
 
-    pub fn range<'a, R: RangeBounds<Prop>>(
+    pub(crate) fn range<'a, R: RangeBounds<String>>(
         &'a self,
         range: R,
         meta: &'a OpSetMetadata,
@@ -111,7 +110,7 @@ impl ObjectData {
         self.ops.range(range, meta)
     }
 
-    pub fn range_at<'a, R: RangeBounds<Prop>>(
+    pub(crate) fn range_at<'a, R: RangeBounds<String>>(
         &'a self,
         range: R,
         meta: &'a OpSetMetadata,
@@ -120,7 +119,7 @@ impl ObjectData {
         self.ops.range_at(range, meta, clock)
     }
 
-    pub fn search<'a, 'b: 'a, Q>(&'b self, mut query: Q, metadata: &OpSetMetadata) -> Q
+    pub(crate) fn search<'a, 'b: 'a, Q>(&'b self, mut query: Q, metadata: &OpSetMetadata) -> Q
     where
         Q: TreeQuery<'a>,
     {
@@ -152,26 +151,26 @@ impl ObjectData {
         }
     }
 
-    pub fn update<F>(&mut self, index: usize, f: F)
+    pub(crate) fn update<F>(&mut self, index: usize, f: F)
     where
         F: FnOnce(&mut Op),
     {
         self.ops.update(index, f)
     }
 
-    pub fn remove(&mut self, index: usize) -> Op {
+    pub(crate) fn remove(&mut self, index: usize) -> Op {
         self.ops.remove(index)
     }
 
-    pub fn insert(&mut self, index: usize, op: Op) {
+    pub(crate) fn insert(&mut self, index: usize, op: Op) {
         self.ops.insert(index, op)
     }
 
-    pub fn typ(&self) -> ObjType {
+    pub(crate) fn typ(&self) -> ObjType {
         self.typ
     }
 
-    pub fn get(&self, index: usize) -> Option<&Op> {
+    pub(crate) fn get(&self, index: usize) -> Option<&Op> {
         self.ops.get(index)
     }
 }
