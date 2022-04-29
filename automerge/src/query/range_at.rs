@@ -15,6 +15,7 @@ pub(crate) struct RangeAt<'a, R: RangeBounds<String>> {
     range: R,
     index: usize,
     last_key: Option<Key>,
+    next_result: Option<(&'a str, Value<'a>, OpId)>,
 
     index_back: usize,
     last_key_back: Option<Key>,
@@ -36,6 +37,7 @@ impl<'a, R: RangeBounds<String>> RangeAt<'a, R> {
             range,
             index: 0,
             last_key: None,
+            next_result: None,
             index_back: root_child.len(),
             last_key_back: None,
             root_child,
@@ -52,18 +54,23 @@ impl<'a, R: RangeBounds<String>> Iterator for RangeAt<'a, R> {
             let op = self.root_child.get(i)?;
             let visible = self.window.visible_at(op, i, &self.clock);
             self.index += 1;
-            if Some(op.key) != self.last_key && visible {
-                self.last_key = Some(op.key);
+            if visible {
                 let prop = match op.key {
                     Key::Map(m) => self.meta.props.get(m),
-                    Key::Seq(_) => panic!("found list op in range query"),
+                    Key::Seq(_) => return None, // this is a list
                 };
                 if self.range.contains(prop) {
-                    return Some((prop, op.value(), op.id));
+                    let result = self.next_result.replace((prop, op.value(), op.id));
+                    if Some(op.key) != self.last_key {
+                        self.last_key = Some(op.key);
+                        if result.is_some() {
+                            return result;
+                        }
+                    }
                 }
             }
         }
-        None
+        self.next_result.take()
     }
 }
 
@@ -71,12 +78,13 @@ impl<'a, R: RangeBounds<String>> DoubleEndedIterator for RangeAt<'a, R> {
     fn next_back(&mut self) -> Option<Self::Item> {
         for i in (self.index..self.index_back).rev() {
             let op = self.root_child.get(i)?;
+            let visible = self.window.visible_at(op, i, &self.clock);
             self.index_back -= 1;
-            if Some(op.key) != self.last_key_back && op.visible() {
+            if Some(op.key) != self.last_key_back && visible {
                 self.last_key_back = Some(op.key);
                 let prop = match op.key {
                     Key::Map(m) => self.meta.props.get(m),
-                    Key::Seq(_) => panic!("can't iterate through lists backwards"),
+                    Key::Seq(_) => return None, // this is a list
                 };
                 if self.range.contains(prop) {
                     return Some((prop, op.value(), op.id));

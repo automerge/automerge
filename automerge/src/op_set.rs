@@ -102,6 +102,31 @@ impl OpSetInternal {
         }
     }
 
+    pub(crate) fn list_range<R: RangeBounds<usize>>(
+        &self,
+        obj: ObjId,
+        range: R,
+    ) -> Option<query::ListRange<'_, R>> {
+        if let Some(tree) = self.trees.get(&obj) {
+            tree.internal.list_range(range)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn list_range_at<R: RangeBounds<usize>>(
+        &self,
+        obj: ObjId,
+        range: R,
+        clock: Clock,
+    ) -> Option<query::ListRangeAt<'_, R>> {
+        if let Some(tree) = self.trees.get(&obj) {
+            tree.internal.list_range_at(range, clock)
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn search<'a, 'b: 'a, Q>(&'b self, obj: &ObjId, query: Q) -> Q
     where
         Q: TreeQuery<'a>,

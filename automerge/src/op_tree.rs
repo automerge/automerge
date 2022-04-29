@@ -91,6 +91,25 @@ impl OpTreeInternal {
             .map(|node| query::RangeAt::new(range, node, meta, clock))
     }
 
+    pub(crate) fn list_range<R: RangeBounds<usize>>(
+        &self,
+        range: R,
+    ) -> Option<query::ListRange<'_, R>> {
+        self.root_node
+            .as_ref()
+            .map(|node| query::ListRange::new(range, node))
+    }
+
+    pub(crate) fn list_range_at<R: RangeBounds<usize>>(
+        &self,
+        range: R,
+        clock: Clock,
+    ) -> Option<query::ListRangeAt<'_, R>> {
+        self.root_node
+            .as_ref()
+            .map(|node| query::ListRangeAt::new(range, clock, node))
+    }
+
     pub(crate) fn search<'a, 'b: 'a, Q>(&'b self, mut query: Q, m: &OpSetMetadata) -> Q
     where
         Q: TreeQuery<'a>,

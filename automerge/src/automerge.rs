@@ -310,7 +310,7 @@ impl Automerge {
     /// For a list the keys are the element ids (opids) encoded as strings.
     pub fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
-            let iter_range = self.ops.range(obj, ..);
+            let iter_range = self.ops.list_range(obj, ..);
             Values::new(self, iter_range)
         } else {
             Values::new(self, None)
@@ -321,7 +321,7 @@ impl Automerge {
     pub fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> ValuesAt<'_> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
             let clock = self.clock_at(heads);
-            let iter_range = self.ops.range_at(obj, .., clock);
+            let iter_range = self.ops.list_range_at(obj, .., clock);
             ValuesAt::new(self, iter_range)
         } else {
             ValuesAt::new(self, None)
@@ -1544,6 +1544,103 @@ mod tests {
                 ("d", 9.into(), ExId::Id(7, actor.clone(), 0)),
             ]
         );
+    }
+
+    #[test]
+    fn get_list_values() -> Result<(), AutomergeError> {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        let list = tx.put_object(ROOT, "list", ObjType::List)?;
+
+        // insert elements
+        tx.insert(&list, 0, "First")?;
+        tx.insert(&list, 1, "Second")?;
+        tx.insert(&list, 2, "Third")?;
+        tx.commit();
+
+        let v1 = doc1.get_heads();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc1.transaction();
+        tx.put(&list, 2, "Third V2")?;
+        tx.commit();
+
+        let mut tx = doc2.transaction();
+        tx.put(&list, 2, "Third V3")?;
+        tx.commit();
+
+        doc1.merge(&mut doc2)?;
+
+        assert_eq!(doc1.values(&list).count(), 3);
+
+        for (i, val1) in doc1.values(&list).enumerate() {
+            let val2 = doc1.get(&list, i)?;
+            assert_eq!(Some(val1), val2);
+        }
+
+        assert_eq!(doc1.values_at(&list, &v1).count(), 3);
+        for (i, val1) in doc1.values_at(&list, &v1).enumerate() {
+            let val2 = doc1.get_at(&list, i, &v1)?;
+            assert_eq!(Some(val1), val2);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn get_range_values() -> Result<(), AutomergeError> {
+        let mut doc1 = Automerge::new();
+        let mut tx = doc1.transaction();
+        tx.put(ROOT, "aa", "aaa")?;
+        tx.put(ROOT, "bb", "bbb")?;
+        tx.put(ROOT, "cc", "ccc")?;
+        tx.put(ROOT, "dd", "ddd")?;
+        tx.commit();
+
+        let v1 = doc1.get_heads();
+        let mut doc2 = doc1.fork();
+
+        let mut tx = doc1.transaction();
+        tx.put(ROOT, "cc", "ccc V2")?;
+        tx.commit();
+
+        let mut tx = doc2.transaction();
+        tx.put(ROOT, "cc", "ccc V3")?;
+        tx.commit();
+
+        doc1.merge(&mut doc2)?;
+
+        let range = "b".to_string().."d".to_string();
+
+        assert_eq!(doc1.range(ROOT, range.clone()).count(), 2);
+
+        for (key, val1, id) in doc1.range(ROOT, range.clone()) {
+            let val2 = doc1.get(ROOT, key)?;
+            assert_eq!(Some((val1, id)), val2);
+        }
+
+        assert_eq!(doc1.range(ROOT, range.clone()).rev().count(), 2);
+
+        for (key, val1, id) in doc1.range(ROOT, range.clone()).rev() {
+            let val2 = doc1.get(ROOT, key)?;
+            assert_eq!(Some((val1, id)), val2);
+        }
+
+        assert_eq!(doc1.range_at(ROOT, range.clone(), &v1).count(), 2);
+
+        for (key, val1, id) in doc1.range_at(ROOT, range.clone(), &v1) {
+            let val2 = doc1.get_at(ROOT, key, &v1)?;
+            assert_eq!(Some((val1, id)), val2);
+        }
+
+        assert_eq!(doc1.range_at(ROOT, range.clone(), &v1).rev().count(), 2);
+
+        for (key, val1, id) in doc1.range_at(ROOT, range, &v1).rev() {
+            let val2 = doc1.get_at(ROOT, key, &v1)?;
+            assert_eq!(Some((val1, id)), val2);
+        }
+
+        Ok(())
     }
 
     #[test]
