@@ -18,6 +18,9 @@ use std::collections::HashSet;
 
 pub(crate) const B: usize = 16;
 
+mod iter;
+pub(crate) use iter::OpTreeIter;
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct OpTree {
     pub(crate) internal: OpTreeInternal,
@@ -33,6 +36,10 @@ impl OpTree {
             objtype: ObjType::Map,
             parent: None,
         }
+    }
+
+    pub(crate) fn iter(&self) -> OpTreeIter<'_> {
+        self.internal.iter()
     }
 }
 
@@ -105,11 +112,8 @@ impl OpTreeInternal {
     }
 
     /// Create an iterator through the sequence.
-    pub(crate) fn iter(&self) -> Iter<'_> {
-        Iter {
-            inner: self,
-            index: 0,
-        }
+    pub(crate) fn iter(&self) -> OpTreeIter<'_> {
+        iter::OpTreeIter::new(self)
     }
 
     /// Insert the `element` into the sequence at `index`.

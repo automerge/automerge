@@ -1,7 +1,7 @@
 use crate::clock::Clock;
 use crate::exid::ExId;
 use crate::indexed_cache::IndexedCache;
-use crate::op_tree::OpTree;
+use crate::op_tree::{self, OpTree};
 use crate::query::{self, OpIdSearch, TreeQuery};
 use crate::types::{self, ActorId, Key, ObjId, Op, OpId, OpType};
 use crate::{ObjType, OpObserver};
@@ -45,13 +45,11 @@ impl OpSetInternal {
     }
 
     pub(crate) fn iter(&self) -> Iter<'_> {
-        let mut objs: Vec<_> = self.trees.keys().collect();
-        objs.sort_by(|a, b| self.m.lamport_cmp(a.0, b.0));
+        let mut objs: Vec<_> = self.trees.iter().collect();
+        objs.sort_by(|a, b| self.m.lamport_cmp((a.0).0, (b.0).0));
         Iter {
-            inner: self,
-            index: 0,
-            sub_index: 0,
-            objs,
+            trees: objs.into_iter(),
+            current: None,
         }
     }
 
@@ -272,30 +270,31 @@ impl<'a> IntoIterator for &'a OpSetInternal {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct Iter<'a> {
-    inner: &'a OpSetInternal,
-    index: usize,
-    objs: Vec<&'a ObjId>,
-    sub_index: usize,
+    trees: std::vec::IntoIter<(&'a ObjId, &'a op_tree::OpTree)>,
+    current: Option<(&'a ObjId, op_tree::OpTreeIter<'a>)>,
 }
-
 impl<'a> Iterator for Iter<'a> {
     type Item = (&'a ObjId, &'a Op);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut result = None;
-        for obj in self.objs.iter().skip(self.index) {
-            let tree = self.inner.trees.get(obj)?;
-            result = tree.internal.get(self.sub_index).map(|op| (*obj, op));
-            if result.is_some() {
-                self.sub_index += 1;
-                break;
-            } else {
-                self.index += 1;
-                self.sub_index = 0;
+        if let Some((id, tree)) = &mut self.current {
+            if let Some(next) = tree.next() {
+                return Some((id, next));
             }
         }
-        result
+
+        loop {
+            self.current = self.trees.next().map(|o| (o.0, o.1.iter()));
+            if let Some((obj, tree)) = &mut self.current {
+                if let Some(next) = tree.next() {
+                    return Some((obj, next));
+                }
+            } else {
+                return None;
+            }
+        }
     }
 }
 
