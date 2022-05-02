@@ -1,6 +1,6 @@
 use super::VisWindow;
 use crate::op_tree::OpTreeNode;
-use crate::types::{Clock, Key, OpId};
+use crate::types::{Clock, ElemId, OpId};
 use crate::Value;
 use std::fmt::Debug;
 use std::ops::RangeBounds;
@@ -10,7 +10,7 @@ pub(crate) struct ListRangeAt<'a, R: RangeBounds<usize>> {
     range: R,
     index: usize,
     pos: usize,
-    last_key: Option<Key>,
+    last_elemid: Option<ElemId>,
     next_result: Option<(usize, Value<'a>, OpId)>,
     index_back: usize,
     root_child: &'a OpTreeNode,
@@ -24,7 +24,7 @@ impl<'a, R: RangeBounds<usize>> ListRangeAt<'a, R> {
             range,
             index: 0, // FIXME root_child.seek_to_pos(range.start)
             pos: 0,   // FIXME range.start
-            last_key: None,
+            last_elemid: None,
             next_result: None,
             index_back: root_child.len(),
             root_child,
@@ -48,8 +48,8 @@ impl<'a, R: RangeBounds<usize>> Iterator for ListRangeAt<'a, R> {
                 if self.range.contains(&self.pos) {
                     result = self.next_result.replace((self.pos, op.value(), op.id));
                 }
-                if Some(op.key) != self.last_key {
-                    self.last_key = Some(op.key);
+                if op.elemid() != self.last_elemid {
+                    self.last_elemid = op.elemid();
                     self.pos += 1;
                     if result.is_some() {
                         return result;

@@ -74,10 +74,10 @@ impl OpTreeInternal {
         &'a self,
         range: R,
         meta: &'a OpSetMetadata,
-    ) -> Option<query::Range<'a, R>> {
+    ) -> Option<query::MapRange<'a, R>> {
         self.root_node
             .as_ref()
-            .map(|node| query::Range::new(range, node, meta))
+            .map(|node| query::MapRange::new(range, node, meta))
     }
 
     pub(crate) fn range_at<'a, R: RangeBounds<String>>(
@@ -85,10 +85,10 @@ impl OpTreeInternal {
         range: R,
         meta: &'a OpSetMetadata,
         clock: Clock,
-    ) -> Option<query::RangeAt<'a, R>> {
+    ) -> Option<query::MapRangeAt<'a, R>> {
         self.root_node
             .as_ref()
-            .map(|node| query::RangeAt::new(range, node, meta, clock))
+            .map(|node| query::MapRangeAt::new(range, node, meta, clock))
     }
 
     pub(crate) fn list_range<R: RangeBounds<usize>>(

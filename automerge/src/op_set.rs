@@ -81,7 +81,7 @@ impl OpSetInternal {
         &self,
         obj: ObjId,
         range: R,
-    ) -> Option<query::Range<'_, R>> {
+    ) -> Option<query::MapRange<'_, R>> {
         if let Some(tree) = self.trees.get(&obj) {
             tree.internal.range(range, &self.m)
         } else {
@@ -94,7 +94,7 @@ impl OpSetInternal {
         obj: ObjId,
         range: R,
         clock: Clock,
-    ) -> Option<query::RangeAt<'_, R>> {
+    ) -> Option<query::MapRangeAt<'_, R>> {
         if let Some(tree) = self.trees.get(&obj) {
             tree.internal.range_at(range, &self.m, clock)
         } else {

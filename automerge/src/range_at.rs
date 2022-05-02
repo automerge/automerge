@@ -5,12 +5,12 @@ use crate::{query, Automerge};
 
 #[derive(Debug)]
 pub struct RangeAt<'a, R: RangeBounds<String>> {
-    range: Option<query::RangeAt<'a, R>>,
+    range: Option<query::MapRangeAt<'a, R>>,
     doc: &'a Automerge,
 }
 
 impl<'a, R: RangeBounds<String>> RangeAt<'a, R> {
-    pub(crate) fn new(doc: &'a Automerge, range: Option<query::RangeAt<'a, R>>) -> Self {
+    pub(crate) fn new(doc: &'a Automerge, range: Option<query::MapRangeAt<'a, R>>) -> Self {
         Self { range, doc }
     }
 }

@@ -1547,6 +1547,19 @@ mod tests {
     }
 
     #[test]
+    fn insert_at_index() {
+        let mut doc = AutoCommit::new();
+
+        let list = &doc.put_object(ROOT, "list", ObjType::List).unwrap();
+        doc.insert(list, 0, 0).unwrap();
+        doc.insert(list, 0, 1).unwrap(); // both inserts at the same index
+
+        assert_eq!(doc.length(list), 2);
+        assert_eq!(doc.keys(list).count(), 2);
+        assert_eq!(doc.values(list).count(), 2); // it's just 1!
+    }
+
+    #[test]
     fn get_list_values() -> Result<(), AutomergeError> {
         let mut doc1 = Automerge::new();
         let mut tx = doc1.transaction();

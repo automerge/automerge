@@ -20,8 +20,8 @@ mod nth_at;
 mod opid;
 mod prop;
 mod prop_at;
-mod range;
-mod range_at;
+mod map_range;
+mod map_range_at;
 mod seek_op;
 mod seek_op_with_patch;
 
@@ -40,8 +40,8 @@ pub(crate) use nth_at::NthAt;
 pub(crate) use opid::OpIdSearch;
 pub(crate) use prop::Prop;
 pub(crate) use prop_at::PropAt;
-pub(crate) use range::Range;
-pub(crate) use range_at::RangeAt;
+pub(crate) use map_range::MapRange;
+pub(crate) use map_range_at::MapRangeAt;
 pub(crate) use seek_op::SeekOp;
 pub(crate) use seek_op_with_patch::SeekOpWithPatch;
 

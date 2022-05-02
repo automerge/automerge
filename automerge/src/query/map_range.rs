@@ -1,39 +1,24 @@
-use crate::clock::Clock;
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
 use crate::types::{Key, OpId};
 use crate::Value;
 use std::fmt::Debug;
 use std::ops::RangeBounds;
 
-use super::VisWindow;
-
 #[derive(Debug)]
-pub(crate) struct RangeAt<'a, R: RangeBounds<String>> {
-    clock: Clock,
-    window: VisWindow,
-
+pub(crate) struct MapRange<'a, R: RangeBounds<String>> {
     range: R,
     index: usize,
     last_key: Option<Key>,
     next_result: Option<(&'a str, Value<'a>, OpId)>,
-
     index_back: usize,
     last_key_back: Option<Key>,
-
     root_child: &'a OpTreeNode,
     meta: &'a OpSetMetadata,
 }
 
-impl<'a, R: RangeBounds<String>> RangeAt<'a, R> {
-    pub(crate) fn new(
-        range: R,
-        root_child: &'a OpTreeNode,
-        meta: &'a OpSetMetadata,
-        clock: Clock,
-    ) -> Self {
+impl<'a, R: RangeBounds<String>> MapRange<'a, R> {
+    pub(crate) fn new(range: R, root_child: &'a OpTreeNode, meta: &'a OpSetMetadata) -> Self {
         Self {
-            clock,
-            window: VisWindow::default(),
             range,
             index: 0,
             last_key: None,
@@ -46,15 +31,14 @@ impl<'a, R: RangeBounds<String>> RangeAt<'a, R> {
     }
 }
 
-impl<'a, R: RangeBounds<String>> Iterator for RangeAt<'a, R> {
+impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
     type Item = (&'a str, Value<'a>, OpId);
 
     fn next(&mut self) -> Option<Self::Item> {
         for i in self.index..self.index_back {
             let op = self.root_child.get(i)?;
-            let visible = self.window.visible_at(op, i, &self.clock);
             self.index += 1;
-            if visible {
+            if op.visible() {
                 let prop = match op.key {
                     Key::Map(m) => self.meta.props.get(m),
                     Key::Seq(_) => return None, // this is a list
@@ -74,13 +58,12 @@ impl<'a, R: RangeBounds<String>> Iterator for RangeAt<'a, R> {
     }
 }
 
-impl<'a, R: RangeBounds<String>> DoubleEndedIterator for RangeAt<'a, R> {
+impl<'a, R: RangeBounds<String>> DoubleEndedIterator for MapRange<'a, R> {
     fn next_back(&mut self) -> Option<Self::Item> {
         for i in (self.index..self.index_back).rev() {
             let op = self.root_child.get(i)?;
-            let visible = self.window.visible_at(op, i, &self.clock);
             self.index_back -= 1;
-            if Some(op.key) != self.last_key_back && visible {
+            if Some(op.key) != self.last_key_back && op.visible() {
                 self.last_key_back = Some(op.key);
                 let prop = match op.key {
                     Key::Map(m) => self.meta.props.get(m),
