@@ -732,6 +732,10 @@
 <span id="725">725</span>
 <span id="726">726</span>
 <span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std</span>::{
     <span class="ident">cmp</span>::{<span class="ident">min</span>, <span class="ident">Ordering</span>},
     <span class="ident">fmt::Debug</span>,
@@ -752,6 +756,9 @@
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const</span> <span class="ident">B</span>: <span class="ident">usize</span> <span class="op">=</span> <span class="number">16</span>;
 
+<span class="kw">mod</span> <span class="ident">iter</span>;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">iter::OpTreeIter</span>;
+
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>)]</span>
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">OpTree</span> {
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">internal</span>: <span class="ident">OpTreeInternal</span>,
@@ -767,6 +774,10 @@
             <span class="ident">objtype</span>: <span class="ident">ObjType::Map</span>,
             <span class="ident">parent</span>: <span class="prelude-val">None</span>,
         }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">iter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">OpTreeIter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span> {
+        <span class="self">self</span>.<span class="ident">internal</span>.<span class="ident">iter</span>()
     }
 }
 
@@ -839,11 +850,8 @@
     }
 
     <span class="doccomment">/// Create an iterator through the sequence.</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">iter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Iter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span> {
-        <span class="ident">Iter</span> {
-            <span class="ident">inner</span>: <span class="self">self</span>,
-            <span class="ident">index</span>: <span class="number">0</span>,
-        }
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">iter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">OpTreeIter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span> {
+        <span class="ident">iter::OpTreeIter::new</span>(<span class="self">self</span>)
     }
 
     <span class="doccomment">/// Insert the `element` into the sequence at `index`.</span>
