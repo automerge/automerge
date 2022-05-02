@@ -736,6 +736,54 @@
 <span id="729">729</span>
 <span id="730">730</span>
 <span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
+<span id="735">735</span>
+<span id="736">736</span>
+<span id="737">737</span>
+<span id="738">738</span>
+<span id="739">739</span>
+<span id="740">740</span>
+<span id="741">741</span>
+<span id="742">742</span>
+<span id="743">743</span>
+<span id="744">744</span>
+<span id="745">745</span>
+<span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+<span id="753">753</span>
+<span id="754">754</span>
+<span id="755">755</span>
+<span id="756">756</span>
+<span id="757">757</span>
+<span id="758">758</span>
+<span id="759">759</span>
+<span id="760">760</span>
+<span id="761">761</span>
+<span id="762">762</span>
+<span id="763">763</span>
+<span id="764">764</span>
+<span id="765">765</span>
+<span id="766">766</span>
+<span id="767">767</span>
+<span id="768">768</span>
+<span id="769">769</span>
+<span id="770">770</span>
+<span id="771">771</span>
+<span id="772">772</span>
+<span id="773">773</span>
+<span id="774">774</span>
+<span id="775">775</span>
+<span id="776">776</span>
+<span id="777">777</span>
+<span id="778">778</span>
+<span id="779">779</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std</span>::{
     <span class="ident">cmp</span>::{<span class="ident">min</span>, <span class="ident">Ordering</span>},
     <span class="ident">fmt::Debug</span>,
@@ -746,7 +794,7 @@
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::op_set::OpSetMetadata</span>;
 <span class="kw">use</span> <span class="kw">crate</span>::{
     <span class="ident">clock::Clock</span>,
-    <span class="ident">query</span>::{<span class="self">self</span>, <span class="ident">Index</span>, <span class="ident">QueryResult</span>, <span class="ident">TreeQuery</span>},
+    <span class="ident">query</span>::{<span class="self">self</span>, <span class="ident">Index</span>, <span class="ident">QueryResult</span>, <span class="ident">ReplaceArgs</span>, <span class="ident">TreeQuery</span>},
 };
 <span class="kw">use</span> <span class="kw">crate</span>::{
     <span class="ident">types</span>::{<span class="ident">ObjId</span>, <span class="ident">Op</span>, <span class="ident">OpId</span>},
@@ -843,7 +891,8 @@
         <span class="self">self</span>.<span class="ident">root_node</span>
             .<span class="ident">as_ref</span>()
             .<span class="ident">map</span>(<span class="op">|</span><span class="ident">root</span><span class="op">|</span> <span class="kw">match</span> <span class="ident">query</span>.<span class="ident">query_node_with_metadata</span>(<span class="ident">root</span>, <span class="ident">m</span>) {
-                <span class="ident">QueryResult::Descend</span> =&gt; <span class="ident">root</span>.<span class="ident">search</span>(<span class="kw-2">&amp;mut</span> <span class="ident">query</span>, <span class="ident">m</span>),
+                <span class="ident">QueryResult::Descend</span> =&gt; <span class="ident">root</span>.<span class="ident">search</span>(<span class="kw-2">&amp;mut</span> <span class="ident">query</span>, <span class="ident">m</span>, <span class="prelude-val">None</span>),
+                <span class="ident">QueryResult::Skip</span>(<span class="ident">skip</span>) =&gt; <span class="ident">root</span>.<span class="ident">search</span>(<span class="kw-2">&amp;mut</span> <span class="ident">query</span>, <span class="ident">m</span>, <span class="prelude-val">Some</span>(<span class="ident">skip</span>)),
                 <span class="kw">_</span> =&gt; <span class="bool-val">true</span>,
             });
         <span class="ident">query</span>
@@ -954,31 +1003,62 @@
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">search</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>: <span class="lifetime">&#39;a</span>, <span class="ident">Q</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="lifetime">&#39;b</span> <span class="self">self</span>, <span class="ident">query</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Q</span>, <span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">OpSetMetadata</span>) -&gt; <span class="ident">bool</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">search</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>: <span class="lifetime">&#39;a</span>, <span class="ident">Q</span><span class="op">&gt;</span>(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;b</span> <span class="self">self</span>,
+        <span class="ident">query</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Q</span>,
+        <span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">OpSetMetadata</span>,
+        <span class="ident">skip</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
+    ) -&gt; <span class="ident">bool</span>
     <span class="kw">where</span>
         <span class="ident">Q</span>: <span class="ident">TreeQuery</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
     {
         <span class="kw">if</span> <span class="self">self</span>.<span class="ident">is_leaf</span>() {
-            <span class="kw">for</span> <span class="ident">e</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">elements</span> {
+            <span class="kw">let</span> <span class="ident">skip</span> <span class="op">=</span> <span class="ident">skip</span>.<span class="ident">unwrap_or</span>(<span class="number">0</span>);
+            <span class="kw">for</span> <span class="ident">e</span> <span class="kw">in</span> <span class="self">self</span>.<span class="ident">elements</span>.<span class="ident">iter</span>().<span class="ident">skip</span>(<span class="ident">skip</span>) {
                 <span class="kw">if</span> <span class="ident">query</span>.<span class="ident">query_element_with_metadata</span>(<span class="ident">e</span>, <span class="ident">m</span>) <span class="op">==</span> <span class="ident">QueryResult::Finish</span> {
                     <span class="kw">return</span> <span class="bool-val">true</span>;
                 }
             }
             <span class="bool-val">false</span>
         } <span class="kw">else</span> {
+            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">skip</span> <span class="op">=</span> <span class="ident">skip</span>.<span class="ident">unwrap_or</span>(<span class="number">0</span>);
             <span class="kw">for</span> (<span class="ident">child_index</span>, <span class="ident">child</span>) <span class="kw">in</span> <span class="self">self</span>.<span class="ident">children</span>.<span class="ident">iter</span>().<span class="ident">enumerate</span>() {
-                <span class="kw">match</span> <span class="ident">query</span>.<span class="ident">query_node_with_metadata</span>(<span class="ident">child</span>, <span class="ident">m</span>) {
-                    <span class="ident">QueryResult::Descend</span> =&gt; {
-                        <span class="kw">if</span> <span class="ident">child</span>.<span class="ident">search</span>(<span class="ident">query</span>, <span class="ident">m</span>) {
-                            <span class="kw">return</span> <span class="bool-val">true</span>;
+                <span class="kw">match</span> <span class="ident">skip</span>.<span class="ident">cmp</span>(<span class="kw-2">&amp;</span><span class="ident">child</span>.<span class="ident">len</span>()) {
+                    <span class="ident">Ordering::Greater</span> =&gt; {
+                        <span class="comment">// not in this child at all</span>
+                        <span class="comment">// take off the number of elements in the child as well as the next element</span>
+                        <span class="ident">skip</span> <span class="op">-</span><span class="op">=</span> <span class="ident">child</span>.<span class="ident">len</span>() <span class="op">+</span> <span class="number">1</span>;
+                    }
+                    <span class="ident">Ordering::Equal</span> =&gt; {
+                        <span class="comment">// just try the element</span>
+                        <span class="ident">skip</span> <span class="op">-</span><span class="op">=</span> <span class="ident">child</span>.<span class="ident">len</span>();
+                        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">e</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">elements</span>.<span class="ident">get</span>(<span class="ident">child_index</span>) {
+                            <span class="kw">if</span> <span class="ident">query</span>.<span class="ident">query_element_with_metadata</span>(<span class="ident">e</span>, <span class="ident">m</span>) <span class="op">==</span> <span class="ident">QueryResult::Finish</span> {
+                                <span class="kw">return</span> <span class="bool-val">true</span>;
+                            }
                         }
                     }
-                    <span class="ident">QueryResult::Finish</span> =&gt; <span class="kw">return</span> <span class="bool-val">true</span>,
-                    <span class="ident">QueryResult::Next</span> =&gt; (),
-                }
-                <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">e</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">elements</span>.<span class="ident">get</span>(<span class="ident">child_index</span>) {
-                    <span class="kw">if</span> <span class="ident">query</span>.<span class="ident">query_element_with_metadata</span>(<span class="ident">e</span>, <span class="ident">m</span>) <span class="op">==</span> <span class="ident">QueryResult::Finish</span> {
-                        <span class="kw">return</span> <span class="bool-val">true</span>;
+                    <span class="ident">Ordering::Less</span> =&gt; {
+                        <span class="comment">// descend and try find it</span>
+                        <span class="kw">match</span> <span class="ident">query</span>.<span class="ident">query_node_with_metadata</span>(<span class="ident">child</span>, <span class="ident">m</span>) {
+                            <span class="ident">QueryResult::Descend</span> =&gt; {
+                                <span class="comment">// search in the child node, passing in the number of items left to</span>
+                                <span class="comment">// skip</span>
+                                <span class="kw">if</span> <span class="ident">child</span>.<span class="ident">search</span>(<span class="ident">query</span>, <span class="ident">m</span>, <span class="prelude-val">Some</span>(<span class="ident">skip</span>)) {
+                                    <span class="kw">return</span> <span class="bool-val">true</span>;
+                                }
+                            }
+                            <span class="ident">QueryResult::Finish</span> =&gt; <span class="kw">return</span> <span class="bool-val">true</span>,
+                            <span class="ident">QueryResult::Next</span> =&gt; (),
+                            <span class="ident">QueryResult::Skip</span>(<span class="kw">_</span>) =&gt; <span class="macro">panic!</span>(<span class="string">&quot;had skip from non-root node&quot;</span>),
+                        }
+                        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">e</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">elements</span>.<span class="ident">get</span>(<span class="ident">child_index</span>) {
+                            <span class="kw">if</span> <span class="ident">query</span>.<span class="ident">query_element_with_metadata</span>(<span class="ident">e</span>, <span class="ident">m</span>) <span class="op">==</span> <span class="ident">QueryResult::Finish</span> {
+                                <span class="kw">return</span> <span class="bool-val">true</span>;
+                            }
+                        }
+                        <span class="comment">// reset the skip to zero so we continue iterating normally</span>
+                        <span class="ident">skip</span> <span class="op">=</span> <span class="number">0</span>;
                     }
                 }
             }
@@ -1294,16 +1374,24 @@
     <span class="doccomment">/// Update the operation at the given index using the provided function.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// This handles updating the indices after the update.</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">update</span><span class="op">&lt;</span><span class="ident">F</span><span class="op">&gt;</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">index</span>: <span class="ident">usize</span>, <span class="ident">f</span>: <span class="ident">F</span>) -&gt; (<span class="ident">Op</span>, <span class="kw-2">&amp;</span><span class="ident">Op</span>)
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">update</span><span class="op">&lt;</span><span class="ident">F</span><span class="op">&gt;</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">index</span>: <span class="ident">usize</span>, <span class="ident">f</span>: <span class="ident">F</span>) -&gt; <span class="ident">ReplaceArgs</span>
     <span class="kw">where</span>
         <span class="ident">F</span>: <span class="ident">FnOnce</span>(<span class="kw-2">&amp;mut</span> <span class="ident">Op</span>),
     {
         <span class="kw">if</span> <span class="self">self</span>.<span class="ident">is_leaf</span>() {
             <span class="kw">let</span> <span class="ident">new_element</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">elements</span>.<span class="ident">get_mut</span>(<span class="ident">index</span>).<span class="ident">unwrap</span>();
-            <span class="kw">let</span> <span class="ident">old_element</span> <span class="op">=</span> <span class="ident">new_element</span>.<span class="ident">clone</span>();
+            <span class="kw">let</span> <span class="ident">old_id</span> <span class="op">=</span> <span class="ident">new_element</span>.<span class="ident">id</span>;
+            <span class="kw">let</span> <span class="ident">old_visible</span> <span class="op">=</span> <span class="ident">new_element</span>.<span class="ident">visible</span>();
             <span class="ident">f</span>(<span class="ident">new_element</span>);
-            <span class="self">self</span>.<span class="ident">index</span>.<span class="ident">replace</span>(<span class="kw-2">&amp;</span><span class="ident">old_element</span>, <span class="ident">new_element</span>);
-            (<span class="ident">old_element</span>, <span class="ident">new_element</span>)
+            <span class="kw">let</span> <span class="ident">replace_args</span> <span class="op">=</span> <span class="ident">ReplaceArgs</span> {
+                <span class="ident">old_id</span>,
+                <span class="ident">new_id</span>: <span class="ident">new_element</span>.<span class="ident">id</span>,
+                <span class="ident">old_visible</span>,
+                <span class="ident">new_visible</span>: <span class="ident">new_element</span>.<span class="ident">visible</span>(),
+                <span class="ident">new_key</span>: <span class="ident">new_element</span>.<span class="ident">elemid_or_key</span>(),
+            };
+            <span class="self">self</span>.<span class="ident">index</span>.<span class="ident">replace</span>(<span class="kw-2">&amp;</span><span class="ident">replace_args</span>);
+            <span class="ident">replace_args</span>
         } <span class="kw">else</span> {
             <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">cumulative_len</span> <span class="op">=</span> <span class="number">0</span>;
             <span class="kw">let</span> <span class="ident">len</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">len</span>();
@@ -1314,15 +1402,23 @@
                     }
                     <span class="ident">Ordering::Equal</span> =&gt; {
                         <span class="kw">let</span> <span class="ident">new_element</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">elements</span>.<span class="ident">get_mut</span>(<span class="ident">child_index</span>).<span class="ident">unwrap</span>();
-                        <span class="kw">let</span> <span class="ident">old_element</span> <span class="op">=</span> <span class="ident">new_element</span>.<span class="ident">clone</span>();
+                        <span class="kw">let</span> <span class="ident">old_id</span> <span class="op">=</span> <span class="ident">new_element</span>.<span class="ident">id</span>;
+                        <span class="kw">let</span> <span class="ident">old_visible</span> <span class="op">=</span> <span class="ident">new_element</span>.<span class="ident">visible</span>();
                         <span class="ident">f</span>(<span class="ident">new_element</span>);
-                        <span class="self">self</span>.<span class="ident">index</span>.<span class="ident">replace</span>(<span class="kw-2">&amp;</span><span class="ident">old_element</span>, <span class="ident">new_element</span>);
-                        <span class="kw">return</span> (<span class="ident">old_element</span>, <span class="ident">new_element</span>);
+                        <span class="kw">let</span> <span class="ident">replace_args</span> <span class="op">=</span> <span class="ident">ReplaceArgs</span> {
+                            <span class="ident">old_id</span>,
+                            <span class="ident">new_id</span>: <span class="ident">new_element</span>.<span class="ident">id</span>,
+                            <span class="ident">old_visible</span>,
+                            <span class="ident">new_visible</span>: <span class="ident">new_element</span>.<span class="ident">visible</span>(),
+                            <span class="ident">new_key</span>: <span class="ident">new_element</span>.<span class="ident">elemid_or_key</span>(),
+                        };
+                        <span class="self">self</span>.<span class="ident">index</span>.<span class="ident">replace</span>(<span class="kw-2">&amp;</span><span class="ident">replace_args</span>);
+                        <span class="kw">return</span> <span class="ident">replace_args</span>;
                     }
                     <span class="ident">Ordering::Greater</span> =&gt; {
-                        <span class="kw">let</span> (<span class="ident">old_element</span>, <span class="ident">new_element</span>) <span class="op">=</span> <span class="ident">child</span>.<span class="ident">update</span>(<span class="ident">index</span> <span class="op">-</span> <span class="ident">cumulative_len</span>, <span class="ident">f</span>);
-                        <span class="self">self</span>.<span class="ident">index</span>.<span class="ident">replace</span>(<span class="kw-2">&amp;</span><span class="ident">old_element</span>, <span class="ident">new_element</span>);
-                        <span class="kw">return</span> (<span class="ident">old_element</span>, <span class="ident">new_element</span>);
+                        <span class="kw">let</span> <span class="ident">replace_args</span> <span class="op">=</span> <span class="ident">child</span>.<span class="ident">update</span>(<span class="ident">index</span> <span class="op">-</span> <span class="ident">cumulative_len</span>, <span class="ident">f</span>);
+                        <span class="self">self</span>.<span class="ident">index</span>.<span class="ident">replace</span>(<span class="kw-2">&amp;</span><span class="ident">replace_args</span>);
+                        <span class="kw">return</span> <span class="ident">replace_args</span>;
                     }
                 }
             }

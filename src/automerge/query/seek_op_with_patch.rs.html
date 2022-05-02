@@ -260,9 +260,11 @@
 <span id="253">253</span>
 <span id="254">254</span>
 <span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::op_tree</span>::{<span class="ident">OpSetMetadata</span>, <span class="ident">OpTreeNode</span>};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::query</span>::{<span class="ident">binary_search_by</span>, <span class="ident">QueryResult</span>, <span class="ident">TreeQuery</span>};
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::types</span>::{<span class="ident">ElemId</span>, <span class="ident">Key</span>, <span class="ident">Op</span>, <span class="ident">HEAD</span>};
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::types</span>::{<span class="ident">Key</span>, <span class="ident">Op</span>, <span class="ident">HEAD</span>};
 <span class="kw">use</span> <span class="ident">std::cmp::Ordering</span>;
 <span class="kw">use</span> <span class="ident">std::fmt::Debug</span>;
 
@@ -273,7 +275,7 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">succ</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
     <span class="ident">found</span>: <span class="ident">bool</span>,
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">seen</span>: <span class="ident">usize</span>,
-    <span class="ident">last_seen</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ElemId</span><span class="op">&gt;</span>,
+    <span class="ident">last_seen</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Key</span><span class="op">&gt;</span>,
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">values</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Op</span><span class="op">&gt;</span>,
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">had_value_before</span>: <span class="ident">bool</span>,
 }
@@ -317,7 +319,7 @@
         }
         <span class="kw">if</span> <span class="ident">e</span>.<span class="ident">visible</span>() <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">last_seen</span>.<span class="ident">is_none</span>() {
             <span class="self">self</span>.<span class="ident">seen</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
-            <span class="self">self</span>.<span class="ident">last_seen</span> <span class="op">=</span> <span class="ident">e</span>.<span class="ident">elemid</span>()
+            <span class="self">self</span>.<span class="ident">last_seen</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">e</span>.<span class="ident">elemid_or_key</span>())
         }
     }
 }
@@ -366,8 +368,10 @@
                         <span class="comment">// subtree contains a *visible* (i.e. empty succs) operation for the list</span>
                         <span class="comment">// element with elemId `last_seen`; this will subtract one even if all</span>
                         <span class="comment">// values for this list element have been deleted in this subtree.</span>
-                        <span class="kw">if</span> <span class="ident">child</span>.<span class="ident">index</span>.<span class="ident">has_visible</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">last_seen</span>) {
-                            <span class="ident">num_vis</span> <span class="op">-</span><span class="op">=</span> <span class="number">1</span>;
+                        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">last_seen</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">last_seen</span> {
+                            <span class="kw">if</span> <span class="ident">child</span>.<span class="ident">index</span>.<span class="ident">has_visible</span>(<span class="kw-2">&amp;</span><span class="ident">last_seen</span>) {
+                                <span class="ident">num_vis</span> <span class="op">-</span><span class="op">=</span> <span class="number">1</span>;
+                            }
                         }
                         <span class="self">self</span>.<span class="ident">seen</span> <span class="op">+</span><span class="op">=</span> <span class="ident">num_vis</span>;
 
@@ -376,7 +380,7 @@
                         <span class="comment">// the last operation&#39;s elemId regardless of whether it&#39;s visible or not.</span>
                         <span class="comment">// This will lead to incorrect counting if `last_seen` is not visible: it&#39;s</span>
                         <span class="comment">// not counted towards `num_vis`, so we shouldn&#39;t be subtracting 1.</span>
-                        <span class="self">self</span>.<span class="ident">last_seen</span> <span class="op">=</span> <span class="ident">child</span>.<span class="ident">last</span>().<span class="ident">elemid</span>();
+                        <span class="self">self</span>.<span class="ident">last_seen</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">child</span>.<span class="ident">last</span>().<span class="ident">elemid_or_key</span>());
                     }
                     <span class="ident">QueryResult::Next</span>
                 }
