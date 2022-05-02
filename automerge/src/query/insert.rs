@@ -16,15 +16,15 @@ pub(crate) struct InsertNth {
     valid: Option<usize>,
     /// last_seen is the target elemid of the last `seen` operation.
     /// It is used to avoid double counting visible elements (which arise through conflicts) that are split across nodes.
-    last_seen: Option<ElemId>,
+    last_seen: Option<Key>,
     last_insert: Option<ElemId>,
-    last_valid_insert: Option<ElemId>,
+    last_valid_insert: Option<Key>,
 }
 
 impl InsertNth {
     pub(crate) fn new(target: usize) -> Self {
         let (valid, last_valid_insert) = if target == 0 {
-            (Some(0), Some(HEAD))
+            (Some(0), Some(Key::Seq(HEAD)))
         } else {
             (None, None)
         };
@@ -44,10 +44,8 @@ impl InsertNth {
     }
 
     pub(crate) fn key(&self) -> Result<Key, AutomergeError> {
-        Ok(self
-            .last_valid_insert
-            .ok_or(AutomergeError::InvalidIndex(self.target))?
-            .into())
+        self.last_valid_insert
+            .ok_or(AutomergeError::InvalidIndex(self.target))
         //if self.target == 0 {
         /*
         if self.last_insert.is_none() {
@@ -65,8 +63,10 @@ impl<'a> TreeQuery<'a> for InsertNth {
     fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
         // if this node has some visible elements then we may find our target within
         let mut num_vis = child.index.visible_len();
-        if child.index.has_visible(&self.last_seen) {
-            num_vis -= 1;
+        if let Some(last_seen) = self.last_seen {
+            if child.index.has_visible(&last_seen) {
+                num_vis -= 1;
+            }
         }
 
         if self.seen + num_vis >= self.target {
@@ -83,9 +83,9 @@ impl<'a> TreeQuery<'a> for InsertNth {
             // - the insert was at a previous node and this is a long run of overwrites so last_seen should already be set correctly
             // - the visible op is in this node and the elemid references it so it can be set here
             // - the visible op is in a future node and so it will be counted as seen there
-            let last_elemid = child.last().elemid();
+            let last_elemid = child.last().elemid_or_key();
             if child.index.has_visible(&last_elemid) {
-                self.last_seen = last_elemid;
+                self.last_seen = Some(last_elemid);
             }
             QueryResult::Next
         }
@@ -104,7 +104,7 @@ impl<'a> TreeQuery<'a> for InsertNth {
                 return QueryResult::Finish;
             }
             self.seen += 1;
-            self.last_seen = element.elemid();
+            self.last_seen = Some(element.elemid_or_key());
             self.last_valid_insert = self.last_seen
         }
         self.n += 1;

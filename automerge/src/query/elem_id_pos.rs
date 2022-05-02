@@ -1,4 +1,7 @@
-use crate::{op_tree::OpTreeNode, types::ElemId};
+use crate::{
+    op_tree::OpTreeNode,
+    types::{ElemId, Key},
+};
 
 use super::{QueryResult, TreeQuery};
 
@@ -30,7 +33,7 @@ impl ElemIdPos {
 impl<'a> TreeQuery<'a> for ElemIdPos {
     fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
         // if index has our element then we can continue
-        if child.index.has_visible(&Some(self.elemid)) {
+        if child.index.has_visible(&Key::Seq(self.elemid)) {
             // element is in this node somewhere
             QueryResult::Descend
         } else {

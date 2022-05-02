@@ -8,7 +8,7 @@ use std::{
 pub(crate) use crate::op_set::OpSetMetadata;
 use crate::{
     clock::Clock,
-    query::{self, Index, QueryResult, TreeQuery},
+    query::{self, Index, QueryResult, ReplaceArgs, TreeQuery},
 };
 use crate::{
     types::{ObjId, Op, OpId},
@@ -105,7 +105,8 @@ impl OpTreeInternal {
         self.root_node
             .as_ref()
             .map(|root| match query.query_node_with_metadata(root, m) {
-                QueryResult::Descend => root.search(&mut query, m),
+                QueryResult::Descend => root.search(&mut query, m, None),
+                QueryResult::Skip(skip) => root.search(&mut query, m, Some(skip)),
                 _ => true,
             });
         query
@@ -216,31 +217,62 @@ impl OpTreeNode {
         }
     }
 
-    pub(crate) fn search<'a, 'b: 'a, Q>(&'b self, query: &mut Q, m: &OpSetMetadata) -> bool
+    pub(crate) fn search<'a, 'b: 'a, Q>(
+        &'b self,
+        query: &mut Q,
+        m: &OpSetMetadata,
+        skip: Option<usize>,
+    ) -> bool
     where
         Q: TreeQuery<'a>,
     {
         if self.is_leaf() {
-            for e in &self.elements {
+            let skip = skip.unwrap_or(0);
+            for e in self.elements.iter().skip(skip) {
                 if query.query_element_with_metadata(e, m) == QueryResult::Finish {
                     return true;
                 }
             }
             false
         } else {
+            let mut skip = skip.unwrap_or(0);
             for (child_index, child) in self.children.iter().enumerate() {
-                match query.query_node_with_metadata(child, m) {
-                    QueryResult::Descend => {
-                        if child.search(query, m) {
-                            return true;
+                match skip.cmp(&child.len()) {
+                    Ordering::Greater => {
+                        // not in this child at all
+                        // take off the number of elements in the child as well as the next element
+                        skip -= child.len() + 1;
+                    }
+                    Ordering::Equal => {
+                        // just try the element
+                        skip -= child.len();
+                        if let Some(e) = self.elements.get(child_index) {
+                            if query.query_element_with_metadata(e, m) == QueryResult::Finish {
+                                return true;
+                            }
                         }
                     }
-                    QueryResult::Finish => return true,
-                    QueryResult::Next => (),
-                }
-                if let Some(e) = self.elements.get(child_index) {
-                    if query.query_element_with_metadata(e, m) == QueryResult::Finish {
-                        return true;
+                    Ordering::Less => {
+                        // descend and try find it
+                        match query.query_node_with_metadata(child, m) {
+                            QueryResult::Descend => {
+                                // search in the child node, passing in the number of items left to
+                                // skip
+                                if child.search(query, m, Some(skip)) {
+                                    return true;
+                                }
+                            }
+                            QueryResult::Finish => return true,
+                            QueryResult::Next => (),
+                            QueryResult::Skip(_) => panic!("had skip from non-root node"),
+                        }
+                        if let Some(e) = self.elements.get(child_index) {
+                            if query.query_element_with_metadata(e, m) == QueryResult::Finish {
+                                return true;
+                            }
+                        }
+                        // reset the skip to zero so we continue iterating normally
+                        skip = 0;
                     }
                 }
             }
@@ -556,16 +588,24 @@ impl OpTreeNode {
     /// Update the operation at the given index using the provided function.
     ///
     /// This handles updating the indices after the update.
-    pub(crate) fn update<F>(&mut self, index: usize, f: F) -> (Op, &Op)
+    pub(crate) fn update<F>(&mut self, index: usize, f: F) -> ReplaceArgs
     where
         F: FnOnce(&mut Op),
     {
         if self.is_leaf() {
             let new_element = self.elements.get_mut(index).unwrap();
-            let old_element = new_element.clone();
+            let old_id = new_element.id;
+            let old_visible = new_element.visible();
             f(new_element);
-            self.index.replace(&old_element, new_element);
-            (old_element, new_element)
+            let replace_args = ReplaceArgs {
+                old_id,
+                new_id: new_element.id,
+                old_visible,
+                new_visible: new_element.visible(),
+                new_key: new_element.elemid_or_key(),
+            };
+            self.index.replace(&replace_args);
+            replace_args
         } else {
             let mut cumulative_len = 0;
             let len = self.len();
@@ -576,15 +616,23 @@ impl OpTreeNode {
                     }
                     Ordering::Equal => {
                         let new_element = self.elements.get_mut(child_index).unwrap();
-                        let old_element = new_element.clone();
+                        let old_id = new_element.id;
+                        let old_visible = new_element.visible();
                         f(new_element);
-                        self.index.replace(&old_element, new_element);
-                        return (old_element, new_element);
+                        let replace_args = ReplaceArgs {
+                            old_id,
+                            new_id: new_element.id,
+                            old_visible,
+                            new_visible: new_element.visible(),
+                            new_key: new_element.elemid_or_key(),
+                        };
+                        self.index.replace(&replace_args);
+                        return replace_args;
                     }
                     Ordering::Greater => {
-                        let (old_element, new_element) = child.update(index - cumulative_len, f);
-                        self.index.replace(&old_element, new_element);
-                        return (old_element, new_element);
+                        let replace_args = child.update(index - cumulative_len, f);
+                        self.index.replace(&replace_args);
+                        return replace_args;
                     }
                 }
             }
