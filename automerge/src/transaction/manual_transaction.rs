@@ -1,9 +1,9 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
-use crate::{Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, ScalarValue, Value};
+use crate::{Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, ScalarValue, Value, Values};
 use crate::{AutomergeError, Keys};
-use crate::{Range, RangeAt, Values, ValuesAt};
+use crate::{ListRange, ListRangeAt, MapRange, MapRangeAt};
 
 use super::{CommitOptions, Transactable, TransactionInner};
 
@@ -187,24 +187,45 @@ impl<'a> Transactable for Transaction<'a> {
         self.doc.keys_at(obj, heads)
     }
 
-    fn range<O: AsRef<ExId>, R: RangeBounds<String>>(&self, obj: O, range: R) -> Range<'_, R> {
-        self.doc.range(obj, range)
+    fn map_range<O: AsRef<ExId>, R: RangeBounds<String>>(
+        &self,
+        obj: O,
+        range: R,
+    ) -> MapRange<'_, R> {
+        self.doc.map_range(obj, range)
     }
 
-    fn range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
+    fn map_range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
         &self,
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> RangeAt<'_, R> {
-        self.doc.range_at(obj, range, heads)
+    ) -> MapRangeAt<'_, R> {
+        self.doc.map_range_at(obj, range, heads)
+    }
+
+    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
+        obj: O,
+        range: R,
+    ) -> ListRange<'_, R> {
+        self.doc.list_range(obj, range)
+    }
+
+    fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
+        obj: O,
+        range: R,
+        heads: &[ChangeHash],
+    ) -> ListRangeAt<'_, R> {
+        self.doc.list_range_at(obj, range, heads)
     }
 
     fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
         self.doc.values(obj)
     }
 
-    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> ValuesAt<'_> {
+    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
         self.doc.values_at(obj, heads)
     }
 

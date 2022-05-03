@@ -77,7 +77,7 @@ impl OpSetInternal {
         }
     }
 
-    pub(crate) fn range<R: RangeBounds<String>>(
+    pub(crate) fn map_range<R: RangeBounds<String>>(
         &self,
         obj: ObjId,
         range: R,
@@ -89,7 +89,7 @@ impl OpSetInternal {
         }
     }
 
-    pub(crate) fn range_at<R: RangeBounds<String>>(
+    pub(crate) fn map_range_at<R: RangeBounds<String>>(
         &self,
         obj: ObjId,
         range: R,

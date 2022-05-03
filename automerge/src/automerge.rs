@@ -9,15 +9,17 @@ use crate::keys::Keys;
 use crate::op_observer::OpObserver;
 use crate::op_set::OpSet;
 use crate::parents::Parents;
-use crate::range::Range;
 use crate::transaction::{self, CommitOptions, Failure, Success, Transaction, TransactionInner};
 use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType,
     ScalarValue, Value,
 };
-use crate::{legacy, query, types, ApplyOptions, ObjType, RangeAt, ValuesAt};
+use crate::KeysAt;
+use crate::{
+    legacy, query, types, ApplyOptions, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType,
+    Values,
+};
 use crate::{AutomergeError, Change, Prop};
-use crate::{KeysAt, Values};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -279,52 +281,91 @@ impl Automerge {
     }
 
     /// Iterate over the keys and values of the map `obj` in the given range.
-    pub fn range<O: AsRef<ExId>, R: RangeBounds<String>>(&self, obj: O, range: R) -> Range<'_, R> {
+    pub fn map_range<O: AsRef<ExId>, R: RangeBounds<String>>(
+        &self,
+        obj: O,
+        range: R,
+    ) -> MapRange<'_, R> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
-            let iter_range = self.ops.range(obj, range);
-            Range::new(self, iter_range)
+            MapRange::new(self, self.ops.map_range(obj, range))
         } else {
-            Range::new(self, None)
+            MapRange::new(self, None)
         }
     }
 
-    /// Historical version of [`range`](Self::range).
-    pub fn range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
+    /// Historical version of [`map_range`](Self::map_range).
+    pub fn map_range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
         &self,
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> RangeAt<'_, R> {
+    ) -> MapRangeAt<'_, R> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
             let clock = self.clock_at(heads);
-            let iter_range = self.ops.range_at(obj, range, clock);
-            RangeAt::new(self, iter_range)
+            let iter_range = self.ops.map_range_at(obj, range, clock);
+            MapRangeAt::new(self, iter_range)
         } else {
-            RangeAt::new(self, None)
+            MapRangeAt::new(self, None)
         }
     }
 
-    /// Iterate over all the keys and values of the object `obj`.
-    ///
-    /// For a map the keys are the keys of the map.
-    /// For a list the keys are the element ids (opids) encoded as strings.
+    /// Iterate over the indexes and values of the list `obj` in the given range.
+    pub fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
+        obj: O,
+        range: R,
+    ) -> ListRange<'_, R> {
+        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
+            ListRange::new(self, self.ops.list_range(obj, range))
+        } else {
+            ListRange::new(self, None)
+        }
+    }
+
+    /// Historical version of [`range`](Self::list_range_at).
+    pub fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
+        obj: O,
+        range: R,
+        heads: &[ChangeHash],
+    ) -> ListRangeAt<'_, R> {
+        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
+            let clock = self.clock_at(heads);
+            let iter_range = self.ops.list_range_at(obj, range, clock);
+            ListRangeAt::new(self, iter_range)
+        } else {
+            ListRangeAt::new(self, None)
+        }
+    }
+
     pub fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
-            let iter_range = self.ops.list_range(obj, ..);
-            Values::new(self, iter_range)
+            match self.ops.object_type(&obj) {
+                Some(t) if t.is_sequence() => Values::new(self, self.ops.list_range(obj, ..)),
+                Some(_) => Values::new(self, self.ops.map_range(obj, ..)),
+                None => Values::empty(self),
+            }
         } else {
-            Values::new(self, None)
+            Values::empty(self)
         }
     }
 
-    /// Historical version of [`values`](Self::values).
-    pub fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> ValuesAt<'_> {
+    pub fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
             let clock = self.clock_at(heads);
-            let iter_range = self.ops.list_range_at(obj, .., clock);
-            ValuesAt::new(self, iter_range)
+            match self.ops.object_type(&obj) {
+                Some(ObjType::Map) | Some(ObjType::Table) => {
+                    let iter_range = self.ops.map_range_at(obj, .., clock);
+                    Values::new(self, iter_range)
+                }
+                Some(ObjType::List) | Some(ObjType::Text) => {
+                    let iter_range = self.ops.list_range_at(obj, .., clock);
+                    Values::new(self, iter_range)
+                }
+                None => Values::empty(self),
+            }
         } else {
-            ValuesAt::new(self, None)
+            Values::empty(self)
         }
     }
 
@@ -1344,8 +1385,6 @@ mod tests {
         assert!(doc.get_at(&list, 0, &heads2)?.unwrap().0 == Value::int(10));
 
         assert!(doc.length_at(&list, &heads3) == 2);
-        //doc.dump();
-        log!("{:?}", doc.get_at(&list, 0, &heads3)?.unwrap().0);
         assert!(doc.get_at(&list, 0, &heads3)?.unwrap().0 == Value::int(30));
         assert!(doc.get_at(&list, 1, &heads3)?.unwrap().0 == Value::int(20));
 
@@ -1491,9 +1530,9 @@ mod tests {
         tx.put(ROOT, "d", 9).unwrap();
         tx.commit();
         let actor = doc.get_actor();
-        assert_eq!(doc.range(ROOT, ..).count(), 4);
+        assert_eq!(doc.map_range(ROOT, ..).count(), 4);
 
-        let mut range = doc.range(ROOT, "b".to_owned().."d".into());
+        let mut range = doc.map_range(ROOT, "b".to_owned().."d".into());
         assert_eq!(
             range.next(),
             Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0)))
@@ -1504,7 +1543,7 @@ mod tests {
         );
         assert_eq!(range.next(), None);
 
-        let mut range = doc.range(ROOT, "b".to_owned()..="d".into());
+        let mut range = doc.map_range(ROOT, "b".to_owned()..="d".into());
         assert_eq!(
             range.next(),
             Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0)))
@@ -1519,7 +1558,7 @@ mod tests {
         );
         assert_eq!(range.next(), None);
 
-        let mut range = doc.range(ROOT, ..="c".to_owned());
+        let mut range = doc.map_range(ROOT, ..="c".to_owned());
         assert_eq!(
             range.next(),
             Some(("a", 8.into(), ExId::Id(6, actor.clone(), 0)))
@@ -1534,7 +1573,7 @@ mod tests {
         );
         assert_eq!(range.next(), None);
 
-        let range = doc.range(ROOT, "a".to_owned()..);
+        let range = doc.map_range(ROOT, "a".to_owned()..);
         assert_eq!(
             range.collect::<Vec<_>>(),
             vec![
@@ -1556,7 +1595,7 @@ mod tests {
 
         assert_eq!(doc.length(list), 2);
         assert_eq!(doc.keys(list).count(), 2);
-        assert_eq!(doc.values(list).count(), 2); // it's just 1!
+        assert_eq!(doc.list_range(list, ..).count(), 2);
     }
 
     #[test]
@@ -1569,6 +1608,11 @@ mod tests {
         tx.insert(&list, 0, "First")?;
         tx.insert(&list, 1, "Second")?;
         tx.insert(&list, 2, "Third")?;
+        tx.insert(&list, 3, "Forth")?;
+        tx.insert(&list, 4, "Fith")?;
+        tx.insert(&list, 5, "Sixth")?;
+        tx.insert(&list, 6, "Seventh")?;
+        tx.insert(&list, 7, "Eights")?;
         tx.commit();
 
         let v1 = doc1.get_heads();
@@ -1584,18 +1628,51 @@ mod tests {
 
         doc1.merge(&mut doc2)?;
 
-        assert_eq!(doc1.values(&list).count(), 3);
+        assert_eq!(doc1.list_range(&list, ..).count(), 8);
 
-        for (i, val1) in doc1.values(&list).enumerate() {
+        for (i, val1, id) in doc1.list_range(&list, ..) {
             let val2 = doc1.get(&list, i)?;
-            assert_eq!(Some(val1), val2);
+            assert_eq!(Some((val1, id)), val2);
         }
 
-        assert_eq!(doc1.values_at(&list, &v1).count(), 3);
-        for (i, val1) in doc1.values_at(&list, &v1).enumerate() {
-            let val2 = doc1.get_at(&list, i, &v1)?;
-            assert_eq!(Some(val1), val2);
+        assert_eq!(doc1.list_range(&list, 3..6).count(), 3);
+        assert_eq!(doc1.list_range(&list, 3..6).next().unwrap().0, 3);
+        assert_eq!(doc1.list_range(&list, 3..6).last().unwrap().0, 5);
+
+        for (i, val1, id) in doc1.list_range(&list, 3..6) {
+            let val2 = doc1.get(&list, i)?;
+            assert_eq!(Some((val1, id)), val2);
         }
+
+        assert_eq!(doc1.list_range_at(&list, .., &v1).count(), 8);
+        for (i, val1, id) in doc1.list_range_at(&list, .., &v1) {
+            let val2 = doc1.get_at(&list, i, &v1)?;
+            assert_eq!(Some((val1, id)), val2);
+        }
+
+        assert_eq!(doc1.list_range_at(&list, 3..6, &v1).count(), 3);
+        assert_eq!(doc1.list_range_at(&list, 3..6, &v1).next().unwrap().0, 3);
+        assert_eq!(doc1.list_range_at(&list, 3..6, &v1).last().unwrap().0, 5);
+
+        for (i, val1, id) in doc1.list_range_at(&list, 3..6, &v1) {
+            let val2 = doc1.get_at(&list, i, &v1)?;
+            assert_eq!(Some((val1, id)), val2);
+        }
+
+        let range: Vec<_> = doc1
+            .list_range(&list, ..)
+            .map(|(_, val, id)| (val, id))
+            .collect();
+        let values = doc1.values(&list);
+        let values: Vec<_> = values.collect();
+        assert_eq!(range, values);
+
+        let range: Vec<_> = doc1
+            .list_range_at(&list, .., &v1)
+            .map(|(_, val, id)| (val, id))
+            .collect();
+        let values: Vec<_> = doc1.values_at(&list, &v1).collect();
+        assert_eq!(range, values);
 
         Ok(())
     }
@@ -1625,33 +1702,47 @@ mod tests {
 
         let range = "b".to_string().."d".to_string();
 
-        assert_eq!(doc1.range(ROOT, range.clone()).count(), 2);
+        assert_eq!(doc1.map_range(ROOT, range.clone()).count(), 2);
 
-        for (key, val1, id) in doc1.range(ROOT, range.clone()) {
+        for (key, val1, id) in doc1.map_range(ROOT, range.clone()) {
             let val2 = doc1.get(ROOT, key)?;
             assert_eq!(Some((val1, id)), val2);
         }
 
-        assert_eq!(doc1.range(ROOT, range.clone()).rev().count(), 2);
+        assert_eq!(doc1.map_range(ROOT, range.clone()).rev().count(), 2);
 
-        for (key, val1, id) in doc1.range(ROOT, range.clone()).rev() {
+        for (key, val1, id) in doc1.map_range(ROOT, range.clone()).rev() {
             let val2 = doc1.get(ROOT, key)?;
             assert_eq!(Some((val1, id)), val2);
         }
 
-        assert_eq!(doc1.range_at(ROOT, range.clone(), &v1).count(), 2);
+        assert_eq!(doc1.map_range_at(ROOT, range.clone(), &v1).count(), 2);
 
-        for (key, val1, id) in doc1.range_at(ROOT, range.clone(), &v1) {
+        for (key, val1, id) in doc1.map_range_at(ROOT, range.clone(), &v1) {
             let val2 = doc1.get_at(ROOT, key, &v1)?;
             assert_eq!(Some((val1, id)), val2);
         }
 
-        assert_eq!(doc1.range_at(ROOT, range.clone(), &v1).rev().count(), 2);
+        assert_eq!(doc1.map_range_at(ROOT, range.clone(), &v1).rev().count(), 2);
 
-        for (key, val1, id) in doc1.range_at(ROOT, range, &v1).rev() {
+        for (key, val1, id) in doc1.map_range_at(ROOT, range, &v1).rev() {
             let val2 = doc1.get_at(ROOT, key, &v1)?;
             assert_eq!(Some((val1, id)), val2);
         }
+
+        let range: Vec<_> = doc1
+            .map_range(ROOT, ..)
+            .map(|(_, val, id)| (val, id))
+            .collect();
+        let values: Vec<_> = doc1.values(ROOT).collect();
+        assert_eq!(range, values);
+
+        let range: Vec<_> = doc1
+            .map_range_at(ROOT, .., &v1)
+            .map(|(_, val, id)| (val, id))
+            .collect();
+        let values: Vec<_> = doc1.values_at(ROOT, &v1).collect();
+        assert_eq!(range, values);
 
         Ok(())
     }
@@ -1673,9 +1764,9 @@ mod tests {
         tx.put(ROOT, "d", 9).unwrap();
         tx.commit();
         let actor = doc.get_actor();
-        assert_eq!(doc.range(ROOT, ..).rev().count(), 4);
+        assert_eq!(doc.map_range(ROOT, ..).rev().count(), 4);
 
-        let mut range = doc.range(ROOT, "b".to_owned().."d".into()).rev();
+        let mut range = doc.map_range(ROOT, "b".to_owned().."d".into()).rev();
         assert_eq!(
             range.next(),
             Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0)))
@@ -1686,7 +1777,7 @@ mod tests {
         );
         assert_eq!(range.next(), None);
 
-        let mut range = doc.range(ROOT, "b".to_owned()..="d".into()).rev();
+        let mut range = doc.map_range(ROOT, "b".to_owned()..="d".into()).rev();
         assert_eq!(
             range.next(),
             Some(("d", 9.into(), ExId::Id(7, actor.clone(), 0)))
@@ -1701,7 +1792,7 @@ mod tests {
         );
         assert_eq!(range.next(), None);
 
-        let mut range = doc.range(ROOT, ..="c".to_owned()).rev();
+        let mut range = doc.map_range(ROOT, ..="c".to_owned()).rev();
         assert_eq!(
             range.next(),
             Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0)))
@@ -1716,7 +1807,7 @@ mod tests {
         );
         assert_eq!(range.next(), None);
 
-        let range = doc.range(ROOT, "a".to_owned()..).rev();
+        let range = doc.map_range(ROOT, "a".to_owned()..).rev();
         assert_eq!(
             range.collect::<Vec<_>>(),
             vec![

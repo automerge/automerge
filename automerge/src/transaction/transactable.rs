@@ -2,8 +2,8 @@ use std::ops::RangeBounds;
 
 use crate::exid::ExId;
 use crate::{
-    AutomergeError, ChangeHash, Keys, KeysAt, ObjType, Parents, Prop, Range, RangeAt, ScalarValue,
-    Value, Values, ValuesAt,
+    AutomergeError, ChangeHash, Keys, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt,
+    ObjType, Parents, Prop, ScalarValue, Value, Values,
 };
 
 /// A way of mutating a document within a single change.
@@ -102,18 +102,35 @@ pub trait Transactable {
     /// Get the keys of the given object at a point in history.
     fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt<'_, '_>;
 
-    fn range<O: AsRef<ExId>, R: RangeBounds<String>>(&self, obj: O, range: R) -> Range<'_, R>;
+    fn map_range<O: AsRef<ExId>, R: RangeBounds<String>>(
+        &self,
+        obj: O,
+        range: R,
+    ) -> MapRange<'_, R>;
 
-    fn range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
+    fn map_range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
         &self,
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> RangeAt<'_, R>;
+    ) -> MapRangeAt<'_, R>;
+
+    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
+        obj: O,
+        range: R,
+    ) -> ListRange<'_, R>;
+
+    fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
+        obj: O,
+        range: R,
+        heads: &[ChangeHash],
+    ) -> ListRangeAt<'_, R>;
 
     fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_>;
 
-    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> ValuesAt<'_>;
+    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_>;
 
     /// Get the length of the given object.
     fn length<O: AsRef<ExId>>(&self, obj: O) -> usize;

@@ -1,7 +1,9 @@
 use crate::clock::Clock;
+use crate::exid::ExId;
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
 use crate::types::{Key, OpId};
-use crate::Value;
+use crate::values::ValueIter;
+use crate::{Automerge, Value};
 use std::fmt::Debug;
 use std::ops::RangeBounds;
 
@@ -22,6 +24,12 @@ pub(crate) struct MapRangeAt<'a, R: RangeBounds<String>> {
 
     root_child: &'a OpTreeNode,
     meta: &'a OpSetMetadata,
+}
+
+impl<'a, R: RangeBounds<String>> ValueIter<'a> for MapRangeAt<'a, R> {
+    fn next_value(&mut self, doc: &'a Automerge) -> Option<(Value<'a>, ExId)> {
+        self.next().map(|(_, val, id)| (val, doc.id_to_exid(id)))
+    }
 }
 
 impl<'a, R: RangeBounds<String>> MapRangeAt<'a, R> {

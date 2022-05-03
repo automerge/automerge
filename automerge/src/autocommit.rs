@@ -4,12 +4,12 @@ use crate::exid::ExId;
 use crate::op_observer::OpObserver;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::{
-    sync, ApplyOptions, Keys, KeysAt, ObjType, Parents, Range, RangeAt, ScalarValue, Values,
-    ValuesAt,
+    sync, ApplyOptions, Keys, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType,
+    Parents, ScalarValue,
 };
 use crate::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop,
-    Value,
+    Value, Values,
 };
 
 /// An automerge document that automatically manages transactions.
@@ -293,24 +293,45 @@ impl Transactable for AutoCommit {
         self.doc.keys_at(obj, heads)
     }
 
-    fn range<O: AsRef<ExId>, R: RangeBounds<String>>(&self, obj: O, range: R) -> Range<'_, R> {
-        self.doc.range(obj, range)
+    fn map_range<O: AsRef<ExId>, R: RangeBounds<String>>(
+        &self,
+        obj: O,
+        range: R,
+    ) -> MapRange<'_, R> {
+        self.doc.map_range(obj, range)
     }
 
-    fn range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
+    fn map_range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
         &self,
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> RangeAt<'_, R> {
-        self.doc.range_at(obj, range, heads)
+    ) -> MapRangeAt<'_, R> {
+        self.doc.map_range_at(obj, range, heads)
+    }
+
+    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
+        obj: O,
+        range: R,
+    ) -> ListRange<'_, R> {
+        self.doc.list_range(obj, range)
+    }
+
+    fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
+        obj: O,
+        range: R,
+        heads: &[ChangeHash],
+    ) -> ListRangeAt<'_, R> {
+        self.doc.list_range_at(obj, range, heads)
     }
 
     fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
         self.doc.values(obj)
     }
 
-    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> ValuesAt<'_> {
+    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
         self.doc.values_at(obj, heads)
     }
 
