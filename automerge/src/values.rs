@@ -52,3 +52,9 @@ impl<'a> Iterator for Values<'a> {
         self.range.next_value(self.doc)
     }
 }
+
+impl<'a> DoubleEndedIterator for Values<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        unimplemented!()
+    }
+}
