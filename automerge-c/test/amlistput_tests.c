@@ -26,7 +26,7 @@ static void test_AMlistPut ## suffix ## _ ## mode(void **state) {             \
     }                                                                         \
     assert_int_equal(AMresultSize(res), 0);                                   \
     AMvalue value = AMresultValue(res, 0);                                    \
-    assert_int_equal(value.tag, AM_VALUE_NOTHING);                            \
+    assert_int_equal(value.tag, AM_VALUE_VOID);                            \
     AMfreeResult(res);                                                        \
     res = AMlistGet(group_state->doc, AM_ROOT, 0);                            \
     if (AMresultStatus(res) != AM_STATUS_OK) {                                \
@@ -59,7 +59,7 @@ static void test_AMlistPutBytes_ ## mode(void **state) {                      \
     }                                                                         \
     assert_int_equal(AMresultSize(res), 0);                                   \
     AMvalue value = AMresultValue(res, 0);                                    \
-    assert_int_equal(value.tag, AM_VALUE_NOTHING);                            \
+    assert_int_equal(value.tag, AM_VALUE_VOID);                            \
     AMfreeResult(res);                                                        \
     res = AMlistGet(group_state->doc, AM_ROOT, 0);                            \
     if (AMresultStatus(res) != AM_STATUS_OK) {                                \
@@ -85,7 +85,7 @@ static void test_AMlistPutNull_ ## mode(void **state) {                       \
     }                                                                         \
     assert_int_equal(AMresultSize(res), 0);                                   \
     AMvalue value = AMresultValue(res, 0);                                    \
-    assert_int_equal(value.tag, AM_VALUE_NOTHING);                            \
+    assert_int_equal(value.tag, AM_VALUE_VOID);                            \
     AMfreeResult(res);                                                        \
     res = AMlistGet(group_state->doc, AM_ROOT, 0);                            \
     if (AMresultStatus(res) != AM_STATUS_OK) {                                \
@@ -115,15 +115,9 @@ static void test_AMlistPutObject_ ## label ## _ ## mode(void **state) {       \
     assert_int_equal(AMresultSize(res), 1);                                   \
     AMvalue value = AMresultValue(res, 0);                                    \
     assert_int_equal(value.tag, AM_VALUE_OBJ_ID);                             \
-    /**                                                                       \
-     * \note The `AMresult` struct can be deallocated immediately when its    \
-     *       value is a pointer to an opaque struct because its lifetime      \
-     *       is tied to the `AMdoc` struct instead.                           \
-     */                                                                       \
-    AMfreeResult(res);                                                        \
     assert_non_null(value.obj_id);                                            \
     assert_int_equal(AMobjSize(group_state->doc, value.obj_id), 0);           \
-    AMfreeObjId(group_state->doc, value.obj_id);                              \
+    AMfreeResult(res);                                                        \
 }
 
 #define test_AMlistPutStr(mode) test_AMlistPutStr ## _ ## mode
@@ -145,7 +139,7 @@ static void test_AMlistPutStr_ ## mode(void **state) {                        \
     }                                                                         \
     assert_int_equal(AMresultSize(res), 0);                                   \
     AMvalue value = AMresultValue(res, 0);                                    \
-    assert_int_equal(value.tag, AM_VALUE_NOTHING);                            \
+    assert_int_equal(value.tag, AM_VALUE_VOID);                            \
     AMfreeResult(res);                                                        \
     res = AMlistGet(group_state->doc, AM_ROOT, 0);                            \
     if (AMresultStatus(res) != AM_STATUS_OK) {                                \
@@ -158,6 +152,10 @@ static void test_AMlistPutStr_ ## mode(void **state) {                        \
     assert_memory_equal(value.str, str_value, STR_LEN + 1);                   \
     AMfreeResult(res);                                                        \
 }
+
+static_void_test_AMlistPut(Bool, insert, boolean, true)
+
+static_void_test_AMlistPut(Bool, update, boolean, true)
 
 static uint8_t const BYTES_VALUE[] = {INT8_MIN, INT8_MAX / 2, INT8_MAX};
 
@@ -207,6 +205,8 @@ static_void_test_AMlistPut(Uint, update, uint, UINT64_MAX)
 
 int run_AMlistPut_tests(void) {
     const struct CMUnitTest tests[] = {
+        cmocka_unit_test(test_AMlistPut(Bool, insert)),
+        cmocka_unit_test(test_AMlistPut(Bool, update)),
         cmocka_unit_test(test_AMlistPutBytes(insert)),
         cmocka_unit_test(test_AMlistPutBytes(update)),
         cmocka_unit_test(test_AMlistPut(Counter, insert)),
