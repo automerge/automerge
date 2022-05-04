@@ -75,11 +75,11 @@ impl OpSetInternal {
         }
     }
 
-    pub(crate) fn range<R: RangeBounds<String>>(
+    pub(crate) fn map_range<R: RangeBounds<String>>(
         &self,
         obj: ObjId,
         range: R,
-    ) -> Option<query::Range<'_, R>> {
+    ) -> Option<query::MapRange<'_, R>> {
         if let Some(tree) = self.trees.get(&obj) {
             tree.internal.range(range, &self.m)
         } else {
@@ -87,14 +87,39 @@ impl OpSetInternal {
         }
     }
 
-    pub(crate) fn range_at<R: RangeBounds<String>>(
+    pub(crate) fn map_range_at<R: RangeBounds<String>>(
         &self,
         obj: ObjId,
         range: R,
         clock: Clock,
-    ) -> Option<query::RangeAt<'_, R>> {
+    ) -> Option<query::MapRangeAt<'_, R>> {
         if let Some(tree) = self.trees.get(&obj) {
             tree.internal.range_at(range, &self.m, clock)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn list_range<R: RangeBounds<usize>>(
+        &self,
+        obj: ObjId,
+        range: R,
+    ) -> Option<query::ListRange<'_, R>> {
+        if let Some(tree) = self.trees.get(&obj) {
+            tree.internal.list_range(range)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn list_range_at<R: RangeBounds<usize>>(
+        &self,
+        obj: ObjId,
+        range: R,
+        clock: Clock,
+    ) -> Option<query::ListRangeAt<'_, R>> {
+        if let Some(tree) = self.trees.get(&obj) {
+            tree.internal.list_range_at(range, clock)
         } else {
             None
         }
