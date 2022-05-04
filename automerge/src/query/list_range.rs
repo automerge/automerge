@@ -40,6 +40,9 @@ impl<'a, R: RangeBounds<usize>> ValueIter<'a> for ListRange<'a, R> {
 impl<'a, R: RangeBounds<usize>> Iterator for ListRange<'a, R> {
     type Item = (usize, Value<'a>, OpId);
 
+    // FIXME: this is fine if we're scanning everything (see values()) but could be much more efficient
+    // if we're scanning a narrow range on a large sequence ... we should be able to seek to the starting
+    // point and stop at the end point and not needless scan all the ops before and after the range
     fn next(&mut self) -> Option<Self::Item> {
         for i in self.index..self.index_back {
             let op = self.root_child.get(i)?;

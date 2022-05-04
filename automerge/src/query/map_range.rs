@@ -42,6 +42,9 @@ impl<'a, R: RangeBounds<String>> MapRange<'a, R> {
 impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
     type Item = (&'a str, Value<'a>, OpId);
 
+    // FIXME: this is fine if we're scanning everything (see values()) but could be much more efficient
+    // if we're scanning a narrow range on a map with many keys... we should be able to seek to the starting
+    // point and stop at the end point and not needless scan all the ops before and after the range
     fn next(&mut self) -> Option<Self::Item> {
         for i in self.index..self.index_back {
             let op = self.root_child.get(i)?;
