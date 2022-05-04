@@ -181,12 +181,29 @@
 <span id="174">174</span>
 <span id="175">175</span>
 <span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::ops::RangeBounds</span>;
 
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::exid::ExId</span>;
 <span class="kw">use</span> <span class="kw">crate</span>::{
-    <span class="ident">AutomergeError</span>, <span class="ident">ChangeHash</span>, <span class="ident">Keys</span>, <span class="ident">KeysAt</span>, <span class="ident">ObjType</span>, <span class="ident">Parents</span>, <span class="ident">Prop</span>, <span class="ident">Range</span>, <span class="ident">RangeAt</span>, <span class="ident">ScalarValue</span>,
-    <span class="ident">Value</span>, <span class="ident">Values</span>, <span class="ident">ValuesAt</span>,
+    <span class="ident">AutomergeError</span>, <span class="ident">ChangeHash</span>, <span class="ident">Keys</span>, <span class="ident">KeysAt</span>, <span class="ident">ListRange</span>, <span class="ident">ListRangeAt</span>, <span class="ident">MapRange</span>, <span class="ident">MapRangeAt</span>,
+    <span class="ident">ObjType</span>, <span class="ident">Parents</span>, <span class="ident">Prop</span>, <span class="ident">ScalarValue</span>, <span class="ident">Value</span>, <span class="ident">Values</span>,
 };
 
 <span class="doccomment">/// A way of mutating a document within a single change.</span>
@@ -285,18 +302,35 @@
     <span class="doccomment">/// Get the keys of the given object at a point in history.</span>
     <span class="kw">fn</span> <span class="ident">keys_at</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>, <span class="ident">heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>]) -&gt; <span class="ident">KeysAt</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span><span class="op">&gt;</span>;
 
-    <span class="kw">fn</span> <span class="ident">range</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">R</span>: <span class="ident">RangeBounds</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>, <span class="ident">range</span>: <span class="ident">R</span>) -&gt; <span class="ident">Range</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">R</span><span class="op">&gt;</span>;
+    <span class="kw">fn</span> <span class="ident">map_range</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">R</span>: <span class="ident">RangeBounds</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span><span class="op">&gt;</span>(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        <span class="ident">obj</span>: <span class="ident">O</span>,
+        <span class="ident">range</span>: <span class="ident">R</span>,
+    ) -&gt; <span class="ident">MapRange</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">R</span><span class="op">&gt;</span>;
 
-    <span class="kw">fn</span> <span class="ident">range_at</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">R</span>: <span class="ident">RangeBounds</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span><span class="op">&gt;</span>(
+    <span class="kw">fn</span> <span class="ident">map_range_at</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">R</span>: <span class="ident">RangeBounds</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span><span class="op">&gt;</span>(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         <span class="ident">obj</span>: <span class="ident">O</span>,
         <span class="ident">range</span>: <span class="ident">R</span>,
         <span class="ident">heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>],
-    ) -&gt; <span class="ident">RangeAt</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">R</span><span class="op">&gt;</span>;
+    ) -&gt; <span class="ident">MapRangeAt</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">R</span><span class="op">&gt;</span>;
+
+    <span class="kw">fn</span> <span class="ident">list_range</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">R</span>: <span class="ident">RangeBounds</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span><span class="op">&gt;</span>(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        <span class="ident">obj</span>: <span class="ident">O</span>,
+        <span class="ident">range</span>: <span class="ident">R</span>,
+    ) -&gt; <span class="ident">ListRange</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">R</span><span class="op">&gt;</span>;
+
+    <span class="kw">fn</span> <span class="ident">list_range_at</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">R</span>: <span class="ident">RangeBounds</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span><span class="op">&gt;</span>(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        <span class="ident">obj</span>: <span class="ident">O</span>,
+        <span class="ident">range</span>: <span class="ident">R</span>,
+        <span class="ident">heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>],
+    ) -&gt; <span class="ident">ListRangeAt</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">R</span><span class="op">&gt;</span>;
 
     <span class="kw">fn</span> <span class="ident">values</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>) -&gt; <span class="ident">Values</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>;
 
-    <span class="kw">fn</span> <span class="ident">values_at</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>, <span class="ident">heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>]) -&gt; <span class="ident">ValuesAt</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>;
+    <span class="kw">fn</span> <span class="ident">values_at</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>, <span class="ident">heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>]) -&gt; <span class="ident">Values</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>;
 
     <span class="doccomment">/// Get the length of the given object.</span>
     <span class="kw">fn</span> <span class="ident">length</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>) -&gt; <span class="ident">usize</span>;

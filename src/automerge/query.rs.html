@@ -272,6 +272,10 @@
 <span id="265">265</span>
 <span id="266">266</span>
 <span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::op_tree</span>::{<span class="ident">OpSetMetadata</span>, <span class="ident">OpTreeNode</span>};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::types</span>::{<span class="ident">Clock</span>, <span class="ident">Counter</span>, <span class="ident">Key</span>, <span class="ident">Op</span>, <span class="ident">OpId</span>, <span class="ident">OpType</span>, <span class="ident">ScalarValue</span>};
 <span class="kw">use</span> <span class="ident">fxhash::FxBuildHasher</span>;
@@ -285,15 +289,17 @@
 <span class="kw">mod</span> <span class="ident">keys_at</span>;
 <span class="kw">mod</span> <span class="ident">len</span>;
 <span class="kw">mod</span> <span class="ident">len_at</span>;
+<span class="kw">mod</span> <span class="ident">list_range</span>;
+<span class="kw">mod</span> <span class="ident">list_range_at</span>;
 <span class="kw">mod</span> <span class="ident">list_vals</span>;
 <span class="kw">mod</span> <span class="ident">list_vals_at</span>;
+<span class="kw">mod</span> <span class="ident">map_range</span>;
+<span class="kw">mod</span> <span class="ident">map_range_at</span>;
 <span class="kw">mod</span> <span class="ident">nth</span>;
 <span class="kw">mod</span> <span class="ident">nth_at</span>;
 <span class="kw">mod</span> <span class="ident">opid</span>;
 <span class="kw">mod</span> <span class="ident">prop</span>;
 <span class="kw">mod</span> <span class="ident">prop_at</span>;
-<span class="kw">mod</span> <span class="ident">range</span>;
-<span class="kw">mod</span> <span class="ident">range_at</span>;
 <span class="kw">mod</span> <span class="ident">seek_op</span>;
 <span class="kw">mod</span> <span class="ident">seek_op_with_patch</span>;
 
@@ -303,15 +309,17 @@
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">keys_at::KeysAt</span>;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">len::Len</span>;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">len_at::LenAt</span>;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">list_range::ListRange</span>;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">list_range_at::ListRangeAt</span>;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">list_vals::ListVals</span>;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">list_vals_at::ListValsAt</span>;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">map_range::MapRange</span>;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">map_range_at::MapRangeAt</span>;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">nth::Nth</span>;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">nth_at::NthAt</span>;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">opid::OpIdSearch</span>;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">prop::Prop</span>;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">prop_at::PropAt</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">range::Range</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">range_at::RangeAt</span>;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">seek_op::SeekOp</span>;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">seek_op_with_patch::SeekOpWithPatch</span>;
 
