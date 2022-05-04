@@ -14,7 +14,8 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: 1.57.0
+          default: true
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
       - run: ./scripts/ci/fmt
@@ -27,7 +28,8 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: 1.57.0
+          default: true
           components: clippy
       - uses: Swatinem/rust-cache@v1
       - run: ./scripts/ci/lint
@@ -40,7 +42,8 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: 1.57.0
+          default: true
       - uses: Swatinem/rust-cache@v1
       - run: ./scripts/ci/docs
         shell: bash
@@ -84,7 +87,8 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: 1.57.0
+          default: true
       - uses: Swatinem/rust-cache@v1
       - name: Install CMocka
         run: sudo apt-get install -y libcmocka-dev
@@ -101,7 +105,7 @@ jobs:
     strategy:
       matrix:
         toolchain:
-          - stable
+          - 1.57.0
           - nightly
     continue-on-error: ${{ matrix.toolchain == 'nightly' }}
     steps:
@@ -110,6 +114,7 @@ jobs:
         with:
           profile: minimal
           toolchain: ${{ matrix.toolchain }}
+          default: true
       - uses: Swatinem/rust-cache@v1
       - run: ./scripts/ci/build-test
         shell: bash
@@ -121,7 +126,8 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: 1.57.0
+          default: true
       - uses: Swatinem/rust-cache@v1
       - run: ./scripts/ci/build-test
         shell: bash
@@ -133,7 +139,8 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: 1.57.0
+          default: true
       - uses: Swatinem/rust-cache@v1
       - run: ./scripts/ci/build-test
         shell: bash
