@@ -56,8 +56,8 @@ int main(int argc, char** argv) {
     value = test(save_result, AM_VALUE_BYTES);
     AMbyteSpan binary = value.bytes;
     doc2 = AMalloc();
-    AMresult* const load_result = AMload(doc2, binary.src, binary.count);
-    AMfreeResult(load_result);
+    result = AMload(doc2, binary.src, binary.count);
+    AMfreeResult(result);
     AMfreeResult(save_result);
 
     result = AMmapPutBool(doc1, card1, "done", true);
