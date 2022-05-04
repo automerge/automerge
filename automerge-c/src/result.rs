@@ -2,9 +2,12 @@ use automerge as am;
 use std::ffi::CString;
 use std::ops::Deref;
 
+use crate::AMbyteSpan;
+use crate::AMchangeHashes;
+use crate::{AMchange, AMchanges};
+
 /// \struct AMobjId
 /// \brief An object's unique identifier.
-#[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
 pub struct AMobjId(am::ObjId);
 
 impl AMobjId {
@@ -27,40 +30,6 @@ impl Deref for AMobjId {
     }
 }
 
-/// \memberof AMvalue
-/// \struct AMbyteSpan
-/// \brief A contiguous sequence of bytes.
-///
-#[repr(C)]
-pub struct AMbyteSpan {
-    /// A pointer to the byte at position zero.
-    /// \warning \p src is only valid until the `AMfreeResult()` function is called
-    ///          on the `AMresult` struct hosting the array of bytes to which
-    ///          it points.
-    src: *const u8,
-    /// The number of bytes in the sequence.
-    count: usize,
-}
-
-impl From<&Vec<u8>> for AMbyteSpan {
-    fn from(v: &Vec<u8>) -> Self {
-        AMbyteSpan {
-            src: (*v).as_ptr(),
-            count: (*v).len(),
-        }
-    }
-}
-
-impl From<&mut am::ActorId> for AMbyteSpan {
-    fn from(actor: &mut am::ActorId) -> Self {
-        let slice = actor.to_bytes();
-        AMbyteSpan {
-            src: slice.as_ptr(),
-            count: slice.len(),
-        }
-    }
-}
-
 /// \struct AMvalue
 /// \brief A discriminated union of value type variants for an `AMresult` struct.
 ///
@@ -79,14 +48,17 @@ impl From<&mut am::ActorId> for AMbyteSpan {
 /// \var AMvalue::bytes
 /// An array of bytes as an `AMbyteSpan` struct.
 ///
+/// \var AMvalue::change_hashes
+/// A sequence of change hashes as an `AMchangeHashes` struct.
+///
+/// \var AMvalue::changes
+/// A sequence of changes as an `AMchanges` struct.
+///
 /// \var AMvalue::counter
 /// A CRDT counter.
 ///
 /// \var AMvalue::f64
 /// A 64-bit float.
-///
-/// \var AMvalue::change_hash
-/// A change hash as an `AMbyteSpan` struct.
 ///
 /// \var AMvalue::int_
 /// A 64-bit signed integer.
@@ -107,27 +79,23 @@ pub enum AMvalue<'a> {
     /// An actor ID variant.
     ActorId(AMbyteSpan),
     /// A boolean variant.
-    Boolean(libc::c_char),
+    Boolean(bool),
     /// An array of bytes variant.
     Bytes(AMbyteSpan),
-    /*
+    /// A change hashes variant.
+    ChangeHashes(AMchangeHashes),
     /// A changes variant.
-    Changes(_),
-    */
+    Changes(AMchanges),
     /// A CRDT counter variant.
     Counter(i64),
     /// A 64-bit float variant.
     F64(f64),
-    /// A change hash variant.
-    ChangeHash(AMbyteSpan),
     /// A 64-bit signed integer variant.
     Int(i64),
     /*
     /// A keys variant.
     Keys(_),
     */
-    /// A nothing variant.
-    Nothing,
     /// A null variant.
     Null,
     /// An object identifier variant.
@@ -142,71 +110,123 @@ pub enum AMvalue<'a> {
     */
     /// A 64-bit unsigned integer variant.
     Uint(u64),
+    /// A void variant.
+    Void,
 }
 
 /// \struct AMresult
 /// \brief A discriminated union of result variants.
-///
-pub enum AMresult<'a> {
+pub enum AMresult {
     ActorId(am::ActorId),
-    Changes(Vec<am::Change>),
+    ChangeHashes(Vec<am::ChangeHash>),
+    Changes(Vec<AMchange>),
     Error(CString),
-    ObjId(&'a AMobjId),
-    Nothing,
+    ObjId(AMobjId),
     Scalars(Vec<am::Value<'static>>, Option<CString>),
+    Void,
 }
 
-impl<'a> AMresult<'a> {
+impl AMresult {
     pub(crate) fn err(s: &str) -> Self {
         AMresult::Error(CString::new(s).unwrap())
     }
 }
 
-impl<'a> From<Result<am::ActorId, am::AutomergeError>> for AMresult<'a> {
+impl From<am::ChangeHash> for AMresult {
+    fn from(change_hash: am::ChangeHash) -> Self {
+        AMresult::ChangeHashes(vec![change_hash])
+    }
+}
+
+impl From<Result<(), am::AutomergeError>> for AMresult {
+    fn from(maybe: Result<(), am::AutomergeError>) -> Self {
+        match maybe {
+            Ok(()) => AMresult::Void,
+            Err(e) => AMresult::err(&e.to_string()),
+        }
+    }
+}
+impl From<Result<am::ActorId, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<am::ActorId, am::AutomergeError>) -> Self {
         match maybe {
             Ok(actor_id) => AMresult::ActorId(actor_id),
-            Err(e) => AMresult::Error(CString::new(e.to_string()).unwrap()),
+            Err(e) => AMresult::err(&e.to_string()),
         }
     }
 }
 
-impl<'a> From<Result<&'a AMobjId, am::AutomergeError>> for AMresult<'a> {
-    fn from(maybe: Result<&'a AMobjId, am::AutomergeError>) -> Self {
+impl From<Result<am::ObjId, am::AutomergeError>> for AMresult {
+    fn from(maybe: Result<am::ObjId, am::AutomergeError>) -> Self {
         match maybe {
-            Ok(obj_id) => AMresult::ObjId(obj_id),
-            Err(e) => AMresult::Error(CString::new(e.to_string()).unwrap()),
+            Ok(obj_id) => AMresult::ObjId(AMobjId::new(obj_id)),
+            Err(e) => AMresult::err(&e.to_string()),
         }
     }
 }
 
-impl<'a> From<Result<(), am::AutomergeError>> for AMresult<'a> {
-    fn from(maybe: Result<(), am::AutomergeError>) -> Self {
-        match maybe {
-            Ok(()) => AMresult::Nothing,
-            Err(e) => AMresult::Error(CString::new(e.to_string()).unwrap()),
-        }
-    }
-}
-
-impl<'a> From<Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>>
-    for AMresult<'a>
-{
+impl From<Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>) -> Self {
         match maybe {
             // \todo Ensure that it's alright to ignore the `am::ObjId` value.
             Ok(Some((value, _))) => AMresult::Scalars(vec![value], None),
-            Ok(None) => AMresult::Nothing,
-            Err(e) => AMresult::Error(CString::new(e.to_string()).unwrap()),
+            Ok(None) => AMresult::Void,
+            Err(e) => AMresult::err(&e.to_string()),
         }
     }
 }
 
-impl<'a> From<Result<am::Value<'static>, am::AutomergeError>> for AMresult<'a> {
+impl From<Result<am::Value<'static>, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<am::Value<'static>, am::AutomergeError>) -> Self {
         match maybe {
             Ok(value) => AMresult::Scalars(vec![value], None),
-            Err(e) => AMresult::Error(CString::new(e.to_string()).unwrap()),
+            Err(e) => AMresult::err(&e.to_string()),
         }
+    }
+}
+
+impl From<Result<usize, am::AutomergeError>> for AMresult {
+    fn from(maybe: Result<usize, am::AutomergeError>) -> Self {
+        match maybe {
+            Ok(size) => AMresult::Scalars(vec![am::Value::uint(size as u64)], None),
+            Err(e) => AMresult::err(&e.to_string()),
+        }
+    }
+}
+
+impl From<Result<Vec<&am::Change>, am::AutomergeError>> for AMresult {
+    fn from(maybe: Result<Vec<&am::Change>, am::AutomergeError>) -> Self {
+        match maybe {
+            Ok(changes) => AMresult::Changes(
+                changes
+                    .iter()
+                    .map(|&change| AMchange::new(change.clone()))
+                    .collect(),
+            ),
+            Err(e) => AMresult::err(&e.to_string()),
+        }
+    }
+}
+
+impl From<Result<Vec<am::ChangeHash>, am::AutomergeError>> for AMresult {
+    fn from(maybe: Result<Vec<am::ChangeHash>, am::AutomergeError>) -> Self {
+        match maybe {
+            Ok(change_hashes) => AMresult::ChangeHashes(change_hashes),
+            Err(e) => AMresult::err(&e.to_string()),
+        }
+    }
+}
+
+impl From<Result<Vec<u8>, am::AutomergeError>> for AMresult {
+    fn from(maybe: Result<Vec<u8>, am::AutomergeError>) -> Self {
+        match maybe {
+            Ok(bytes) => AMresult::Scalars(vec![am::Value::bytes(bytes)], None),
+            Err(e) => AMresult::err(&e.to_string()),
+        }
+    }
+}
+
+impl From<AMresult> for *mut AMresult {
+    fn from(b: AMresult) -> Self {
+        Box::into_raw(Box::new(b))
     }
 }

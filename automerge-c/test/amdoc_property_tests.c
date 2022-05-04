@@ -60,7 +60,7 @@ static void test_AMputActor(void **state) {
     }
     assert_int_equal(AMresultSize(res), 0);
     AMvalue value = AMresultValue(res, 0);
-    assert_int_equal(value.tag, AM_VALUE_NOTHING);
+    assert_int_equal(value.tag, AM_VALUE_VOID);
     AMfreeResult(res);
     res = AMgetActor(group_state->doc);
     if (AMresultStatus(res) != AM_STATUS_OK) {
@@ -86,7 +86,7 @@ static void test_AMputActorHex(void **state) {
     }
     assert_int_equal(AMresultSize(res), 0);
     AMvalue value = AMresultValue(res, 0);
-    assert_int_equal(value.tag, AM_VALUE_NOTHING);
+    assert_int_equal(value.tag, AM_VALUE_VOID);
     AMfreeResult(res);
     res = AMgetActorHex(group_state->doc);
     if (AMresultStatus(res) != AM_STATUS_OK) {

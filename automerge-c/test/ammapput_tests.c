@@ -29,7 +29,7 @@ static void test_AMmapPut ## suffix(void **state) {                           \
     }                                                                         \
     assert_int_equal(AMresultSize(res), 0);                                   \
     AMvalue value = AMresultValue(res, 0);                                    \
-    assert_int_equal(value.tag, AM_VALUE_NOTHING);                            \
+    assert_int_equal(value.tag, AM_VALUE_VOID);                            \
     AMfreeResult(res);                                                        \
     res = AMmapGet(group_state->doc, AM_ROOT, #suffix);                       \
     if (AMresultStatus(res) != AM_STATUS_OK) {                                \
@@ -59,16 +59,12 @@ static void test_AMmapPutObject_ ## label(void **state) {                     \
     assert_int_equal(AMresultSize(res), 1);                                   \
     AMvalue value = AMresultValue(res, 0);                                    \
     assert_int_equal(value.tag, AM_VALUE_OBJ_ID);                             \
-    /**                                                                       \
-     * \note The `AMresult` struct can be deallocated immediately when its    \
-     *       value is a pointer to an opaque struct because its lifetime      \
-     *       is tied to the `AMdoc` struct instead.                           \
-     */                                                                       \
-    AMfreeResult(res);                                                        \
     assert_non_null(value.obj_id);                                            \
     assert_int_equal(AMobjSize(group_state->doc, value.obj_id), 0);           \
-    AMfreeObjId(group_state->doc, value.obj_id);                                                             \
+    AMfreeResult(res);                                                        \
 }
+
+static_void_test_AMmapPut(Bool, boolean, true)
 
 static void test_AMmapPutBytes(void **state) {
     static char const* const KEY = "Bytes";
@@ -88,7 +84,7 @@ static void test_AMmapPutBytes(void **state) {
     }
     assert_int_equal(AMresultSize(res), 0);
     AMvalue value = AMresultValue(res, 0);
-    assert_int_equal(value.tag, AM_VALUE_NOTHING);
+    assert_int_equal(value.tag, AM_VALUE_VOID);
     AMfreeResult(res);
     res = AMmapGet(group_state->doc, AM_ROOT, KEY);
     if (AMresultStatus(res) != AM_STATUS_OK) {
@@ -118,7 +114,7 @@ static void test_AMmapPutNull(void **state) {
     }
     assert_int_equal(AMresultSize(res), 0);
     AMvalue value = AMresultValue(res, 0);
-    assert_int_equal(value.tag, AM_VALUE_NOTHING);
+    assert_int_equal(value.tag, AM_VALUE_VOID);
     AMfreeResult(res);
     res = AMmapGet(group_state->doc, AM_ROOT, KEY);
     if (AMresultStatus(res) != AM_STATUS_OK) {
@@ -153,7 +149,7 @@ static void test_AMmapPutStr(void **state) {
     }
     assert_int_equal(AMresultSize(res), 0);
     AMvalue value = AMresultValue(res, 0);
-    assert_int_equal(value.tag, AM_VALUE_NOTHING);
+    assert_int_equal(value.tag, AM_VALUE_VOID);
     AMfreeResult(res);
     res = AMmapGet(group_state->doc, AM_ROOT, KEY);
     if (AMresultStatus(res) != AM_STATUS_OK) {
@@ -173,6 +169,7 @@ static_void_test_AMmapPut(Uint, uint, UINT64_MAX)
 
 int run_AMmapPut_tests(void) {
     const struct CMUnitTest tests[] = {
+        cmocka_unit_test(test_AMmapPut(Bool)),
         cmocka_unit_test(test_AMmapPutBytes),
         cmocka_unit_test(test_AMmapPut(Counter)),
         cmocka_unit_test(test_AMmapPut(F64)),

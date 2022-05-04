@@ -50,9 +50,11 @@ add_custom_command(
     MAIN_DEPENDENCY
         lib.rs
     DEPENDS
+        byte_span.rs
+        change_hashes.rs
+        changes.rs
         doc.rs
         result.rs
-        utils.rs
         ${CMAKE_SOURCE_DIR}/build.rs
         ${CMAKE_SOURCE_DIR}/Cargo.toml
         ${CMAKE_SOURCE_DIR}/cbindgen.toml

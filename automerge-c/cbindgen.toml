@@ -25,7 +25,7 @@ language = "C"
 line_length = 140
 no_includes = true
 style = "both"
-sys_includes = ["stdbool.h", "stddef.h", "stdint.h"]
+sys_includes = ["stdbool.h", "stddef.h", "stdint.h", "time.h"]
 usize_is_size_t = true
 
 [enum]

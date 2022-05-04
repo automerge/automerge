@@ -96,6 +96,8 @@ if(BUILD_TESTING)
     enable_testing()
 endif()
 
+add_subdirectory(examples EXCLUDE_FROM_ALL)
+
 # Generate and install .cmake files
 set(PROJECT_CONFIG_NAME "${PROJECT_NAME}-config")
 
