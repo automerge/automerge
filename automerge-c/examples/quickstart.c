@@ -52,11 +52,11 @@ int main(int argc, char** argv) {
     AMfreeResult(result);
     AMfreeDoc(doc2);
 
-    AMresult* save_result = AMsave(doc1);
-    AMvalue save_value = test(save_result, AM_VALUE_BYTES);
-    AMbyteSpan binary = save_value.bytes;
+    AMresult* const save_result = AMsave(doc1);
+    value = test(save_result, AM_VALUE_BYTES);
+    AMbyteSpan binary = value.bytes;
     doc2 = AMalloc();
-    AMresult* load_result = AMload(doc2, binary.src, binary.count);
+    AMresult* const load_result = AMload(doc2, binary.src, binary.count);
     AMfreeResult(load_result);
     AMfreeResult(save_result);
 
