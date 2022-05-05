@@ -99,6 +99,21 @@ impl<'a, R: RangeBounds<String>> DoubleEndedIterator for MapRangeAt<'a, R> {
                 }
             }
         }
+
+        // we're now overlapping the index and index_back so try and take the result from the next query
+        if let Some((prop, a, b)) = self.next_result.take() {
+            let last_prop = match self.last_key_back {
+                None => None,
+                Some(Key::Map(u)) => Some(self.meta.props.get(u).as_str()),
+                Some(Key::Seq(_)) => None,
+            };
+
+            // we can only use this result if we haven't ended in the prop's state (to account for
+            // conflicts).
+            if Some(prop) != last_prop {
+                return Some((prop, a, b));
+            }
+        }
         None
     }
 }

@@ -74,6 +74,7 @@ impl<'a, R: RangeBounds<String>> DoubleEndedIterator for MapRange<'a, R> {
         for i in (self.index..self.index_back).rev() {
             let op = self.root_child.get(i)?;
             self.index_back -= 1;
+
             if Some(op.key) != self.last_key_back && op.visible() {
                 self.last_key_back = Some(op.key);
                 let prop = match op.key {
@@ -83,6 +84,21 @@ impl<'a, R: RangeBounds<String>> DoubleEndedIterator for MapRange<'a, R> {
                 if self.range.contains(prop) {
                     return Some((prop, op.value(), op.id));
                 }
+            }
+        }
+
+        // we're now overlapping the index and index_back so try and take the result from the next query
+        if let Some((prop, a, b)) = self.next_result.take() {
+            let last_prop = match self.last_key_back {
+                None => None,
+                Some(Key::Map(u)) => Some(self.meta.props.get(u).as_str()),
+                Some(Key::Seq(_)) => None,
+            };
+
+            // we can only use this result if we haven't ended in the prop's state (to account for
+            // conflicts).
+            if Some(prop) != last_prop {
+                return Some((prop, a, b));
             }
         }
         None
