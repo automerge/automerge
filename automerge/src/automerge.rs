@@ -322,7 +322,7 @@ impl Automerge {
         }
     }
 
-    /// Historical version of [`range`](Self::list_range_at).
+    /// Historical version of [`list_range`](Self::list_range).
     pub fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
         &self,
         obj: O,

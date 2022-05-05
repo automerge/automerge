@@ -77,7 +77,7 @@ impl OpTreeInternal {
             .map(|root| query::KeysAt::new(root, clock))
     }
 
-    pub(crate) fn range<'a, R: RangeBounds<String>>(
+    pub(crate) fn map_range<'a, R: RangeBounds<String>>(
         &'a self,
         range: R,
         meta: &'a OpSetMetadata,
@@ -87,7 +87,7 @@ impl OpTreeInternal {
             .map(|node| query::MapRange::new(range, node, meta))
     }
 
-    pub(crate) fn range_at<'a, R: RangeBounds<String>>(
+    pub(crate) fn map_range_at<'a, R: RangeBounds<String>>(
         &'a self,
         range: R,
         meta: &'a OpSetMetadata,
