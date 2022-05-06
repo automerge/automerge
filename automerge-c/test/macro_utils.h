@@ -5,15 +5,16 @@
 #include "automerge.h"
 
 /**
- * \brief Gets the `AMvalue` discriminant corresponding to a function name suffix.
+ * \brief Gets the `AMvalue` struct discriminant corresponding to a function
+ *        name suffix.
  *
  * \param[in] suffix A string.
- * \return An `AMvalue` variant discriminant enum tag.
+ * \return An `AMvalue` struct discriminant.
  */
 AMvalueVariant AMvalue_discriminant(char const* suffix);
 
 /**
- * \brief Gets the `AMobjType` tag corresponding to a object type label.
+ * \brief Gets the `AMobjType` enum tag corresponding to an object type label.
  *
  * \param[in] obj_type_label A string.
  * \return An `AMobjType` enum tag.
