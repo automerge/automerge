@@ -3,50 +3,7 @@
 
 #include <automerge.h>
 
-AMvalue test(AMresult* result, AMvalueVariant const value_tag) {
-    static char prelude[64];
-
-    if (result == NULL) {
-        fprintf(stderr, "NULL AMresult struct pointer.");
-        exit(-1);
-    }
-    AMstatus const status = AMresultStatus(result);
-    if (status != AM_STATUS_OK) {
-        switch (status) {
-            case AM_STATUS_ERROR:          sprintf(prelude, "Error");          break;
-            case AM_STATUS_INVALID_RESULT: sprintf(prelude, "Invalid result"); break;
-            default: sprintf(prelude, "Unknown status code %d", status);
-        }
-        fprintf(stderr, "%s; %s.", prelude, AMerrorMessage(result));
-        AMfreeResult(result);
-        exit(-2);
-    }
-    AMvalue const value = AMresultValue(result, 0);
-    if (value.tag != value_tag) {
-        char const* label = NULL;
-        switch (value.tag) {
-            case AM_VALUE_ACTOR_ID:      label = "AM_VALUE_ACTOR_ID";      break;
-            case AM_VALUE_BOOLEAN:       label = "AM_VALUE_BOOLEAN";       break;
-            case AM_VALUE_BYTES:         label = "AM_VALUE_BYTES";         break;
-            case AM_VALUE_CHANGE_HASHES: label = "AM_VALUE_CHANGE_HASHES"; break;
-            case AM_VALUE_CHANGES:       label = "AM_VALUE_CHANGES";       break;
-            case AM_VALUE_COUNTER:       label = "AM_VALUE_COUNTER";       break;
-            case AM_VALUE_F64:           label = "AM_VALUE_F64";           break;
-            case AM_VALUE_INT:           label = "AM_VALUE_INT";           break;
-            case AM_VALUE_VOID:          label = "AM_VALUE_VOID";          break;
-            case AM_VALUE_NULL:          label = "AM_VALUE_NULL";          break;
-            case AM_VALUE_OBJ_ID:        label = "AM_VALUE_OBJ_ID";        break;
-            case AM_VALUE_STR:           label = "AM_VALUE_STR";           break;
-            case AM_VALUE_TIMESTAMP:     label = "AM_VALUE_TIMESTAMP";     break;
-            case AM_VALUE_UINT:          label = "AM_VALUE_UINT";          break;
-            default:                     label = "unknown";
-        }
-        fprintf(stderr, "Unexpected %s variant (%d).", label, value.tag);
-        AMfreeResult(result);
-        exit(-3);
-    }
-    return value;
-}
+AMvalue test(AMresult*, AMvalueVariant const);
 
 /*
  *  Based on https://automerge.github.io/docs/quickstart
@@ -124,4 +81,57 @@ int main(int argc, char** argv) {
     AMfreeResult(result);
     AMfreeResult(cards_result);
     AMfreeDoc(doc1);
+}
+
+/// \brief Extracts an `AMvalue` struct with discriminant \p value_tag
+///        from \p result or writes a message to `stderr`, frees \p result
+///        and terminates the program.
+///
+/// \param[in] result A pointer to an `AMresult` struct.
+/// \param[in] value_tag An `AMvalue` struct discriminant.
+/// \return An `AMvalue` struct.
+/// \pre \p result must be a valid address.
+AMvalue test(AMresult* result, AMvalueVariant const value_tag) {
+    static char prelude[64];
+
+    if (result == NULL) {
+        fprintf(stderr, "NULL `AMresult` struct pointer.");
+        exit(EXIT_FAILURE);
+    }
+    AMstatus const status = AMresultStatus(result);
+    if (status != AM_STATUS_OK) {
+        switch (status) {
+            case AM_STATUS_ERROR:          sprintf(prelude, "Error");          break;
+            case AM_STATUS_INVALID_RESULT: sprintf(prelude, "Invalid result"); break;
+            default: sprintf(prelude, "Unknown `AMstatus` tag %d", status);
+        }
+        fprintf(stderr, "%s; %s.", prelude, AMerrorMessage(result));
+        AMfreeResult(result);
+        exit(EXIT_FAILURE);
+    }
+    AMvalue const value = AMresultValue(result, 0);
+    if (value.tag != value_tag) {
+        char const* label = NULL;
+        switch (value.tag) {
+            case AM_VALUE_ACTOR_ID:      label = "AM_VALUE_ACTOR_ID";      break;
+            case AM_VALUE_BOOLEAN:       label = "AM_VALUE_BOOLEAN";       break;
+            case AM_VALUE_BYTES:         label = "AM_VALUE_BYTES";         break;
+            case AM_VALUE_CHANGE_HASHES: label = "AM_VALUE_CHANGE_HASHES"; break;
+            case AM_VALUE_CHANGES:       label = "AM_VALUE_CHANGES";       break;
+            case AM_VALUE_COUNTER:       label = "AM_VALUE_COUNTER";       break;
+            case AM_VALUE_F64:           label = "AM_VALUE_F64";           break;
+            case AM_VALUE_INT:           label = "AM_VALUE_INT";           break;
+            case AM_VALUE_VOID:          label = "AM_VALUE_VOID";          break;
+            case AM_VALUE_NULL:          label = "AM_VALUE_NULL";          break;
+            case AM_VALUE_OBJ_ID:        label = "AM_VALUE_OBJ_ID";        break;
+            case AM_VALUE_STR:           label = "AM_VALUE_STR";           break;
+            case AM_VALUE_TIMESTAMP:     label = "AM_VALUE_TIMESTAMP";     break;
+            case AM_VALUE_UINT:          label = "AM_VALUE_UINT";          break;
+            default:                     label = "<unknown>";
+        }
+        fprintf(stderr, "Unexpected `AMvalueVariant` tag `%s` (%d).", label, value.tag);
+        AMfreeResult(result);
+        exit(EXIT_FAILURE);
+    }
+    return value;
 }
