@@ -83,14 +83,16 @@ int main(int argc, char** argv) {
     AMfreeDoc(doc1);
 }
 
-/// \brief Extracts an `AMvalue` struct with discriminant \p value_tag
-///        from \p result or writes a message to `stderr`, frees \p result
-///        and terminates the program.
-///
-/// \param[in] result A pointer to an `AMresult` struct.
-/// \param[in] value_tag An `AMvalue` struct discriminant.
-/// \return An `AMvalue` struct.
-/// \pre \p result must be a valid address.
+/**
+ * \brief Extracts an `AMvalue` struct with discriminant \p value_tag
+ *        from \p result or writes a message to `stderr`, frees \p result
+ *        and terminates the program.
+ *
+.* \param[in] result A pointer to an `AMresult` struct.
+ * \param[in] value_tag An `AMvalue` struct discriminant.
+ * \return An `AMvalue` struct.
+ * \pre \p result must be a valid address.
+ */
 AMvalue test(AMresult* result, AMvalueVariant const value_tag) {
     static char prelude[64];
 
