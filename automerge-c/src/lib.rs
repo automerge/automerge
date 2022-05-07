@@ -88,7 +88,7 @@ fn to_result<R: Into<AMresult>>(r: R) -> *mut AMresult {
 /// \warning To avoid a memory leak, the returned pointer must be deallocated
 ///          with `AMfreeDoc()`.
 #[no_mangle]
-pub extern "C" fn AMalloc() -> *mut AMdoc {
+pub extern "C" fn AMcreate() -> *mut AMdoc {
     AMdoc::new(am::AutoCommit::new()).into()
 }
 
@@ -148,7 +148,7 @@ pub unsafe extern "C" fn AMdup(doc: *mut AMdoc) -> *mut AMdoc {
 
 /// \memberof AMdoc
 /// \brief Deallocates the storage for an `AMdoc` struct previously
-///        allocated by `AMalloc()` or `AMdup()`.
+///        allocated by `AMcreate()`, `AMdup()` or `AMload()`.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \pre \p doc must be a valid address.
@@ -165,7 +165,33 @@ pub unsafe extern "C" fn AMfreeDoc(doc: *mut AMdoc) {
 }
 
 /// \memberof AMdoc
-/// \brief Loads the compact form of an incremental save of an `AMdoc` struct
+/// \brief Allocates storage for an `AMdoc` struct and initializes it with the
+///        compact form of an incremental save pointed to by \p src.
+///
+/// \param[in] src A pointer to an array of bytes.
+/// \param[in] count The number of bytes in \p src to load.
+/// \return A pointer to an `AMdoc` struct.
+/// \pre \p src must be a valid address.
+/// \pre `0 <=` \p count `<=` length of \p src.
+/// \warning To avoid a memory leak, the returned pointer must be deallocated
+///          with `AMfreeDoc()`.
+/// \internal
+///
+/// # Safety
+/// src must be a byte array of length `>= count`
+#[no_mangle]
+pub unsafe extern "C" fn AMload(src: *const u8, count: usize) -> *mut AMdoc {
+    let mut data = Vec::new();
+    data.extend_from_slice(std::slice::from_raw_parts(src, count));
+    if let Ok(auto_commit) = am::AutoCommit::load(&data) {
+        AMdoc::new(auto_commit).into()
+    } else {
+        std::ptr::null_mut::<AMdoc>()
+    }
+}
+
+/// \memberof AMdoc
+/// \brief Loads the compact form of an incremental save pointed to by \p src
 ///        into \p doc.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
@@ -184,7 +210,11 @@ pub unsafe extern "C" fn AMfreeDoc(doc: *mut AMdoc) {
 /// doc must be a pointer to a valid AMdoc
 /// src must be a byte array of length `>= count`
 #[no_mangle]
-pub unsafe extern "C" fn AMload(doc: *mut AMdoc, src: *const u8, count: usize) -> *mut AMresult {
+pub unsafe extern "C" fn AMloadIncremental(
+    doc: *mut AMdoc,
+    src: *const u8,
+    count: usize,
+) -> *mut AMresult {
     let doc = to_doc!(doc);
     let mut data = Vec::new();
     data.extend_from_slice(std::slice::from_raw_parts(src, count));
