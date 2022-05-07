@@ -9,7 +9,11 @@ AMvalue test(AMresult*, AMvalueVariant const);
  *  Based on https://automerge.github.io/docs/quickstart
  */
 int main(int argc, char** argv) {
-    AMdoc* const doc1 = AMalloc();
+    AMdoc* const doc1 = AMcreate();
+    if (doc1 == NULL) {
+        fprintf(stderr, "`AMcreate()` failure.");
+        exit(EXIT_FAILURE);
+    }
     AMresult* const cards_result = AMmapPutObject(doc1, AM_ROOT, "cards", AM_OBJ_TYPE_LIST);
     AMvalue value = test(cards_result, AM_VALUE_OBJ_ID);
     AMobjId const* const cards = value.obj_id;
@@ -36,7 +40,14 @@ int main(int argc, char** argv) {
     test(result, AM_VALUE_CHANGE_HASHES);
     AMfreeResult(result);
 
-    AMdoc* doc2 = AMalloc();
+    AMdoc* doc2 = AMcreate();
+    if (doc2 == NULL) {
+        fprintf(stderr, "`AMcreate()` failure.");
+        AMfreeResult(card1_result);
+        AMfreeResult(cards_result);
+        AMfreeDoc(doc1);
+        exit(EXIT_FAILURE);
+    }
     result = AMmerge(doc2, doc1);
     test(result, AM_VALUE_CHANGE_HASHES);
     AMfreeResult(result);
@@ -45,11 +56,15 @@ int main(int argc, char** argv) {
     AMresult* const save_result = AMsave(doc1);
     value = test(save_result, AM_VALUE_BYTES);
     AMbyteSpan binary = value.bytes;
-    doc2 = AMalloc();
-    result = AMload(doc2, binary.src, binary.count);
-    test(result, AM_VALUE_UINT);
-    AMfreeResult(result);
+    doc2 = AMload(binary.src, binary.count);
     AMfreeResult(save_result);
+    if (doc2 == NULL) {
+        fprintf(stderr, "`AMload()` failure.");
+        AMfreeResult(card1_result);
+        AMfreeResult(cards_result);
+        AMfreeDoc(doc1);
+        exit(EXIT_FAILURE);
+    }
 
     result = AMmapPutBool(doc1, card1, "done", true);
     test(result, AM_VALUE_VOID);
