@@ -4,6 +4,7 @@ use std::ops::Deref;
 
 use crate::AMbyteSpan;
 use crate::AMchangeHashes;
+use crate::AMsyncMessage;
 use crate::{AMchange, AMchanges};
 
 /// \struct AMobjId
@@ -110,6 +111,8 @@ pub enum AMvalue<'a> {
     */
     /// A 64-bit unsigned integer variant.
     Uint(u64),
+    /// A synchronization message variant.
+    SyncMessage(&'a AMsyncMessage),
     /// A void variant.
     Void,
 }
@@ -123,6 +126,7 @@ pub enum AMresult {
     Error(CString),
     ObjId(AMobjId),
     Scalars(Vec<am::Value<'static>>, Option<CString>),
+    SyncMessage(AMsyncMessage),
     Void,
 }
 
@@ -135,6 +139,15 @@ impl AMresult {
 impl From<am::ChangeHash> for AMresult {
     fn from(change_hash: am::ChangeHash) -> Self {
         AMresult::ChangeHashes(vec![change_hash])
+    }
+}
+
+impl From<Option<am::sync::Message>> for AMresult {
+    fn from(maybe: Option<am::sync::Message>) -> Self {
+        match maybe {
+            Some(message) => AMresult::SyncMessage(AMsyncMessage::new(message)),
+            None => AMresult::Void,
+        }
     }
 }
 

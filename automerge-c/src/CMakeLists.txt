@@ -55,6 +55,7 @@ add_custom_command(
         changes.rs
         doc.rs
         result.rs
+        sync.rs
         ${CMAKE_SOURCE_DIR}/build.rs
         ${CMAKE_SOURCE_DIR}/Cargo.toml
         ${CMAKE_SOURCE_DIR}/cbindgen.toml

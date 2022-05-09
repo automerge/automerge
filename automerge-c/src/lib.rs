@@ -7,6 +7,7 @@ mod change_hashes;
 mod changes;
 mod doc;
 mod result;
+mod sync;
 
 use automerge::transaction::{CommitOptions, Transactable};
 
@@ -15,6 +16,7 @@ use change_hashes::AMchangeHashes;
 use changes::{AMchange, AMchanges};
 use doc::AMdoc;
 use result::{AMobjId, AMresult, AMvalue};
+use sync::{AMsyncMessage, AMsyncState};
 
 /// \ingroup enumerations
 /// \enum AMobjType
@@ -77,6 +79,26 @@ macro_rules! to_obj_id {
     }};
 }
 
+macro_rules! to_sync_message {
+    ($handle:expr) => {{
+        let handle = $handle.as_ref();
+        match handle {
+            Some(b) => b,
+            None => return AMresult::err("Invalid AMsyncMessage pointer").into(),
+        }
+    }};
+}
+
+macro_rules! to_sync_state {
+    ($handle:expr) => {{
+        let handle = $handle.as_mut();
+        match handle {
+            Some(b) => b,
+            None => return AMresult::err("Invalid AMsyncState pointer").into(),
+        }
+    }};
+}
+
 fn to_result<R: Into<AMresult>>(r: R) -> *mut AMresult {
     (r.into()).into()
 }
@@ -85,8 +107,8 @@ fn to_result<R: Into<AMresult>>(r: R) -> *mut AMresult {
 /// \brief Allocates a new `AMdoc` struct and initializes it with defaults.
 ///
 /// \return A pointer to an `AMdoc` struct.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeDoc()`.
+/// \warning To avoid a memory leak, the returned `AMdoc` struct must be
+///          deallocated with `AMfreeDoc()`.
 #[no_mangle]
 pub extern "C" fn AMcreate() -> *mut AMdoc {
     AMdoc::new(am::AutoCommit::new()).into()
@@ -102,8 +124,8 @@ pub extern "C" fn AMcreate() -> *mut AMdoc {
 /// \return A pointer to an `AMresult` struct containing a change hash as an
 ///         `AMbyteSpan` struct.
 /// \pre \p doc must be a valid address.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -132,8 +154,8 @@ pub unsafe extern "C" fn AMcommit(
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \return A pointer to an `AMdoc` struct.
 /// \pre \p doc must be a valid address.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeDoc()`.
+/// \warning To avoid a memory leak, the returned `AMdoc` struct must be
+///          deallocated with `AMfreeDoc()`.
 /// \internal
 ///
 /// # Safety
@@ -165,6 +187,45 @@ pub unsafe extern "C" fn AMfreeDoc(doc: *mut AMdoc) {
 }
 
 /// \memberof AMdoc
+/// \brief Generates a synchronization message for a peer based upon the
+///        synchronization state \p sync_state.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] sync_state A pointer to an `AMsyncState` struct.
+/// \return A pointer to an `AMresult` struct containing an `AMsyncMessage`
+///         struct.
+/// \pre \p doc must b e a valid address.
+/// \pre \p sync_state must be a valid address.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// sync_state must be a pointer to a valid AMsyncState
+#[no_mangle]
+pub unsafe extern "C" fn AMgenerateSyncMessage(
+    doc: *mut AMdoc,
+    sync_state: *mut AMsyncState,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    let sync_state = to_sync_state!(sync_state);
+    to_result(doc.generate_sync_message(sync_state.as_mut()))
+}
+
+/// \memberof AMsyncState
+/// \brief Allocates a new `AMsyncState` struct and initializes it with
+///        defaults.
+///
+/// \return A pointer to an `AMsyncState` struct.
+/// \warning To avoid a memory leak, the returned `AMsyncState` struct must be
+///          deallocated with `AMfreeSyncState()`.
+#[no_mangle]
+pub extern "C" fn AMinitSyncState() -> *mut AMsyncState {
+    AMsyncState::new(am::sync::State::new()).into()
+}
+
+/// \memberof AMdoc
 /// \brief Allocates storage for an `AMdoc` struct and initializes it with the
 ///        compact form of an incremental save pointed to by \p src.
 ///
@@ -173,8 +234,8 @@ pub unsafe extern "C" fn AMfreeDoc(doc: *mut AMdoc) {
 /// \return A pointer to an `AMdoc` struct.
 /// \pre \p src must be a valid address.
 /// \pre `0 <=` \p count `<=` length of \p src.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeDoc()`.
+/// \warning To avoid a memory leak, the returned `AMdoc` struct must be
+///          deallocated with `AMfreeDoc()`.
 /// \internal
 ///
 /// # Safety
@@ -202,8 +263,8 @@ pub unsafe extern "C" fn AMload(src: *const u8, count: usize) -> *mut AMdoc {
 /// \pre \p doc must be a valid address.
 /// \pre \p src must be a valid address.
 /// \pre `0 <=` \p count `<=` length of \p src.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -231,8 +292,8 @@ pub unsafe extern "C" fn AMloadIncremental(
 ///         struct.
 /// \pre \p dest must be a valid address.
 /// \pre \p src must be a valid address.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -245,14 +306,43 @@ pub unsafe extern "C" fn AMmerge(dest: *mut AMdoc, src: *mut AMdoc) -> *mut AMre
 }
 
 /// \memberof AMdoc
+/// \brief Receives a synchronization message \p sync_message from a peer based
+///        upon the synchronization state \p sync_state.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] sync_state A pointer to an `AMsyncState` struct.
+/// \param[in] sync_message A pointer to an `AMsyncMessage` struct.
+/// \return A pointer to an `AMresult` struct containing a void.
+/// \pre \p doc must be a valid address.
+/// \pre \p sync_state must be a valid address.
+/// \pre \p sync_message must be a valid address.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// sync_state must be a pointer to a valid AMsyncState
+/// sync_message must be a pointer to a valid AMsyncMessage
+#[no_mangle]
+pub unsafe extern "C" fn AMreceiveSyncMessage(
+    doc: *mut AMdoc,
+    sync_state: *mut AMsyncState,
+    sync_message: *const AMsyncMessage,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    let sync_state = to_sync_state!(sync_state);
+    let sync_message = to_sync_message!(sync_message);
+    to_result(doc.receive_sync_message(sync_state.as_mut(), sync_message.as_ref().clone()))
+}
+
+/// \memberof AMdoc
 /// \brief Saves the entirety of \p doc into a compact form.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \return A pointer to an `AMresult` struct containing an array of bytes as
 ///         an `AMbyteSpan` struct.
 /// \pre \p doc must be a valid address.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -269,8 +359,8 @@ pub unsafe extern "C" fn AMsave(doc: *mut AMdoc) -> *mut AMresult {
 /// \return A pointer to an `AMresult` struct containing an actor ID as an
 ///         `AMbyteSpan` struct.
 /// \pre \p doc must be a valid address.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -287,8 +377,8 @@ pub unsafe extern "C" fn AMgetActor(doc: *mut AMdoc) -> *mut AMresult {
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \return A pointer to an `AMresult` struct containing a `char const*`.
 /// \pre \p doc must be a valid address.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -311,8 +401,8 @@ pub unsafe extern "C" fn AMgetActorHex(doc: *mut AMdoc) -> *mut AMresult {
 /// \pre \p doc must be a valid address.
 /// \pre \p value must be a valid address.
 /// \pre `0 <=` \p count `<=` length of \p value.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -338,8 +428,8 @@ pub unsafe extern "C" fn AMsetActor(
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
 /// \pre \p hex_str must be a valid address.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -396,6 +486,7 @@ pub unsafe extern "C" fn AMresultSize(result: *mut AMresult) -> usize {
             AMresult::Changes(changes) => changes.len(),
             AMresult::Error(_) | AMresult::Void => 0,
             AMresult::Scalars(vec, _) => vec.len(),
+            AMresult::SyncMessage(_) => 1,
         }
     } else {
         0
@@ -477,6 +568,11 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult, index: usize) 
                     }
                 }
             }
+            AMresult::SyncMessage(sync_message) => {
+                if index == 0 {
+                    value = AMvalue::SyncMessage(sync_message);
+                }
+            }
             AMresult::Void => (),
         }
     };
@@ -492,8 +588,8 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult, index: usize) 
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -520,8 +616,8 @@ pub unsafe extern "C" fn AMmapDelete(
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -549,8 +645,8 @@ pub unsafe extern "C" fn AMmapPutBool(
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -578,8 +674,8 @@ pub unsafe extern "C" fn AMmapPutInt(
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -608,8 +704,8 @@ pub unsafe extern "C" fn AMmapPutUint(
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
 /// \pre \p value must be a valid address.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -641,8 +737,8 @@ pub unsafe extern "C" fn AMmapPutStr(
 /// \pre \p key must be a valid address.
 /// \pre \p value must be a valid address.
 /// \pre `0 <=` \p count `<=` length of \p value.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -674,8 +770,8 @@ pub unsafe extern "C" fn AMmapPutBytes(
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -703,8 +799,8 @@ pub unsafe extern "C" fn AMmapPutF64(
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -736,8 +832,8 @@ pub unsafe extern "C" fn AMmapPutCounter(
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -768,8 +864,8 @@ pub unsafe extern "C" fn AMmapPutTimestamp(
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
-/// \warning To avoid a memory leak, the returned p ointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -796,8 +892,8 @@ pub unsafe extern "C" fn AMmapPutNull(
 /// \return A pointer to an `AMresult` struct containing a pointer to an `AMobjId` struct.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -824,8 +920,8 @@ pub unsafe extern "C" fn AMmapPutObject(
 /// \return A pointer to an `AMresult` struct.
 /// \pre \p doc must be a valid address.
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj_id.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -850,8 +946,8 @@ pub unsafe extern "C" fn AMlistGet(
 /// \return A pointer to an `AMresult` struct.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -877,8 +973,8 @@ pub unsafe extern "C" fn AMmapGet(
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj_id.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -905,8 +1001,8 @@ pub unsafe extern "C" fn AMlistDelete(
 /// \param[in] value A boolean.
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -945,8 +1041,8 @@ pub unsafe extern "C" fn AMlistPutBool(
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj_id.
 /// \pre \p value must be a valid address.
 /// \pre `0 <=` \p count `<=` length of \p value.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -985,8 +1081,8 @@ pub unsafe extern "C" fn AMlistPutBytes(
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj_id.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -1022,8 +1118,8 @@ pub unsafe extern "C" fn AMlistPutCounter(
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj_id.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -1058,8 +1154,8 @@ pub unsafe extern "C" fn AMlistPutF64(
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj_id.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -1093,8 +1189,8 @@ pub unsafe extern "C" fn AMlistPutInt(
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj_id.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -1129,8 +1225,8 @@ pub unsafe extern "C" fn AMlistPutNull(
 /// \return A pointer to an `AMresult` struct containing a pointer to an `AMobjId` struct.
 /// \pre \p doc must be a valid address.
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj_id.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -1167,8 +1263,8 @@ pub unsafe extern "C" fn AMlistPutObject(
 /// \pre \p doc must be a valid address.
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj_id.
 /// \pre \p value must be a valid address.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -1205,8 +1301,8 @@ pub unsafe extern "C" fn AMlistPutStr(
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj_id.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -1242,8 +1338,8 @@ pub unsafe extern "C" fn AMlistPutTimestamp(
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj_id.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
@@ -1280,6 +1376,24 @@ pub unsafe extern "C" fn AMfreeResult(result: *mut AMresult) {
     if !result.is_null() {
         let result: AMresult = *Box::from_raw(result);
         drop(result)
+    }
+}
+
+/// \memberof AMsyncState
+/// \brief Deallocates the storage for an `AMsyncState` struct previously
+///        allocated by `AMinitSyncState()`.
+///
+/// \param[in] sync_state A pointer to an `AMsyncState` struct.
+/// \pre \p sync_state must be a valid address.
+/// \internal
+///
+/// # Safety
+/// sync_state must be a pointer to a valid AMsyncState
+#[no_mangle]
+pub unsafe extern "C" fn AMfreeSyncState(sync_state: *mut AMsyncState) {
+    if !sync_state.is_null() {
+        let sync_state: AMsyncState = *Box::from_raw(sync_state);
+        drop(sync_state)
     }
 }
 
@@ -1378,8 +1492,8 @@ pub unsafe extern "C" fn AMgetChangeHash(change: *const AMchange) -> AMbyteSpan 
 /// \param[in] have_deps A pointer to an `AMchangeHashes` struct or `NULL`.
 /// \return A pointer to an `AMresult` struct containing an `AMchanges` struct.
 /// \pre \p doc must be a valid address.
-/// \warning To avoid a memory leak, the returned pointer must be deallocated
-///          with `AMfreeResult()`.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfreeResult()`.
 /// \internal
 ///
 /// # Safety
