@@ -333,7 +333,7 @@ impl OpTreeNode {
                 cumulative_len += child.len() + 1;
             }
         }
-        panic!("index not found in node")
+        panic!("index {} not found in node with len {}", index, self.len())
     }
 
     fn insert_into_non_full_node(&mut self, index: usize, element: Op) {
