@@ -142,6 +142,13 @@ impl OpTreeInternal {
     ///
     /// Panics if `index > len`.
     pub(crate) fn insert(&mut self, index: usize, element: Op) {
+        assert!(
+            index <= self.len(),
+            "tried to insert at {} but len is {}",
+            index,
+            self.len()
+        );
+
         let old_len = self.len();
         if let Some(root) = self.root_node.as_mut() {
             #[cfg(debug_assertions)]
@@ -333,7 +340,7 @@ impl OpTreeNode {
                 cumulative_len += child.len() + 1;
             }
         }
-        panic!("index not found in node")
+        panic!("index {} not found in node with len {}", index, self.len())
     }
 
     fn insert_into_non_full_node(&mut self, index: usize, element: Op) {

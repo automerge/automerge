@@ -98,7 +98,7 @@ pub(crate) enum QueryResult {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Index {
-    /// The map of visible elements to the number of operations targetting them.
+    /// The map of visible keys to the number of visible operations for that key.
     pub(crate) visible: HashMap<Key, usize, FxBuildHasher>,
     /// Set of opids found in this node and below.
     pub(crate) ops: HashSet<OpId, FxBuildHasher>,

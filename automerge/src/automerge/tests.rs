@@ -477,6 +477,325 @@ fn range_iter_map() {
 }
 
 #[test]
+fn map_range_back_and_forth_single() {
+    let mut doc = AutoCommit::new();
+    let actor = doc.get_actor().clone();
+
+    doc.put(ROOT, "1", "a").unwrap();
+    doc.put(ROOT, "2", "b").unwrap();
+    doc.put(ROOT, "3", "c").unwrap();
+
+    let mut range_all = doc.map_range(ROOT, ..);
+    assert_eq!(
+        range_all.next(),
+        Some(("1", "a".into(), ExId::Id(1, actor.clone(), 0)))
+    );
+    assert_eq!(
+        range_all.next_back(),
+        Some(("3", "c".into(), ExId::Id(3, actor.clone(), 0)))
+    );
+    assert_eq!(
+        range_all.next_back(),
+        Some(("2", "b".into(), ExId::Id(2, actor.clone(), 0)))
+    );
+    assert_eq!(range_all.next_back(), None);
+    assert_eq!(range_all.next(), None);
+
+    let mut range_all = doc.map_range(ROOT, ..);
+    assert_eq!(
+        range_all.next(),
+        Some(("1", "a".into(), ExId::Id(1, actor.clone(), 0)))
+    );
+    assert_eq!(
+        range_all.next_back(),
+        Some(("3", "c".into(), ExId::Id(3, actor.clone(), 0)))
+    );
+    assert_eq!(
+        range_all.next(),
+        Some(("2", Value::str("b"), ExId::Id(2, actor.clone(), 0)))
+    );
+    assert_eq!(range_all.next_back(), None);
+    assert_eq!(range_all.next(), None);
+
+    let mut range_all = doc.map_range(ROOT, ..);
+    assert_eq!(
+        range_all.next(),
+        Some(("1", "a".into(), ExId::Id(1, actor.clone(), 0)))
+    );
+    assert_eq!(
+        range_all.next(),
+        Some(("2", "b".into(), ExId::Id(2, actor.clone(), 0)))
+    );
+    assert_eq!(
+        range_all.next(),
+        Some(("3", "c".into(), ExId::Id(3, actor.clone(), 0)))
+    );
+    assert_eq!(range_all.next_back(), None);
+    assert_eq!(range_all.next(), None);
+
+    let mut range_all = doc.map_range(ROOT, ..);
+    assert_eq!(
+        range_all.next_back(),
+        Some(("3", "c".into(), ExId::Id(3, actor.clone(), 0)))
+    );
+    assert_eq!(
+        range_all.next_back(),
+        Some(("2", "b".into(), ExId::Id(2, actor.clone(), 0)))
+    );
+    assert_eq!(
+        range_all.next_back(),
+        Some(("1", "a".into(), ExId::Id(1, actor, 0)))
+    );
+    assert_eq!(range_all.next_back(), None);
+    assert_eq!(range_all.next(), None);
+}
+
+#[test]
+fn map_range_back_and_forth_double() {
+    let mut doc1 = AutoCommit::new();
+    doc1.set_actor(ActorId::from([0]));
+
+    doc1.put(ROOT, "1", "a").unwrap();
+    doc1.put(ROOT, "2", "b").unwrap();
+    doc1.put(ROOT, "3", "c").unwrap();
+
+    // actor 2 should win in all conflicts here
+    let mut doc2 = AutoCommit::new();
+    doc1.set_actor(ActorId::from([1]));
+    let actor2 = doc2.get_actor().clone();
+    doc2.put(ROOT, "1", "aa").unwrap();
+    doc2.put(ROOT, "2", "bb").unwrap();
+    doc2.put(ROOT, "3", "cc").unwrap();
+
+    doc1.merge(&mut doc2).unwrap();
+
+    let mut range_all = doc1.map_range(ROOT, ..);
+    assert_eq!(
+        range_all.next(),
+        Some(("1", "aa".into(), ExId::Id(1, actor2.clone(), 1)))
+    );
+    assert_eq!(
+        range_all.next_back(),
+        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), 1)))
+    );
+    assert_eq!(
+        range_all.next_back(),
+        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), 1)))
+    );
+    assert_eq!(range_all.next_back(), None);
+    assert_eq!(range_all.next(), None);
+
+    let mut range_all = doc1.map_range(ROOT, ..);
+    assert_eq!(
+        range_all.next(),
+        Some(("1", "aa".into(), ExId::Id(1, actor2.clone(), 1)))
+    );
+    assert_eq!(
+        range_all.next_back(),
+        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), 1)))
+    );
+    assert_eq!(
+        range_all.next(),
+        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), 1)))
+    );
+    assert_eq!(range_all.next_back(), None);
+    assert_eq!(range_all.next(), None);
+
+    let mut range_all = doc1.map_range(ROOT, ..);
+    assert_eq!(
+        range_all.next(),
+        Some(("1", "aa".into(), ExId::Id(1, actor2.clone(), 1)))
+    );
+    assert_eq!(
+        range_all.next(),
+        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), 1)))
+    );
+    assert_eq!(
+        range_all.next(),
+        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), 1)))
+    );
+    assert_eq!(range_all.next_back(), None);
+    assert_eq!(range_all.next(), None);
+
+    let mut range_all = doc1.map_range(ROOT, ..);
+    assert_eq!(
+        range_all.next_back(),
+        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), 1)))
+    );
+    assert_eq!(
+        range_all.next_back(),
+        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), 1)))
+    );
+    assert_eq!(
+        range_all.next_back(),
+        Some(("1", "aa".into(), ExId::Id(1, actor2, 1)))
+    );
+    assert_eq!(range_all.next_back(), None);
+    assert_eq!(range_all.next(), None);
+}
+
+#[test]
+fn map_range_at_back_and_forth_single() {
+    let mut doc = AutoCommit::new();
+    let actor = doc.get_actor().clone();
+
+    doc.put(ROOT, "1", "a").unwrap();
+    doc.put(ROOT, "2", "b").unwrap();
+    doc.put(ROOT, "3", "c").unwrap();
+
+    let heads = doc.get_heads();
+
+    let mut range_all = doc.map_range_at(ROOT, .., &heads);
+    assert_eq!(
+        range_all.next(),
+        Some(("1", "a".into(), ExId::Id(1, actor.clone(), 0)))
+    );
+    assert_eq!(
+        range_all.next_back(),
+        Some(("3", "c".into(), ExId::Id(3, actor.clone(), 0)))
+    );
+    assert_eq!(
+        range_all.next_back(),
+        Some(("2", "b".into(), ExId::Id(2, actor.clone(), 0)))
+    );
+    assert_eq!(range_all.next_back(), None);
+    assert_eq!(range_all.next(), None);
+
+    let mut range_all = doc.map_range_at(ROOT, .., &heads);
+    assert_eq!(
+        range_all.next(),
+        Some(("1", "a".into(), ExId::Id(1, actor.clone(), 0)))
+    );
+    assert_eq!(
+        range_all.next_back(),
+        Some(("3", "c".into(), ExId::Id(3, actor.clone(), 0)))
+    );
+    assert_eq!(
+        range_all.next(),
+        Some(("2", Value::str("b"), ExId::Id(2, actor.clone(), 0)))
+    );
+    assert_eq!(range_all.next_back(), None);
+    assert_eq!(range_all.next(), None);
+
+    let mut range_all = doc.map_range_at(ROOT, .., &heads);
+    assert_eq!(
+        range_all.next(),
+        Some(("1", "a".into(), ExId::Id(1, actor.clone(), 0)))
+    );
+    assert_eq!(
+        range_all.next(),
+        Some(("2", "b".into(), ExId::Id(2, actor.clone(), 0)))
+    );
+    assert_eq!(
+        range_all.next(),
+        Some(("3", "c".into(), ExId::Id(3, actor.clone(), 0)))
+    );
+    assert_eq!(range_all.next_back(), None);
+    assert_eq!(range_all.next(), None);
+
+    let mut range_all = doc.map_range_at(ROOT, .., &heads);
+    assert_eq!(
+        range_all.next_back(),
+        Some(("3", "c".into(), ExId::Id(3, actor.clone(), 0)))
+    );
+    assert_eq!(
+        range_all.next_back(),
+        Some(("2", "b".into(), ExId::Id(2, actor.clone(), 0)))
+    );
+    assert_eq!(
+        range_all.next_back(),
+        Some(("1", "a".into(), ExId::Id(1, actor, 0)))
+    );
+    assert_eq!(range_all.next_back(), None);
+    assert_eq!(range_all.next(), None);
+}
+
+#[test]
+fn map_range_at_back_and_forth_double() {
+    let mut doc1 = AutoCommit::new();
+    doc1.set_actor(ActorId::from([0]));
+
+    doc1.put(ROOT, "1", "a").unwrap();
+    doc1.put(ROOT, "2", "b").unwrap();
+    doc1.put(ROOT, "3", "c").unwrap();
+
+    // actor 2 should win in all conflicts here
+    let mut doc2 = AutoCommit::new();
+    doc1.set_actor(ActorId::from([1]));
+    let actor2 = doc2.get_actor().clone();
+    doc2.put(ROOT, "1", "aa").unwrap();
+    doc2.put(ROOT, "2", "bb").unwrap();
+    doc2.put(ROOT, "3", "cc").unwrap();
+
+    doc1.merge(&mut doc2).unwrap();
+    let heads = doc1.get_heads();
+
+    let mut range_all = doc1.map_range_at(ROOT, .., &heads);
+    assert_eq!(
+        range_all.next(),
+        Some(("1", "aa".into(), ExId::Id(1, actor2.clone(), 1)))
+    );
+    assert_eq!(
+        range_all.next_back(),
+        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), 1)))
+    );
+    assert_eq!(
+        range_all.next_back(),
+        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), 1)))
+    );
+    assert_eq!(range_all.next_back(), None);
+    assert_eq!(range_all.next(), None);
+
+    let mut range_all = doc1.map_range_at(ROOT, .., &heads);
+    assert_eq!(
+        range_all.next(),
+        Some(("1", "aa".into(), ExId::Id(1, actor2.clone(), 1)))
+    );
+    assert_eq!(
+        range_all.next_back(),
+        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), 1)))
+    );
+    assert_eq!(
+        range_all.next(),
+        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), 1)))
+    );
+    assert_eq!(range_all.next_back(), None);
+    assert_eq!(range_all.next(), None);
+
+    let mut range_all = doc1.map_range_at(ROOT, .., &heads);
+    assert_eq!(
+        range_all.next(),
+        Some(("1", "aa".into(), ExId::Id(1, actor2.clone(), 1)))
+    );
+    assert_eq!(
+        range_all.next(),
+        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), 1)))
+    );
+    assert_eq!(
+        range_all.next(),
+        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), 1)))
+    );
+    assert_eq!(range_all.next_back(), None);
+    assert_eq!(range_all.next(), None);
+
+    let mut range_all = doc1.map_range_at(ROOT, .., &heads);
+    assert_eq!(
+        range_all.next_back(),
+        Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), 1)))
+    );
+    assert_eq!(
+        range_all.next_back(),
+        Some(("2", "bb".into(), ExId::Id(2, actor2.clone(), 1)))
+    );
+    assert_eq!(
+        range_all.next_back(),
+        Some(("1", "aa".into(), ExId::Id(1, actor2, 1)))
+    );
+    assert_eq!(range_all.next_back(), None);
+    assert_eq!(range_all.next(), None);
+}
+
+#[test]
 fn insert_at_index() {
     let mut doc = AutoCommit::new();
 
