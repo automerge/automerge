@@ -109,6 +109,21 @@
 <span id="102">102</span>
 <span id="103">103</span>
 <span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::clock::Clock</span>;
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::exid::ExId</span>;
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::op_tree</span>::{<span class="ident">OpSetMetadata</span>, <span class="ident">OpTreeNode</span>};
@@ -208,6 +223,21 @@
                 <span class="kw">if</span> <span class="self">self</span>.<span class="ident">range</span>.<span class="ident">contains</span>(<span class="ident">prop</span>) {
                     <span class="kw">return</span> <span class="prelude-val">Some</span>((<span class="ident">prop</span>, <span class="ident">op</span>.<span class="ident">value</span>(), <span class="ident">op</span>.<span class="ident">id</span>));
                 }
+            }
+        }
+
+        <span class="comment">// we&#39;re now overlapping the index and index_back so try and take the result from the next query</span>
+        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>((<span class="ident">prop</span>, <span class="ident">a</span>, <span class="ident">b</span>)) <span class="op">=</span> <span class="self">self</span>.<span class="ident">next_result</span>.<span class="ident">take</span>() {
+            <span class="kw">let</span> <span class="ident">last_prop</span> <span class="op">=</span> <span class="kw">match</span> <span class="self">self</span>.<span class="ident">last_key_back</span> {
+                <span class="prelude-val">None</span> =&gt; <span class="prelude-val">None</span>,
+                <span class="prelude-val">Some</span>(<span class="ident">Key::Map</span>(<span class="ident">u</span>)) =&gt; <span class="prelude-val">Some</span>(<span class="self">self</span>.<span class="ident">meta</span>.<span class="ident">props</span>.<span class="ident">get</span>(<span class="ident">u</span>).<span class="ident">as_str</span>()),
+                <span class="prelude-val">Some</span>(<span class="ident">Key::Seq</span>(<span class="kw">_</span>)) =&gt; <span class="prelude-val">None</span>,
+            };
+
+            <span class="comment">// we can only use this result if we haven&#39;t ended in the prop&#39;s state (to account for</span>
+            <span class="comment">// conflicts).</span>
+            <span class="kw">if</span> <span class="prelude-val">Some</span>(<span class="ident">prop</span>) <span class="op">!</span><span class="op">=</span> <span class="ident">last_prop</span> {
+                <span class="kw">return</span> <span class="prelude-val">Some</span>((<span class="ident">prop</span>, <span class="ident">a</span>, <span class="ident">b</span>));
             }
         }
         <span class="prelude-val">None</span>

@@ -376,7 +376,7 @@
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>)]</span>
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">Index</span> {
-    <span class="doccomment">/// The map of visible elements to the number of operations targetting them.</span>
+    <span class="doccomment">/// The map of visible keys to the number of visible operations for that key.</span>
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">visible</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Key</span>, <span class="ident">usize</span>, <span class="ident">FxBuildHasher</span><span class="op">&gt;</span>,
     <span class="doccomment">/// Set of opids found in this node and below.</span>
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">ops</span>: <span class="ident">HashSet</span><span class="op">&lt;</span><span class="ident">OpId</span>, <span class="ident">FxBuildHasher</span><span class="op">&gt;</span>,
