@@ -73,6 +73,24 @@ impl<'a, R: RangeBounds<usize>> Iterator for ListRange<'a, R> {
 
 impl<'a, R: RangeBounds<usize>> DoubleEndedIterator for ListRange<'a, R> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        todo!()
+        for i in (self.index..self.index_back).rev() {
+            let op = self.root_child.get(i)?;
+            self.index += 1;
+            if op.visible() {
+                if op.elemid() != self.last_elemid {
+                    self.last_elemid = op.elemid();
+                    self.pos += 1;
+                    if self.range.contains(&(self.pos - 1)) {
+                        let result = self.next_result.replace((self.pos - 1, op.value(), op.id));
+                        if result.is_some() {
+                            return result;
+                        }
+                    }
+                } else if self.pos > 0 && self.range.contains(&(self.pos - 1)) {
+                    self.next_result = Some((self.pos - 1, op.value(), op.id));
+                }
+            }
+        }
+        self.next_result.take()
     }
 }

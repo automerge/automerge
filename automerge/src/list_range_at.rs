@@ -25,3 +25,9 @@ impl<'a, R: RangeBounds<usize>> Iterator for ListRangeAt<'a, R> {
             .map(|(key, value, id)| (key, value, self.doc.id_to_exid(id)))
     }
 }
+
+impl<'a, R: RangeBounds<usize>> DoubleEndedIterator for ListRangeAt<'a, R> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        todo!()
+    }
+}
