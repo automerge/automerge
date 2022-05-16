@@ -22,6 +22,11 @@ impl<'a, R: RangeBounds<String>> ValueIter<'a> for MapRange<'a, R> {
     fn next_value(&mut self, doc: &'a Automerge) -> Option<(Value<'a>, ExId)> {
         self.next().map(|(_, val, id)| (val, doc.id_to_exid(id)))
     }
+
+    fn next_value_back(&mut self, doc: &'a Automerge) -> Option<(Value<'a>, ExId)> {
+        self.next_back()
+            .map(|(_, val, id)| (val, doc.id_to_exid(id)))
+    }
 }
 
 impl<'a, R: RangeBounds<String>> MapRange<'a, R> {

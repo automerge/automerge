@@ -15,12 +15,16 @@ impl<'a> fmt::Debug for Values<'a> {
 
 pub(crate) trait ValueIter<'a> {
     fn next_value(&mut self, doc: &'a Automerge) -> Option<(Value<'a>, ExId)>;
+    fn next_value_back(&mut self, doc: &'a Automerge) -> Option<(Value<'a>, ExId)>;
 }
 
 pub(crate) struct NoValues {}
 
 impl<'a> ValueIter<'a> for NoValues {
     fn next_value(&mut self, _doc: &'a Automerge) -> Option<(Value<'a>, ExId)> {
+        None
+    }
+    fn next_value_back(&mut self, _doc: &'a Automerge) -> Option<(Value<'a>, ExId)> {
         None
     }
 }
@@ -55,6 +59,6 @@ impl<'a> Iterator for Values<'a> {
 
 impl<'a> DoubleEndedIterator for Values<'a> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        unimplemented!()
+        self.range.next_value_back(self.doc)
     }
 }

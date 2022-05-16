@@ -24,6 +24,11 @@ impl<'a, R: RangeBounds<usize>> ValueIter<'a> for ListRangeAt<'a, R> {
     fn next_value(&mut self, doc: &'a Automerge) -> Option<(Value<'a>, ExId)> {
         self.next().map(|(_, val, id)| (val, doc.id_to_exid(id)))
     }
+
+    fn next_value_back(&mut self, doc: &'a Automerge) -> Option<(Value<'a>, ExId)> {
+        self.next_back()
+            .map(|(_, val, id)| (val, doc.id_to_exid(id)))
+    }
 }
 
 impl<'a, R: RangeBounds<usize>> ListRangeAt<'a, R> {
@@ -66,5 +71,11 @@ impl<'a, R: RangeBounds<usize>> Iterator for ListRangeAt<'a, R> {
             }
         }
         self.next_result.take()
+    }
+}
+
+impl<'a, R: RangeBounds<usize>> DoubleEndedIterator for ListRangeAt<'a, R> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        todo!()
     }
 }
