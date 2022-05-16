@@ -87,7 +87,7 @@ impl TransactionInner {
         }
 
         // remove the actor from the cache so that it doesn't end up in the saved document
-        if doc.states.get(&self.actor).is_none() {
+        if doc.states.get(&self.actor).is_none() && doc.ops.m.actors.len() > 0 {
             let actor = doc.ops.m.actors.remove_last();
             doc.actor = Actor::Unused(actor);
         }
