@@ -4,7 +4,9 @@
   "description": "",
   "private": true,
   "scripts": {
-    "build": "webpack"
+    "build": "webpack",
+    "start": "serve public",
+    "test": "node dist/node.js"
   },
   "author": "",
   "dependencies": {
@@ -13,6 +15,7 @@
   "devDependencies": {
     "webpack": "^5.72.1",
     "webpack-cli": "^4.9.2",
-    "webpack-node-externals": "^3.0.0"
+    "webpack-node-externals": "^3.0.0",
+    "serve": "^13.0.2"
   }
 }

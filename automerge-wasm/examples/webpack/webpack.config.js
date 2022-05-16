@@ -11,7 +11,7 @@ const serverConfig = {
 
   entry: './src/index.js',
   output: {
-    filename: 'server.js',
+    filename: 'node.js',
     path: path.resolve(__dirname, 'dist'),
   },
   mode: "development", // or production
@@ -21,8 +21,8 @@ const clientConfig = {
   target: 'web',
   entry: './src/index.js',
   output: {
-    filename: 'browser.js',
-    path: path.resolve(__dirname, 'dist'),
+    filename: 'main.js',
+    path: path.resolve(__dirname, 'public'),
   },
   mode: "development", // or production
   performance: {       // we dont want the wasm blob to generate warnings

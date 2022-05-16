@@ -1,4 +1,5 @@
 yarn.lock
 node_modules
-dist/*.wasm
-dist/*.js
+public/*.wasm
+public/main.js
+dist
