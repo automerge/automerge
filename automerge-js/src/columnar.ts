@@ -1,9 +1,9 @@
-const pako = require('pako')
-const { copyObject, parseOpId, equalBytes } = require('./common')
-const {
+import * as pako from 'pako'
+import { copyObject, parseOpId, equalBytes } from './common'
+import {
   utf8ToString, hexStringToBytes, bytesToHexString,
   Encoder, Decoder, RLEEncoder, RLEDecoder, DeltaEncoder, DeltaDecoder, BooleanEncoder, BooleanDecoder
-} = require('./encoding')
+} from './encoding'
 
 // Maybe we should be using the platform's built-in hash implementation?
 // Node has the crypto module: https://nodejs.org/api/crypto.html and browsers have
@@ -18,7 +18,7 @@ const {
 // - It does not need a secure source of random bits and does not need to be
 //   constant-time;
 // - I have reviewed the source code and it seems pretty reasonable.
-const { Hash } = require('fast-sha256')
+import { Hash } from 'fast-sha256'
 
 // These bytes don't mean anything, they were generated randomly
 const MAGIC_BYTES = new Uint8Array([0x85, 0x6f, 0x4a, 0x83])
@@ -32,7 +32,7 @@ const CHUNK_TYPE_DEFLATE = 2 // like CHUNK_TYPE_CHANGE but with DEFLATE compress
 const DEFLATE_MIN_SIZE = 256
 
 // The least-significant 3 bits of a columnId indicate its datatype
-const COLUMN_TYPE = {
+export const COLUMN_TYPE = {
   GROUP_CARD: 0, ACTOR_ID: 1, INT_RLE: 2, INT_DELTA: 3, BOOLEAN: 4,
   STRING_RLE: 5, VALUE_LEN: 6, VALUE_RAW: 7
 }
@@ -43,15 +43,15 @@ const COLUMN_TYPE_DEFLATE = 8
 // In the values in a column of type VALUE_LEN, the bottom four bits indicate the type of the value,
 // one of the following types in VALUE_TYPE. The higher bits indicate the length of the value in the
 // associated VALUE_RAW column (in bytes).
-const VALUE_TYPE = {
+export const VALUE_TYPE = {
   NULL: 0, FALSE: 1, TRUE: 2, LEB128_UINT: 3, LEB128_INT: 4, IEEE754: 5,
   UTF8: 6, BYTES: 7, COUNTER: 8, TIMESTAMP: 9, MIN_UNKNOWN: 10, MAX_UNKNOWN: 15
 }
 
 // make* actions must be at even-numbered indexes in this list
-const ACTIONS = ['makeMap', 'set', 'makeList', 'del', 'makeText', 'inc', 'makeTable', 'link']
+export const ACTIONS = ['makeMap', 'set', 'makeList', 'del', 'makeText', 'inc', 'makeTable', 'link']
 
-const OBJECT_TYPE = {makeMap: 'map', makeList: 'list', makeText: 'text', makeTable: 'table'}
+export const OBJECT_TYPE = {makeMap: 'map', makeList: 'list', makeText: 'text', makeTable: 'table'}
 
 const COMMON_COLUMNS = [
   {columnName: 'objActor',  columnId: 0 << 4 | COLUMN_TYPE.ACTOR_ID},
@@ -69,13 +69,13 @@ const COMMON_COLUMNS = [
   {columnName: 'chldCtr',   columnId: 6 << 4 | COLUMN_TYPE.INT_DELTA}
 ]
 
-const CHANGE_COLUMNS = COMMON_COLUMNS.concat([
+export const CHANGE_COLUMNS = COMMON_COLUMNS.concat([
   {columnName: 'predNum',   columnId: 7 << 4 | COLUMN_TYPE.GROUP_CARD},
   {columnName: 'predActor', columnId: 7 << 4 | COLUMN_TYPE.ACTOR_ID},
   {columnName: 'predCtr',   columnId: 7 << 4 | COLUMN_TYPE.INT_DELTA}
 ])
 
-const DOC_OPS_COLUMNS = COMMON_COLUMNS.concat([
+export const DOC_OPS_COLUMNS = COMMON_COLUMNS.concat([
   {columnName: 'succNum',   columnId: 8 << 4 | COLUMN_TYPE.GROUP_CARD},
   {columnName: 'succActor', columnId: 8 << 4 | COLUMN_TYPE.ACTOR_ID},
   {columnName: 'succCtr',   columnId: 8 << 4 | COLUMN_TYPE.INT_DELTA}
@@ -131,7 +131,7 @@ function compareParsedOpIds(id1, id2) {
  * false.
  */
 function parseAllOpIds(changes, single) {
-  const actors = {}, newChanges = []
+  const actors : any = {}, newChanges : any = []
   for (let change of changes) {
     change = copyObject(change)
     actors[change.actor] = true
@@ -294,7 +294,7 @@ function encodeValue(op, columns) {
  * form `{value: value, datatype: datatypeTag}` where `value` is a JavaScript primitive datatype
  * corresponding to the value, and `datatypeTag` is a datatype annotation such as 'counter'.
  */
-function decodeValue(sizeTag, bytes) {
+export function decodeValue(sizeTag, bytes) {
   if (sizeTag === VALUE_TYPE.NULL) {
     return {value: null}
   } else if (sizeTag === VALUE_TYPE.FALSE) {
@@ -367,7 +367,7 @@ function decodeValueColumns(columns, colIndex, actorIds, result) {
  * objects.
  */
 function encodeOps(ops, forDocument) {
-  const columns = {
+  const columns : any = {
     objActor  : new RLEEncoder('uint'),
     objCtr    : new RLEEncoder('uint'),
     keyActor  : new RLEEncoder('uint'),
@@ -427,7 +427,7 @@ function encodeOps(ops, forDocument) {
     }
   }
 
-  let columnList = []
+  let columnList : any = []
   for (let {columnName, columnId} of forDocument ? DOC_OPS_COLUMNS : CHANGE_COLUMNS) {
     if (columns[columnName]) columnList.push({id: columnId, name: columnName, encoder: columns[columnName]})
   }
@@ -436,7 +436,7 @@ function encodeOps(ops, forDocument) {
 
 function expandMultiOps(ops, startOp, actor) {
   let opNum = startOp
-  let expandedOps = []
+  let expandedOps : any = []
   for (const op of ops) {
     if (op.action === 'set' && op.values && op.insert) {
       if (op.pred.length !== 0) throw new RangeError('multi-insert pred must be empty')
@@ -470,12 +470,12 @@ function expandMultiOps(ops, startOp, actor) {
  * individual change.
  */
 function decodeOps(ops, forDocument) {
-  const newOps = []
+  const newOps : any = []
   for (let op of ops) {
     const obj = (op.objCtr === null) ? '_root' : `${op.objCtr}@${op.objActor}`
     const elemId = op.keyStr ? undefined : (op.keyCtr === 0 ? '_head' : `${op.keyCtr}@${op.keyActor}`)
     const action = ACTIONS[op.action] || op.action
-    const newOp = elemId ? {obj, elemId, action} : {obj, key: op.keyStr, action}
+    const newOp : any = elemId ? {obj, elemId, action} : {obj, key: op.keyStr, action}
     newOp.insert = !!op.insert
     if (ACTIONS[op.action] === 'set' || ACTIONS[op.action] === 'inc') {
       newOp.value = op.valLen
@@ -511,7 +511,7 @@ function checkSortedOpIds(opIds) {
   }
 }
 
-function encoderByColumnId(columnId) {
+export function encoderByColumnId(columnId) {
   if ((columnId & 7) === COLUMN_TYPE.INT_DELTA) {
     return new DeltaEncoder()
   } else if ((columnId & 7) === COLUMN_TYPE.BOOLEAN) {
@@ -525,7 +525,7 @@ function encoderByColumnId(columnId) {
   }
 }
 
-function decoderByColumnId(columnId, buffer) {
+export function decoderByColumnId(columnId, buffer) {
   if ((columnId & 7) === COLUMN_TYPE.INT_DELTA) {
     return new DeltaDecoder(buffer)
   } else if ((columnId & 7) === COLUMN_TYPE.BOOLEAN) {
@@ -539,9 +539,9 @@ function decoderByColumnId(columnId, buffer) {
   }
 }
 
-function makeDecoders(columns, columnSpec) {
+export function makeDecoders(columns, columnSpec) {
   const emptyBuf = new Uint8Array(0)
-  let decoders = [], columnIndex = 0, specIndex = 0
+  let decoders : any = [], columnIndex = 0, specIndex = 0
 
   while (columnIndex < columns.length || specIndex < columnSpec.length) {
     if (columnIndex === columns.length ||
@@ -565,7 +565,7 @@ function makeDecoders(columns, columnSpec) {
 
 function decodeColumns(columns, actorIds, columnSpec) {
   columns = makeDecoders(columns, columnSpec)
-  let parsedRows = []
+  let parsedRows : any = []
   while (columns.some(col => !col.decoder.done)) {
     let row = {}, col = 0
     while (col < columns.length) {
@@ -576,7 +576,7 @@ function decodeColumns(columns, actorIds, columnSpec) {
       }
 
       if (columnId % 8 === COLUMN_TYPE.GROUP_CARD) {
-        const values = [], count = columns[col].decoder.readValue()
+        const values : any = [], count = columns[col].decoder.readValue()
         for (let i = 0; i < count; i++) {
           let value = {}
           for (let colOffset = 1; colOffset < groupCols; colOffset++) {
@@ -600,7 +600,7 @@ function decodeColumnInfo(decoder) {
   // deflate-compressed. We ignore this bit when checking whether columns are sorted by ID.
   const COLUMN_ID_MASK = (-1 ^ COLUMN_TYPE_DEFLATE) >>> 0
 
-  let lastColumnId = -1, columns = [], numColumns = decoder.readUint53()
+  let lastColumnId = -1, columns : any = [], numColumns = decoder.readUint53()
   for (let i = 0; i < numColumns; i++) {
     const columnId = decoder.readUint53(), bufferLen = decoder.readUint53()
     if ((columnId & COLUMN_ID_MASK) <= (lastColumnId & COLUMN_ID_MASK)) {
@@ -622,11 +622,11 @@ function encodeColumnInfo(encoder, columns) {
 }
 
 function decodeChangeHeader(decoder) {
-  const numDeps = decoder.readUint53(), deps = []
+  const numDeps = decoder.readUint53(), deps : any = []
   for (let i = 0; i < numDeps; i++) {
     deps.push(bytesToHexString(decoder.readRawBytes(32)))
   }
-  let change = {
+  let change : any = {
     actor:   decoder.readHexString(),
     seq:     decoder.readUint53(),
     startOp: decoder.readUint53(),
@@ -682,7 +682,7 @@ function decodeContainerHeader(decoder, computeHash) {
   const hashStartOffset = decoder.offset
   const chunkType = decoder.readByte()
   const chunkLength = decoder.readUint53()
-  const header = {chunkType, chunkLength, chunkData: decoder.readRawBytes(chunkLength)}
+  const header : any = {chunkType, chunkLength, chunkData: decoder.readRawBytes(chunkLength)}
 
   if (computeHash) {
     const sha256 = new Hash()
@@ -699,7 +699,7 @@ function decodeContainerHeader(decoder, computeHash) {
 /**
  * Returns the checksum of a change (bytes 4 to 7) as a 32-bit unsigned integer.
  */
-function getChangeChecksum(change) {
+export function getChangeChecksum(change) {
   if (change[0] !== MAGIC_BYTES[0] || change[1] !== MAGIC_BYTES[1] ||
       change[2] !== MAGIC_BYTES[2] || change[3] !== MAGIC_BYTES[3]) {
     throw new RangeError('Data does not begin with magic bytes 85 6f 4a 83')
@@ -707,9 +707,9 @@ function getChangeChecksum(change) {
   return ((change[4] << 24) | (change[5] << 16) | (change[6] << 8) | change[7]) >>> 0
 }
 
-function encodeChange(changeObj) {
+export function encodeChange(changeObj) {
   const { changes, actorIds } = parseAllOpIds([changeObj], true)
-  const change = changes[0]
+  const change : any = changes[0]
 
   const { hash, bytes } = encodeContainer(CHUNK_TYPE_CHANGE, encoder => {
     if (!Array.isArray(change.deps)) throw new TypeError('deps is not an array')
@@ -725,7 +725,7 @@ function encodeChange(changeObj) {
     encoder.appendUint53(actorIds.length - 1)
     for (let actor of actorIds.slice(1)) encoder.appendHexString(actor)
 
-    const columns = encodeOps(change.ops, false)
+    const columns : any = encodeOps(change.ops, false)
     encodeColumnInfo(encoder, columns)
     for (let column of columns) encoder.appendRawBytes(column.encoder.buffer)
     if (change.extraBytes) encoder.appendRawBytes(change.extraBytes)
@@ -738,16 +738,16 @@ function encodeChange(changeObj) {
   return (bytes.byteLength >= DEFLATE_MIN_SIZE) ? deflateChange(bytes) : bytes
 }
 
-function decodeChangeColumns(buffer) {
+export function decodeChangeColumns(buffer) {
   if (buffer[8] === CHUNK_TYPE_DEFLATE) buffer = inflateChange(buffer)
   const decoder = new Decoder(buffer)
-  const header = decodeContainerHeader(decoder, true)
+  const header : any = decodeContainerHeader(decoder, true)
   const chunkDecoder = new Decoder(header.chunkData)
   if (!decoder.done) throw new RangeError('Encoded change has trailing data')
   if (header.chunkType !== CHUNK_TYPE_CHANGE) throw new RangeError(`Unexpected chunk type: ${header.chunkType}`)
 
-  const change = decodeChangeHeader(chunkDecoder)
-  const columns = decodeColumnInfo(chunkDecoder)
+  const change : any = decodeChangeHeader(chunkDecoder)
+  const columns : any = decodeColumnInfo(chunkDecoder)
   for (let i = 0; i < columns.length; i++) {
     if ((columns[i].columnId & COLUMN_TYPE_DEFLATE) !== 0) {
       throw new RangeError('change must not contain deflated columns')
@@ -767,8 +767,8 @@ function decodeChangeColumns(buffer) {
 /**
  * Decodes one change in binary format into its JS object representation.
  */
-function decodeChange(buffer) {
-  const change = decodeChangeColumns(buffer)
+export function decodeChange(buffer) {
+  const change : any = decodeChangeColumns(buffer)
   change.ops = decodeOps(decodeColumns(change.columns, change.actorIds, CHANGE_COLUMNS), false)
   delete change.actorIds
   delete change.columns
@@ -780,13 +780,13 @@ function decodeChange(buffer) {
  * the operations. Saves work when we only need to inspect the headers. Only
  * computes the hash of the change if `computeHash` is true.
  */
-function decodeChangeMeta(buffer, computeHash) {
+export function decodeChangeMeta(buffer, computeHash) : any {
   if (buffer[8] === CHUNK_TYPE_DEFLATE) buffer = inflateChange(buffer)
-  const header = decodeContainerHeader(new Decoder(buffer), computeHash)
+  const header : any = decodeContainerHeader(new Decoder(buffer), computeHash)
   if (header.chunkType !== CHUNK_TYPE_CHANGE) {
     throw new RangeError('Buffer chunk type is not a change')
   }
-  const meta = decodeChangeHeader(new Decoder(header.chunkData))
+  const meta : any = decodeChangeHeader(new Decoder(header.chunkData))
   meta.change = buffer
   if (computeHash) meta.hash = header.hash
   return meta
@@ -826,8 +826,8 @@ function inflateChange(buffer) {
  * Takes an Uint8Array that may contain multiple concatenated changes, and
  * returns an array of subarrays, each subarray containing one change.
  */
-function splitContainers(buffer) {
-  let decoder = new Decoder(buffer), chunks = [], startOffset = 0
+export function splitContainers(buffer) {
+  let decoder = new Decoder(buffer), chunks : any = [], startOffset = 0
   while (!decoder.done) {
     decodeContainerHeader(decoder, false)
     chunks.push(buffer.subarray(startOffset, decoder.offset))
@@ -840,8 +840,8 @@ function splitContainers(buffer) {
  * Decodes a list of changes from the binary format into JS objects.
  * `binaryChanges` is an array of `Uint8Array` objects.
  */
-function decodeChanges(binaryChanges) {
-  let decoded = []
+export function decodeChanges(binaryChanges) {
+  let decoded : any = []
   for (let binaryChange of binaryChanges) {
     for (let chunk of splitContainers(binaryChange)) {
       if (chunk[8] === CHUNK_TYPE_DOCUMENT) {
@@ -914,11 +914,11 @@ function groupDocumentOps(changes) {
 
   let ops = []
   for (let objectId of Object.keys(byObjectId).sort(sortOpIds)) {
-    let keys = []
+    let keys : string[] = []
     if (objectType[objectId] === 'makeList' || objectType[objectId] === 'makeText') {
       let stack = ['_head']
       while (stack.length > 0) {
-        const key = stack.pop()
+        const key : any = stack.pop()
         if (key !== '_head') keys.push(key)
         for (let opId of byReference[objectId][key].sort(sortOpIds)) stack.push(opId)
       }
@@ -931,6 +931,7 @@ function groupDocumentOps(changes) {
     for (let key of keys) {
       for (let opId of Object.keys(byObjectId[objectId][key]).sort(sortOpIds)) {
         const op = byObjectId[objectId][key][opId]
+        // @ts-ignore
         if (op.action !== 'del') ops.push(op)
       }
     }
@@ -976,6 +977,7 @@ function groupChangeOps(changes, ops) {
     delete op.succ
   }
   for (let op of Object.values(opsById)) {
+    // @ts-ignore
     if (op.action === 'del') ops.push(op)
   }
 
@@ -1055,7 +1057,7 @@ function encodeDocumentChanges(changes) {
     }
   }
 
-  let changesColumns = []
+  let changesColumns : any = []
   for (let {columnName, columnId} of DOCUMENT_COLUMNS) {
     changesColumns.push({id: columnId, name: columnName, encoder: columns[columnName]})
   }
@@ -1104,7 +1106,7 @@ function decodeDocumentChanges(changes, expectedHeads) {
 /**
  * Transforms a list of changes into a binary representation of the document state.
  */
-function encodeDocument(binaryChanges) {
+export function encodeDocument(binaryChanges) {
   const { changes, actorIds } = parseAllOpIds(decodeChanges(binaryChanges), false)
   const { changesColumns, heads } = encodeDocumentChanges(changes)
   const opsColumns = encodeOps(groupDocumentOps(changes), true)
@@ -1122,29 +1124,31 @@ function encodeDocument(binaryChanges) {
     }
     encodeColumnInfo(encoder, changesColumns)
     encodeColumnInfo(encoder, opsColumns)
+    // @ts-ignore
     for (let column of changesColumns) encoder.appendRawBytes(column.encoder.buffer)
+    // @ts-ignore
     for (let column of opsColumns) encoder.appendRawBytes(column.encoder.buffer)
   }).bytes
 }
 
-function decodeDocumentHeader(buffer) {
+export function decodeDocumentHeader(buffer) {
   const documentDecoder = new Decoder(buffer)
   const header = decodeContainerHeader(documentDecoder, true)
   const decoder = new Decoder(header.chunkData)
   if (!documentDecoder.done) throw new RangeError('Encoded document has trailing data')
   if (header.chunkType !== CHUNK_TYPE_DOCUMENT) throw new RangeError(`Unexpected chunk type: ${header.chunkType}`)
 
-  const actorIds = [], numActors = decoder.readUint53()
+  const actorIds : string[] = [], numActors = decoder.readUint53()
   for (let i = 0; i < numActors; i++) {
     actorIds.push(decoder.readHexString())
   }
-  const heads = [], numHeads = decoder.readUint53()
+  const heads : string[] = [], numHeads = decoder.readUint53()
   for (let i = 0; i < numHeads; i++) {
     heads.push(bytesToHexString(decoder.readRawBytes(32)))
   }
 
-  const changesColumns = decodeColumnInfo(decoder)
-  const opsColumns = decodeColumnInfo(decoder)
+  const changesColumns : any = decodeColumnInfo(decoder)
+  const opsColumns : any = decodeColumnInfo(decoder)
   for (let i = 0; i < changesColumns.length; i++) {
     changesColumns[i].buffer = decoder.readRawBytes(changesColumns[i].bufferLen)
     inflateColumn(changesColumns[i])
@@ -1158,7 +1162,7 @@ function decodeDocumentHeader(buffer) {
   return { changesColumns, opsColumns, actorIds, heads, extraBytes }
 }
 
-function decodeDocument(buffer) {
+export function decodeDocument(buffer) {
   const { changesColumns, opsColumns, actorIds, heads } = decodeDocumentHeader(buffer)
   const changes = decodeColumns(changesColumns, actorIds, DOCUMENT_COLUMNS)
   const ops = decodeOps(decodeColumns(opsColumns, actorIds, DOC_OPS_COLUMNS), true)
@@ -1196,7 +1200,7 @@ function inflateColumn(column) {
  * or false if the property has been deleted.
  */
 function addPatchProperty(objects, property) {
-  let values = {}, counter = null
+  let values : any = {}, counter : any = null
   for (let op of property.ops) {
     // Apply counters and their increments regardless of the number of successor operations
     if (op.actionName === 'set' && op.value.datatype === 'counter') {
@@ -1290,7 +1294,7 @@ function condenseEdits(diff) {
  * Appends a list edit operation (insert, update, remove) to an array of existing operations. If the
  * last existing operation can be extended (as a multi-op), we do that.
  */
-function appendEdit(existingEdits, nextEdit) {
+export function appendEdit(existingEdits, nextEdit) {
   if (existingEdits.length === 0) {
     existingEdits.push(nextEdit)
     return
@@ -1336,13 +1340,13 @@ function opIdDelta(id1, id2, delta = 1) {
  * and returns a patch that can be sent to the frontend to instantiate the
  * current state of that document.
  */
-function constructPatch(documentBuffer) {
+export function constructPatch(documentBuffer) {
   const { opsColumns, actorIds } = decodeDocumentHeader(documentBuffer)
-  const col = makeDecoders(opsColumns, DOC_OPS_COLUMNS).reduce(
-    (acc, col) => Object.assign(acc, {[col.columnName]: col.decoder}), {})
+  const col : any = makeDecoders(opsColumns, DOC_OPS_COLUMNS).reduce(
+    (acc, col: any) => Object.assign(acc, {[col.columnName]: col.decoder}), {})
 
   let objects = {_root: {objectId: '_root', type: 'map', props: {}}}
-  let property = null
+  let property : any = null
 
   while (!col.idActor.done) {
     const opId = `${col.idCtr.readValue()}@${actorIds[col.idActor.readValue()]}`
@@ -1369,7 +1373,7 @@ function constructPatch(documentBuffer) {
     const rawValue = col.valRaw.readRawBytes(sizeTag >> 4)
     const value = decodeValue(sizeTag, rawValue)
     const succNum = col.succNum.readValue()
-    let succ = []
+    let succ : string[] = []
     for (let i = 0; i < succNum; i++) {
       succ.push(`${col.succCtr.readValue()}@${actorIds[col.succActor.readValue()]}`)
     }

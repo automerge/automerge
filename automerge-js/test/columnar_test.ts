@@ -1,7 +1,7 @@
-const assert = require('assert')
-const { checkEncoded } = require('./helpers')
-const Automerge = require('..')
-const { encodeChange, decodeChange } =  Automerge
+import * as assert from 'assert'
+import { checkEncoded } from './helpers'
+import * as Automerge from '../src'
+import { encodeChange, decodeChange } from '../src'
 
 describe('change encoding', () => {
   it('should encode text edits', () => {

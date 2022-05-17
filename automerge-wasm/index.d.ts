@@ -89,6 +89,8 @@ export function encodeSyncMessage(message: DecodedSyncMessage): SyncMessage;
 export function decodeSyncMessage(msg: SyncMessage): DecodedSyncMessage;
 export function encodeSyncState(state: SyncState): Uint8Array;
 export function decodeSyncState(data: Uint8Array): SyncState;
+export function exportSyncState(state: SyncState): JsSyncState;
+export function importSyncState(state: JsSyncState): SyncState;
 
 export class Automerge {
   // change state
@@ -151,6 +153,9 @@ export class Automerge {
 
   // dump internal state to a JS object
   toJS(): any;
+}
+
+export class JsSyncState {
 }
 
 export class SyncState {

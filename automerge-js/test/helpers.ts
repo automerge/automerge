@@ -1,5 +1,5 @@
-const assert = require('assert')
-const { Encoder } = require('../src/encoding')
+import * as assert from 'assert'
+import { Encoder } from '../src/encoding'
 
 // Assertion that succeeds if the first argument deepStrictEquals at least one of the
 // subsequent arguments (but we don't care which one)

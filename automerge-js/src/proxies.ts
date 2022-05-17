@@ -1,11 +1,15 @@
 
-const AutomergeWASM = require("automerge-wasm")
-const { Int, Uint, Float64 } = require("./numbers");
-const { Counter, getWriteableCounter } = require("./counter");
-const { Text } = require("./text");
-const { STATE, HEADS, FROZEN, OBJECT_ID, READ_ONLY } = require("./constants")
+import AutomergeWASM from "automerge-wasm"
+import { Automerge, Heads, ObjID } from "automerge-wasm"
+// @ts-ignore
+import { Int, Uint, Float64 } from "./numbers"
+// @ts-ignore
+import { Counter, getWriteableCounter } from "./counter"
+// @ts-ignore
+import { Text } from "./text"
+import { STATE, HEADS, FROZEN, OBJECT_ID, READ_ONLY } from "./constants"
 
-function parseListIndex(key) {
+export function parseListIndex(key) {
   if (typeof key === 'string' && /^[0-9]+$/.test(key)) key = parseInt(key, 10)
   if (typeof key !== 'number') {
     // throw new TypeError('A list index must be a number, but you passed ' + JSON.stringify(key))
@@ -17,7 +21,7 @@ function parseListIndex(key) {
   return key
 }
 
-function valueAt(target, prop) {
+function valueAt(target, prop) : any {
       const { context, objectId, path, readonly, heads} = target
       let value = context.get(objectId, prop, heads)
       if (value === undefined) {
@@ -96,8 +100,8 @@ function import_value(value) {
     }
 }
 
-const MapHandler = {
-  get (target, key) {
+export const MapHandler = {
+  get (target, key) : any {
     const { context, objectId, path, readonly, frozen, heads, cache } = target
     if (key === Symbol.toStringTag) { return target[Symbol.toStringTag] }
     if (key === OBJECT_ID) return objectId
@@ -119,11 +123,11 @@ const MapHandler = {
     }
     if (key === FROZEN) {
       target.frozen = val
-      return
+      return true
     }
     if (key === HEADS) {
       target.heads = val
-      return
+      return true
     }
     let [ value, datatype ] = import_value(val)
     if (frozen) {
@@ -192,10 +196,11 @@ const MapHandler = {
 }
 
 
-const ListHandler = {
+export const ListHandler = {
   get (target, index) {
     const {context, objectId, path, readonly, frozen, heads } = target
     index = parseListIndex(index)
+    // @ts-ignore
     if (index === Symbol.hasInstance) { return (instance) => { return [].has(instance) } }
     if (index === Symbol.toStringTag) { return target[Symbol.toStringTag] }
     if (index === OBJECT_ID) return objectId
@@ -231,11 +236,11 @@ const ListHandler = {
     }
     if (index === FROZEN) {
       target.frozen = val
-      return
+      return true
     }
     if (index === HEADS) {
       target.heads = val
-      return
+      return true
     }
     if (typeof index == "string") {
       throw new RangeError('list index must be a number')
@@ -322,9 +327,9 @@ const ListHandler = {
   },
 
   getPrototypeOf(target) { return Object.getPrototypeOf([]) },
-  ownKeys (target) {
+  ownKeys (target) : string[] {
     const {context, objectId, heads } = target
-    let keys = []
+    let keys : string[] = []
     // uncommenting this causes assert.deepEqual() to fail when comparing to a pojo array
     // but not uncommenting it causes for (i in list) {} to not enumerate values properly
     //for (let i = 0; i < target.context.length(objectId, heads); i++) { keys.push(i.toString()) }
@@ -333,12 +338,13 @@ const ListHandler = {
   }
 }
 
-const TextHandler = Object.assign({}, ListHandler, {
+export const TextHandler = Object.assign({}, ListHandler, {
   get (target, index) {
     // FIXME this is a one line change from ListHandler.get()
     const {context, objectId, path, readonly, frozen, heads } = target
     index = parseListIndex(index)
     if (index === Symbol.toStringTag) { return target[Symbol.toStringTag] }
+    // @ts-ignore
     if (index === Symbol.hasInstance) { return (instance) => { return [].has(instance) } }
     if (index === OBJECT_ID) return objectId
     if (index === READ_ONLY) return readonly
@@ -368,24 +374,24 @@ const TextHandler = Object.assign({}, ListHandler, {
   },
 })
 
-function mapProxy(context, objectId, path, readonly, heads) {
+export function mapProxy(context: Automerge, objectId: ObjID, path?: string[], readonly?: boolean, heads?: Heads) : any {
   return new Proxy({context, objectId, path, readonly: !!readonly, frozen: false, heads, cache: {}}, MapHandler)
 }
 
-function listProxy(context, objectId, path, readonly, heads) {
+export function listProxy(context: Automerge, objectId: ObjID, path?: string[], readonly?: boolean, heads?: Heads) : any {
   let target = []
   Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false, heads, cache: {}})
   return new Proxy(target, ListHandler)
 }
 
-function textProxy(context, objectId, path, readonly, heads) {
+export function textProxy(context: Automerge, objectId: ObjID, path?: string[], readonly?: boolean, heads?: Heads) : any {
   let target = []
   Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false, heads, cache: {}})
   return new Proxy(target, TextHandler)
 }
 
-function rootProxy(context, readonly) {
-  return mapProxy(context, "_root", [], readonly)
+export function rootProxy(context: Automerge, readonly?: boolean) : any {
+  return mapProxy(context, "_root", [], !!readonly)
 }
 
 function listMethods(target) {
@@ -400,18 +406,20 @@ function listMethods(target) {
       return this
     },
 
-    fill(val, start, end) {
-      // FIXME
-      let list = context.getObject(objectId)
-      let [value, datatype] = valueAt(target, index)
-      for (let index = parseListIndex(start || 0); index < parseListIndex(end || list.length); index++) {
-        context.put(objectId, index, value, datatype)
+    fill(val: any, start: number, end: number) {
+      // FIXME needs tests
+      const [value, datatype] = import_value(val)
+      start = parseListIndex(start || 0)
+      end = parseListIndex(end || context.length(objectId))
+      for (let i = start; i < end; i++) {
+        context.put(objectId, i, value, datatype)
       }
       return this
     },
 
     indexOf(o, start = 0) {
       // FIXME
+      /*
       const id = o[OBJECT_ID]
       if (id) {
         const list = context.getObject(objectId)
@@ -424,6 +432,7 @@ function listMethods(target) {
       } else {
         return context.indexOf(objectId, o, start)
       }
+      */
     },
 
     insertAt(index, ...values) {
@@ -468,7 +477,7 @@ function listMethods(target) {
       if (readonly) {
         throw new RangeError("Sequence object cannot be modified outside of a change block")
       }
-      let result = []
+      let result : any = []
       for (let i = 0; i < del; i++) {
         let value = valueAt(target, index)
         result.push(value)
@@ -527,7 +536,7 @@ function listMethods(target) {
       let len = context.length(objectId, heads)
       const iterator = {
         next: () => {
-          let value = undefined
+          let value : undefined | number = undefined
           if (i < len) { value = i; i++ }
           return { value, done: true }
         }
@@ -557,7 +566,7 @@ function listMethods(target) {
                       'join', 'lastIndexOf', 'map', 'reduce', 'reduceRight',
                       'slice', 'some', 'toLocaleString', 'toString']) {
     methods[method] = (...args) => {
-      const list = []
+      const list : any = []
       while (true) {
         let value =  valueAt(target, list.length)
         if (value == undefined) {
@@ -575,7 +584,7 @@ function listMethods(target) {
 
 function textMethods(target) {
   const {context, objectId, path, readonly, frozen, heads } = target
-  const methods = {
+  const methods : any = {
     set (index, value) {
       return this[index] = value
     },
@@ -585,8 +594,8 @@ function textMethods(target) {
     toString () {
       return context.text(objectId, heads).replace(/￼/g,'')
     },
-    toSpans () {
-      let spans = []
+    toSpans () : any[] {
+      let spans : any[] = []
       let chars = ''
       let length = this.length
       for (let i = 0; i < length; i++) {
@@ -614,4 +623,4 @@ function textMethods(target) {
 }
 
 
-module.exports = { rootProxy, textProxy, listProxy, mapProxy, MapHandler, ListHandler, TextHandler }
+//module.exports = { rootProxy, textProxy, listProxy, mapProxy, MapHandler, ListHandler, TextHandler }

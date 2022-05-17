@@ -1,4 +1,4 @@
-function isObject(obj) {
+export function isObject(obj: any) : boolean {
   return typeof obj === 'object' && obj !== null
 }
 
@@ -6,9 +6,9 @@ function isObject(obj) {
  * Returns a shallow copy of the object `obj`. Faster than `Object.assign({}, obj)`.
  * https://jsperf.com/cloning-large-objects/1
  */
-function copyObject(obj) {
+export function copyObject(obj: any) : any {
   if (!isObject(obj)) return {}
-  let copy = {}
+  let copy : any = {}
   for (let key of Object.keys(obj)) {
     copy[key] = obj[key]
   }
@@ -19,7 +19,13 @@ function copyObject(obj) {
  * Takes a string in the form that is used to identify operations (a counter concatenated
  * with an actor ID, separated by an `@` sign) and returns an object `{counter, actorId}`.
  */
-function parseOpId(opId) {
+
+interface OpIdObj {
+  counter: number,
+  actorId: string 
+}
+
+export function parseOpId(opId: string) : OpIdObj {
   const match = /^(\d+)@(.*)$/.exec(opId || '')
   if (!match) {
     throw new RangeError(`Not a valid opId: ${opId}`)
@@ -30,7 +36,7 @@ function parseOpId(opId) {
 /**
  * Returns true if the two byte arrays contain the same data, false if not.
  */
-function equalBytes(array1, array2) {
+export function equalBytes(array1: Uint8Array, array2: Uint8Array) : boolean {
   if (!(array1 instanceof Uint8Array) || !(array2 instanceof Uint8Array)) {
     throw new TypeError('equalBytes can only compare Uint8Arrays')
   }
@@ -41,6 +47,3 @@ function equalBytes(array1, array2) {
   return true
 }
 
-module.exports = {
-  isObject, copyObject, parseOpId, equalBytes
-}

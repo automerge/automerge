@@ -1,9 +1,7 @@
-const assert = require('assert')
-//const Automerge = process.env.TEST_DIST === '1' ? require('../dist/automerge') : require('../src/automerge')
-const Automerge = require('../src')
-const { assertEqualsOneOf } = require('./helpers')
-const { decodeChange } = require('../src/columnar')
-//const { decodeChange } = Automerge
+import * as assert from 'assert'
+import * as Automerge from '../src'
+import { assertEqualsOneOf } from './helpers'
+import { decodeChange } from '../src/columnar'
 
 const UUID_PATTERN = /^[0-9a-f]{32}$/
 const OPID_PATTERN = /^[0-9]+@[0-9a-f]{32}$/
@@ -810,11 +808,12 @@ describe('Automerge', () => {
   })
 
   describe('concurrent use', () => {
-    let s1, s2, s3
+    let s1, s2, s3, s4
     beforeEach(() => {
       s1 = Automerge.init()
       s2 = Automerge.init()
       s3 = Automerge.init()
+      s4 = Automerge.init()
     })
 
     it('should merge concurrent updates of different properties', () => {
