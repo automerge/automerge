@@ -1,15 +1,50 @@
 {
   "name": "automerge-js",
+  "collaborators": [
+    "Orion Henry <orion@inkandswitch.com>",
+    "Martin Kleppmann"
+  ],
   "version": "0.1.0",
-  "main": "src/index.js",
+  "description": "Reimplementation of `automerge` on top of the automerge-wasm backend",
+  "homepage": "https://github.com/automerge/automerge-rs/tree/main/automerge-js",
+  "repository": "github:automerge/automerge-rs",
+  "files": [
+    "README.md",
+    "LICENSE",
+    "package.json",
+    "index.d.ts",
+    "package.json",
+    "index.d.ts",
+    "dist/mjs/constants.js",
+    "dist/mjs/numbers.js",
+    "dist/mjs/sync.js",
+    "dist/mjs/index.js",
+    "dist/mjs/encoding.js",
+    "dist/mjs/columnar.js",
+    "dist/mjs/uuid.js",
+    "dist/mjs/counter.js",
+    "dist/mjs/common.js",
+    "dist/mjs/text.js",
+    "dist/mjs/proxies.js",
+    "dist/cjs/constants.js",
+    "dist/cjs/numbers.js",
+    "dist/cjs/sync.js",
+    "dist/cjs/index.js",
+    "dist/cjs/encoding.js",
+    "dist/cjs/columnar.js",
+    "dist/cjs/uuid.js",
+    "dist/cjs/counter.js",
+    "dist/cjs/common.js",
+    "dist/cjs/text.js",
+    "dist/cjs/proxies.js"
+  ],
+  "module": "./dist/mjs/index.js",
+  "main": "./dist/cjs/index.js",
   "license": "MIT",
   "scripts": {
     "lint": "tslint --project tsconfig.json",
+    "build": "tsc -p config/mjs.json && tsc -p config/cjs.json && tsc -p config/types.json",
     "test": "ts-mocha -p tsconfig.json test/**/*.ts"
-  },
-  "directories": {
-    "src": "./src",
-    "test": "./test"
   },
   "devDependencies": {
     "@types/expect": "^24.3.0",
@@ -21,7 +56,7 @@
     "typescript": "^4.6.4"
   },
   "dependencies": {
-    "automerge-wasm": "file:../automerge-wasm",
+    "automerge-wasm": "^0.1.2",
     "fast-sha256": "^1.3.0",
     "pako": "^2.0.4",
     "uuid": "^8.3"
