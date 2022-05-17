@@ -3,6 +3,7 @@ import * as AutomergeWASM from "automerge-wasm"
 import { uuid } from './uuid'
 
 import _init from "automerge-wasm"
+
 export default _init
 
 export { uuid } from './uuid'
