@@ -1,23 +1,25 @@
 import * as AutomergeWASM from "automerge-wasm"
 
 import { uuid } from './uuid'
+
+import _init from "automerge-wasm"
+export default _init
+
 export { uuid } from './uuid'
 
 import { rootProxy, listProxy, textProxy, mapProxy } from "./proxies"
 import { STATE, HEADS, OBJECT_ID, READ_ONLY, FROZEN  } from "./constants"
 import { Counter  } from "./counter"
-//@ts-ignore
 import { Text } from "./text"
 import { Int, Uint, Float64  } from "./numbers"
 import { isObject } from "./common"
 
-import { Actor as ActorId, Prop, ObjID, Change, DecodedChange, Heads, Automerge } from "automerge-wasm"
-import { JsSyncState as SyncState, SyncMessage, DecodedSyncMessage } from "automerge-wasm"
-
+export { Text } from "./text"
 export { Counter  } from "./counter"
 export { Int, Uint, Float64  } from "./numbers"
-//@ts-ignore
-export { Text } from "./text"
+
+import { Actor as ActorId, Prop, ObjID, Change, DecodedChange, Heads, Automerge } from "automerge-wasm"
+import { JsSyncState as SyncState, SyncMessage, DecodedSyncMessage } from "automerge-wasm"
 
 function _state<T>(doc: Doc<T>) : Automerge {
   let state = (<any>doc)[STATE]

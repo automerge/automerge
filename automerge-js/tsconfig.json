@@ -1,16 +1,22 @@
 {
-  "compilerOptions": {
-    "noImplicitAny": false,
-    "strict": true,
-    "allowJs": false,
-    "baseUrl": ".",
-    "lib": ["dom", "esnext.asynciterable", "es2017", "es2016", "es2015"],
-    "module": "commonjs",
-    "moduleResolution": "node",
-    "target": "es2016",
-    "skipLibCheck": true,
-    "outDir": "./dist"
-  },
-  "include": [ "src/**/*" ],
-  "exclude": ["dist/**/*"]
+    "compilerOptions": {
+        "target": "es2016",
+        "sourceMap": false,
+        "declaration": false,
+        "resolveJsonModule": true,
+        "module": "commonjs",
+        "moduleResolution": "node",
+        "noImplicitAny": false,
+        "allowSyntheticDefaultImports": true,
+        "forceConsistentCasingInFileNames": true,
+        "strict": true,
+        "noFallthroughCasesInSwitch": true,
+        "skipLibCheck": true,
+        "outDir": "./dist/cjs"
+    },
+    "include": [ "src/**/*" ],
+    "exclude": [
+        "./dist/**/*",
+        "./node_modules"
+    ]
 }

@@ -1,0 +1,10 @@
+
+{
+    "extends": "../tsconfig.json",
+    "compilerOptions": {
+      "declaration": true,
+      "emitDeclarationOnly": true,
+      "outFile": "../index.d.ts"
+    },
+    "include": [ "../src/index.ts" ]
+}
