@@ -1,8 +1,8 @@
-const assert = require('assert')
-const Automerge = require('..');
-const { BloomFilter } = require('../src/sync')
-const { decodeChangeMeta } = require('../src/columnar')
-const { decodeSyncMessage, encodeSyncMessage, decodeSyncState, encodeSyncState, initSyncState } = Automerge
+import * as assert from 'assert'
+import * as Automerge from '../src'
+import { BloomFilter } from '../src/sync'
+import { decodeChangeMeta } from '../src/columnar'
+import { decodeSyncMessage, encodeSyncMessage, decodeSyncState, encodeSyncState, initSyncState } from "../src"
 
 function inspect(a) {
   const util = require("util");
@@ -240,6 +240,7 @@ describe('Data sync protocol', () => {
       it('should assume sent changes were recieved until we hear otherwise', () => {
         let n1 = Automerge.init('01234567'), n2 = Automerge.init('89abcdef')
         let s1 = initSyncState(), message = null
+        let s2
 
         n1 = Automerge.change(n1, {time: 0}, doc => doc.items = [])
         ;[n1, n2, s1, s2 ] = sync(n1, n2)

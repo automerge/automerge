@@ -1,7 +1,6 @@
-
-const assert = require('assert')
-const util = require('util')
-const Automerge = require('..')
+import * as assert from 'assert'
+import * as util from 'util'
+import * as Automerge from '../src'
 
 describe('Automerge', () => {
     describe('basics', () => {

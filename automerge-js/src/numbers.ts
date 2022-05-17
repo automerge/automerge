@@ -1,7 +1,9 @@
 // Convience classes to allow users to stricly specify the number type they want
 
-class Int {
-  constructor(value) {
+export class Int {
+  value: number;
+
+  constructor(value: number) {
     if (!(Number.isInteger(value) && value <= Number.MAX_SAFE_INTEGER && value >= Number.MIN_SAFE_INTEGER)) {
       throw new RangeError(`Value ${value} cannot be a uint`)
     }
@@ -10,8 +12,10 @@ class Int {
   }
 }
 
-class Uint {
-  constructor(value) {
+export class Uint {
+  value: number;
+
+  constructor(value: number) {
     if (!(Number.isInteger(value) && value <= Number.MAX_SAFE_INTEGER && value >= 0)) {
       throw new RangeError(`Value ${value} cannot be a uint`)
     }
@@ -20,8 +24,10 @@ class Uint {
   }
 }
 
-class Float64 {
-  constructor(value) {
+export class Float64 {
+  value: number;
+
+  constructor(value: number) {
     if (typeof value !== 'number') {
       throw new RangeError(`Value ${value} cannot be a float64`)
     }
@@ -30,4 +36,3 @@ class Float64 {
   }
 }
 
-module.exports = { Int, Uint, Float64 }

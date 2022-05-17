@@ -16,11 +16,10 @@
  * last sync to disk), and we fall back to sending the entire document in this case.
  */
 
-//const Backend = require('./backend')
-const Backend = {} //require('./backend')
-const { hexStringToBytes, bytesToHexString, Encoder, Decoder } = require('./encoding')
-const { decodeChangeMeta } = require('./columnar')
-const { copyObject } = require('../src/common')
+const Backend : any = {} //require('./backend')
+import { hexStringToBytes, bytesToHexString, Encoder, Decoder } from './encoding'
+import { decodeChangeMeta } from './columnar'
+import { copyObject } from './common'
 
 const HASH_SIZE = 32 // 256 bits = 32 bytes
 const MESSAGE_TYPE_SYNC = 0x42 // first byte of a sync message, for identification
@@ -36,7 +35,12 @@ const BITS_PER_ENTRY = 10, NUM_PROBES = 7
  * over a network. The entries that are added are assumed to already be SHA-256 hashes,
  * so this implementation does not perform its own hashing.
  */
-class BloomFilter {
+export class BloomFilter {
+  numEntries: number;
+  numBitsPerEntry: number;
+  numProbes: number;
+  bits: Uint8Array;
+
   constructor (arg) {
     if (Array.isArray(arg)) {
       // arg is an array of SHA256 hashes in hexadecimal encoding
@@ -143,8 +147,8 @@ function encodeHashes(encoder, hashes) {
  * Decodes a byte array in the format returned by encodeHashes(), and returns its content as an
  * array of hex strings.
  */
-function decodeHashes(decoder) {
-  let length = decoder.readUint32(), hashes = []
+function decodeHashes(decoder) : string[] {
+  let length = decoder.readUint32(), hashes : string[] = []
   for (let i = 0; i < length; i++) {
     hashes.push(bytesToHexString(decoder.readRawBytes(HASH_SIZE)))
   }
@@ -155,7 +159,7 @@ function decodeHashes(decoder) {
  * Takes a sync message of the form `{heads, need, have, changes}` and encodes it as a byte array for
  * transmission.
  */
-function encodeSyncMessage(message) {
+export function encodeSyncMessage(message) {
   const encoder = new Encoder()
   encoder.appendByte(MESSAGE_TYPE_SYNC)
   encodeHashes(encoder, message.heads)
@@ -175,7 +179,7 @@ function encodeSyncMessage(message) {
 /**
  * Takes a binary-encoded sync message and decodes it into the form `{heads, need, have, changes}`.
  */
-function decodeSyncMessage(bytes) {
+export function decodeSyncMessage(bytes) {
   const decoder = new Decoder(bytes)
   const messageType = decoder.readByte()
   if (messageType !== MESSAGE_TYPE_SYNC) {
@@ -187,12 +191,14 @@ function decodeSyncMessage(bytes) {
   let message = {heads, need, have: [], changes: []}
   for (let i = 0; i < haveCount; i++) {
     const lastSync = decodeHashes(decoder)
-    const bloom = decoder.readPrefixedBytes(decoder)
+    const bloom = decoder.readPrefixedBytes()
+    // @ts-ignore
     message.have.push({lastSync, bloom})
   }
   const changeCount = decoder.readUint32()
   for (let i = 0; i < changeCount; i++) {
     const change = decoder.readPrefixedBytes()
+    // @ts-ignore
     message.changes.push(change)
   }
   // Ignore any trailing bytes -- they can be used for extensions by future versions of the protocol
@@ -204,7 +210,7 @@ function decodeSyncMessage(bytes) {
  * an application restart or disconnect and reconnect. The ephemeral parts of the state that should
  * be cleared on reconnect are not encoded.
  */
-function encodeSyncState(syncState) {
+export function encodeSyncState(syncState) {
   const encoder = new Encoder()
   encoder.appendByte(PEER_STATE_TYPE)
   encodeHashes(encoder, syncState.sharedHeads)
@@ -215,7 +221,7 @@ function encodeSyncState(syncState) {
  * Takes a persisted peer state as encoded by `encodeSyncState` and decodes it into a SyncState
  * object. The parts of the peer state that were not encoded are initialised with default values.
  */
-function decodeSyncState(bytes) {
+export function decodeSyncState(bytes) {
   const decoder = new Decoder(bytes)
   const recordType = decoder.readByte()
   if (recordType !== PEER_STATE_TYPE) {
@@ -249,7 +255,7 @@ function getChangesToSend(backend, have, need) {
     return need.map(hash => Backend.getChangeByHash(backend, hash)).filter(change => change !== undefined)
   }
 
-  let lastSyncHashes = {}, bloomFilters = []
+  let lastSyncHashes : any = {}, bloomFilters : BloomFilter[] = []
   for (let h of have) {
     for (let hash of h.lastSync) lastSyncHashes[hash] = true
     bloomFilters.push(new BloomFilter(h.bloom))
@@ -259,7 +265,7 @@ function getChangesToSend(backend, have, need) {
   const changes = Backend.getChanges(backend, Object.keys(lastSyncHashes))
     .map(change => decodeChangeMeta(change, true))
 
-  let changeHashes = {}, dependents = {}, hashesToSend = {}
+  let changeHashes : any = {}, dependents : any = {}, hashesToSend : any = {}
   for (let change of changes) {
     changeHashes[change.hash] = true
 
@@ -278,7 +284,7 @@ function getChangesToSend(backend, have, need) {
   // Include any changes that depend on a Bloom-negative change
   let stack = Object.keys(hashesToSend)
   while (stack.length > 0) {
-    const hash = stack.pop()
+    const hash : any = stack.pop()
     if (dependents[hash]) {
       for (let dep of dependents[hash]) {
         if (!hashesToSend[dep]) {
@@ -290,7 +296,7 @@ function getChangesToSend(backend, have, need) {
   }
 
   // Include any explicitly requested changes
-  let changesToSend = []
+  let changesToSend : any = []
   for (let hash of need) {
     hashesToSend[hash] = true
     if (!changeHashes[hash]) { // Change is not among those returned by getMissingChanges()?
@@ -306,7 +312,7 @@ function getChangesToSend(backend, have, need) {
   return changesToSend
 }
 
-function initSyncState() {
+export function initSyncState() {
   return {
     sharedHeads: [],
     lastSentHeads: [],
@@ -325,7 +331,7 @@ function compareArrays(a, b) {
  * Given a backend and what we believe to be the state of our peer, generate a message which tells
  * them about we have and includes any changes we believe they need
  */
-function generateSyncMessage(backend, syncState) {
+export function generateSyncMessage(backend, syncState) {
   if (!backend) {
     throw new Error("generateSyncMessage called with no Automerge document")
   }
@@ -345,7 +351,7 @@ function generateSyncMessage(backend, syncState) {
   // because they (intentionally) only sent us a subset of changes. In case 1, we leave the `have`
   // field of the message empty because we just want to fill in the missing dependencies for now.
   // In case 2, or if ourNeed is empty, we send a Bloom filter to request any unsent changes.
-  let ourHave = []
+  let ourHave : any = []
   if (!theirHeads || ourNeed.every(hash => theirHeads.includes(hash))) {
     ourHave = [makeBloomFilter(backend, sharedHeads)]
   }
@@ -418,7 +424,7 @@ function advanceHeads(myOldHeads, myNewHeads, ourOldSharedHeads) {
  * Given a backend, a message message and the state of our peer, apply any changes, update what
  * we believe about the peer, and (if there were applied changes) produce a patch for the frontend
  */
-function receiveSyncMessage(backend, oldSyncState, binaryMessage) {
+export function receiveSyncMessage(backend, oldSyncState, binaryMessage) {
   if (!backend) {
     throw new Error("generateSyncMessage called with no Automerge document")
   }

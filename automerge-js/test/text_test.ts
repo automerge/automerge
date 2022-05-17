@@ -1,6 +1,6 @@
-const assert = require('assert')
-const Automerge = require('..')
-const { assertEqualsOneOf } = require('./helpers')
+import * as assert from 'assert'
+import * as Automerge from '../src'
+import { assertEqualsOneOf } from './helpers'
 
 function attributeStateToAttributes(accumulatedAttributes) {
   const attributes = {}
