@@ -8,8 +8,8 @@ export function isObject(obj: any) : boolean {
  */
 export function copyObject(obj: any) : any {
   if (!isObject(obj)) return {}
-  let copy : any = {}
-  for (let key of Object.keys(obj)) {
+  const copy : any = {}
+  for (const key of Object.keys(obj)) {
     copy[key] = obj[key]
   }
   return copy

@@ -145,7 +145,7 @@ function parseAllOpIds(changes, single) {
       if (op.obj.actorId) actors[op.obj.actorId] = true
       if (op.elemId && op.elemId.actorId) actors[op.elemId.actorId] = true
       if (op.child && op.child.actorId) actors[op.child.actorId] = true
-      for (let pred of op.pred) actors[pred.actorId] = true
+      for (const pred of op.pred) actors[pred.actorId] = true
       return op
     })
     newChanges.push(change)
@@ -155,10 +155,10 @@ function parseAllOpIds(changes, single) {
   if (single) {
     actorIds = [changes[0].actor].concat(actorIds.filter(actor => actor !== changes[0].actor))
   }
-  for (let change of newChanges) {
+  for (const change of newChanges) {
     change.actorNum = actorIds.indexOf(change.actor)
     for (let i = 0; i < change.ops.length; i++) {
-      let op = change.ops[i]
+      const op = change.ops[i]
       op.id = {counter: change.startOp + i, actorNum: change.actorNum, actorId: change.actor}
       op.obj = actorIdToActorNum(op.obj, actorIds)
       op.elemId = actorIdToActorNum(op.elemId, actorIds)
@@ -393,7 +393,7 @@ function encodeOps(ops, forDocument) {
     columns.predActor = new RLEEncoder('uint')
   }
 
-  for (let op of ops) {
+  for (const op of ops) {
     encodeObjectId(op, columns)
     encodeOperationKey(op, columns)
     columns.insert.appendValue(!!op.insert)
@@ -427,8 +427,8 @@ function encodeOps(ops, forDocument) {
     }
   }
 
-  let columnList : any = []
-  for (let {columnName, columnId} of forDocument ? DOC_OPS_COLUMNS : CHANGE_COLUMNS) {
+  const columnList : any = []
+  for (const {columnName, columnId} of forDocument ? DOC_OPS_COLUMNS : CHANGE_COLUMNS) {
     if (columns[columnName]) columnList.push({id: columnId, name: columnName, encoder: columns[columnName]})
   }
   return columnList.sort((a, b) => a.id - b.id)
@@ -436,7 +436,7 @@ function encodeOps(ops, forDocument) {
 
 function expandMultiOps(ops, startOp, actor) {
   let opNum = startOp
-  let expandedOps : any = []
+  const expandedOps : any = []
   for (const op of ops) {
     if (op.action === 'set' && op.values && op.insert) {
       if (op.pred.length !== 0) throw new RangeError('multi-insert pred must be empty')
@@ -471,7 +471,7 @@ function expandMultiOps(ops, startOp, actor) {
  */
 function decodeOps(ops, forDocument) {
   const newOps : any = []
-  for (let op of ops) {
+  for (const op of ops) {
     const obj = (op.objCtr === null) ? '_root' : `${op.objCtr}@${op.objActor}`
     const elemId = op.keyStr ? undefined : (op.keyCtr === 0 ? '_head' : `${op.keyCtr}@${op.keyActor}`)
     const action = ACTIONS[op.action] || op.action
@@ -503,7 +503,7 @@ function decodeOps(ops, forDocument) {
  */
 function checkSortedOpIds(opIds) {
   let last = null
-  for (let opId of opIds) {
+  for (const opId of opIds) {
     if (last && compareParsedOpIds(last, opId) !== -1) {
       throw new RangeError('operation IDs are not in ascending order')
     }
@@ -565,7 +565,7 @@ export function makeDecoders(columns, columnSpec) {
 
 function decodeColumns(columns, actorIds, columnSpec) {
   columns = makeDecoders(columns, columnSpec)
-  let parsedRows : any = []
+  const parsedRows : any = []
   while (columns.some(col => !col.decoder.done)) {
     let row = {}, col = 0
     while (col < columns.length) {
@@ -578,7 +578,7 @@ function decodeColumns(columns, actorIds, columnSpec) {
       if (columnId % 8 === COLUMN_TYPE.GROUP_CARD) {
         const values : any = [], count = columns[col].decoder.readValue()
         for (let i = 0; i < count; i++) {
-          let value = {}
+          const value = {}
           for (let colOffset = 1; colOffset < groupCols; colOffset++) {
             decodeValueColumns(columns, col + colOffset, actorIds, value)
           }
@@ -615,7 +615,7 @@ function decodeColumnInfo(decoder) {
 function encodeColumnInfo(encoder, columns) {
   const nonEmptyColumns = columns.filter(column => column.encoder.buffer.byteLength > 0)
   encoder.appendUint53(nonEmptyColumns.length)
-  for (let column of nonEmptyColumns) {
+  for (const column of nonEmptyColumns) {
     encoder.appendUint53(column.id)
     encoder.appendUint53(column.encoder.buffer.byteLength)
   }
@@ -626,7 +626,7 @@ function decodeChangeHeader(decoder) {
   for (let i = 0; i < numDeps; i++) {
     deps.push(bytesToHexString(decoder.readRawBytes(32)))
   }
-  let change : any = {
+  const change : any = {
     actor:   decoder.readHexString(),
     seq:     decoder.readUint53(),
     startOp: decoder.readUint53(),
@@ -714,7 +714,7 @@ export function encodeChange(changeObj) {
   const { hash, bytes } = encodeContainer(CHUNK_TYPE_CHANGE, encoder => {
     if (!Array.isArray(change.deps)) throw new TypeError('deps is not an array')
     encoder.appendUint53(change.deps.length)
-    for (let hash of change.deps.slice().sort()) {
+    for (const hash of change.deps.slice().sort()) {
       encoder.appendRawBytes(hexStringToBytes(hash))
     }
     encoder.appendHexString(change.actor)
@@ -723,11 +723,11 @@ export function encodeChange(changeObj) {
     encoder.appendInt53(change.time)
     encoder.appendPrefixedString(change.message || '')
     encoder.appendUint53(actorIds.length - 1)
-    for (let actor of actorIds.slice(1)) encoder.appendHexString(actor)
+    for (const actor of actorIds.slice(1)) encoder.appendHexString(actor)
 
     const columns : any = encodeOps(change.ops, false)
     encodeColumnInfo(encoder, columns)
-    for (let column of columns) encoder.appendRawBytes(column.encoder.buffer)
+    for (const column of columns) encoder.appendRawBytes(column.encoder.buffer)
     if (change.extraBytes) encoder.appendRawBytes(change.extraBytes)
   })
 
@@ -842,8 +842,8 @@ export function splitContainers(buffer) {
  */
 export function decodeChanges(binaryChanges) {
   let decoded : any = []
-  for (let binaryChange of binaryChanges) {
-    for (let chunk of splitContainers(binaryChange)) {
+  for (const binaryChange of binaryChanges) {
+    for (const chunk of splitContainers(binaryChange)) {
       if (chunk[8] === CHUNK_TYPE_DOCUMENT) {
         decoded = decoded.concat(decodeDocument(chunk))
       } else if (chunk[8] === CHUNK_TYPE_CHANGE || chunk[8] === CHUNK_TYPE_DEFLATE) {
@@ -869,8 +869,8 @@ function sortOpIds(a, b) {
 }
 
 function groupDocumentOps(changes) {
-  let byObjectId = {}, byReference = {}, objectType = {}
-  for (let change of changes) {
+  const byObjectId = {}, byReference = {}, objectType = {}
+  for (const change of changes) {
     for (let i = 0; i < change.ops.length; i++) {
       const op = change.ops[i], opId = `${op.id.counter}@${op.id.actorId}`
       const objectId = (op.obj === '_root') ? '_root' : `${op.obj.counter}@${op.obj.actorId}`
@@ -902,7 +902,7 @@ function groupDocumentOps(changes) {
       byObjectId[objectId][key][opId] = op
       op.succ = []
 
-      for (let pred of op.pred) {
+      for (const pred of op.pred) {
         const predId = `${pred.counter}@${pred.actorId}`
         if (!byObjectId[objectId][key][predId]) {
           throw new RangeError(`No predecessor operation ${predId}`)
@@ -912,15 +912,15 @@ function groupDocumentOps(changes) {
     }
   }
 
-  let ops = []
-  for (let objectId of Object.keys(byObjectId).sort(sortOpIds)) {
+  const ops = []
+  for (const objectId of Object.keys(byObjectId).sort(sortOpIds)) {
     let keys : string[] = []
     if (objectType[objectId] === 'makeList' || objectType[objectId] === 'makeText') {
-      let stack = ['_head']
+      const stack = ['_head']
       while (stack.length > 0) {
         const key : any = stack.pop()
         if (key !== '_head') keys.push(key)
-        for (let opId of byReference[objectId][key].sort(sortOpIds)) stack.push(opId)
+        for (const opId of byReference[objectId][key].sort(sortOpIds)) stack.push(opId)
       }
     } else {
       // FIXME JavaScript sorts based on UTF-16 encoding. We should change this to use the UTF-8
@@ -928,8 +928,8 @@ function groupDocumentOps(changes) {
       keys = Object.keys(byObjectId[objectId]).sort()
     }
 
-    for (let key of keys) {
-      for (let opId of Object.keys(byObjectId[objectId][key]).sort(sortOpIds)) {
+    for (const key of keys) {
+      for (const opId of Object.keys(byObjectId[objectId][key]).sort(sortOpIds)) {
         const op = byObjectId[objectId][key][opId]
         // @ts-ignore
         if (op.action !== 'del') ops.push(op)
@@ -945,8 +945,8 @@ function groupDocumentOps(changes) {
  * Does not return anything, only mutates `changes`.
  */
 function groupChangeOps(changes, ops) {
-  let changesByActor = {} // map from actorId to array of changes by that actor
-  for (let change of changes) {
+  const changesByActor = {} // map from actorId to array of changes by that actor
+  for (const change of changes) {
     change.ops = []
     if (!changesByActor[change.actor]) changesByActor[change.actor] = []
     if (change.seq !== changesByActor[change.actor].length + 1) {
@@ -958,12 +958,12 @@ function groupChangeOps(changes, ops) {
     changesByActor[change.actor].push(change)
   }
 
-  let opsById = {}
-  for (let op of ops) {
+  const opsById = {}
+  for (const op of ops) {
     if (op.action === 'del') throw new RangeError('document should not contain del operations')
     op.pred = opsById[op.id] ? opsById[op.id].pred : []
     opsById[op.id] = op
-    for (let succ of op.succ) {
+    for (const succ of op.succ) {
       if (!opsById[succ]) {
         if (op.elemId) {
           const elemId = op.insert ? op.id : op.elemId
@@ -976,12 +976,12 @@ function groupChangeOps(changes, ops) {
     }
     delete op.succ
   }
-  for (let op of Object.values(opsById)) {
+  for (const op of Object.values(opsById)) {
     // @ts-ignore
     if (op.action === 'del') ops.push(op)
   }
 
-  for (let op of ops) {
+  for (const op of ops) {
     const { counter, actorId } = parseOpId(op.id)
     const actorChanges = changesByActor[actorId]
     // Binary search to find the change that should contain this operation
@@ -1000,7 +1000,7 @@ function groupChangeOps(changes, ops) {
     actorChanges[left].ops.push(op)
   }
 
-  for (let change of changes) {
+  for (const change of changes) {
     change.ops.sort((op1, op2) => sortOpIds(op1.id, op2.id))
     change.startOp = change.maxOp - change.ops.length + 1
     delete change.maxOp
@@ -1026,8 +1026,8 @@ function encodeDocumentChanges(changes) {
     extraLen  : new RLEEncoder('uint'),
     extraRaw  : new Encoder()
   }
-  let indexByHash = {} // map from change hash to its index in the changes array
-  let heads = {} // change hashes that are not a dependency of any other change
+  const indexByHash = {} // map from change hash to its index in the changes array
+  const heads = {} // change hashes that are not a dependency of any other change
 
   for (let i = 0; i < changes.length; i++) {
     const change = changes[i]
@@ -1041,7 +1041,7 @@ function encodeDocumentChanges(changes) {
     columns.message.appendValue(change.message)
     columns.depsNum.appendValue(change.deps.length)
 
-    for (let dep of change.deps) {
+    for (const dep of change.deps) {
       if (typeof indexByHash[dep] !== 'number') {
         throw new RangeError(`Unknown dependency hash: ${dep}`)
       }
@@ -1057,8 +1057,8 @@ function encodeDocumentChanges(changes) {
     }
   }
 
-  let changesColumns : any = []
-  for (let {columnName, columnId} of DOCUMENT_COLUMNS) {
+  const changesColumns : any = []
+  for (const {columnName, columnId} of DOCUMENT_COLUMNS) {
     changesColumns.push({id: columnId, name: columnName, encoder: columns[columnName]})
   }
   changesColumns.sort((a, b) => a.id - b.id)
@@ -1066,11 +1066,11 @@ function encodeDocumentChanges(changes) {
 }
 
 function decodeDocumentChanges(changes, expectedHeads) {
-  let heads = {} // change hashes that are not a dependency of any other change
+  const heads = {} // change hashes that are not a dependency of any other change
   for (let i = 0; i < changes.length; i++) {
-    let change = changes[i]
+    const change = changes[i]
     change.deps = []
-    for (let index of change.depsNum.map(d => d.depsIndex)) {
+    for (const index of change.depsNum.map(d => d.depsIndex)) {
       if (!changes[index] || !changes[index].hash) {
         throw new RangeError(`No hash for index ${index} while processing index ${i}`)
       }
@@ -1110,24 +1110,24 @@ export function encodeDocument(binaryChanges) {
   const { changes, actorIds } = parseAllOpIds(decodeChanges(binaryChanges), false)
   const { changesColumns, heads } = encodeDocumentChanges(changes)
   const opsColumns = encodeOps(groupDocumentOps(changes), true)
-  for (let column of changesColumns) deflateColumn(column)
-  for (let column of opsColumns) deflateColumn(column)
+  for (const column of changesColumns) deflateColumn(column)
+  for (const column of opsColumns) deflateColumn(column)
 
   return encodeContainer(CHUNK_TYPE_DOCUMENT, encoder => {
     encoder.appendUint53(actorIds.length)
-    for (let actor of actorIds) {
+    for (const actor of actorIds) {
       encoder.appendHexString(actor)
     }
     encoder.appendUint53(heads.length)
-    for (let head of heads.sort()) {
+    for (const head of heads.sort()) {
       encoder.appendRawBytes(hexStringToBytes(head))
     }
     encodeColumnInfo(encoder, changesColumns)
     encodeColumnInfo(encoder, opsColumns)
     // @ts-ignore
-    for (let column of changesColumns) encoder.appendRawBytes(column.encoder.buffer)
+    for (const column of changesColumns) encoder.appendRawBytes(column.encoder.buffer)
     // @ts-ignore
-    for (let column of opsColumns) encoder.appendRawBytes(column.encoder.buffer)
+    for (const column of opsColumns) encoder.appendRawBytes(column.encoder.buffer)
   }).bytes
 }
 
@@ -1201,17 +1201,17 @@ function inflateColumn(column) {
  */
 function addPatchProperty(objects, property) {
   let values : any = {}, counter : any = null
-  for (let op of property.ops) {
+  for (const op of property.ops) {
     // Apply counters and their increments regardless of the number of successor operations
     if (op.actionName === 'set' && op.value.datatype === 'counter') {
       if (!counter) counter = {opId: op.opId, value: 0, succ: {}}
       counter.value += op.value.value
-      for (let succId of op.succ) counter.succ[succId] = true
+      for (const succId of op.succ) counter.succ[succId] = true
     } else if (op.actionName === 'inc') {
       if (!counter) throw new RangeError(`inc operation ${op.opId} without a counter`)
       counter.value += op.value.value
       delete counter.succ[op.opId]
-      for (let succId of op.succ) counter.succ[succId] = true
+      for (const succId of op.succ) counter.succ[succId] = true
 
     } else if (op.succ.length === 0) { // Ignore any ops that have been overwritten
       if (op.actionName.startsWith('make')) {
@@ -1240,7 +1240,7 @@ function addPatchProperty(objects, property) {
   }
 
   if (Object.keys(values).length > 0) {
-    let obj = objects[property.objId]
+    const obj = objects[property.objId]
     if (obj.type === 'map' || obj.type === 'table') {
       obj.props[property.key] = values
     } else if (obj.type === 'list' || obj.type === 'text') {
@@ -1278,7 +1278,7 @@ function makeListEdits(list, values, elemId, index) {
 function condenseEdits(diff) {
   if (diff.type === 'list' || diff.type === 'text') {
     diff.edits.forEach(e => condenseEdits(e.value))
-    let newEdits = diff.edits
+    const newEdits = diff.edits
     diff.edits = []
     for (const edit of newEdits) appendEdit(diff.edits, edit)
   } else if (diff.type === 'map' || diff.type === 'table') {
@@ -1300,7 +1300,7 @@ export function appendEdit(existingEdits, nextEdit) {
     return
   }
 
-  let lastEdit = existingEdits[existingEdits.length - 1]
+  const lastEdit = existingEdits[existingEdits.length - 1]
   if (lastEdit.action === 'insert' && nextEdit.action === 'insert' &&
       lastEdit.index === nextEdit.index - 1 &&
       lastEdit.value.type === 'value' && nextEdit.value.type === 'value' &&
@@ -1345,7 +1345,7 @@ export function constructPatch(documentBuffer) {
   const col : any = makeDecoders(opsColumns, DOC_OPS_COLUMNS).reduce(
     (acc, col: any) => Object.assign(acc, {[col.columnName]: col.decoder}), {})
 
-  let objects = {_root: {objectId: '_root', type: 'map', props: {}}}
+  const objects = {_root: {objectId: '_root', type: 'map', props: {}}}
   let property : any = null
 
   while (!col.idActor.done) {
@@ -1362,7 +1362,7 @@ export function constructPatch(documentBuffer) {
 
     const objActor = col.objActor.readValue(), objCtr = col.objCtr.readValue()
     const objId = objActor === null ? '_root' : `${objCtr}@${actorIds[objActor]}`
-    let obj = objects[objId]
+    const obj = objects[objId]
     if (!obj) throw new RangeError(`Operation for nonexistent object: ${objId}`)
 
     const keyActor = col.keyActor.readValue(), keyCtr = col.keyCtr.readValue()
@@ -1373,7 +1373,7 @@ export function constructPatch(documentBuffer) {
     const rawValue = col.valRaw.readRawBytes(sizeTag >> 4)
     const value = decodeValue(sizeTag, rawValue)
     const succNum = col.succNum.readValue()
-    let succ : string[] = []
+    const succ : string[] = []
     for (let i = 0; i < succNum; i++) {
       succ.push(`${col.succCtr.readValue()}@${actorIds[col.succActor.readValue()]}`)
     }

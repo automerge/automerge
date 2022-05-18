@@ -48,7 +48,7 @@ export class BloomFilter {
       this.numBitsPerEntry = BITS_PER_ENTRY
       this.numProbes = NUM_PROBES
       this.bits = new Uint8Array(Math.ceil(this.numEntries * this.numBitsPerEntry / 8))
-      for (let hash of arg) this.addHash(hash)
+      for (const hash of arg) this.addHash(hash)
     } else if (arg instanceof Uint8Array) {
       if (arg.byteLength === 0) {
         this.numEntries = 0
@@ -96,7 +96,7 @@ export class BloomFilter {
     // on the next three lines, the right shift means interpret value as unsigned
     let x = ((hashBytes[0] | hashBytes[1] << 8 | hashBytes[2]  << 16 | hashBytes[3]  << 24) >>> 0) % modulo
     let y = ((hashBytes[4] | hashBytes[5] << 8 | hashBytes[6]  << 16 | hashBytes[7]  << 24) >>> 0) % modulo
-    let z = ((hashBytes[8] | hashBytes[9] << 8 | hashBytes[10] << 16 | hashBytes[11] << 24) >>> 0) % modulo
+    const z = ((hashBytes[8] | hashBytes[9] << 8 | hashBytes[10] << 16 | hashBytes[11] << 24) >>> 0) % modulo
     const probes = [x]
     for (let i = 1; i < this.numProbes; i++) {
       x = (x + y) % modulo
@@ -110,7 +110,7 @@ export class BloomFilter {
    * Sets the Bloom filter bits corresponding to a given SHA-256 hash (given as hex string).
    */
   addHash(hash) {
-    for (let probe of this.getProbes(hash)) {
+    for (const probe of this.getProbes(hash)) {
       this.bits[probe >>> 3] |= 1 << (probe & 7)
     }
   }
@@ -120,7 +120,7 @@ export class BloomFilter {
    */
   containsHash(hash) {
     if (this.numEntries === 0) return false
-    for (let probe of this.getProbes(hash)) {
+    for (const probe of this.getProbes(hash)) {
       if ((this.bits[probe >>> 3] & (1 << (probe & 7))) === 0) {
         return false
       }
@@ -148,7 +148,7 @@ function encodeHashes(encoder, hashes) {
  * array of hex strings.
  */
 function decodeHashes(decoder) : string[] {
-  let length = decoder.readUint32(), hashes : string[] = []
+  const length = decoder.readUint32(), hashes : string[] = []
   for (let i = 0; i < length; i++) {
     hashes.push(bytesToHexString(decoder.readRawBytes(HASH_SIZE)))
   }
@@ -165,12 +165,12 @@ export function encodeSyncMessage(message) {
   encodeHashes(encoder, message.heads)
   encodeHashes(encoder, message.need)
   encoder.appendUint32(message.have.length)
-  for (let have of message.have) {
+  for (const have of message.have) {
     encodeHashes(encoder, have.lastSync)
     encoder.appendPrefixedBytes(have.bloom)
   }
   encoder.appendUint32(message.changes.length)
-  for (let change of message.changes) {
+  for (const change of message.changes) {
     encoder.appendPrefixedBytes(change)
   }
   return encoder.buffer
@@ -188,7 +188,7 @@ export function decodeSyncMessage(bytes) {
   const heads = decodeHashes(decoder)
   const need = decodeHashes(decoder)
   const haveCount = decoder.readUint32()
-  let message = {heads, need, have: [], changes: []}
+  const message = {heads, need, have: [], changes: []}
   for (let i = 0; i < haveCount; i++) {
     const lastSync = decodeHashes(decoder)
     const bloom = decoder.readPrefixedBytes()
@@ -255,9 +255,9 @@ function getChangesToSend(backend, have, need) {
     return need.map(hash => Backend.getChangeByHash(backend, hash)).filter(change => change !== undefined)
   }
 
-  let lastSyncHashes : any = {}, bloomFilters : BloomFilter[] = []
-  for (let h of have) {
-    for (let hash of h.lastSync) lastSyncHashes[hash] = true
+  const lastSyncHashes : any = {}, bloomFilters : BloomFilter[] = []
+  for (const h of have) {
+    for (const hash of h.lastSync) lastSyncHashes[hash] = true
     bloomFilters.push(new BloomFilter(h.bloom))
   }
 
@@ -265,12 +265,12 @@ function getChangesToSend(backend, have, need) {
   const changes = Backend.getChanges(backend, Object.keys(lastSyncHashes))
     .map(change => decodeChangeMeta(change, true))
 
-  let changeHashes : any = {}, dependents : any = {}, hashesToSend : any = {}
-  for (let change of changes) {
+  const changeHashes : any = {}, dependents : any = {}, hashesToSend : any = {}
+  for (const change of changes) {
     changeHashes[change.hash] = true
 
     // For each change, make a list of changes that depend on it
-    for (let dep of change.deps) {
+    for (const dep of change.deps) {
       if (!dependents[dep]) dependents[dep] = []
       dependents[dep].push(change.hash)
     }
@@ -282,11 +282,11 @@ function getChangesToSend(backend, have, need) {
   }
 
   // Include any changes that depend on a Bloom-negative change
-  let stack = Object.keys(hashesToSend)
+  const stack = Object.keys(hashesToSend)
   while (stack.length > 0) {
     const hash : any = stack.pop()
     if (dependents[hash]) {
-      for (let dep of dependents[hash]) {
+      for (const dep of dependents[hash]) {
         if (!hashesToSend[dep]) {
           hashesToSend[dep] = true
           stack.push(dep)
@@ -296,8 +296,8 @@ function getChangesToSend(backend, have, need) {
   }
 
   // Include any explicitly requested changes
-  let changesToSend : any = []
-  for (let hash of need) {
+  const changesToSend : any = []
+  for (const hash of need) {
     hashesToSend[hash] = true
     if (!changeHashes[hash]) { // Change is not among those returned by getMissingChanges()?
       const change = Backend.getChangeByHash(backend, hash)
@@ -306,7 +306,7 @@ function getChangesToSend(backend, have, need) {
   }
 
   // Return changes in the order they were returned by getMissingChanges()
-  for (let change of changes) {
+  for (const change of changes) {
     if (hashesToSend[change.hash]) changesToSend.push(change.change)
   }
   return changesToSend
