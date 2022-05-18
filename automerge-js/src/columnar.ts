@@ -541,7 +541,8 @@ export function decoderByColumnId(columnId, buffer) {
 
 export function makeDecoders(columns, columnSpec) {
   const emptyBuf = new Uint8Array(0)
-  let decoders : any = [], columnIndex = 0, specIndex = 0
+  const decoders : any = []
+  let columnIndex = 0, specIndex = 0
 
   while (columnIndex < columns.length || specIndex < columnSpec.length) {
     if (columnIndex === columns.length ||
@@ -567,10 +568,12 @@ function decodeColumns(columns, actorIds, columnSpec) {
   columns = makeDecoders(columns, columnSpec)
   const parsedRows : any = []
   while (columns.some(col => !col.decoder.done)) {
-    let row = {}, col = 0
+    const row = {}
+    let col = 0
     while (col < columns.length) {
       const columnId = columns[col].columnId
-      let groupId = columnId >> 4, groupCols = 1
+      const groupId = columnId >> 4
+      let groupCols = 1
       while (col + groupCols < columns.length && columns[col + groupCols].columnId >> 4 === groupId) {
         groupCols++
       }
@@ -600,7 +603,8 @@ function decodeColumnInfo(decoder) {
   // deflate-compressed. We ignore this bit when checking whether columns are sorted by ID.
   const COLUMN_ID_MASK = (-1 ^ COLUMN_TYPE_DEFLATE) >>> 0
 
-  let lastColumnId = -1, columns : any = [], numColumns = decoder.readUint53()
+  let lastColumnId = -1
+  const columns : any = [], numColumns = decoder.readUint53()
   for (let i = 0; i < numColumns; i++) {
     const columnId = decoder.readUint53(), bufferLen = decoder.readUint53()
     if ((columnId & COLUMN_ID_MASK) <= (lastColumnId & COLUMN_ID_MASK)) {
@@ -827,7 +831,8 @@ function inflateChange(buffer) {
  * returns an array of subarrays, each subarray containing one change.
  */
 export function splitContainers(buffer) {
-  let decoder = new Decoder(buffer), chunks : any = [], startOffset = 0
+  const decoder = new Decoder(buffer), chunks : any = []
+  let startOffset = 0
   while (!decoder.done) {
     decodeContainerHeader(decoder, false)
     chunks.push(buffer.subarray(startOffset, decoder.offset))
@@ -912,7 +917,7 @@ function groupDocumentOps(changes) {
     }
   }
 
-  const ops = []
+  const ops : any[] = []
   for (const objectId of Object.keys(byObjectId).sort(sortOpIds)) {
     let keys : string[] = []
     if (objectType[objectId] === 'makeList' || objectType[objectId] === 'makeText') {
@@ -930,8 +935,7 @@ function groupDocumentOps(changes) {
 
     for (const key of keys) {
       for (const opId of Object.keys(byObjectId[objectId][key]).sort(sortOpIds)) {
-        const op = byObjectId[objectId][key][opId]
-        // @ts-ignore
+        const op : any = byObjectId[objectId][key][opId]
         if (op.action !== 'del') ops.push(op)
       }
     }
@@ -1200,7 +1204,8 @@ function inflateColumn(column) {
  * or false if the property has been deleted.
  */
 function addPatchProperty(objects, property) {
-  let values : any = {}, counter : any = null
+  const values : any = {}
+  let counter : any = null
   for (const op of property.ops) {
     // Apply counters and their increments regardless of the number of successor operations
     if (op.actionName === 'set' && op.value.datatype === 'counter') {
