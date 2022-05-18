@@ -1,5 +1,5 @@
 
-import { Automerge, Heads, ObjID } from "./low_level_api"
+import { Automerge, Heads, ObjID } from "./low_level"
 import { Int, Uint, Float64 } from "./numbers"
 import { Counter, getWriteableCounter } from "./counter"
 import { Text } from "./text"
@@ -98,7 +98,7 @@ function import_value(value) {
 
 const MapHandler = {
   get (target, key) : any {
-    const { context, objectId, path, readonly, frozen, heads, cache } = target
+    const { context, objectId, readonly, frozen, heads, cache } = target
     if (key === Symbol.toStringTag) { return target[Symbol.toStringTag] }
     if (key === OBJECT_ID) return objectId
     if (key === READ_ONLY) return readonly
@@ -133,27 +133,30 @@ const MapHandler = {
       throw new RangeError(`Object property "${key}" cannot be modified`)
     }
     switch (datatype) {
-      case "list":
+      case "list": {
         const list = context.putObject(objectId, key, [])
         const proxyList = listProxy(context, list, [ ... path, key ], readonly );
         for (let i = 0; i < value.length; i++) {
           proxyList[i] = value[i]
         }
-        break;
-      case "text":
+        break
+      }
+      case "text": {
         const text = context.putObject(objectId, key, "", "text")
         const proxyText = textProxy(context, text, [ ... path, key ], readonly );
         for (let i = 0; i < value.length; i++) {
           proxyText[i] = value.get(i)
         }
-        break;
-      case "map":
+        break
+      }
+      case "map": {
         const map = context.putObject(objectId, key, {})
         const proxyMap : any = mapProxy(context, map, [ ... path, key ], readonly );
         for (const key in value) {
           proxyMap[key] = value[key]
         }
         break;
+      }
       default:
         context.put(objectId, key, value, datatype)
     }
@@ -161,7 +164,7 @@ const MapHandler = {
   },
 
   deleteProperty (target, key) {
-    const { context, objectId, path, readonly, frozen } = target
+    const { context, objectId, readonly } = target
     target.cache = {} // reset cache on delete
     if (readonly) {
       throw new RangeError(`Object property "${key}" cannot be modified`)
@@ -176,7 +179,7 @@ const MapHandler = {
   },
 
   getOwnPropertyDescriptor (target, key) {
-    const { context, objectId } = target
+    // const { context, objectId } = target
     const value = this.get(target, key)
     if (typeof value !== 'undefined') {
       return {
@@ -194,10 +197,9 @@ const MapHandler = {
 
 const ListHandler = {
   get (target, index) {
-    const {context, objectId, path, readonly, frozen, heads } = target
+    const {context, objectId, readonly, frozen, heads } = target
     index = parseListIndex(index)
-    // @ts-ignore
-    if (index === Symbol.hasInstance) { return (instance) => { return [].has(instance) } }
+    if (index === Symbol.hasInstance) { return (instance) => { return Array.isArray(instance) } }
     if (index === Symbol.toStringTag) { return target[Symbol.toStringTag] }
     if (index === OBJECT_ID) return objectId
     if (index === READ_ONLY) return readonly
@@ -249,7 +251,7 @@ const ListHandler = {
       throw new RangeError(`Object property "${index}" cannot be modified`)
     }
     switch (datatype) {
-      case "list":
+      case "list": {
         let list
         if (index >= context.length(objectId)) {
           list = context.insertObject(objectId, index, [])
@@ -259,7 +261,8 @@ const ListHandler = {
         const proxyList = listProxy(context, list, [ ... path, index ], readonly);
         proxyList.splice(0,0,...value)
         break;
-      case "text":
+      }
+      case "text": {
         let text
         if (index >= context.length(objectId)) {
           text = context.insertObject(objectId, index, "", "text")
@@ -269,7 +272,8 @@ const ListHandler = {
         const proxyText = textProxy(context, text, [ ... path, index ], readonly);
         proxyText.splice(0,0,...value)
         break;
-      case "map":
+      }
+      case "map": {
         let map
         if (index >= context.length(objectId)) {
           map = context.insertObject(objectId, index, {})
@@ -281,6 +285,7 @@ const ListHandler = {
           proxyMap[key] = value[key]
         }
         break;
+      }
       default:
         if (index >= context.length(objectId)) {
           context.insert(objectId, index, value, datatype)
@@ -311,7 +316,7 @@ const ListHandler = {
   },
 
   getOwnPropertyDescriptor (target, index) {
-    const {context, objectId, path, readonly, frozen, heads} = target
+    const {context, objectId, heads} = target
 
     if (index === 'length') return {writable: true, value: context.length(objectId, heads) }
     if (index === OBJECT_ID) return {configurable: false, enumerable: false, value: objectId}
@@ -322,12 +327,12 @@ const ListHandler = {
     return { configurable: true, enumerable: true, value }
   },
 
-  getPrototypeOf(target) { return Object.getPrototypeOf([]) },
+  getPrototypeOf(target) { return Object.getPrototypeOf(target) },
   ownKeys (target) : string[] {
-    const {context, objectId, heads } = target
     const keys : string[] = []
     // uncommenting this causes assert.deepEqual() to fail when comparing to a pojo array
     // but not uncommenting it causes for (i in list) {} to not enumerate values properly
+    //const {context, objectId, heads } = target
     //for (let i = 0; i < target.context.length(objectId, heads); i++) { keys.push(i.toString()) }
     keys.push("length");
     return keys
@@ -337,11 +342,10 @@ const ListHandler = {
 const TextHandler = Object.assign({}, ListHandler, {
   get (target, index) {
     // FIXME this is a one line change from ListHandler.get()
-    const {context, objectId, path, readonly, frozen, heads } = target
+    const {context, objectId, readonly, frozen, heads } = target
     index = parseListIndex(index)
     if (index === Symbol.toStringTag) { return target[Symbol.toStringTag] }
-    // @ts-ignore
-    if (index === Symbol.hasInstance) { return (instance) => { return [].has(instance) } }
+    if (index === Symbol.hasInstance) { return (instance) => { return Array.isArray(instance) } }
     if (index === OBJECT_ID) return objectId
     if (index === READ_ONLY) return readonly
     if (index === FROZEN) return frozen
@@ -482,23 +486,26 @@ function listMethods(target) {
       const values = vals.map((val) => import_value(val))
       for (const [value,datatype] of values) {
         switch (datatype) {
-          case "list":
+          case "list": {
             const list = context.insertObject(objectId, index, [])
             const proxyList = listProxy(context, list, [ ... path, index ], readonly);
             proxyList.splice(0,0,...value)
             break;
-          case "text":
+          }
+          case "text": {
             const text = context.insertObject(objectId, index, "", "text")
             const proxyText = textProxy(context, text, [ ... path, index ], readonly);
             proxyText.splice(0,0,...value)
             break;
-          case "map":
+          }
+          case "map": {
             const map = context.insertObject(objectId, index, {})
             const proxyMap : any = mapProxy(context, map, [ ... path, index ], readonly);
             for (const key in value) {
               proxyMap[key] = value[key]
             }
             break;
+          }
           default:
             context.insert(objectId, index, value, datatype)
         }
@@ -563,13 +570,13 @@ function listMethods(target) {
                       'slice', 'some', 'toLocaleString', 'toString']) {
     methods[method] = (...args) => {
       const list : any = []
-      while (true) {
-        const value =  valueAt(target, list.length)
-        if (value == undefined) {
-          break
+      let value
+      do {
+        value = valueAt(target, list.length)
+        if (value !== undefined) {
+          list.push(value)
         }
-        list.push(value)
-      }
+      } while (value !== undefined)
 
       return list[method](...args)
     }
@@ -579,7 +586,7 @@ function listMethods(target) {
 }
 
 function textMethods(target) : any {
-  const {context, objectId, path, readonly, frozen, heads } = target
+  const {context, objectId, heads } = target
   const methods : any = {
     set (index, value) {
       return this[index] = value

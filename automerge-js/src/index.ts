@@ -14,9 +14,9 @@ export { Text } from "./text"
 export { Counter  } from "./counter"
 export { Int, Uint, Float64  } from "./numbers"
 
-import { ApiHandler, LowLevelApi, UseApi } from "./low_level_api"
-import { Actor as ActorId, Prop, ObjID, Change, DecodedChange, Heads, Automerge } from "./low_level_api"
-import { JsSyncState as SyncState, SyncMessage, DecodedSyncMessage } from "./low_level_api"
+import { ApiHandler, LowLevelApi, UseApi } from "./low_level"
+import { Actor as ActorId, Prop, ObjID, Change, DecodedChange, Heads, Automerge } from "./low_level"
+import { JsSyncState as SyncState, SyncMessage, DecodedSyncMessage } from "./low_level"
 
 export type ChangeOptions<T> = { message?: string, time?: number }
 
@@ -113,18 +113,13 @@ function _change<T>(doc: Doc<T>, options: ChangeOptions<T>, callback: ChangeFn<T
   const state = _state(doc)
   const heads = state.getHeads()
   try {
-    //@ts-ignore
-    doc[HEADS] = heads
-    //Object.defineProperty(doc, HEADS, { value: heads, configurable: true, writable: true })
-    //@ts-ignore
-    doc[FROZEN] = true
+    Reflect.set(doc,HEADS,heads)
+    Reflect.set(doc,FROZEN,true)
     const root : T = rootProxy(state);
     callback(root)
     if (state.pendingOps() === 0) {
-      //@ts-ignore
-      doc[FROZEN] = false
-      //@ts-ignore
-      doc[HEADS] = undefined
+      Reflect.set(doc,FROZEN,false)
+      Reflect.set(doc,HEADS,undefined)
       return doc
     } else {
       state.commit(options.message, options.time)
@@ -132,10 +127,8 @@ function _change<T>(doc: Doc<T>, options: ChangeOptions<T>, callback: ChangeFn<T
     }
   } catch (e) {
     //console.log("ERROR: ",e)
-    //@ts-ignore
-    doc[FROZEN] = false
-    //@ts-ignore
-    doc[HEADS] = undefined
+    Reflect.set(doc,FROZEN,false)
+    Reflect.set(doc,HEADS,undefined)
     state.rollback()
     throw e
   }
@@ -183,8 +176,7 @@ export function merge<T>(local: Doc<T>, remote: Doc<T>) : Doc<T> {
   const remoteState = _state(remote)
   const changes = localState.getChangesAdded(remoteState)
   localState.applyChanges(changes)
-  //@ts-ignore
-  local[HEADS] = heads
+  Reflect.set(local,HEADS,heads)
   return rootProxy(localState, true)
 }
 
@@ -286,8 +278,7 @@ export function applyChanges<T>(doc: Doc<T>, changes: Change[]) : [Doc<T>] {
   const state = _state(doc)
   const heads = state.getHeads()
   state.applyChanges(changes)
-  //@ts-ignore
-  doc[HEADS] = heads
+  Reflect.set(doc,HEADS,heads)
   return [rootProxy(state, true)];
 }
 
@@ -351,8 +342,7 @@ export function receiveSyncMessage<T>(doc: Doc<T>, inState: SyncState, message: 
   const state = _state(doc)
   const heads = state.getHeads()
   state.receiveSyncMessage(syncState, message)
-  //@ts-ignore
-  doc[HEADS] = heads;
+  Reflect.set(doc,HEADS,heads)
   const outState = ApiHandler.exportSyncState(syncState)
   return [rootProxy(state, true), outState, null];
 }

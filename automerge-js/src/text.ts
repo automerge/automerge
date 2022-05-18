@@ -1,4 +1,4 @@
-import { Value } from "./low_level_api"
+import { Value } from "./low_level"
 
 export class Text {
   elems: Value[]

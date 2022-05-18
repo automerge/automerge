@@ -26,11 +26,11 @@ export function hexStringToBytes(value: string) : Uint8Array {
   if (!/^([0-9a-f][0-9a-f])*$/.test(value)) {
     throw new RangeError('value is not hexadecimal')
   }
-  if (value === '') {
+  const match = value.match(/../g)
+  if (match === null) {
     return new Uint8Array(0)
   } else {
-    // @ts-ignore
-    return new Uint8Array(value.match(/../g).map(b => parseInt(b, 16)))
+    return new Uint8Array(match.map(b => parseInt(b, 16)))
   }
 }
 
@@ -44,7 +44,8 @@ for (let i = 0; i < 256; i++) {
  * Converts a Uint8Array into the equivalent hexadecimal string.
  */
 export function bytesToHexString(bytes: Uint8Array) : string {
-  let hex = '', len = bytes.byteLength
+  let hex = ''
+  const len = bytes.byteLength
   for (let i = 0; i < len; i++) {
     hex += BYTE_TO_HEX[bytes[i]]
   }
@@ -989,7 +990,8 @@ export class DeltaEncoder extends RLEEncoder {
 
     // Copy any null values, and the first non-null value, so that appendValue() computes the
     // difference between the encoder's last value and the decoder's first (absolute) value.
-    let value = decoder.readValue(), nulls = 0
+    const value = decoder.readValue()
+    let nulls = 0
     this.appendValue(value)
     if (value === null) {
       nulls = decoder.count + 1
@@ -1011,9 +1013,7 @@ export class DeltaEncoder extends RLEEncoder {
     if (remaining !== undefined) remaining -= nulls + 1
     const { nonNullValues, sum } = super.copyFrom(decoder, {count: remaining, sumValues: true})
     if (nonNullValues > 0) {
-      // @ts-ignore
       this.absoluteValue = sum
-      // @ts-ignore
       decoder.absoluteValue = sum
     }
   }

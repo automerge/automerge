@@ -1,4 +1,4 @@
-import { Automerge, ObjID, Prop } from "./low_level_api"
+import { Automerge, ObjID, Prop } from "./low_level"
 /**
  * The most basic CRDT: an integer value that can be changed only by
  * incrementing and decrementing. Since addition of integers is commutative,
