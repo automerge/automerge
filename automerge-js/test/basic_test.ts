@@ -1,6 +1,9 @@
 import * as assert from 'assert'
 import * as util from 'util'
 import * as Automerge from '../src'
+import * as AutomergeWASM from "automerge-wasm"
+
+Automerge.use(AutomergeWASM)
 
 describe('Automerge', () => {
     describe('basics', () => {
