@@ -761,7 +761,7 @@ export class RLEEncoder extends Encoder {
       this.appendRawValue(this.lastValue)
     } else if (this.state === 'literal') {
       this.appendInt53(-this.literal.length)
-      for (let v of this.literal) this.appendRawValue(v)
+      for (const v of this.literal) this.appendRawValue(v)
     } else if (this.state === 'nulls') {
       this.appendInt32(0)
       this.appendUint53(this.count)

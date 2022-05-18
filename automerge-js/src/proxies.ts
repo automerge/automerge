@@ -19,7 +19,7 @@ function parseListIndex(key) {
 
 function valueAt(target, prop) : any {
       const { context, objectId, path, readonly, heads} = target
-      let value = context.get(objectId, prop, heads)
+      const value = context.get(objectId, prop, heads)
       if (value === undefined) {
         return
       }
@@ -112,7 +112,7 @@ const MapHandler = {
   },
 
   set (target, key, val) {
-    let { context, objectId, path, readonly, frozen} = target
+    const { context, objectId, path, readonly, frozen} = target
     target.cache = {} // reset cache on set
     if (val && val[OBJECT_ID]) {
           throw new RangeError('Cannot create a reference to an existing document object')
@@ -125,7 +125,7 @@ const MapHandler = {
       target.heads = val
       return true
     }
-    let [ value, datatype ] = import_value(val)
+    const [ value, datatype ] = import_value(val)
     if (frozen) {
       throw new RangeError("Attempting to use an outdated Automerge document")
     }
@@ -225,7 +225,7 @@ const ListHandler = {
   },
 
   set (target, index, val) {
-    let {context, objectId, path, readonly, frozen } = target
+    const {context, objectId, path, readonly, frozen } = target
     index = parseListIndex(index)
     if (val && val[OBJECT_ID]) {
       throw new RangeError('Cannot create a reference to an existing document object')
@@ -318,14 +318,14 @@ const ListHandler = {
 
     index = parseListIndex(index)
 
-    let value = valueAt(target, index)
+    const value = valueAt(target, index)
     return { configurable: true, enumerable: true, value }
   },
 
   getPrototypeOf(target) { return Object.getPrototypeOf([]) },
   ownKeys (target) : string[] {
     const {context, objectId, heads } = target
-    let keys : string[] = []
+    const keys : string[] = []
     // uncommenting this causes assert.deepEqual() to fail when comparing to a pojo array
     // but not uncommenting it causes for (i in list) {} to not enumerate values properly
     //for (let i = 0; i < target.context.length(objectId, heads); i++) { keys.push(i.toString()) }
@@ -375,13 +375,13 @@ export function mapProxy(context: Automerge, objectId: ObjID, path?: string[], r
 }
 
 export function listProxy(context: Automerge, objectId: ObjID, path?: string[], readonly?: boolean, heads?: Heads) : any {
-  let target = []
+  const target = []
   Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false, heads, cache: {}})
   return new Proxy(target, ListHandler)
 }
 
 export function textProxy(context: Automerge, objectId: ObjID, path?: string[], readonly?: boolean, heads?: Heads) : any {
-  let target = []
+  const target = []
   Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false, heads, cache: {}})
   return new Proxy(target, TextHandler)
 }
@@ -437,17 +437,17 @@ function listMethods(target) {
     },
 
     pop() {
-      let length = context.length(objectId)
+      const length = context.length(objectId)
       if (length == 0) {
         return undefined
       }
-      let last = valueAt(target, length - 1)
+      const last = valueAt(target, length - 1)
       context.delete(objectId, length - 1)
       return last
     },
 
     push(...values) {
-      let len = context.length(objectId)
+      const len = context.length(objectId)
       this.splice(len, 0, ...values)
       return context.length(objectId)
     },
@@ -462,7 +462,7 @@ function listMethods(target) {
     splice(index, del, ...vals) {
       index = parseListIndex(index)
       del = parseListIndex(del)
-      for (let val of vals) {
+      for (const val of vals) {
         if (val && val[OBJECT_ID]) {
               throw new RangeError('Cannot create a reference to an existing document object')
         }
@@ -473,14 +473,14 @@ function listMethods(target) {
       if (readonly) {
         throw new RangeError("Sequence object cannot be modified outside of a change block")
       }
-      let result : any = []
+      const result : any = []
       for (let i = 0; i < del; i++) {
-        let value = valueAt(target, index)
+        const value = valueAt(target, index)
         result.push(value)
         context.delete(objectId, index)
       }
       const values = vals.map((val) => import_value(val))
-      for (let [value,datatype] of values) {
+      for (const [value,datatype] of values) {
         switch (datatype) {
           case "list":
             const list = context.insertObject(objectId, index, [])
@@ -513,10 +513,10 @@ function listMethods(target) {
     },
 
     entries() {
-      let i = 0;
+      const i = 0;
       const iterator = {
         next: () => {
-          let value = valueAt(target, i)
+          const value = valueAt(target, i)
           if (value === undefined) {
             return { value: undefined, done: true }
           } else {
@@ -529,7 +529,7 @@ function listMethods(target) {
 
     keys() {
       let i = 0;
-      let len = context.length(objectId, heads)
+      const len = context.length(objectId, heads)
       const iterator = {
         next: () => {
           let value : undefined | number = undefined
@@ -541,10 +541,10 @@ function listMethods(target) {
     },
 
     values() {
-      let i = 0;
+      const i = 0;
       const iterator = {
         next: () => {
-          let value = valueAt(target, i)
+          const value = valueAt(target, i)
           if (value === undefined) {
             return { value: undefined, done: true }
           } else {
@@ -558,13 +558,13 @@ function listMethods(target) {
 
   // Read-only methods that can delegate to the JavaScript built-in implementations
   // FIXME - super slow
-  for (let method of ['concat', 'every', 'filter', 'find', 'findIndex', 'forEach', 'includes',
+  for (const method of ['concat', 'every', 'filter', 'find', 'findIndex', 'forEach', 'includes',
                       'join', 'lastIndexOf', 'map', 'reduce', 'reduceRight',
                       'slice', 'some', 'toLocaleString', 'toString']) {
     methods[method] = (...args) => {
       const list : any = []
       while (true) {
-        let value =  valueAt(target, list.length)
+        const value =  valueAt(target, list.length)
         if (value == undefined) {
           break
         }
@@ -591,9 +591,9 @@ function textMethods(target) {
       return context.text(objectId, heads).replace(/￼/g,'')
     },
     toSpans () : any[] {
-      let spans : any[] = []
+      const spans : any[] = []
       let chars = ''
-      let length = this.length
+      const length = this.length
       for (let i = 0; i < length; i++) {
         const value = this[i]
         if (typeof value === 'string') {

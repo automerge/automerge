@@ -34,7 +34,7 @@ export function use(api: LowLevelApi) {
 }
 
 function _state<T>(doc: Doc<T>) : Automerge {
-  let state = (<any>doc)[STATE]
+  const state = (<any>doc)[STATE]
   if (state == undefined) {
     throw new RangeError("must be the document root")
   }
@@ -118,7 +118,7 @@ function _change<T>(doc: Doc<T>, options: ChangeOptions<T>, callback: ChangeFn<T
     //Object.defineProperty(doc, HEADS, { value: heads, configurable: true, writable: true })
     //@ts-ignore
     doc[FROZEN] = true
-    let root = rootProxy(state);
+    const root = rootProxy(state);
     callback(root)
     if (state.pendingOps() === 0) {
       //@ts-ignore
@@ -194,11 +194,11 @@ export function getActorId<T>(doc: Doc<T>) : ActorId {
 }
 
 function conflictAt(context : Automerge, objectId: ObjID, prop: Prop) : any {
-      let values = context.getAll(objectId, prop)
+      const values = context.getAll(objectId, prop)
       if (values.length <= 1) {
         return
       }
-      let result = {}
+      const result = {}
       for (const conflict of values) {
         const datatype = conflict[0]
         const value = conflict[1]
@@ -407,8 +407,8 @@ export function toJS(doc: any) : any {
       //@ts-ignore
       return doc.map((a: any) => toJS(a))
     }
-    let tmp : any = {}
-    for (let index in doc) {
+    const tmp : any = {}
+    for (const index in doc) {
       tmp[index] = toJS(doc[index])
     }
     return tmp

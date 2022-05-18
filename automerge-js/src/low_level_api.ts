@@ -95,12 +95,12 @@ export interface LowLevelApi {
 }
 
 export function UseApi(api: LowLevelApi) {
-  for (let k in api) {
+  for (const k in api) {
     ApiHandler[k] = api[k]
   }
 }
 
-export let ApiHandler : LowLevelApi = {
+export const ApiHandler : LowLevelApi = {
   create(actor?: Actor): Automerge { throw new RangeError("Automerge.use() not called") },
   load(data: Uint8Array, actor?: Actor): Automerge { throw new RangeError("Automerge.use() not called") },
   encodeChange(change: DecodedChange): Change { throw new RangeError("Automerge.use() not called") },

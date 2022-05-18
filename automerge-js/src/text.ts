@@ -118,7 +118,7 @@ export class Text {
 }
 
 // Read-only methods that can delegate to the JavaScript built-in array
-for (let method of ['concat', 'every', 'filter', 'find', 'findIndex', 'forEach', 'includes',
+for (const method of ['concat', 'every', 'filter', 'find', 'findIndex', 'forEach', 'includes',
                     'indexOf', 'join', 'lastIndexOf', 'map', 'reduce', 'reduceRight',
                     'slice', 'some', 'toLocaleString']) {
   Text.prototype[method] = function (...args) {
