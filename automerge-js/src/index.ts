@@ -1,10 +1,5 @@
-import * as AutomergeWASM from "automerge-wasm"
 
 import { uuid } from './uuid'
-
-import _init from "automerge-wasm"
-
-export default _init
 
 export { uuid } from './uuid'
 
@@ -19,8 +14,24 @@ export { Text } from "./text"
 export { Counter  } from "./counter"
 export { Int, Uint, Float64  } from "./numbers"
 
-import { Actor as ActorId, Prop, ObjID, Change, DecodedChange, Heads, Automerge } from "automerge-wasm"
-import { JsSyncState as SyncState, SyncMessage, DecodedSyncMessage } from "automerge-wasm"
+import { ApiHandler, LowLevelApi, UseApi } from "./low_level_api"
+import { Actor as ActorId, Prop, ObjID, Change, DecodedChange, Heads, Automerge } from "./low_level_api"
+import { JsSyncState as SyncState, SyncMessage, DecodedSyncMessage } from "./low_level_api"
+
+export type ChangeOptions<T> = { message?: string, time?: number }
+
+export type Doc<T> = { readonly [P in keyof T]: Doc<T[P]> }
+
+export type ChangeFn<T> = (doc: T) => void
+
+export interface State<T> {
+  change: DecodedChange
+  snapshot: T
+}
+
+export function use(api: LowLevelApi) {
+  UseApi(api)
+}
 
 function _state<T>(doc: Doc<T>) : Automerge {
   let state = (<any>doc)[STATE]
@@ -50,7 +61,7 @@ export function init<T>(actor?: ActorId) : Doc<T>{
   if (typeof actor !== "string") {
     actor = undefined
   }
-  const state = AutomergeWASM.create(actor)
+  const state = ApiHandler.create(actor)
   return rootProxy(state, true);
 }
 
@@ -67,16 +78,21 @@ export function from<T>(initialState: T | Doc<T>, actor?: ActorId): Doc<T> {
     return change(init(actor), (d) => Object.assign(d, initialState))
 }
 
-export function change<D, T = Proxy<D>>(doc: D, options: ChangeOptions<T> | ChangeFn<T>, callback?: ChangeFn<T>): D {
-
+export function change<T>(doc: Doc<T>, options: string | ChangeOptions<T> | ChangeFn<T>, callback?: ChangeFn<T>): Doc<T> {
   if (typeof options === 'function') {
-    callback = options
-    options = {}
+    return _change(doc, {}, options)
+  } else if (typeof callback === 'function') {
+    if (typeof options === "string") {
+      options = { message: options }
+    }
+    return _change(doc, options, callback)
+  } else {
+    throw RangeError("Invalid args for change")
   }
+}
 
-  if (typeof options === "string") {
-    options = { message: options }
-  }
+function _change<T>(doc: Doc<T>, options: ChangeOptions<T>, callback: ChangeFn<T>): Doc<T> {
+
 
   if (typeof callback !== "function") {
     throw new RangeError("invalid change function");
@@ -149,7 +165,7 @@ export function emptyChange<T>(doc: Doc<T>, options: ChangeOptions<T>) {
 }
 
 export function load<T>(data: Uint8Array, actor: ActorId) : Doc<T> {
-  const state = AutomergeWASM.load(data, actor)
+  const state = ApiHandler.load(data, actor)
   return rootProxy(state, true);
 }
 
@@ -303,23 +319,23 @@ export function equals(val1: any, val2: any) : boolean {
 }
 
 export function encodeSyncState(state: SyncState) : Uint8Array {
-  return AutomergeWASM.encodeSyncState(AutomergeWASM.importSyncState(state))
+  return ApiHandler.encodeSyncState(ApiHandler.importSyncState(state))
 }
 
 export function decodeSyncState(state: Uint8Array) : SyncState {
-  return AutomergeWASM.exportSyncState(AutomergeWASM.decodeSyncState(state))
+  return ApiHandler.exportSyncState(ApiHandler.decodeSyncState(state))
 }
 
 export function generateSyncMessage<T>(doc: Doc<T>, inState: SyncState) : [ SyncState, SyncMessage | null ] {
   const state = _state(doc)
-  const syncState = AutomergeWASM.importSyncState(inState)
+  const syncState = ApiHandler.importSyncState(inState)
   const message = state.generateSyncMessage(syncState)
-  const outState = AutomergeWASM.exportSyncState(syncState)
+  const outState = ApiHandler.exportSyncState(syncState)
   return [ outState, message ]
 }
 
 export function receiveSyncMessage<T>(doc: Doc<T>, inState: SyncState, message: SyncMessage) : [ Doc<T>, SyncState, null ] {
-  const syncState = AutomergeWASM.importSyncState(inState)
+  const syncState = ApiHandler.importSyncState(inState)
   if (doc === undefined || _obj(doc) !== "_root") {
     throw new RangeError("must be the document root");
   }
@@ -337,28 +353,28 @@ export function receiveSyncMessage<T>(doc: Doc<T>, inState: SyncState, message: 
   state.receiveSyncMessage(syncState, message)
   //@ts-ignore
   doc[HEADS] = heads;
-  const outState = AutomergeWASM.exportSyncState(syncState)
+  const outState = ApiHandler.exportSyncState(syncState)
   return [rootProxy(state, true), outState, null];
 }
 
 export function initSyncState() : SyncState {
-  return AutomergeWASM.exportSyncState(AutomergeWASM.initSyncState())
+  return ApiHandler.exportSyncState(ApiHandler.initSyncState())
 }
 
 export function encodeChange(change: DecodedChange) : Change {
-  return AutomergeWASM.encodeChange(change)
+  return ApiHandler.encodeChange(change)
 }
 
 export function decodeChange(data: Change) : DecodedChange {
-  return AutomergeWASM.decodeChange(data)
+  return ApiHandler.decodeChange(data)
 }
 
 export function encodeSyncMessage(message: DecodedSyncMessage) : SyncMessage {
-  return AutomergeWASM.encodeSyncMessage(message)
+  return ApiHandler.encodeSyncMessage(message)
 }
 
 export function decodeSyncMessage(message: SyncMessage) : DecodedSyncMessage {
-  return AutomergeWASM.decodeSyncMessage(message)
+  return ApiHandler.decodeSyncMessage(message)
 }
 
 export function getMissingDeps<T>(doc: Doc<T>, heads: Heads) : Heads {
@@ -401,99 +417,3 @@ export function toJS(doc: any) : any {
   }
 }
 
-type ChangeOptions<T> =
-    | string // = message
-    | {
-      message?: string
-      time?: number
-    }
-
-type Doc<T> = FreezeObject<T>
-
-/**
- * The argument pased to the callback of a `change` function is a mutable proxy of the original
- * type. `Proxy<D>` is the inverse of `Doc<T>`: `Proxy<Doc<T>>` is `T`, and `Doc<Proxy<D>>` is `D`.
- */
-type Proxy<D> = D extends Doc<infer T> ? T : never
-
-type ChangeFn<T> = (doc: T) => void
-
-interface State<T> {
-  change: DecodedChange
-  snapshot: T
-}
-
-// custom CRDT types
-
-/*
-  class TableRow {
-    readonly id: UUID
-  }
-
-  class Table<T> {
-    constructor()
-    add(item: T): UUID
-    byId(id: UUID): T & TableRow
-    count: number
-    ids: UUID[]
-    remove(id: UUID): void
-    rows: (T & TableRow)[]
-  }
-*/
-
-  class List<T> extends Array<T> {
-    insertAt?(index: number, ...args: T[]): List<T>
-    deleteAt?(index: number, numDelete?: number): List<T>
-  }
-
-/*
-
-  class Text extends List<string> {
-    constructor(text?: string | string[])
-    get(index: number): string
-    toSpans<T>(): (string | T)[]
-  }
-
-  // Note that until https://github.com/Microsoft/TypeScript/issues/2361 is addressed, we
-  // can't treat a Counter like a literal number without force-casting it as a number.
-  // This won't compile:
-  //   `assert.strictEqual(c + 10, 13) // Operator '+' cannot be applied to types 'Counter' and '10'.ts(2365)`
-  // But this will:
-  //   `assert.strictEqual(c as unknown as number + 10, 13)`
-  class Counter extends Number {
-    constructor(value?: number)
-    increment(delta?: number): void
-    decrement(delta?: number): void
-    toString(): string
-    valueOf(): number
-    value: number
-  }
-
-  class Int { constructor(value: number) }
-  class Uint { constructor(value: number) }
-  class Float64 { constructor(value: number) }
-
-*/
-
-  // Readonly variants
-
-  //type ReadonlyTable<T> = ReadonlyArray<T> & Table<T>
-  type ReadonlyList<T> = ReadonlyArray<T> & List<T>
-  type ReadonlyText = ReadonlyList<string> & Text
-
-// prettier-ignore
-type Freeze<T> =
-  T extends Function ? T
-  : T extends Text ? ReadonlyText
-//  : T extends Table<infer T> ? FreezeTable<T>
-  : T extends List<infer T> ? FreezeList<T>
-  : T extends Array<infer T> ? FreezeArray<T>
-  : T extends Map<infer K, infer V> ? FreezeMap<K, V>
-  : T extends string & infer O ? string & O
-  : FreezeObject<T>
-
-//interface FreezeTable<T> extends ReadonlyTable<Freeze<T>> {}
-interface FreezeList<T> extends ReadonlyList<Freeze<T>> {}
-interface FreezeArray<T> extends ReadonlyArray<Freeze<T>> {}
-interface FreezeMap<K, V> extends ReadonlyMap<Freeze<K>, Freeze<V>> {}
-type FreezeObject<T> = { readonly [P in keyof T]: Freeze<T[P]> }

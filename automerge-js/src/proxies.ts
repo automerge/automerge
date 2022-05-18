@@ -1,15 +1,11 @@
 
-import AutomergeWASM from "automerge-wasm"
-import { Automerge, Heads, ObjID } from "automerge-wasm"
-// @ts-ignore
+import { Automerge, Heads, ObjID } from "./low_level_api"
 import { Int, Uint, Float64 } from "./numbers"
-// @ts-ignore
 import { Counter, getWriteableCounter } from "./counter"
-// @ts-ignore
 import { Text } from "./text"
 import { STATE, HEADS, FROZEN, OBJECT_ID, READ_ONLY } from "./constants"
 
-export function parseListIndex(key) {
+function parseListIndex(key) {
   if (typeof key === 'string' && /^[0-9]+$/.test(key)) key = parseInt(key, 10)
   if (typeof key !== 'number') {
     // throw new TypeError('A list index must be a number, but you passed ' + JSON.stringify(key))
@@ -100,7 +96,7 @@ function import_value(value) {
     }
 }
 
-export const MapHandler = {
+const MapHandler = {
   get (target, key) : any {
     const { context, objectId, path, readonly, frozen, heads, cache } = target
     if (key === Symbol.toStringTag) { return target[Symbol.toStringTag] }
@@ -196,7 +192,7 @@ export const MapHandler = {
 }
 
 
-export const ListHandler = {
+const ListHandler = {
   get (target, index) {
     const {context, objectId, path, readonly, frozen, heads } = target
     index = parseListIndex(index)
@@ -338,7 +334,7 @@ export const ListHandler = {
   }
 }
 
-export const TextHandler = Object.assign({}, ListHandler, {
+const TextHandler = Object.assign({}, ListHandler, {
   get (target, index) {
     // FIXME this is a one line change from ListHandler.get()
     const {context, objectId, path, readonly, frozen, heads } = target
@@ -622,5 +618,3 @@ function textMethods(target) {
   return methods
 }
 
-
-//module.exports = { rootProxy, textProxy, listProxy, mapProxy, MapHandler, ListHandler, TextHandler }
