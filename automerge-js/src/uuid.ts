@@ -6,11 +6,16 @@ function defaultFactory() {
 
 let factory = defaultFactory
 
-export function uuid() {
+interface UUIDFactory extends Function {
+  setFactory(f: typeof factory);
+  reset();
+}
+
+export const uuid : UUIDFactory = () => {
   return factory()
 }
 
-// @ts-ignore
 uuid.setFactory = newFactory => { factory = newFactory }
-// @ts-ignore
+
 uuid.reset = () => { factory = defaultFactory }
+

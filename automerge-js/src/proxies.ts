@@ -149,7 +149,7 @@ const MapHandler = {
         break;
       case "map":
         const map = context.putObject(objectId, key, {})
-        const proxyMap = mapProxy(context, map, [ ... path, key ], readonly );
+        const proxyMap : any = mapProxy(context, map, [ ... path, key ], readonly );
         for (const key in value) {
           proxyMap[key] = value[key]
         }
@@ -276,7 +276,7 @@ const ListHandler = {
         } else {
           map = context.putObject(objectId, index, {})
         }
-        const proxyMap = mapProxy(context, map, [ ... path, index ], readonly);
+        const proxyMap : any = mapProxy(context, map, [ ... path, index ], readonly);
         for (const key in value) {
           proxyMap[key] = value[key]
         }
@@ -370,23 +370,23 @@ const TextHandler = Object.assign({}, ListHandler, {
   },
 })
 
-export function mapProxy(context: Automerge, objectId: ObjID, path?: string[], readonly?: boolean, heads?: Heads) : any {
+export function mapProxy<T>(context: Automerge, objectId: ObjID, path?: string[], readonly?: boolean, heads?: Heads) : T {
   return new Proxy({context, objectId, path, readonly: !!readonly, frozen: false, heads, cache: {}}, MapHandler)
 }
 
-export function listProxy(context: Automerge, objectId: ObjID, path?: string[], readonly?: boolean, heads?: Heads) : any {
+export function listProxy<T>(context: Automerge, objectId: ObjID, path?: string[], readonly?: boolean, heads?: Heads) : Array<T> {
   const target = []
   Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false, heads, cache: {}})
   return new Proxy(target, ListHandler)
 }
 
-export function textProxy(context: Automerge, objectId: ObjID, path?: string[], readonly?: boolean, heads?: Heads) : any {
+export function textProxy<T>(context: Automerge, objectId: ObjID, path?: string[], readonly?: boolean, heads?: Heads) : Array<T> {
   const target = []
   Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false, heads, cache: {}})
   return new Proxy(target, TextHandler)
 }
 
-export function rootProxy(context: Automerge, readonly?: boolean) : any {
+export function rootProxy<T>(context: Automerge, readonly?: boolean) : T {
   return mapProxy(context, "_root", [], !!readonly)
 }
 
@@ -494,7 +494,7 @@ function listMethods(target) {
             break;
           case "map":
             const map = context.insertObject(objectId, index, {})
-            const proxyMap = mapProxy(context, map, [ ... path, index ], readonly);
+            const proxyMap : any = mapProxy(context, map, [ ... path, index ], readonly);
             for (const key in value) {
               proxyMap[key] = value[key]
             }
@@ -578,7 +578,7 @@ function listMethods(target) {
   return methods
 }
 
-function textMethods(target) {
+function textMethods(target) : any {
   const {context, objectId, path, readonly, frozen, heads } = target
   const methods : any = {
     set (index, value) {

@@ -118,7 +118,7 @@ function _change<T>(doc: Doc<T>, options: ChangeOptions<T>, callback: ChangeFn<T
     //Object.defineProperty(doc, HEADS, { value: heads, configurable: true, writable: true })
     //@ts-ignore
     doc[FROZEN] = true
-    const root = rootProxy(state);
+    const root : T = rootProxy(state);
     callback(root)
     if (state.pendingOps() === 0) {
       //@ts-ignore

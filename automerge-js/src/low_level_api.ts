@@ -44,10 +44,15 @@ export type Datatype =
   "text" |
   "list";
 
+export type SyncHave = {
+  lastSync: Heads,
+  bloom: Uint8Array,
+}
+
 export type DecodedSyncMessage = {
   heads: Heads,
   need: Heads,
-  have: any[]
+  have: SyncHave[]
   changes: Change[]
 }
 

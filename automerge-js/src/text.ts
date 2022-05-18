@@ -1,8 +1,7 @@
-import { OBJECT_ID } from './constants'
-import { isObject } from '../src/common'
+import { Value } from "./low_level_api"
 
 export class Text {
-  elems: any[]
+  elems: Value[]
 
   constructor (text?: string | string[]) {
     //const instance = Object.create(Text.prototype)
@@ -21,7 +20,7 @@ export class Text {
     return this.elems.length
   }
 
-  get (index) : any {
+  get (index) : Value {
     return this.elems[index]
   }
 
@@ -66,8 +65,8 @@ export class Text {
    * For example, the value ['a', 'b', {x: 3}, 'c', 'd'] has spans:
    * => ['ab', {x: 3}, 'cd']
    */
-  toSpans() : any[] {
-    const spans : any = []
+  toSpans() : Value[] {
+    const spans : Value[] = []
     let chars = ''
     for (const elem of this.elems) {
       if (typeof elem === 'string') {
@@ -97,7 +96,7 @@ export class Text {
   /**
    * Updates the list item at position `index` to a new value `value`.
    */
-  set (index: number, value: any) {
+  set (index: number, value: Value) {
     this.elems[index] = value
   }
 
