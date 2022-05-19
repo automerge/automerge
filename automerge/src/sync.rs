@@ -165,13 +165,10 @@ impl Automerge {
 
     fn make_bloom_filter(&self, last_sync: Vec<ChangeHash>) -> Have {
         let new_changes = self.get_changes(&last_sync);
-        let hashes = new_changes
-            .into_iter()
-            .map(|change| change.hash)
-            .collect::<Vec<_>>();
+        let hashes = new_changes.into_iter().map(|change| &change.hash);
         Have {
             last_sync,
-            bloom: BloomFilter::from(&hashes[..]),
+            bloom: BloomFilter::from_hashes(hashes),
         }
     }
 
