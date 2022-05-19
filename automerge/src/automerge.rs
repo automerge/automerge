@@ -40,6 +40,8 @@ pub struct Automerge {
     pub(crate) history: Vec<Change>,
     /// Mapping from change hash to index into the history list.
     pub(crate) history_index: HashMap<ChangeHash, usize>,
+    /// Mapping from change hash to vector clock at this state.
+    pub(crate) clocks: HashMap<ChangeHash, Clock>,
     /// Mapping from actor index to list of seqs seen for them.
     pub(crate) states: HashMap<usize, Vec<usize>>,
     /// Current dependencies of this document (heads hashes).
@@ -61,6 +63,7 @@ impl Automerge {
             queue: vec![],
             history: vec![],
             history_index: HashMap::new(),
+            clocks: HashMap::new(),
             states: HashMap::new(),
             ops: Default::default(),
             deps: Default::default(),
@@ -947,9 +950,13 @@ impl Automerge {
         assert_eq!(
             changes,
             clock_changes,
-            "{:#?} {:#?}",
+            "{:#?} {:#?} {:#?}",
             changes.iter().map(|c| c.hash).collect::<Vec<_>>(),
-            clock_changes.iter().map(|c| c.hash).collect::<Vec<_>>()
+            clock_changes
+                .iter()
+                .map(|c| (c.hash, c.actor_id()))
+                .collect::<Vec<_>>(),
+            self.clock_at(have_deps),
         );
         changes
     }
@@ -965,20 +972,12 @@ impl Automerge {
 
     fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
         let mut clock = Clock::new();
-        let mut seen = HashSet::new();
-        let mut to_see = heads.to_vec();
-        // FIXME - faster
-        while let Some(hash) = to_see.pop() {
-            if let Some(c) = self.get_change_by_hash(&hash) {
-                for h in &c.deps {
-                    if !seen.contains(h) {
-                        to_see.push(*h);
-                    }
-                }
-                let actor = self.ops.m.actors.lookup(c.actor_id()).unwrap();
-                clock.include(actor, c.max_op());
-                seen.insert(hash);
-            }
+        for hash in heads {
+            let c = self
+                .clocks
+                .get(hash)
+                .expect("Asked for change that isn't in this document");
+            clock.merge(c);
         }
         clock
     }
@@ -1038,10 +1037,19 @@ impl Automerge {
 
         let history_index = self.history.len();
 
+        let actor_index = self.ops.m.actors.cache(change.actor_id().clone());
         self.states
             .entry(self.ops.m.actors.cache(change.actor_id().clone()))
             .or_default()
             .push(history_index);
+
+        let mut clock = Clock::new();
+        for hash in &change.deps {
+            let c = self.clocks.get(hash).unwrap();
+            clock.merge(c);
+        }
+        clock.include(actor_index, change.max_op());
+        self.clocks.insert(change.hash, clock);
 
         self.history_index.insert(change.hash, history_index);
         self.history.push(change);
