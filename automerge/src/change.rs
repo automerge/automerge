@@ -333,6 +333,7 @@ pub struct Change {
     pub deps: Vec<amp::ChangeHash>,
     ops: HashMap<u32, Range<usize>>,
     extra_bytes: Range<usize>,
+    /// The number of operations in this change.
     num_ops: usize,
 }
 
