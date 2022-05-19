@@ -4,6 +4,7 @@ use std::num::NonZeroU64;
 use std::ops::RangeBounds;
 
 use crate::change::encode_document;
+use crate::clock::ClockData;
 use crate::exid::ExId;
 use crate::keys::Keys;
 use crate::op_observer::OpObserver;
@@ -918,16 +919,10 @@ impl Automerge {
         let mut change_indexes: Vec<usize> = Vec::new();
         // walk the state from the given deps clock and add them into the vec
         for (actor_index, actor_changes) in &self.states {
-            if let Some(max_op) = clock.get_for_actor(actor_index) {
+            if let Some(clock_data) = clock.get_for_actor(actor_index) {
                 // find the change in this actors sequence of changes that corresponds to the max_op
                 // recorded for them in the clock
-                let clock_start = actor_changes
-                    .binary_search_by_key(max_op, |change_index| {
-                        self.history[*change_index].max_op()
-                    })
-                    .expect("Clock index should always correspond to a value in the actor's state");
-                let first_unseen_change = clock_start + 1;
-                change_indexes.extend(&actor_changes[first_unseen_change..]);
+                change_indexes.extend(&actor_changes[clock_data.seq as usize..]);
             } else {
                 change_indexes.extend(&actor_changes[..]);
             }
@@ -956,15 +951,25 @@ impl Automerge {
     }
 
     fn clock_at(&self, heads: &[ChangeHash]) -> Result<Clock, AutomergeError> {
-        let mut clock = Clock::new();
-        for hash in heads {
-            let c = self
+        if let Some(first_hash) = heads.first() {
+            let mut clock = self
                 .clocks
-                .get(hash)
-                .ok_or(AutomergeError::MissingHash(*hash))?;
-            clock.merge(c);
+                .get(first_hash)
+                .ok_or(AutomergeError::MissingHash(*first_hash))?
+                .clone();
+
+            for hash in &heads[1..] {
+                let c = self
+                    .clocks
+                    .get(hash)
+                    .ok_or(AutomergeError::MissingHash(*hash))?;
+                clock.merge(c);
+            }
+
+            Ok(clock)
+        } else {
+            Ok(Clock::new())
         }
-        Ok(clock)
     }
 
     /// Get a change by its hash.
@@ -1033,7 +1038,13 @@ impl Automerge {
             let c = self.clocks.get(hash).unwrap();
             clock.merge(c);
         }
-        clock.include(actor_index, change.max_op());
+        clock.include(
+            actor_index,
+            ClockData {
+                max_op: change.max_op(),
+                seq: change.seq,
+            },
+        );
         self.clocks.insert(change.hash, clock);
 
         self.history_index.insert(change.hash, history_index);
