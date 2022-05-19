@@ -83,15 +83,8 @@ impl BloomFilter {
             true
         }
     }
-}
 
-fn bits_capacity(num_entries: u32, num_bits_per_entry: u32) -> usize {
-    let f = ((f64::from(num_entries) * f64::from(num_bits_per_entry)) / 8_f64).ceil();
-    f as usize
-}
-
-impl From<&[ChangeHash]> for BloomFilter {
-    fn from(hashes: &[ChangeHash]) -> Self {
+    pub fn from_hashes<'a>(hashes: impl ExactSizeIterator<Item = &'a ChangeHash>) -> Self {
         let num_entries = hashes.len() as u32;
         let num_bits_per_entry = BITS_PER_ENTRY;
         let num_probes = NUM_PROBES;
@@ -107,6 +100,11 @@ impl From<&[ChangeHash]> for BloomFilter {
         }
         filter
     }
+}
+
+fn bits_capacity(num_entries: u32, num_bits_per_entry: u32) -> usize {
+    let f = ((f64::from(num_entries) * f64::from(num_bits_per_entry)) / 8_f64).ceil();
+    f as usize
 }
 
 impl TryFrom<&[u8]> for BloomFilter {
