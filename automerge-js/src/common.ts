@@ -1,4 +1,6 @@
-export function isObject(obj: any) : boolean {
+import { UnknownObject } from './types';
+
+export function isObject(obj: unknown) : obj is UnknownObject {
   return typeof obj === 'object' && obj !== null
 }
 
@@ -6,9 +8,9 @@ export function isObject(obj: any) : boolean {
  * Returns a shallow copy of the object `obj`. Faster than `Object.assign({}, obj)`.
  * https://jsperf.com/cloning-large-objects/1
  */
-export function copyObject(obj: any) : any {
+export function copyObject<T extends UnknownObject>(obj: T) : T {
   if (!isObject(obj)) return {}
-  const copy : any = {}
+  const copy = {}
   for (const key of Object.keys(obj)) {
     copy[key] = obj[key]
   }
