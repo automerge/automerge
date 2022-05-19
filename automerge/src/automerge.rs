@@ -943,24 +943,7 @@ impl Automerge {
     }
 
     pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Result<Vec<&Change>, AutomergeError> {
-        let changes = if let Some(changes) = self.get_changes_fast(have_deps) {
-            changes
-        } else {
-            self.get_changes_slow(have_deps)
-        };
-        let clock_changes = self.get_changes_clock(have_deps)?;
-        assert_eq!(
-            changes,
-            clock_changes,
-            "{:#?} {:#?} {:#?}",
-            changes.iter().map(|c| c.hash).collect::<Vec<_>>(),
-            clock_changes
-                .iter()
-                .map(|c| (c.hash, c.actor_id()))
-                .collect::<Vec<_>>(),
-            self.clock_at(have_deps),
-        );
-        Ok(changes)
+        self.get_changes_clock(have_deps)
     }
 
     /// Get the last change this actor made to the document.
