@@ -3,7 +3,8 @@ use fxhash::FxBuildHasher;
 use std::cmp;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, PartialEq)]
+/// Vector clock mapping actor indices to the max op counter of the changes created by that actor.
+#[derive(Default, Debug, Clone, PartialEq)]
 pub(crate) struct Clock(HashMap<usize, u64, FxBuildHasher>);
 
 impl Clock {
@@ -11,24 +12,30 @@ impl Clock {
         Clock(Default::default())
     }
 
-    pub(crate) fn include(&mut self, key: usize, n: u64) {
+    pub(crate) fn include(&mut self, actor_index: usize, max_op: u64) {
         self.0
-            .entry(key)
-            .and_modify(|m| *m = cmp::max(n, *m))
-            .or_insert(n);
+            .entry(actor_index)
+            .and_modify(|m| *m = cmp::max(max_op, *m))
+            .or_insert(max_op);
     }
 
     pub(crate) fn covers(&self, id: &OpId) -> bool {
-        if let Some(val) = self.0.get(&id.1) {
-            val >= &id.0
+        if let Some(max_op) = self.0.get(&id.1) {
+            max_op >= &id.0
         } else {
             false
         }
     }
 
-    /// Get the max_op recorded in this clock for the actor.
+    /// Get the max_op counter recorded in this clock for the actor.
     pub(crate) fn get_for_actor(&self, actor_index: &usize) -> Option<&u64> {
         self.0.get(actor_index)
+    }
+
+    pub(crate) fn merge(&mut self, other: &Self) {
+        for (actor, max_op) in &other.0 {
+            self.include(*actor, *max_op);
+        }
     }
 }
 
