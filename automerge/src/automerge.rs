@@ -974,7 +974,7 @@ impl Automerge {
 
         let actor_index = self.ops.m.actors.cache(change.actor_id().clone());
         self.states
-            .entry(self.ops.m.actors.cache(change.actor_id().clone()))
+            .entry(actor_index)
             .or_default()
             .push(history_index);
 
