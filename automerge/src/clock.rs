@@ -25,6 +25,11 @@ impl Clock {
             false
         }
     }
+
+    /// Get the max_op recorded in this clock for the actor.
+    pub(crate) fn get_for_actor(&self, actor_index: &usize) -> Option<&u64> {
+        self.0.get(actor_index)
+    }
 }
 
 #[cfg(test)]

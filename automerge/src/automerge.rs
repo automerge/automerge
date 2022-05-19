@@ -903,6 +903,52 @@ impl Automerge {
             .collect()
     }
 
+    /// Get the changes since `have_deps` in this document using a clock internally.
+    fn get_changes_clock(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
+        // get the clock for the given deps
+        let clock = self.clock_at(have_deps);
+
+        // get the documents current clock
+
+        let mut changes = Vec::new();
+        // walk the state from the given deps clock and add them into the vec
+        for (actor_index, actor_changes) in &self.states {
+            if let Some(max_op) = clock.get_for_actor(actor_index) {
+                // find the change in this actors sequence of changes that corresponds to the max_op
+                // recorded for them in the clock
+                let clock_start = actor_changes
+                    .binary_search_by_key(max_op, |change_index| {
+                        self.history[*change_index].max_op()
+                    })
+                    .expect("Clock index should always correspond to a value in the actor's state");
+                changes.extend(
+                    actor_changes[clock_start..]
+                        .iter()
+                        .map(|change_index| &self.history[*change_index]),
+                );
+            } else {
+                changes.extend(
+                    actor_changes
+                        .iter()
+                        .map(|change_index| &self.history[*change_index]),
+                );
+            }
+        }
+
+        // ensure the changes are still in sorted order
+        changes
+    }
+
+    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
+        let changes = if let Some(changes) = self.get_changes_fast(have_deps) {
+            changes
+        } else {
+            self.get_changes_slow(have_deps)
+        };
+        assert_eq!(changes, self.get_changes_clock(have_deps));
+        changes
+    }
+
     /// Get the last change this actor made to the document.
     pub fn get_last_local_change(&self) -> Option<&Change> {
         return self
@@ -910,14 +956,6 @@ impl Automerge {
             .iter()
             .rev()
             .find(|c| c.actor_id() == self.get_actor());
-    }
-
-    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
-        if let Some(changes) = self.get_changes_fast(have_deps) {
-            changes
-        } else {
-            self.get_changes_slow(have_deps)
-        }
     }
 
     fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
