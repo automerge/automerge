@@ -279,11 +279,11 @@ impl Automerge {
     /// Historical version of [`keys`](Self::keys).
     pub fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt<'_, '_> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
-            let clock = self.clock_at(heads);
-            KeysAt::new(self, self.ops.keys_at(obj, clock))
-        } else {
-            KeysAt::new(self, None)
+            if let Ok(clock) = self.clock_at(heads) {
+                return KeysAt::new(self, self.ops.keys_at(obj, clock));
+            }
         }
+        KeysAt::new(self, None)
     }
 
     /// Iterate over the keys and values of the map `obj` in the given range.
@@ -307,12 +307,12 @@ impl Automerge {
         heads: &[ChangeHash],
     ) -> MapRangeAt<'_, R> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
-            let clock = self.clock_at(heads);
-            let iter_range = self.ops.map_range_at(obj, range, clock);
-            MapRangeAt::new(self, iter_range)
-        } else {
-            MapRangeAt::new(self, None)
+            if let Ok(clock) = self.clock_at(heads) {
+                let iter_range = self.ops.map_range_at(obj, range, clock);
+                return MapRangeAt::new(self, iter_range);
+            }
         }
+        MapRangeAt::new(self, None)
     }
 
     /// Iterate over the indexes and values of the list `obj` in the given range.
@@ -336,12 +336,12 @@ impl Automerge {
         heads: &[ChangeHash],
     ) -> ListRangeAt<'_, R> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
-            let clock = self.clock_at(heads);
-            let iter_range = self.ops.list_range_at(obj, range, clock);
-            ListRangeAt::new(self, iter_range)
-        } else {
-            ListRangeAt::new(self, None)
+            if let Ok(clock) = self.clock_at(heads) {
+                let iter_range = self.ops.list_range_at(obj, range, clock);
+                return ListRangeAt::new(self, iter_range);
+            }
         }
+        ListRangeAt::new(self, None)
     }
 
     pub fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
@@ -358,21 +358,21 @@ impl Automerge {
 
     pub fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
-            let clock = self.clock_at(heads);
-            match self.ops.object_type(&obj) {
-                Some(ObjType::Map) | Some(ObjType::Table) => {
-                    let iter_range = self.ops.map_range_at(obj, .., clock);
-                    Values::new(self, iter_range)
-                }
-                Some(ObjType::List) | Some(ObjType::Text) => {
-                    let iter_range = self.ops.list_range_at(obj, .., clock);
-                    Values::new(self, iter_range)
-                }
-                None => Values::empty(self),
+            if let Ok(clock) = self.clock_at(heads) {
+                return match self.ops.object_type(&obj) {
+                    Some(ObjType::Map) | Some(ObjType::Table) => {
+                        let iter_range = self.ops.map_range_at(obj, .., clock);
+                        Values::new(self, iter_range)
+                    }
+                    Some(ObjType::List) | Some(ObjType::Text) => {
+                        let iter_range = self.ops.list_range_at(obj, .., clock);
+                        Values::new(self, iter_range)
+                    }
+                    None => Values::empty(self),
+                };
             }
-        } else {
-            Values::empty(self)
         }
+        Values::empty(self)
     }
 
     /// Get the length of the given object.
@@ -393,17 +393,17 @@ impl Automerge {
     /// Historical version of [`length`](Self::length).
     pub fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
         if let Ok(inner_obj) = self.exid_to_obj(obj.as_ref()) {
-            let clock = self.clock_at(heads);
-            match self.ops.object_type(&inner_obj) {
-                Some(ObjType::Map) | Some(ObjType::Table) => self.keys_at(obj, heads).count(),
-                Some(ObjType::List) | Some(ObjType::Text) => {
-                    self.ops.search(&inner_obj, query::LenAt::new(clock)).len
-                }
-                None => 0,
+            if let Ok(clock) = self.clock_at(heads) {
+                return match self.ops.object_type(&inner_obj) {
+                    Some(ObjType::Map) | Some(ObjType::Table) => self.keys_at(obj, heads).count(),
+                    Some(ObjType::List) | Some(ObjType::Text) => {
+                        self.ops.search(&inner_obj, query::LenAt::new(clock)).len
+                    }
+                    None => 0,
+                };
             }
-        } else {
-            0
         }
+        0
     }
 
     /// Get the type of this object, if it is an object.
@@ -460,7 +460,7 @@ impl Automerge {
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = self.clock_at(heads);
+        let clock = self.clock_at(heads)?;
         let query = self.ops.search(&obj, query::ListValsAt::new(clock));
         let mut buffer = String::new();
         for q in &query.ops {
@@ -542,7 +542,7 @@ impl Automerge {
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         let prop = prop.into();
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = self.clock_at(heads);
+        let clock = self.clock_at(heads)?;
         let result = match prop {
             Prop::Map(p) => {
                 let prop = self.ops.m.props.lookup(&p);
@@ -752,7 +752,9 @@ impl Automerge {
 
     /// Save the changes since last save in a compact form.
     pub fn save_incremental(&mut self) -> Vec<u8> {
-        let changes = self.get_changes(self.saved.as_slice());
+        let changes = self
+            .get_changes(self.saved.as_slice())
+            .expect("Should only be getting changes using previously saved heads");
         let mut bytes = vec![];
         for c in changes {
             bytes.extend(c.raw_bytes());
@@ -907,9 +909,9 @@ impl Automerge {
     }
 
     /// Get the changes since `have_deps` in this document using a clock internally.
-    fn get_changes_clock(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
+    fn get_changes_clock(&self, have_deps: &[ChangeHash]) -> Result<Vec<&Change>, AutomergeError> {
         // get the clock for the given deps
-        let clock = self.clock_at(have_deps);
+        let clock = self.clock_at(have_deps)?;
 
         // get the documents current clock
 
@@ -934,19 +936,19 @@ impl Automerge {
         // ensure the changes are still in sorted order
         change_indexes.sort_unstable();
 
-        change_indexes
+        Ok(change_indexes
             .into_iter()
             .map(|i| &self.history[i])
-            .collect()
+            .collect())
     }
 
-    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
+    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Result<Vec<&Change>, AutomergeError> {
         let changes = if let Some(changes) = self.get_changes_fast(have_deps) {
             changes
         } else {
             self.get_changes_slow(have_deps)
         };
-        let clock_changes = self.get_changes_clock(have_deps);
+        let clock_changes = self.get_changes_clock(have_deps)?;
         assert_eq!(
             changes,
             clock_changes,
@@ -958,7 +960,7 @@ impl Automerge {
                 .collect::<Vec<_>>(),
             self.clock_at(have_deps),
         );
-        changes
+        Ok(changes)
     }
 
     /// Get the last change this actor made to the document.
@@ -970,16 +972,16 @@ impl Automerge {
             .find(|c| c.actor_id() == self.get_actor());
     }
 
-    fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
+    fn clock_at(&self, heads: &[ChangeHash]) -> Result<Clock, AutomergeError> {
         let mut clock = Clock::new();
         for hash in heads {
             let c = self
                 .clocks
                 .get(hash)
-                .expect("Asked for change that isn't in this document");
+                .ok_or(AutomergeError::MissingHash(*hash))?;
             clock.merge(c);
         }
-        clock
+        Ok(clock)
     }
 
     /// Get a change by its hash.

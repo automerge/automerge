@@ -23,6 +23,8 @@ pub enum AutomergeError {
     DuplicateSeqNumber(u64, ActorId),
     #[error("invalid hash {0}")]
     InvalidHash(ChangeHash),
+    #[error("hash {0} does not correspond to a change in this document")]
+    MissingHash(ChangeHash),
     #[error("increment operations must be against a counter value")]
     MissingCounter,
     #[error("general failure")]

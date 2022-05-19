@@ -572,7 +572,7 @@ impl Automerge {
     pub fn get_changes(&mut self, have_deps: JsValue) -> Result<Array, JsValue> {
         self.ensure_transaction_closed();
         let deps: Vec<_> = JS(have_deps).try_into()?;
-        let changes = self.doc.get_changes(&deps);
+        let changes = self.doc.get_changes(&deps)?;
         let changes: Array = changes
             .iter()
             .map(|c| Uint8Array::from(c.raw_bytes()))

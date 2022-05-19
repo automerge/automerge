@@ -170,7 +170,10 @@ impl AutoCommit {
         self.doc.get_last_local_change()
     }
 
-    pub fn get_changes(&mut self, have_deps: &[ChangeHash]) -> Vec<&Change> {
+    pub fn get_changes(
+        &mut self,
+        have_deps: &[ChangeHash],
+    ) -> Result<Vec<&Change>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.get_changes(have_deps)
     }

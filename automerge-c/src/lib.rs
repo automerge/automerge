@@ -1395,7 +1395,7 @@ pub unsafe extern "C" fn AMgetChanges(
         Some(have_deps) => have_deps.as_ref(),
         None => &empty_deps,
     };
-    to_result(Ok(doc.get_changes(have_deps)))
+    to_result(doc.get_changes(have_deps))
 }
 
 /// \memberof AMchange

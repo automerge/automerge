@@ -59,6 +59,7 @@ impl Automerge {
             sync_state.their_need.as_ref(),
         ) {
             self.get_changes_to_send(their_have.clone(), their_need)
+                .expect("Should have only used hashes that are in the document")
         } else {
             Vec::new()
         };
@@ -163,7 +164,9 @@ impl Automerge {
     }
 
     fn make_bloom_filter(&self, last_sync: Vec<ChangeHash>) -> Have {
-        let new_changes = self.get_changes(&last_sync);
+        let new_changes = self
+            .get_changes(&last_sync)
+            .expect("Should have only used hashes that are in the document");
         let hashes = new_changes.into_iter().map(|change| &change.hash);
         Have {
             last_sync,
@@ -171,11 +174,16 @@ impl Automerge {
         }
     }
 
-    fn get_changes_to_send(&self, have: Vec<Have>, need: &[ChangeHash]) -> Vec<&Change> {
+    fn get_changes_to_send(
+        &self,
+        have: Vec<Have>,
+        need: &[ChangeHash],
+    ) -> Result<Vec<&Change>, AutomergeError> {
         if have.is_empty() {
-            need.iter()
+            Ok(need
+                .iter()
                 .filter_map(|hash| self.get_change_by_hash(hash))
-                .collect()
+                .collect())
         } else {
             let mut last_sync_hashes = HashSet::new();
             let mut bloom_filters = Vec::with_capacity(have.len());
@@ -189,7 +197,7 @@ impl Automerge {
             }
             let last_sync_hashes = last_sync_hashes.into_iter().collect::<Vec<_>>();
 
-            let changes = self.get_changes(&last_sync_hashes);
+            let changes = self.get_changes(&last_sync_hashes)?;
 
             let mut change_hashes = HashSet::with_capacity(changes.len());
             let mut dependents: HashMap<ChangeHash, Vec<ChangeHash>> = HashMap::new();
@@ -237,7 +245,7 @@ impl Automerge {
                     changes_to_send.push(change);
                 }
             }
-            changes_to_send
+            Ok(changes_to_send)
         }
     }
 }

@@ -1473,7 +1473,7 @@ fn observe_counter_change_application() {
     doc.put(ROOT, "counter", ScalarValue::counter(1)).unwrap();
     doc.increment(ROOT, "counter", 2).unwrap();
     doc.increment(ROOT, "counter", 5).unwrap();
-    let changes = doc.get_changes(&[]).into_iter().cloned().collect();
+    let changes = doc.get_changes(&[]).unwrap().into_iter().cloned().collect();
 
     let mut new_doc = AutoCommit::new();
     let mut observer = VecOpObserver::default();
@@ -1517,5 +1517,5 @@ fn get_changes_heads_empty() {
     doc.put(ROOT, "key2", 1).unwrap();
     doc.commit();
     let heads = doc.get_heads();
-    assert_eq!(doc.get_changes(&heads), Vec::<&Change>::new());
+    assert_eq!(doc.get_changes(&heads).unwrap(), Vec::<&Change>::new());
 }
