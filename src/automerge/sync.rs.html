@@ -380,9 +380,6 @@
 <span id="373">373</span>
 <span id="374">374</span>
 <span id="375">375</span>
-<span id="376">376</span>
-<span id="377">377</span>
-<span id="378">378</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">itertools::Itertools</span>;
 <span class="kw">use</span> <span class="ident">std</span>::{
     <span class="ident">borrow::Cow</span>,
@@ -550,13 +547,10 @@
 
     <span class="kw">fn</span> <span class="ident">make_bloom_filter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">last_sync</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>) -&gt; <span class="ident">Have</span> {
         <span class="kw">let</span> <span class="ident">new_changes</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">get_changes</span>(<span class="kw-2">&amp;</span><span class="ident">last_sync</span>);
-        <span class="kw">let</span> <span class="ident">hashes</span> <span class="op">=</span> <span class="ident">new_changes</span>
-            .<span class="ident">into_iter</span>()
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">change</span><span class="op">|</span> <span class="ident">change</span>.<span class="ident">hash</span>)
-            .<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
+        <span class="kw">let</span> <span class="ident">hashes</span> <span class="op">=</span> <span class="ident">new_changes</span>.<span class="ident">into_iter</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">change</span><span class="op">|</span> <span class="kw-2">&amp;</span><span class="ident">change</span>.<span class="ident">hash</span>);
         <span class="ident">Have</span> {
             <span class="ident">last_sync</span>,
-            <span class="ident">bloom</span>: <span class="ident">BloomFilter::from</span>(<span class="kw-2">&amp;</span><span class="ident">hashes</span>[..]),
+            <span class="ident">bloom</span>: <span class="ident">BloomFilter::from_hashes</span>(<span class="ident">hashes</span>),
         }
     }
 
