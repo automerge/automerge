@@ -854,61 +854,6 @@ impl Automerge {
         missing
     }
 
-    fn get_changes_fast(&self, have_deps: &[ChangeHash]) -> Option<Vec<&Change>> {
-        if have_deps.is_empty() {
-            return Some(self.history.iter().collect());
-        }
-
-        let lowest_idx = have_deps
-            .iter()
-            .filter_map(|h| self.history_index.get(h))
-            .min()?
-            + 1;
-
-        let mut missing_changes = vec![];
-        let mut has_seen: HashSet<_> = have_deps.iter().collect();
-        for change in &self.history[lowest_idx..] {
-            let deps_seen = change.deps.iter().filter(|h| has_seen.contains(h)).count();
-            if deps_seen > 0 {
-                if deps_seen != change.deps.len() {
-                    // future change depends on something we haven't seen - fast path cant work
-                    return None;
-                }
-                missing_changes.push(change);
-                has_seen.insert(&change.hash);
-            }
-        }
-
-        // if we get to the end and there is a head we haven't seen then fast path cant work
-        if self.get_heads().iter().all(|h| has_seen.contains(h)) {
-            Some(missing_changes)
-        } else {
-            None
-        }
-    }
-
-    fn get_changes_slow(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
-        let mut stack: Vec<_> = have_deps.iter().collect();
-        let mut has_seen = HashSet::new();
-        while let Some(hash) = stack.pop() {
-            if has_seen.contains(&hash) {
-                continue;
-            }
-            if let Some(change) = self
-                .history_index
-                .get(hash)
-                .and_then(|i| self.history.get(*i))
-            {
-                stack.extend(change.deps.iter());
-            }
-            has_seen.insert(hash);
-        }
-        self.history
-            .iter()
-            .filter(|change| !has_seen.contains(&change.hash))
-            .collect()
-    }
-
     /// Get the changes since `have_deps` in this document using a clock internally.
     fn get_changes_clock(&self, have_deps: &[ChangeHash]) -> Result<Vec<&Change>, AutomergeError> {
         // get the clock for the given deps
