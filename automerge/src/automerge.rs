@@ -910,7 +910,7 @@ impl Automerge {
 
         // get the documents current clock
 
-        let mut changes = Vec::new();
+        let mut change_indexes: Vec<usize> = Vec::new();
         // walk the state from the given deps clock and add them into the vec
         for (actor_index, actor_changes) in &self.states {
             if let Some(max_op) = clock.get_for_actor(actor_index) {
@@ -921,22 +921,20 @@ impl Automerge {
                         self.history[*change_index].max_op()
                     })
                     .expect("Clock index should always correspond to a value in the actor's state");
-                changes.extend(
-                    actor_changes[clock_start..]
-                        .iter()
-                        .map(|change_index| &self.history[*change_index]),
-                );
+                let first_unseen_change = clock_start + 1;
+                change_indexes.extend(&actor_changes[first_unseen_change..]);
             } else {
-                changes.extend(
-                    actor_changes
-                        .iter()
-                        .map(|change_index| &self.history[*change_index]),
-                );
+                change_indexes.extend(&actor_changes[..]);
             }
         }
 
         // ensure the changes are still in sorted order
-        changes
+        change_indexes.sort_unstable();
+
+        change_indexes
+            .into_iter()
+            .map(|i| &self.history[i])
+            .collect()
     }
 
     pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
@@ -945,7 +943,14 @@ impl Automerge {
         } else {
             self.get_changes_slow(have_deps)
         };
-        assert_eq!(changes, self.get_changes_clock(have_deps));
+        let clock_changes = self.get_changes_clock(have_deps);
+        assert_eq!(
+            changes,
+            clock_changes,
+            "{:#?} {:#?}",
+            changes.iter().map(|c| c.hash).collect::<Vec<_>>(),
+            clock_changes.iter().map(|c| c.hash).collect::<Vec<_>>()
+        );
         changes
     }
 
