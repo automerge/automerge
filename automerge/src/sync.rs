@@ -137,7 +137,7 @@ impl Automerge {
         }
 
         // trim down the sent hashes to those that we know they haven't seen
-        self.filter_changes(&message_heads, &mut sync_state.sent_hashes);
+        self.filter_changes(&message_heads, &mut sync_state.sent_hashes)?;
 
         if changes_is_empty && message_heads == before_heads {
             sync_state.last_sent_heads = message_heads.clone();

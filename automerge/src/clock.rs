@@ -1,6 +1,6 @@
 use crate::types::OpId;
 use fxhash::FxBuildHasher;
-use std::collections::HashMap;
+use std::{cmp::Ordering, collections::HashMap};
 
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ClockData {
@@ -10,9 +10,37 @@ pub(crate) struct ClockData {
     pub(crate) seq: u64,
 }
 
+// a clock for the same actor is ahead of another if it has a higher max_op
+impl PartialOrd for ClockData {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.max_op.partial_cmp(&other.max_op)
+    }
+}
+
 /// Vector clock mapping actor indices to the max op counter of the changes created by that actor.
 #[derive(Default, Debug, Clone, PartialEq)]
 pub(crate) struct Clock(HashMap<usize, ClockData, FxBuildHasher>);
+
+// A general clock is greater if it has one element the other does not or has a counter higher than
+// the other for a given actor.
+//
+// It is equal with another clock if it has the same entries everywhere.
+//
+// It is less than another clock otherwise.
+impl PartialOrd for Clock {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        if self.0 == other.0 {
+            Some(Ordering::Equal)
+        } else if self.is_greater(other) {
+            Some(Ordering::Greater)
+        } else if other.is_greater(self) {
+            Some(Ordering::Less)
+        } else {
+            // concurrent
+            None
+        }
+    }
+}
 
 impl Clock {
     pub(crate) fn new() -> Self {
@@ -48,6 +76,40 @@ impl Clock {
             self.include(*actor, *data);
         }
     }
+
+    fn is_greater(&self, other: &Self) -> bool {
+        let mut has_greater = false;
+
+        let mut others_found = 0;
+
+        for (actor, data) in &self.0 {
+            if let Some(other_data) = other.0.get(actor) {
+                if data < other_data {
+                    // may be concurrent or less
+                    return false;
+                } else if data > other_data {
+                    has_greater = true;
+                }
+                others_found += 1;
+            } else {
+                // other doesn't have this so effectively has a greater element
+                has_greater = true;
+            }
+        }
+
+        if has_greater {
+            // if they are equal then we have seen every key in the other clock and have at least
+            // one greater element so our clock is greater
+            //
+            // If they aren't the same then we haven't seen every key but have a greater element
+            // anyway so are concurrent
+            others_found == other.0.len()
+        } else {
+            // our clock doesn't have anything greater than the other clock so can't be greater but
+            // could still be concurrent
+            false
+        }
+    }
 }
 
 #[cfg(test)]
@@ -71,5 +133,35 @@ mod tests {
 
         assert!(!clock.covers(&OpId(1, 3)));
         assert!(!clock.covers(&OpId(100, 3)));
+    }
+
+    #[test]
+    fn comparison() {
+        let mut base_clock = Clock::new();
+        base_clock.include(1, ClockData { max_op: 1, seq: 1 });
+        base_clock.include(2, ClockData { max_op: 1, seq: 1 });
+
+        let mut after_clock = base_clock.clone();
+        after_clock.include(1, ClockData { max_op: 2, seq: 2 });
+
+        assert!(after_clock > base_clock);
+        assert!(base_clock < after_clock);
+
+        assert!(base_clock == base_clock);
+
+        let mut new_actor_clock = base_clock.clone();
+        new_actor_clock.include(3, ClockData { max_op: 1, seq: 1 });
+
+        assert_eq!(
+            base_clock.partial_cmp(&new_actor_clock),
+            Some(Ordering::Less)
+        );
+        assert_eq!(
+            new_actor_clock.partial_cmp(&base_clock),
+            Some(Ordering::Greater)
+        );
+
+        assert_eq!(after_clock.partial_cmp(&new_actor_clock), None);
+        assert_eq!(new_actor_clock.partial_cmp(&after_clock), None);
     }
 }
