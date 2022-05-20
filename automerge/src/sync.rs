@@ -58,7 +58,7 @@ impl Automerge {
             sync_state.their_have.as_ref(),
             sync_state.their_need.as_ref(),
         ) {
-            self.get_changes_to_send(their_have.clone(), their_need)
+            self.get_changes_to_send(their_have, their_need)
                 .expect("Should have only used hashes that are in the document")
         } else {
             Vec::new()
@@ -176,7 +176,7 @@ impl Automerge {
 
     fn get_changes_to_send(
         &self,
-        have: Vec<Have>,
+        have: &[Have],
         need: &[ChangeHash],
     ) -> Result<Vec<&Change>, AutomergeError> {
         if have.is_empty() {
@@ -195,7 +195,7 @@ impl Automerge {
                 }
                 bloom_filters.push(bloom);
             }
-            let last_sync_hashes = last_sync_hashes.into_iter().collect::<Vec<_>>();
+            let last_sync_hashes = last_sync_hashes.into_iter().copied().collect::<Vec<_>>();
 
             let changes = self.get_changes(&last_sync_hashes)?;
 
