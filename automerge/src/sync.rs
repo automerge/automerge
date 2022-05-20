@@ -54,7 +54,7 @@ impl Automerge {
             }
         }
 
-        let mut changes_to_send = if let (Some(their_have), Some(their_need)) = (
+        let changes_to_send = if let (Some(their_have), Some(their_need)) = (
             sync_state.their_have.as_ref(),
             sync_state.their_need.as_ref(),
         ) {
@@ -76,8 +76,17 @@ impl Automerge {
             return None;
         }
 
-        // deduplicate the changes to send with those we have already sent
-        changes_to_send.retain(|change| !sync_state.sent_hashes.contains(&change.hash));
+        // deduplicate the changes to send with those we have already sent and clone it now
+        let changes_to_send = changes_to_send
+            .into_iter()
+            .filter_map(|change| {
+                if !sync_state.sent_hashes.contains(&change.hash) {
+                    Some(change.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
 
         sync_state.last_sent_heads = our_heads.clone();
         sync_state
@@ -88,7 +97,7 @@ impl Automerge {
             heads: our_heads,
             have: our_have,
             need: our_need,
-            changes: changes_to_send.into_iter().cloned().collect(),
+            changes: changes_to_send,
         };
 
         Some(sync_message)
