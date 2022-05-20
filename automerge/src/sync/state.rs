@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashSet};
+use std::{borrow::Cow, collections::BTreeSet};
 
 use super::{decode_hashes, encode_hashes, BloomFilter};
 use crate::{decoding, decoding::Decoder, ChangeHash};
@@ -6,20 +6,20 @@ use crate::{decoding, decoding::Decoder, ChangeHash};
 const SYNC_STATE_TYPE: u8 = 0x43; // first byte of an encoded sync state, for identification
 
 /// The state of synchronisation with a peer.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct State {
     pub shared_heads: Vec<ChangeHash>,
     pub last_sent_heads: Vec<ChangeHash>,
     pub their_heads: Option<Vec<ChangeHash>>,
     pub their_need: Option<Vec<ChangeHash>>,
     pub their_have: Option<Vec<Have>>,
-    pub sent_hashes: HashSet<ChangeHash>,
+    pub sent_hashes: BTreeSet<ChangeHash>,
 }
 
 /// A summary of the changes that the sender of the message already has.
 /// This is implicitly a request to the recipient to send all changes that the
 /// sender does not already have.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct Have {
     /// The heads at the time of the last successful sync with this recipient.
     pub last_sync: Vec<ChangeHash>,
@@ -57,7 +57,7 @@ impl State {
             their_heads: None,
             their_need: None,
             their_have: Some(Vec::new()),
-            sent_hashes: HashSet::new(),
+            sent_hashes: BTreeSet::new(),
         })
     }
 }

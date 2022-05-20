@@ -8,7 +8,7 @@ use crate::{decoding, decoding::Decoder, encoding::Encodable, ChangeHash};
 const BITS_PER_ENTRY: u32 = 10;
 const NUM_PROBES: u32 = 7;
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BloomFilter {
     num_entries: u32,
     num_bits_per_entry: u32,

@@ -1,7 +1,7 @@
 use automerge as am;
 use automerge::ChangeHash;
 use js_sys::Uint8Array;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::convert::TryInto;
 use wasm_bindgen::prelude::*;
 
@@ -33,7 +33,7 @@ impl SyncState {
     #[wasm_bindgen(setter, js_name = sentHashes)]
     pub fn set_sent_hashes(&mut self, hashes: JsValue) -> Result<(), JsValue> {
         let hashes_map: HashMap<ChangeHash, bool> = hashes.into_serde().map_err(to_js_err)?;
-        let hashes_set: HashSet<ChangeHash> = hashes_map.keys().cloned().collect();
+        let hashes_set: BTreeSet<ChangeHash> = hashes_map.keys().cloned().collect();
         self.0.sent_hashes = hashes_set;
         Ok(())
     }
