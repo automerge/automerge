@@ -508,9 +508,12 @@ impl Op {
 #[derive(Debug, Clone)]
 pub(crate) struct Peer {}
 
+/// The number of bytes in a change hash.
+pub(crate) const HASH_SIZE: usize = 32; // 256 bits = 32 bytes
+
 /// The sha256 hash of a change.
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord, Copy)]
-pub struct ChangeHash(pub [u8; 32]);
+pub struct ChangeHash(pub [u8; HASH_SIZE]);
 
 impl fmt::Debug for ChangeHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

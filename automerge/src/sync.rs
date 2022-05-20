@@ -7,8 +7,8 @@ use std::{
 };
 
 use crate::{
-    decoding, decoding::Decoder, encoding::Encodable, ApplyOptions, Automerge, AutomergeError,
-    Change, ChangeHash, OpObserver,
+    decoding, decoding::Decoder, encoding::Encodable, types::HASH_SIZE, ApplyOptions, Automerge,
+    AutomergeError, Change, ChangeHash, OpObserver,
 };
 
 mod bloom;
@@ -17,7 +17,6 @@ mod state;
 pub use bloom::BloomFilter;
 pub use state::{Have, State};
 
-const HASH_SIZE: usize = 32; // 256 bits = 32 bytes
 const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identification
 
 impl Automerge {
