@@ -199,9 +199,7 @@ impl Automerge {
 
             for h in have {
                 let Have { last_sync, bloom } = h;
-                for hash in last_sync {
-                    last_sync_hashes.insert(hash);
-                }
+                last_sync_hashes.extend(last_sync);
                 bloom_filters.push(bloom);
             }
             let last_sync_hashes = last_sync_hashes.into_iter().copied().collect::<Vec<_>>();
