@@ -980,7 +980,10 @@ impl Automerge {
 
         let mut clock = Clock::new();
         for hash in &change.deps {
-            let c = self.clocks.get(hash).unwrap();
+            let c = self
+                .clocks
+                .get(hash)
+                .expect("Change's deps should already be in the document");
             clock.merge(c);
         }
         clock.include(
