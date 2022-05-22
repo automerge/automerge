@@ -4,6 +4,7 @@ use std::num::NonZeroU64;
 use std::ops::RangeBounds;
 
 use crate::change::encode_document;
+use crate::clock::ClockData;
 use crate::exid::ExId;
 use crate::keys::Keys;
 use crate::op_observer::OpObserver;
@@ -40,6 +41,8 @@ pub struct Automerge {
     pub(crate) history: Vec<Change>,
     /// Mapping from change hash to index into the history list.
     pub(crate) history_index: HashMap<ChangeHash, usize>,
+    /// Mapping from change hash to vector clock at this state.
+    pub(crate) clocks: HashMap<ChangeHash, Clock>,
     /// Mapping from actor index to list of seqs seen for them.
     pub(crate) states: HashMap<usize, Vec<usize>>,
     /// Current dependencies of this document (heads hashes).
@@ -61,6 +64,7 @@ impl Automerge {
             queue: vec![],
             history: vec![],
             history_index: HashMap::new(),
+            clocks: HashMap::new(),
             states: HashMap::new(),
             ops: Default::default(),
             deps: Default::default(),
@@ -276,11 +280,11 @@ impl Automerge {
     /// Historical version of [`keys`](Self::keys).
     pub fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt<'_, '_> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
-            let clock = self.clock_at(heads);
-            KeysAt::new(self, self.ops.keys_at(obj, clock))
-        } else {
-            KeysAt::new(self, None)
+            if let Ok(clock) = self.clock_at(heads) {
+                return KeysAt::new(self, self.ops.keys_at(obj, clock));
+            }
         }
+        KeysAt::new(self, None)
     }
 
     /// Iterate over the keys and values of the map `obj` in the given range.
@@ -304,12 +308,12 @@ impl Automerge {
         heads: &[ChangeHash],
     ) -> MapRangeAt<'_, R> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
-            let clock = self.clock_at(heads);
-            let iter_range = self.ops.map_range_at(obj, range, clock);
-            MapRangeAt::new(self, iter_range)
-        } else {
-            MapRangeAt::new(self, None)
+            if let Ok(clock) = self.clock_at(heads) {
+                let iter_range = self.ops.map_range_at(obj, range, clock);
+                return MapRangeAt::new(self, iter_range);
+            }
         }
+        MapRangeAt::new(self, None)
     }
 
     /// Iterate over the indexes and values of the list `obj` in the given range.
@@ -333,12 +337,12 @@ impl Automerge {
         heads: &[ChangeHash],
     ) -> ListRangeAt<'_, R> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
-            let clock = self.clock_at(heads);
-            let iter_range = self.ops.list_range_at(obj, range, clock);
-            ListRangeAt::new(self, iter_range)
-        } else {
-            ListRangeAt::new(self, None)
+            if let Ok(clock) = self.clock_at(heads) {
+                let iter_range = self.ops.list_range_at(obj, range, clock);
+                return ListRangeAt::new(self, iter_range);
+            }
         }
+        ListRangeAt::new(self, None)
     }
 
     pub fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
@@ -355,21 +359,21 @@ impl Automerge {
 
     pub fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
-            let clock = self.clock_at(heads);
-            match self.ops.object_type(&obj) {
-                Some(ObjType::Map) | Some(ObjType::Table) => {
-                    let iter_range = self.ops.map_range_at(obj, .., clock);
-                    Values::new(self, iter_range)
-                }
-                Some(ObjType::List) | Some(ObjType::Text) => {
-                    let iter_range = self.ops.list_range_at(obj, .., clock);
-                    Values::new(self, iter_range)
-                }
-                None => Values::empty(self),
+            if let Ok(clock) = self.clock_at(heads) {
+                return match self.ops.object_type(&obj) {
+                    Some(ObjType::Map) | Some(ObjType::Table) => {
+                        let iter_range = self.ops.map_range_at(obj, .., clock);
+                        Values::new(self, iter_range)
+                    }
+                    Some(ObjType::List) | Some(ObjType::Text) => {
+                        let iter_range = self.ops.list_range_at(obj, .., clock);
+                        Values::new(self, iter_range)
+                    }
+                    None => Values::empty(self),
+                };
             }
-        } else {
-            Values::empty(self)
         }
+        Values::empty(self)
     }
 
     /// Get the length of the given object.
@@ -390,17 +394,17 @@ impl Automerge {
     /// Historical version of [`length`](Self::length).
     pub fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
         if let Ok(inner_obj) = self.exid_to_obj(obj.as_ref()) {
-            let clock = self.clock_at(heads);
-            match self.ops.object_type(&inner_obj) {
-                Some(ObjType::Map) | Some(ObjType::Table) => self.keys_at(obj, heads).count(),
-                Some(ObjType::List) | Some(ObjType::Text) => {
-                    self.ops.search(&inner_obj, query::LenAt::new(clock)).len
-                }
-                None => 0,
+            if let Ok(clock) = self.clock_at(heads) {
+                return match self.ops.object_type(&inner_obj) {
+                    Some(ObjType::Map) | Some(ObjType::Table) => self.keys_at(obj, heads).count(),
+                    Some(ObjType::List) | Some(ObjType::Text) => {
+                        self.ops.search(&inner_obj, query::LenAt::new(clock)).len
+                    }
+                    None => 0,
+                };
             }
-        } else {
-            0
         }
+        0
     }
 
     /// Get the type of this object, if it is an object.
@@ -457,7 +461,7 @@ impl Automerge {
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = self.clock_at(heads);
+        let clock = self.clock_at(heads)?;
         let query = self.ops.search(&obj, query::ListValsAt::new(clock));
         let mut buffer = String::new();
         for q in &query.ops {
@@ -539,7 +543,7 @@ impl Automerge {
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         let prop = prop.into();
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = self.clock_at(heads);
+        let clock = self.clock_at(heads)?;
         let result = match prop {
             Prop::Map(p) => {
                 let prop = self.ops.m.props.lookup(&p);
@@ -749,7 +753,9 @@ impl Automerge {
 
     /// Save the changes since last save in a compact form.
     pub fn save_incremental(&mut self) -> Vec<u8> {
-        let changes = self.get_changes(self.saved.as_slice());
+        let changes = self
+            .get_changes(self.saved.as_slice())
+            .expect("Should only be getting changes using previously saved heads");
         let mut bytes = vec![];
         for c in changes {
             bytes.extend(c.raw_bytes());
@@ -848,59 +854,36 @@ impl Automerge {
         missing
     }
 
-    fn get_changes_fast(&self, have_deps: &[ChangeHash]) -> Option<Vec<&Change>> {
-        if have_deps.is_empty() {
-            return Some(self.history.iter().collect());
-        }
+    /// Get the changes since `have_deps` in this document using a clock internally.
+    fn get_changes_clock(&self, have_deps: &[ChangeHash]) -> Result<Vec<&Change>, AutomergeError> {
+        // get the clock for the given deps
+        let clock = self.clock_at(have_deps)?;
 
-        let lowest_idx = have_deps
-            .iter()
-            .filter_map(|h| self.history_index.get(h))
-            .min()?
-            + 1;
+        // get the documents current clock
 
-        let mut missing_changes = vec![];
-        let mut has_seen: HashSet<_> = have_deps.iter().collect();
-        for change in &self.history[lowest_idx..] {
-            let deps_seen = change.deps.iter().filter(|h| has_seen.contains(h)).count();
-            if deps_seen > 0 {
-                if deps_seen != change.deps.len() {
-                    // future change depends on something we haven't seen - fast path cant work
-                    return None;
-                }
-                missing_changes.push(change);
-                has_seen.insert(&change.hash);
+        let mut change_indexes: Vec<usize> = Vec::new();
+        // walk the state from the given deps clock and add them into the vec
+        for (actor_index, actor_changes) in &self.states {
+            if let Some(clock_data) = clock.get_for_actor(actor_index) {
+                // find the change in this actors sequence of changes that corresponds to the max_op
+                // recorded for them in the clock
+                change_indexes.extend(&actor_changes[clock_data.seq as usize..]);
+            } else {
+                change_indexes.extend(&actor_changes[..]);
             }
         }
 
-        // if we get to the end and there is a head we haven't seen then fast path cant work
-        if self.get_heads().iter().all(|h| has_seen.contains(h)) {
-            Some(missing_changes)
-        } else {
-            None
-        }
+        // ensure the changes are still in sorted order
+        change_indexes.sort_unstable();
+
+        Ok(change_indexes
+            .into_iter()
+            .map(|i| &self.history[i])
+            .collect())
     }
 
-    fn get_changes_slow(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
-        let mut stack: Vec<_> = have_deps.iter().collect();
-        let mut has_seen = HashSet::new();
-        while let Some(hash) = stack.pop() {
-            if has_seen.contains(&hash) {
-                continue;
-            }
-            if let Some(change) = self
-                .history_index
-                .get(hash)
-                .and_then(|i| self.history.get(*i))
-            {
-                stack.extend(change.deps.iter());
-            }
-            has_seen.insert(hash);
-        }
-        self.history
-            .iter()
-            .filter(|change| !has_seen.contains(&change.hash))
-            .collect()
+    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Result<Vec<&Change>, AutomergeError> {
+        self.get_changes_clock(have_deps)
     }
 
     /// Get the last change this actor made to the document.
@@ -912,32 +895,26 @@ impl Automerge {
             .find(|c| c.actor_id() == self.get_actor());
     }
 
-    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
-        if let Some(changes) = self.get_changes_fast(have_deps) {
-            changes
-        } else {
-            self.get_changes_slow(have_deps)
-        }
-    }
+    fn clock_at(&self, heads: &[ChangeHash]) -> Result<Clock, AutomergeError> {
+        if let Some(first_hash) = heads.first() {
+            let mut clock = self
+                .clocks
+                .get(first_hash)
+                .ok_or(AutomergeError::MissingHash(*first_hash))?
+                .clone();
 
-    fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
-        let mut clock = Clock::new();
-        let mut seen = HashSet::new();
-        let mut to_see = heads.to_vec();
-        // FIXME - faster
-        while let Some(hash) = to_see.pop() {
-            if let Some(c) = self.get_change_by_hash(&hash) {
-                for h in &c.deps {
-                    if !seen.contains(h) {
-                        to_see.push(*h);
-                    }
-                }
-                let actor = self.ops.m.actors.lookup(c.actor_id()).unwrap();
-                clock.include(actor, c.max_op());
-                seen.insert(hash);
+            for hash in &heads[1..] {
+                let c = self
+                    .clocks
+                    .get(hash)
+                    .ok_or(AutomergeError::MissingHash(*hash))?;
+                clock.merge(c);
             }
+
+            Ok(clock)
+        } else {
+            Ok(Clock::new())
         }
-        clock
     }
 
     /// Get a change by its hash.
@@ -995,10 +972,28 @@ impl Automerge {
 
         let history_index = self.history.len();
 
+        let actor_index = self.ops.m.actors.cache(change.actor_id().clone());
         self.states
-            .entry(self.ops.m.actors.cache(change.actor_id().clone()))
+            .entry(actor_index)
             .or_default()
             .push(history_index);
+
+        let mut clock = Clock::new();
+        for hash in &change.deps {
+            let c = self
+                .clocks
+                .get(hash)
+                .expect("Change's deps should already be in the document");
+            clock.merge(c);
+        }
+        clock.include(
+            actor_index,
+            ClockData {
+                max_op: change.max_op(),
+                seq: change.seq,
+            },
+        );
+        self.clocks.insert(change.hash, clock);
 
         self.history_index.insert(change.hash, history_index);
         self.history.push(change);

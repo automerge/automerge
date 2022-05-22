@@ -51,3 +51,7 @@ harness = false
 [[bench]]
 name = "map"
 harness = false
+
+[[bench]]
+name = "sync"
+harness = false

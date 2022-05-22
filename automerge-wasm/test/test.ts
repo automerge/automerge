@@ -312,11 +312,12 @@ describe('Automerge', () => {
       doc1.put("_root", "hello", "world")
       let doc2 = load(doc1.save(), "bbbb");
       let doc3 = load(doc1.save(), "cccc");
+      let heads = doc1.getHeads()
       doc1.put("_root", "cnt", 20)
       doc2.put("_root", "cnt", 0, "counter")
       doc3.put("_root", "cnt", 10, "counter")
-      doc1.applyChanges(doc2.getChanges(doc1.getHeads()))
-      doc1.applyChanges(doc3.getChanges(doc1.getHeads()))
+      doc1.applyChanges(doc2.getChanges(heads))
+      doc1.applyChanges(doc3.getChanges(heads))
       let result = doc1.getAll("_root", "cnt")
       assert.deepEqual(result,[
         ['int',20,'2@aaaa'],
@@ -345,11 +346,12 @@ describe('Automerge', () => {
       doc1.insert(seq, 0, "hello")
       let doc2 = load(doc1.save(), "bbbb");
       let doc3 = load(doc1.save(), "cccc");
+      let heads = doc1.getHeads()
       doc1.put(seq, 0, 20)
       doc2.put(seq, 0, 0, "counter")
       doc3.put(seq, 0, 10, "counter")
-      doc1.applyChanges(doc2.getChanges(doc1.getHeads()))
-      doc1.applyChanges(doc3.getChanges(doc1.getHeads()))
+      doc1.applyChanges(doc2.getChanges(heads))
+      doc1.applyChanges(doc3.getChanges(heads))
       let result = doc1.getAll(seq, 0)
       assert.deepEqual(result,[
         ['int',20,'3@aaaa'],
