@@ -1112,7 +1112,7 @@
 <span id="1105">1105</span>
 <span id="1106">1106</span>
 <span id="1107">1107</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::collections</span>::{<span class="ident">HashMap</span>, <span class="ident">HashSet</span>, <span class="ident">VecDeque</span>};
+</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::collections</span>::{<span class="ident">BTreeSet</span>, <span class="ident">HashMap</span>, <span class="ident">HashSet</span>, <span class="ident">VecDeque</span>};
 <span class="kw">use</span> <span class="ident">std::fmt::Debug</span>;
 <span class="kw">use</span> <span class="ident">std::num::NonZeroU64</span>;
 <span class="kw">use</span> <span class="ident">std::ops::RangeBounds</span>;
@@ -1877,7 +1877,7 @@
     <span class="doccomment">/// Filter the changes down to those that are not transitive dependencies of the heads.</span>
     <span class="doccomment">///</span>
     <span class="doccomment">/// Thus a graph with these heads has not seen the remaining changes.</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">filter_changes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>], <span class="ident">changes</span>: <span class="kw-2">&amp;mut</span> <span class="ident">HashSet</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>) {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">filter_changes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>], <span class="ident">changes</span>: <span class="kw-2">&amp;mut</span> <span class="ident">BTreeSet</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>) {
         <span class="comment">// Reduce the working set to find to those which we may be able to find.</span>
         <span class="comment">// This filters out those hashes that are successors of or concurrent with all of the</span>
         <span class="comment">// heads.</span>

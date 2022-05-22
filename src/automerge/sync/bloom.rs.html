@@ -146,7 +146,7 @@
 <span class="kw">const</span> <span class="ident">BITS_PER_ENTRY</span>: <span class="ident">u32</span> <span class="op">=</span> <span class="number">10</span>;
 <span class="kw">const</span> <span class="ident">NUM_PROBES</span>: <span class="ident">u32</span> <span class="op">=</span> <span class="number">7</span>;
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Default</span>, <span class="ident">Debug</span>, <span class="ident">Clone</span>)]</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Default</span>, <span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>, <span class="ident">Hash</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">BloomFilter</span> {
     <span class="ident">num_entries</span>: <span class="ident">u32</span>,
     <span class="ident">num_bits_per_entry</span>: <span class="ident">u32</span>,

@@ -60,7 +60,7 @@
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">automerge</span> <span class="kw">as</span> <span class="ident">am</span>;
 <span class="kw">use</span> <span class="ident">automerge::ChangeHash</span>;
 <span class="kw">use</span> <span class="ident">js_sys::Uint8Array</span>;
-<span class="kw">use</span> <span class="ident">std::collections</span>::{<span class="ident">HashMap</span>, <span class="ident">HashSet</span>};
+<span class="kw">use</span> <span class="ident">std::collections</span>::{<span class="ident">BTreeSet</span>, <span class="ident">HashMap</span>};
 <span class="kw">use</span> <span class="ident">std::convert::TryInto</span>;
 <span class="kw">use</span> <span class="ident">wasm_bindgen::prelude</span>::<span class="kw-2">*</span>;
 
@@ -92,7 +92,7 @@
     <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">setter</span>, <span class="ident">js_name</span> <span class="op">=</span> <span class="ident">sentHashes</span>)]</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_sent_hashes</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">hashes</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">JsValue</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">hashes_map</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">ChangeHash</span>, <span class="ident">bool</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">hashes</span>.<span class="ident">into_serde</span>().<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">hashes_set</span>: <span class="ident">HashSet</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">hashes_map</span>.<span class="ident">keys</span>().<span class="ident">cloned</span>().<span class="ident">collect</span>();
+        <span class="kw">let</span> <span class="ident">hashes_set</span>: <span class="ident">BTreeSet</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">hashes_map</span>.<span class="ident">keys</span>().<span class="ident">cloned</span>().<span class="ident">collect</span>();
         <span class="self">self</span>.<span class="number">0</span>.<span class="ident">sent_hashes</span> <span class="op">=</span> <span class="ident">hashes_set</span>;
         <span class="prelude-val">Ok</span>(())
     }

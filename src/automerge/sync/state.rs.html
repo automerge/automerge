@@ -68,7 +68,7 @@
 <span id="61">61</span>
 <span id="62">62</span>
 <span id="63">63</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std</span>::{<span class="ident">borrow::Cow</span>, <span class="ident">collections::HashSet</span>};
+</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std</span>::{<span class="ident">borrow::Cow</span>, <span class="ident">collections::BTreeSet</span>};
 
 <span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">decode_hashes</span>, <span class="ident">encode_hashes</span>, <span class="ident">BloomFilter</span>};
 <span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">decoding</span>, <span class="ident">decoding::Decoder</span>, <span class="ident">ChangeHash</span>};
@@ -76,20 +76,20 @@
 <span class="kw">const</span> <span class="ident">SYNC_STATE_TYPE</span>: <span class="ident">u8</span> <span class="op">=</span> <span class="number">0x43</span>; <span class="comment">// first byte of an encoded sync state, for identification</span>
 
 <span class="doccomment">/// The state of synchronisation with a peer.</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">Default</span>)]</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">Default</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>, <span class="ident">Hash</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">State</span> {
     <span class="kw">pub</span> <span class="ident">shared_heads</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>,
     <span class="kw">pub</span> <span class="ident">last_sent_heads</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>,
     <span class="kw">pub</span> <span class="ident">their_heads</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="kw">pub</span> <span class="ident">their_need</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="kw">pub</span> <span class="ident">their_have</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Have</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span> <span class="ident">sent_hashes</span>: <span class="ident">HashSet</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span> <span class="ident">sent_hashes</span>: <span class="ident">BTreeSet</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>,
 }
 
 <span class="doccomment">/// A summary of the changes that the sender of the message already has.</span>
 <span class="doccomment">/// This is implicitly a request to the recipient to send all changes that the</span>
 <span class="doccomment">/// sender does not already have.</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">Default</span>)]</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">Default</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>, <span class="ident">Hash</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Have</span> {
     <span class="doccomment">/// The heads at the time of the last successful sync with this recipient.</span>
     <span class="kw">pub</span> <span class="ident">last_sync</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>,
@@ -127,7 +127,7 @@
             <span class="ident">their_heads</span>: <span class="prelude-val">None</span>,
             <span class="ident">their_need</span>: <span class="prelude-val">None</span>,
             <span class="ident">their_have</span>: <span class="prelude-val">Some</span>(<span class="ident">Vec::new</span>()),
-            <span class="ident">sent_hashes</span>: <span class="ident">HashSet::new</span>(),
+            <span class="ident">sent_hashes</span>: <span class="ident">BTreeSet::new</span>(),
         })
     }
 }
