@@ -1,9 +1,10 @@
 
-import { Automerge, Heads, ObjID } from "./low_level"
+import { Automerge, Heads, ObjID } from "./types"
 import { Int, Uint, Float64 } from "./numbers"
 import { Counter, getWriteableCounter } from "./counter"
 import { Text } from "./text"
 import { STATE, HEADS, FROZEN, OBJECT_ID, READ_ONLY } from "./constants"
+import { AutomergeValue, ScalarValue, MapValue, ListValue, TextValue, Prop } from "./types"
 
 function parseListIndex(key) {
   if (typeof key === 'string' && /^[0-9]+$/.test(key)) key = parseInt(key, 10)
@@ -17,7 +18,7 @@ function parseListIndex(key) {
   return key
 }
 
-function valueAt(target, prop) : any {
+function valueAt(target, prop: Prop) : AutomergeValue | undefined {
       const { context, objectId, path, readonly, heads} = target
       const value = context.get(objectId, prop, heads)
       if (value === undefined) {
@@ -97,7 +98,7 @@ function import_value(value) {
 }
 
 const MapHandler = {
-  get (target, key) : any {
+  get (target, key) : AutomergeValue {
     const { context, objectId, readonly, frozen, heads, cache } = target
     if (key === Symbol.toStringTag) { return target[Symbol.toStringTag] }
     if (key === OBJECT_ID) return objectId
@@ -151,7 +152,7 @@ const MapHandler = {
       }
       case "map": {
         const map = context.putObject(objectId, key, {})
-        const proxyMap : any = mapProxy(context, map, [ ... path, key ], readonly );
+        const proxyMap = mapProxy(context, map, [ ... path, key ], readonly );
         for (const key in value) {
           proxyMap[key] = value[key]
         }
@@ -280,7 +281,7 @@ const ListHandler = {
         } else {
           map = context.putObject(objectId, index, {})
         }
-        const proxyMap : any = mapProxy(context, map, [ ... path, index ], readonly);
+        const proxyMap = mapProxy(context, map, [ ... path, index ], readonly);
         for (const key in value) {
           proxyMap[key] = value[key]
         }
@@ -328,7 +329,7 @@ const ListHandler = {
   },
 
   getPrototypeOf(target) { return Object.getPrototypeOf(target) },
-  ownKeys (target) : string[] {
+  ownKeys (/*target*/) : string[] {
     const keys : string[] = []
     // uncommenting this causes assert.deepEqual() to fail when comparing to a pojo array
     // but not uncommenting it causes for (i in list) {} to not enumerate values properly
@@ -369,29 +370,30 @@ const TextHandler = Object.assign({}, ListHandler, {
       return textMethods(target)[index] || listMethods(target)[index]
     }
   },
-  getPrototypeOf(target) {
+  getPrototypeOf(/*target*/) {
     return Object.getPrototypeOf(new Text())
   },
 })
 
-export function mapProxy<T>(context: Automerge, objectId: ObjID, path?: string[], readonly?: boolean, heads?: Heads) : T {
+export function mapProxy(context: Automerge, objectId: ObjID, path?: Prop[], readonly?: boolean, heads?: Heads) : MapValue {
   return new Proxy({context, objectId, path, readonly: !!readonly, frozen: false, heads, cache: {}}, MapHandler)
 }
 
-export function listProxy<T>(context: Automerge, objectId: ObjID, path?: string[], readonly?: boolean, heads?: Heads) : Array<T> {
+export function listProxy(context: Automerge, objectId: ObjID, path?: Prop[], readonly?: boolean, heads?: Heads) : ListValue {
   const target = []
   Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false, heads, cache: {}})
   return new Proxy(target, ListHandler)
 }
 
-export function textProxy<T>(context: Automerge, objectId: ObjID, path?: string[], readonly?: boolean, heads?: Heads) : Array<T> {
+export function textProxy(context: Automerge, objectId: ObjID, path?: Prop[], readonly?: boolean, heads?: Heads) : TextValue {
   const target = []
   Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false, heads, cache: {}})
   return new Proxy(target, TextHandler)
 }
 
 export function rootProxy<T>(context: Automerge, readonly?: boolean) : T {
-  return mapProxy(context, "_root", [], !!readonly)
+  /* eslint-disable-next-line */
+  return <any>mapProxy(context, "_root", [], !!readonly)
 }
 
 function listMethods(target) {
@@ -406,7 +408,7 @@ function listMethods(target) {
       return this
     },
 
-    fill(val: any, start: number, end: number) {
+    fill(val: ScalarValue, start: number, end: number) {
       // FIXME needs tests
       const [value, datatype] = import_value(val)
       start = parseListIndex(start || 0)
@@ -417,7 +419,7 @@ function listMethods(target) {
       return this
     },
 
-    indexOf(o, start = 0) {
+    indexOf(/*o, start = 0*/) {
       // FIXME
       /*
       const id = o[OBJECT_ID]
@@ -477,10 +479,12 @@ function listMethods(target) {
       if (readonly) {
         throw new RangeError("Sequence object cannot be modified outside of a change block")
       }
-      const result : any = []
+      const result : AutomergeValue[] = []
       for (let i = 0; i < del; i++) {
         const value = valueAt(target, index)
-        result.push(value)
+        if (value !== undefined) {
+          result.push(value)
+        }
         context.delete(objectId, index)
       }
       const values = vals.map((val) => import_value(val))
@@ -500,7 +504,7 @@ function listMethods(target) {
           }
           case "map": {
             const map = context.insertObject(objectId, index, {})
-            const proxyMap : any = mapProxy(context, map, [ ... path, index ], readonly);
+            const proxyMap = mapProxy(context, map, [ ... path, index ], readonly);
             for (const key in value) {
               proxyMap[key] = value[key]
             }
@@ -569,7 +573,7 @@ function listMethods(target) {
                       'join', 'lastIndexOf', 'map', 'reduce', 'reduceRight',
                       'slice', 'some', 'toLocaleString', 'toString']) {
     methods[method] = (...args) => {
-      const list : any = []
+      const list : AutomergeValue = []
       let value
       do {
         value = valueAt(target, list.length)
@@ -585,22 +589,22 @@ function listMethods(target) {
   return methods
 }
 
-function textMethods(target) : any {
+function textMethods(target) {
   const {context, objectId, heads } = target
-  const methods : any = {
+  const methods = {
     set (index, value) {
       return this[index] = value
     },
-    get (index) {
+    get (index) : AutomergeValue {
       return this[index]
     },
-    toString () {
+    toString () : string {
       return context.text(objectId, heads).replace(/￼/g,'')
     },
-    toSpans () : any[] {
-      const spans : any[] = []
+    toSpans () : AutomergeValue[] {
+      const spans : AutomergeValue[] = []
       let chars = ''
-      const length = this.length
+      const length = context.length(objectId)
       for (let i = 0; i < length; i++) {
         const value = this[i]
         if (typeof value === 'string') {
@@ -618,7 +622,7 @@ function textMethods(target) : any {
       }
       return spans
     },
-    toJSON () {
+    toJSON () : string {
       return this.toString()
     }
   }

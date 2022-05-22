@@ -43,7 +43,9 @@
   "license": "MIT",
   "scripts": {
     "lint": "eslint src",
-    "build": "tsc -p config/mjs.json && tsc -p config/cjs.json && tsc -p config/types.json",
+    "build": "yarn build-cjs",
+    "build-cjs": "tsc -p config/cjs.json && tsc -p config/types.json",
+    "build-mjs": "tsc -p config/mjs.json && tsc -p config/types.json",
     "test": "ts-mocha -p tsconfig.json test/**/*.ts"
   },
   "devDependencies": {
@@ -55,10 +57,10 @@
     "eslint": "^8.15.0",
     "mocha": "^10.0.0",
     "ts-mocha": "^10.0.0",
-    "automerge-wasm": "^0.1.3",
     "typescript": "^4.6.4"
   },
   "dependencies": {
+    "automerge-wasm": "file:../automerge-wasm",
     "fast-sha256": "^1.3.0",
     "pako": "^2.0.4",
     "uuid": "^8.3"

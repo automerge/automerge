@@ -1,9 +1,19 @@
 import * as pako from 'pako'
-import { copyObject, parseOpId, equalBytes } from './common'
+import { parseOpId, equalBytes } from './common'
 import {
   utf8ToString, hexStringToBytes, bytesToHexString,
   Encoder, Decoder, RLEEncoder, RLEDecoder, DeltaEncoder, DeltaDecoder, BooleanEncoder, BooleanDecoder
 } from './encoding'
+
+
+interface Op {
+  id: string;
+  action: string;
+  obj: string;
+  elemId?: string;
+  key?: string;
+  pred: string[];
+}
 
 // Maybe we should be using the platform's built-in hash implementation?
 // Node has the crypto module: https://nodejs.org/api/crypto.html and browsers have
@@ -133,11 +143,11 @@ function compareParsedOpIds(id1, id2) {
 function parseAllOpIds(changes, single) {
   const actors : any = {}, newChanges : any = []
   for (let change of changes) {
-    change = copyObject(change)
+    change = { ... change }
     actors[change.actor] = true
     change.ops = expandMultiOps(change.ops, change.startOp, change.actor)
     change.ops = change.ops.map(op => {
-      op = copyObject(op)
+      op = { ... op }
       if (op.obj !== '_root') op.obj = parseOpId(op.obj)
       if (op.elemId && op.elemId !== '_head') op.elemId = parseOpId(op.elemId)
       if (op.child) op.child = parseOpId(op.child)
@@ -962,7 +972,7 @@ function groupChangeOps(changes, ops) {
     changesByActor[change.actor].push(change)
   }
 
-  const opsById = {}
+  const opsById : { [key:string]: Op } = {}
   for (const op of ops) {
     if (op.action === 'del') throw new RangeError('document should not contain del operations')
     op.pred = opsById[op.id] ? opsById[op.id].pred : []
@@ -981,7 +991,6 @@ function groupChangeOps(changes, ops) {
     delete op.succ
   }
   for (const op of Object.values(opsById)) {
-    // @ts-ignore
     if (op.action === 'del') ops.push(op)
   }
 

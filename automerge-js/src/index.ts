@@ -1,24 +1,20 @@
 
-import { uuid } from './uuid'
-
 export { uuid } from './uuid'
 
 import { rootProxy, listProxy, textProxy, mapProxy } from "./proxies"
 import { STATE, HEADS, OBJECT_ID, READ_ONLY, FROZEN  } from "./constants"
-import { Counter  } from "./counter"
-import { Text } from "./text"
-import { Int, Uint, Float64  } from "./numbers"
+
 import { isObject } from "./common"
 
-export { Text } from "./text"
-export { Counter  } from "./counter"
-export { Int, Uint, Float64  } from "./numbers"
+import { Text, Counter } from "./types"
+export { Text, Counter, Int, Uint, Float64 } from "./types"
 
 import { ApiHandler, LowLevelApi, UseApi } from "./low_level"
-import { Actor as ActorId, Prop, ObjID, Change, DecodedChange, Heads, Automerge } from "./low_level"
-import { JsSyncState as SyncState, SyncMessage, DecodedSyncMessage } from "./low_level"
 
-export type ChangeOptions<T> = { message?: string, time?: number }
+import { ActorId, Prop, ObjID, Change, DecodedChange, Heads, Automerge } from "./types"
+import { SyncState, SyncMessage, DecodedSyncMessage, AutomergeValue } from "./types"
+
+export type ChangeOptions = { message?: string, time?: number }
 
 export type Doc<T> = { readonly [P in keyof T]: Doc<T[P]> }
 
@@ -78,7 +74,7 @@ export function from<T>(initialState: T | Doc<T>, actor?: ActorId): Doc<T> {
     return change(init(actor), (d) => Object.assign(d, initialState))
 }
 
-export function change<T>(doc: Doc<T>, options: string | ChangeOptions<T> | ChangeFn<T>, callback?: ChangeFn<T>): Doc<T> {
+export function change<T>(doc: Doc<T>, options: string | ChangeOptions | ChangeFn<T>, callback?: ChangeFn<T>): Doc<T> {
   if (typeof options === 'function') {
     return _change(doc, {}, options)
   } else if (typeof callback === 'function') {
@@ -91,7 +87,7 @@ export function change<T>(doc: Doc<T>, options: string | ChangeOptions<T> | Chan
   }
 }
 
-function _change<T>(doc: Doc<T>, options: ChangeOptions<T>, callback: ChangeFn<T>): Doc<T> {
+function _change<T>(doc: Doc<T>, options: ChangeOptions, callback: ChangeFn<T>): Doc<T> {
 
 
   if (typeof callback !== "function") {
@@ -134,7 +130,7 @@ function _change<T>(doc: Doc<T>, options: ChangeOptions<T>, callback: ChangeFn<T
   }
 }
 
-export function emptyChange<T>(doc: Doc<T>, options: ChangeOptions<T>) {
+export function emptyChange<T>(doc: Doc<T>, options: ChangeOptions) {
   if (options === undefined) {
     options = {}
   }
@@ -190,22 +186,20 @@ function conflictAt(context : Automerge, objectId: ObjID, prop: Prop) : any {
       if (values.length <= 1) {
         return
       }
-      const result = {}
-      for (const conflict of values) {
-        const datatype = conflict[0]
-        const value = conflict[1]
-        switch (datatype) {
+      const result : { [key: ObjID]: AutomergeValue } = {}
+      for (const fullVal of values) {
+        //const datatype = fullVal[0]
+        //const value = fullVal[1]
+        //switch (datatype) {
+        switch (fullVal[0]) {
           case "map":
-            //@ts-ignore
-            result[value] = mapProxy(context, value, [ prop ], true)
+            result[fullVal[1]] = mapProxy(context, fullVal[1], [ prop ], true)
             break;
           case "list":
-            //@ts-ignore
-            result[value] = listProxy(context, value, [ prop ], true)
+            result[fullVal[1]] = listProxy(context, fullVal[1], [ prop ], true)
             break;
           case "text":
-            //@ts-ignore
-            result[value] = textProxy(context, value, [ prop ], true)
+            result[fullVal[1]] = textProxy(context, fullVal[1], [ prop ], true)
             break;
           //case "table":
           //case "cursor":
@@ -216,19 +210,16 @@ function conflictAt(context : Automerge, objectId: ObjID, prop: Prop) : any {
           case "boolean":
           case "bytes":
           case "null":
-            //@ts-ignore
-            result[conflict[2]] = value
+            result[fullVal[2]] = fullVal[1]
             break;
           case "counter":
-            //@ts-ignore
-            result[conflict[2]] = new Counter(value)
+            result[fullVal[2]] = new Counter(fullVal[1])
             break;
           case "timestamp":
-            //@ts-ignore
-            result[conflict[2]] = new Date(<number>value)
+            result[fullVal[2]] = new Date(fullVal[1])
             break;
           default:
-            throw RangeError(`datatype ${datatype} unimplemented`)
+            throw RangeError(`datatype ${fullVal[0]} unimplemented`)
         }
       }
       return result
@@ -394,7 +385,6 @@ export function toJS(doc: any) : any {
       return doc.map((a) => toJS(a))
     }
     if (doc instanceof Text) {
-      //@ts-ignore
       return doc.map((a: any) => toJS(a))
     }
     const tmp : any = {}

@@ -2,7 +2,7 @@
     "compilerOptions": {
         "target": "es2016",
         "sourceMap": false,
-        "declaration": false,
+        "declaration": true,
         "resolveJsonModule": true,
         "module": "commonjs",
         "moduleResolution": "node",

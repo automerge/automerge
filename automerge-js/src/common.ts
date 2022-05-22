@@ -8,14 +8,16 @@ export function isObject(obj: unknown) : obj is UnknownObject {
  * Returns a shallow copy of the object `obj`. Faster than `Object.assign({}, obj)`.
  * https://jsperf.com/cloning-large-objects/1
  */
+/*
 export function copyObject<T extends UnknownObject>(obj: T) : T {
-  if (!isObject(obj)) return {}
-  const copy = {}
+  if (!isObject(obj)) throw RangeError(`Cannot copy object '${obj}'`) //return {}
+  const copy : UnknownObject = {}
   for (const key of Object.keys(obj)) {
     copy[key] = obj[key]
   }
   return copy
 }
+*/
 
 /**
  * Takes a string in the form that is used to identify operations (a counter concatenated

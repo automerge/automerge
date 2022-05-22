@@ -1,4 +1,4 @@
-import { Value } from "./low_level"
+import { Value } from "./types"
 
 export class Text {
   elems: Value[]
@@ -114,11 +114,17 @@ export class Text {
   deleteAt(index, numDelete = 1) {
     this.elems.splice(index, numDelete)
   }
+
+  map(callback, thisArg?) {
+    this.elems.map(callback, thisArg)
+  }
+
+
 }
 
 // Read-only methods that can delegate to the JavaScript built-in array
 for (const method of ['concat', 'every', 'filter', 'find', 'findIndex', 'forEach', 'includes',
-                    'indexOf', 'join', 'lastIndexOf', 'map', 'reduce', 'reduceRight',
+                    'indexOf', 'join', 'lastIndexOf', 'reduce', 'reduceRight',
                     'slice', 'some', 'toLocaleString']) {
   Text.prototype[method] = function (...args) {
     const array = [...this]

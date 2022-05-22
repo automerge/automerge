@@ -287,6 +287,7 @@ export class Encoder {
    * the buffer constructed by this Encoder.
    */
   finish() {
+    return
   }
 }
 
