@@ -1002,6 +1002,14 @@
 <span id="995">995</span>
 <span id="996">996</span>
 <span id="997">997</span>
+<span id="998">998</span>
+<span id="999">999</span>
+<span id="1000">1000</span>
+<span id="1001">1001</span>
+<span id="1002">1002</span>
+<span id="1003">1003</span>
+<span id="1004">1004</span>
+<span id="1005">1005</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::columnar</span>::{
     <span class="ident">ChangeEncoder</span>, <span class="ident">ChangeIterator</span>, <span class="ident">ColumnEncoder</span>, <span class="ident">DepsIterator</span>, <span class="ident">DocChange</span>, <span class="ident">DocOp</span>, <span class="ident">DocOpEncoder</span>,
     <span class="ident">DocOpIterator</span>, <span class="ident">OperationIterator</span>, <span class="ident">COLUMN_TYPE_DEFLATE</span>,
@@ -1204,6 +1212,7 @@
         <span class="ident">deps</span>,
         <span class="ident">ops</span>: <span class="ident">chunk</span>.<span class="ident">ops</span>,
         <span class="ident">extra_bytes</span>: <span class="ident">chunk</span>.<span class="ident">extra_bytes</span>,
+        <span class="ident">num_ops</span>: <span class="ident">change</span>.<span class="ident">operations</span>.<span class="ident">len</span>(),
     }
 }
 
@@ -1336,6 +1345,8 @@
     <span class="kw">pub</span> <span class="ident">deps</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">amp::ChangeHash</span><span class="op">&gt;</span>,
     <span class="ident">ops</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">u32</span>, <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="ident">extra_bytes</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
+    <span class="doccomment">/// The number of operations in this change.</span>
+    <span class="ident">num_ops</span>: <span class="ident">usize</span>,
 }
 
 <span class="kw">impl</span> <span class="ident">Change</span> {
@@ -1357,8 +1368,7 @@
     }
 
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">len</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
-        <span class="comment">// TODO - this could be a lot more efficient</span>
-        <span class="self">self</span>.<span class="ident">iter_ops</span>().<span class="ident">count</span>()
+        <span class="self">self</span>.<span class="ident">num_ops</span>
     }
 
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">max_op</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u64</span> {
@@ -1554,7 +1564,7 @@
         <span class="kw">let</span> <span class="ident">ops_info</span> <span class="op">=</span> <span class="ident">decode_column_info</span>(<span class="ident">bytes</span>.<span class="ident">uncompressed</span>(), <span class="kw-2">&amp;mut</span> <span class="ident">cursor</span>, <span class="bool-val">false</span>)<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="ident">ops</span> <span class="op">=</span> <span class="ident">decode_columns</span>(<span class="kw-2">&amp;mut</span> <span class="ident">cursor</span>, <span class="kw-2">&amp;</span><span class="ident">ops_info</span>);
 
-        <span class="prelude-val">Ok</span>(<span class="ident">Change</span> {
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">change</span> <span class="op">=</span> <span class="ident">Change</span> {
             <span class="ident">bytes</span>,
             <span class="ident">body_start</span>,
             <span class="ident">hash</span>,
@@ -1566,7 +1576,13 @@
             <span class="ident">deps</span>,
             <span class="ident">ops</span>,
             <span class="ident">extra_bytes</span>: <span class="ident">cursor</span>,
-        })
+            <span class="ident">num_ops</span>: <span class="number">0</span>, <span class="comment">// filled in below</span>
+        };
+
+        <span class="kw">let</span> <span class="ident">len</span> <span class="op">=</span> <span class="ident">change</span>.<span class="ident">iter_ops</span>().<span class="ident">count</span>();
+        <span class="ident">change</span>.<span class="ident">num_ops</span> <span class="op">=</span> <span class="ident">len</span>;
+
+        <span class="prelude-val">Ok</span>(<span class="ident">change</span>)
     }
 }
 

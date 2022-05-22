@@ -73,6 +73,8 @@
 <span id="66">66</span>
 <span id="67">67</span>
 <span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::types</span>::{<span class="ident">ActorId</span>, <span class="ident">ScalarValue</span>};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::value::DataType</span>;
 <span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">decoding</span>, <span class="ident">encoding</span>, <span class="ident">ChangeHash</span>};
@@ -98,6 +100,8 @@
     <span class="ident">DuplicateSeqNumber</span>(<span class="ident">u64</span>, <span class="ident">ActorId</span>),
     <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;invalid hash {0}&quot;</span>)]</span>
     <span class="ident">InvalidHash</span>(<span class="ident">ChangeHash</span>),
+    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;hash {0} does not correspond to a change in this document&quot;</span>)]</span>
+    <span class="ident">MissingHash</span>(<span class="ident">ChangeHash</span>),
     <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;increment operations must be against a counter value&quot;</span>)]</span>
     <span class="ident">MissingCounter</span>,
     <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;general failure&quot;</span>)]</span>

@@ -508,6 +508,9 @@
 <span id="501">501</span>
 <span id="502">502</span>
 <span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::ops::RangeBounds</span>;
 
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::exid::ExId</span>;
@@ -680,7 +683,10 @@
         <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_last_local_change</span>()
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_changes</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">have_deps</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>]) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">Change</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_changes</span>(
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
+        <span class="ident">have_deps</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>],
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">Change</span><span class="op">&gt;</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">ensure_transaction_closed</span>();
         <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_changes</span>(<span class="ident">have_deps</span>)
     }
