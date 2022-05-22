@@ -13,5 +13,6 @@
     "target": "es2016",
     "typeRoots": ["./index.d.ts"]
   },
-  "exclude": ["dist/**/*"]
+  "include": ["test/**/*.ts"],
+  "exclude": ["dist/**/*", "examples/**/*"]
 }
