@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::ops::RangeBounds;
@@ -763,7 +763,7 @@ impl Automerge {
     /// Filter the changes down to those that are not transitive dependencies of the heads.
     ///
     /// Thus a graph with these heads has not seen the remaining changes.
-    pub(crate) fn filter_changes(&self, heads: &[ChangeHash], changes: &mut HashSet<ChangeHash>) {
+    pub(crate) fn filter_changes(&self, heads: &[ChangeHash], changes: &mut BTreeSet<ChangeHash>) {
         // Reduce the working set to find to those which we may be able to find.
         // This filters out those hashes that are successors of or concurrent with all of the
         // heads.
