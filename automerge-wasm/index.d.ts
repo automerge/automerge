@@ -8,7 +8,7 @@ export type Hash = string;
 export type Heads = Hash[];
 export type Value = string | number | boolean | null | Date | Uint8Array
 export type MaterializeValue = Record<string, MaterializeValue> | Array<MaterializeValue> | Value
-export type ObjType = string | Array<Value> | Record<string,Value>
+export type ObjType = string | Array<Value> | Record<string,Value | ObjType>
 export type FullValue =
   ["str", string] |
   ["int", number] |
