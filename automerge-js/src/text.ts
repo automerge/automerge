@@ -20,7 +20,7 @@ export class Text {
     return this.elems.length
   }
 
-  get (index) : Value {
+  get (index: number) : Value {
     return this.elems[index]
   }
 
@@ -103,7 +103,7 @@ export class Text {
   /**
    * Inserts new list items `values` starting at position `index`.
    */
-  insertAt(index: number, ...values) {
+  insertAt(index: number, ...values: Value[]) {
     this.elems.splice(index, 0, ... values)
   }
 
@@ -111,12 +111,12 @@ export class Text {
    * Deletes `numDelete` list items starting at position `index`.
    * if `numDelete` is not given, one item is deleted.
    */
-  deleteAt(index, numDelete = 1) {
+  deleteAt(index: number, numDelete = 1) {
     this.elems.splice(index, numDelete)
   }
 
-  map(callback, thisArg?) {
-    this.elems.map(callback, thisArg)
+  map<T>(callback: (e: Value) => T) {
+    this.elems.map(callback)
   }
 
 

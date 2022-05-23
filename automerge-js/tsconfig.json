@@ -2,7 +2,7 @@
     "compilerOptions": {
         "target": "es2016",
         "sourceMap": false,
-        "declaration": true,
+        "declaration": false,
         "resolveJsonModule": true,
         "module": "commonjs",
         "moduleResolution": "node",
@@ -12,7 +12,7 @@
         "strict": true,
         "noFallthroughCasesInSwitch": true,
         "skipLibCheck": true,
-        "outDir": "./dist/cjs"
+        "outDir": "./dist"
     },
     "include": [ "src/**/*" ],
     "exclude": [

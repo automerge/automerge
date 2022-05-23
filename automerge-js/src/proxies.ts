@@ -592,10 +592,10 @@ function listMethods(target) {
 function textMethods(target) {
   const {context, objectId, heads } = target
   const methods = {
-    set (index, value) {
+    set (index: number, value) {
       return this[index] = value
     },
-    get (index) : AutomergeValue {
+    get (index: number) : AutomergeValue {
       return this[index]
     },
     toString () : string {

@@ -8,29 +8,28 @@
 const utf8encoder = new TextEncoder()
 const utf8decoder = new TextDecoder('utf-8')
 
-export function stringToUtf8(s: string) : BufferSource {
-  return utf8encoder.encode(s)
+function stringToUtf8(string) {
+  return utf8encoder.encode(string)
 }
 
-export function utf8ToString(buffer: BufferSource) : string {
+function utf8ToString(buffer) {
   return utf8decoder.decode(buffer)
 }
 
 /**
  * Converts a string consisting of hexadecimal digits into an Uint8Array.
  */
-export function hexStringToBytes(value: string) : Uint8Array {
+function hexStringToBytes(value) {
   if (typeof value !== 'string') {
     throw new TypeError('value is not a string')
   }
   if (!/^([0-9a-f][0-9a-f])*$/.test(value)) {
     throw new RangeError('value is not hexadecimal')
   }
-  const match = value.match(/../g)
-  if (match === null) {
+  if (value === '') {
     return new Uint8Array(0)
   } else {
-    return new Uint8Array(match.map(b => parseInt(b, 16)))
+    return new Uint8Array(value.match(/../g).map(b => parseInt(b, 16)))
   }
 }
 
@@ -43,9 +42,8 @@ for (let i = 0; i < 256; i++) {
 /**
  * Converts a Uint8Array into the equivalent hexadecimal string.
  */
-export function bytesToHexString(bytes: Uint8Array) : string {
-  let hex = ''
-  const len = bytes.byteLength
+function bytesToHexString(bytes) {
+  let hex = '', len = bytes.byteLength
   for (let i = 0; i < len; i++) {
     hex += BYTE_TO_HEX[bytes[i]]
   }
@@ -56,10 +54,7 @@ export function bytesToHexString(bytes: Uint8Array) : string {
  * Wrapper around an Uint8Array that allows values to be appended to the buffer,
  * and that automatically grows the buffer when space runs out.
  */
-export class Encoder {
-  buf: Uint8Array;
-  offset: number;
-
+class Encoder {
   constructor() {
     this.buf = new Uint8Array(16)
     this.offset = 0
@@ -287,7 +282,6 @@ export class Encoder {
    * the buffer constructed by this Encoder.
    */
   finish() {
-    return
   }
 }
 
@@ -296,10 +290,7 @@ export class Encoder {
  * the current decoding position, and allows values to be incrementally read by
  * decoding the bytes at the current position.
  */
-export class Decoder {
-  buf: Uint8Array;
-  offset: number;
-
+class Decoder {
   constructor(buffer) {
     if (!(buffer instanceof Uint8Array)) {
       throw new TypeError(`Not a byte array: ${buffer}`)
@@ -564,13 +555,7 @@ export class Decoder {
  * After one of these three has completed, the process repeats, starting again
  * with a repetition count, until we reach the end of the buffer.
  */
-export class RLEEncoder extends Encoder {
-  type: any
-  state: string
-  lastValue: any
-  count: number
-  literal: any
-
+class RLEEncoder extends Encoder {
   constructor(type) {
     super()
     this.type = type
@@ -679,7 +664,7 @@ export class RLEEncoder extends Encoder {
    * Returns an object of the form `{nonNullValues, sum}` where `nonNullValues` is the number of
    * non-null values copied, and `sum` is the sum (only if the `sumValues` option is set).
    */
-  copyFrom(decoder, options: any = {}) : any {
+  copyFrom(decoder, options = {}) {
     const { count, sumValues, sumShift } = options
     if (!(decoder instanceof RLEDecoder) || (decoder.type !== this.type)) {
       throw new TypeError('incompatible type of decoder')
@@ -722,7 +707,7 @@ export class RLEEncoder extends Encoder {
         nonNullValues += numValues
         for (let i = 0; i < numValues; i++) {
           if (decoder.done) throw new RangeError('incomplete literal')
-          const value : any = decoder.readRawValue()
+          const value = decoder.readRawValue()
           if (value === decoder.lastValue) throw new RangeError('Repetition of values is not allowed in literal')
           decoder.lastValue = value
           this._appendValue(value)
@@ -763,7 +748,7 @@ export class RLEEncoder extends Encoder {
       this.appendRawValue(this.lastValue)
     } else if (this.state === 'literal') {
       this.appendInt53(-this.literal.length)
-      for (const v of this.literal) this.appendRawValue(v)
+      for (let v of this.literal) this.appendRawValue(v)
     } else if (this.state === 'nulls') {
       this.appendInt32(0)
       this.appendUint53(this.count)
@@ -801,12 +786,7 @@ export class RLEEncoder extends Encoder {
  * Counterpart to RLEEncoder: reads values from an RLE-compressed sequence,
  * returning nulls and repeated values as required.
  */
-export class RLEDecoder extends Decoder {
-  type: any;
-  lastValue: any;
-  count: number;
-  state: any;
-
+class RLEDecoder extends Decoder {
   constructor(type, buffer) {
     super(buffer)
     this.type = type
@@ -949,9 +929,7 @@ export class RLEDecoder extends Decoder {
  *
  * Null values are also allowed, as with RLEEncoder.
  */
-export class DeltaEncoder extends RLEEncoder {
-  absoluteValue: number
-
+class DeltaEncoder extends RLEEncoder {
   constructor() {
     super('int')
     this.absoluteValue = 0
@@ -977,7 +955,7 @@ export class DeltaEncoder extends RLEEncoder {
    * contain the key `count`, indicating the number of values to copy. If not specified, copies
    * all remaining values in the decoder.
    */
-  copyFrom(decoder, options: any = {}) : any {
+  copyFrom(decoder, options = {}) {
     if (options.sumValues) {
       throw new RangeError('unsupported options for DeltaEncoder.copyFrom()')
     }
@@ -991,8 +969,7 @@ export class DeltaEncoder extends RLEEncoder {
 
     // Copy any null values, and the first non-null value, so that appendValue() computes the
     // difference between the encoder's last value and the decoder's first (absolute) value.
-    const value = decoder.readValue()
-    let nulls = 0
+    let value = decoder.readValue(), nulls = 0
     this.appendValue(value)
     if (value === null) {
       nulls = decoder.count + 1
@@ -1024,9 +1001,7 @@ export class DeltaEncoder extends RLEEncoder {
  * Counterpart to DeltaEncoder: reads values from a delta-compressed sequence of
  * numbers (may include null values).
  */
-export class DeltaDecoder extends RLEDecoder {
-  absoluteValue : number;
-
+class DeltaDecoder extends RLEDecoder {
   constructor(buffer) {
     super('int', buffer)
     this.absoluteValue = 0
@@ -1083,10 +1058,7 @@ export class DeltaDecoder extends RLEDecoder {
  * only encode the repetition count but not the actual value, since the values
  * just alternate between false and true (starting with false).
  */
-export class BooleanEncoder extends Encoder {
-  lastValue: boolean;
-  count: number;
-
+class BooleanEncoder extends Encoder {
   constructor() {
     super()
     this.lastValue = false
@@ -1116,7 +1088,7 @@ export class BooleanEncoder extends Encoder {
    * contain the key `count`, indicating the number of values to copy. If not specified, copies
    * all remaining values in the decoder.
    */
-  copyFrom(decoder, options: any = {}) : any {
+  copyFrom(decoder, options = {}) {
     if (!(decoder instanceof BooleanDecoder)) {
       throw new TypeError('incompatible type of decoder')
     }
@@ -1166,11 +1138,7 @@ export class BooleanEncoder extends Encoder {
  * Counterpart to BooleanEncoder: reads boolean values from a runlength-encoded
  * sequence.
  */
-export class BooleanDecoder extends Decoder {
-  lastValue: boolean;
-  firstRun: boolean;
-  count: number;
-
+class BooleanDecoder extends Decoder {
   constructor(buffer) {
     super(buffer)
     this.lastValue = true // is negated the first time we read a count
@@ -1235,3 +1203,7 @@ export class BooleanDecoder extends Decoder {
   }
 }
 
+module.exports = {
+  stringToUtf8, utf8ToString, hexStringToBytes, bytesToHexString,
+  Encoder, Decoder, RLEEncoder, RLEDecoder, DeltaEncoder, DeltaDecoder, BooleanEncoder, BooleanDecoder
+}

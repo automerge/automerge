@@ -1,6 +1,4 @@
-import { UnknownObject } from './types';
-
-export function isObject(obj: unknown) : obj is UnknownObject {
+function isObject(obj) {
   return typeof obj === 'object' && obj !== null
 }
 
@@ -8,28 +6,20 @@ export function isObject(obj: unknown) : obj is UnknownObject {
  * Returns a shallow copy of the object `obj`. Faster than `Object.assign({}, obj)`.
  * https://jsperf.com/cloning-large-objects/1
  */
-/*
-export function copyObject<T extends UnknownObject>(obj: T) : T {
-  if (!isObject(obj)) throw RangeError(`Cannot copy object '${obj}'`) //return {}
-  const copy : UnknownObject = {}
-  for (const key of Object.keys(obj)) {
+function copyObject(obj) {
+  if (!isObject(obj)) return {}
+  let copy = {}
+  for (let key of Object.keys(obj)) {
     copy[key] = obj[key]
   }
   return copy
 }
-*/
 
 /**
  * Takes a string in the form that is used to identify operations (a counter concatenated
  * with an actor ID, separated by an `@` sign) and returns an object `{counter, actorId}`.
  */
-
-interface OpIdObj {
-  counter: number,
-  actorId: string 
-}
-
-export function parseOpId(opId: string) : OpIdObj {
+function parseOpId(opId) {
   const match = /^(\d+)@(.*)$/.exec(opId || '')
   if (!match) {
     throw new RangeError(`Not a valid opId: ${opId}`)
@@ -40,7 +30,7 @@ export function parseOpId(opId: string) : OpIdObj {
 /**
  * Returns true if the two byte arrays contain the same data, false if not.
  */
-export function equalBytes(array1: Uint8Array, array2: Uint8Array) : boolean {
+function equalBytes(array1, array2) {
   if (!(array1 instanceof Uint8Array) || !(array2 instanceof Uint8Array)) {
     throw new TypeError('equalBytes can only compare Uint8Arrays')
   }
@@ -51,3 +41,15 @@ export function equalBytes(array1: Uint8Array, array2: Uint8Array) : boolean {
   return true
 }
 
+/**
+ * Creates an array containing the value `null` repeated `length` times.
+ */
+function createArrayOfNulls(length) {
+  const array = new Array(length)
+  for (let i = 0; i < length; i++) array[i] = null
+  return array
+}
+
+module.exports = {
+  isObject, copyObject, parseOpId, equalBytes, createArrayOfNulls
+}

@@ -603,7 +603,8 @@ describe('Automerge.Text', () => {
           applyDeltaDocToAutomergeText(delta, doc)
         })
 
-        assert.strictEqual(s2.text.join(''), 'Hello reader')
+        //assert.strictEqual(s2.text.join(''), 'Hello reader')
+        assert.strictEqual(s2.text.toString(), 'Hello reader')
       })
 
       it('should apply an insert with control characters', () => {

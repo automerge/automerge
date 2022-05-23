@@ -1,5 +1,5 @@
 
-export { Actor as ActorId, Value, Prop, ObjID, Change, DecodedChange, Heads, Automerge } from "automerge-wasm"
+export { Actor as ActorId, Value, Prop, ObjID, Change, DecodedChange, Heads, Automerge, MaterializeValue } from "automerge-wasm"
 export { JsSyncState as SyncState, SyncMessage, DecodedSyncMessage } from "automerge-wasm"
 
 export { Text } from "./text"

@@ -4,14 +4,12 @@ export { uuid } from './uuid'
 import { rootProxy, listProxy, textProxy, mapProxy } from "./proxies"
 import { STATE, HEADS, OBJECT_ID, READ_ONLY, FROZEN  } from "./constants"
 
-import { isObject } from "./common"
-
-import { Text, Counter } from "./types"
+import { Counter } from "./types"
 export { Text, Counter, Int, Uint, Float64 } from "./types"
 
 import { ApiHandler, LowLevelApi, UseApi } from "./low_level"
 
-import { ActorId, Prop, ObjID, Change, DecodedChange, Heads, Automerge } from "./types"
+import { ActorId, Prop, ObjID, Change, DecodedChange, Heads, Automerge, MaterializeValue } from "./types"
 import { SyncState, SyncMessage, DecodedSyncMessage, AutomergeValue } from "./types"
 
 export type ChangeOptions = { message?: string, time?: number }
@@ -30,7 +28,7 @@ export function use(api: LowLevelApi) {
 }
 
 function _state<T>(doc: Doc<T>) : Automerge {
-  const state = (<any>doc)[STATE]
+  const state = Reflect.get(doc,STATE)
   if (state == undefined) {
     throw new RangeError("must be the document root")
   }
@@ -38,19 +36,19 @@ function _state<T>(doc: Doc<T>) : Automerge {
 }
 
 function _frozen<T>(doc: Doc<T>) : boolean {
-  return (<any>doc)[FROZEN] === true
+  return Reflect.get(doc,FROZEN) === true
 }
 
 function _heads<T>(doc: Doc<T>) : Heads | undefined {
-  return (<any>doc)[HEADS]
+  return Reflect.get(doc,HEADS)
 }
 
 function _obj<T>(doc: Doc<T>) : ObjID {
-  return (<any>doc)[OBJECT_ID]
+  return Reflect.get(doc,OBJECT_ID)
 }
 
 function _readonly<T>(doc: Doc<T>) : boolean {
-  return (<any>doc)[READ_ONLY] === true
+  return Reflect.get(doc,READ_ONLY) === true
 }
 
 export function init<T>(actor?: ActorId) : Doc<T>{
@@ -181,16 +179,15 @@ export function getActorId<T>(doc: Doc<T>) : ActorId {
   return state.getActorId()
 }
 
-function conflictAt(context : Automerge, objectId: ObjID, prop: Prop) : any {
+type Conflicts = { [key: string]: AutomergeValue }
+
+function conflictAt(context : Automerge, objectId: ObjID, prop: Prop) : Conflicts | undefined {
       const values = context.getAll(objectId, prop)
       if (values.length <= 1) {
         return
       }
-      const result : { [key: ObjID]: AutomergeValue } = {}
+      const result : Conflicts = {}
       for (const fullVal of values) {
-        //const datatype = fullVal[0]
-        //const value = fullVal[1]
-        //switch (datatype) {
         switch (fullVal[0]) {
           case "map":
             result[fullVal[1]] = mapProxy(context, fullVal[1], [ prop ], true)
@@ -225,7 +222,7 @@ function conflictAt(context : Automerge, objectId: ObjID, prop: Prop) : any {
       return result
 }
 
-export function getConflicts<T>(doc: Doc<T>, prop: Prop) : any {
+export function getConflicts<T>(doc: Doc<T>, prop: Prop) : Conflicts | undefined {
   const state = _state(doc)
   const objectId = _obj(doc)
   return conflictAt(state, objectId, prop)
@@ -274,7 +271,6 @@ export function applyChanges<T>(doc: Doc<T>, changes: Change[]) : [Doc<T>] {
 }
 
 export function getHistory<T>(doc: Doc<T>) : State<T>[] {
-  const actor = getActorId(doc)
   const history = getAllChanges(doc)
   return history.map((change, index) => ({
       get change () {
@@ -289,7 +285,7 @@ export function getHistory<T>(doc: Doc<T>) : State<T>[] {
 }
 
 // FIXME : no tests
-export function equals(val1: any, val2: any) : boolean {
+export function equals(val1: unknown, val2: unknown) : boolean {
   if (!isObject(val1) || !isObject(val2)) return val1 === val2
   const keys1 = Object.keys(val1).sort(), keys2 = Object.keys(val2).sort()
   if (keys1.length !== keys2.length) return false
@@ -373,27 +369,14 @@ export function dump<T>(doc: Doc<T>) {
   state.dump()
 }
 
-export function toJS(doc: any) : any {
-  if (typeof doc === "object") {
-    if (doc instanceof Uint8Array) {
-      return doc
-    }
-    if (doc === null) {
-      return doc
-    }
-    if (doc instanceof Array) {
-      return doc.map((a) => toJS(a))
-    }
-    if (doc instanceof Text) {
-      return doc.map((a: any) => toJS(a))
-    }
-    const tmp : any = {}
-    for (const index in doc) {
-      tmp[index] = toJS(doc[index])
-    }
-    return tmp
-  } else {
-    return doc
-  }
+// FIXME - return T?
+export function toJS<T>(doc: Doc<T>) : MaterializeValue {
+  let state = _state(doc)
+  let heads = _heads(doc)
+  return state.materialize("_root", heads)
 }
 
+
+function isObject(obj: unknown) : obj is Record<string,unknown> {
+  return typeof obj === 'object' && obj !== null
+}

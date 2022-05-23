@@ -7,8 +7,8 @@ function defaultFactory() {
 let factory = defaultFactory
 
 interface UUIDFactory extends Function {
-  setFactory(f: typeof factory);
-  reset();
+  setFactory(f: typeof factory): void;
+  reset(): void;
 }
 
 export const uuid : UUIDFactory = () => {
