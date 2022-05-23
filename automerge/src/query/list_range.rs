@@ -11,7 +11,9 @@ pub(crate) struct ListRange<'a, R: RangeBounds<usize>> {
     range: R,
     index: usize,
     pos: usize,
+    pos_back: usize,
     last_elemid: Option<ElemId>,
+    last_elemid_back: Option<ElemId>,
     next_result: Option<(usize, Value<'a>, OpId)>,
     index_back: usize,
     root_child: &'a OpTreeNode,
@@ -23,7 +25,9 @@ impl<'a, R: RangeBounds<usize>> ListRange<'a, R> {
             range,
             index: 0, // FIXME root_child.seek_to_pos(range.start)
             pos: 0,   // FIXME range.start
+            pos_back: root_child.index.visible_len(),
             last_elemid: None,
+            last_elemid_back: None,
             next_result: None,
             index_back: root_child.len(),
             root_child,
@@ -75,22 +79,25 @@ impl<'a, R: RangeBounds<usize>> DoubleEndedIterator for ListRange<'a, R> {
     fn next_back(&mut self) -> Option<Self::Item> {
         for i in (self.index..self.index_back).rev() {
             let op = self.root_child.get(i)?;
-            self.index += 1;
-            if op.visible() {
-                if op.elemid() != self.last_elemid {
-                    self.last_elemid = op.elemid();
-                    self.pos += 1;
-                    if self.range.contains(&(self.pos - 1)) {
-                        let result = self.next_result.replace((self.pos - 1, op.value(), op.id));
-                        if result.is_some() {
-                            return result;
-                        }
-                    }
-                } else if self.pos > 0 && self.range.contains(&(self.pos - 1)) {
-                    self.next_result = Some((self.pos - 1, op.value(), op.id));
+            self.index_back -= 1;
+
+            if op.elemid() != self.last_elemid_back && op.visible() {
+                self.last_elemid_back = op.elemid();
+                self.pos_back -= 1;
+                if self.range.contains(&self.pos_back) {
+                    return Some((self.pos_back, op.value(), op.id));
                 }
             }
         }
-        self.next_result.take()
+
+        // we're now overlapping the index and index_back so try and take the result from the next query
+        if let Some((pos, a, b)) = self.next_result.take() {
+            // we can only use this result if we haven't ended in the prop's state (to account for
+            // conflicts).
+            if pos != self.pos_back {
+                return Some((pos, a, b));
+            }
+        }
+        None
     }
 }
