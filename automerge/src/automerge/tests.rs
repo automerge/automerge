@@ -874,81 +874,82 @@ fn list_range_back_and_forth_single() {
 fn list_range_back_and_forth_double() {
     let mut doc1 = AutoCommit::new();
     doc1.set_actor(ActorId::from([0]));
+    let list = doc1.put_object(ROOT, "list", ObjType::List).unwrap();
+    let mut doc2 = doc1.fork();
 
-    doc1.put(ROOT, "1", "a").unwrap();
-    doc1.put(ROOT, "2", "b").unwrap();
-    doc1.put(ROOT, "3", "c").unwrap();
+    doc1.insert(&list, 0, "a").unwrap();
+    doc1.insert(&list, 1, "b").unwrap();
+    doc1.insert(&list, 2, "c").unwrap();
 
     // actor 2 should win in all conflicts here
-    let mut doc2 = AutoCommit::new();
-    doc1.set_actor(ActorId::from([1]));
+    doc2.set_actor(ActorId::from([1]));
     let actor2 = doc2.get_actor().clone();
-    doc2.put(ROOT, "1", "aa").unwrap();
-    doc2.put(ROOT, "2", "bb").unwrap();
-    doc2.put(ROOT, "3", "cc").unwrap();
+    doc2.insert(&list, 0, "aa").unwrap();
+    doc2.insert(&list, 1, "bb").unwrap();
+    doc2.insert(&list, 2, "cc").unwrap();
 
     doc1.merge(&mut doc2).unwrap();
 
-    let mut range_all = doc1.list_range(ROOT, ..);
+    let mut range_all = doc1.list_range(&list, ..);
     assert_eq!(
         range_all.next(),
-        Some((0, "aa".into(), ExId::Id(1, actor2.clone(), 1)))
+        Some((0, "aa".into(), ExId::Id(2, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some((2, "cc".into(), ExId::Id(3, actor2.clone(), 1)))
+        Some((2, "cc".into(), ExId::Id(4, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some((1, "bb".into(), ExId::Id(2, actor2.clone(), 1)))
+        Some((1, "bb".into(), ExId::Id(3, actor2.clone(), 1)))
     );
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
 
-    let mut range_all = doc1.list_range(ROOT, ..);
+    let mut range_all = doc1.list_range(&list, ..);
     assert_eq!(
         range_all.next(),
-        Some((0, "aa".into(), ExId::Id(1, actor2.clone(), 1)))
+        Some((0, "aa".into(), ExId::Id(2, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some((2, "cc".into(), ExId::Id(3, actor2.clone(), 1)))
+        Some((2, "cc".into(), ExId::Id(4, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next(),
-        Some((1, "bb".into(), ExId::Id(2, actor2.clone(), 1)))
+        Some((1, "bb".into(), ExId::Id(3, actor2.clone(), 1)))
     );
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
 
-    let mut range_all = doc1.list_range(ROOT, ..);
+    let mut range_all = doc1.list_range(&list, ..);
     assert_eq!(
         range_all.next(),
-        Some((0, "aa".into(), ExId::Id(1, actor2.clone(), 1)))
+        Some((0, "aa".into(), ExId::Id(2, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next(),
-        Some((1, "bb".into(), ExId::Id(2, actor2.clone(), 1)))
+        Some((1, "bb".into(), ExId::Id(3, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next(),
-        Some((2, "cc".into(), ExId::Id(3, actor2.clone(), 1)))
+        Some((2, "cc".into(), ExId::Id(4, actor2.clone(), 1)))
     );
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
 
-    let mut range_all = doc1.list_range(ROOT, ..);
+    let mut range_all = doc1.list_range(&list, ..);
     assert_eq!(
         range_all.next_back(),
-        Some((2, "cc".into(), ExId::Id(3, actor2.clone(), 1)))
+        Some((2, "cc".into(), ExId::Id(4, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some((1, "bb".into(), ExId::Id(2, actor2.clone(), 1)))
+        Some((1, "bb".into(), ExId::Id(3, actor2.clone(), 1)))
     );
     assert_eq!(
         range_all.next_back(),
-        Some((0, "aa".into(), ExId::Id(1, actor2, 1)))
+        Some((0, "aa".into(), ExId::Id(2, actor2, 1)))
     );
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
@@ -959,9 +960,9 @@ fn list_range_at_back_and_forth_single() {
     let mut doc = AutoCommit::new();
     let actor = doc.get_actor().clone();
 
-    doc.put(ROOT, "1", "a").unwrap();
-    doc.put(ROOT, "2", "b").unwrap();
-    doc.put(ROOT, "3", "c").unwrap();
+    doc.put(ROOT, 0, "a").unwrap();
+    doc.put(ROOT, 1, "b").unwrap();
+    doc.put(ROOT, 2, "c").unwrap();
 
     let heads = doc.get_heads();
 
@@ -1035,17 +1036,17 @@ fn list_range_at_back_and_forth_double() {
     let mut doc1 = AutoCommit::new();
     doc1.set_actor(ActorId::from([0]));
 
-    doc1.put(ROOT, "1", "a").unwrap();
-    doc1.put(ROOT, "2", "b").unwrap();
-    doc1.put(ROOT, "3", "c").unwrap();
+    doc1.put(ROOT, 0, "a").unwrap();
+    doc1.put(ROOT, 1, "b").unwrap();
+    doc1.put(ROOT, 2, "c").unwrap();
 
     // actor 2 should win in all conflicts here
     let mut doc2 = AutoCommit::new();
     doc1.set_actor(ActorId::from([1]));
     let actor2 = doc2.get_actor().clone();
-    doc2.put(ROOT, "1", "aa").unwrap();
-    doc2.put(ROOT, "2", "bb").unwrap();
-    doc2.put(ROOT, "3", "cc").unwrap();
+    doc2.put(ROOT, 0, "aa").unwrap();
+    doc2.put(ROOT, 1, "bb").unwrap();
+    doc2.put(ROOT, 2, "cc").unwrap();
 
     doc1.merge(&mut doc2).unwrap();
     let heads = doc1.get_heads();
