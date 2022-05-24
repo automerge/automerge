@@ -132,7 +132,7 @@ impl fmt::Display for ActorId {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, Copy, Hash)]
 #[serde(rename_all = "camelCase", untagged)]
 pub enum ObjType {
     Map,
