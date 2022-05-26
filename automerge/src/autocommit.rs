@@ -117,14 +117,17 @@ impl AutoCommit {
         self.doc.load_incremental_with(data, options)
     }
 
-    pub fn apply_changes(&mut self, changes: Vec<Change>) -> Result<(), AutomergeError> {
+    pub fn apply_changes(
+        &mut self,
+        changes: impl IntoIterator<Item = Change>,
+    ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.apply_changes(changes)
     }
 
-    pub fn apply_changes_with<Obs: OpObserver>(
+    pub fn apply_changes_with<I: IntoIterator<Item = Change>, Obs: OpObserver>(
         &mut self,
-        changes: Vec<Change>,
+        changes: I,
         options: ApplyOptions<'_, Obs>,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
