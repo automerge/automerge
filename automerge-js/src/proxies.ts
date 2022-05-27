@@ -1,10 +1,11 @@
 
-import { Automerge, Heads, ObjID } from "./types"
+import { Automerge, Heads, ObjID } from "automerge-types"
+import { Prop } from "automerge-types"
+import { AutomergeValue, ScalarValue, MapValue, ListValue, TextValue } from "./types"
 import { Int, Uint, Float64 } from "./numbers"
 import { Counter, getWriteableCounter } from "./counter"
 import { Text } from "./text"
 import { STATE, HEADS, FROZEN, OBJECT_ID, READ_ONLY } from "./constants"
-import { AutomergeValue, ScalarValue, MapValue, ListValue, TextValue, Prop } from "./types"
 
 function parseListIndex(key) {
   if (typeof key === 'string' && /^[0-9]+$/.test(key)) key = parseInt(key, 10)

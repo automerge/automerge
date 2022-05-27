@@ -1,6 +1,5 @@
 import { describe, it } from 'mocha';
-//@ts-ignore
-import assert from 'assert'
+import * as assert from 'assert'
 //@ts-ignore
 import init, { create, load } from '..'
 

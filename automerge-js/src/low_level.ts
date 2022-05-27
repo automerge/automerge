@@ -1,16 +1,15 @@
 
-import { Automerge, Change, DecodedChange, Actor, SyncState, SyncMessage, JsSyncState, DecodedSyncMessage }  from "automerge-wasm"
-import { API as LowLevelApi }  from "automerge-wasm"
-export { API as LowLevelApi }  from "automerge-wasm"
+import { Automerge, Change, DecodedChange, Actor, SyncState, SyncMessage, JsSyncState, DecodedSyncMessage }  from "automerge-types"
+import { API } from "automerge-types"
 
-export function UseApi(api: LowLevelApi) {
+export function UseApi(api: API) {
   for (const k in api) {
     ApiHandler[k] = api[k]
   }
 }
 
 /* eslint-disable */
-export const ApiHandler : LowLevelApi = {
+export const ApiHandler : API = {
   create(actor?: Actor): Automerge { throw new RangeError("Automerge.use() not called") },
   load(data: Uint8Array, actor?: Actor): Automerge { throw new RangeError("Automerge.use() not called") },
   encodeChange(change: DecodedChange): Change { throw new RangeError("Automerge.use() not called") },

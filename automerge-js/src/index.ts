@@ -4,13 +4,14 @@ export { uuid } from './uuid'
 import { rootProxy, listProxy, textProxy, mapProxy } from "./proxies"
 import { STATE, HEADS, OBJECT_ID, READ_ONLY, FROZEN  } from "./constants"
 
-import { Counter } from "./types"
-export { Text, Counter, Int, Uint, Float64 } from "./types"
+import { AutomergeValue, Counter } from "./types"
+export { AutomergeValue, Text, Counter, Int, Uint, Float64 } from "./types"
 
-import { ApiHandler, LowLevelApi, UseApi } from "./low_level"
+import { API } from "automerge-types";
+import { ApiHandler, UseApi } from "./low_level"
 
-import { ActorId, Prop, ObjID, Change, DecodedChange, Heads, Automerge, MaterializeValue } from "./types"
-import { SyncState, SyncMessage, DecodedSyncMessage, AutomergeValue } from "./types"
+import { Actor as ActorId, Prop, ObjID, Change, DecodedChange, Heads, Automerge, MaterializeValue } from "automerge-types"
+import { JsSyncState as SyncState, SyncMessage, DecodedSyncMessage } from "automerge-types"
 
 export type ChangeOptions = { message?: string, time?: number }
 
@@ -23,7 +24,7 @@ export interface State<T> {
   snapshot: T
 }
 
-export function use(api: LowLevelApi) {
+export function use(api: API) {
   UseApi(api)
 }
 
@@ -371,8 +372,8 @@ export function dump<T>(doc: Doc<T>) {
 
 // FIXME - return T?
 export function toJS<T>(doc: Doc<T>) : MaterializeValue {
-  let state = _state(doc)
-  let heads = _heads(doc)
+  const state = _state(doc)
+  const heads = _heads(doc)
   return state.materialize("_root", heads)
 }
 

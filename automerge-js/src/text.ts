@@ -1,4 +1,4 @@
-import { Value } from "./types"
+import { Value } from "automerge-types"
 
 export class Text {
   elems: Value[]

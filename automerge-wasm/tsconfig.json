@@ -11,6 +11,7 @@
     "paths": { "dev": ["*"]},
     "rootDir": "",
     "target": "es2016",
+    "types": ["mocha", "node"],
     "typeRoots": ["./index.d.ts"]
   },
   "include": ["test/**/*.ts"],

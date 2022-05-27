@@ -10,7 +10,8 @@
   },
   "author": "",
   "dependencies": {
-    "automerge-js": "file:automerge-js-0.1.0.tgz"
+    "automerge-js": "file:automerge-js-0.1.0.tgz",
+    "automerge-wasm": "file:automerge-wasm-0.1.3.tgz"
   },
   "devDependencies": {
     "serve": "^13.0.2",

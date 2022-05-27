@@ -1,13 +1,7 @@
 
-export { Actor as ActorId, Value, Prop, ObjID, Change, DecodedChange, Heads, Automerge, MaterializeValue } from "automerge-wasm"
-export { JsSyncState as SyncState, SyncMessage, DecodedSyncMessage } from "automerge-wasm"
-
 export { Text } from "./text"
 export { Counter  } from "./counter"
 export { Int, Uint, Float64  } from "./numbers"
-
-export type UnknownObject = Record<string | number | symbol, unknown>;
-export type Dictionary<T> = Record<string, T>;
 
 import { Counter } from "./counter"
 

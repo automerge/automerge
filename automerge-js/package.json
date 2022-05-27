@@ -28,7 +28,7 @@
   "license": "MIT",
   "scripts": {
     "lint": "eslint src",
-    "build": "tsc",
+    "build": "tsc -p config/mjs.json",
     "test": "ts-mocha test/*.ts"
   },
   "devDependencies": {
@@ -40,12 +40,12 @@
     "eslint": "^8.15.0",
     "mocha": "^10.0.0",
     "ts-mocha": "^10.0.0",
+    "fast-sha256": "^1.3.0",
+    "pako": "^2.0.4",
     "typescript": "^4.6.4"
   },
   "dependencies": {
-    "automerge-wasm": "file:../automerge-wasm",
-    "fast-sha256": "^1.3.0",
-    "pako": "^2.0.4",
+    "automerge-types": "^0.1.1",
     "uuid": "^8.3"
   }
 }
