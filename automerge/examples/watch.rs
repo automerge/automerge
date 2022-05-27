@@ -19,7 +19,7 @@ fn main() {
         },
     )
     .unwrap();
-    get_changes(&doc, observer.take_patches());
+    get_changes(observer.take_patches());
 
     let mut tx = doc.transaction();
     let map = tx
@@ -37,50 +37,49 @@ fn main() {
     let m = tx.insert_object(&list, 2, automerge::ObjType::Map).unwrap();
     tx.put(&m, "hi", 2).unwrap();
     let _heads3 = tx.commit_with(CommitOptions::default().with_op_observer(&mut observer));
-    get_changes(&doc, observer.take_patches());
+    get_changes(observer.take_patches());
 }
 
-fn get_changes(doc: &Automerge, patches: Vec<Patch>) {
+fn get_changes(patches: Vec<Patch>) {
     for patch in patches {
         match patch {
             Patch::Put {
                 obj,
+                path,
                 key,
                 value,
                 conflict: _,
             } => {
                 println!(
                     "put {:?} at {:?} in obj {:?}, object path {:?}",
-                    value,
-                    key,
-                    obj,
-                    doc.path_to_object(&obj)
+                    value, key, obj, path,
                 )
             }
-            Patch::Insert { obj, index, value } => {
+            Patch::Insert {
+                obj,
+                index,
+                value,
+                path,
+            } => {
                 println!(
                     "insert {:?} at {:?} in obj {:?}, object path {:?}",
-                    value,
-                    index,
-                    obj,
-                    doc.path_to_object(&obj)
+                    value, index, obj, path,
                 )
             }
-            Patch::Increment { obj, key, value } => {
+            Patch::Increment {
+                obj,
+                key,
+                value,
+                path,
+            } => {
                 println!(
                     "increment {:?} in obj {:?} by {:?}, object path {:?}",
-                    key,
-                    obj,
-                    value,
-                    doc.path_to_object(&obj)
+                    key, obj, value, path,
                 )
             }
-            Patch::Delete { obj, key } => println!(
-                "delete {:?} in obj {:?}, object path {:?}",
-                key,
-                obj,
-                doc.path_to_object(&obj)
-            ),
+            Patch::Delete { obj, key, path } => {
+                println!("delete {:?} in obj {:?}, object path {:?}", key, obj, path)
+            }
         }
     }
 }

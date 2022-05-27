@@ -2,8 +2,9 @@ use crate::clock::Clock;
 use crate::exid::ExId;
 use crate::indexed_cache::IndexedCache;
 use crate::op_tree::{self, OpTree};
+use crate::path::Path;
 use crate::query::{self, OpIdSearch, TreeQuery};
-use crate::types::{self, ActorId, Key, ObjId, Op, OpId, OpType};
+use crate::types::{self, ActorId, Key, ObjId, Op, OpId, OpType, Prop};
 use crate::{ObjType, OpObserver};
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
@@ -220,21 +221,21 @@ impl OpSetInternal {
 
         if op.insert {
             let value = (op.value(), self.id_to_exid(op.id));
-            observer.insert(ex_obj, seen, value);
+            observer.insert(ex_obj, self.path(obj), seen, value);
         } else if op.is_delete() {
             if let Some(winner) = &values.last() {
                 let value = (winner.value(), self.id_to_exid(winner.id));
                 let conflict = values.len() > 1;
-                observer.put(ex_obj, key, value, conflict);
+                observer.put(ex_obj, self.path(obj), key, value, conflict);
             } else {
-                observer.delete(ex_obj, key);
+                observer.delete(ex_obj, self.path(obj), key);
             }
         } else if let Some(value) = op.get_increment_value() {
             // only observe this increment if the counter is visible, i.e. the counter's
             // create op is in the values
             if values.iter().any(|value| op.pred.contains(&value.id)) {
                 // we have observed the value
-                observer.increment(ex_obj, key, (value, self.id_to_exid(op.id)));
+                observer.increment(ex_obj, self.path(obj), key, (value, self.id_to_exid(op.id)));
             }
         } else {
             let winner = if let Some(last_value) = values.last() {
@@ -248,10 +249,10 @@ impl OpSetInternal {
             };
             let value = (winner.value(), self.id_to_exid(winner.id));
             if op.is_list_op() && !had_value_before {
-                observer.insert(ex_obj, seen, value);
+                observer.insert(ex_obj, self.path(obj), seen, value);
             } else {
                 let conflict = !values.is_empty();
-                observer.put(ex_obj, key, value, conflict);
+                observer.put(ex_obj, self.path(obj), key, value, conflict);
             }
         }
 
@@ -276,6 +277,31 @@ impl OpSetInternal {
         let graph = super::visualisation::GraphVisualisation::construct(&self.trees, &self.m);
         dot::render(&graph, &mut out).unwrap();
         String::from_utf8_lossy(&out[..]).to_string()
+    }
+
+    pub(crate) fn parent_prop(&self, obj: &ObjId) -> Option<(ObjId, Prop)> {
+        self.parent_object(&obj)
+            .map(|(id, key)| (id, self.export_key(&id, key)))
+    }
+
+    pub(crate) fn path(&self, obj: &ObjId) -> Path<'_> {
+        Path {
+            obj: *obj,
+            op_set: self,
+        }
+    }
+
+    pub(crate) fn export_key(&self, obj: &ObjId, key: Key) -> Prop {
+        match key {
+            Key::Map(m) => Prop::Map(self.m.props.get(m).into()),
+            Key::Seq(opid) => {
+                let i = self
+                    .search(&obj, query::ElemIdPos::new(opid))
+                    .index()
+                    .unwrap();
+                Prop::Seq(i)
+            }
+        }
     }
 }
 

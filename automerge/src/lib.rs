@@ -76,6 +76,7 @@ mod op_set;
 mod op_tree;
 mod options;
 mod parents;
+mod path;
 mod query;
 pub mod sync;
 pub mod transaction;

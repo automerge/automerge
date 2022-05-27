@@ -49,15 +49,22 @@ impl TransactionInner {
                     let value = (op.value(), doc.id_to_exid(op.id));
                     match prop {
                         Prop::Map(_) => panic!("insert into a map"),
-                        Prop::Seq(index) => observer.insert(ex_obj, *index, value),
+                        Prop::Seq(index) => {
+                            observer.insert(ex_obj, doc.ops.path(obj), *index, value)
+                        }
                     }
                 } else if op.is_delete() {
-                    observer.delete(ex_obj, prop.clone());
+                    observer.delete(ex_obj, doc.ops.path(obj), prop.clone());
                 } else if let Some(value) = op.get_increment_value() {
-                    observer.increment(ex_obj, prop.clone(), (value, doc.id_to_exid(op.id)));
+                    observer.increment(
+                        ex_obj,
+                        doc.ops.path(obj),
+                        prop.clone(),
+                        (value, doc.id_to_exid(op.id)),
+                    );
                 } else {
                     let value = (op.value(), doc.ops.id_to_exid(op.id));
-                    observer.put(ex_obj, prop.clone(), value, false);
+                    observer.put(ex_obj, doc.ops.path(obj), prop.clone(), value, false);
                 }
             }
         }

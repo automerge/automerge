@@ -346,6 +346,12 @@ pub(crate) fn to_objtype(
     }
 }
 
+pub(crate) fn export_path(path: Vec<Prop>, key: Prop) -> Array {
+    let path: Array = path.into_iter().map(|p| JsValue::from(p)).collect();
+    path.push(&key.into());
+    return path;
+}
+
 pub(crate) fn get_heads(heads: Option<Array>) -> Option<Vec<ChangeHash>> {
     let heads = heads?;
     let heads: Result<Vec<ChangeHash>, _> = heads.iter().map(|j| j.into_serde()).collect();

@@ -230,8 +230,8 @@ impl Automerge {
                 None
             } else {
                 self.ops
-                    .parent_object(&obj)
-                    .map(|(id, key)| (self.id_to_exid(id.0), self.export_key(id, key)))
+                    .parent_prop(&obj)
+                    .map(|(id, prop)| (self.id_to_exid(id.0), prop))
             }
         } else {
             None
@@ -249,20 +249,22 @@ impl Automerge {
         path
     }
 
-    /// Export a key to a prop.
-    fn export_key(&self, obj: ObjId, key: Key) -> Prop {
-        match key {
-            Key::Map(m) => Prop::Map(self.ops.m.props.get(m).into()),
-            Key::Seq(opid) => {
-                let i = self
-                    .ops
-                    .search(&obj, query::ElemIdPos::new(opid))
-                    .index()
-                    .unwrap();
-                Prop::Seq(i)
+    /*
+        /// Export a key to a prop.
+        fn export_key(&self, obj: ObjId, key: Key) -> Prop {
+            match key {
+                Key::Map(m) => Prop::Map(self.ops.m.props.get(m).into()),
+                Key::Seq(opid) => {
+                    let i = self
+                        .ops
+                        .search(&obj, query::ElemIdPos::new(opid))
+                        .index()
+                        .unwrap();
+                    Prop::Seq(i)
+                }
             }
         }
-    }
+    */
 
     /// Get the keys of the object `obj`.
     ///

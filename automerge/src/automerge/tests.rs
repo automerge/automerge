@@ -1446,6 +1446,7 @@ fn observe_counter_change_application_overwrite() {
         observer.take_patches(),
         vec![Patch::Put {
             obj: ExId::Root,
+            path: vec![],
             key: Prop::Map("counter".into()),
             value: (
                 ScalarValue::Str("mystring".into()).into(),
@@ -1488,6 +1489,7 @@ fn observe_counter_change_application() {
         vec![
             Patch::Put {
                 obj: ExId::Root,
+                path: vec![],
                 key: Prop::Map("counter".into()),
                 value: (
                     ScalarValue::counter(1).into(),
@@ -1497,11 +1499,13 @@ fn observe_counter_change_application() {
             },
             Patch::Increment {
                 obj: ExId::Root,
+                path: vec![],
                 key: Prop::Map("counter".into()),
                 value: (2, ExId::Id(2, doc.get_actor().clone(), 0)),
             },
             Patch::Increment {
                 obj: ExId::Root,
+                path: vec![],
                 key: Prop::Map("counter".into()),
                 value: (5, ExId::Id(3, doc.get_actor().clone(), 0)),
             }

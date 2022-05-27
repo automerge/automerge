@@ -43,8 +43,8 @@ mod sync;
 mod value;
 
 use interop::{
-    get_heads, js_get, js_set, list_to_js, list_to_js_at, map_to_js, map_to_js_at, to_js_err,
-    to_objtype, to_prop, AR, JS,
+    export_path, get_heads, js_get, js_set, list_to_js, list_to_js_at, map_to_js, map_to_js_at,
+    to_js_err, to_objtype, to_prop, AR, JS,
 };
 use sync::SyncState;
 use value::{datatype, ScalarValue};
@@ -451,17 +451,19 @@ impl Automerge {
             .map_or_else(Vec::new, |o| o.take_patches());
         let result = Array::new();
         for p in patches {
-            let patch = Object::new();
+            let patch = Array::new();
             match p {
                 Patch::Put {
                     obj,
+                    path,
                     key,
                     value,
                     conflict,
                 } => {
                     js_set(&patch, "action", "put")?;
-                    js_set(&patch, "obj", obj.to_string())?;
-                    js_set(&patch, "key", key)?;
+                    //js_set(&patch, "obj", obj.to_string())?;
+                    js_set(&patch, "path", export_path(path, key))?;
+                    //js_set(&patch, "key", key)?;
                     match value {
                         (Value::Object(obj_type), obj_id) => {
                             js_set(&patch, "datatype", obj_type.to_string())?;
@@ -472,13 +474,19 @@ impl Automerge {
                             js_set(&patch, "value", ScalarValue(value))?;
                         }
                     };
-                    js_set(&patch, "conflict", conflict)?;
+                    //js_set(&patch, "conflict", conflict)?;
                 }
 
-                Patch::Insert { obj, index, value } => {
+                Patch::Insert {
+                    obj,
+                    path,
+                    index,
+                    value,
+                } => {
                     js_set(&patch, "action", "insert")?;
-                    js_set(&patch, "obj", obj.to_string())?;
-                    js_set(&patch, "key", index as f64)?;
+                    //js_set(&patch, "obj", obj.to_string())?;
+                    js_set(&patch, "path", export_path(path, index.into()))?;
+                    //js_set(&patch, "key", index as f64)?;
                     match value {
                         (Value::Object(obj_type), obj_id) => {
                             js_set(&patch, "datatype", obj_type.to_string())?;
@@ -491,17 +499,24 @@ impl Automerge {
                     };
                 }
 
-                Patch::Increment { obj, key, value } => {
+                Patch::Increment {
+                    obj,
+                    path,
+                    key,
+                    value,
+                } => {
                     js_set(&patch, "action", "increment")?;
-                    js_set(&patch, "obj", obj.to_string())?;
-                    js_set(&patch, "key", key)?;
-                    js_set(&patch, "value", value.0)?;
+                    //js_set(&patch, "obj", obj.to_string())?;
+                    js_set(&patch, "path", export_path(path, key))?;
+                    //js_set(&patch, "key", key)?;
+                    js_set(&patch, "value", value.0 as f64)?;
                 }
 
-                Patch::Delete { obj, key } => {
+                Patch::Delete { obj, path, key } => {
                     js_set(&patch, "action", "delete")?;
-                    js_set(&patch, "obj", obj.to_string())?;
-                    js_set(&patch, "key", key)?;
+                    //js_set(&patch, "obj", obj.to_string())?;
+                    js_set(&patch, "path", export_path(path, key))?;
+                    //js_set(&patch, "key", key)?;
                 }
             }
             result.push(&patch);
