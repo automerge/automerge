@@ -12,10 +12,13 @@ extern int run_AMlistPut_tests(void);
 
 extern int run_AMmapPut_tests(void);
 
+extern int run_sync_tests(void);
+
 int main(void) {
     return (
         run_AMdoc_property_tests() +
         run_AMlistPut_tests() +
-        run_AMmapPut_tests()
+        run_AMmapPut_tests() +
+        run_sync_tests()
     );
 }
