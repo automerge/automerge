@@ -52,10 +52,19 @@ add_custom_command(
     DEPENDS
         byte_span.rs
         change_hashes.rs
+        change.rs
         changes.rs
         doc.rs
+        doc/list.rs
+        doc/map.rs
+        doc/utils.rs
+        obj.rs
         result.rs
         sync.rs
+        sync/have.rs
+        sync/haves.rs
+        sync/message.rs
+        sync/state.rs
         ${CMAKE_SOURCE_DIR}/build.rs
         ${CMAKE_SOURCE_DIR}/Cargo.toml
         ${CMAKE_SOURCE_DIR}/cbindgen.toml
