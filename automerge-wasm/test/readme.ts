@@ -1,7 +1,8 @@
 import { describe, it } from 'mocha';
 import * as assert from 'assert'
 //@ts-ignore
-import init, { create, load } from '..'
+import init from '..'
+import { create, load } from '..'
 
 describe('Automerge', () => {
   describe('Readme Examples', () => {
@@ -83,7 +84,7 @@ describe('Automerge', () => {
       // Anywhere Object Ids are being used a path can also be used.
       // The following two statements are equivalent:
 
-      const id = doc.get("/", "config")
+      const id = doc.getWithType("/", "config")
       if (id && id[0] === 'map') {
         doc.put(id[1], "align", "right")
       }
@@ -138,8 +139,8 @@ describe('Automerge', () => {
       const obj = doc.insertObject(notes, 6, { hi: "there" })
 
       assert.deepEqual(doc.text(notes), "Hello \ufffceveryone")
-      assert.deepEqual(doc.get(notes, 6), ["map", obj])
-      assert.deepEqual(doc.get(obj, "hi"), ["str", "there"])
+      assert.deepEqual(doc.get(notes, 6), obj)
+      assert.deepEqual(doc.get(obj, "hi"), "there")
 
       doc.free()
     })
@@ -148,8 +149,8 @@ describe('Automerge', () => {
       doc1.put("_root", "key1", "val1")
       const key2 = doc1.putObject("_root", "key2", [])
 
-      assert.deepEqual(doc1.get("_root", "key1"), ["str", "val1"])
-      assert.deepEqual(doc1.get("_root", "key2"), ["list", "2@aabbcc"])
+      assert.deepEqual(doc1.get("_root", "key1"), "val1")
+      assert.deepEqual(doc1.getWithType("_root", "key2"), ["list", "2@aabbcc"])
       assert.deepEqual(doc1.keys("_root"), ["key1", "key2"])
 
       const doc2 = doc1.fork("ffaaff")
@@ -160,7 +161,7 @@ describe('Automerge', () => {
 
       doc1.merge(doc2)
 
-      assert.deepEqual(doc1.get("_root","key3"), ["str", "doc2val"])
+      assert.deepEqual(doc1.get("_root","key3"), "doc2val")
       assert.deepEqual(doc1.getAll("_root","key3"),[[ "str", "doc1val", "3@aabbcc"], ["str", "doc2val", "3@ffaaff"]])
 
       doc1.free(); doc2.free()
@@ -188,12 +189,12 @@ describe('Automerge', () => {
 
       doc.put("_root", "key", "val1")
 
-      assert.deepEqual(doc.get("_root", "key"),["str","val1"])
+      assert.deepEqual(doc.get("_root", "key"),"val1")
       assert.deepEqual(doc.pendingOps(),1)
 
       doc.rollback()
 
-      assert.deepEqual(doc.get("_root", "key"),null)
+      assert.deepEqual(doc.get("_root", "key"),undefined)
       assert.deepEqual(doc.pendingOps(),0)
 
       doc.put("_root", "key", "val2")
@@ -202,7 +203,7 @@ describe('Automerge', () => {
 
       doc.commit("test commit 1")
 
-      assert.deepEqual(doc.get("_root", "key"),["str","val2"])
+      assert.deepEqual(doc.get("_root", "key"),"val2")
       assert.deepEqual(doc.pendingOps(),0)
 
       doc.free()
@@ -218,10 +219,10 @@ describe('Automerge', () => {
 
       doc.put("_root", "key", "val3")
 
-      assert.deepEqual(doc.get("_root","key"), ["str","val3"])
-      assert.deepEqual(doc.get("_root","key",heads2), ["str","val2"])
-      assert.deepEqual(doc.get("_root","key",heads1), ["str","val1"])
-      assert.deepEqual(doc.get("_root","key",[]), null)
+      assert.deepEqual(doc.get("_root","key"), "val3")
+      assert.deepEqual(doc.get("_root","key",heads2), "val2")
+      assert.deepEqual(doc.get("_root","key",heads1), "val1")
+      assert.deepEqual(doc.get("_root","key",[]), undefined)
 
       doc.free()
     })

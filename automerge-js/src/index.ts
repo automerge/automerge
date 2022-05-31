@@ -231,11 +231,7 @@ export function getConflicts<T>(doc: Doc<T>, prop: Prop) : Conflicts | undefined
 
 export function getLastLocalChange<T>(doc: Doc<T>) : Change | undefined {
   const state = _state(doc)
-  try {
-    return state.getLastLocalChange()
-  } catch (e) {
-    return
-  }
+  return state.getLastLocalChange() || undefined
 }
 
 export function getObjectId<T>(doc: Doc<T>) : ObjID {

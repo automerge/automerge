@@ -140,7 +140,8 @@ export class Automerge {
   delete(obj: ObjID, prop: Prop): void;
 
   // returns a single value - if there is a conflict return the winner
-  get(obj: ObjID, prop: Prop, heads?: Heads): FullValue | null;
+  get(obj: ObjID, prop: Prop, heads?: Heads): Value | undefined;
+  getWithType(obj: ObjID, prop: Prop, heads?: Heads): FullValue | null;
   // return all values in case of a conflict
   getAll(obj: ObjID, arg: Prop, heads?: Heads): FullValueWithId[];
   keys(obj: ObjID, heads?: Heads): string[];
@@ -174,7 +175,7 @@ export class Automerge {
   getChangeByHash(hash: Hash): Change | null;
   getChangesAdded(other: Automerge): Change[];
   getHeads(): Heads;
-  getLastLocalChange(): Change;
+  getLastLocalChange(): Change | null;
   getMissingDeps(heads?: Heads): Heads;
 
   // memory management

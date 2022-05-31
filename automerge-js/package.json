@@ -4,7 +4,7 @@
     "Orion Henry <orion@inkandswitch.com>",
     "Martin Kleppmann"
   ],
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Reimplementation of `automerge` on top of the automerge-wasm backend",
   "homepage": "https://github.com/automerge/automerge-rs/tree/main/automerge-js",
   "repository": "github:automerge/automerge-rs",
@@ -13,22 +13,32 @@
     "LICENSE",
     "package.json",
     "index.d.ts",
-    "dist/constants.js",
-    "dist/types.js",
-    "dist/numbers.js",
-    "dist/index.js",
-    "dist/uuid.js",
-    "dist/counter.js",
-    "dist/low_level.js",
-    "dist/text.js",
-    "dist/proxies.js"
+    "dist/cjs/constants.js",
+    "dist/cjs/types.js",
+    "dist/cjs/numbers.js",
+    "dist/cjs/index.js",
+    "dist/cjs/uuid.js",
+    "dist/cjs/counter.js",
+    "dist/cjs/low_level.js",
+    "dist/cjs/text.js",
+    "dist/cjs/proxies.js",
+    "dist/mjs/constants.js",
+    "dist/mjs/types.js",
+    "dist/mjs/numbers.js",
+    "dist/mjs/index.js",
+    "dist/mjs/uuid.js",
+    "dist/mjs/counter.js",
+    "dist/mjs/low_level.js",
+    "dist/mjs/text.js",
+    "dist/mjs/proxies.js"
   ],
   "types": "index.d.ts",
-  "main": "./dist/index.js",
+  "module": "./dist/mjs/index.js",
+  "main": "./dist/cjs/index.js",
   "license": "MIT",
   "scripts": {
     "lint": "eslint src",
-    "build": "tsc -p config/mjs.json",
+    "build": "tsc -p config/mjs.json && tsc -p config/cjs.json",
     "test": "ts-mocha test/*.ts"
   },
   "devDependencies": {
@@ -45,7 +55,7 @@
     "typescript": "^4.6.4"
   },
   "dependencies": {
-    "automerge-types": "^0.1.1",
+    "automerge-types": "0.1.4",
     "uuid": "^8.3"
   }
 }
