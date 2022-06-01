@@ -1498,6 +1498,7 @@ describe('Automerge', () => {
       // Apply n3's latest change to n2. If running in Node, turn the Uint8Array into a Buffer, to
       // simulate transmission over a network (see https://github.com/automerge/automerge/pull/362)
       let change = n3.getLastLocalChange()
+      if (change === null) throw new RangeError("no local change")
       //@ts-ignore
       if (typeof Buffer === 'function') change = Buffer.from(change)
       if (change === undefined) { throw new RangeError("last local change failed") }
@@ -1512,8 +1513,12 @@ describe('Automerge', () => {
     it('should handle histories with lots of branching and merging', () => {
       const n1 = create('01234567'), n2 = create('89abcdef'), n3 = create('fedcba98')
       n1.put("_root","x",0); n1.commit("",0)
-      n2.applyChanges([n1.getLastLocalChange()])
-      n3.applyChanges([n1.getLastLocalChange()])
+      let change1 = n1.getLastLocalChange()
+      if (change1 === null) throw new RangeError("no local change")
+      n2.applyChanges([change1])
+      let change2 = n1.getLastLocalChange()
+      if (change2 === null) throw new RangeError("no local change")
+      n3.applyChanges([change2])
       n3.put("_root","x",1); n3.commit("",0)
 
       //        - n1c1 <------ n1c2 <------ n1c3 <-- etc. <-- n1c20 <------ n1c21
@@ -1526,7 +1531,9 @@ describe('Automerge', () => {
         n1.put("_root","n1",i); n1.commit("",0)
         n2.put("_root","n2",i); n2.commit("",0)
         const change1 = n1.getLastLocalChange()
+        if (change1 === null) throw new RangeError("no local change")
         const change2 = n2.getLastLocalChange()
+        if (change2 === null) throw new RangeError("no local change")
         n1.applyChanges([change2])
         n2.applyChanges([change1])
       }
@@ -1535,7 +1542,9 @@ describe('Automerge', () => {
       sync(n1, n2, s1, s2)
 
       // Having n3's last change concurrent to the last sync heads forces us into the slower code path
-      n2.applyChanges([n3.getLastLocalChange()])
+      const change3 = n2.getLastLocalChange()
+      if (change3 === null) throw new RangeError("no local change")
+      n2.applyChanges([change3])
       n1.put("_root","n1","final"); n1.commit("",0)
       n2.put("_root","n2","final"); n2.commit("",0)
 
@@ -1970,8 +1979,10 @@ describe('Automerge', () => {
         // n2 and n3 apply {c5, c6, c7, c8}
         n3.put("_root","x",5); n3.commit("",0)
         const change5 = n3.getLastLocalChange()
+        if (change5 === null) throw new RangeError("no local change")
         n3.put("_root","x",6); n3.commit("",0)
         const change6 = n3.getLastLocalChange(), c6 = n3.getHeads()[0]
+        if (change6 === null) throw new RangeError("no local change")
         for (let i = 7; i <= 8; i++) {
           n3.put("_root","x",i); n3.commit("",0)
         }

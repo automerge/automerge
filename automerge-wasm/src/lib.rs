@@ -367,12 +367,8 @@ impl Automerge {
                 self.doc.get(&obj, prop)?
             };
             match value {
-                Some((Value::Object(_), obj_id)) => {
-                    Ok(obj_id.to_string().into())
-                }
-                Some((Value::Scalar(value), _)) => {
-                    Ok(ScalarValue(value).into())
-                }
+                Some((Value::Object(_), obj_id)) => Ok(obj_id.to_string().into()),
+                Some((Value::Scalar(value), _)) => Ok(ScalarValue(value).into()),
                 None => Ok(JsValue::undefined()),
             }
         } else {
