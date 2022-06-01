@@ -21,8 +21,8 @@ function parseListIndex(key) {
 
 function valueAt(target, prop: Prop) : AutomergeValue | undefined {
       const { context, objectId, path, readonly, heads} = target
-      const value = context.get(objectId, prop, heads)
-      if (value === undefined) {
+      const value = context.getWithType(objectId, prop, heads)
+      if (value === null) {
         return
       }
       const datatype = value[0]
