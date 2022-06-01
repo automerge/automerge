@@ -12,7 +12,7 @@ int group_setup(void** state) {
 
 int group_teardown(void** state) {
     GroupState* group_state = *state;
-    AMfreeDoc(group_state->doc);
+    AMfree(group_state->doc);
     free(group_state);
     return 0;
 }

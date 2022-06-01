@@ -10,6 +10,7 @@ add_executable(
         ammapput_tests.c
         macro_utils.c
         main.c
+        sync_tests.c
 )
 
 set_target_properties(test_${LIBRARY_NAME} PROPERTIES LINKER_LANGUAGE C)

@@ -22,80 +22,80 @@ int main(int argc, char** argv) {
     AMobjId const* const card1 = value.obj_id;
     AMresult* result = AMmapPutStr(doc1, card1, "title", "Rewrite everything in Clojure");
     test(result, AM_VALUE_VOID);
-    AMfreeResult(result);
+    AMresultFree(result);
     result = AMmapPutBool(doc1, card1, "done", false);
     test(result, AM_VALUE_VOID);
-    AMfreeResult(result);
+    AMresultFree(result);
     AMresult* const card2_result = AMlistPutObject(doc1, cards, 0, true, AM_OBJ_TYPE_MAP);
     value = test(card2_result, AM_VALUE_OBJ_ID);
     AMobjId const* const card2 = value.obj_id;
     result = AMmapPutStr(doc1, card2, "title", "Rewrite everything in Haskell");
     test(result, AM_VALUE_VOID);
-    AMfreeResult(result);
+    AMresultFree(result);
     result = AMmapPutBool(doc1, card2, "done", false);
     test(result, AM_VALUE_VOID);
-    AMfreeResult(result);
-    AMfreeResult(card2_result);
+    AMresultFree(result);
+    AMresultFree(card2_result);
     result = AMcommit(doc1, "Add card", NULL);
     test(result, AM_VALUE_CHANGE_HASHES);
-    AMfreeResult(result);
+    AMresultFree(result);
 
     AMdoc* doc2 = AMcreate();
     if (doc2 == NULL) {
         fprintf(stderr, "`AMcreate()` failure.");
-        AMfreeResult(card1_result);
-        AMfreeResult(cards_result);
-        AMfreeDoc(doc1);
+        AMresultFree(card1_result);
+        AMresultFree(cards_result);
+        AMfree(doc1);
         exit(EXIT_FAILURE);
     }
     result = AMmerge(doc2, doc1);
     test(result, AM_VALUE_CHANGE_HASHES);
-    AMfreeResult(result);
-    AMfreeDoc(doc2);
+    AMresultFree(result);
+    AMfree(doc2);
 
     AMresult* const save_result = AMsave(doc1);
     value = test(save_result, AM_VALUE_BYTES);
     AMbyteSpan binary = value.bytes;
     doc2 = AMload(binary.src, binary.count);
-    AMfreeResult(save_result);
+    AMresultFree(save_result);
     if (doc2 == NULL) {
         fprintf(stderr, "`AMload()` failure.");
-        AMfreeResult(card1_result);
-        AMfreeResult(cards_result);
-        AMfreeDoc(doc1);
+        AMresultFree(card1_result);
+        AMresultFree(cards_result);
+        AMfree(doc1);
         exit(EXIT_FAILURE);
     }
 
     result = AMmapPutBool(doc1, card1, "done", true);
     test(result, AM_VALUE_VOID);
-    AMfreeResult(result);
+    AMresultFree(result);
     result = AMcommit(doc1, "Mark card as done", NULL);
     test(result, AM_VALUE_CHANGE_HASHES);
-    AMfreeResult(result);
-    AMfreeResult(card1_result);
+    AMresultFree(result);
+    AMresultFree(card1_result);
 
     result = AMlistDelete(doc2, cards, 0);
     test(result, AM_VALUE_VOID);
-    AMfreeResult(result);
+    AMresultFree(result);
     result = AMcommit(doc2, "Delete card", NULL);
     test(result, AM_VALUE_CHANGE_HASHES);
-    AMfreeResult(result);
+    AMresultFree(result);
 
     result = AMmerge(doc1, doc2);
     test(result, AM_VALUE_CHANGE_HASHES);
-    AMfreeResult(result);
-    AMfreeDoc(doc2);
+    AMresultFree(result);
+    AMfree(doc2);
 
     result = AMgetChanges(doc1, NULL);
     value = test(result, AM_VALUE_CHANGES);
     AMchange const* change = NULL;
-    while (value.changes.ptr && (change = AMnextChange(&value.changes, 1))) {
+    while (value.changes.ptr && (change = AMchangesNext(&value.changes, 1))) {
         size_t const size = AMobjSizeAt(doc1, cards, change);
-        printf("%s %ld\n", AMgetMessage(change), size);
+        printf("%s %ld\n", AMchangeMessage(change), size);
     }
-    AMfreeResult(result);
-    AMfreeResult(cards_result);
-    AMfreeDoc(doc1);
+    AMresultFree(result);
+    AMresultFree(cards_result);
+    AMfree(doc1);
 }
 
 /**
@@ -123,7 +123,7 @@ AMvalue test(AMresult* result, AMvalueVariant const value_tag) {
             default: sprintf(prelude, "Unknown `AMstatus` tag %d", status);
         }
         fprintf(stderr, "%s; %s.", prelude, AMerrorMessage(result));
-        AMfreeResult(result);
+        AMresultFree(result);
         exit(EXIT_FAILURE);
     }
     AMvalue const value = AMresultValue(result, 0);
@@ -147,7 +147,7 @@ AMvalue test(AMresult* result, AMvalueVariant const value_tag) {
             default:                     label = "<unknown>";
         }
         fprintf(stderr, "Unexpected `AMvalueVariant` tag `%s` (%d).", label, value.tag);
-        AMfreeResult(result);
+        AMresultFree(result);
         exit(EXIT_FAILURE);
     }
     return value;
