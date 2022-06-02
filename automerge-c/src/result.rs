@@ -107,7 +107,7 @@ pub enum AMresult {
     ActorId(am::ActorId),
     ChangeHashes(Vec<am::ChangeHash>),
     Changes(Vec<am::Change>, BTreeMap<usize, AMchange>),
-    Doc(AMdoc),
+    Doc(Box<AMdoc>),
     Error(CString),
     ObjId(AMobjId),
     Scalars(Vec<am::Value<'static>>, Option<CString>),
@@ -124,7 +124,7 @@ impl AMresult {
 
 impl From<am::AutoCommit> for AMresult {
     fn from(auto_commit: am::AutoCommit) -> Self {
-        AMresult::Doc(AMdoc::new(auto_commit))
+        AMresult::Doc(Box::new(AMdoc::new(auto_commit)))
     }
 }
 
@@ -178,7 +178,7 @@ impl From<Result<am::ActorId, am::AutomergeError>> for AMresult {
 impl From<Result<am::AutoCommit, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<am::AutoCommit, am::AutomergeError>) -> Self {
         match maybe {
-            Ok(auto_commit) => AMresult::Doc(AMdoc::new(auto_commit)),
+            Ok(auto_commit) => AMresult::Doc(Box::new(AMdoc::new(auto_commit))),
             Err(e) => AMresult::err(&e.to_string()),
         }
     }
@@ -376,7 +376,11 @@ pub unsafe extern "C" fn AMresultSize(result: *mut AMresult) -> usize {
     if let Some(result) = result.as_mut() {
         match result {
             AMresult::Error(_) | AMresult::Void => 0,
-            AMresult::ActorId(_) | AMresult::Doc(_) | AMresult::ObjId(_) | AMresult::SyncMessage(_) | AMresult::SyncState(_) => 1,
+            AMresult::ActorId(_)
+            | AMresult::Doc(_)
+            | AMresult::ObjId(_)
+            | AMresult::SyncMessage(_)
+            | AMresult::SyncState(_) => 1,
             AMresult::ChangeHashes(change_hashes) => change_hashes.len(),
             AMresult::Changes(changes, _) => changes.len(),
             AMresult::Scalars(vec, _) => vec.len(),
@@ -435,7 +439,7 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult, index: usize) 
             }
             AMresult::Doc(doc) => {
                 if index == 0 {
-                    value = AMvalue::Doc(doc)
+                    value = AMvalue::Doc(&mut **doc)
                 }
             }
             AMresult::Error(_) => {}
