@@ -81,8 +81,8 @@ impl Default for AMchangeHashes {
 }
 
 /// \memberof AMchangeHashes
-/// \brief Advances/rewinds an `AMchangeHashes` struct by at most \p |n|
-/// positions.
+/// \brief Advances/rewinds an iterator over a sequence of change hashes by at
+///        most \p |n| positions.
 ///
 /// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \param[in] n The direction (\p -n -> backward, \p +n -> forward) and maximum
@@ -100,7 +100,8 @@ pub unsafe extern "C" fn AMchangeHashesAdvance(change_hashes: *mut AMchangeHashe
 }
 
 /// \memberof AMchangeHashes
-/// \brief Compares two change hash sequences.
+/// \brief Compares the sequences of change hashes underlying a pair of
+///        iterators.
 ///
 /// \param[in] change_hashes1 A pointer to an `AMchangeHashes` struct.
 /// \param[in] change_hashes2 A pointer to an `AMchangeHashes` struct.
@@ -134,15 +135,15 @@ pub unsafe extern "C" fn AMchangeHashesCmp(
 }
 
 /// \memberof AMchangeHashes
-/// \brief Gets the `AMbyteSpan` struct at the current position of an
-/// `AMchangeHashes`struct and then advances/rewinds it by at most \p |n|
-/// positions.
+/// \brief Gets the change hash at the current position of an iterator over
+///        a sequence of change hashes and then advances/rewinds it by at most
+///        \p |n| positions.
 ///
 /// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \param[in] n The direction (\p -n -> backward, \p +n -> forward) and maximum
 ///              number of positions to advance/rewind.
-/// \return An `AMbyteSpan` struct that's `NULL` when \p change_hashes was
-///         previously advanced/rewound past its forward/backward limit.
+/// \return An `AMbyteSpan` struct with `.src == NULL` when \p change_hashes
+///         was previously advanced/rewound past its forward/backward limit.
 /// \pre \p change_hashes must be a valid address.
 /// \internal
 ///
@@ -162,13 +163,14 @@ pub unsafe extern "C" fn AMchangeHashesNext(
 }
 
 /// \memberof AMchangeHashes
-/// \brief Advances/rewinds an `AMchangeHashes` struct by at most \p |n|
-/// positions and then gets the `AMbyteSpan` struct at its current position.
+/// \brief Advances/rewinds an iterator over a sequence of change hashes by at
+///        most \p |n| positions and then gets the change hash at its current
+///        position.
 ///
 /// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \param[in] n The direction (\p -n -> backward, \p +n -> forward) and maximum
 ///              number of positions to advance/rewind.
-/// \return An `AMbyteSpan` struct that's `NULL` when \p change_hashes is
+/// \return An `AMbyteSpan` struct that's null when \p change_hashes is
 ///         presently advanced/rewound past its forward/backward limit.
 /// \pre \p change_hashes must be a valid address.
 /// \internal
@@ -189,7 +191,8 @@ pub unsafe extern "C" fn AMchangeHashesPrev(
 }
 
 /// \memberof AMchangeHashes
-/// \brief Gets the size of an `AMchangeHashes` struct.
+/// \brief Gets the size of the sequence of change hashes underlying an
+///        iterator.
 ///
 /// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \return The count of values in \p change_hashes.

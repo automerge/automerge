@@ -17,7 +17,7 @@ use crate::result::{to_result, AMresult};
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -44,7 +44,7 @@ pub unsafe extern "C" fn AMmapDelete(
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -72,7 +72,7 @@ pub unsafe extern "C" fn AMmapGet(
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -91,7 +91,7 @@ pub unsafe extern "C" fn AMmapPutBool(
 }
 
 /// \memberof AMdoc
-/// \brief Puts an array of bytes as the value of a key in a map object.
+/// \brief Puts a sequence of bytes as the value of a key in a map object.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
@@ -104,7 +104,7 @@ pub unsafe extern "C" fn AMmapPutBool(
 /// \pre \p value must be a valid address.
 /// \pre `0 <=` \p count `<=` length of \p value.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -137,7 +137,7 @@ pub unsafe extern "C" fn AMmapPutBytes(
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -169,7 +169,7 @@ pub unsafe extern "C" fn AMmapPutCounter(
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -197,7 +197,7 @@ pub unsafe extern "C" fn AMmapPutNull(
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -226,7 +226,7 @@ pub unsafe extern "C" fn AMmapPutObject(
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -255,7 +255,7 @@ pub unsafe extern "C" fn AMmapPutF64(
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -285,7 +285,7 @@ pub unsafe extern "C" fn AMmapPutInt(
 /// \pre \p key must be a valid address.
 /// \pre \p value must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -315,7 +315,7 @@ pub unsafe extern "C" fn AMmapPutStr(
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -348,7 +348,7 @@ pub unsafe extern "C" fn AMmapPutTimestamp(
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety

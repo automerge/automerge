@@ -61,7 +61,7 @@ static void test_AMputActor(void **state) {
     assert_int_equal(AMresultSize(res), 0);
     AMvalue value = AMresultValue(res, 0);
     assert_int_equal(value.tag, AM_VALUE_VOID);
-    AMresultFree(res);
+    AMfree(res);
     res = AMgetActor(group_state->doc);
     if (AMresultStatus(res) != AM_STATUS_OK) {
         fail_msg("%s", AMerrorMessage(res));
@@ -71,7 +71,7 @@ static void test_AMputActor(void **state) {
     assert_int_equal(value.tag, AM_VALUE_ACTOR_ID);
     assert_int_equal(value.actor_id.count, test_state->actor_id_size);
     assert_memory_equal(value.actor_id.src, test_state->actor_id_bytes, value.actor_id.count);
-    AMresultFree(res);
+    AMfree(res);
 }
 
 static void test_AMputActorHex(void **state) {
@@ -87,7 +87,7 @@ static void test_AMputActorHex(void **state) {
     assert_int_equal(AMresultSize(res), 0);
     AMvalue value = AMresultValue(res, 0);
     assert_int_equal(value.tag, AM_VALUE_VOID);
-    AMresultFree(res);
+    AMfree(res);
     res = AMgetActorHex(group_state->doc);
     if (AMresultStatus(res) != AM_STATUS_OK) {
         fail_msg("%s", AMerrorMessage(res));
@@ -97,7 +97,7 @@ static void test_AMputActorHex(void **state) {
     assert_int_equal(value.tag, AM_VALUE_STR);
     assert_int_equal(strlen(value.str), test_state->actor_id_size * 2);
     assert_string_equal(value.str, test_state->actor_id_str);
-    AMresultFree(res);
+    AMfree(res);
 }
 
 int run_AMdoc_property_tests(void) {

@@ -50,6 +50,12 @@ impl AMdoc {
     }
 }
 
+impl AsRef<am::AutoCommit> for AMdoc {
+    fn as_ref(&self) -> &am::AutoCommit {
+        &self.0
+    }
+}
+
 impl Deref for AMdoc {
     type Target = am::AutoCommit;
 
@@ -64,23 +70,16 @@ impl DerefMut for AMdoc {
     }
 }
 
-impl From<AMdoc> for *mut AMdoc {
-    fn from(b: AMdoc) -> Self {
-        Box::into_raw(Box::new(b))
-    }
-}
-
 /// \memberof AMdoc
 /// \brief Applies a sequence of changes to a document.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] changes A pointer to an `AMchanges` struct.
-/// \
 /// \pre \p doc must be a valid address.
 /// \pre \p changes must be a valid address.
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -97,19 +96,20 @@ pub unsafe extern "C" fn AMapplyChanges(
 }
 
 /// \memberof AMdoc
-/// \brief Allocates a new `AMdoc` struct and initializes it with defaults.
+/// \brief Allocates a new document and initializes it with defaults.
 ///
-/// \return A pointer to an `AMdoc` struct.
-/// \warning To avoid a memory leak, the returned `AMdoc` struct must be
+/// \return A pointer to an `AMresult` struct containing a pointer to an
+///         `AMdoc` struct.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
 ///          deallocated with `AMfree()`.
 #[no_mangle]
-pub extern "C" fn AMcreate() -> *mut AMdoc {
-    AMdoc::new(am::AutoCommit::new()).into()
+pub extern "C" fn AMcreate() -> *mut AMresult {
+    to_result(am::AutoCommit::new())
 }
 
 /// \memberof AMdoc
-/// \brief Commits the current operations on \p doc with an optional message
-///        and/or time override as seconds since the epoch.
+/// \brief Commits the current operations on a document with an optional
+///        message and/or time override as seconds since the epoch.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] message A UTF-8 string or `NULL`.
@@ -118,7 +118,7 @@ pub extern "C" fn AMcreate() -> *mut AMdoc {
 ///         `AMbyteSpan` struct.
 /// \pre \p doc must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -141,28 +141,27 @@ pub unsafe extern "C" fn AMcommit(
 }
 
 /// \memberof AMdoc
-/// \brief Allocates storage for an `AMdoc` struct and initializes it by
-///        duplicating the given `AMdoc` struct.
+/// \brief Allocates storage for a document and initializes it by duplicating
+///        the given document.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \return A pointer to an `AMdoc` struct.
+/// \return A pointer to an `AMresult` struct containing a pointer to an
+///         `AMdoc` struct.
 /// \pre \p doc must be a valid address.
-/// \warning To avoid a memory leak, the returned `AMdoc` struct must be
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
 ///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
 #[no_mangle]
-pub unsafe extern "C" fn AMdup(doc: *mut AMdoc) -> *mut AMdoc {
-    match doc.as_mut() {
-        Some(doc) => doc.clone().into(),
-        None => std::ptr::null_mut::<AMdoc>(),
-    }
+pub unsafe extern "C" fn AMdup(doc: *mut AMdoc) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    to_result(doc.as_ref().clone())
 }
 
 /// \memberof AMdoc
-/// \brief Compares two documents for equality after closing their respective
+/// \brief Tests the equality of two documents after closing their respective
 ///        transactions.
 ///
 /// \param[in] doc1 An `AMdoc` struct.
@@ -184,26 +183,8 @@ pub unsafe extern "C" fn AMequal(doc1: *mut AMdoc, doc2: *mut AMdoc) -> bool {
 }
 
 /// \memberof AMdoc
-/// \brief Deallocates the storage for an `AMdoc` struct previously
-///        allocated by `AMcreate()`, `AMdup()` or `AMload()`.
-///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \pre \p doc must be a valid address.
-/// \internal
-///
-/// # Safety
-/// doc must be a pointer to a valid AMdoc
-#[no_mangle]
-pub unsafe extern "C" fn AMfree(doc: *mut AMdoc) {
-    if !doc.is_null() {
-        let doc: AMdoc = *Box::from_raw(doc);
-        drop(doc)
-    }
-}
-
-/// \memberof AMdoc
-/// \brief Generates a synchronization message for a peer based upon the
-///        synchronization state \p sync_state.
+/// \brief Generates a synchronization message for a peer based upon the given
+///        synchronization state.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] sync_state A pointer to an `AMsyncState` struct.
@@ -212,7 +193,7 @@ pub unsafe extern "C" fn AMfree(doc: *mut AMdoc) {
 /// \pre \p doc must b e a valid address.
 /// \pre \p sync_state must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -236,7 +217,7 @@ pub unsafe extern "C" fn AMgenerateSyncMessage(
 ///         `AMbyteSpan` struct.
 /// \pre \p doc must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -254,7 +235,7 @@ pub unsafe extern "C" fn AMgetActor(doc: *mut AMdoc) -> *mut AMresult {
 /// \return A pointer to an `AMresult` struct containing a `char const*`.
 /// \pre \p doc must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -275,7 +256,7 @@ pub unsafe extern "C" fn AMgetActorHex(doc: *mut AMdoc) -> *mut AMresult {
 /// \return A pointer to an `AMresult` struct containing an `AMchanges` struct.
 /// \pre \p doc must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -302,7 +283,7 @@ pub unsafe extern "C" fn AMgetChanges(
 ///         struct.
 /// \pre \p doc must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -323,7 +304,7 @@ pub unsafe extern "C" fn AMgetHeads(doc: *mut AMdoc) -> *mut AMresult {
 ///         struct.
 /// \pre \p doc must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -350,7 +331,7 @@ pub unsafe extern "C" fn AMgetMissingDeps(
 ///         struct or a void.
 /// \pre \p doc must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -362,34 +343,30 @@ pub unsafe extern "C" fn AMgetLastLocalChange(doc: *mut AMdoc) -> *mut AMresult 
 }
 
 /// \memberof AMdoc
-/// \brief Allocates storage for an `AMdoc` struct and initializes it with the
-///        compact form of an incremental save pointed to by \p src.
+/// \brief Allocates storage for a document and initializes it with the compact
+///        form of an incremental save.
 ///
 /// \param[in] src A pointer to an array of bytes.
 /// \param[in] count The number of bytes in \p src to load.
-/// \return A pointer to an `AMdoc` struct.
+/// \return A pointer to an `AMresult` struct containing a pointer to an
+///         `AMdoc` struct.
 /// \pre \p src must be a valid address.
 /// \pre `0 <=` \p count `<=` length of \p src.
-/// \warning To avoid a memory leak, the returned `AMdoc` struct must be
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
 ///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
 /// src must be a byte array of length `>= count`
 #[no_mangle]
-pub unsafe extern "C" fn AMload(src: *const u8, count: usize) -> *mut AMdoc {
+pub unsafe extern "C" fn AMload(src: *const u8, count: usize) -> *mut AMresult {
     let mut data = Vec::new();
     data.extend_from_slice(std::slice::from_raw_parts(src, count));
-    if let Ok(auto_commit) = am::AutoCommit::load(&data) {
-        AMdoc::new(auto_commit).into()
-    } else {
-        std::ptr::null_mut::<AMdoc>()
-    }
+    to_result(am::AutoCommit::load(&data))
 }
 
 /// \memberof AMdoc
-/// \brief Loads the compact form of an incremental save pointed to by \p src
-///        into \p doc.
+/// \brief Loads the compact form of an incremental save into a document.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] src A pointer to an array of bytes.
@@ -400,7 +377,7 @@ pub unsafe extern "C" fn AMload(src: *const u8, count: usize) -> *mut AMdoc {
 /// \pre \p src must be a valid address.
 /// \pre `0 <=` \p count `<=` length of \p src.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -428,7 +405,7 @@ pub unsafe extern "C" fn AMloadIncremental(
 /// \pre \p dest must be a valid address.
 /// \pre \p src must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -522,14 +499,14 @@ pub unsafe extern "C" fn AMreceiveSyncMessage(
 }
 
 /// \memberof AMdoc
-/// \brief Saves the entirety of \p doc into a compact form.
+/// \brief Saves the entirety of a document into a compact form.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \return A pointer to an `AMresult` struct containing an array of bytes as
 ///         an `AMbyteSpan` struct.
 /// \pre \p doc must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -541,17 +518,17 @@ pub unsafe extern "C" fn AMsave(doc: *mut AMdoc) -> *mut AMresult {
 }
 
 /// \memberof AMdoc
-/// \brief Puts an array of bytes as the actor ID value of an `AMdoc` struct.  .
+/// \brief Puts a sequence of bytes as the actor ID value of a document.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] value A pointer to an array of bytes.
+/// \param[in] value A pointer to a contiguous sequence of bytes.
 /// \param[in] count The number of bytes to copy from \p value.
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
 /// \pre \p value must be a valid address.
 /// \pre `0 <=` \p count `<=` length of \p value.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -570,7 +547,7 @@ pub unsafe extern "C" fn AMsetActor(
 }
 
 /// \memberof AMdoc
-/// \brief Puts a hexadecimal string as the actor ID value of an `AMdoc` struct.
+/// \brief Puts a hexadecimal string as the actor ID value of a document.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] hex_str A string of hexadecimal characters.
@@ -578,7 +555,7 @@ pub unsafe extern "C" fn AMsetActor(
 /// \pre \p doc must be a valid address.
 /// \pre \p hex_str must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety

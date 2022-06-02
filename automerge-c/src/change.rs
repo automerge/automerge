@@ -61,7 +61,7 @@ pub unsafe extern "C" fn AMchangeActorId(change: *const AMchange) -> AMbyteSpan 
 }
 
 /// \memberof AMchange
-/// \brief Compresses the raw bytes within an `AMchange` struct.
+/// \brief Compresses the raw bytes of a change.
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \pre \p change must be a valid address.
@@ -114,7 +114,7 @@ pub unsafe extern "C" fn AMchangeExtraBytes(change: *const AMchange) -> AMbyteSp
 }
 
 /// \memberof AMchange
-/// \brief Loads a change as bytes into an `AMchange` struct.
+/// \brief Loads a sequence of bytes into a change.
 ///
 /// \param[in] src A pointer to an array of bytes.
 /// \param[in] count The number of bytes in \p src to load.
@@ -122,7 +122,7 @@ pub unsafe extern "C" fn AMchangeExtraBytes(change: *const AMchange) -> AMbyteSp
 /// \pre \p src must be a valid address.
 /// \pre `0 <=` \p count `<=` length of \p src.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -156,7 +156,7 @@ pub unsafe extern "C" fn AMchangeHash(change: *const AMchange) -> AMbyteSpan {
 }
 
 /// \memberof AMchange
-/// \brief Gets the emptiness of a change.
+/// \brief Tests the emptiness of a change.
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A boolean.
@@ -309,7 +309,7 @@ pub unsafe extern "C" fn AMchangeRawBytes(change: *const AMchange) -> AMbyteSpan
 }
 
 /// \memberof AMchange
-/// \brief Loads a document into a sequence of `AMchange` structs.
+/// \brief Loads a document into a sequence of changes.
 ///
 /// \param[in] src A pointer to an array of bytes.
 /// \param[in] count The number of bytes in \p src to load.
@@ -318,7 +318,7 @@ pub unsafe extern "C" fn AMchangeRawBytes(change: *const AMchange) -> AMbyteSpan
 /// \pre \p src must be a valid address.
 /// \pre `0 <=` \p count `<=` length of \p src.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety

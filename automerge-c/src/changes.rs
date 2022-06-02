@@ -100,8 +100,8 @@ impl Default for AMchanges {
 }
 
 /// \memberof AMchanges
-/// \brief Advances/rewinds an `AMchanges` struct by at most \p |n|
-/// positions.
+/// \brief Advances/rewinds an iterator over a sequence of changes by at most
+///        \p |n| positions.
 ///
 /// \param[in] changes A pointer to an `AMchanges` struct.
 /// \param[in] n The direction (\p -n -> backward, \p +n -> forward) and maximum
@@ -119,7 +119,8 @@ pub unsafe extern "C" fn AMchangesAdvance(changes: *mut AMchanges, n: isize) {
 }
 
 /// \memberof AMchanges
-/// \brief Compares two change sequences for equality.
+/// \brief Tests the equality of two sequences of changes underlying a pair
+///        of iterators.
 ///
 /// \param[in] changes1 A pointer to an `AMchanges` struct.
 /// \param[in] changes2 A pointer to an `AMchanges` struct.
@@ -143,8 +144,8 @@ pub unsafe extern "C" fn AMchangesEqual(
 }
 
 /// \memberof AMchanges
-/// \brief Gets a pointer to the `AMchange` struct at the current position of
-///        an `AMchanges`struct and then advances/rewinds it by at most \p |n|
+/// \brief Gets the change at the current position of an iterator over a
+///        sequence of changes and then advances/rewinds it by at most \p |n|
 ///        positions.
 ///
 /// \param[in] changes A pointer to an `AMchanges` struct.
@@ -168,9 +169,8 @@ pub unsafe extern "C" fn AMchangesNext(changes: *mut AMchanges, n: isize) -> *co
 }
 
 /// \memberof AMchanges
-/// \brief Advances/rewinds an `AMchanges` struct by at most \p |n|
-///        positions and then gets a pointer to the `AMchange` struct at its
-///        current position.
+/// \brief Advances/rewinds an iterator over a sequence of changes by at most
+///        \p |n| positions and then gets the change at its current position.
 ///
 /// \param[in] changes A pointer to an `AMchanges` struct.
 /// \param[in] n The direction (\p -n -> backward, \p +n -> forward) and maximum
@@ -193,7 +193,7 @@ pub unsafe extern "C" fn AMchangesPrev(changes: *mut AMchanges, n: isize) -> *co
 }
 
 /// \memberof AMchanges
-/// \brief Gets the size of an `AMchanges` struct.
+/// \brief Gets the size of the sequence of changes underlying an iterator.
 ///
 /// \param[in] changes A pointer to an `AMchanges` struct.
 /// \return The count of values in \p changes.

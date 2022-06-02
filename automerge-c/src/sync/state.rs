@@ -54,7 +54,7 @@ impl From<AMsyncState> for *mut AMsyncState {
 }
 
 /// \memberof AMsyncState
-/// \brief Decodes an array of bytes into a synchronizaton state.
+/// \brief Decodes a sequence of bytes into a synchronizaton state.
 ///
 /// \param[in] src A pointer to an array of bytes.
 /// \param[in] count The number of bytes in \p src to decode.
@@ -63,7 +63,7 @@ impl From<AMsyncState> for *mut AMsyncState {
 /// \pre \p src must be a valid address.
 /// \pre `0 <=` \p count `<=` length of \p src.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -76,14 +76,14 @@ pub unsafe extern "C" fn AMsyncStateDecode(src: *const u8, count: usize) -> *mut
 }
 
 /// \memberof AMsyncState
-/// \brief Encodes a synchronizaton state as an array of bytes.
+/// \brief Encodes a synchronizaton state as a sequence of bytes.
 ///
 /// \param[in] sync_state A pointer to an `AMsyncState` struct.
 /// \return A pointer to an `AMresult` struct containing an array of bytes as
 ///         an `AMbyteSpan` struct.
 /// \pre \p sync_state must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -95,7 +95,7 @@ pub unsafe extern "C" fn AMsyncStateEncode(sync_state: *const AMsyncState) -> *m
 }
 
 /// \memberof AMsyncState
-/// \brief Compares two synchronization states for equality.
+/// \brief Tests the equality of two synchronization states.
 ///
 /// \param[in] sync_state1 A pointer to an `AMsyncState` struct.
 /// \param[in] sync_state2 A pointer to an `AMsyncState` struct.
@@ -119,33 +119,16 @@ pub unsafe extern "C" fn AMsyncStateEqual(
 }
 
 /// \memberof AMsyncState
-/// \brief Deallocates the storage for an `AMsyncState` struct previously
-///        allocated by `AMsyncStateInit()`.
-///
-/// \param[in] sync_state A pointer to an `AMsyncState` struct.
-/// \pre \p sync_state must be a valid address.
-/// \internal
-///
-/// # Safety
-/// sync_state must be a pointer to a valid AMsyncState
-#[no_mangle]
-pub unsafe extern "C" fn AMsyncStateFree(sync_state: *mut AMsyncState) {
-    if !sync_state.is_null() {
-        let sync_state: AMsyncState = *Box::from_raw(sync_state);
-        drop(sync_state)
-    }
-}
-
-/// \memberof AMsyncState
-/// \brief Allocates a new `AMsyncState` struct and initializes it with
+/// \brief Allocates a new synchronization state and initializes it with
 ///        defaults.
 ///
-/// \return A pointer to an `AMsyncState` struct.
-/// \warning To avoid a memory leak, the returned `AMsyncState` struct must be
-///          deallocated with `AMsyncStateFree()`.
+/// \return A pointer to an `AMresult` struct containing a pointer to an
+///         `AMsyncState` struct.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfree()`.
 #[no_mangle]
-pub extern "C" fn AMsyncStateInit() -> *mut AMsyncState {
-    AMsyncState::new(am::sync::State::new()).into()
+pub extern "C" fn AMsyncStateInit() -> *mut AMresult {
+    to_result(am::sync::State::new())
 }
 
 /// \memberof AMsyncState
