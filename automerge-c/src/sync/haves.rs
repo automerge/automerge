@@ -33,7 +33,7 @@ impl AMsyncHaves {
     pub fn advance(&mut self, n: isize) {
         let len = self.len as isize;
         if n != 0 && self.offset >= -len && self.offset < len {
-            // It's being advanced and it's hasn't stopped.
+            // It's being advanced and its hasn't stopped.
             self.offset = std::cmp::max(-(len + 1), std::cmp::min(self.offset + n, len));
         };
     }
@@ -100,8 +100,8 @@ impl Default for AMsyncHaves {
 }
 
 /// \memberof AMsyncHaves
-/// \brief Advances/rewinds an `AMsyncHaves` struct by at most \p |n|
-/// positions.
+/// \brief Advances/rewinds an iterator over a sequence of synchronization
+///        haves by at most \p |n| positions.
 ///
 /// \param[in] sync_haves A pointer to an `AMsyncHaves` struct.
 /// \param[in] n The direction (\p -n -> backward, \p +n -> forward) and maximum
@@ -119,15 +119,40 @@ pub unsafe extern "C" fn AMsyncHavesAdvance(sync_haves: *mut AMsyncHaves, n: isi
 }
 
 /// \memberof AMsyncHaves
-/// \brief Gets a pointer to the `AMsyncHave` struct at the current position of
-///        an `AMsyncHaves`struct and then advances/rewinds it by at most \p |n|
-///        positions.
+/// \brief Tests the equality of two sequences of synchronization haves
+///        underlying a pair of iterators.
+///
+/// \param[in] sync_haves1 A pointer to an `AMsyncHaves` struct.
+/// \param[in] sync_haves2 A pointer to an `AMsyncHaves` struct.
+/// \return `true` if \p sync_haves1 `==` \p sync_haves2 and `false` otherwise.
+/// \pre \p sync_haves1 must be a valid address.
+/// \pre \p sync_haves2 must be a valid address.
+/// \internal
+///
+/// #Safety
+/// sync_haves1 must be a pointer to a valid AMsyncHaves
+/// sync_haves2 must be a pointer to a valid AMsyncHaves
+#[no_mangle]
+pub unsafe extern "C" fn AMsyncHavesEqual(
+    sync_haves1: *const AMsyncHaves,
+    sync_haves2: *const AMsyncHaves,
+) -> bool {
+    match (sync_haves1.as_ref(), sync_haves2.as_ref()) {
+        (Some(sync_haves1), Some(sync_haves2)) => sync_haves1.as_ref() == sync_haves2.as_ref(),
+        (None, Some(_)) | (Some(_), None) | (None, None) => false,
+    }
+}
+
+/// \memberof AMsyncHaves
+/// \brief Gets the synchronization have at the current position of an iterator
+///        over a sequence of synchronization haves and then advances/rewinds
+///        it by at most \p |n| positions.
 ///
 /// \param[in] sync_haves A pointer to an `AMsyncHaves` struct.
 /// \param[in] n The direction (\p -n -> backward, \p +n -> forward) and maximum
 ///              number of positions to advance/rewind.
-/// \return A pointer to an `AMsyncHave` struct that's `NULL` when \p sync_haves
-///         was previously advanced/rewound past its
+/// \return A pointer to an `AMsyncHave` struct that's `NULL` when
+///         \p sync_haves was previously advanced/rewound past its
 ///         forward/backward limit.
 /// \pre \p sync_haves must be a valid address.
 /// \internal
@@ -148,9 +173,9 @@ pub unsafe extern "C" fn AMsyncHavesNext(
 }
 
 /// \memberof AMsyncHaves
-/// \brief Advances/rewinds an `AMsyncHaves` struct by at most \p |n|
-///        positions and then gets a pointer to the `AMsyncHave` struct at its
-///        current position.
+/// \brief Advances/rewinds an iterator over a sequence of synchronization
+///        haves by at most \p |n| positions and then gets the synchronization
+///        have at its current position.
 ///
 /// \param[in] sync_haves A pointer to an `AMsyncHaves` struct.
 /// \param[in] n The direction (\p -n -> backward, \p +n -> forward) and maximum
@@ -177,7 +202,8 @@ pub unsafe extern "C" fn AMsyncHavesPrev(
 }
 
 /// \memberof AMsyncHaves
-/// \brief Gets the size of an `AMsyncHaves` struct.
+/// \brief Gets the size of the sequence of synchronization haves underlying an
+///        iterator.
 ///
 /// \param[in] sync_haves A pointer to an `AMsyncHaves` struct.
 /// \return The count of values in \p sync_haves.

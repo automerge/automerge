@@ -7,11 +7,12 @@ use crate::byte_span::AMbyteSpan;
 use crate::change::AMchange;
 use crate::change_hashes::AMchangeHashes;
 use crate::changes::AMchanges;
+use crate::doc::AMdoc;
 use crate::obj::AMobjId;
 use crate::sync::{AMsyncMessage, AMsyncState};
 
 /// \struct AMvalue
-/// \brief A discriminated union of value type variants for an `AMresult` struct.
+/// \brief A discriminated union of value type variants for a result.
 ///
 /// \enum AMvalueVariant
 /// \brief A value type discriminant.
@@ -68,6 +69,8 @@ pub enum AMvalue<'a> {
     Changes(AMchanges),
     /// A CRDT counter variant.
     Counter(i64),
+    /// A document variant.
+    Doc(*mut AMdoc),
     /// A 64-bit float variant.
     F64(f64),
     /// A 64-bit signed integer variant.
@@ -104,6 +107,7 @@ pub enum AMresult {
     ActorId(am::ActorId),
     ChangeHashes(Vec<am::ChangeHash>),
     Changes(Vec<am::Change>, BTreeMap<usize, AMchange>),
+    Doc(AMdoc),
     Error(CString),
     ObjId(AMobjId),
     Scalars(Vec<am::Value<'static>>, Option<CString>),
@@ -118,9 +122,21 @@ impl AMresult {
     }
 }
 
+impl From<am::AutoCommit> for AMresult {
+    fn from(auto_commit: am::AutoCommit) -> Self {
+        AMresult::Doc(AMdoc::new(auto_commit))
+    }
+}
+
 impl From<am::ChangeHash> for AMresult {
     fn from(change_hash: am::ChangeHash) -> Self {
         AMresult::ChangeHashes(vec![change_hash])
+    }
+}
+
+impl From<am::sync::State> for AMresult {
+    fn from(state: am::sync::State) -> Self {
+        AMresult::SyncState(AMsyncState::new(state))
     }
 }
 
@@ -154,6 +170,15 @@ impl From<Result<am::ActorId, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<am::ActorId, am::AutomergeError>) -> Self {
         match maybe {
             Ok(actor_id) => AMresult::ActorId(actor_id),
+            Err(e) => AMresult::err(&e.to_string()),
+        }
+    }
+}
+
+impl From<Result<am::AutoCommit, am::AutomergeError>> for AMresult {
+    fn from(maybe: Result<am::AutoCommit, am::AutomergeError>) -> Self {
+        match maybe {
+            Ok(auto_commit) => AMresult::Doc(AMdoc::new(auto_commit)),
             Err(e) => AMresult::err(&e.to_string()),
         }
     }
@@ -302,7 +327,7 @@ pub enum AMstatus {
 }
 
 /// \memberof AMresult
-/// \brief Gets an `AMresult` struct's error message string.
+/// \brief Gets a result's error message string.
 ///
 /// \param[in] result A pointer to an `AMresult` struct.
 /// \return A UTF-8 string value or `NULL`.
@@ -320,7 +345,7 @@ pub unsafe extern "C" fn AMerrorMessage(result: *mut AMresult) -> *const c_char 
 }
 
 /// \memberof AMresult
-/// \brief Deallocates the storage for an `AMresult` struct.
+/// \brief Deallocates the storage for a result.
 ///
 /// \param[in] result A pointer to an `AMresult` struct.
 /// \pre \p result must be a valid address.
@@ -329,7 +354,7 @@ pub unsafe extern "C" fn AMerrorMessage(result: *mut AMresult) -> *const c_char 
 /// # Safety
 /// result must be a pointer to a valid AMresult
 #[no_mangle]
-pub unsafe extern "C" fn AMresultFree(result: *mut AMresult) {
+pub unsafe extern "C" fn AMfree(result: *mut AMresult) {
     if !result.is_null() {
         let result: AMresult = *Box::from_raw(result);
         drop(result)
@@ -337,7 +362,7 @@ pub unsafe extern "C" fn AMresultFree(result: *mut AMresult) {
 }
 
 /// \memberof AMresult
-/// \brief Gets the size of an `AMresult` struct.
+/// \brief Gets the size of a result's value.
 ///
 /// \param[in] result A pointer to an `AMresult` struct.
 /// \return The count of values in \p result.
@@ -350,13 +375,11 @@ pub unsafe extern "C" fn AMresultFree(result: *mut AMresult) {
 pub unsafe extern "C" fn AMresultSize(result: *mut AMresult) -> usize {
     if let Some(result) = result.as_mut() {
         match result {
-            AMresult::ActorId(_) | AMresult::ObjId(_) => 1,
+            AMresult::Error(_) | AMresult::Void => 0,
+            AMresult::ActorId(_) | AMresult::Doc(_) | AMresult::ObjId(_) | AMresult::SyncMessage(_) | AMresult::SyncState(_) => 1,
             AMresult::ChangeHashes(change_hashes) => change_hashes.len(),
             AMresult::Changes(changes, _) => changes.len(),
-            AMresult::Error(_) | AMresult::Void => 0,
             AMresult::Scalars(vec, _) => vec.len(),
-            AMresult::SyncMessage(_) => 1,
-            AMresult::SyncState(_) => 1,
         }
     } else {
         0
@@ -364,7 +387,7 @@ pub unsafe extern "C" fn AMresultSize(result: *mut AMresult) -> usize {
 }
 
 /// \memberof AMresult
-/// \brief Gets the status code of an `AMresult` struct.
+/// \brief Gets the status code of a result.
 ///
 /// \param[in] result A pointer to an `AMresult` struct.
 /// \return An `AMstatus` enum tag.
@@ -383,7 +406,7 @@ pub unsafe extern "C" fn AMresultStatus(result: *mut AMresult) -> AMstatus {
 }
 
 /// \memberof AMresult
-/// \brief Gets a value from an `AMresult` struct.
+/// \brief Gets a result's value.
 ///
 /// \param[in] result A pointer to an `AMresult` struct.
 /// \param[in] index The index of a value.
@@ -409,6 +432,11 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult, index: usize) 
             }
             AMresult::Changes(changes, storage) => {
                 value = AMvalue::Changes(AMchanges::new(changes, storage));
+            }
+            AMresult::Doc(doc) => {
+                if index == 0 {
+                    value = AMvalue::Doc(doc)
+                }
             }
             AMresult::Error(_) => {}
             AMresult::ObjId(obj_id) => {

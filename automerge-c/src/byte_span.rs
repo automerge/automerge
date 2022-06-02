@@ -6,7 +6,7 @@ use automerge as am;
 #[repr(C)]
 pub struct AMbyteSpan {
     /// A pointer to an array of bytes.
-    /// \warning \p src is only valid until the `AMresultFree()` function is
+    /// \warning \p src is only valid until the `AMfree()` function is
     ///          called on the `AMresult` struct hosting the array of bytes to
     ///          which it points.
     src: *const u8,

@@ -16,7 +16,7 @@ use crate::result::{to_result, AMresult};
 /// \pre \p doc must be a valid address.
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj_id.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -42,7 +42,7 @@ pub unsafe extern "C" fn AMlistDelete(
 /// \pre \p doc must be a valid address.
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj_id.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -70,7 +70,7 @@ pub unsafe extern "C" fn AMlistGet(
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -95,7 +95,7 @@ pub unsafe extern "C" fn AMlistPutBool(
 }
 
 /// \memberof AMdoc
-/// \brief Puts an array of bytes as the value at an index in a list object.
+/// \brief Puts a sequence of bytes as the value at an index in a list object.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
@@ -110,7 +110,7 @@ pub unsafe extern "C" fn AMlistPutBool(
 /// \pre \p value must be a valid address.
 /// \pre `0 <=` \p count `<=` length of \p value.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -150,7 +150,7 @@ pub unsafe extern "C" fn AMlistPutBytes(
 /// \pre \p doc must be a valid address.
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj_id.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -187,7 +187,7 @@ pub unsafe extern "C" fn AMlistPutCounter(
 /// \pre \p doc must be a valid address.
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj_id.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -223,7 +223,7 @@ pub unsafe extern "C" fn AMlistPutF64(
 /// \pre \p doc must be a valid address.
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj_id.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -258,7 +258,7 @@ pub unsafe extern "C" fn AMlistPutInt(
 /// \pre \p doc must be a valid address.
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj_id.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -294,7 +294,7 @@ pub unsafe extern "C" fn AMlistPutNull(
 /// \pre \p doc must be a valid address.
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj_id.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -332,7 +332,7 @@ pub unsafe extern "C" fn AMlistPutObject(
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj_id.
 /// \pre \p value must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -370,7 +370,7 @@ pub unsafe extern "C" fn AMlistPutStr(
 /// \pre \p doc must be a valid address.
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj_id.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -407,7 +407,7 @@ pub unsafe extern "C" fn AMlistPutTimestamp(
 /// \pre \p doc must be a valid address.
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj_id.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety

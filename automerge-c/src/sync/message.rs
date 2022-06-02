@@ -68,7 +68,7 @@ pub unsafe extern "C" fn AMsyncMessageChanges(sync_message: *const AMsyncMessage
 }
 
 /// \memberof AMsyncMessage
-/// \brief Decodes an array of bytes into a synchronization message.
+/// \brief Decodes a sequence of bytes into a synchronization message.
 ///
 /// \param[in] src A pointer to an array of bytes.
 /// \param[in] count The number of bytes in \p src to decode.
@@ -77,7 +77,7 @@ pub unsafe extern "C" fn AMsyncMessageChanges(sync_message: *const AMsyncMessage
 /// \pre \p src must be a valid address.
 /// \pre `0 <=` \p count `<=` length of \p src.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
@@ -90,14 +90,14 @@ pub unsafe extern "C" fn AMsyncMessageDecode(src: *const u8, count: usize) -> *m
 }
 
 /// \memberof AMsyncMessage
-/// \brief Encodes a synchronization message as an array of bytes.
+/// \brief Encodes a synchronization message as a sequence of bytes.
 ///
 /// \param[in] sync_message A pointer to an `AMsyncMessage` struct.
 /// \return A pointer to an `AMresult` struct containing an array of bytes as
 ///         an `AMbyteSpan` struct.
 /// \pre \p sync_message must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMresultFree()`.
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
