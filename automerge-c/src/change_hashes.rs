@@ -1,81 +1,125 @@
 use automerge as am;
 use std::cmp::Ordering;
 use std::ffi::c_void;
+use std::mem::size_of;
 
 use crate::byte_span::AMbyteSpan;
+
+#[repr(C)]
+struct Detail {
+    len: usize,
+    offset: isize,
+}
+
+/// \note cbindgen won't propagate the value of a `std::mem::size_of<T>()` call
+///       (https://github.com/eqrion/cbindgen/issues/252) but it will
+///       propagate the name of a constant initialized from it so if the
+///       constant's name is a symbolic representation of the value it can be
+///       converted into a number by post-processing the header it generated.
+pub const USIZE_USIZE_: usize = size_of::<Detail>();
+
+impl Detail {
+    fn new(len: usize, offset: isize) -> Self {
+        Self { len, offset }
+    }
+}
+
+impl From<Detail> for [u8; USIZE_USIZE_] {
+    fn from(detail: Detail) -> Self {
+        unsafe {
+            std::slice::from_raw_parts((&detail as *const Detail) as *const u8, USIZE_USIZE_)
+                .try_into()
+                .unwrap()
+        }
+    }
+}
 
 /// \struct AMchangeHashes
 /// \brief A bidirectional iterator over a sequence of change hashes.
 #[repr(C)]
 pub struct AMchangeHashes {
-    /// The length of the sequence.
-    len: usize,
-    /// The offset from \p ptr, \p +offset -> forward direction,
-    /// \p -offset -> reverse direction.
-    offset: isize,
     /// A pointer to the first change hash or `NULL`.
     ptr: *const c_void,
+    /// Reserved.
+    detail: [u8; USIZE_USIZE_],
 }
 
 impl AMchangeHashes {
     pub fn new(change_hashes: &[am::ChangeHash]) -> Self {
         Self {
-            len: change_hashes.len(),
-            offset: 0,
             ptr: change_hashes.as_ptr() as *const c_void,
+            detail: Detail::new(change_hashes.len(), 0).into(),
         }
     }
 
     pub fn advance(&mut self, n: isize) {
-        let len = self.len as isize;
-        if n != 0 && self.offset >= -len && self.offset < len {
-            // It's being advanced and it's hasn't stopped.
-            self.offset = std::cmp::max(-(len + 1), std::cmp::min(self.offset + n, len));
+        let detail = unsafe { &mut *(self.detail.as_mut_ptr() as *mut Detail) };
+        let len = detail.len as isize;
+        if n != 0 && detail.offset >= -len && detail.offset < len {
+            // It's being advanced and it hasn't stopped.
+            detail.offset = std::cmp::max(-(len + 1), std::cmp::min(detail.offset + n, len));
         };
     }
 
+    pub fn len(&self) -> usize {
+        let detail = unsafe { &*(self.detail.as_ptr() as *const Detail) };
+        detail.len
+    }
+
     pub fn next(&mut self, n: isize) -> Option<&am::ChangeHash> {
-        let len = self.len as isize;
-        if self.offset < -len || self.offset == len {
+        let detail = unsafe { &mut *(self.detail.as_mut_ptr() as *mut Detail) };
+        let len = detail.len as isize;
+        if detail.offset < -len || detail.offset == len {
             // It's stopped.
             None
         } else {
-            let slice =
-                unsafe { std::slice::from_raw_parts(self.ptr as *const am::ChangeHash, self.len) };
-            let index = (self.offset + if self.offset < 0 { len } else { 0 }) as usize;
-            let element = Some(&slice[index]);
+            let slice: &[am::ChangeHash] = unsafe {
+                std::slice::from_raw_parts(self.ptr as *const am::ChangeHash, detail.len)
+            };
+            let index = (detail.offset + if detail.offset < 0 { len } else { 0 }) as usize;
+            let value = &slice[index];
             self.advance(n);
-            element
+            Some(value)
         }
     }
 
     pub fn prev(&mut self, n: isize) -> Option<&am::ChangeHash> {
         self.advance(n);
-        let len = self.len as isize;
-        if self.offset < -len || self.offset == len {
+        let detail = unsafe { &mut *(self.detail.as_mut_ptr() as *mut Detail) };
+        let len = detail.len as isize;
+        if detail.offset < -len || detail.offset == len {
             // It's stopped.
             None
         } else {
-            let slice =
-                unsafe { std::slice::from_raw_parts(self.ptr as *const am::ChangeHash, self.len) };
-            let index = (self.offset + if self.offset < 0 { len } else { 0 }) as usize;
+            let slice: &[am::ChangeHash] = unsafe {
+                std::slice::from_raw_parts(self.ptr as *const am::ChangeHash, detail.len)
+            };
+            let index = (detail.offset + if detail.offset < 0 { len } else { 0 }) as usize;
             Some(&slice[index])
+        }
+    }
+
+    pub fn reverse(&self) -> Self {
+        let detail = unsafe { &*(self.detail.as_ptr() as *const Detail) };
+        Self {
+            ptr: self.ptr,
+            detail: Detail::new(detail.len, -(detail.offset + 1)).into(),
         }
     }
 }
 
 impl AsRef<[am::ChangeHash]> for AMchangeHashes {
     fn as_ref(&self) -> &[am::ChangeHash] {
-        unsafe { std::slice::from_raw_parts(self.ptr as *const am::ChangeHash, self.len) }
+        let detail = unsafe { &*(self.detail.as_ptr() as *const Detail) };
+        unsafe { std::slice::from_raw_parts(self.ptr as *const am::ChangeHash, detail.len) }
     }
 }
 
 impl Default for AMchangeHashes {
     fn default() -> Self {
         Self {
-            len: 0,
-            offset: 0,
             ptr: std::ptr::null(),
+            detail: [0; USIZE_USIZE_],
         }
     }
 }
@@ -170,8 +214,8 @@ pub unsafe extern "C" fn AMchangeHashesNext(
 /// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \param[in] n The direction (\p -n -> backward, \p +n -> forward) and maximum
 ///              number of positions to advance/rewind.
-/// \return An `AMbyteSpan` struct that's null when \p change_hashes is
-///         presently advanced/rewound past its forward/backward limit.
+/// \return An `AMbyteSpan` struct with `.src == NULL` when \p change_hashes
+///         is presently advanced/rewound past its forward/backward limit.
 /// \pre \p change_hashes must be a valid address.
 /// \internal
 ///
@@ -204,8 +248,29 @@ pub unsafe extern "C" fn AMchangeHashesPrev(
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeHashesSize(change_hashes: *const AMchangeHashes) -> usize {
     if let Some(change_hashes) = change_hashes.as_ref() {
-        change_hashes.len
+        change_hashes.len()
     } else {
         0
+    }
+}
+
+/// \memberof AMchangeHashes
+/// \brief Creates a reversed copy of a change hashes iterator.
+///
+/// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
+/// \return An `AMchangeHashes` struct
+/// \pre \p change_hashes must be a valid address.
+/// \internal
+///
+/// #Safety
+/// change_hashes must be a pointer to a valid AMchangeHashes
+#[no_mangle]
+pub unsafe extern "C" fn AMchangeHashesReverse(
+    change_hashes: *const AMchangeHashes,
+) -> AMchangeHashes {
+    if let Some(change_hashes) = change_hashes.as_ref() {
+        change_hashes.reverse()
+    } else {
+        AMchangeHashes::default()
     }
 }
