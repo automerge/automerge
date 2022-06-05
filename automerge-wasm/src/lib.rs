@@ -454,11 +454,7 @@ impl Automerge {
             let patch = Array::new();
             match p {
                 Patch::Put {
-                    obj,
-                    path,
-                    key,
-                    value,
-                    conflict,
+                    path, key, value, ..
                 } => {
                     js_set(&patch, "action", "put")?;
                     //js_set(&patch, "obj", obj.to_string())?;
@@ -478,10 +474,7 @@ impl Automerge {
                 }
 
                 Patch::Insert {
-                    obj,
-                    path,
-                    index,
-                    value,
+                    path, index, value, ..
                 } => {
                     js_set(&patch, "action", "insert")?;
                     //js_set(&patch, "obj", obj.to_string())?;
@@ -500,10 +493,7 @@ impl Automerge {
                 }
 
                 Patch::Increment {
-                    obj,
-                    path,
-                    key,
-                    value,
+                    path, key, value, ..
                 } => {
                     js_set(&patch, "action", "increment")?;
                     //js_set(&patch, "obj", obj.to_string())?;
@@ -512,7 +502,7 @@ impl Automerge {
                     js_set(&patch, "value", value.0 as f64)?;
                 }
 
-                Patch::Delete { obj, path, key } => {
+                Patch::Delete { path, key, .. } => {
                     js_set(&patch, "action", "delete")?;
                     //js_set(&patch, "obj", obj.to_string())?;
                     js_set(&patch, "path", export_path(path, key))?;

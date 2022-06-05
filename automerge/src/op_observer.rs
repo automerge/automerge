@@ -1,5 +1,5 @@
 use crate::exid::ExId;
-use crate::path::Path;
+use crate::parents::Parents;
 use crate::Prop;
 use crate::Value;
 
@@ -11,7 +11,13 @@ pub trait OpObserver {
     /// - `index`: the index the new value has been inserted at.
     /// - `tagged_value`: the value that has been inserted and the id of the operation that did the
     /// insert.
-    fn insert(&mut self, obj: ExId, path: Path<'_>, index: usize, tagged_value: (Value<'_>, ExId));
+    fn insert(
+        &mut self,
+        obj: ExId,
+        parents: Parents<'_>,
+        index: usize,
+        tagged_value: (Value<'_>, ExId),
+    );
 
     /// A new value has been put into the given object.
     ///
@@ -23,7 +29,7 @@ pub trait OpObserver {
     fn put(
         &mut self,
         obj: ExId,
-        path: Path<'_>,
+        parents: Parents<'_>,
         key: Prop,
         tagged_value: (Value<'_>, ExId),
         conflict: bool,
@@ -35,20 +41,20 @@ pub trait OpObserver {
     /// - `key`: they key that the chounter is at.
     /// - `tagged_value`: the amount the counter has been incremented by, and the the id of the
     /// increment operation.
-    fn increment(&mut self, obj: ExId, path: Path<'_>, key: Prop, tagged_value: (i64, ExId));
+    fn increment(&mut self, obj: ExId, parents: Parents<'_>, key: Prop, tagged_value: (i64, ExId));
 
     /// A value has beeen deleted.
     ///
     /// - `obj`: the object that has been deleted in.
     /// - `key`: the key of the value that has been deleted.
-    fn delete(&mut self, obj: ExId, path: Path<'_>, key: Prop);
+    fn delete(&mut self, obj: ExId, parents: Parents<'_>, key: Prop);
 }
 
 impl OpObserver for () {
     fn insert(
         &mut self,
         _obj: ExId,
-        _path: Path<'_>,
+        _parents: Parents<'_>,
         _index: usize,
         _tagged_value: (Value<'_>, ExId),
     ) {
@@ -57,16 +63,23 @@ impl OpObserver for () {
     fn put(
         &mut self,
         _obj: ExId,
-        _path: Path<'_>,
+        _parents: Parents<'_>,
         _key: Prop,
         _tagged_value: (Value<'_>, ExId),
         _conflict: bool,
     ) {
     }
 
-    fn increment(&mut self, _obj: ExId, _path: Path<'_>, _key: Prop, _tagged_value: (i64, ExId)) {}
+    fn increment(
+        &mut self,
+        _obj: ExId,
+        _parents: Parents<'_>,
+        _key: Prop,
+        _tagged_value: (i64, ExId),
+    ) {
+    }
 
-    fn delete(&mut self, _obj: ExId, _path: Path<'_>, _key: Prop) {}
+    fn delete(&mut self, _obj: ExId, _parents: Parents<'_>, _key: Prop) {}
 }
 
 /// Capture operations into a [`Vec`] and store them as patches.
@@ -87,11 +100,11 @@ impl OpObserver for VecOpObserver {
     fn insert(
         &mut self,
         obj_id: ExId,
-        path: Path<'_>,
+        parents: Parents<'_>,
         index: usize,
         (value, id): (Value<'_>, ExId),
     ) {
-        let mut path = path.collect::<Vec<_>>();
+        let mut path = parents.collect::<Vec<_>>();
         path.reverse();
         self.patches.push(Patch::Insert {
             obj: obj_id,
@@ -104,12 +117,12 @@ impl OpObserver for VecOpObserver {
     fn put(
         &mut self,
         obj: ExId,
-        path: Path<'_>,
+        parents: Parents<'_>,
         key: Prop,
         (value, id): (Value<'_>, ExId),
         conflict: bool,
     ) {
-        let mut path = path.collect::<Vec<_>>();
+        let mut path = parents.collect::<Vec<_>>();
         path.reverse();
         self.patches.push(Patch::Put {
             obj,
@@ -120,8 +133,8 @@ impl OpObserver for VecOpObserver {
         });
     }
 
-    fn increment(&mut self, obj: ExId, path: Path<'_>, key: Prop, tagged_value: (i64, ExId)) {
-        let mut path = path.collect::<Vec<_>>();
+    fn increment(&mut self, obj: ExId, parents: Parents<'_>, key: Prop, tagged_value: (i64, ExId)) {
+        let mut path = parents.collect::<Vec<_>>();
         path.reverse();
         self.patches.push(Patch::Increment {
             obj,
@@ -131,8 +144,8 @@ impl OpObserver for VecOpObserver {
         });
     }
 
-    fn delete(&mut self, obj: ExId, path: Path<'_>, key: Prop) {
-        let mut path = path.collect::<Vec<_>>();
+    fn delete(&mut self, obj: ExId, parents: Parents<'_>, key: Prop) {
+        let mut path = parents.collect::<Vec<_>>();
         path.reverse();
         self.patches.push(Patch::Delete { obj, path, key })
     }
@@ -145,7 +158,7 @@ pub enum Patch {
     Put {
         /// The object that was put into.
         obj: ExId,
-        path: Vec<Prop>,
+        path: Vec<(ExId, Prop)>,
         /// The key that the new value was put at.
         key: Prop,
         /// The value that was put, and the id of the operation that put it there.
@@ -157,7 +170,7 @@ pub enum Patch {
     Insert {
         /// The object that was inserted into.
         obj: ExId,
-        path: Vec<Prop>,
+        path: Vec<(ExId, Prop)>,
         /// The index that the new value was inserted at.
         index: usize,
         /// The value that was inserted, and the id of the operation that inserted it there.
@@ -167,7 +180,7 @@ pub enum Patch {
     Increment {
         /// The object that was incremented in.
         obj: ExId,
-        path: Vec<Prop>,
+        path: Vec<(ExId, Prop)>,
         /// The key that was incremented.
         key: Prop,
         /// The amount that the counter was incremented by, and the id of the operation that
@@ -178,7 +191,7 @@ pub enum Patch {
     Delete {
         /// The object that was deleted from.
         obj: ExId,
-        path: Vec<Prop>,
+        path: Vec<(ExId, Prop)>,
         /// The key that was deleted.
         key: Prop,
     },

@@ -240,7 +240,7 @@ impl Automerge {
 
     /// Get an iterator over the parents of an object.
     pub fn parents(&self, obj: ExId) -> Parents<'_> {
-        Parents { obj, doc: self }
+        self.ops.parents(&obj)
     }
 
     pub fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Vec<(ExId, Prop)> {
@@ -416,25 +416,7 @@ impl Automerge {
     }
 
     pub(crate) fn exid_to_obj(&self, id: &ExId) -> Result<ObjId, AutomergeError> {
-        match id {
-            ExId::Root => Ok(ObjId::root()),
-            ExId::Id(ctr, actor, idx) => {
-                // do a direct get here b/c this could be foriegn and not be within the array
-                // bounds
-                if self.ops.m.actors.cache.get(*idx) == Some(actor) {
-                    Ok(ObjId(OpId(*ctr, *idx)))
-                } else {
-                    // FIXME - make a real error
-                    let idx = self
-                        .ops
-                        .m
-                        .actors
-                        .lookup(actor)
-                        .ok_or(AutomergeError::Fail)?;
-                    Ok(ObjId(OpId(*ctr, idx)))
-                }
-            }
-        }
+        self.ops.exid_to_obj(id)
     }
 
     pub(crate) fn id_to_exid(&self, id: OpId) -> ExId {

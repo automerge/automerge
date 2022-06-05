@@ -1,9 +1,11 @@
-use crate::{exid::ExId, Automerge, Prop};
+use crate::exid::ExId;
+use crate::op_set::OpSet;
+use crate::Prop;
 
 #[derive(Debug)]
 pub struct Parents<'a> {
     pub(crate) obj: ExId,
-    pub(crate) doc: &'a Automerge,
+    pub(crate) doc: &'a OpSet,
 }
 
 impl<'a> Iterator for Parents<'a> {

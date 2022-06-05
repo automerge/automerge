@@ -59,9 +59,6 @@ function applyPatchToArray(obj: Array<any>, prop: number, path: Prop[], patch: a
       case "insert":
         return [ ... obj.slice(0,prop), patchValue(patch), ... obj.slice(prop) ]
       case "delete":
-        console.log("obj=", obj)
-        let tmp = [... obj.slice(0,prop), ... obj.slice(prop + 1) ]
-        console.log("tmp=", tmp)
         return [... obj.slice(0,prop), ... obj.slice(prop + 1) ]
       default: 
         throw new RangeError(`Invalid patch ${patch}`)
@@ -73,8 +70,11 @@ function applyPatchToArray(obj: Array<any>, prop: number, path: Prop[], patch: a
 
 function applyPatches(obj: any, patches: any) {
   for (let patch of patches) {
+    console.log("obj",obj)
+    console.log("patch",patch)
     obj = applyPatch(obj, patch.path, patch)
   }
+  console.log("obj",obj)
   return obj
 }
 
@@ -97,7 +97,6 @@ describe('Automerge', () => {
       doc1.increment("/list", 6, 10);
       let sublist = doc1.putObject("/sub", "list", [1,2,3,4,[ 1,2,3,[4,{ five: "six" } ] ] ])
       doc1.put(sub, "str", "value")
-      //doc1.delete("/sub/list", 0)
       doc1.put("/sub", "num", 0)
       doc1.put("/sub", "bin", new Uint8Array([1,2,3]))
       doc1.put("/sub", "bool", true)
@@ -105,6 +104,16 @@ describe('Automerge', () => {
       doc1.put("/sub/sub", "num", 0)
       doc1.put("/sub/sub", "bin", new Uint8Array([1,2,3]))
       doc1.put("/sub/sub", "bool", true)
+      let patches = doc1.popPatches()
+      let js = applyPatches({}, patches)
+      assert.deepEqual(js,doc1.materialize("/"))
+    })
+    it.only('can handle deletes with nested patches', () => {
+      const doc1 = create()
+      doc1.enablePatches(true)
+      let list = doc1.putObject("/", "list", [1,2,3,['a','b','c']])
+      //doc1.delete("/list", 1);
+      doc1.push("/list", 'hello');
       let patches = doc1.popPatches()
       let js = applyPatches({}, patches)
       assert.deepEqual(js,doc1.materialize("/"))
