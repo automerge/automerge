@@ -9,6 +9,7 @@ use crate::byte_span::AMbyteSpan;
 struct Detail {
     len: usize,
     offset: isize,
+    ptr: *const c_void,
 }
 
 /// \note cbindgen won't propagate the value of a `std::mem::size_of<T>()` call
@@ -16,18 +17,73 @@ struct Detail {
 ///       propagate the name of a constant initialized from it so if the
 ///       constant's name is a symbolic representation of the value it can be
 ///       converted into a number by post-processing the header it generated.
-pub const USIZE_USIZE_: usize = size_of::<Detail>();
+pub const USIZE_USIZE_USIZE_: usize = size_of::<Detail>();
 
 impl Detail {
-    fn new(len: usize, offset: isize) -> Self {
-        Self { len, offset }
+    fn new(change_hashes: &[am::ChangeHash], offset: isize) -> Self {
+        Self {
+            len: change_hashes.len(),
+            offset,
+            ptr: change_hashes.as_ptr() as *const c_void,
+        }
+    }
+
+    pub fn advance(&mut self, n: isize) {
+        if n != 0 && !self.is_stopped() {
+            let n = if self.offset < 0 { -n } else { n };
+            let len = self.len as isize;
+            self.offset = std::cmp::max(-(len + 1), std::cmp::min(self.offset + n, len));
+        };
+    }
+
+    pub fn get_index(&self) -> usize {
+        (self.offset
+            + if self.offset < 0 {
+                self.len as isize
+            } else {
+                0
+            }) as usize
+    }
+
+    pub fn next(&mut self, n: isize) -> Option<&am::ChangeHash> {
+        if self.is_stopped() {
+            return None;
+        }
+        let slice: &[am::ChangeHash] =
+            unsafe { std::slice::from_raw_parts(self.ptr as *const am::ChangeHash, self.len) };
+        let value = &slice[self.get_index()];
+        self.advance(n);
+        Some(value)
+    }
+
+    pub fn is_stopped(&self) -> bool {
+        let len = self.len as isize;
+        self.offset < -len || self.offset == len
+    }
+
+    pub fn prev(&mut self, n: isize) -> Option<&am::ChangeHash> {
+        self.advance(n);
+        if self.is_stopped() {
+            return None;
+        }
+        let slice: &[am::ChangeHash] =
+            unsafe { std::slice::from_raw_parts(self.ptr as *const am::ChangeHash, self.len) };
+        Some(&slice[self.get_index()])
+    }
+
+    pub fn reversed(&self) -> Self {
+        Self {
+            len: self.len,
+            offset: -(self.offset + 1),
+            ptr: self.ptr,
+        }
     }
 }
 
-impl From<Detail> for [u8; USIZE_USIZE_] {
+impl From<Detail> for [u8; USIZE_USIZE_USIZE_] {
     fn from(detail: Detail) -> Self {
         unsafe {
-            std::slice::from_raw_parts((&detail as *const Detail) as *const u8, USIZE_USIZE_)
+            std::slice::from_raw_parts((&detail as *const Detail) as *const u8, USIZE_USIZE_USIZE_)
                 .try_into()
                 .unwrap()
         }
@@ -35,30 +91,23 @@ impl From<Detail> for [u8; USIZE_USIZE_] {
 }
 
 /// \struct AMchangeHashes
-/// \brief A bidirectional iterator over a sequence of change hashes.
+/// \brief A random-access iterator over a sequence of change hashes.
 #[repr(C)]
 pub struct AMchangeHashes {
-    /// A pointer to the first change hash or `NULL`.
-    ptr: *const c_void,
     /// Reserved.
-    detail: [u8; USIZE_USIZE_],
+    detail: [u8; USIZE_USIZE_USIZE_],
 }
 
 impl AMchangeHashes {
     pub fn new(change_hashes: &[am::ChangeHash]) -> Self {
         Self {
-            ptr: change_hashes.as_ptr() as *const c_void,
-            detail: Detail::new(change_hashes.len(), 0).into(),
+            detail: Detail::new(change_hashes, 0).into(),
         }
     }
 
     pub fn advance(&mut self, n: isize) {
         let detail = unsafe { &mut *(self.detail.as_mut_ptr() as *mut Detail) };
-        let len = detail.len as isize;
-        if n != 0 && detail.offset >= -len && detail.offset < len {
-            // It's being advanced and it hasn't stopped.
-            detail.offset = std::cmp::max(-(len + 1), std::cmp::min(detail.offset + n, len));
-        };
+        detail.advance(n);
     }
 
     pub fn len(&self) -> usize {
@@ -68,42 +117,18 @@ impl AMchangeHashes {
 
     pub fn next(&mut self, n: isize) -> Option<&am::ChangeHash> {
         let detail = unsafe { &mut *(self.detail.as_mut_ptr() as *mut Detail) };
-        let len = detail.len as isize;
-        if detail.offset < -len || detail.offset == len {
-            // It's stopped.
-            None
-        } else {
-            let slice: &[am::ChangeHash] = unsafe {
-                std::slice::from_raw_parts(self.ptr as *const am::ChangeHash, detail.len)
-            };
-            let index = (detail.offset + if detail.offset < 0 { len } else { 0 }) as usize;
-            let value = &slice[index];
-            self.advance(n);
-            Some(value)
-        }
+        detail.next(n)
     }
 
     pub fn prev(&mut self, n: isize) -> Option<&am::ChangeHash> {
-        self.advance(n);
         let detail = unsafe { &mut *(self.detail.as_mut_ptr() as *mut Detail) };
-        let len = detail.len as isize;
-        if detail.offset < -len || detail.offset == len {
-            // It's stopped.
-            None
-        } else {
-            let slice: &[am::ChangeHash] = unsafe {
-                std::slice::from_raw_parts(self.ptr as *const am::ChangeHash, detail.len)
-            };
-            let index = (detail.offset + if detail.offset < 0 { len } else { 0 }) as usize;
-            Some(&slice[index])
-        }
+        detail.prev(n)
     }
 
-    pub fn reverse(&self) -> Self {
+    pub fn reversed(&self) -> Self {
         let detail = unsafe { &*(self.detail.as_ptr() as *const Detail) };
         Self {
-            ptr: self.ptr,
-            detail: Detail::new(detail.len, -(detail.offset + 1)).into(),
+            detail: detail.reversed().into(),
         }
     }
 }
@@ -111,26 +136,26 @@ impl AMchangeHashes {
 impl AsRef<[am::ChangeHash]> for AMchangeHashes {
     fn as_ref(&self) -> &[am::ChangeHash] {
         let detail = unsafe { &*(self.detail.as_ptr() as *const Detail) };
-        unsafe { std::slice::from_raw_parts(self.ptr as *const am::ChangeHash, detail.len) }
+        unsafe { std::slice::from_raw_parts(detail.ptr as *const am::ChangeHash, detail.len) }
     }
 }
 
 impl Default for AMchangeHashes {
     fn default() -> Self {
         Self {
-            ptr: std::ptr::null(),
-            detail: [0; USIZE_USIZE_],
+            detail: [0; USIZE_USIZE_USIZE_],
         }
     }
 }
 
 /// \memberof AMchangeHashes
-/// \brief Advances/rewinds an iterator over a sequence of change hashes by at
-///        most \p |n| positions.
+/// \brief Advances an iterator over a sequence of change hashes by at most
+///        \p |n| positions where the sign of \p n is relative to the
+///        iterator's direction.
 ///
 /// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
-/// \param[in] n The direction (\p -n -> backward, \p +n -> forward) and maximum
-///              number of positions to advance/rewind.
+/// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
+///              number of positions to advance.
 /// \pre \p change_hashes must be a valid address.
 /// \internal
 ///
@@ -179,15 +204,16 @@ pub unsafe extern "C" fn AMchangeHashesCmp(
 }
 
 /// \memberof AMchangeHashes
-/// \brief Gets the change hash at the current position of an iterator over
-///        a sequence of change hashes and then advances/rewinds it by at most
-///        \p |n| positions.
+/// \brief Gets the change hash at the current position of an iterator over a
+///        sequence of change hashes and then advances it by at most \p |n|
+///        positions where the sign of \p n is relative to the iterator's
+///        direction.
 ///
 /// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
-/// \param[in] n The direction (\p -n -> backward, \p +n -> forward) and maximum
-///              number of positions to advance/rewind.
+/// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
+///              number of positions to advance.
 /// \return An `AMbyteSpan` struct with `.src == NULL` when \p change_hashes
-///         was previously advanced/rewound past its forward/backward limit.
+///         was previously advanced past its forward/reverse limit.
 /// \pre \p change_hashes must be a valid address.
 /// \internal
 ///
@@ -207,15 +233,16 @@ pub unsafe extern "C" fn AMchangeHashesNext(
 }
 
 /// \memberof AMchangeHashes
-/// \brief Advances/rewinds an iterator over a sequence of change hashes by at
-///        most \p |n| positions and then gets the change hash at its current
+/// \brief Advances an iterator over a sequence of change hashes by at most
+///        \p |n| positions where the sign of \p n is relative to the
+///        iterator's direction and then gets the change hash at its new
 ///        position.
 ///
 /// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
-/// \param[in] n The direction (\p -n -> backward, \p +n -> forward) and maximum
-///              number of positions to advance/rewind.
-/// \return An `AMbyteSpan` struct with `.src == NULL` when \p change_hashes
-///         is presently advanced/rewound past its forward/backward limit.
+/// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
+///              number of positions to advance.
+/// \return An `AMbyteSpan` struct with `.src == NULL` when \p change_hashes is
+///         presently advanced past its forward/reverse limit.
 /// \pre \p change_hashes must be a valid address.
 /// \internal
 ///
@@ -255,7 +282,8 @@ pub unsafe extern "C" fn AMchangeHashesSize(change_hashes: *const AMchangeHashes
 }
 
 /// \memberof AMchangeHashes
-/// \brief Creates a reversed copy of a change hashes iterator.
+/// \brief Creates an iterator over the same sequence of change hashes as the
+///        given one but with the opposite position and direction.
 ///
 /// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \return An `AMchangeHashes` struct
@@ -265,11 +293,11 @@ pub unsafe extern "C" fn AMchangeHashesSize(change_hashes: *const AMchangeHashes
 /// #Safety
 /// change_hashes must be a pointer to a valid AMchangeHashes
 #[no_mangle]
-pub unsafe extern "C" fn AMchangeHashesReverse(
+pub unsafe extern "C" fn AMchangeHashesReversed(
     change_hashes: *const AMchangeHashes,
 ) -> AMchangeHashes {
     if let Some(change_hashes) = change_hashes.as_ref() {
-        change_hashes.reverse()
+        change_hashes.reversed()
     } else {
         AMchangeHashes::default()
     }
