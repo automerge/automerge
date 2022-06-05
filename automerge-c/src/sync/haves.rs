@@ -9,6 +9,7 @@ use crate::sync::have::AMsyncHave;
 struct Detail {
     len: usize,
     offset: isize,
+    ptr: *const c_void,
     storage: *mut c_void,
 }
 
@@ -17,54 +18,123 @@ struct Detail {
 ///       propagate the name of a constant initialized from it so if the
 ///       constant's name is a symbolic representation of the value it can be
 ///       converted into a number by post-processing the header it generated.
-pub const USIZE_USIZE_USIZE_: usize = size_of::<Detail>();
+pub const USIZE_USIZE_USIZE_USIZE_: usize = size_of::<Detail>();
 
 impl Detail {
-    fn new(len: usize, offset: isize, storage: &mut BTreeMap<usize, AMsyncHave>) -> Self {
+    fn new(
+        haves: &[am::sync::Have],
+        offset: isize,
+        storage: &mut BTreeMap<usize, AMsyncHave>,
+    ) -> Self {
         let storage: *mut BTreeMap<usize, AMsyncHave> = storage;
         Self {
-            len,
+            len: haves.len(),
             offset,
+            ptr: haves.as_ptr() as *const c_void,
             storage: storage as *mut c_void,
+        }
+    }
+
+    pub fn advance(&mut self, n: isize) {
+        if n != 0 && !self.is_stopped() {
+            let n = if self.offset < 0 { -n } else { n };
+            let len = self.len as isize;
+            self.offset = std::cmp::max(-(len + 1), std::cmp::min(self.offset + n, len));
+        };
+    }
+
+    pub fn get_index(&self) -> usize {
+        (self.offset
+            + if self.offset < 0 {
+                self.len as isize
+            } else {
+                0
+            }) as usize
+    }
+
+    pub fn next(&mut self, n: isize) -> Option<*const AMsyncHave> {
+        if self.is_stopped() {
+            return None;
+        }
+        let slice: &[am::sync::Have] =
+            unsafe { std::slice::from_raw_parts(self.ptr as *const am::sync::Have, self.len) };
+        let storage = unsafe { &mut *(self.storage as *mut BTreeMap<usize, AMsyncHave>) };
+        let index = self.get_index();
+        let value = match storage.get_mut(&index) {
+            Some(value) => value,
+            None => {
+                storage.insert(index, AMsyncHave::new(&slice[index]));
+                storage.get_mut(&index).unwrap()
+            }
+        };
+        self.advance(n);
+        Some(value)
+    }
+
+    pub fn is_stopped(&self) -> bool {
+        let len = self.len as isize;
+        self.offset < -len || self.offset == len
+    }
+
+    pub fn prev(&mut self, n: isize) -> Option<*const AMsyncHave> {
+        self.advance(n);
+        if self.is_stopped() {
+            return None;
+        }
+        let slice: &[am::sync::Have] =
+            unsafe { std::slice::from_raw_parts(self.ptr as *const am::sync::Have, self.len) };
+        let storage = unsafe { &mut *(self.storage as *mut BTreeMap<usize, AMsyncHave>) };
+        let index = self.get_index();
+        Some(match storage.get_mut(&index) {
+            Some(value) => value,
+            None => {
+                storage.insert(index, AMsyncHave::new(&slice[index]));
+                storage.get_mut(&index).unwrap()
+            }
+        })
+    }
+
+    pub fn reversed(&self) -> Self {
+        Self {
+            len: self.len,
+            offset: -(self.offset + 1),
+            ptr: self.ptr,
+            storage: self.storage,
         }
     }
 }
 
-impl From<Detail> for [u8; USIZE_USIZE_USIZE_] {
+impl From<Detail> for [u8; USIZE_USIZE_USIZE_USIZE_] {
     fn from(detail: Detail) -> Self {
         unsafe {
-            std::slice::from_raw_parts((&detail as *const Detail) as *const u8, USIZE_USIZE_USIZE_)
-                .try_into()
-                .unwrap()
+            std::slice::from_raw_parts(
+                (&detail as *const Detail) as *const u8,
+                USIZE_USIZE_USIZE_USIZE_,
+            )
+            .try_into()
+            .unwrap()
         }
     }
 }
 
 /// \struct AMsyncHaves
-/// \brief A bidirectional iterator over a sequence of synchronization haves.
+/// \brief A random-access iterator over a sequence of synchronization haves.
 #[repr(C)]
 pub struct AMsyncHaves {
-    /// A pointer to the first synchronization have or `NULL`.
-    ptr: *const c_void,
     /// Reserved.
-    detail: [u8; USIZE_USIZE_USIZE_],
+    detail: [u8; USIZE_USIZE_USIZE_USIZE_],
 }
 
 impl AMsyncHaves {
     pub fn new(haves: &[am::sync::Have], storage: &mut BTreeMap<usize, AMsyncHave>) -> Self {
         Self {
-            ptr: haves.as_ptr() as *const c_void,
-            detail: Detail::new(haves.len(), 0, storage).into(),
+            detail: Detail::new(haves, 0, storage).into(),
         }
     }
 
     pub fn advance(&mut self, n: isize) {
         let detail = unsafe { &mut *(self.detail.as_mut_ptr() as *mut Detail) };
-        let len = detail.len as isize;
-        if n != 0 && detail.offset >= -len && detail.offset < len {
-            // It's being advanced and it hasn't stopped.
-            detail.offset = std::cmp::max(-(len + 1), std::cmp::min(detail.offset + n, len));
-        };
+        detail.advance(n);
     }
 
     pub fn len(&self) -> usize {
@@ -74,57 +144,18 @@ impl AMsyncHaves {
 
     pub fn next(&mut self, n: isize) -> Option<*const AMsyncHave> {
         let detail = unsafe { &mut *(self.detail.as_mut_ptr() as *mut Detail) };
-        let len = detail.len as isize;
-        if detail.offset < -len || detail.offset == len {
-            // It's stopped.
-            None
-        } else {
-            let slice: &[am::sync::Have] = unsafe {
-                std::slice::from_raw_parts(self.ptr as *const am::sync::Have, detail.len)
-            };
-            let index = (detail.offset + if detail.offset < 0 { len } else { 0 }) as usize;
-            let storage = unsafe { &mut *(detail.storage as *mut BTreeMap<usize, AMsyncHave>) };
-            let value = match storage.get_mut(&index) {
-                Some(value) => value,
-                None => {
-                    storage.insert(index, AMsyncHave::new(&slice[index]));
-                    storage.get_mut(&index).unwrap()
-                }
-            };
-            self.advance(n);
-            Some(value)
-        }
+        detail.next(n)
     }
 
     pub fn prev(&mut self, n: isize) -> Option<*const AMsyncHave> {
-        self.advance(n);
         let detail = unsafe { &mut *(self.detail.as_mut_ptr() as *mut Detail) };
-        let len = detail.len as isize;
-        if detail.offset < -len || detail.offset == len {
-            // It's stopped.
-            None
-        } else {
-            let slice: &[am::sync::Have] = unsafe {
-                std::slice::from_raw_parts(self.ptr as *const am::sync::Have, detail.len)
-            };
-            let index = (detail.offset + if detail.offset < 0 { len } else { 0 }) as usize;
-            let storage = unsafe { &mut *(detail.storage as *mut BTreeMap<usize, AMsyncHave>) };
-            Some(match storage.get_mut(&index) {
-                Some(value) => value,
-                None => {
-                    storage.insert(index, AMsyncHave::new(&slice[index]));
-                    storage.get_mut(&index).unwrap()
-                }
-            })
-        }
+        detail.prev(n)
     }
 
-    pub fn reverse(&self) -> Self {
+    pub fn reversed(&self) -> Self {
         let detail = unsafe { &*(self.detail.as_ptr() as *const Detail) };
-        let storage = unsafe { &mut *(detail.storage as *mut BTreeMap<usize, AMsyncHave>) };
         Self {
-            ptr: self.ptr,
-            detail: Detail::new(detail.len, -(detail.offset + 1), storage).into(),
+            detail: detail.reversed().into(),
         }
     }
 }
@@ -132,26 +163,26 @@ impl AMsyncHaves {
 impl AsRef<[am::sync::Have]> for AMsyncHaves {
     fn as_ref(&self) -> &[am::sync::Have] {
         let detail = unsafe { &*(self.detail.as_ptr() as *const Detail) };
-        unsafe { std::slice::from_raw_parts(self.ptr as *const am::sync::Have, detail.len) }
+        unsafe { std::slice::from_raw_parts(detail.ptr as *const am::sync::Have, detail.len) }
     }
 }
 
 impl Default for AMsyncHaves {
     fn default() -> Self {
         Self {
-            ptr: std::ptr::null(),
-            detail: [0; USIZE_USIZE_USIZE_],
+            detail: [0; USIZE_USIZE_USIZE_USIZE_],
         }
     }
 }
 
 /// \memberof AMsyncHaves
-/// \brief Advances/rewinds an iterator over a sequence of synchronization
-///        haves by at most \p |n| positions.
+/// \brief Advances an iterator over a sequence of synchronization haves by at
+///        most \p |n| positions where the sign of \p n is relative to the
+///        iterator's direction.
 ///
 /// \param[in] sync_haves A pointer to an `AMsyncHaves` struct.
-/// \param[in] n The direction (\p -n -> backward, \p +n -> forward) and maximum
-///              number of positions to advance/rewind.
+/// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
+///              number of positions to advance.
 /// \pre \p sync_haves must be a valid address.
 /// \internal
 ///
@@ -191,15 +222,16 @@ pub unsafe extern "C" fn AMsyncHavesEqual(
 
 /// \memberof AMsyncHaves
 /// \brief Gets the synchronization have at the current position of an iterator
-///        over a sequence of synchronization haves and then advances/rewinds
-///        it by at most \p |n| positions.
+///        over a sequence of synchronization haves and then advances it by at
+///        most \p |n| positions where the sign of \p n is relative to the
+///        iterator's direction.
 ///
 /// \param[in] sync_haves A pointer to an `AMsyncHaves` struct.
-/// \param[in] n The direction (\p -n -> backward, \p +n -> forward) and maximum
-///              number of positions to advance/rewind.
+/// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
+///              number of positions to advance.
 /// \return A pointer to an `AMsyncHave` struct that's `NULL` when
-///         \p sync_haves was previously advanced/rewound past its
-///         forward/backward limit.
+///         \p sync_haves was previously advanced past its forward/reverse
+///         limit.
 /// \pre \p sync_haves must be a valid address.
 /// \internal
 ///
@@ -219,16 +251,16 @@ pub unsafe extern "C" fn AMsyncHavesNext(
 }
 
 /// \memberof AMsyncHaves
-/// \brief Advances/rewinds an iterator over a sequence of synchronization
-///        haves by at most \p |n| positions and then gets the synchronization
-///        have at its current position.
+/// \brief Advances an iterator over a sequence of synchronization haves by at
+///        most \p |n| positions where the sign of \p n is relative to the
+///        iterator's direction and then gets the synchronization have at its
+///        new position.
 ///
 /// \param[in] sync_haves A pointer to an `AMsyncHaves` struct.
-/// \param[in] n The direction (\p -n -> backward, \p +n -> forward) and maximum
-///              number of positions to advance/rewind.
-/// \return A pointer to an `AMsyncHave` struct that's `NULL` when \p sync_haves
-///         is presently advanced/rewound past its
-///         forward/backward limit.
+/// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
+///              number of positions to advance.
+/// \return A pointer to an `AMsyncHave` struct that's `NULL` when
+///         \p sync_haves is presently advanced past its forward/reverse limit.
 /// \pre \p sync_haves must be a valid address.
 /// \internal
 ///
@@ -268,7 +300,8 @@ pub unsafe extern "C" fn AMsyncHavesSize(sync_haves: *const AMsyncHaves) -> usiz
 }
 
 /// \memberof AMsyncHaves
-/// \brief Creates a reversed copy of a synchronization haves iterator.
+/// \brief Creates an iterator over the same sequence of synchronization haves
+///        as the given one but with the opposite position and direction.
 ///
 /// \param[in] sync_haves A pointer to an `AMsyncHaves` struct.
 /// \return An `AMsyncHaves` struct
@@ -278,9 +311,9 @@ pub unsafe extern "C" fn AMsyncHavesSize(sync_haves: *const AMsyncHaves) -> usiz
 /// #Safety
 /// sync_haves must be a pointer to a valid AMsyncHaves
 #[no_mangle]
-pub unsafe extern "C" fn AMsyncHavesReverse(sync_haves: *const AMsyncHaves) -> AMsyncHaves {
+pub unsafe extern "C" fn AMsyncHavesReversed(sync_haves: *const AMsyncHaves) -> AMsyncHaves {
     if let Some(sync_haves) = sync_haves.as_ref() {
-        sync_haves.reverse()
+        sync_haves.reversed()
     } else {
         AMsyncHaves::default()
     }
