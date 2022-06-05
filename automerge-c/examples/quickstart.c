@@ -92,7 +92,7 @@ int main(int argc, char** argv) {
     result = AMgetChanges(doc1, NULL);
     value = test(result, AM_VALUE_CHANGES);
     AMchange const* change = NULL;
-    while (value.changes.ptr && (change = AMchangesNext(&value.changes, 1))) {
+    while ((change = AMchangesNext(&value.changes, 1)) != NULL) {
         size_t const size = AMobjSizeAt(doc1, cards, change);
         printf("%s %ld\n", AMchangeMessage(change), size);
     }
