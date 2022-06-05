@@ -9,6 +9,7 @@ use crate::change::AMchange;
 struct Detail {
     len: usize,
     offset: isize,
+    ptr: *const c_void,
     storage: *mut c_void,
 }
 
@@ -17,54 +18,119 @@ struct Detail {
 ///       propagate the name of a constant initialized from it so if the
 ///       constant's name is a symbolic representation of the value it can be
 ///       converted into a number by post-processing the header it generated.
-pub const USIZE_USIZE_USIZE_: usize = size_of::<Detail>();
+pub const USIZE_USIZE_USIZE_USIZE_: usize = size_of::<Detail>();
 
 impl Detail {
-    fn new(len: usize, offset: isize, storage: &mut BTreeMap<usize, AMchange>) -> Self {
+    fn new(changes: &[am::Change], offset: isize, storage: &mut BTreeMap<usize, AMchange>) -> Self {
         let storage: *mut BTreeMap<usize, AMchange> = storage;
         Self {
-            len,
+            len: changes.len(),
             offset,
+            ptr: changes.as_ptr() as *const c_void,
             storage: storage as *mut c_void,
+        }
+    }
+
+    pub fn advance(&mut self, n: isize) {
+        if n != 0 && !self.is_stopped() {
+            let n = if self.offset < 0 { -n } else { n };
+            let len = self.len as isize;
+            self.offset = std::cmp::max(-(len + 1), std::cmp::min(self.offset + n, len));
+        };
+    }
+
+    pub fn get_index(&self) -> usize {
+        (self.offset
+            + if self.offset < 0 {
+                self.len as isize
+            } else {
+                0
+            }) as usize
+    }
+
+    pub fn next(&mut self, n: isize) -> Option<*const AMchange> {
+        if self.is_stopped() {
+            return None;
+        }
+        let slice: &mut [am::Change] =
+            unsafe { std::slice::from_raw_parts_mut(self.ptr as *mut am::Change, self.len) };
+        let storage = unsafe { &mut *(self.storage as *mut BTreeMap<usize, AMchange>) };
+        let index = self.get_index();
+        let value = match storage.get_mut(&index) {
+            Some(value) => value,
+            None => {
+                storage.insert(index, AMchange::new(&mut slice[index]));
+                storage.get_mut(&index).unwrap()
+            }
+        };
+        self.advance(n);
+        Some(value)
+    }
+
+    pub fn is_stopped(&self) -> bool {
+        let len = self.len as isize;
+        self.offset < -len || self.offset == len
+    }
+
+    pub fn prev(&mut self, n: isize) -> Option<*const AMchange> {
+        self.advance(n);
+        if self.is_stopped() {
+            return None;
+        }
+        let slice: &mut [am::Change] =
+            unsafe { std::slice::from_raw_parts_mut(self.ptr as *mut am::Change, self.len) };
+        let storage = unsafe { &mut *(self.storage as *mut BTreeMap<usize, AMchange>) };
+        let index = self.get_index();
+        Some(match storage.get_mut(&index) {
+            Some(value) => value,
+            None => {
+                storage.insert(index, AMchange::new(&mut slice[index]));
+                storage.get_mut(&index).unwrap()
+            }
+        })
+    }
+
+    pub fn reversed(&self) -> Self {
+        Self {
+            len: self.len,
+            offset: -(self.offset + 1),
+            ptr: self.ptr,
+            storage: self.storage,
         }
     }
 }
 
-impl From<Detail> for [u8; USIZE_USIZE_USIZE_] {
+impl From<Detail> for [u8; USIZE_USIZE_USIZE_USIZE_] {
     fn from(detail: Detail) -> Self {
         unsafe {
-            std::slice::from_raw_parts((&detail as *const Detail) as *const u8, USIZE_USIZE_USIZE_)
-                .try_into()
-                .unwrap()
+            std::slice::from_raw_parts(
+                (&detail as *const Detail) as *const u8,
+                USIZE_USIZE_USIZE_USIZE_,
+            )
+            .try_into()
+            .unwrap()
         }
     }
 }
 
 /// \struct AMchanges
-/// \brief A bidirectional iterator over a sequence of changes.
+/// \brief A random-access iterator over a sequence of changes.
 #[repr(C)]
 pub struct AMchanges {
-    /// A pointer to the first change or `NULL`.
-    ptr: *const c_void,
     /// Reserved.
-    detail: [u8; USIZE_USIZE_USIZE_],
+    detail: [u8; USIZE_USIZE_USIZE_USIZE_],
 }
 
 impl AMchanges {
     pub fn new(changes: &[am::Change], storage: &mut BTreeMap<usize, AMchange>) -> Self {
         Self {
-            ptr: changes.as_ptr() as *const c_void,
-            detail: Detail::new(changes.len(), 0, storage).into(),
+            detail: Detail::new(changes, 0, storage).into(),
         }
     }
 
     pub fn advance(&mut self, n: isize) {
         let detail = unsafe { &mut *(self.detail.as_mut_ptr() as *mut Detail) };
-        let len = detail.len as isize;
-        if n != 0 && detail.offset >= -len && detail.offset < len {
-            // It's being advanced and it hasn't stopped.
-            detail.offset = std::cmp::max(-(len + 1), std::cmp::min(detail.offset + n, len));
-        };
+        detail.advance(n);
     }
 
     pub fn len(&self) -> usize {
@@ -74,55 +140,18 @@ impl AMchanges {
 
     pub fn next(&mut self, n: isize) -> Option<*const AMchange> {
         let detail = unsafe { &mut *(self.detail.as_mut_ptr() as *mut Detail) };
-        let len = detail.len as isize;
-        if detail.offset < -len || detail.offset == len {
-            // It's stopped.
-            None
-        } else {
-            let slice: &mut [am::Change] =
-                unsafe { std::slice::from_raw_parts_mut(self.ptr as *mut am::Change, detail.len) };
-            let index = (detail.offset + if detail.offset < 0 { len } else { 0 }) as usize;
-            let storage = unsafe { &mut *(detail.storage as *mut BTreeMap<usize, AMchange>) };
-            let value = match storage.get_mut(&index) {
-                Some(value) => value,
-                None => {
-                    storage.insert(index, AMchange::new(&mut slice[index]));
-                    storage.get_mut(&index).unwrap()
-                }
-            };
-            self.advance(n);
-            Some(value)
-        }
+        detail.next(n)
     }
 
     pub fn prev(&mut self, n: isize) -> Option<*const AMchange> {
-        self.advance(n);
         let detail = unsafe { &mut *(self.detail.as_mut_ptr() as *mut Detail) };
-        let len = detail.len as isize;
-        if detail.offset < -len || detail.offset == len {
-            // It's stopped.
-            None
-        } else {
-            let slice: &mut [am::Change] =
-                unsafe { std::slice::from_raw_parts_mut(self.ptr as *mut am::Change, detail.len) };
-            let index = (detail.offset + if detail.offset < 0 { len } else { 0 }) as usize;
-            let storage = unsafe { &mut *(detail.storage as *mut BTreeMap<usize, AMchange>) };
-            Some(match storage.get_mut(&index) {
-                Some(value) => value,
-                None => {
-                    storage.insert(index, AMchange::new(&mut slice[index]));
-                    storage.get_mut(&index).unwrap()
-                }
-            })
-        }
+        detail.prev(n)
     }
 
-    pub fn reverse(&self) -> Self {
+    pub fn reversed(&self) -> Self {
         let detail = unsafe { &*(self.detail.as_ptr() as *const Detail) };
-        let storage = unsafe { &mut *(detail.storage as *mut BTreeMap<usize, AMchange>) };
         Self {
-            ptr: self.ptr,
-            detail: Detail::new(detail.len, -(detail.offset + 1), storage).into(),
+            detail: detail.reversed().into(),
         }
     }
 }
@@ -130,26 +159,26 @@ impl AMchanges {
 impl AsRef<[am::Change]> for AMchanges {
     fn as_ref(&self) -> &[am::Change] {
         let detail = unsafe { &*(self.detail.as_ptr() as *const Detail) };
-        unsafe { std::slice::from_raw_parts(self.ptr as *const am::Change, detail.len) }
+        unsafe { std::slice::from_raw_parts(detail.ptr as *const am::Change, detail.len) }
     }
 }
 
 impl Default for AMchanges {
     fn default() -> Self {
         Self {
-            ptr: std::ptr::null(),
-            detail: [0; USIZE_USIZE_USIZE_],
+            detail: [0; USIZE_USIZE_USIZE_USIZE_],
         }
     }
 }
 
 /// \memberof AMchanges
-/// \brief Advances/rewinds an iterator over a sequence of changes by at most
-///        \p |n| positions.
+/// \brief Advances an iterator over a sequence of changes by at most \p |n|
+///        positions where the sign of \p n is relative to the iterator's
+///        direction.
 ///
 /// \param[in] changes A pointer to an `AMchanges` struct.
-/// \param[in] n The direction (\p -n -> backward, \p +n -> forward) and maximum
-///              number of positions to advance/rewind.
+/// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
+///              number of positions to advance.
 /// \pre \p changes must be a valid address.
 /// \internal
 ///
@@ -189,14 +218,14 @@ pub unsafe extern "C" fn AMchangesEqual(
 
 /// \memberof AMchanges
 /// \brief Gets the change at the current position of an iterator over a
-///        sequence of changes and then advances/rewinds it by at most \p |n|
-///        positions.
+///        sequence of changes and then advances it by at most \p |n| positions
+///        where the sign of \p n is relative to the iterator's direction.
 ///
 /// \param[in] changes A pointer to an `AMchanges` struct.
-/// \param[in] n The direction (\p -n -> backward, \p +n -> forward) and maximum
-///              number of positions to advance/rewind.
+/// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
+///              number of positions to advance.
 /// \return A pointer to an `AMchange` struct that's `NULL` when \p changes was
-///         previously advanced/rewound past its forward/backward limit.
+///         previously advanced past its forward/reverse limit.
 /// \pre \p changes must be a valid address.
 /// \internal
 ///
@@ -213,14 +242,15 @@ pub unsafe extern "C" fn AMchangesNext(changes: *mut AMchanges, n: isize) -> *co
 }
 
 /// \memberof AMchanges
-/// \brief Advances/rewinds an iterator over a sequence of changes by at most
-///        \p |n| positions and then gets the change at its current position.
+/// \brief Advances an iterator over a sequence of changes by at most \p |n|
+///        positions where the sign of \p n is relative to the iterator's
+///        direction and then gets the change at its new position.
 ///
 /// \param[in] changes A pointer to an `AMchanges` struct.
-/// \param[in] n The direction (\p -n -> backward, \p +n -> forward) and maximum
-///              number of positions to advance/rewind.
+/// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
+///              number of positions to advance.
 /// \return A pointer to an `AMchange` struct that's `NULL` when \p changes is
-///         presently advanced/rewound past its forward/backward limit.
+///         presently advanced past its forward/reverse limit.
 /// \pre \p changes must be a valid address.
 /// \internal
 ///
@@ -256,19 +286,20 @@ pub unsafe extern "C" fn AMchangesSize(changes: *const AMchanges) -> usize {
 }
 
 /// \memberof AMchanges
-/// \brief Creates a reversed copy of a changes iterator.
+/// \brief Creates an iterator over the same sequence of changes as the given
+///        one but with the opposite position and direction.
 ///
 /// \param[in] changes A pointer to an `AMchanges` struct.
-/// \return An `AMchanges` struct
+/// \return An `AMchanges` struct.
 /// \pre \p changes must be a valid address.
 /// \internal
 ///
 /// #Safety
 /// changes must be a pointer to a valid AMchanges
 #[no_mangle]
-pub unsafe extern "C" fn AMchangesReverse(changes: *const AMchanges) -> AMchanges {
+pub unsafe extern "C" fn AMchangesReversed(changes: *const AMchanges) -> AMchanges {
     if let Some(changes) = changes.as_ref() {
-        changes.reverse()
+        changes.reversed()
     } else {
         AMchanges::default()
     }
