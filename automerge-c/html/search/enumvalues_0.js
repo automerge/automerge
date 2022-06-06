@@ -1,0 +1,26 @@
+var searchData=
+[
+  ['am_5fobj_5ftype_5flist_288',['AM_OBJ_TYPE_LIST',['../automerge_8h.html#gafb0d5d75bf8a6a0767ed76ee883344fda8b34b557a4d1c72b3de3646de1d6801e',1,'automerge.h']]],
+  ['am_5fobj_5ftype_5fmap_289',['AM_OBJ_TYPE_MAP',['../automerge_8h.html#gafb0d5d75bf8a6a0767ed76ee883344fda1c0d989e5e412426b2fcc6382bf4ef61',1,'automerge.h']]],
+  ['am_5fobj_5ftype_5ftext_290',['AM_OBJ_TYPE_TEXT',['../automerge_8h.html#gafb0d5d75bf8a6a0767ed76ee883344fda0f3024c1f9d785e9a81870ba999daaae',1,'automerge.h']]],
+  ['am_5fstatus_5ferror_291',['AM_STATUS_ERROR',['../automerge_8h.html#ga95d2f1b79b11e5da8ebe5c78ae7b1527a715981479a1cfc4c2436689a509281e3',1,'automerge.h']]],
+  ['am_5fstatus_5finvalid_5fresult_292',['AM_STATUS_INVALID_RESULT',['../automerge_8h.html#ga95d2f1b79b11e5da8ebe5c78ae7b1527a0ef5426bca097ed07d1b7bdc3ec809cc',1,'automerge.h']]],
+  ['am_5fstatus_5fok_293',['AM_STATUS_OK',['../automerge_8h.html#ga95d2f1b79b11e5da8ebe5c78ae7b1527a4ecd517a8e3c7b3f250a1b3bd9aa3931',1,'automerge.h']]],
+  ['am_5fvalue_5factor_5fid_294',['AM_VALUE_ACTOR_ID',['../automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1acf5d5de49c3db9ad035e213a5c92b928',1,'automerge.h']]],
+  ['am_5fvalue_5fboolean_295',['AM_VALUE_BOOLEAN',['../automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1aaaa95b8df6dfc8d68d69dedab5bcd4c4',1,'automerge.h']]],
+  ['am_5fvalue_5fbytes_296',['AM_VALUE_BYTES',['../automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1a5291478fdcbef215ce307d4c43f3a2e2',1,'automerge.h']]],
+  ['am_5fvalue_5fchange_5fhashes_297',['AM_VALUE_CHANGE_HASHES',['../automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1a14bcb66efcb77110a5cec252cfa98b21',1,'automerge.h']]],
+  ['am_5fvalue_5fchanges_298',['AM_VALUE_CHANGES',['../automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1a9674efb6e53adc56836ccf935206c930',1,'automerge.h']]],
+  ['am_5fvalue_5fcounter_299',['AM_VALUE_COUNTER',['../automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1ab9d9d8374d55b7ca8ec171f87af28104',1,'automerge.h']]],
+  ['am_5fvalue_5fdoc_300',['AM_VALUE_DOC',['../automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1a376d5d0052b45a2c4567b1217da12c35',1,'automerge.h']]],
+  ['am_5fvalue_5ff64_301',['AM_VALUE_F64',['../automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1a65495c07b77edd23d6a4646569a0b539',1,'automerge.h']]],
+  ['am_5fvalue_5fint_302',['AM_VALUE_INT',['../automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1a34b64a05f7ed093dac1b3852d78d2a45',1,'automerge.h']]],
+  ['am_5fvalue_5fnull_303',['AM_VALUE_NULL',['../automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1af0d8615bec9d9ddb8e87760f9ed81999',1,'automerge.h']]],
+  ['am_5fvalue_5fobj_5fid_304',['AM_VALUE_OBJ_ID',['../automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1a8357da73f582a745a7433213647a667e',1,'automerge.h']]],
+  ['am_5fvalue_5fstr_305',['AM_VALUE_STR',['../automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1a045615a1932439a91505a75cf9a445ca',1,'automerge.h']]],
+  ['am_5fvalue_5fsync_5fmessage_306',['AM_VALUE_SYNC_MESSAGE',['../automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1aa7f531080c3532c08aba09e6eb85b0e9',1,'automerge.h']]],
+  ['am_5fvalue_5fsync_5fstate_307',['AM_VALUE_SYNC_STATE',['../automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1a689ff53e808c6c7b401537adba148f9e',1,'automerge.h']]],
+  ['am_5fvalue_5ftimestamp_308',['AM_VALUE_TIMESTAMP',['../automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1ac47f9ab563b29f3bd94f7f86b9337522',1,'automerge.h']]],
+  ['am_5fvalue_5fuint_309',['AM_VALUE_UINT',['../automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1a6ec698d0af0bfef3a72432a588224a6e',1,'automerge.h']]],
+  ['am_5fvalue_5fvoid_310',['AM_VALUE_VOID',['../automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1a21ec02543d731ab32c9957675e5e9896',1,'automerge.h']]]
+];
