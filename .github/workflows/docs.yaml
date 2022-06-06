@@ -47,7 +47,7 @@ jobs:
         shell: bash
 
       - name: Install cmocka
-        run: sudo apt-get install -y cmocka
+        run: sudo apt-get install -y libcmocka0
         shell: bash
 
       - name: Build C docs
