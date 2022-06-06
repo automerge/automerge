@@ -59,7 +59,7 @@ jobs:
         shell: bash
 
       - name: Configure root page
-        run: echo '<meta http-equiv="refresh" content="0; url=automerge">' > target/doc/index.html
+        run: echo '<meta http-equiv="refresh" content="0; url=automerge">' > docs/index.html
 
       - name: Deploy docs
         uses: peaceiris/actions-gh-pages@v3
