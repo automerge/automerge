@@ -10,7 +10,7 @@ AMvalue test(AMresult*, AMvalueVariant const);
  */
 int main(int argc, char** argv) {
     AMresult* const doc1_result = AMcreate();
-    AMdoc* const doc1 = AMresultValue(doc1_result, 0).doc;
+    AMdoc* const doc1 = AMresultValue(doc1_result).doc;
     if (doc1 == NULL) {
         fprintf(stderr, "`AMcreate()` failure.");
         exit(EXIT_FAILURE);
@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
     AMfree(result);
 
     AMresult* doc2_result = AMcreate();
-    AMdoc* doc2 = AMresultValue(doc2_result, 0).doc;
+    AMdoc* doc2 = AMresultValue(doc2_result).doc;
     if (doc2 == NULL) {
         fprintf(stderr, "`AMcreate()` failure.");
         AMfree(card1_result);
@@ -59,7 +59,7 @@ int main(int argc, char** argv) {
     value = test(save_result, AM_VALUE_BYTES);
     AMbyteSpan binary = value.bytes;
     doc2_result = AMload(binary.src, binary.count);
-    doc2 = AMresultValue(doc2_result, 0).doc;
+    doc2 = AMresultValue(doc2_result).doc;
     AMfree(save_result);
     if (doc2 == NULL) {
         fprintf(stderr, "`AMload()` failure.");
@@ -92,7 +92,7 @@ int main(int argc, char** argv) {
     result = AMgetChanges(doc1, NULL);
     value = test(result, AM_VALUE_CHANGES);
     AMchange const* change = NULL;
-    while (value.changes.ptr && (change = AMchangesNext(&value.changes, 1))) {
+    while ((change = AMchangesNext(&value.changes, 1)) != NULL) {
         size_t const size = AMobjSizeAt(doc1, cards, change);
         printf("%s %ld\n", AMchangeMessage(change), size);
     }
@@ -129,7 +129,7 @@ AMvalue test(AMresult* result, AMvalueVariant const discriminant) {
         AMfree(result);
         exit(EXIT_FAILURE);
     }
-    AMvalue const value = AMresultValue(result, 0);
+    AMvalue const value = AMresultValue(result);
     if (value.tag != discriminant) {
         char const* label = NULL;
         switch (value.tag) {

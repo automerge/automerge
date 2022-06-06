@@ -110,7 +110,7 @@ pub enum AMresult {
     Doc(Box<AMdoc>),
     Error(CString),
     ObjId(AMobjId),
-    Scalars(Vec<am::Value<'static>>, Option<CString>),
+    Value(am::Value<'static>, Option<CString>),
     SyncMessage(AMsyncMessage),
     SyncState(AMsyncState),
     Void,
@@ -223,7 +223,7 @@ impl From<Result<am::sync::State, am::DecodingError>> for AMresult {
 impl From<Result<am::Value<'static>, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<am::Value<'static>, am::AutomergeError>) -> Self {
         match maybe {
-            Ok(value) => AMresult::Scalars(vec![value], None),
+            Ok(value) => AMresult::Value(value, None),
             Err(e) => AMresult::err(&e.to_string()),
         }
     }
@@ -233,7 +233,7 @@ impl From<Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>> f
     fn from(maybe: Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>) -> Self {
         match maybe {
             // \todo Ensure that it's alright to ignore the `am::ObjId` value.
-            Ok(Some((value, _))) => AMresult::Scalars(vec![value], None),
+            Ok(Some((value, _))) => AMresult::Value(value, None),
             Ok(None) => AMresult::Void,
             Err(e) => AMresult::err(&e.to_string()),
         }
@@ -243,7 +243,7 @@ impl From<Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>> f
 impl From<Result<usize, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<usize, am::AutomergeError>) -> Self {
         match maybe {
-            Ok(size) => AMresult::Scalars(vec![am::Value::uint(size as u64)], None),
+            Ok(size) => AMresult::Value(am::Value::uint(size as u64), None),
             Err(e) => AMresult::err(&e.to_string()),
         }
     }
@@ -283,7 +283,7 @@ impl From<Result<Vec<am::ChangeHash>, am::AutomergeError>> for AMresult {
 impl From<Result<Vec<u8>, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<Vec<u8>, am::AutomergeError>) -> Self {
         match maybe {
-            Ok(bytes) => AMresult::Scalars(vec![am::Value::bytes(bytes)], None),
+            Ok(bytes) => AMresult::Value(am::Value::bytes(bytes), None),
             Err(e) => AMresult::err(&e.to_string()),
         }
     }
@@ -291,7 +291,7 @@ impl From<Result<Vec<u8>, am::AutomergeError>> for AMresult {
 
 impl From<Vec<u8>> for AMresult {
     fn from(bytes: Vec<u8>) -> Self {
-        AMresult::Scalars(vec![am::Value::bytes(bytes)], None)
+        AMresult::Value(am::Value::bytes(bytes), None)
     }
 }
 
@@ -380,10 +380,10 @@ pub unsafe extern "C" fn AMresultSize(result: *mut AMresult) -> usize {
             | AMresult::Doc(_)
             | AMresult::ObjId(_)
             | AMresult::SyncMessage(_)
-            | AMresult::SyncState(_) => 1,
+            | AMresult::SyncState(_)
+            | AMresult::Value(_, _) => 1,
             AMresult::ChangeHashes(change_hashes) => change_hashes.len(),
             AMresult::Changes(changes, _) => changes.len(),
-            AMresult::Scalars(vec, _) => vec.len(),
         }
     } else {
         0
@@ -413,94 +413,78 @@ pub unsafe extern "C" fn AMresultStatus(result: *mut AMresult) -> AMstatus {
 /// \brief Gets a result's value.
 ///
 /// \param[in] result A pointer to an `AMresult` struct.
-/// \param[in] index The index of a value.
 /// \return An `AMvalue` struct.
 /// \pre \p result must be a valid address.
-/// \pre `0 <=` \p index `<=` AMresultSize() for \p result.
 /// \internal
 ///
 /// # Safety
 /// result must be a pointer to a valid AMresult
 #[no_mangle]
-pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult, index: usize) -> AMvalue<'a> {
-    let mut value = AMvalue::Void;
+pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult) -> AMvalue<'a> {
+    let mut content = AMvalue::Void;
     if let Some(result) = result.as_mut() {
         match result {
             AMresult::ActorId(actor_id) => {
-                if index == 0 {
-                    value = AMvalue::ActorId(actor_id.into());
-                }
+                content = AMvalue::ActorId(actor_id.into());
             }
             AMresult::ChangeHashes(change_hashes) => {
-                value = AMvalue::ChangeHashes(AMchangeHashes::new(change_hashes));
+                content = AMvalue::ChangeHashes(AMchangeHashes::new(change_hashes));
             }
             AMresult::Changes(changes, storage) => {
-                value = AMvalue::Changes(AMchanges::new(changes, storage));
+                content = AMvalue::Changes(AMchanges::new(changes, storage));
             }
-            AMresult::Doc(doc) => {
-                if index == 0 {
-                    value = AMvalue::Doc(&mut **doc)
-                }
-            }
+            AMresult::Doc(doc) => content = AMvalue::Doc(&mut **doc),
             AMresult::Error(_) => {}
             AMresult::ObjId(obj_id) => {
-                if index == 0 {
-                    value = AMvalue::ObjId(obj_id);
-                }
+                content = AMvalue::ObjId(obj_id);
             }
-            AMresult::Scalars(vec, hosted_str) => {
-                if let Some(element) = vec.get(index) {
-                    match element {
-                        am::Value::Scalar(scalar) => match scalar.as_ref() {
-                            am::ScalarValue::Boolean(flag) => {
-                                value = AMvalue::Boolean(*flag);
+            AMresult::Value(value, hosted_str) => {
+                match value {
+                    am::Value::Scalar(scalar) => match scalar.as_ref() {
+                        am::ScalarValue::Boolean(flag) => {
+                            content = AMvalue::Boolean(*flag);
+                        }
+                        am::ScalarValue::Bytes(bytes) => {
+                            content = AMvalue::Bytes(bytes.as_slice().into());
+                        }
+                        am::ScalarValue::Counter(counter) => {
+                            content = AMvalue::Counter(counter.into());
+                        }
+                        am::ScalarValue::F64(float) => {
+                            content = AMvalue::F64(*float);
+                        }
+                        am::ScalarValue::Int(int) => {
+                            content = AMvalue::Int(*int);
+                        }
+                        am::ScalarValue::Null => {
+                            content = AMvalue::Null;
+                        }
+                        am::ScalarValue::Str(smol_str) => {
+                            *hosted_str = CString::new(smol_str.to_string()).ok();
+                            if let Some(c_str) = hosted_str {
+                                content = AMvalue::Str(c_str.as_ptr());
                             }
-                            am::ScalarValue::Bytes(bytes) => {
-                                value = AMvalue::Bytes(bytes.as_slice().into());
-                            }
-                            am::ScalarValue::Counter(counter) => {
-                                value = AMvalue::Counter(counter.into());
-                            }
-                            am::ScalarValue::F64(float) => {
-                                value = AMvalue::F64(*float);
-                            }
-                            am::ScalarValue::Int(int) => {
-                                value = AMvalue::Int(*int);
-                            }
-                            am::ScalarValue::Null => {
-                                value = AMvalue::Null;
-                            }
-                            am::ScalarValue::Str(smol_str) => {
-                                *hosted_str = CString::new(smol_str.to_string()).ok();
-                                if let Some(c_str) = hosted_str {
-                                    value = AMvalue::Str(c_str.as_ptr());
-                                }
-                            }
-                            am::ScalarValue::Timestamp(timestamp) => {
-                                value = AMvalue::Timestamp(*timestamp);
-                            }
-                            am::ScalarValue::Uint(uint) => {
-                                value = AMvalue::Uint(*uint);
-                            }
-                        },
-                        // \todo Confirm that an object value should be ignored
-                        //       when there's no object ID variant.
-                        am::Value::Object(_) => {}
-                    }
+                        }
+                        am::ScalarValue::Timestamp(timestamp) => {
+                            content = AMvalue::Timestamp(*timestamp);
+                        }
+                        am::ScalarValue::Uint(uint) => {
+                            content = AMvalue::Uint(*uint);
+                        }
+                    },
+                    // \todo Confirm that an object variant should be ignored
+                    //       when there's no object ID variant.
+                    am::Value::Object(_) => {}
                 }
             }
             AMresult::SyncMessage(sync_message) => {
-                if index == 0 {
-                    value = AMvalue::SyncMessage(sync_message);
-                }
+                content = AMvalue::SyncMessage(sync_message);
             }
             AMresult::SyncState(sync_state) => {
-                if index == 0 {
-                    value = AMvalue::SyncState(sync_state);
-                }
+                content = AMvalue::SyncState(sync_state);
             }
             AMresult::Void => {}
         }
     };
-    value
+    content
 }

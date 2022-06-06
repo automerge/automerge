@@ -6,7 +6,7 @@
 int group_setup(void** state) {
     GroupState* group_state = calloc(1, sizeof(GroupState));
     group_state->doc_result = AMcreate();
-    group_state->doc = AMresultValue(group_state->doc_result, 0).doc;
+    group_state->doc = AMresultValue(group_state->doc_result).doc;
     *state = group_state;
     return 0;
 }

@@ -24,13 +24,13 @@ typedef struct {
 static int setup(void** state) {
     TestState* test_state = calloc(1, sizeof(TestState));
     test_state->doc1_result = AMcreate();
-    test_state->doc1 = AMresultValue(test_state->doc1_result, 0).doc;
+    test_state->doc1 = AMresultValue(test_state->doc1_result).doc;
     test_state->doc2_result = AMcreate();
-    test_state->doc2 = AMresultValue(test_state->doc2_result, 0).doc;
+    test_state->doc2 = AMresultValue(test_state->doc2_result).doc;
     test_state->sync_state1_result = AMsyncStateInit();
-    test_state->sync_state1 = AMresultValue(test_state->sync_state1_result, 0).sync_state;
+    test_state->sync_state1 = AMresultValue(test_state->sync_state1_result).sync_state;
     test_state->sync_state2_result = AMsyncStateInit();
-    test_state->sync_state2 = AMresultValue(test_state->sync_state2_result, 0).sync_state;
+    test_state->sync_state2 = AMresultValue(test_state->sync_state2_result).sync_state;
     *state = test_state;
     return 0;
 }
@@ -57,7 +57,7 @@ static void sync(AMdoc* a,
     do {
         AMresult* a2b_msg_result = AMgenerateSyncMessage(a, a_sync_state);
         AMresult* b2a_msg_result = AMgenerateSyncMessage(b, b_sync_state);
-        AMvalue value = AMresultValue(a2b_msg_result, 0);
+        AMvalue value = AMresultValue(a2b_msg_result);
         switch (value.tag) {
             case AM_VALUE_SYNC_MESSAGE: {
                 a2b_msg = value.sync_message;
@@ -66,7 +66,7 @@ static void sync(AMdoc* a,
             break;
             case AM_VALUE_VOID: a2b_msg = NULL; break;
         }
-        value = AMresultValue(b2a_msg_result, 0);
+        value = AMresultValue(b2a_msg_result);
         switch (value.tag) {
             case AM_VALUE_SYNC_MESSAGE: {
                 b2a_msg = value.sync_message;
@@ -95,7 +95,7 @@ static void test_converged_empty_local_doc_reply_no_local_data(void **state) {
         fail_msg("%s", AMerrorMessage(sync_message_result));
     }
     assert_int_equal(AMresultSize(sync_message_result), 1);
-    AMvalue value = AMresultValue(sync_message_result, 0);
+    AMvalue value = AMresultValue(sync_message_result);
     assert_int_equal(value.tag, AM_VALUE_SYNC_MESSAGE);
     AMsyncMessage const* sync_message = value.sync_message;
     AMchangeHashes heads = AMsyncMessageHeads(sync_message);
@@ -125,7 +125,7 @@ static void test_converged_empty_local_doc_no_reply(void **state) {
         fail_msg("%s", AMerrorMessage(sync_message1_result));
     }
     assert_int_equal(AMresultSize(sync_message1_result), 1);
-    AMvalue value = AMresultValue(sync_message1_result, 0);
+    AMvalue value = AMresultValue(sync_message1_result);
     assert_int_equal(value.tag, AM_VALUE_SYNC_MESSAGE);
     AMsyncMessage const* sync_message1 = value.sync_message;
     AMresult* result = AMreceiveSyncMessage(
@@ -135,7 +135,7 @@ static void test_converged_empty_local_doc_no_reply(void **state) {
         fail_msg("%s", AMerrorMessage(result));
     }
     assert_int_equal(AMresultSize(result), 0);
-    value = AMresultValue(result, 0);
+    value = AMresultValue(result);
     assert_int_equal(value.tag, AM_VALUE_VOID);
     AMfree(result);
     AMresult* sync_message2_result = AMgenerateSyncMessage(
@@ -145,7 +145,7 @@ static void test_converged_empty_local_doc_no_reply(void **state) {
         fail_msg("%s", AMerrorMessage(sync_message2_result));
     }
     assert_int_equal(AMresultSize(sync_message2_result), 0);
-    value = AMresultValue(sync_message2_result, 0);
+    value = AMresultValue(sync_message2_result);
     assert_int_equal(value.tag, AM_VALUE_VOID);
     AMfree(sync_message2_result);
     AMfree(sync_message1_result);
@@ -165,7 +165,7 @@ static void test_converged_equal_heads_no_reply(void **state) {
         AMcommit(test_state->doc1, NULL, &time);
     }
     AMresult* changes_result = AMgetChanges(test_state->doc1, NULL);
-    AMvalue value = AMresultValue(changes_result, 0);
+    AMvalue value = AMresultValue(changes_result);
     AMfree(AMapplyChanges(test_state->doc2, &value.changes));
     AMfree(changes_result);
     assert_true(AMequal(test_state->doc1, test_state->doc2));
@@ -175,10 +175,10 @@ static void test_converged_equal_heads_no_reply(void **state) {
         test_state->doc1,
         test_state->sync_state1
     );
-    AMsyncMessage const* sync_message1 = AMresultValue(sync_message1_result, 0).sync_message;
+    AMsyncMessage const* sync_message1 = AMresultValue(sync_message1_result).sync_message;
     AMchangeHashes last_sent_heads = AMsyncStateLastSentHeads(test_state->sync_state1);
     AMresult* heads_result = AMgetHeads(test_state->doc1);
-    AMchangeHashes heads = AMresultValue(heads_result, 0).change_hashes;
+    AMchangeHashes heads = AMresultValue(heads_result).change_hashes;
     assert_int_equal(AMchangeHashesCmp(&last_sent_heads, &heads), 0);
     AMfree(heads_result);
 
@@ -190,7 +190,7 @@ static void test_converged_equal_heads_no_reply(void **state) {
     AMresult* sync_message2_result = AMgenerateSyncMessage(
         test_state->doc2, test_state->sync_state2
     );
-    assert_int_equal(AMresultValue(sync_message2_result, 0).tag, AM_VALUE_VOID);
+    assert_int_equal(AMresultValue(sync_message2_result).tag, AM_VALUE_VOID);
     AMfree(sync_message2_result);
 }
 
@@ -292,7 +292,7 @@ static void test_converged_no_message_once_synced(void **state) {
     /* The first node reports what it has. */
     AMresult* message_result = AMgenerateSyncMessage(test_state->doc1,
                                                      test_state->sync_state1);
-    AMsyncMessage const* message = AMresultValue(message_result, 0).sync_message;
+    AMsyncMessage const* message = AMresultValue(message_result).sync_message;
 
     /* The second node receives that message and sends changes along with what
      * it has. */
@@ -302,7 +302,7 @@ static void test_converged_no_message_once_synced(void **state) {
     AMfree(message_result);
     message_result = AMgenerateSyncMessage(test_state->doc2,
                                            test_state->sync_state2);
-    message = AMresultValue(message_result, 0).sync_message;
+    message = AMresultValue(message_result).sync_message;
     AMchanges message_changes = AMsyncMessageChanges(message);
     assert_int_equal(AMchangesSize(&message_changes), 5);
 
@@ -314,7 +314,7 @@ static void test_converged_no_message_once_synced(void **state) {
     AMfree(message_result);
     message_result = AMgenerateSyncMessage(test_state->doc1,
                                            test_state->sync_state1);
-    message = AMresultValue(message_result, 0).sync_message;
+    message = AMresultValue(message_result).sync_message;
     message_changes = AMsyncMessageChanges(message);
     assert_int_equal(AMchangesSize(&message_changes), 5);
 
@@ -326,7 +326,7 @@ static void test_converged_no_message_once_synced(void **state) {
     AMfree(message_result);
     message_result = AMgenerateSyncMessage(test_state->doc2,
                                            test_state->sync_state2);
-    message = AMresultValue(message_result, 0).sync_message;
+    message = AMresultValue(message_result).sync_message;
 
     /* The first node receives the message and has nothing more to say. */
     AMfree(AMreceiveSyncMessage(test_state->doc1,
@@ -335,13 +335,13 @@ static void test_converged_no_message_once_synced(void **state) {
     AMfree(message_result);
     message_result = AMgenerateSyncMessage(test_state->doc1,
                                            test_state->sync_state1);
-    assert_int_equal(AMresultValue(message_result, 0).tag, AM_VALUE_VOID);
+    assert_int_equal(AMresultValue(message_result).tag, AM_VALUE_VOID);
     AMfree(message_result);
 
     /* The second node also has nothing left to say. */
     message_result = AMgenerateSyncMessage(test_state->doc2,
                                            test_state->sync_state2);
-    assert_int_equal(AMresultValue(message_result, 0).tag, AM_VALUE_VOID);
+    assert_int_equal(AMresultValue(message_result).tag, AM_VALUE_VOID);
     AMfree(message_result);
 }
 
@@ -363,19 +363,19 @@ static void test_converged_allow_simultaneous_messages(void **state) {
         AMcommit(test_state->doc2, NULL, &time);
     }
     AMresult* heads1_result = AMgetHeads(test_state->doc1);
-    AMchangeHashes heads1 = AMresultValue(heads1_result, 0).change_hashes;
+    AMchangeHashes heads1 = AMresultValue(heads1_result).change_hashes;
     AMbyteSpan head1 = AMchangeHashesNext(&heads1, 1);
     AMresult* heads2_result = AMgetHeads(test_state->doc2);
-    AMchangeHashes heads2 = AMresultValue(heads2_result, 0).change_hashes;
+    AMchangeHashes heads2 = AMresultValue(heads2_result).change_hashes;
     AMbyteSpan head2 = AMchangeHashesNext(&heads2, 1);
 
     /* Both sides report what they have but have no shared peer state. */
     AMresult* msg1to2_result = AMgenerateSyncMessage(test_state->doc1,
                                                      test_state->sync_state1);
-    AMsyncMessage const* msg1to2 = AMresultValue(msg1to2_result, 0).sync_message;
+    AMsyncMessage const* msg1to2 = AMresultValue(msg1to2_result).sync_message;
     AMresult* msg2to1_result = AMgenerateSyncMessage(test_state->doc2,
                                                      test_state->sync_state2);
-    AMsyncMessage const* msg2to1 = AMresultValue(msg2to1_result, 0).sync_message;
+    AMsyncMessage const* msg2to1 = AMresultValue(msg2to1_result).sync_message;
     AMchanges msg1to2_changes = AMsyncMessageChanges(msg1to2);
     assert_int_equal(AMchangesSize(&msg1to2_changes), 0);
     AMsyncHaves msg1to2_haves = AMsyncMessageHaves(msg1to2);
@@ -405,12 +405,12 @@ static void test_converged_allow_simultaneous_messages(void **state) {
      * message). */
     msg1to2_result = AMgenerateSyncMessage(test_state->doc1,
                                            test_state->sync_state1);
-    msg1to2 = AMresultValue(msg1to2_result, 0).sync_message;
+    msg1to2 = AMresultValue(msg1to2_result).sync_message;
     msg1to2_changes = AMsyncMessageChanges(msg1to2);
     assert_int_equal(AMchangesSize(&msg1to2_changes), 5);
     msg2to1_result = AMgenerateSyncMessage(test_state->doc2,
                                            test_state->sync_state2);
-    msg2to1 = AMresultValue(msg2to1_result, 0).sync_message;
+    msg2to1 = AMresultValue(msg2to1_result).sync_message;
     msg2to1_changes = AMsyncMessageChanges(msg2to1);
     assert_int_equal(AMchangesSize(&msg2to1_changes), 5);
 
@@ -420,14 +420,14 @@ static void test_converged_allow_simultaneous_messages(void **state) {
                                       msg2to1));
     AMfree(msg2to1_result);
     AMresult* missing_deps_result = AMgetMissingDeps(test_state->doc1, NULL);
-    AMchangeHashes missing_deps = AMresultValue(missing_deps_result, 0).change_hashes;
+    AMchangeHashes missing_deps = AMresultValue(missing_deps_result).change_hashes;
     assert_int_equal(AMchangeHashesSize(&missing_deps), 0);
     AMfree(missing_deps_result);
     AMresult* map_value_result = AMmapGet(test_state->doc1, AM_ROOT, "x");
-    assert_int_equal(AMresultValue(map_value_result, 0).uint, 4);
+    assert_int_equal(AMresultValue(map_value_result).uint, 4);
     AMfree(map_value_result);
     map_value_result = AMmapGet(test_state->doc1, AM_ROOT, "y");
-    assert_int_equal(AMresultValue(map_value_result, 0).uint, 4);
+    assert_int_equal(AMresultValue(map_value_result).uint, 4);
     AMfree(map_value_result);
 
     AMfree(AMreceiveSyncMessage(test_state->doc2,
@@ -435,26 +435,26 @@ static void test_converged_allow_simultaneous_messages(void **state) {
                                       msg1to2));
     AMfree(msg1to2_result);
     missing_deps_result = AMgetMissingDeps(test_state->doc2, NULL);
-    missing_deps = AMresultValue(missing_deps_result, 0).change_hashes;
+    missing_deps = AMresultValue(missing_deps_result).change_hashes;
     assert_int_equal(AMchangeHashesSize(&missing_deps), 0);
     AMfree(missing_deps_result);
     map_value_result = AMmapGet(test_state->doc2, AM_ROOT, "x");
-    assert_int_equal(AMresultValue(map_value_result, 0).uint, 4);
+    assert_int_equal(AMresultValue(map_value_result).uint, 4);
     AMfree(map_value_result);
     map_value_result = AMmapGet(test_state->doc2, AM_ROOT, "y");
-    assert_int_equal(AMresultValue(map_value_result, 0).uint, 4);
+    assert_int_equal(AMresultValue(map_value_result).uint, 4);
     AMfree(map_value_result);
 
     /* The response acknowledges that the changes were received and sends no
      * further changes. */
     msg1to2_result = AMgenerateSyncMessage(test_state->doc1,
                                            test_state->sync_state1);
-    msg1to2 = AMresultValue(msg1to2_result, 0).sync_message;
+    msg1to2 = AMresultValue(msg1to2_result).sync_message;
     msg1to2_changes = AMsyncMessageChanges(msg1to2);
     assert_int_equal(AMchangesSize(&msg1to2_changes), 0);
     msg2to1_result = AMgenerateSyncMessage(test_state->doc2,
                                            test_state->sync_state2);
-    msg2to1 = AMresultValue(msg2to1_result, 0).sync_message;
+    msg2to1 = AMresultValue(msg2to1_result).sync_message;
     msg2to1_changes = AMsyncMessageChanges(msg2to1);
     assert_int_equal(AMchangesSize(&msg2to1_changes), 0);
 
@@ -471,11 +471,11 @@ static void test_converged_allow_simultaneous_messages(void **state) {
     /* They're synchronized so no more messages are required. */
     msg1to2_result = AMgenerateSyncMessage(test_state->doc1,
                                            test_state->sync_state1);
-    assert_int_equal(AMresultValue(msg1to2_result, 0).tag, AM_VALUE_VOID);
+    assert_int_equal(AMresultValue(msg1to2_result).tag, AM_VALUE_VOID);
     AMfree(msg1to2_result);
     msg2to1_result = AMgenerateSyncMessage(test_state->doc2,
                                            test_state->sync_state2);
-    assert_int_equal(AMresultValue(msg2to1_result, 0).tag, AM_VALUE_VOID);
+    assert_int_equal(AMresultValue(msg2to1_result).tag, AM_VALUE_VOID);
     AMfree(msg2to1_result);
 
     /* If we make one more change and start synchronizing then its "last
@@ -484,7 +484,7 @@ static void test_converged_allow_simultaneous_messages(void **state) {
     AMcommit(test_state->doc1, NULL, &time);
     msg1to2_result = AMgenerateSyncMessage(test_state->doc1,
                                            test_state->sync_state1);
-    msg1to2 = AMresultValue(msg1to2_result, 0).sync_message;
+    msg1to2 = AMresultValue(msg1to2_result).sync_message;
     msg1to2_haves = AMsyncMessageHaves(msg1to2);
     msg1to2_have = AMsyncHavesNext(&msg1to2_haves, 1);
     msg1to2_last_sync = AMsyncHaveLastSync(msg1to2_have);
@@ -512,7 +512,7 @@ static void test_converged_assume_sent_changes_were_received(void **state) {
                                             AM_ROOT,
                                             "items",
                                             AM_OBJ_TYPE_LIST);
-    AMobjId const* items = AMresultValue(items_result, 0).obj_id;
+    AMobjId const* items = AMresultValue(items_result).obj_id;
     time_t const time = 0;
     AMcommit(test_state->doc1, NULL, &time);
     sync(test_state->doc1,
@@ -524,7 +524,7 @@ static void test_converged_assume_sent_changes_were_received(void **state) {
     AMcommit(test_state->doc1, NULL, &time);
     AMresult* message_result = AMgenerateSyncMessage(test_state->doc1,
                                                      test_state->sync_state1);
-    AMsyncMessage const* message = AMresultValue(message_result, 0).sync_message;
+    AMsyncMessage const* message = AMresultValue(message_result).sync_message;
     AMchanges message_changes = AMsyncMessageChanges(message);
     assert_int_equal(AMchangesSize(&message_changes), 1);
     AMfree(message_result);
@@ -533,7 +533,7 @@ static void test_converged_assume_sent_changes_were_received(void **state) {
     AMcommit(test_state->doc1, NULL, &time);
     message_result = AMgenerateSyncMessage(test_state->doc1,
                                            test_state->sync_state1);
-    message = AMresultValue(message_result, 0).sync_message;
+    message = AMresultValue(message_result).sync_message;
     message_changes = AMsyncMessageChanges(message);
     assert_int_equal(AMchangesSize(&message_changes), 1);
     AMfree(message_result);
@@ -542,7 +542,7 @@ static void test_converged_assume_sent_changes_were_received(void **state) {
     AMcommit(test_state->doc1, NULL, &time);
     message_result = AMgenerateSyncMessage(test_state->doc1,
                                            test_state->sync_state1);
-    message = AMresultValue(message_result, 0).sync_message;
+    message = AMresultValue(message_result).sync_message;
     message_changes = AMsyncMessageChanges(message);
     assert_int_equal(AMchangesSize(&message_changes), 1);
     AMfree(message_result);
@@ -623,9 +623,9 @@ static void test_diverged_works_without_prior_sync_state(void **state) {
          test_state->sync_state1,
          test_state->sync_state2);
     AMresult* heads1_result = AMgetHeads(test_state->doc1);
-    AMchangeHashes heads1 = AMresultValue(heads1_result, 0).change_hashes;
+    AMchangeHashes heads1 = AMresultValue(heads1_result).change_hashes;
     AMresult* heads2_result = AMgetHeads(test_state->doc2);
-    AMchangeHashes heads2 = AMresultValue(heads2_result, 0).change_hashes;
+    AMchangeHashes heads2 = AMresultValue(heads2_result).change_hashes;
     assert_int_equal(AMchangeHashesCmp(&heads1, &heads2), 0);
     AMfree(heads2_result);
     AMfree(heads1_result);
@@ -666,24 +666,24 @@ static void test_diverged_works_with_prior_sync_state(void **state) {
         AMcommit(test_state->doc2, NULL, &time);
     }
     AMresult* encoded_result = AMsyncStateEncode(test_state->sync_state1);
-    AMbyteSpan encoded = AMresultValue(encoded_result, 0).bytes;
+    AMbyteSpan encoded = AMresultValue(encoded_result).bytes;
     AMresult* sync_state1_result = AMsyncStateDecode(encoded.src, encoded.count);
     AMfree(encoded_result);
-    AMsyncState* sync_state1 = AMresultValue(sync_state1_result, 0).sync_state;
+    AMsyncState* sync_state1 = AMresultValue(sync_state1_result).sync_state;
     encoded_result = AMsyncStateEncode(test_state->sync_state2);
-    encoded = AMresultValue(encoded_result, 0).bytes;
+    encoded = AMresultValue(encoded_result).bytes;
     AMresult* sync_state2_result = AMsyncStateDecode(encoded.src, encoded.count);
     AMfree(encoded_result);
-    AMsyncState* sync_state2 = AMresultValue(sync_state2_result, 0).sync_state;
+    AMsyncState* sync_state2 = AMresultValue(sync_state2_result).sync_state;
 
     assert_false(AMequal(test_state->doc1, test_state->doc2));
     sync(test_state->doc1, test_state->doc2, sync_state1, sync_state2);
     AMfree(sync_state2_result);
     AMfree(sync_state1_result);
     AMresult* heads1_result = AMgetHeads(test_state->doc1);
-    AMchangeHashes heads1 = AMresultValue(heads1_result, 0).change_hashes;
+    AMchangeHashes heads1 = AMresultValue(heads1_result).change_hashes;
     AMresult* heads2_result = AMgetHeads(test_state->doc2);
-    AMchangeHashes heads2 = AMresultValue(heads2_result, 0).change_hashes;
+    AMchangeHashes heads2 = AMresultValue(heads2_result).change_hashes;
     assert_int_equal(AMchangeHashesCmp(&heads1, &heads2), 0);
     AMfree(heads2_result);
     AMfree(heads1_result);
@@ -710,7 +710,7 @@ static void test_diverged_ensure_not_empty_after_sync(void **state) {
          test_state->sync_state2);
 
     AMresult* heads1_result = AMgetHeads(test_state->doc1);
-    AMchangeHashes heads1 = AMresultValue(heads1_result, 0).change_hashes;
+    AMchangeHashes heads1 = AMresultValue(heads1_result).change_hashes;
     AMchangeHashes shared_heads1 = AMsyncStateSharedHeads(test_state->sync_state1);
     assert_int_equal(AMchangeHashesCmp(&shared_heads1, &heads1), 0);
     AMchangeHashes shared_heads2 = AMsyncStateSharedHeads(test_state->sync_state2);
@@ -747,12 +747,12 @@ static void test_diverged_resync_after_node_crash_with_data_loss(void **state) {
 
     /* Save a copy of n2 as "r" to simulate recovering from a crash. */
     AMresult* r_result = AMdup(test_state->doc2);
-    AMdoc* r = AMresultValue(r_result, 0).doc;
+    AMdoc* r = AMresultValue(r_result).doc;
     AMresult* encoded_result = AMsyncStateEncode(test_state->sync_state2);
-    AMbyteSpan encoded = AMresultValue(encoded_result, 0).bytes;
+    AMbyteSpan encoded = AMresultValue(encoded_result).bytes;
     AMresult* sync_state_resultr = AMsyncStateDecode(encoded.src, encoded.count);
     AMfree(encoded_result);
-    AMsyncState* sync_stater = AMresultValue(sync_state_resultr, 0).sync_state;
+    AMsyncState* sync_stater = AMresultValue(sync_state_resultr).sync_state;
     /* Synchronize another few commits. */
     for (size_t value = 3; value != 6; ++value) {
         AMfree(AMmapPutUint(test_state->doc1, AM_ROOT, "x", value));
@@ -764,9 +764,9 @@ static void test_diverged_resync_after_node_crash_with_data_loss(void **state) {
          test_state->sync_state2);
     /* Everyone should be on the same page here. */
     AMresult* heads1_result = AMgetHeads(test_state->doc1);
-    AMchangeHashes heads1 = AMresultValue(heads1_result, 0).change_hashes;
+    AMchangeHashes heads1 = AMresultValue(heads1_result).change_hashes;
     AMresult* heads2_result = AMgetHeads(test_state->doc2);
-    AMchangeHashes heads2 = AMresultValue(heads2_result, 0).change_hashes;
+    AMchangeHashes heads2 = AMresultValue(heads2_result).change_hashes;
     assert_int_equal(AMchangeHashesCmp(&heads1, &heads2), 0);
     AMfree(heads2_result);
     AMfree(heads1_result);
@@ -779,18 +779,18 @@ static void test_diverged_resync_after_node_crash_with_data_loss(void **state) {
         AMcommit(test_state->doc1, NULL, &time);
     }
     heads1_result = AMgetHeads(test_state->doc1);
-    heads1 = AMresultValue(heads1_result, 0).change_hashes;
+    heads1 = AMresultValue(heads1_result).change_hashes;
     AMresult* heads_resultr = AMgetHeads(r);
-    AMchangeHashes headsr = AMresultValue(heads_resultr, 0).change_hashes;
+    AMchangeHashes headsr = AMresultValue(heads_resultr).change_hashes;
     assert_int_not_equal(AMchangeHashesCmp(&heads1, &headsr), 0);
     AMfree(heads_resultr);
     AMfree(heads1_result);
     assert_false(AMequal(test_state->doc1, r));
     AMresult* map_value_result = AMmapGet(test_state->doc1, AM_ROOT, "x");
-    assert_int_equal(AMresultValue(map_value_result, 0).uint, 8);
+    assert_int_equal(AMresultValue(map_value_result).uint, 8);
     AMfree(map_value_result);
     map_value_result = AMmapGet(r, AM_ROOT, "x");
-    assert_int_equal(AMresultValue(map_value_result, 0).uint, 2);
+    assert_int_equal(AMresultValue(map_value_result).uint, 2);
     AMfree(map_value_result);
     sync(test_state->doc1,
          r,
@@ -798,9 +798,9 @@ static void test_diverged_resync_after_node_crash_with_data_loss(void **state) {
          sync_stater);
     AMfree(sync_state_resultr);
     heads1_result = AMgetHeads(test_state->doc1);
-    heads1 = AMresultValue(heads1_result, 0).change_hashes;
+    heads1 = AMresultValue(heads1_result).change_hashes;
     heads_resultr = AMgetHeads(r);
-    headsr = AMresultValue(heads_resultr, 0).change_hashes;
+    headsr = AMresultValue(heads_resultr).change_hashes;
     assert_int_equal(AMchangeHashesCmp(&heads1, &headsr), 0);
     AMfree(heads_resultr);
     AMfree(heads1_result);
@@ -829,31 +829,31 @@ static void test_diverged_resync_after_data_loss_without_disconnection(void **st
          test_state->sync_state2);
 
     AMresult* heads1_result = AMgetHeads(test_state->doc1);
-    AMchangeHashes heads1 = AMresultValue(heads1_result, 0).change_hashes;
+    AMchangeHashes heads1 = AMresultValue(heads1_result).change_hashes;
     AMresult* heads2_result = AMgetHeads(test_state->doc2);
-    AMchangeHashes heads2 = AMresultValue(heads2_result, 0).change_hashes;
+    AMchangeHashes heads2 = AMresultValue(heads2_result).change_hashes;
     assert_int_equal(AMchangeHashesCmp(&heads1, &heads2), 0);
     AMfree(heads2_result);
     AMfree(heads1_result);
     assert_true(AMequal(test_state->doc1, test_state->doc2));
 
     AMresult* doc2_after_data_loss_result = AMcreate();
-    AMdoc* doc2_after_data_loss = AMresultValue(doc2_after_data_loss_result, 0).doc;
+    AMdoc* doc2_after_data_loss = AMresultValue(doc2_after_data_loss_result).doc;
     AMfree(AMsetActorHex(doc2_after_data_loss, "89abcdef"));
 
     /* "n2" now has no data, but n1 still thinks it does. Note we don't do
      * decodeSyncState(encodeSyncState(s1)) in order to simulate data loss
      * without disconnecting. */
     AMresult* sync_state2_after_data_loss_result = AMsyncStateInit();
-    AMsyncState* sync_state2_after_data_loss = AMresultValue(sync_state2_after_data_loss_result, 0).sync_state;
+    AMsyncState* sync_state2_after_data_loss = AMresultValue(sync_state2_after_data_loss_result).sync_state;
     sync(test_state->doc1,
          doc2_after_data_loss,
          test_state->sync_state1,
          sync_state2_after_data_loss);
     heads1_result = AMgetHeads(test_state->doc1);
-    heads1 = AMresultValue(heads1_result, 0).change_hashes;
+    heads1 = AMresultValue(heads1_result).change_hashes;
     heads2_result = AMgetHeads(doc2_after_data_loss);
-    heads2 = AMresultValue(heads2_result, 0).change_hashes;
+    heads2 = AMresultValue(heads2_result).change_hashes;
     assert_int_equal(AMchangeHashesCmp(&heads1, &heads2), 0);
     AMfree(heads2_result);
     AMfree(heads1_result);
@@ -871,14 +871,14 @@ static void test_diverged_handles_concurrent_changes(void **state) {
     AMfree(AMsetActorHex(test_state->doc1, "01234567"));
     AMfree(AMsetActorHex(test_state->doc2, "89abcdef"));
     AMresult* doc3_result = AMcreate();
-    AMdoc* doc3 = AMresultValue(doc3_result, 0).doc;
+    AMdoc* doc3 = AMresultValue(doc3_result).doc;
     AMfree(AMsetActorHex(doc3, "fedcba98"));
     AMsyncState* sync_state12 = test_state->sync_state1;
     AMsyncState* sync_state21 = test_state->sync_state2;
     AMresult* sync_state23_result = AMsyncStateInit();
-    AMsyncState* sync_state23 = AMresultValue(sync_state23_result, 0).sync_state;
+    AMsyncState* sync_state23 = AMresultValue(sync_state23_result).sync_state;
     AMresult* sync_state32_result = AMsyncStateInit();
-    AMsyncState* sync_state32 = AMresultValue(sync_state32_result, 0).sync_state;
+    AMsyncState* sync_state32 = AMresultValue(sync_state32_result).sync_state;
 
     /* Change 1 is known to all three nodes. */
     time_t const time = 0;
@@ -902,7 +902,7 @@ static void test_diverged_handles_concurrent_changes(void **state) {
 
     /* Apply n3's latest change to n2. */
     AMresult* changes_result = AMgetLastLocalChange(doc3);
-    AMchanges changes = AMresultValue(changes_result, 0).changes;
+    AMchanges changes = AMresultValue(changes_result).changes;
     AMfree(AMapplyChanges(test_state->doc2, &changes));
     AMfree(changes_result);
 
@@ -910,9 +910,9 @@ static void test_diverged_handles_concurrent_changes(void **state) {
      * heads. */
     sync(test_state->doc1, test_state->doc2, sync_state12, sync_state21);
     AMresult* heads1_result = AMgetHeads(test_state->doc1);
-    AMchangeHashes heads1 = AMresultValue(heads1_result, 0).change_hashes;
+    AMchangeHashes heads1 = AMresultValue(heads1_result).change_hashes;
     AMresult* heads2_result = AMgetHeads(test_state->doc2);
-    AMchangeHashes heads2 = AMresultValue(heads2_result, 0).change_hashes;
+    AMchangeHashes heads2 = AMresultValue(heads2_result).change_hashes;
     assert_int_equal(AMchangeHashesCmp(&heads1, &heads2), 0);
     AMfree(heads2_result);
     AMfree(heads1_result);
@@ -932,13 +932,13 @@ static void test_diverged_handles_histories_of_branching_and_merging(void **stat
     AMfree(AMsetActorHex(test_state->doc1, "01234567"));
     AMfree(AMsetActorHex(test_state->doc2, "89abcdef"));
     AMresult* doc3_result = AMcreate();
-    AMdoc* doc3 = AMresultValue(doc3_result, 0).doc;
+    AMdoc* doc3 = AMresultValue(doc3_result).doc;
     AMfree(AMsetActorHex(doc3, "fedcba98"));
     time_t const time = 0;
     AMfree(AMmapPutUint(test_state->doc1, AM_ROOT, "x", 0));
     AMcommit(test_state->doc1, NULL, &time);
     AMresult* changes_result = AMgetLastLocalChange(test_state->doc1);
-    AMchanges changes = AMresultValue(changes_result, 0).changes;
+    AMchanges changes = AMresultValue(changes_result).changes;
     AMfree(AMapplyChanges(test_state->doc2, &changes));
     AMfree(AMapplyChanges(doc3, &changes));
     AMfree(changes_result);
@@ -958,9 +958,9 @@ static void test_diverged_handles_histories_of_branching_and_merging(void **stat
         AMfree(AMmapPutUint(test_state->doc2, AM_ROOT, "n2", value));
         AMcommit(test_state->doc2, NULL, &time);
         AMresult* changes1_result = AMgetLastLocalChange(test_state->doc1);
-        AMchanges changes1 = AMresultValue(changes1_result, 0).changes;
+        AMchanges changes1 = AMresultValue(changes1_result).changes;
         AMresult* changes2_result = AMgetLastLocalChange(test_state->doc2);
-        AMchanges changes2 = AMresultValue(changes2_result, 0).changes;
+        AMchanges changes2 = AMresultValue(changes2_result).changes;
         AMfree(AMapplyChanges(test_state->doc1, &changes2));
         AMfree(changes2_result);
         AMfree(AMapplyChanges(test_state->doc2, &changes1));
@@ -975,7 +975,7 @@ static void test_diverged_handles_histories_of_branching_and_merging(void **stat
     /* Having n3's last change concurrent to the last sync heads forces us into
      * the slower code path. */
     AMresult* changes3_result = AMgetLastLocalChange(doc3);
-    AMchanges changes3 = AMresultValue(changes3_result, 0).changes;
+    AMchanges changes3 = AMresultValue(changes3_result).changes;
     AMfree(AMapplyChanges(test_state->doc2, &changes3));
     AMfree(changes3_result);
     AMfree(AMmapPutStr(test_state->doc1, AM_ROOT, "n1", "final"));
@@ -988,9 +988,9 @@ static void test_diverged_handles_histories_of_branching_and_merging(void **stat
          test_state->sync_state1,
          test_state->sync_state2);
     AMresult* heads1_result = AMgetHeads(test_state->doc1);
-    AMchangeHashes heads1 = AMresultValue(heads1_result, 0).change_hashes;
+    AMchangeHashes heads1 = AMresultValue(heads1_result).change_hashes;
     AMresult* heads2_result = AMgetHeads(test_state->doc2);
-    AMchangeHashes heads2 = AMresultValue(heads2_result, 0).change_hashes;
+    AMchangeHashes heads2 = AMresultValue(heads2_result).change_hashes;
     assert_int_equal(AMchangeHashesCmp(&heads1, &heads2), 0);
     AMfree(heads2_result);
     AMfree(heads1_result);
