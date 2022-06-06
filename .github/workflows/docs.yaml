@@ -42,6 +42,14 @@ jobs:
         run: mkdir -p docs && mv target/doc/* docs/.
         shell: bash
 
+      - name: Install doxygen
+        run: sudo apt-get install -y doxygen
+        shell: bash
+
+      - name: Install cmocka
+        run: sudo apt-get install -y cmocka
+        shell: bash
+
       - name: Build C docs
         run: ./scripts/ci/cmake-docs
         shell: bash
