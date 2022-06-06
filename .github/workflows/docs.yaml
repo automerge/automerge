@@ -23,16 +23,32 @@ jobs:
         uses: Swatinem/rust-cache@v1
 
       - name: Clean docs dir
+        run: rm -rf docs
+        shell: bash
+
+      - name: Clean Rust docs dir
         uses: actions-rs/cargo@v1
         with:
           command: clean
           args: --doc
 
-      - name: Build docs
+      - name: Build Rust docs
         uses: actions-rs/cargo@v1
         with:
           command: doc
           args: --workspace --all-features --no-deps
+
+      - name: Move Rust docs
+        run: mkdir -p docs && mv target/doc/* docs/.
+        shell: bash
+
+      - name: Build C docs
+        run: ./scripts/ci/cmake-docs
+        shell: bash
+
+      - name: Move C docs
+        run: mkdir -p docs/automerge-c && mv automerge-c/build/src/html docs/automerge-c
+        shell: bash
 
       - name: Configure root page
         run: echo '<meta http-equiv="refresh" content="0; url=automerge">' > target/doc/index.html
@@ -41,4 +57,4 @@ jobs:
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./target/doc
+          publish_dir: ./docs
