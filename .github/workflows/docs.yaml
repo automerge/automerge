@@ -55,7 +55,7 @@ jobs:
         shell: bash
 
       - name: Move C docs
-        run: mkdir -p docs/automerge-c && mv automerge-c/build/src/html docs/automerge-c
+        run: mkdir -p docs/automerge-c && mv automerge-c/build/src/html/* docs/automerge-c/.
         shell: bash
 
       - name: Configure root page
