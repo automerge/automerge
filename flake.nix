@@ -52,8 +52,10 @@
                 nodejs
                 yarn
 
+                # c deps
                 cmake
                 cmocka
+                doxygen
 
                 rnix-lsp
                 nixpkgs-fmt
