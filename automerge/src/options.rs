@@ -18,7 +18,7 @@ impl<'a> ApplyOptions<'a> {
 }
 
 impl<'a> From<Option<&'a mut OpObserver>> for ApplyOptions<'a> {
-  fn from(o: Option<&'a mut OpObserver>) -> Self {
-    ApplyOptions { op_observer: o }
-  }
+    fn from(o: Option<&'a mut OpObserver>) -> Self {
+        ApplyOptions { op_observer: o }
+    }
 }

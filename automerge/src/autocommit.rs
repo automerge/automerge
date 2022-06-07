@@ -1,11 +1,11 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
-use crate::transaction::{CommitOptions, Transactable};
 use crate::op_observer::OpObserver;
+use crate::transaction::{CommitOptions, Transactable};
 use crate::{
     sync, ApplyOptions, Keys, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType,
-    Parents, ScalarValue, Patch
+    Parents, Patch, ScalarValue,
 };
 use crate::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop,
@@ -13,7 +13,7 @@ use crate::{
 };
 
 /// An automerge document that automatically manages transactions.
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct AutoCommit {
     doc: Automerge,
     transaction: Option<TransactionInner>,
@@ -81,10 +81,10 @@ impl AutoCommit {
     }
 
     fn ensure_transaction_open(&mut self) {
-      if self.transaction.is_none() {
-        let observer = self.observer.as_ref().map(|_| OpObserver::default());
-        self.transaction = Some(self.doc.transaction_inner(observer))
-      }
+        if self.transaction.is_none() {
+            let observer = self.observer.as_ref().map(|_| OpObserver::default());
+            self.transaction = Some(self.doc.transaction_inner(observer))
+        }
     }
 
     pub fn fork(&mut self) -> Self {
@@ -120,9 +120,7 @@ impl AutoCommit {
         })
     }
 
-    pub fn load_with_observer(
-        data: &[u8],
-    ) -> Result<Self, AutomergeError> {
+    pub fn load_with_observer(data: &[u8]) -> Result<Self, AutomergeError> {
         let mut observer = OpObserver::default();
         let options = ApplyOptions::default().with_op_observer(&mut observer);
         let doc = Automerge::load_with(data, options)?;
@@ -135,19 +133,25 @@ impl AutoCommit {
 
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
         self.ensure_transaction_closed();
-        self.doc.load_incremental_with(data, self.observer.as_mut().into() )
+        self.doc
+            .load_incremental_with(data, self.observer.as_mut().into())
     }
 
-    pub fn apply_changes(&mut self, changes: Vec<Change>) -> Result<(), AutomergeError> {
+    pub fn apply_changes(
+        &mut self,
+        changes: impl IntoIterator<Item = Change>,
+    ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
-        self.doc.apply_changes_with(changes, self.observer.as_mut().into())
+        self.doc
+            .apply_changes_with(changes, self.observer.as_mut().into())
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
     pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.ensure_transaction_closed();
         other.ensure_transaction_closed();
-        self.doc.merge_with(&mut other.doc, self.observer.as_mut().into())
+        self.doc
+            .merge_with(&mut other.doc, self.observer.as_mut().into())
     }
 
     pub fn save(&mut self) -> Vec<u8> {
@@ -210,7 +214,8 @@ impl AutoCommit {
         message: sync::Message,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
-        self.doc.receive_sync_message_with(sync_state, message, self.observer.as_mut().into())
+        self.doc
+            .receive_sync_message_with(sync_state, message, self.observer.as_mut().into())
     }
 
     #[cfg(feature = "optree-visualisation")]
@@ -249,7 +254,7 @@ impl AutoCommit {
         // ensure that even no changes triggers a change
         self.ensure_transaction_open();
         if let Some(observer) = &mut self.observer {
-          options = options.with_op_observer(observer);
+            options = options.with_op_observer(observer);
         }
         let tx = self.transaction.take().unwrap();
         tx.commit(
@@ -268,12 +273,12 @@ impl AutoCommit {
     }
 
     pub fn take_patches(&mut self) -> Vec<Patch> {
-      self.ensure_transaction_closed();
-      if let Some(observer) = &mut self.observer {
-        observer.take_patches()
-      } else {
-        Vec::new()
-      }
+        self.ensure_transaction_closed();
+        if let Some(observer) = &mut self.observer {
+            observer.take_patches()
+        } else {
+            Vec::new()
+        }
     }
 }
 

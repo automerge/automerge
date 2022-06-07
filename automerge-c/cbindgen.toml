@@ -7,7 +7,7 @@ after_includes = """\n
 /**
  * \\memberof AMdoc
  * \\def AM_ROOT
- * \\brief The root object of an `AMdoc` struct.
+ * \\brief The root object of a document.
  */
 #define AM_ROOT NULL
 """

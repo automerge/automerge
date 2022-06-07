@@ -58,7 +58,13 @@ impl OpObserver {
         });
     }
 
-    pub fn increment(&mut self, obj: ExId, parents: Parents<'_>, key: Prop, tagged_value: (i64, ExId)) {
+    pub fn increment(
+        &mut self,
+        obj: ExId,
+        parents: Parents<'_>,
+        key: Prop,
+        tagged_value: (i64, ExId),
+    ) {
         let mut path = parents.collect::<Vec<_>>();
         path.reverse();
         self.patches.push(Patch::Increment {

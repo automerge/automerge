@@ -39,7 +39,8 @@ if(WIN32)
 endif()
 
 add_custom_command(
-    OUTPUT ${CARGO_OUTPUT}
+    OUTPUT
+        ${CARGO_OUTPUT}
     COMMAND
         # \note cbindgen won't regenerate its output header file after it's
         #       been removed but it will after its configuration file has been
@@ -52,9 +53,19 @@ add_custom_command(
     DEPENDS
         byte_span.rs
         change_hashes.rs
+        change.rs
         changes.rs
         doc.rs
+        doc/list.rs
+        doc/map.rs
+        doc/utils.rs
+        obj.rs
         result.rs
+        sync.rs
+        sync/have.rs
+        sync/haves.rs
+        sync/message.rs
+        sync/state.rs
         ${CMAKE_SOURCE_DIR}/build.rs
         ${CMAKE_SOURCE_DIR}/Cargo.toml
         ${CMAKE_SOURCE_DIR}/cbindgen.toml
@@ -70,7 +81,8 @@ add_custom_target(
     DEPENDS ${CARGO_OUTPUT}
 )
 
-# \note cbindgen's naming behavior isn't fully configurable.
+# \note cbindgen's naming behavior isn't fully configurable and it ignores
+#       `const fn` calls (https://github.com/eqrion/cbindgen/issues/252).
 add_custom_command(
     TARGET ${LIBRARY_NAME}_artifacts
     POST_BUILD
@@ -83,10 +95,13 @@ add_custom_command(
     COMMAND
         # Compensate for cbindgen's translation of consecutive uppercase letters to "ScreamingSnakeCase".
         ${CMAKE_COMMAND} -DMATCH_REGEX=A_M\([^_]+\)_ -DREPLACE_EXPR=AM_\\1_ -P ${CMAKE_SOURCE_DIR}/cmake/file_regex_replace.cmake -- ${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
+    COMMAND
+        # Compensate for cbindgen ignoring `std:mem::size_of<T>()` calls.
+        ${CMAKE_COMMAND} -DMATCH_REGEX=USIZE_ -DREPLACE_EXPR=\+${CMAKE_SIZEOF_VOID_P} -P ${CMAKE_SOURCE_DIR}/cmake/file_regex_replace.cmake -- ${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
     WORKING_DIRECTORY
         ${CMAKE_SOURCE_DIR}
     COMMENT
-        "Compensating for hard-coded cbindgen naming behaviors..."
+        "Compensating for cbindgen deficits..."
     VERBATIM
 )
 

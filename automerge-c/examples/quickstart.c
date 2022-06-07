@@ -9,7 +9,8 @@ AMvalue test(AMresult*, AMvalueVariant const);
  *  Based on https://automerge.github.io/docs/quickstart
  */
 int main(int argc, char** argv) {
-    AMdoc* const doc1 = AMcreate();
+    AMresult* const doc1_result = AMcreate();
+    AMdoc* const doc1 = AMresultValue(doc1_result).doc;
     if (doc1 == NULL) {
         fprintf(stderr, "`AMcreate()` failure.");
         exit(EXIT_FAILURE);
@@ -22,93 +23,95 @@ int main(int argc, char** argv) {
     AMobjId const* const card1 = value.obj_id;
     AMresult* result = AMmapPutStr(doc1, card1, "title", "Rewrite everything in Clojure");
     test(result, AM_VALUE_VOID);
-    AMfreeResult(result);
+    AMfree(result);
     result = AMmapPutBool(doc1, card1, "done", false);
     test(result, AM_VALUE_VOID);
-    AMfreeResult(result);
+    AMfree(result);
     AMresult* const card2_result = AMlistPutObject(doc1, cards, 0, true, AM_OBJ_TYPE_MAP);
     value = test(card2_result, AM_VALUE_OBJ_ID);
     AMobjId const* const card2 = value.obj_id;
     result = AMmapPutStr(doc1, card2, "title", "Rewrite everything in Haskell");
     test(result, AM_VALUE_VOID);
-    AMfreeResult(result);
+    AMfree(result);
     result = AMmapPutBool(doc1, card2, "done", false);
     test(result, AM_VALUE_VOID);
-    AMfreeResult(result);
-    AMfreeResult(card2_result);
+    AMfree(result);
+    AMfree(card2_result);
     result = AMcommit(doc1, "Add card", NULL);
     test(result, AM_VALUE_CHANGE_HASHES);
-    AMfreeResult(result);
+    AMfree(result);
 
-    AMdoc* doc2 = AMcreate();
+    AMresult* doc2_result = AMcreate();
+    AMdoc* doc2 = AMresultValue(doc2_result).doc;
     if (doc2 == NULL) {
         fprintf(stderr, "`AMcreate()` failure.");
-        AMfreeResult(card1_result);
-        AMfreeResult(cards_result);
-        AMfreeDoc(doc1);
+        AMfree(card1_result);
+        AMfree(cards_result);
+        AMfree(doc1_result);
         exit(EXIT_FAILURE);
     }
     result = AMmerge(doc2, doc1);
     test(result, AM_VALUE_CHANGE_HASHES);
-    AMfreeResult(result);
-    AMfreeDoc(doc2);
+    AMfree(result);
+    AMfree(doc2_result);
 
     AMresult* const save_result = AMsave(doc1);
     value = test(save_result, AM_VALUE_BYTES);
     AMbyteSpan binary = value.bytes;
-    doc2 = AMload(binary.src, binary.count);
-    AMfreeResult(save_result);
+    doc2_result = AMload(binary.src, binary.count);
+    doc2 = AMresultValue(doc2_result).doc;
+    AMfree(save_result);
     if (doc2 == NULL) {
         fprintf(stderr, "`AMload()` failure.");
-        AMfreeResult(card1_result);
-        AMfreeResult(cards_result);
-        AMfreeDoc(doc1);
+        AMfree(card1_result);
+        AMfree(cards_result);
+        AMfree(doc1_result);
         exit(EXIT_FAILURE);
     }
 
     result = AMmapPutBool(doc1, card1, "done", true);
     test(result, AM_VALUE_VOID);
-    AMfreeResult(result);
+    AMfree(result);
     result = AMcommit(doc1, "Mark card as done", NULL);
     test(result, AM_VALUE_CHANGE_HASHES);
-    AMfreeResult(result);
-    AMfreeResult(card1_result);
+    AMfree(result);
+    AMfree(card1_result);
 
     result = AMlistDelete(doc2, cards, 0);
     test(result, AM_VALUE_VOID);
-    AMfreeResult(result);
+    AMfree(result);
     result = AMcommit(doc2, "Delete card", NULL);
     test(result, AM_VALUE_CHANGE_HASHES);
-    AMfreeResult(result);
+    AMfree(result);
 
     result = AMmerge(doc1, doc2);
     test(result, AM_VALUE_CHANGE_HASHES);
-    AMfreeResult(result);
-    AMfreeDoc(doc2);
+    AMfree(result);
+    AMfree(doc2_result);
 
     result = AMgetChanges(doc1, NULL);
     value = test(result, AM_VALUE_CHANGES);
     AMchange const* change = NULL;
-    while (value.changes.ptr && (change = AMnextChange(&value.changes, 1))) {
+    while ((change = AMchangesNext(&value.changes, 1)) != NULL) {
         size_t const size = AMobjSizeAt(doc1, cards, change);
-        printf("%s %ld\n", AMgetMessage(change), size);
+        printf("%s %ld\n", AMchangeMessage(change), size);
     }
-    AMfreeResult(result);
-    AMfreeResult(cards_result);
-    AMfreeDoc(doc1);
+    AMfree(result);
+    AMfree(cards_result);
+    AMfree(doc1_result);
 }
 
 /**
- * \brief Extracts an `AMvalue` struct with discriminant \p value_tag
- *        from \p result or writes a message to `stderr`, frees \p result
- *        and terminates the program.
+ * \brief Extracts a value with the given discriminant from the given result
+ *        or writes a message to `stderr`, frees the given result and
+ *        terminates the program.
  *
 .* \param[in] result A pointer to an `AMresult` struct.
- * \param[in] value_tag An `AMvalue` struct discriminant.
+ * \param[in] discriminant An `AMvalueVariant` enum tag.
  * \return An `AMvalue` struct.
  * \pre \p result must be a valid address.
  */
-AMvalue test(AMresult* result, AMvalueVariant const value_tag) {
+AMvalue test(AMresult* result, AMvalueVariant const discriminant) {
     static char prelude[64];
 
     if (result == NULL) {
@@ -123,11 +126,11 @@ AMvalue test(AMresult* result, AMvalueVariant const value_tag) {
             default: sprintf(prelude, "Unknown `AMstatus` tag %d", status);
         }
         fprintf(stderr, "%s; %s.", prelude, AMerrorMessage(result));
-        AMfreeResult(result);
+        AMfree(result);
         exit(EXIT_FAILURE);
     }
-    AMvalue const value = AMresultValue(result, 0);
-    if (value.tag != value_tag) {
+    AMvalue const value = AMresultValue(result);
+    if (value.tag != discriminant) {
         char const* label = NULL;
         switch (value.tag) {
             case AM_VALUE_ACTOR_ID:      label = "AM_VALUE_ACTOR_ID";      break;
@@ -147,7 +150,7 @@ AMvalue test(AMresult* result, AMvalueVariant const value_tag) {
             default:                     label = "<unknown>";
         }
         fprintf(stderr, "Unexpected `AMvalueVariant` tag `%s` (%d).", label, value.tag);
-        AMfreeResult(result);
+        AMfree(result);
         exit(EXIT_FAILURE);
     }
     return value;

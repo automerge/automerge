@@ -1466,7 +1466,7 @@ fn observe_counter_change_application() {
     doc.put(ROOT, "counter", ScalarValue::counter(1)).unwrap();
     doc.increment(ROOT, "counter", 2).unwrap();
     doc.increment(ROOT, "counter", 5).unwrap();
-    let changes : Vec<_> = doc.get_changes(&[]).unwrap().into_iter().cloned().collect();
+    let changes = doc.get_changes(&[]).unwrap().into_iter().cloned();
 
     let mut new_doc = AutoCommit::new();
     new_doc.enable_observer();

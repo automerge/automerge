@@ -25,18 +25,18 @@ static void test_AMlistPut ## suffix ## _ ## mode(void **state) {             \
         fail_msg("%s", AMerrorMessage(res));                                  \
     }                                                                         \
     assert_int_equal(AMresultSize(res), 0);                                   \
-    AMvalue value = AMresultValue(res, 0);                                    \
-    assert_int_equal(value.tag, AM_VALUE_VOID);                            \
-    AMfreeResult(res);                                                        \
+    AMvalue value = AMresultValue(res);                                       \
+    assert_int_equal(value.tag, AM_VALUE_VOID);                               \
+    AMfree(res);                                                              \
     res = AMlistGet(group_state->doc, AM_ROOT, 0);                            \
     if (AMresultStatus(res) != AM_STATUS_OK) {                                \
         fail_msg("%s", AMerrorMessage(res));                                  \
     }                                                                         \
     assert_int_equal(AMresultSize(res), 1);                                   \
-    value = AMresultValue(res, 0);                                            \
+    value = AMresultValue(res);                                               \
     assert_int_equal(value.tag, AMvalue_discriminant(#suffix));               \
     assert_true(value.member == scalar_value);                                \
-    AMfreeResult(res);                                                        \
+    AMfree(res);                                                              \
 }
 
 #define test_AMlistPutBytes(mode) test_AMlistPutBytes ## _ ## mode
@@ -58,19 +58,19 @@ static void test_AMlistPutBytes_ ## mode(void **state) {                      \
         fail_msg("%s", AMerrorMessage(res));                                  \
     }                                                                         \
     assert_int_equal(AMresultSize(res), 0);                                   \
-    AMvalue value = AMresultValue(res, 0);                                    \
-    assert_int_equal(value.tag, AM_VALUE_VOID);                            \
-    AMfreeResult(res);                                                        \
+    AMvalue value = AMresultValue(res);                                       \
+    assert_int_equal(value.tag, AM_VALUE_VOID);                               \
+    AMfree(res);                                                              \
     res = AMlistGet(group_state->doc, AM_ROOT, 0);                            \
     if (AMresultStatus(res) != AM_STATUS_OK) {                                \
         fail_msg("%s", AMerrorMessage(res));                                  \
     }                                                                         \
     assert_int_equal(AMresultSize(res), 1);                                   \
-    value = AMresultValue(res, 0);                                            \
+    value = AMresultValue(res);                                               \
     assert_int_equal(value.tag, AM_VALUE_BYTES);                              \
     assert_int_equal(value.bytes.count, BYTES_SIZE);                          \
     assert_memory_equal(value.bytes.src, bytes_value, BYTES_SIZE);            \
-    AMfreeResult(res);                                                        \
+    AMfree(res);                                                              \
 }
 
 #define test_AMlistPutNull(mode) test_AMlistPutNull_ ## mode
@@ -84,17 +84,17 @@ static void test_AMlistPutNull_ ## mode(void **state) {                       \
         fail_msg("%s", AMerrorMessage(res));                                  \
     }                                                                         \
     assert_int_equal(AMresultSize(res), 0);                                   \
-    AMvalue value = AMresultValue(res, 0);                                    \
-    assert_int_equal(value.tag, AM_VALUE_VOID);                            \
-    AMfreeResult(res);                                                        \
+    AMvalue value = AMresultValue(res);                                       \
+    assert_int_equal(value.tag, AM_VALUE_VOID);                               \
+    AMfree(res);                                                              \
     res = AMlistGet(group_state->doc, AM_ROOT, 0);                            \
     if (AMresultStatus(res) != AM_STATUS_OK) {                                \
         fail_msg("%s", AMerrorMessage(res));                                  \
     }                                                                         \
     assert_int_equal(AMresultSize(res), 1);                                   \
-    value = AMresultValue(res, 0);                                            \
+    value = AMresultValue(res);                                               \
     assert_int_equal(value.tag, AM_VALUE_NULL);                               \
-    AMfreeResult(res);                                                        \
+    AMfree(res);                                                              \
 }
 
 #define test_AMlistPutObject(label, mode) test_AMlistPutObject_ ## label ## _ ## mode
@@ -113,11 +113,11 @@ static void test_AMlistPutObject_ ## label ## _ ## mode(void **state) {       \
         fail_msg("%s", AMerrorMessage(res));                                  \
     }                                                                         \
     assert_int_equal(AMresultSize(res), 1);                                   \
-    AMvalue value = AMresultValue(res, 0);                                    \
+    AMvalue value = AMresultValue(res);                                       \
     assert_int_equal(value.tag, AM_VALUE_OBJ_ID);                             \
     assert_non_null(value.obj_id);                                            \
     assert_int_equal(AMobjSize(group_state->doc, value.obj_id), 0);           \
-    AMfreeResult(res);                                                        \
+    AMfree(res);                                                              \
 }
 
 #define test_AMlistPutStr(mode) test_AMlistPutStr ## _ ## mode
@@ -138,19 +138,19 @@ static void test_AMlistPutStr_ ## mode(void **state) {                        \
         fail_msg("%s", AMerrorMessage(res));                                  \
     }                                                                         \
     assert_int_equal(AMresultSize(res), 0);                                   \
-    AMvalue value = AMresultValue(res, 0);                                    \
-    assert_int_equal(value.tag, AM_VALUE_VOID);                            \
-    AMfreeResult(res);                                                        \
+    AMvalue value = AMresultValue(res);                                       \
+    assert_int_equal(value.tag, AM_VALUE_VOID);                               \
+    AMfree(res);                                                              \
     res = AMlistGet(group_state->doc, AM_ROOT, 0);                            \
     if (AMresultStatus(res) != AM_STATUS_OK) {                                \
         fail_msg("%s", AMerrorMessage(res));                                  \
     }                                                                         \
     assert_int_equal(AMresultSize(res), 1);                                   \
-    value = AMresultValue(res, 0);                                            \
+    value = AMresultValue(res);                                               \
     assert_int_equal(value.tag, AM_VALUE_STR);                                \
     assert_int_equal(strlen(value.str), STR_LEN);                             \
     assert_memory_equal(value.str, str_value, STR_LEN + 1);                   \
-    AMfreeResult(res);                                                        \
+    AMfree(res);                                                              \
 }
 
 static_void_test_AMlistPut(Bool, insert, boolean, true)

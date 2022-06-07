@@ -54,11 +54,11 @@ impl Automerge {
             }
         }
 
-        let mut changes_to_send = if let (Some(their_have), Some(their_need)) = (
+        let changes_to_send = if let (Some(their_have), Some(their_need)) = (
             sync_state.their_have.as_ref(),
             sync_state.their_need.as_ref(),
         ) {
-            self.get_changes_to_send(their_have.clone(), their_need)
+            self.get_changes_to_send(their_have, their_need)
                 .expect("Should have only used hashes that are in the document")
         } else {
             Vec::new()
@@ -76,8 +76,17 @@ impl Automerge {
             return None;
         }
 
-        // deduplicate the changes to send with those we have already sent
-        changes_to_send.retain(|change| !sync_state.sent_hashes.contains(&change.hash));
+        // deduplicate the changes to send with those we have already sent and clone it now
+        let changes_to_send = changes_to_send
+            .into_iter()
+            .filter_map(|change| {
+                if !sync_state.sent_hashes.contains(&change.hash) {
+                    Some(change.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
 
         sync_state.last_sent_heads = our_heads.clone();
         sync_state
@@ -88,7 +97,7 @@ impl Automerge {
             heads: our_heads,
             have: our_have,
             need: our_need,
-            changes: changes_to_send.into_iter().cloned().collect(),
+            changes: changes_to_send,
         };
 
         Some(sync_message)
@@ -128,7 +137,7 @@ impl Automerge {
         }
 
         // trim down the sent hashes to those that we know they haven't seen
-        self.filter_changes(&message_heads, &mut sync_state.sent_hashes);
+        self.filter_changes(&message_heads, &mut sync_state.sent_hashes)?;
 
         if changes_is_empty && message_heads == before_heads {
             sync_state.last_sent_heads = message_heads.clone();
@@ -176,7 +185,7 @@ impl Automerge {
 
     fn get_changes_to_send(
         &self,
-        have: Vec<Have>,
+        have: &[Have],
         need: &[ChangeHash],
     ) -> Result<Vec<&Change>, AutomergeError> {
         if have.is_empty() {
@@ -190,12 +199,10 @@ impl Automerge {
 
             for h in have {
                 let Have { last_sync, bloom } = h;
-                for hash in last_sync {
-                    last_sync_hashes.insert(hash);
-                }
+                last_sync_hashes.extend(last_sync);
                 bloom_filters.push(bloom);
             }
-            let last_sync_hashes = last_sync_hashes.into_iter().collect::<Vec<_>>();
+            let last_sync_hashes = last_sync_hashes.into_iter().copied().collect::<Vec<_>>();
 
             let changes = self.get_changes(&last_sync_hashes)?;
 

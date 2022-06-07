@@ -5,6 +5,7 @@
 #include "automerge.h"
 
 typedef struct {
+    AMresult* doc_result;
     AMdoc* doc;
 } GroupState;
 

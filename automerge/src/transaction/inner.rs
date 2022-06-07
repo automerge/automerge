@@ -7,7 +7,7 @@ use crate::types::{Key, ObjId, OpId};
 use crate::{change::export_change, types::Op, Automerge, ChangeHash, Prop};
 use crate::{AutomergeError, ObjType, OpObserver, OpType, ScalarValue};
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct TransactionInner {
     pub(crate) actor: usize,
     pub(crate) seq: u64,
@@ -28,27 +28,22 @@ impl TransactionInner {
 
     fn observe_op(&mut self, doc: &mut Automerge, obj: ObjId, prop: Prop, op: &Op) {
         if let Some(observer) = &mut self.op_observer {
-                let ex_obj = doc.ops.id_to_exid(obj.0);
-                let parents = doc.ops.parents(&ex_obj);
-                if op.insert {
-                    let value = (op.value(), doc.id_to_exid(op.id));
-                    match prop {
-                        Prop::Map(_) => panic!("insert into a map"),
-                        Prop::Seq(index) => observer.insert(ex_obj, parents, index, value),
-                    }
-                } else if op.is_delete() {
-                    observer.delete(ex_obj, parents, prop);
-                } else if let Some(value) = op.get_increment_value() {
-                    observer.increment(
-                        ex_obj,
-                        parents,
-                        prop,
-                        (value, doc.id_to_exid(op.id)),
-                    );
-                } else {
-                    let value = (op.value(), doc.ops.id_to_exid(op.id));
-                    observer.put(ex_obj, parents, prop, value, false);
+            let ex_obj = doc.ops.id_to_exid(obj.0);
+            let parents = doc.ops.parents(&ex_obj);
+            if op.insert {
+                let value = (op.value(), doc.id_to_exid(op.id));
+                match prop {
+                    Prop::Map(_) => panic!("insert into a map"),
+                    Prop::Seq(index) => observer.insert(ex_obj, parents, index, value),
                 }
+            } else if op.is_delete() {
+                observer.delete(ex_obj, parents, prop);
+            } else if let Some(value) = op.get_increment_value() {
+                observer.increment(ex_obj, parents, prop, (value, doc.id_to_exid(op.id)));
+            } else {
+                let value = (op.value(), doc.ops.id_to_exid(op.id));
+                observer.put(ex_obj, parents, prop, value, false);
+            }
         }
     }
 
@@ -61,11 +56,10 @@ impl TransactionInner {
         time: Option<i64>,
         observer: Option<&mut OpObserver>,
     ) -> ChangeHash {
-
         if let Some(tx_observer) = self.op_observer.take() {
-          if let Some(observer) = observer {
-            observer.merge(tx_observer)
-          }
+            if let Some(observer) = observer {
+                observer.merge(tx_observer)
+            }
         }
 
         if message.is_some() {
@@ -240,7 +234,7 @@ impl TransactionInner {
         };
 
         doc.ops.insert(query.pos(), &obj, op.clone());
-        
+
         self.observe_op(doc, obj, Prop::Seq(index), &op);
 
         self.operations.push((obj, op));

@@ -2,8 +2,8 @@ use automerge::transaction::CommitOptions;
 use automerge::transaction::Transactable;
 use automerge::Automerge;
 use automerge::AutomergeError;
-use automerge::Patch;
 use automerge::OpObserver;
+use automerge::Patch;
 use automerge::ROOT;
 
 fn main() {
