@@ -292,10 +292,7 @@ pub unsafe extern "C" fn AMgetChanges(
 /// doc1 must be a pointer to a valid AMdoc
 /// doc2 must be a pointer to a valid AMdoc
 #[no_mangle]
-pub unsafe extern "C" fn AMgetChangesAdded(
-    doc1: *mut AMdoc,
-    doc2: *mut AMdoc,
-) -> *mut AMresult {
+pub unsafe extern "C" fn AMgetChangesAdded(doc1: *mut AMdoc, doc2: *mut AMdoc) -> *mut AMresult {
     let doc1 = to_doc!(doc1);
     let doc2 = to_doc!(doc2);
     to_result(doc1.get_changes_added(doc2))

@@ -297,8 +297,7 @@ impl From<Result<Vec<u8>, am::AutomergeError>> for AMresult {
 
 impl From<Vec<&am::Change>> for AMresult {
     fn from(changes: Vec<&am::Change>) -> Self {
-        let changes: Vec<am::Change> =
-            changes.iter().map(|&change| change.clone()).collect();
+        let changes: Vec<am::Change> = changes.iter().map(|&change| change.clone()).collect();
         AMresult::Changes(changes, BTreeMap::new())
     }
 }
