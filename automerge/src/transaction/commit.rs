@@ -1,12 +1,14 @@
+use crate::op_observer::OpObserver;
+
 /// Optional metadata for a commit.
 #[derive(Debug, Default)]
-pub struct CommitOptions<'a, Obs> {
+pub struct CommitOptions<'a> {
     pub message: Option<String>,
     pub time: Option<i64>,
-    pub op_observer: Option<&'a mut Obs>,
+    pub op_observer: Option<&'a mut OpObserver>,
 }
 
-impl<'a, Obs> CommitOptions<'a, Obs> {
+impl<'a> CommitOptions<'a> {
     /// Add a message to the commit.
     pub fn with_message<S: Into<String>>(mut self, message: S) -> Self {
         self.message = Some(message.into());
@@ -31,12 +33,12 @@ impl<'a, Obs> CommitOptions<'a, Obs> {
         self
     }
 
-    pub fn with_op_observer(mut self, op_observer: &'a mut Obs) -> Self {
+    pub fn with_op_observer(mut self, op_observer: &'a mut OpObserver) -> Self {
         self.op_observer = Some(op_observer);
         self
     }
 
-    pub fn set_op_observer(&mut self, op_observer: &'a mut Obs) -> &mut Self {
+    pub fn set_op_observer(&mut self, op_observer: &'a mut OpObserver) -> &mut Self {
         self.op_observer = Some(op_observer);
         self
     }

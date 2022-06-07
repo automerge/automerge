@@ -1,7 +1,7 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
-use crate::{Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, ScalarValue, Value, Values};
+use crate::{Automerge, ChangeHash, KeysAt, ObjType, Prop, ScalarValue, Value, Values};
 use crate::{AutomergeError, Keys};
 use crate::{ListRange, ListRangeAt, MapRange, MapRangeAt};
 
@@ -39,7 +39,7 @@ impl<'a> Transaction<'a> {
         self.inner
             .take()
             .unwrap()
-            .commit::<()>(self.doc, None, None, None)
+            .commit(self.doc, None, None, None)
     }
 
     /// Commit the operations in this transaction with some options.
@@ -56,9 +56,9 @@ impl<'a> Transaction<'a> {
     /// tx.put_object(ROOT, "todos", ObjType::List).unwrap();
     /// let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as
     /// i64;
-    /// tx.commit_with::<()>(CommitOptions::default().with_message("Create todos list").with_time(now));
+    /// tx.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
     /// ```
-    pub fn commit_with<Obs: OpObserver>(mut self, options: CommitOptions<'_, Obs>) -> ChangeHash {
+    pub fn commit_with(mut self, options: CommitOptions<'_>) -> ChangeHash {
         self.inner.take().unwrap().commit(
             self.doc,
             options.message,

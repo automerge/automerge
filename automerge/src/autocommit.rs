@@ -1,11 +1,11 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
-use crate::op_observer::OpObserver;
 use crate::transaction::{CommitOptions, Transactable};
+use crate::op_observer::OpObserver;
 use crate::{
     sync, ApplyOptions, Keys, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType,
-    Parents, ScalarValue,
+    Parents, ScalarValue, Patch
 };
 use crate::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop,
@@ -13,10 +13,11 @@ use crate::{
 };
 
 /// An automerge document that automatically manages transactions.
-#[derive(Debug, Clone)]
+#[derive(Debug,Clone)]
 pub struct AutoCommit {
     doc: Automerge,
     transaction: Option<TransactionInner>,
+    observer: Option<OpObserver>,
 }
 
 impl Default for AutoCommit {
@@ -30,6 +31,7 @@ impl AutoCommit {
         Self {
             doc: Automerge::new(),
             transaction: None,
+            observer: None,
         }
     }
 
@@ -56,17 +58,41 @@ impl AutoCommit {
         self.doc.get_actor()
     }
 
+    pub fn enable_observer(&mut self) -> Option<OpObserver> {
+        self.ensure_transaction_closed();
+        self.observer.replace(OpObserver::default())
+    }
+
+    pub fn disable_observer(&mut self) -> Option<OpObserver> {
+        self.ensure_transaction_closed();
+        self.observer.take()
+    }
+
+    pub fn with_observer(mut self) -> Self {
+        self.ensure_transaction_closed();
+        self.enable_observer();
+        self
+    }
+
+    pub fn without_observer(mut self) -> Self {
+        self.ensure_transaction_closed();
+        self.disable_observer();
+        self
+    }
+
     fn ensure_transaction_open(&mut self) {
-        if self.transaction.is_none() {
-            self.transaction = Some(self.doc.transaction_inner());
-        }
+      if self.transaction.is_none() {
+        let observer = self.observer.as_ref().map(|_| OpObserver::default());
+        self.transaction = Some(self.doc.transaction_inner(observer))
+      }
     }
 
     pub fn fork(&mut self) -> Self {
         self.ensure_transaction_closed();
         Self {
             doc: self.doc.fork(),
-            transaction: self.transaction.clone(),
+            transaction: None,
+            observer: None,
         }
     }
 
@@ -74,13 +100,14 @@ impl AutoCommit {
         self.ensure_transaction_closed();
         Ok(Self {
             doc: self.doc.fork_at(heads)?,
-            transaction: self.transaction.clone(),
+            transaction: None,
+            observer: None,
         })
     }
 
     fn ensure_transaction_closed(&mut self) {
         if let Some(tx) = self.transaction.take() {
-            tx.commit::<()>(&mut self.doc, None, None, None);
+            tx.commit(&mut self.doc, None, None, self.observer.as_mut());
         }
     }
 
@@ -89,64 +116,38 @@ impl AutoCommit {
         Ok(Self {
             doc,
             transaction: None,
+            observer: None,
         })
     }
 
-    pub fn load_with<Obs: OpObserver>(
+    pub fn load_with_observer(
         data: &[u8],
-        options: ApplyOptions<'_, Obs>,
     ) -> Result<Self, AutomergeError> {
+        let mut observer = OpObserver::default();
+        let options = ApplyOptions::default().with_op_observer(&mut observer);
         let doc = Automerge::load_with(data, options)?;
         Ok(Self {
             doc,
             transaction: None,
+            observer: Some(observer),
         })
     }
 
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
         self.ensure_transaction_closed();
-        self.doc.load_incremental(data)
-    }
-
-    pub fn load_incremental_with<'a, Obs: OpObserver>(
-        &mut self,
-        data: &[u8],
-        options: ApplyOptions<'a, Obs>,
-    ) -> Result<usize, AutomergeError> {
-        self.ensure_transaction_closed();
-        self.doc.load_incremental_with(data, options)
+        self.doc.load_incremental_with(data, self.observer.as_mut().into() )
     }
 
     pub fn apply_changes(&mut self, changes: Vec<Change>) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
-        self.doc.apply_changes(changes)
-    }
-
-    pub fn apply_changes_with<Obs: OpObserver>(
-        &mut self,
-        changes: Vec<Change>,
-        options: ApplyOptions<'_, Obs>,
-    ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_closed();
-        self.doc.apply_changes_with(changes, options)
+        self.doc.apply_changes_with(changes, self.observer.as_mut().into())
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
     pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.ensure_transaction_closed();
         other.ensure_transaction_closed();
-        self.doc.merge(&mut other.doc)
-    }
-
-    /// Takes all the changes in `other` which are not in `self` and applies them
-    pub fn merge_with<'a, Obs: OpObserver>(
-        &mut self,
-        other: &mut Self,
-        options: ApplyOptions<'a, Obs>,
-    ) -> Result<Vec<ChangeHash>, AutomergeError> {
-        self.ensure_transaction_closed();
-        other.ensure_transaction_closed();
-        self.doc.merge_with(&mut other.doc, options)
+        self.doc.merge_with(&mut other.doc, self.observer.as_mut().into())
     }
 
     pub fn save(&mut self) -> Vec<u8> {
@@ -183,7 +184,7 @@ impl AutoCommit {
         self.doc.get_change_by_hash(hash)
     }
 
-    pub fn get_changes_added<'a>(&mut self, other: &'a mut Self) -> Vec<&'a Change> {
+    pub fn get_changes_added<'b>(&mut self, other: &'b mut Self) -> Vec<&'b Change> {
         self.ensure_transaction_closed();
         other.ensure_transaction_closed();
         self.doc.get_changes_added(&other.doc)
@@ -209,18 +210,7 @@ impl AutoCommit {
         message: sync::Message,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
-        self.doc.receive_sync_message(sync_state, message)
-    }
-
-    pub fn receive_sync_message_with<'a, Obs: OpObserver>(
-        &mut self,
-        sync_state: &mut sync::State,
-        message: sync::Message,
-        options: ApplyOptions<'a, Obs>,
-    ) -> Result<(), AutomergeError> {
-        self.ensure_transaction_closed();
-        self.doc
-            .receive_sync_message_with(sync_state, message, options)
+        self.doc.receive_sync_message_with(sync_state, message, self.observer.as_mut().into())
     }
 
     #[cfg(feature = "optree-visualisation")]
@@ -237,7 +227,7 @@ impl AutoCommit {
     }
 
     pub fn commit(&mut self) -> ChangeHash {
-        self.commit_with::<()>(CommitOptions::default())
+        self.commit_with(CommitOptions::default())
     }
 
     /// Commit the current operations with some options.
@@ -253,11 +243,14 @@ impl AutoCommit {
     /// doc.put_object(&ROOT, "todos", ObjType::List).unwrap();
     /// let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as
     /// i64;
-    /// doc.commit_with::<()>(CommitOptions::default().with_message("Create todos list").with_time(now));
+    /// doc.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
     /// ```
-    pub fn commit_with<Obs: OpObserver>(&mut self, options: CommitOptions<'_, Obs>) -> ChangeHash {
+    pub fn commit_with<'a>(&'a mut self, mut options: CommitOptions<'a>) -> ChangeHash {
         // ensure that even no changes triggers a change
         self.ensure_transaction_open();
+        if let Some(observer) = &mut self.observer {
+          options = options.with_op_observer(observer);
+        }
         let tx = self.transaction.take().unwrap();
         tx.commit(
             &mut self.doc,
@@ -272,6 +265,15 @@ impl AutoCommit {
             .take()
             .map(|tx| tx.rollback(&mut self.doc))
             .unwrap_or(0)
+    }
+
+    pub fn take_patches(&mut self) -> Vec<Patch> {
+      self.ensure_transaction_closed();
+      if let Some(observer) = &mut self.observer {
+        observer.take_patches()
+      } else {
+        Vec::new()
+      }
     }
 }
 

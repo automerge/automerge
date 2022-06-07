@@ -1434,16 +1434,12 @@ fn observe_counter_change_application_overwrite() {
     doc1.increment(ROOT, "counter", 5).unwrap();
     doc1.commit();
 
-    let mut observer = VecOpObserver::default();
-    let mut doc3 = doc1.clone();
-    doc3.merge_with(
-        &mut doc2,
-        ApplyOptions::default().with_op_observer(&mut observer),
-    )
-    .unwrap();
+    let mut doc3 = doc1.fork();
+    doc3.enable_observer();
+    doc3.merge(&mut doc2).unwrap();
 
     assert_eq!(
-        observer.take_patches(),
+        doc3.take_patches(),
         vec![Patch::Put {
             obj: ExId::Root,
             path: vec![],
@@ -1456,16 +1452,12 @@ fn observe_counter_change_application_overwrite() {
         }]
     );
 
-    let mut observer = VecOpObserver::default();
-    let mut doc4 = doc2.clone();
-    doc4.merge_with(
-        &mut doc1,
-        ApplyOptions::default().with_op_observer(&mut observer),
-    )
-    .unwrap();
+    let mut doc4 = doc2.fork();
+    doc4.enable_observer();
+    doc4.merge(&mut doc1).unwrap();
 
     // no patches as the increments operate on an invisible counter
-    assert_eq!(observer.take_patches(), vec![]);
+    assert_eq!(doc4.take_patches(), vec![]);
 }
 
 #[test]
@@ -1474,18 +1466,13 @@ fn observe_counter_change_application() {
     doc.put(ROOT, "counter", ScalarValue::counter(1)).unwrap();
     doc.increment(ROOT, "counter", 2).unwrap();
     doc.increment(ROOT, "counter", 5).unwrap();
-    let changes = doc.get_changes(&[]).unwrap().into_iter().cloned().collect();
+    let changes : Vec<_> = doc.get_changes(&[]).unwrap().into_iter().cloned().collect();
 
     let mut new_doc = AutoCommit::new();
-    let mut observer = VecOpObserver::default();
-    new_doc
-        .apply_changes_with(
-            changes,
-            ApplyOptions::default().with_op_observer(&mut observer),
-        )
-        .unwrap();
+    new_doc.enable_observer();
+    new_doc.apply_changes(changes).unwrap();
     assert_eq!(
-        observer.take_patches(),
+        new_doc.take_patches(),
         vec![
             Patch::Put {
                 obj: ExId::Root,

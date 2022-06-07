@@ -11,7 +11,7 @@
         "forceConsistentCasingInFileNames": true,
         "strict": true,
         "noFallthroughCasesInSwitch": true,
-        "skipLibCheck": true,
+        "skipLibCheck": false,
         "outDir": "./dist"
     },
     "include": [ "src/**/*" ],

@@ -1,5 +1,6 @@
 use automerge as am;
 use automerge::transaction::Transactable;
+use automerge::Patch;
 use automerge::{Change, ChangeHash, Prop};
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use std::collections::{BTreeSet, HashSet};
@@ -7,7 +8,7 @@ use std::fmt::Display;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use crate::{ObjId, ScalarValue, Value};
+use crate::{datatype, ObjId, ScalarValue, Value};
 
 pub(crate) struct JS(pub(crate) JsValue);
 pub(crate) struct AR(pub(crate) Array);
@@ -350,6 +351,72 @@ pub(crate) fn export_path(path: Vec<(ObjId, Prop)>, key: Prop) -> Array {
     let path: Array = path.into_iter().map(|(_, p)| JsValue::from(p)).collect();
     path.push(&key.into());
     path
+}
+
+pub(crate) fn export_patches(patches: Vec<Patch>) -> Result<Array, JsValue> {
+    let result = Array::new();
+    for p in patches {
+        let patch = Array::new();
+        match p {
+            Patch::Put {
+                path, key, value, ..
+            } => {
+                js_set(&patch, "action", "put")?;
+                //js_set(&patch, "obj", obj.to_string())?;
+                js_set(&patch, "path", export_path(path, key))?;
+                //js_set(&patch, "key", key)?;
+                match value {
+                    (Value::Object(obj_type), obj_id) => {
+                        js_set(&patch, "datatype", obj_type.to_string())?;
+                        js_set(&patch, "value", obj_id.to_string())?;
+                    }
+                    (Value::Scalar(value), _) => {
+                        js_set(&patch, "datatype", datatype(&value))?;
+                        js_set(&patch, "value", ScalarValue(value))?;
+                    }
+                };
+                //js_set(&patch, "conflict", conflict)?;
+            }
+
+            Patch::Insert {
+                path, index, value, ..
+            } => {
+                js_set(&patch, "action", "insert")?;
+                //js_set(&patch, "obj", obj.to_string())?;
+                js_set(&patch, "path", export_path(path, index.into()))?;
+                //js_set(&patch, "key", index as f64)?;
+                match value {
+                    (Value::Object(obj_type), obj_id) => {
+                        js_set(&patch, "datatype", obj_type.to_string())?;
+                        js_set(&patch, "value", obj_id.to_string())?;
+                    }
+                    (Value::Scalar(value), _) => {
+                        js_set(&patch, "datatype", datatype(&value))?;
+                        js_set(&patch, "value", ScalarValue(value))?;
+                    }
+                };
+            }
+
+            Patch::Increment {
+                path, key, value, ..
+            } => {
+                js_set(&patch, "action", "increment")?;
+                //js_set(&patch, "obj", obj.to_string())?;
+                js_set(&patch, "path", export_path(path, key))?;
+                //js_set(&patch, "key", key)?;
+                js_set(&patch, "value", value.0 as f64)?;
+            }
+
+            Patch::Delete { path, key, .. } => {
+                js_set(&patch, "action", "delete")?;
+                //js_set(&patch, "obj", obj.to_string())?;
+                js_set(&patch, "path", export_path(path, key))?;
+                //js_set(&patch, "key", key)?;
+            }
+        }
+        result.push(&patch);
+    }
+    Ok(result)
 }
 
 pub(crate) fn get_heads(heads: Option<Array>) -> Option<Vec<ChangeHash>> {

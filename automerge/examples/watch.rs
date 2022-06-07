@@ -3,15 +3,15 @@ use automerge::transaction::Transactable;
 use automerge::Automerge;
 use automerge::AutomergeError;
 use automerge::Patch;
-use automerge::VecOpObserver;
+use automerge::OpObserver;
 use automerge::ROOT;
 
 fn main() {
     let mut doc = Automerge::new();
 
-    let mut observer = VecOpObserver::default();
+    let mut observer = OpObserver::default();
     // a simple scalar change in the root object
-    doc.transact_with::<_, _, AutomergeError, _, _>(
+    doc.transact_with::<_, _, AutomergeError, _>(
         |_result| CommitOptions::default().with_op_observer(&mut observer),
         |tx| {
             tx.put(ROOT, "hello", "world").unwrap();

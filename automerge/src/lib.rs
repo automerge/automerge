@@ -102,7 +102,6 @@ pub use map_range::MapRange;
 pub use map_range_at::MapRangeAt;
 pub use op_observer::OpObserver;
 pub use op_observer::Patch;
-pub use op_observer::VecOpObserver;
 pub use options::ApplyOptions;
 pub use parents::Parents;
 pub use types::{ActorId, ChangeHash, ObjType, OpType, Prop};

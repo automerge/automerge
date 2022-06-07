@@ -1,7 +1,7 @@
 use automerge::transaction::Transactable;
 use automerge::{
-    ActorId, ApplyOptions, AutoCommit, Automerge, AutomergeError, ObjType, ScalarValue, Value,
-    VecOpObserver, ROOT,
+    ActorId, AutoCommit, Automerge, AutomergeError, ObjType, ScalarValue, Value,
+    ROOT,
 };
 
 mod helpers;
@@ -941,12 +941,8 @@ fn observe_counter_change_application() {
     let changes = doc.get_changes(&[]).unwrap().into_iter().cloned().collect();
 
     let mut doc = AutoCommit::new();
-    let mut observer = VecOpObserver::default();
-    doc.apply_changes_with(
-        changes,
-        ApplyOptions::default().with_op_observer(&mut observer),
-    )
-    .unwrap();
+    doc.enable_observer();
+    doc.apply_changes(changes).unwrap();
 }
 
 #[test]

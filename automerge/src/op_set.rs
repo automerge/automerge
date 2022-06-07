@@ -197,11 +197,11 @@ impl OpSetInternal {
         op
     }
 
-    pub(crate) fn insert_op_with_observer<Obs: OpObserver>(
+    pub(crate) fn insert_op_with_observer(
         &mut self,
         obj: &ObjId,
         op: Op,
-        observer: &mut Obs,
+        observer: &mut OpObserver,
     ) -> Op {
         let q = self.search(obj, query::SeekOpWithPatch::new(&op));
 

@@ -9,11 +9,20 @@ function patchValue(patch: any) : any {
     switch (patch.datatype) {
       case "map":
         return {}
-      case "list": 
-      case "text":
+      case "list":
         return []
+      case "text":
+        return ""
       default:
         return patch.value
+    }
+}
+
+function patchTextValue(patch: any) : any {
+    if (typeof patch.value === "string" && patch.value.length == 1) {
+      return patch.value
+    } else {
+      return "\uFFFC"
     }
 }
 
@@ -21,6 +30,9 @@ function applyPatch(obj: any, path: Prop[], patch: any) : any {
   let prop = path.shift();
   if (typeof prop === 'number' && Array.isArray(obj)) {
     return applyPatchToArray(obj, prop, path, patch)
+  }
+  if (typeof prop === 'number' && typeof obj === 'string') {
+    return applyPatchToText(obj, prop, path, patch)
   }
   if (typeof prop === 'string' && typeof obj === 'object') {
     return applyPatchToObject(obj, prop, path, patch)
@@ -41,7 +53,7 @@ function applyPatchToObject(obj: Obj, prop: string, path: Prop[], patch: any) : 
         let tmp = { ... obj }
         delete tmp[prop]
         return tmp
-      default: 
+      default:
         throw new RangeError(`Invalid patch ${patch}`)
     }
   } else {
@@ -60,7 +72,7 @@ function applyPatchToArray(obj: Array<any>, prop: number, path: Prop[], patch: a
         return [ ... obj.slice(0,prop), patchValue(patch), ... obj.slice(prop) ]
       case "delete":
         return [... obj.slice(0,prop), ... obj.slice(prop + 1) ]
-      default: 
+      default:
         throw new RangeError(`Invalid patch ${patch}`)
     }
   } else {
@@ -68,13 +80,29 @@ function applyPatchToArray(obj: Array<any>, prop: number, path: Prop[], patch: a
   }
 }
 
+function applyPatchToText(obj: string, prop: number, path: Prop[], patch: any) : any {
+  if (path.length === 0) {
+    switch (patch.action) {
+      case "increment":
+        return obj
+      case "put":
+        return obj.slice(0,prop) + patchTextValue(patch) + obj.slice(prop + 1)
+      case "insert":
+        return obj.slice(0,prop) + patchTextValue(patch) + obj.slice(prop)
+      case "delete":
+        return obj.slice(0,prop) + obj.slice(prop + 1)
+      default:
+        throw new RangeError(`Invalid patch ${patch}`)
+    }
+  } else {
+     return obj
+  }
+}
+
 function applyPatches(obj: any, patches: any) {
   for (let patch of patches) {
-    console.log("obj",obj)
-    console.log("patch",patch)
     obj = applyPatch(obj, patch.path, patch)
   }
-  console.log("obj",obj)
   return obj
 }
 
@@ -112,10 +140,30 @@ describe('Automerge', () => {
       const doc1 = create()
       doc1.enablePatches(true)
       let list = doc1.putObject("/", "list", [1,2,3,['a','b','c']])
-      //doc1.delete("/list", 1);
+      doc1.delete("/list", 1);
       doc1.push("/list", 'hello');
       let patches = doc1.popPatches()
       let js = applyPatches({}, patches)
+      assert.deepEqual(js,doc1.materialize("/"))
+    })
+
+    it.only('can handle patches with deletes withlists holding objects', () => {
+      const doc1 = create()
+      doc1.enablePatches(true)
+
+      let list = doc1.putObject("/", "list", [1,2,3,[{n:1},{n:2},{n:3}]])
+      doc1.delete("/list", 1);
+      doc1.put("/list/2/0", "n", 100);
+      doc1.delete("/list", 1);
+      doc1.put("/list/1/1", "n", 200);
+      doc1.insertObject("/list/1", 3, {n:400})
+
+      let text = doc1.putObject("/", "text", "hello world");
+      doc1.insertObject("/text", 3, {n:1})
+      let patches = doc1.popPatches()
+      console.log(doc1.materialize("/"))
+      let js = applyPatches({}, patches)
+
       assert.deepEqual(js,doc1.materialize("/"))
     })
   })

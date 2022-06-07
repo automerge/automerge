@@ -508,7 +508,7 @@ pub(crate) fn export_change(
         operations: change
             .operations
             .iter()
-            .map(|(obj, _, op)| export_op(op, obj, actors, props))
+            .map(|(obj, op)| export_op(op, obj, actors, props))
             .collect(),
         extra_bytes: change.extra_bytes,
     }
