@@ -54,7 +54,7 @@ impl From<AMsyncState> for *mut AMsyncState {
 }
 
 /// \memberof AMsyncState
-/// \brief Decodes a sequence of bytes into a synchronizaton state.
+/// \brief Decodes a sequence of bytes into a synchronization state.
 ///
 /// \param[in] src A pointer to an array of bytes.
 /// \param[in] count The number of bytes in \p src to decode.
