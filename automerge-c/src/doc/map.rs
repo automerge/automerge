@@ -62,6 +62,35 @@ pub unsafe extern "C" fn AMmapGet(
 }
 
 /// \memberof AMdoc
+/// \brief Increments a counter for a key in a map object by the given value.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
+/// \param[in] value A 64-bit signed integer.
+/// \return A pointer to an `AMresult` struct containing a void.
+/// \pre \p doc must be a valid address.
+/// \pre \p key must be a valid address.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfree()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj_id must be a pointer to a valid AMobjId or NULL
+/// key must be a c string of the map key to be used
+#[no_mangle]
+pub unsafe extern "C" fn AMmapIncrement(
+    doc: *mut AMdoc,
+    obj_id: *const AMobjId,
+    key: *const c_char,
+    value: i64,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    to_result(doc.increment(to_obj_id!(obj_id), to_str(key), value))
+}
+
+/// \memberof AMdoc
 /// \brief Puts a boolean as the value of a key in a map object.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
