@@ -140,6 +140,12 @@ impl From<am::sync::State> for AMresult {
     }
 }
 
+impl From<AMresult> for *mut AMresult {
+    fn from(b: AMresult) -> Self {
+        Box::into_raw(Box::new(b))
+    }
+}
+
 impl From<Option<&am::Change>> for AMresult {
     fn from(maybe: Option<&am::Change>) -> Self {
         match maybe {
@@ -289,9 +295,11 @@ impl From<Result<Vec<u8>, am::AutomergeError>> for AMresult {
     }
 }
 
-impl From<Vec<u8>> for AMresult {
-    fn from(bytes: Vec<u8>) -> Self {
-        AMresult::Value(am::Value::bytes(bytes), None)
+impl From<Vec<&am::Change>> for AMresult {
+    fn from(changes: Vec<&am::Change>) -> Self {
+        let changes: Vec<am::Change> =
+            changes.iter().map(|&change| change.clone()).collect();
+        AMresult::Changes(changes, BTreeMap::new())
     }
 }
 
@@ -301,9 +309,9 @@ impl From<Vec<am::ChangeHash>> for AMresult {
     }
 }
 
-impl From<AMresult> for *mut AMresult {
-    fn from(b: AMresult) -> Self {
-        Box::into_raw(Box::new(b))
+impl From<Vec<u8>> for AMresult {
+    fn from(bytes: Vec<u8>) -> Self {
+        AMresult::Value(am::Value::bytes(bytes), None)
     }
 }
 

@@ -276,6 +276,32 @@ pub unsafe extern "C" fn AMgetChanges(
 }
 
 /// \memberof AMdoc
+/// \brief Gets the changes added to a second document that weren't added to
+///        a first document.
+///
+/// \param[in] doc1 An `AMdoc` struct.
+/// \param[in] doc2 An `AMdoc` struct.
+/// \return A pointer to an `AMresult` struct containing an `AMchanges` struct.
+/// \pre \p doc1 must be a valid address.
+/// \pre \p doc2 must be a valid address.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfree()`.
+/// \internal
+///
+/// # Safety
+/// doc1 must be a pointer to a valid AMdoc
+/// doc2 must be a pointer to a valid AMdoc
+#[no_mangle]
+pub unsafe extern "C" fn AMgetChangesAdded(
+    doc1: *mut AMdoc,
+    doc2: *mut AMdoc,
+) -> *mut AMresult {
+    let doc1 = to_doc!(doc1);
+    let doc2 = to_doc!(doc2);
+    to_result(doc1.get_changes_added(doc2))
+}
+
+/// \memberof AMdoc
 /// \brief Gets the current heads of a document.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
@@ -396,10 +422,11 @@ pub unsafe extern "C" fn AMloadIncremental(
 }
 
 /// \memberof AMdoc
-/// \brief Applies a sequence of changes to a document.
+/// \brief Applies all of the changes in \p src which are not in \p dest to
+///        \p dest.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] changes A pointer to an `AMdoc` struct.
+/// \param[in] dest A pointer to an `AMdoc` struct.
+/// \param[in] src A pointer to an `AMdoc` struct.
 /// \return A pointer to an `AMresult` struct containing an `AMchangeHashes`
 ///         struct.
 /// \pre \p dest must be a valid address.
@@ -470,6 +497,26 @@ pub unsafe extern "C" fn AMobjSizeAt(
 }
 
 /// \memberof AMdoc
+/// \brief Gets the number of pending operations added during a document's
+///        current transaction.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \return The count of pending operations for \p doc.
+/// \pre \p doc must be a valid address.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+#[no_mangle]
+pub unsafe extern "C" fn AMpendingOps(doc: *mut AMdoc) -> usize {
+    if let Some(doc) = doc.as_mut() {
+        doc.pending_ops()
+    } else {
+        0
+    }
+}
+
+/// \memberof AMdoc
 /// \brief Receives a synchronization message from a peer based upon a given
 ///        synchronization state.
 ///
@@ -499,6 +546,26 @@ pub unsafe extern "C" fn AMreceiveSyncMessage(
 }
 
 /// \memberof AMdoc
+/// \brief Cancels the pending operations added during a document's current
+///        transaction and gets the number of cancellations.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \return The count of pending operations for \p doc that were cancelled.
+/// \pre \p doc must be a valid address.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+#[no_mangle]
+pub unsafe extern "C" fn AMrollback(doc: *mut AMdoc) -> usize {
+    if let Some(doc) = doc.as_mut() {
+        doc.rollback()
+    } else {
+        0
+    }
+}
+
+/// \memberof AMdoc
 /// \brief Saves the entirety of a document into a compact form.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
@@ -515,6 +582,26 @@ pub unsafe extern "C" fn AMreceiveSyncMessage(
 pub unsafe extern "C" fn AMsave(doc: *mut AMdoc) -> *mut AMresult {
     let doc = to_doc!(doc);
     to_result(Ok(doc.save()))
+}
+
+/// \memberof AMdoc
+/// \brief Saves the changes to a document since its last save into a compact
+///        form.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \return A pointer to an `AMresult` struct containing an array of bytes as
+///         an `AMbyteSpan` struct.
+/// \pre \p doc must be a valid address.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfree()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+#[no_mangle]
+pub unsafe extern "C" fn AMsaveIncremental(doc: *mut AMdoc) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    to_result(Ok(doc.save_incremental()))
 }
 
 /// \memberof AMdoc
