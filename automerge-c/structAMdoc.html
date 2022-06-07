@@ -106,6 +106,9 @@ Public Member Functions</h2></td></tr>
 <tr class="memitem:adfbb03c8ca920834e48086af46d115eb"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#adfbb03c8ca920834e48086af46d115eb">AMgetChanges</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMchangeHashes.html">AMchangeHashes</a> *have_deps)</td></tr>
 <tr class="memdesc:adfbb03c8ca920834e48086af46d115eb"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the changes added to a document by their respective hashes.  <a href="structAMdoc.html#adfbb03c8ca920834e48086af46d115eb">More...</a><br /></td></tr>
 <tr class="separator:adfbb03c8ca920834e48086af46d115eb"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a2c9a3a50a1051303499c15e62777f230"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a2c9a3a50a1051303499c15e62777f230">AMgetChangesAdded</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc1, struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc2)</td></tr>
+<tr class="memdesc:a2c9a3a50a1051303499c15e62777f230"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the changes added to a second document that weren't added to a first document.  <a href="structAMdoc.html#a2c9a3a50a1051303499c15e62777f230">More...</a><br /></td></tr>
+<tr class="separator:a2c9a3a50a1051303499c15e62777f230"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a50d9cc73661cec439913585964618171"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a50d9cc73661cec439913585964618171">AMgetHeads</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc)</td></tr>
 <tr class="memdesc:a50d9cc73661cec439913585964618171"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the current heads of a document.  <a href="structAMdoc.html#a50d9cc73661cec439913585964618171">More...</a><br /></td></tr>
 <tr class="separator:a50d9cc73661cec439913585964618171"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -121,6 +124,9 @@ Public Member Functions</h2></td></tr>
 <tr class="memitem:a74755386bd2f93aac592c8cf3c78d842"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a74755386bd2f93aac592c8cf3c78d842">AMlistGet</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id, size_t index)</td></tr>
 <tr class="memdesc:a74755386bd2f93aac592c8cf3c78d842"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the value at an index in a list object.  <a href="structAMdoc.html#a74755386bd2f93aac592c8cf3c78d842">More...</a><br /></td></tr>
 <tr class="separator:a74755386bd2f93aac592c8cf3c78d842"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a1df2b38eab17c09ac95586857d451455"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a1df2b38eab17c09ac95586857d451455">AMlistIncrement</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id, size_t index, int64_t value)</td></tr>
+<tr class="memdesc:a1df2b38eab17c09ac95586857d451455"><td class="mdescLeft">&#160;</td><td class="mdescRight">Increments a counter at an index in a list object by the given value.  <a href="structAMdoc.html#a1df2b38eab17c09ac95586857d451455">More...</a><br /></td></tr>
+<tr class="separator:a1df2b38eab17c09ac95586857d451455"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ac76da0cf2cbb3be99f0d812bf46c3893"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#ac76da0cf2cbb3be99f0d812bf46c3893">AMlistPutBool</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id, size_t index, bool insert, bool value)</td></tr>
 <tr class="memdesc:ac76da0cf2cbb3be99f0d812bf46c3893"><td class="mdescLeft">&#160;</td><td class="mdescRight">Puts a boolean as the value at an index in a list object.  <a href="structAMdoc.html#ac76da0cf2cbb3be99f0d812bf46c3893">More...</a><br /></td></tr>
 <tr class="separator:ac76da0cf2cbb3be99f0d812bf46c3893"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -163,6 +169,9 @@ Public Member Functions</h2></td></tr>
 <tr class="memitem:a75b8b20dd90af6222a24c5b681717a6c"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a75b8b20dd90af6222a24c5b681717a6c">AMmapGet</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id, const char *key)</td></tr>
 <tr class="memdesc:a75b8b20dd90af6222a24c5b681717a6c"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the value for a key in a map object.  <a href="structAMdoc.html#a75b8b20dd90af6222a24c5b681717a6c">More...</a><br /></td></tr>
 <tr class="separator:a75b8b20dd90af6222a24c5b681717a6c"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a5c51f815a3ecb6486ae355f01d633503"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a5c51f815a3ecb6486ae355f01d633503">AMmapIncrement</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id, const char *key, int64_t value)</td></tr>
+<tr class="memdesc:a5c51f815a3ecb6486ae355f01d633503"><td class="mdescLeft">&#160;</td><td class="mdescRight">Increments a counter for a key in a map object by the given value.  <a href="structAMdoc.html#a5c51f815a3ecb6486ae355f01d633503">More...</a><br /></td></tr>
+<tr class="separator:a5c51f815a3ecb6486ae355f01d633503"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a616d8ff88dcb213ee7058a7561c3b2a4"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a616d8ff88dcb213ee7058a7561c3b2a4">AMmapPutBool</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id, const char *key, bool value)</td></tr>
 <tr class="memdesc:a616d8ff88dcb213ee7058a7561c3b2a4"><td class="mdescLeft">&#160;</td><td class="mdescRight">Puts a boolean as the value of a key in a map object.  <a href="structAMdoc.html#a616d8ff88dcb213ee7058a7561c3b2a4">More...</a><br /></td></tr>
 <tr class="separator:a616d8ff88dcb213ee7058a7561c3b2a4"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -194,7 +203,7 @@ Public Member Functions</h2></td></tr>
 <tr class="memdesc:a5b1eee7567d2e58ede4c3efdca1aac3f"><td class="mdescLeft">&#160;</td><td class="mdescRight">Puts an unsigned integer as the value of a key in a map object.  <a href="structAMdoc.html#a5b1eee7567d2e58ede4c3efdca1aac3f">More...</a><br /></td></tr>
 <tr class="separator:a5b1eee7567d2e58ede4c3efdca1aac3f"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:af249af927903ba020b2577e5fa1b3c50"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#af249af927903ba020b2577e5fa1b3c50">AMmerge</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *dest, struct <a class="el" href="structAMdoc.html">AMdoc</a> *src)</td></tr>
-<tr class="memdesc:af249af927903ba020b2577e5fa1b3c50"><td class="mdescLeft">&#160;</td><td class="mdescRight">Applies a sequence of changes to a document.  <a href="structAMdoc.html#af249af927903ba020b2577e5fa1b3c50">More...</a><br /></td></tr>
+<tr class="memdesc:af249af927903ba020b2577e5fa1b3c50"><td class="mdescLeft">&#160;</td><td class="mdescRight">Applies all of the changes in <code>src</code> which are not in <code>dest</code> to <code>dest</code>.  <a href="structAMdoc.html#af249af927903ba020b2577e5fa1b3c50">More...</a><br /></td></tr>
 <tr class="separator:af249af927903ba020b2577e5fa1b3c50"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ad0546625e1cc2c4aa100b02ba9b8345b"><td class="memItemLeft" align="right" valign="top">size_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#ad0546625e1cc2c4aa100b02ba9b8345b">AMobjSize</a> (const struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id)</td></tr>
 <tr class="memdesc:ad0546625e1cc2c4aa100b02ba9b8345b"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the size of an object.  <a href="structAMdoc.html#ad0546625e1cc2c4aa100b02ba9b8345b">More...</a><br /></td></tr>
@@ -202,12 +211,21 @@ Public Member Functions</h2></td></tr>
 <tr class="memitem:a8ec07f6c23cb17fdaa68b0fcf7e989e7"><td class="memItemLeft" align="right" valign="top">size_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a8ec07f6c23cb17fdaa68b0fcf7e989e7">AMobjSizeAt</a> (const struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id, const struct <a class="el" href="structAMchange.html">AMchange</a> *change)</td></tr>
 <tr class="memdesc:a8ec07f6c23cb17fdaa68b0fcf7e989e7"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the historical size of an object.  <a href="structAMdoc.html#a8ec07f6c23cb17fdaa68b0fcf7e989e7">More...</a><br /></td></tr>
 <tr class="separator:a8ec07f6c23cb17fdaa68b0fcf7e989e7"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a640a2bec6eb353a3b9a96190ba51dcc0"><td class="memItemLeft" align="right" valign="top">size_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a640a2bec6eb353a3b9a96190ba51dcc0">AMpendingOps</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc)</td></tr>
+<tr class="memdesc:a640a2bec6eb353a3b9a96190ba51dcc0"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the number of pending operations added during a document's current transaction.  <a href="structAMdoc.html#a640a2bec6eb353a3b9a96190ba51dcc0">More...</a><br /></td></tr>
+<tr class="separator:a640a2bec6eb353a3b9a96190ba51dcc0"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a853fbc3242e37019fc1d951f51c99529"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a853fbc3242e37019fc1d951f51c99529">AMreceiveSyncMessage</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, struct <a class="el" href="structAMsyncState.html">AMsyncState</a> *sync_state, const struct <a class="el" href="structAMsyncMessage.html">AMsyncMessage</a> *sync_message)</td></tr>
 <tr class="memdesc:a853fbc3242e37019fc1d951f51c99529"><td class="mdescLeft">&#160;</td><td class="mdescRight">Receives a synchronization message from a peer based upon a given synchronization state.  <a href="structAMdoc.html#a853fbc3242e37019fc1d951f51c99529">More...</a><br /></td></tr>
 <tr class="separator:a853fbc3242e37019fc1d951f51c99529"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a2aa7e389776fd5b08cb5c42ead8ac75f"><td class="memItemLeft" align="right" valign="top">size_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a2aa7e389776fd5b08cb5c42ead8ac75f">AMrollback</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc)</td></tr>
+<tr class="memdesc:a2aa7e389776fd5b08cb5c42ead8ac75f"><td class="mdescLeft">&#160;</td><td class="mdescRight">Cancels the pending operations added during a document's current transaction and gets the number of cancellations.  <a href="structAMdoc.html#a2aa7e389776fd5b08cb5c42ead8ac75f">More...</a><br /></td></tr>
+<tr class="separator:a2aa7e389776fd5b08cb5c42ead8ac75f"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ab919eefed8c3f6c8fcd837a335c2e146"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#ab919eefed8c3f6c8fcd837a335c2e146">AMsave</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc)</td></tr>
 <tr class="memdesc:ab919eefed8c3f6c8fcd837a335c2e146"><td class="mdescLeft">&#160;</td><td class="mdescRight">Saves the entirety of a document into a compact form.  <a href="structAMdoc.html#ab919eefed8c3f6c8fcd837a335c2e146">More...</a><br /></td></tr>
 <tr class="separator:ab919eefed8c3f6c8fcd837a335c2e146"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:aa44570aeb0f2676dac5e677efdaa3bc9"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#aa44570aeb0f2676dac5e677efdaa3bc9">AMsaveIncremental</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc)</td></tr>
+<tr class="memdesc:aa44570aeb0f2676dac5e677efdaa3bc9"><td class="mdescLeft">&#160;</td><td class="mdescRight">Saves the changes to a document since its last save into a compact form.  <a href="structAMdoc.html#aa44570aeb0f2676dac5e677efdaa3bc9">More...</a><br /></td></tr>
+<tr class="separator:aa44570aeb0f2676dac5e677efdaa3bc9"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a7d79c6696662ecb05f9e9aab2d7121c2"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a7d79c6696662ecb05f9e9aab2d7121c2">AMsetActor</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const uint8_t *value, size_t count)</td></tr>
 <tr class="memdesc:a7d79c6696662ecb05f9e9aab2d7121c2"><td class="mdescLeft">&#160;</td><td class="mdescRight">Puts a sequence of bytes as the actor ID value of a document.  <a href="structAMdoc.html#a7d79c6696662ecb05f9e9aab2d7121c2">More...</a><br /></td></tr>
 <tr class="separator:a7d79c6696662ecb05f9e9aab2d7121c2"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -539,6 +557,48 @@ Public Member Functions</h2></td></tr>
 
 </div>
 </div>
+<a id="a2c9a3a50a1051303499c15e62777f230"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a2c9a3a50a1051303499c15e62777f230">&#9670;&nbsp;</a></span>AMgetChangesAdded()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">struct <a class="el" href="structAMresult.html">AMresult</a> * AMgetChangesAdded </td>
+          <td>(</td>
+          <td class="paramtype">struct <a class="el" href="structAMdoc.html">AMdoc</a> *&#160;</td>
+          <td class="paramname"><em>doc1</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">struct <a class="el" href="structAMdoc.html">AMdoc</a> *&#160;</td>
+          <td class="paramname"><em>doc2</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Gets the changes added to a second document that weren't added to a first document. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">doc1</td><td>An <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">doc2</td><td>An <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an <code><a class="el" href="structAMchanges.html" title="A random-access iterator over a sequence of changes.">AMchanges</a></code> struct. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc1</code> must be a valid address. </dd>
+<dd>
+<code>doc2</code> must be a valid address. </dd></dl>
+<dl class="section warning"><dt>Warning</dt><dd>To avoid a memory leak, the returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code>. </dd></dl>
+
+</div>
+</div>
 <a id="a50d9cc73661cec439913585964618171"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#a50d9cc73661cec439913585964618171">&#9670;&nbsp;</a></span>AMgetHeads()</h2>
 
@@ -728,6 +788,62 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> must be a valid address. </dd>
+<dd>
+<code>0 &lt;=</code> <code>index</code> <code>&lt;=</code> length of the list object identified by <code>obj_id</code>. </dd></dl>
+<dl class="section warning"><dt>Warning</dt><dd>To avoid a memory leak, the returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code>. </dd></dl>
+
+</div>
+</div>
+<a id="a1df2b38eab17c09ac95586857d451455"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a1df2b38eab17c09ac95586857d451455">&#9670;&nbsp;</a></span>AMlistIncrement()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">struct <a class="el" href="structAMresult.html">AMresult</a> * AMlistIncrement </td>
+          <td>(</td>
+          <td class="paramtype">struct <a class="el" href="structAMdoc.html">AMdoc</a> *&#160;</td>
+          <td class="paramname"><em>doc</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const struct <a class="el" href="structAMobjId.html">AMobjId</a> *&#160;</td>
+          <td class="paramname"><em>obj_id</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">size_t&#160;</td>
+          <td class="paramname"><em>index</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">int64_t&#160;</td>
+          <td class="paramname"><em>value</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Increments a counter at an index in a list object by the given value. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct or <code>NULL</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">value</td><td>A 64-bit signed integer. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
 <dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> must be a valid address. </dd>
 <dd>
 <code>0 &lt;=</code> <code>index</code> <code>&lt;=</code> length of the list object identified by <code>obj_id</code>. </dd></dl>
@@ -1560,6 +1676,62 @@ Public Member Functions</h2></td></tr>
 
 </div>
 </div>
+<a id="a5c51f815a3ecb6486ae355f01d633503"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a5c51f815a3ecb6486ae355f01d633503">&#9670;&nbsp;</a></span>AMmapIncrement()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">struct <a class="el" href="structAMresult.html">AMresult</a> * AMmapIncrement </td>
+          <td>(</td>
+          <td class="paramtype">struct <a class="el" href="structAMdoc.html">AMdoc</a> *&#160;</td>
+          <td class="paramname"><em>doc</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const struct <a class="el" href="structAMobjId.html">AMobjId</a> *&#160;</td>
+          <td class="paramname"><em>obj_id</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const char *&#160;</td>
+          <td class="paramname"><em>key</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">int64_t&#160;</td>
+          <td class="paramname"><em>value</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Increments a counter for a key in a map object by the given value. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct or <code>NULL</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">key</td><td>A UTF-8 string key for the map object identified by <code>obj_id</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">value</td><td>A 64-bit signed integer. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> must be a valid address. </dd>
+<dd>
+<code>key</code> must be a valid address. </dd></dl>
+<dl class="section warning"><dt>Warning</dt><dd>To avoid a memory leak, the returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code>. </dd></dl>
+
+</div>
+</div>
 <a id="a616d8ff88dcb213ee7058a7561c3b2a4"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#a616d8ff88dcb213ee7058a7561c3b2a4">&#9670;&nbsp;</a></span>AMmapPutBool()</h2>
 
@@ -2152,11 +2324,11 @@ Public Member Functions</h2></td></tr>
       </table>
 </div><div class="memdoc">
 
-<p>Applies a sequence of changes to a document. </p>
+<p>Applies all of the changes in <code>src</code> which are not in <code>dest</code> to <code>dest</code>. </p>
 <dl class="params"><dt>Parameters</dt><dd>
   <table class="params">
-    <tr><td class="paramdir">[in]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
-    <tr><td class="paramdir">[in]</td><td class="paramname">changes</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">dest</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">src</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
   </table>
   </dd>
 </dl>
@@ -2253,6 +2425,34 @@ Public Member Functions</h2></td></tr>
 
 </div>
 </div>
+<a id="a640a2bec6eb353a3b9a96190ba51dcc0"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a640a2bec6eb353a3b9a96190ba51dcc0">&#9670;&nbsp;</a></span>AMpendingOps()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">size_t AMpendingOps </td>
+          <td>(</td>
+          <td class="paramtype">struct <a class="el" href="structAMdoc.html">AMdoc</a> *&#160;</td>
+          <td class="paramname"><em>doc</em></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Gets the number of pending operations added during a document's current transaction. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>The count of pending operations for <code>doc</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> must be a valid address. </dd></dl>
+
+</div>
+</div>
 <a id="a853fbc3242e37019fc1d951f51c99529"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#a853fbc3242e37019fc1d951f51c99529">&#9670;&nbsp;</a></span>AMreceiveSyncMessage()</h2>
 
@@ -2303,6 +2503,34 @@ Public Member Functions</h2></td></tr>
 
 </div>
 </div>
+<a id="a2aa7e389776fd5b08cb5c42ead8ac75f"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a2aa7e389776fd5b08cb5c42ead8ac75f">&#9670;&nbsp;</a></span>AMrollback()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">size_t AMrollback </td>
+          <td>(</td>
+          <td class="paramtype">struct <a class="el" href="structAMdoc.html">AMdoc</a> *&#160;</td>
+          <td class="paramname"><em>doc</em></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Cancels the pending operations added during a document's current transaction and gets the number of cancellations. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>The count of pending operations for <code>doc</code> that were cancelled. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> must be a valid address. </dd></dl>
+
+</div>
+</div>
 <a id="ab919eefed8c3f6c8fcd837a335c2e146"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#ab919eefed8c3f6c8fcd837a335c2e146">&#9670;&nbsp;</a></span>AMsave()</h2>
 
@@ -2320,6 +2548,35 @@ Public Member Functions</h2></td></tr>
 </div><div class="memdoc">
 
 <p>Saves the entirety of a document into a compact form. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an array of bytes as an <code><a class="el" href="structAMbyteSpan.html" title="A contiguous sequence of bytes.">AMbyteSpan</a></code> struct. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> must be a valid address. </dd></dl>
+<dl class="section warning"><dt>Warning</dt><dd>To avoid a memory leak, the returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code>. </dd></dl>
+
+</div>
+</div>
+<a id="aa44570aeb0f2676dac5e677efdaa3bc9"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#aa44570aeb0f2676dac5e677efdaa3bc9">&#9670;&nbsp;</a></span>AMsaveIncremental()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">struct <a class="el" href="structAMresult.html">AMresult</a> * AMsaveIncremental </td>
+          <td>(</td>
+          <td class="paramtype">struct <a class="el" href="structAMdoc.html">AMdoc</a> *&#160;</td>
+          <td class="paramname"><em>doc</em></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Saves the changes to a document since its last save into a compact form. </p>
 <dl class="params"><dt>Parameters</dt><dd>
   <table class="params">
     <tr><td class="paramdir">[in]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
