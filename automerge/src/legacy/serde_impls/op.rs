@@ -48,6 +48,7 @@ impl Serialize for Op {
         }
         match &self.action {
             OpType::Increment(n) => op.serialize_field("value", &n)?,
+            OpType::Put(ScalarValue::Counter(c)) => op.serialize_field("value", &c.start)?,
             OpType::Put(value) => op.serialize_field("value", &value)?,
             _ => {}
         }
