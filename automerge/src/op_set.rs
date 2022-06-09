@@ -160,6 +160,30 @@ impl OpSetInternal {
         self.length
     }
 
+    pub(crate) fn hint_clear(&mut self, obj: &ObjId) {
+        if let Some(tree) = self.trees.get_mut(obj) {
+            tree.internal.cache.clear();
+        }
+    }
+
+    pub(crate) fn hint_delete(&mut self, pos: usize, obj: &ObjId) {
+        if let Some(tree) = self.trees.get_mut(obj) {
+            tree.internal.cache.delete(pos);
+        }
+    }
+
+    pub(crate) fn hint_shift(&mut self, index: Option<usize>, pos: usize, obj: &ObjId) {
+        if let Some(tree) = self.trees.get_mut(obj) {
+            tree.internal.cache.shift(index, pos);
+        }
+    }
+
+    pub(crate) fn hint_insert(&mut self, index: usize, pos: usize, obj: &ObjId, element: &Op) {
+        if let Some(tree) = self.trees.get_mut(obj) {
+            tree.internal.cache.insert(index, pos, element);
+        }
+    }
+
     pub(crate) fn insert(&mut self, index: usize, obj: &ObjId, element: Op) {
         if let OpType::Make(typ) = element.action {
             self.trees.insert(
@@ -180,6 +204,8 @@ impl OpSetInternal {
     }
 
     pub(crate) fn insert_op(&mut self, obj: &ObjId, op: Op) -> Op {
+        self.hint_clear(obj);
+
         let q = self.search(obj, query::SeekOp::new(&op));
 
         let succ = q.succ;
@@ -201,6 +227,9 @@ impl OpSetInternal {
         op: Op,
         observer: &mut Obs,
     ) -> Op {
+        // FIXME
+        self.hint_clear(obj);
+
         let q = self.search(obj, query::SeekOpWithPatch::new(&op));
 
         let query::SeekOpWithPatch {

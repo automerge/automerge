@@ -76,6 +76,7 @@ impl TransactionInner {
         let num = self.pending_ops();
         // remove in reverse order so sets are removed before makes etc...
         for (obj, _prop, op) in self.operations.into_iter().rev() {
+            doc.ops.hint_clear(&obj);
             for pred_id in &op.pred {
                 if let Some(p) = doc.ops.search(&obj, OpIdSearch::new(*pred_id)).index() {
                     doc.ops.replace(&obj, p, |o| o.remove_succ(&op));
@@ -169,7 +170,10 @@ impl TransactionInner {
         }
 
         if !op.is_delete() {
+            doc.ops.hint_shift((&prop).into(), pos, &obj);
             doc.ops.insert(pos, &obj, op.clone());
+        } else {
+            doc.ops.hint_delete(pos, &obj)
         }
 
         self.operations.push((obj, prop, op));
@@ -223,6 +227,8 @@ impl TransactionInner {
             insert: true,
         };
 
+        let pos = query.pos();
+        doc.ops.hint_insert(index, pos, &obj, &op);
         doc.ops.insert(query.pos(), &obj, op.clone());
         self.operations.push((obj, Prop::Seq(index), op));
 

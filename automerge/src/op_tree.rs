@@ -11,15 +11,76 @@ use crate::{
     query::{self, Index, QueryResult, ReplaceArgs, TreeQuery},
 };
 use crate::{
-    types::{ObjId, Op, OpId},
+    types::{Key, ObjId, Op, OpId},
     ObjType,
 };
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 pub(crate) const B: usize = 16;
 
 mod iter;
 pub(crate) use iter::OpTreeIter;
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ListCachePoint {
+    pub(crate) index: usize, // list index
+    pub(crate) pos: usize,   // op tree position
+    pub(crate) key: Key,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct QueryCache {
+    index: VecDeque<ListCachePoint>,
+}
+
+const CACHE_MAX: usize = 4;
+
+impl QueryCache {
+    pub(crate) fn find(&self, index: usize) -> Option<&ListCachePoint> {
+        self.index.iter().find(|c| c.index == index)
+    }
+
+    pub(crate) fn insert(&mut self, index: usize, pos: usize, op: &Op) {
+        for c in &mut self.index {
+            if c.pos >= pos {
+                c.pos += 1;
+                c.index += 1;
+            }
+        }
+        if self.index.len() >= CACHE_MAX {
+            self.index.pop_front();
+        }
+        self.index.push_back(ListCachePoint {
+            index,
+            pos,
+            key: op.elemid_or_key(),
+        });
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.index.truncate(0)
+    }
+
+    pub(crate) fn delete(&mut self, pos: usize) {
+        for c in &mut self.index {
+            if c.pos >= pos {
+                c.index -= 1;
+            }
+        }
+        self.index.retain(|c| c.pos + 1 != pos);
+    }
+
+    pub(crate) fn shift(&mut self, index: Option<usize>, pos: usize) {
+        for c in &mut self.index {
+            if c.pos >= pos {
+                c.pos += 1;
+            }
+        }
+        if let Some(index) = index {
+            self.index.retain(|c| c.index != index);
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct OpTree {
@@ -46,6 +107,7 @@ impl OpTree {
 #[derive(Clone, Debug)]
 pub(crate) struct OpTreeInternal {
     pub(crate) root_node: Option<OpTreeNode>,
+    pub(crate) cache: QueryCache,
 }
 
 #[derive(Clone, Debug)]
@@ -59,7 +121,10 @@ pub(crate) struct OpTreeNode {
 impl OpTreeInternal {
     /// Construct a new, empty, sequence.
     pub(crate) fn new() -> Self {
-        Self { root_node: None }
+        Self {
+            root_node: None,
+            cache: Default::default(),
+        }
     }
 
     /// Get the length of the sequence.
@@ -121,13 +186,15 @@ impl OpTreeInternal {
     where
         Q: TreeQuery<'a>,
     {
-        self.root_node
-            .as_ref()
-            .map(|root| match query.query_node_with_metadata(root, m) {
-                QueryResult::Descend => root.search(&mut query, m, None),
-                QueryResult::Skip(skip) => root.search(&mut query, m, Some(skip)),
-                _ => true,
-            });
+        if !query.read_cache(&self.cache) {
+            self.root_node
+                .as_ref()
+                .map(|root| match query.query_node_with_metadata(root, m) {
+                    QueryResult::Descend => root.search(&mut query, m, None),
+                    QueryResult::Skip(skip) => root.search(&mut query, m, Some(skip)),
+                    _ => true,
+                });
+        }
         query
     }
 

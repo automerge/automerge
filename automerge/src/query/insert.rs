@@ -1,6 +1,6 @@
 use crate::error::AutomergeError;
 use crate::op_tree::OpTreeNode;
-use crate::query::{QueryResult, TreeQuery};
+use crate::query::{QueryCache, QueryResult, TreeQuery};
 use crate::types::{ElemId, Key, Op, HEAD};
 use std::fmt::Debug;
 
@@ -46,16 +46,6 @@ impl InsertNth {
     pub(crate) fn key(&self) -> Result<Key, AutomergeError> {
         self.last_valid_insert
             .ok_or(AutomergeError::InvalidIndex(self.target))
-        //if self.target == 0 {
-        /*
-        if self.last_insert.is_none() {
-            Ok(HEAD.into())
-        } else if self.seen == self.target && self.last_insert.is_some() {
-            Ok(Key::Seq(self.last_insert.unwrap()))
-        } else {
-            Err(AutomergeError::InvalidIndex(self.target))
-        }
-        */
     }
 }
 
@@ -109,5 +99,19 @@ impl<'a> TreeQuery<'a> for InsertNth {
         }
         self.n += 1;
         QueryResult::Next
+    }
+
+    // AXIOM: ListCachePoint is only for single item inserts
+    // remove cache points on update
+
+    fn read_cache(&mut self, cache: &QueryCache) -> bool {
+        if self.target > 0 {
+            if let Some(c) = cache.find(self.target - 1) {
+                self.last_valid_insert = Some(c.key);
+                self.valid = Some(c.pos + 1);
+                return true;
+            }
+        }
+        false
     }
 }

@@ -575,3 +575,12 @@ impl From<Prop> for wasm_bindgen::JsValue {
         }
     }
 }
+
+impl From<&Prop> for Option<usize> {
+    fn from(prop: &Prop) -> Self {
+        match prop {
+            Prop::Map(_) => None,
+            Prop::Seq(index) => Some(*index),
+        }
+    }
+}

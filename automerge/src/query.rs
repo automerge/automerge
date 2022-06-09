@@ -1,4 +1,4 @@
-use crate::op_tree::{OpSetMetadata, OpTreeNode};
+use crate::op_tree::{OpSetMetadata, OpTreeNode, QueryCache};
 use crate::types::{Clock, Counter, Key, Op, OpId, OpType, ScalarValue};
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
@@ -85,6 +85,12 @@ pub(crate) trait TreeQuery<'a> {
     fn query_element(&mut self, _element: &'a Op) -> QueryResult {
         panic!("invalid element query")
     }
+
+    fn read_cache(&mut self, _cache: &QueryCache) -> bool {
+        false
+    }
+
+    fn update_cache(&mut self, _cache: &mut QueryCache) {}
 }
 
 #[derive(Debug, Clone, PartialEq)]
