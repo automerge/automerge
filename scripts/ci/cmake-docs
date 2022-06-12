@@ -2,7 +2,7 @@
 
 set -eoux pipefail
 
-cmake -E make_directory automerge-c/build
+mkdir -p automerge-c/build
 cd automerge-c/build
 cmake -B . -S ..
 cmake --build . --target automerge_docs
