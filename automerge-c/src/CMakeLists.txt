@@ -77,7 +77,7 @@ add_custom_command(
 )
 
 add_custom_target(
-    ${LIBRARY_NAME}_artifacts
+    ${LIBRARY_NAME}_artifacts ALL
     DEPENDS ${CARGO_OUTPUT}
 )
 
