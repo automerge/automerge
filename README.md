@@ -96,7 +96,7 @@ $ mkdir -p build
 $ cd build
 $ cmake -S .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
 ## building and testing
-$ cmake --build .
+$ cmake --build . --target test_automerge
 ```
 To add debugging symbols, replace `Release` with `Debug`.
 To build a shared library instead of a static one, replace `OFF` with `ON`.
