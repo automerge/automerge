@@ -139,7 +139,7 @@ export class Automerge {
 
   // transactions
   commit(message?: string, time?: number): Hash;
-  merge(other: Automerge): ObjID[];
+  merge(other: Automerge): Heads;
   getActorId(): Actor;
   pendingOps(): number;
   rollback(): number;
@@ -151,14 +151,14 @@ export class Automerge {
   // save and load to local store
   save(): Uint8Array;
   saveIncremental(): Uint8Array;
-  loadIncremental(data: Uint8Array): ObjID[];
+  loadIncremental(data: Uint8Array): number;
 
   // sync over network
-  receiveSyncMessage(state: SyncState, message: SyncMessage): ObjID[];
+  receiveSyncMessage(state: SyncState, message: SyncMessage): void;
   generateSyncMessage(state: SyncState): SyncMessage | null;
 
   // low level change functions
-  applyChanges(changes: Change[]): ObjID[];
+  applyChanges(changes: Change[]): void;
   getChanges(have_deps: Heads): Change[];
   getChangeByHash(hash: Hash): Change | null;
   getChangesAdded(other: Automerge): Change[];
