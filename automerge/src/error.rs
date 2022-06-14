@@ -29,8 +29,6 @@ pub enum AutomergeError {
     MissingCounter,
     #[error("general failure")]
     Fail,
-    #[error(transparent)]
-    HexDecode(#[from] hex::FromHexError),
 }
 
 #[cfg(feature = "wasm")]
