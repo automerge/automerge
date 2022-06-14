@@ -4,12 +4,14 @@ find_package(cmocka REQUIRED)
 
 add_executable(
     test_${LIBRARY_NAME}
-        group_state.c
+        actor_id_tests.c
         doc_tests.c
+        group_state.c
         list_tests.c
-        map_tests.c
         macro_utils.c
         main.c
+        map_tests.c
+        str_utils.c
         sync_tests.c
 )
 

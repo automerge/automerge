@@ -278,8 +278,12 @@ static void test_converged_works_with_prior_sync_state(void **state) {
 static void test_converged_no_message_once_synced(void **state) {
     /* Create & synchronize two nodes. */
     TestState* test_state = *state;
-    AMfree(AMsetActorHex(test_state->doc1, "abc123"));
-    AMfree(AMsetActorHex(test_state->doc2, "def456"));
+    AMresult* actor_id_result = AMactorIdInitStr("abc123");
+    AMfree(AMsetActor(test_state->doc1, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
+    actor_id_result = AMactorIdInitStr("def456");
+    AMfree(AMsetActor(test_state->doc2, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
 
     time_t const time = 0;
     for (size_t value = 0; value != 5; ++value) {
@@ -352,8 +356,12 @@ static void test_converged_no_message_once_synced(void **state) {
 static void test_converged_allow_simultaneous_messages(void **state) {
     /* Create & synchronize two nodes. */
     TestState* test_state = *state;
-    AMfree(AMsetActorHex(test_state->doc1, "abc123"));
-    AMfree(AMsetActorHex(test_state->doc2, "def456"));
+    AMresult* actor_id_result = AMactorIdInitStr("abc123");
+    AMfree(AMsetActor(test_state->doc1, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
+    actor_id_result = AMactorIdInitStr("def456");
+    AMfree(AMsetActor(test_state->doc2, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
 
     time_t const time = 0;
     for (size_t value = 0; value != 5; ++value) {
@@ -505,8 +513,12 @@ static void test_converged_allow_simultaneous_messages(void **state) {
  */
 static void test_converged_assume_sent_changes_were_received(void **state) {
     TestState* test_state = *state;
-    AMfree(AMsetActorHex(test_state->doc1, "01234567"));
-    AMfree(AMsetActorHex(test_state->doc2, "89abcdef"));
+    AMresult* actor_id_result = AMactorIdInitStr("01234567");
+    AMfree(AMsetActor(test_state->doc1, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
+    actor_id_result = AMactorIdInitStr("89abcdef");
+    AMfree(AMsetActor(test_state->doc2, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
 
     AMresult* items_result = AMmapPutObject(test_state->doc1,
                                             AM_ROOT,
@@ -595,8 +607,12 @@ static void test_diverged_works_without_prior_sync_state(void **state) {
 
     /* Create two peers both with divergent commits. */
     TestState* test_state = *state;
-    AMfree(AMsetActorHex(test_state->doc1, "01234567"));
-    AMfree(AMsetActorHex(test_state->doc2, "89abcdef"));
+    AMresult* actor_id_result = AMactorIdInitStr("01234567");
+    AMfree(AMsetActor(test_state->doc1, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
+    actor_id_result = AMactorIdInitStr("89abcdef");
+    AMfree(AMsetActor(test_state->doc2, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
     time_t const time = 0;
     for (size_t value = 0; value != 10; ++value) {
         AMfree(AMmapPutUint(test_state->doc1, AM_ROOT, "x", value));
@@ -645,8 +661,12 @@ static void test_diverged_works_with_prior_sync_state(void **state) {
 
     /* Create two peers both with divergent commits. */
     TestState* test_state = *state;
-    AMfree(AMsetActorHex(test_state->doc1, "01234567"));
-    AMfree(AMsetActorHex(test_state->doc2, "89abcdef"));
+    AMresult* actor_id_result = AMactorIdInitStr("01234567");
+    AMfree(AMsetActor(test_state->doc1, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
+    actor_id_result = AMactorIdInitStr("89abcdef");
+    AMfree(AMsetActor(test_state->doc2, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
     time_t const time = 0;
     for (size_t value = 0; value != 10; ++value) {
         AMfree(AMmapPutUint(test_state->doc1, AM_ROOT, "x", value));
@@ -696,8 +716,12 @@ static void test_diverged_works_with_prior_sync_state(void **state) {
  */
 static void test_diverged_ensure_not_empty_after_sync(void **state) {
     TestState* test_state = *state;
-    AMfree(AMsetActorHex(test_state->doc1, "01234567"));
-    AMfree(AMsetActorHex(test_state->doc2, "89abcdef"));
+    AMresult* actor_id_result = AMactorIdInitStr("01234567");
+    AMfree(AMsetActor(test_state->doc1, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
+    actor_id_result = AMactorIdInitStr("89abcdef");
+    AMfree(AMsetActor(test_state->doc2, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
 
     time_t const time = 0;
     for (size_t value = 0; value != 3; ++value) {
@@ -731,8 +755,12 @@ static void test_diverged_resync_after_node_crash_with_data_loss(void **state) {
        * We want to successfully sync (n1) with (r), even though (n1) believes
        * it's talking to (n2). */
     TestState* test_state = *state;
-    AMfree(AMsetActorHex(test_state->doc1, "01234567"));
-    AMfree(AMsetActorHex(test_state->doc2, "89abcdef"));
+    AMresult* actor_id_result = AMactorIdInitStr("01234567");
+    AMfree(AMsetActor(test_state->doc1, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
+    actor_id_result = AMactorIdInitStr("89abcdef");
+    AMfree(AMsetActor(test_state->doc2, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
 
     /* n1 makes three changes which we synchronize to n2. */
     time_t const time = 0;
@@ -814,8 +842,12 @@ static void test_diverged_resync_after_node_crash_with_data_loss(void **state) {
  */
 static void test_diverged_resync_after_data_loss_without_disconnection(void **state) {
     TestState* test_state = *state;
-    AMfree(AMsetActorHex(test_state->doc1, "01234567"));
-    AMfree(AMsetActorHex(test_state->doc2, "89abcdef"));
+    AMresult* actor_id_result = AMactorIdInitStr("01234567");
+    AMfree(AMsetActor(test_state->doc1, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
+    actor_id_result = AMactorIdInitStr("89abcdef");
+    AMfree(AMsetActor(test_state->doc2, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
 
     /* n1 makes three changes which we synchronize to n2. */
     time_t const time = 0;
@@ -839,7 +871,9 @@ static void test_diverged_resync_after_data_loss_without_disconnection(void **st
 
     AMresult* doc2_after_data_loss_result = AMcreate();
     AMdoc* doc2_after_data_loss = AMresultValue(doc2_after_data_loss_result).doc;
-    AMfree(AMsetActorHex(doc2_after_data_loss, "89abcdef"));
+    actor_id_result = AMactorIdInitStr("89abcdef");
+    AMfree(AMsetActor(doc2_after_data_loss, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
 
     /* "n2" now has no data, but n1 still thinks it does. Note we don't do
      * decodeSyncState(encodeSyncState(s1)) in order to simulate data loss
@@ -868,11 +902,17 @@ static void test_diverged_resync_after_data_loss_without_disconnection(void **st
  */
 static void test_diverged_handles_concurrent_changes(void **state) {
     TestState* test_state = *state;
-    AMfree(AMsetActorHex(test_state->doc1, "01234567"));
-    AMfree(AMsetActorHex(test_state->doc2, "89abcdef"));
+    AMresult* actor_id_result = AMactorIdInitStr("01234567");
+    AMfree(AMsetActor(test_state->doc1, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
+    actor_id_result = AMactorIdInitStr("89abcdef");
+    AMfree(AMsetActor(test_state->doc2, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
     AMresult* doc3_result = AMcreate();
     AMdoc* doc3 = AMresultValue(doc3_result).doc;
-    AMfree(AMsetActorHex(doc3, "fedcba98"));
+    actor_id_result = AMactorIdInitStr("fedcba98");
+    AMfree(AMsetActor(doc3, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
     AMsyncState* sync_state12 = test_state->sync_state1;
     AMsyncState* sync_state21 = test_state->sync_state2;
     AMresult* sync_state23_result = AMsyncStateInit();
@@ -929,11 +969,17 @@ static void test_diverged_handles_concurrent_changes(void **state) {
  */
 static void test_diverged_handles_histories_of_branching_and_merging(void **state) {
     TestState* test_state = *state;
-    AMfree(AMsetActorHex(test_state->doc1, "01234567"));
-    AMfree(AMsetActorHex(test_state->doc2, "89abcdef"));
+    AMresult* actor_id_result = AMactorIdInitStr("01234567");
+    AMfree(AMsetActor(test_state->doc1, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
+    actor_id_result = AMactorIdInitStr("89abcdef");
+    AMfree(AMsetActor(test_state->doc2, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
     AMresult* doc3_result = AMcreate();
     AMdoc* doc3 = AMresultValue(doc3_result).doc;
-    AMfree(AMsetActorHex(doc3, "fedcba98"));
+    actor_id_result = AMactorIdInitStr("fedcba98");
+    AMfree(AMsetActor(doc3, AMresultValue(actor_id_result).actor_id));
+    AMfree(actor_id_result);
     time_t const time = 0;
     AMfree(AMmapPutUint(test_state->doc1, AM_ROOT, "x", 0));
     AMcommit(test_state->doc1, NULL, &time);

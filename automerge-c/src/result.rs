@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::ffi::CString;
 use std::os::raw::c_char;
 
+use crate::actor_id::AMactorId;
 use crate::byte_span::AMbyteSpan;
 use crate::change::AMchange;
 use crate::change_hashes::AMchangeHashes;
@@ -21,7 +22,7 @@ use crate::sync::{AMsyncMessage, AMsyncState};
 /// The variant discriminator of an `AMvalue` struct.
 ///
 /// \var AMvalue::actor_id
-/// An actor ID as an `AMbyteSpan` struct.
+/// An actor ID as an `AMactorId` struct.
 ///
 /// \var AMvalue::boolean
 /// A boolean.
@@ -58,7 +59,7 @@ use crate::sync::{AMsyncMessage, AMsyncState};
 #[repr(C)]
 pub enum AMvalue<'a> {
     /// An actor ID variant.
-    ActorId(AMbyteSpan),
+    ActorId(&'a AMactorId),
     /// A boolean variant.
     Boolean(bool),
     /// A byte array variant.
@@ -104,7 +105,7 @@ pub enum AMvalue<'a> {
 /// \struct AMresult
 /// \brief A discriminated union of result variants.
 pub enum AMresult {
-    ActorId(am::ActorId),
+    ActorId(AMactorId),
     ChangeHashes(Vec<am::ChangeHash>),
     Changes(Vec<am::Change>, BTreeMap<usize, AMchange>),
     Doc(Box<AMdoc>),
@@ -175,7 +176,16 @@ impl From<Result<(), am::AutomergeError>> for AMresult {
 impl From<Result<am::ActorId, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<am::ActorId, am::AutomergeError>) -> Self {
         match maybe {
-            Ok(actor_id) => AMresult::ActorId(actor_id),
+            Ok(actor_id) => AMresult::ActorId(AMactorId::new(actor_id)),
+            Err(e) => AMresult::err(&e.to_string()),
+        }
+    }
+}
+
+impl From<Result<am::ActorId, am::InvalidActorId>> for AMresult {
+    fn from(maybe: Result<am::ActorId, am::InvalidActorId>) -> Self {
+        match maybe {
+            Ok(actor_id) => AMresult::ActorId(AMactorId::new(actor_id)),
             Err(e) => AMresult::err(&e.to_string()),
         }
     }
@@ -432,7 +442,7 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult) -> AMvalue<'a>
     if let Some(result) = result.as_mut() {
         match result {
             AMresult::ActorId(actor_id) => {
-                content = AMvalue::ActorId(actor_id.into());
+                content = AMvalue::ActorId(actor_id);
             }
             AMresult::ChangeHashes(change_hashes) => {
                 content = AMvalue::ChangeHashes(AMchangeHashes::new(change_hashes));

@@ -1,6 +1,18 @@
 use std::ffi::CStr;
 use std::os::raw::c_char;
 
+macro_rules! to_actor_id {
+    ($handle:expr) => {{
+        let handle = $handle.as_ref();
+        match handle {
+            Some(b) => b,
+            None => return AMresult::err("Invalid AMactorId pointer").into(),
+        }
+    }};
+}
+
+pub(crate) use to_actor_id;
+
 macro_rules! to_doc {
     ($handle:expr) => {{
         let handle = $handle.as_mut();

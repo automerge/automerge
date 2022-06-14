@@ -1,7 +1,6 @@
 #include <setjmp.h>
 #include <stdarg.h>
 #include <stddef.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -10,6 +9,7 @@
 
 /* local */
 #include "group_state.h"
+#include "str_utils.h"
 
 typedef struct {
     GroupState* group_state;
@@ -17,16 +17,6 @@ typedef struct {
     uint8_t* actor_id_bytes;
     size_t actor_id_size;
 } TestState;
-
-static void hex_to_bytes(char const* hex_str, uint8_t* bytes, size_t const count) {
-    unsigned int byte;
-    char const* next = hex_str;
-	for (size_t index = 0; *next && index != count; next += 2, ++index) {
-		if (sscanf(next, "%02x", &byte) == 1) {
-            bytes[index] = (uint8_t)byte;
-        }
-	}
-}
 
 static int setup(void** state) {
     TestState* test_state = calloc(1, sizeof(TestState));
@@ -47,63 +37,65 @@ static int teardown(void** state) {
     return 0;
 }
 
-static void test_AMputActor(void **state) {
+static void test_AMputActor_bytes(void **state) {
     TestState* test_state = *state;
     GroupState* group_state = test_state->group_state;
-    AMresult* res = AMsetActor(
-        group_state->doc,
-        test_state->actor_id_bytes,
-        test_state->actor_id_size
-    );
-    if (AMresultStatus(res) != AM_STATUS_OK) {
-        fail_msg("%s", AMerrorMessage(res));
+    AMresult* actor_id_result = AMactorIdInitBytes(test_state->actor_id_bytes,
+                                                   test_state->actor_id_size);
+    AMvalue value = AMresultValue(actor_id_result);
+    AMresult* result = AMsetActor(group_state->doc, value.actor_id);
+    AMfree(actor_id_result);
+    if (AMresultStatus(result) != AM_STATUS_OK) {
+        fail_msg("%s", AMerrorMessage(result));
     }
-    assert_int_equal(AMresultSize(res), 0);
-    AMvalue value = AMresultValue(res);
+    assert_int_equal(AMresultSize(result), 0);
+    value = AMresultValue(result);
     assert_int_equal(value.tag, AM_VALUE_VOID);
-    AMfree(res);
-    res = AMgetActor(group_state->doc);
-    if (AMresultStatus(res) != AM_STATUS_OK) {
-        fail_msg("%s", AMerrorMessage(res));
+    AMfree(result);
+    result = AMgetActor(group_state->doc);
+    if (AMresultStatus(result) != AM_STATUS_OK) {
+        fail_msg("%s", AMerrorMessage(result));
     }
-    assert_int_equal(AMresultSize(res), 1);
-    value = AMresultValue(res);
+    assert_int_equal(AMresultSize(result), 1);
+    value = AMresultValue(result);
     assert_int_equal(value.tag, AM_VALUE_ACTOR_ID);
-    assert_int_equal(value.actor_id.count, test_state->actor_id_size);
-    assert_memory_equal(value.actor_id.src, test_state->actor_id_bytes, value.actor_id.count);
-    AMfree(res);
+    AMbyteSpan const bytes = AMactorIdBytes(value.actor_id);
+    assert_int_equal(bytes.count, test_state->actor_id_size);
+    assert_memory_equal(bytes.src, test_state->actor_id_bytes, bytes.count);
+    AMfree(result);
 }
 
-static void test_AMputActorHex(void **state) {
+static void test_AMputActor_hex(void **state) {
     TestState* test_state = *state;
     GroupState* group_state = test_state->group_state;
-    AMresult* res = AMsetActorHex(
-        group_state->doc,
-        test_state->actor_id_str
-    );
-    if (AMresultStatus(res) != AM_STATUS_OK) {
-        fail_msg("%s", AMerrorMessage(res));
+    AMresult* actor_id_result = AMactorIdInitStr(test_state->actor_id_str);
+    AMvalue value = AMresultValue(actor_id_result);
+    AMresult* result = AMsetActor(group_state->doc, value.actor_id);
+    AMfree(actor_id_result);
+    if (AMresultStatus(result) != AM_STATUS_OK) {
+        fail_msg("%s", AMerrorMessage(result));
     }
-    assert_int_equal(AMresultSize(res), 0);
-    AMvalue value = AMresultValue(res);
+    assert_int_equal(AMresultSize(result), 0);
+    value = AMresultValue(result);
     assert_int_equal(value.tag, AM_VALUE_VOID);
-    AMfree(res);
-    res = AMgetActorHex(group_state->doc);
-    if (AMresultStatus(res) != AM_STATUS_OK) {
-        fail_msg("%s", AMerrorMessage(res));
+    AMfree(result);
+    result = AMgetActor(group_state->doc);
+    if (AMresultStatus(result) != AM_STATUS_OK) {
+        fail_msg("%s", AMerrorMessage(result));
     }
-    assert_int_equal(AMresultSize(res), 1);
-    value = AMresultValue(res);
-    assert_int_equal(value.tag, AM_VALUE_STR);
-    assert_int_equal(strlen(value.str), test_state->actor_id_size * 2);
-    assert_string_equal(value.str, test_state->actor_id_str);
-    AMfree(res);
+    assert_int_equal(AMresultSize(result), 1);
+    value = AMresultValue(result);
+    assert_int_equal(value.tag, AM_VALUE_ACTOR_ID);
+    char const* const str = AMactorIdStr(value.actor_id);
+    assert_int_equal(strlen(str), test_state->actor_id_size * 2);
+    assert_string_equal(str, test_state->actor_id_str);
+    AMfree(result);
 }
 
 int run_doc_tests(void) {
     const struct CMUnitTest tests[] = {
-        cmocka_unit_test_setup_teardown(test_AMputActor, setup, teardown),
-        cmocka_unit_test_setup_teardown(test_AMputActorHex, setup, teardown),
+        cmocka_unit_test_setup_teardown(test_AMputActor_bytes, setup, teardown),
+        cmocka_unit_test_setup_teardown(test_AMputActor_hex, setup, teardown),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);
