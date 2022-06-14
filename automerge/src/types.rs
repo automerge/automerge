@@ -237,11 +237,11 @@ impl OpId {
         self.1
     }
     #[inline]
-    pub fn prev(&self) -> OpId {
+    pub(crate) fn prev(&self) -> OpId {
         OpId(self.0 - 1, self.1)
     }
     #[inline]
-    pub fn next(&self) -> OpId {
+    pub(crate) fn next(&self) -> OpId {
         OpId(self.0 + 1, self.1)
     }
 }
@@ -469,7 +469,7 @@ impl Op {
         matches!(&self.action, OpType::Increment(_))
     }
 
-    pub fn valid_mark_anchor(&self) -> bool {
+    pub(crate) fn valid_mark_anchor(&self) -> bool {
         self.succ.is_empty()
             && matches!(
                 &self.action,
@@ -477,7 +477,7 @@ impl Op {
             )
     }
 
-    pub fn is_mark(&self) -> bool {
+    pub(crate) fn is_mark(&self) -> bool {
         matches!(&self.action, OpType::MarkBegin(_) | OpType::MarkEnd(_))
     }
 
@@ -509,7 +509,7 @@ impl Op {
         }
     }
 
-    pub fn as_string(&self) -> Option<String> {
+    pub(crate) fn as_string(&self) -> Option<String> {
         match &self.action {
             OpType::Put(scalar) => scalar.as_string(),
             _ => None,

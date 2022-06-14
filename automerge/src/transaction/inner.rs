@@ -176,7 +176,7 @@ impl TransactionInner {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn mark<O: AsRef<ExId>>(
+    pub(crate) fn mark<O: AsRef<ExId>>(
         &mut self,
         doc: &mut Automerge,
         obj: O,
@@ -200,7 +200,7 @@ impl TransactionInner {
         Ok(())
     }
 
-    pub fn unmark<O: AsRef<ExId>>(
+    pub(crate) fn unmark<O: AsRef<ExId>>(
         &mut self,
         doc: &mut Automerge,
         obj: O,

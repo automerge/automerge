@@ -10,7 +10,7 @@ pub(crate) struct Attribute2 {
     seen: usize,
     last_seen: Option<ElemId>,
     baseline: Clock,
-    pub change_sets: Vec<ChangeSet2>,
+    pub(crate) change_sets: Vec<ChangeSet2>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -62,7 +62,7 @@ impl ChangeSet2 {
 }
 
 impl Attribute2 {
-    pub fn new(baseline: Clock, change_sets: Vec<Clock>) -> Self {
+    pub(crate) fn new(baseline: Clock, change_sets: Vec<Clock>) -> Self {
         Attribute2 {
             pos: 0,
             seen: 0,
@@ -147,7 +147,7 @@ impl Attribute2 {
         }
     }
 
-    pub fn finish(&mut self) {
+    pub(crate) fn finish(&mut self) {
         for cs in &mut self.change_sets {
             cs.cut_add();
             cs.cut_del();

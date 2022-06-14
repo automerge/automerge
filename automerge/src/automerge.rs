@@ -474,7 +474,7 @@ impl Automerge {
         Ok(buffer)
     }
 
-    pub fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::Span>, AutomergeError> {
+    pub fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::Span<'_>>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
         let mut query = self.ops.search(&obj, query::Spans::new());
         query.check_marks();
@@ -489,7 +489,10 @@ impl Automerge {
     ) -> Result<Vec<query::ChangeSet>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
         let baseline = self.clock_at(baseline);
-        let change_sets: Vec<Clock> = change_sets.iter().map(|p| self.clock_at(p).unwrap()).collect();
+        let change_sets: Vec<Clock> = change_sets
+            .iter()
+            .map(|p| self.clock_at(p).unwrap())
+            .collect();
         let mut query = self
             .ops
             .search(&obj, query::Attribute::new(baseline.unwrap(), change_sets));
@@ -505,7 +508,10 @@ impl Automerge {
     ) -> Result<Vec<query::ChangeSet2>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
         let baseline = self.clock_at(baseline);
-        let change_sets: Vec<Clock> = change_sets.iter().map(|p| self.clock_at(p).unwrap()).collect();
+        let change_sets: Vec<Clock> = change_sets
+            .iter()
+            .map(|p| self.clock_at(p).unwrap())
+            .collect();
         let mut query = self
             .ops
             .search(&obj, query::Attribute2::new(baseline.unwrap(), change_sets));
@@ -796,7 +802,7 @@ impl Automerge {
             .into_iter()
             .cloned()
             .collect::<Vec<_>>();
-        self.apply_changes_with(changes, options);
+        self.apply_changes_with(changes, options)?;
         Ok(self.get_heads())
     }
 

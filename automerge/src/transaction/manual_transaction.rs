@@ -1,11 +1,11 @@
 use std::ops::RangeBounds;
 
+use super::{CommitOptions, Transactable, TransactionInner};
 use crate::exid::ExId;
+use crate::query;
 use crate::{Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, ScalarValue, Value, Values};
 use crate::{AutomergeError, Keys};
 use crate::{ListRange, ListRangeAt, MapRange, MapRangeAt};
-use crate::query;
-use super::{CommitOptions, Transactable, TransactionInner};
 
 /// A transaction on a document.
 /// Transactions group operations into a single change so that no other operations can happen
@@ -280,7 +280,7 @@ impl<'a> Transactable for Transaction<'a> {
         self.doc.text_at(obj, heads)
     }
 
-    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::Span>, AutomergeError> {
+    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::Span<'_>>, AutomergeError> {
         self.doc.spans(obj)
     }
 

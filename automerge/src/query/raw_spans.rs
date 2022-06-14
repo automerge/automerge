@@ -9,20 +9,20 @@ pub(crate) struct RawSpans {
     last_seen: Option<ElemId>,
     last_insert: Option<ElemId>,
     changed: bool,
-    pub spans: Vec<RawSpan>,
+    pub(crate) spans: Vec<RawSpan>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RawSpan {
-    pub id: OpId,
-    pub start: usize,
-    pub end: usize,
-    pub name: String,
-    pub value: ScalarValue,
+    pub(crate) id: OpId,
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+    pub(crate) name: String,
+    pub(crate) value: ScalarValue,
 }
 
 impl RawSpans {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         RawSpans {
             pos: 0,
             seen: 0,

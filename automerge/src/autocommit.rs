@@ -5,12 +5,12 @@ use crate::op_observer::OpObserver;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::Parents;
 use crate::{
-    sync, ApplyOptions, Keys, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType,
-    ScalarValue,
+    query, transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash,
+    Prop, Value, Values,
 };
 use crate::{
-    transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop,
-    Value, Values, query
+    sync, ApplyOptions, Keys, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType,
+    ScalarValue,
 };
 
 /// An automerge document that automatically manages transactions.
@@ -499,7 +499,7 @@ impl Transactable for AutoCommit {
         self.doc.text_at(obj, heads)
     }
 
-    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::Span>, AutomergeError> {
+    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::Span<'_>>, AutomergeError> {
         self.doc.spans(obj)
     }
 

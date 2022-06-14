@@ -1,4 +1,3 @@
-use crate::exid::ExId;
 use crate::{
     decoding, decoding::Decoder, encoding::Encodable, Automerge, AutomergeError, Change, ChangeHash,
 };
@@ -10,9 +9,7 @@ use std::{
     io::Write,
 };
 
-use crate::{
-    types::HASH_SIZE, ApplyOptions, OpObserver,
-};
+use crate::{types::HASH_SIZE, ApplyOptions, OpObserver};
 
 mod bloom;
 mod state;

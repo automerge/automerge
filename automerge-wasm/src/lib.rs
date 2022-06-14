@@ -775,8 +775,7 @@ impl Automerge {
         } else {
             ApplyOptions::default()
         };
-        self
-            .doc
+        self.doc
             .apply_changes_with(changes, options)
             .map_err(to_js_err)?;
         Ok(())
@@ -875,8 +874,7 @@ impl Automerge {
         } else {
             ApplyOptions::default()
         };
-        self
-            .doc
+        self.doc
             .receive_sync_message_with(&mut state.0, message, options)
             .map_err(to_js_err)?;
         Ok(())

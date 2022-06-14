@@ -15,7 +15,7 @@ pub(crate) struct Spans<'a> {
     ops: Vec<&'a Op>,
     marks: HashMap<String, &'a ScalarValue>,
     changed: bool,
-    pub spans: Vec<Span<'a>>,
+    pub(crate) spans: Vec<Span<'a>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,7 +25,7 @@ pub struct Span<'a> {
 }
 
 impl<'a> Spans<'a> {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Spans {
             pos: 0,
             seen: 0,
@@ -40,7 +40,7 @@ impl<'a> Spans<'a> {
         }
     }
 
-    pub fn check_marks(&mut self) {
+    pub(crate) fn check_marks(&mut self) {
         let mut new_marks = HashMap::new();
         for op in &self.ops {
             if let OpType::MarkBegin(m) = &op.action {

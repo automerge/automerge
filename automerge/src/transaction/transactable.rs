@@ -168,7 +168,7 @@ pub trait Transactable {
     ) -> Result<String, AutomergeError>;
 
     /// test spans api for mark/span experiment
-    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::Span>, AutomergeError>;
+    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::Span<'_>>, AutomergeError>;
 
     /// test raw_spans api for mark/span experiment
     fn raw_spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::SpanInfo>, AutomergeError>;
