@@ -1,32 +1,38 @@
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
 use crate::query::{binary_search_by, QueryResult, TreeQuery};
-use crate::types::{ElemId, Key, Op, HEAD};
+use crate::types::{Key, Op, HEAD};
 use std::cmp::Ordering;
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SeekOpWithPatch<'a> {
     op: Op,
-    pub pos: usize,
-    pub succ: Vec<usize>,
+    pub(crate) pos: usize,
+    /// A position counter for after we find the insert position to record conflicts.
+    later_pos: usize,
+    pub(crate) succ: Vec<usize>,
     found: bool,
-    pub seen: usize,
-    last_seen: Option<ElemId>,
-    pub values: Vec<&'a Op>,
-    pub had_value_before: bool,
+    pub(crate) seen: usize,
+    last_seen: Option<Key>,
+    pub(crate) values: Vec<&'a Op>,
+    pub(crate) had_value_before: bool,
+    /// The found start position of the key if there is one yet (for map objects).
+    start: Option<usize>,
 }
 
 impl<'a> SeekOpWithPatch<'a> {
-    pub fn new(op: &Op) -> Self {
+    pub(crate) fn new(op: &Op) -> Self {
         SeekOpWithPatch {
             op: op.clone(),
             succ: vec![],
             pos: 0,
+            later_pos: 0,
             found: false,
             seen: 0,
             last_seen: None,
             values: vec![],
             had_value_before: false,
+            start: None,
         }
     }
 
@@ -55,7 +61,7 @@ impl<'a> SeekOpWithPatch<'a> {
         }
         if e.visible() && self.last_seen.is_none() {
             self.seen += 1;
-            self.last_seen = e.elemid()
+            self.last_seen = Some(e.elemid_or_key())
         }
     }
 }
@@ -104,8 +110,10 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                         // subtree contains a *visible* (i.e. empty succs) operation for the list
                         // element with elemId `last_seen`; this will subtract one even if all
                         // values for this list element have been deleted in this subtree.
-                        if child.index.has_visible(&self.last_seen) {
-                            num_vis -= 1;
+                        if let Some(last_seen) = self.last_seen {
+                            if child.index.has_visible(&last_seen) {
+                                num_vis -= 1;
+                            }
                         }
                         self.seen += num_vis;
 
@@ -114,7 +122,7 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                         // the last operation's elemId regardless of whether it's visible or not.
                         // This will lead to incorrect counting if `last_seen` is not visible: it's
                         // not counted towards `num_vis`, so we shouldn't be subtracting 1.
-                        self.last_seen = child.last().elemid();
+                        self.last_seen = Some(child.last().elemid_or_key());
                     }
                     QueryResult::Next
                 }
@@ -122,49 +130,28 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
 
             // Updating a map: operations appear in sorted order by key
             Key::Map(_) => {
-                // Search for the place where we need to insert the new operation. First find the
-                // first op with a key >= the key we're updating
-                self.pos = binary_search_by(child, |op| m.key_cmp(&op.key, &self.op.key));
-                while self.pos < child.len() {
-                    // Iterate over any existing operations for the same key; stop when we reach an
-                    // operation with a different key
-                    let op = child.get(self.pos).unwrap();
-                    if op.key != self.op.key {
-                        break;
+                if let Some(start) = self.start {
+                    if self.pos + child.len() >= start {
+                        // skip empty nodes
+                        if child.index.visible_len() == 0 {
+                            self.pos += child.len();
+                            QueryResult::Next
+                        } else {
+                            QueryResult::Descend
+                        }
+                    } else {
+                        self.pos += child.len();
+                        QueryResult::Next
                     }
-
-                    // Keep track of any ops we're overwriting and any conflicts on this key
-                    if self.op.overwrites(op) {
-                        self.succ.push(self.pos);
-                    } else if op.visible() {
-                        self.values.push(op);
-                    }
-
-                    // Ops for the same key should be in ascending order of opId, so we break when
-                    // we reach an op with an opId greater than that of the new operation
-                    if m.lamport_cmp(op.id, self.op.id) == Ordering::Greater {
-                        break;
-                    }
-                    self.pos += 1;
+                } else {
+                    // in the root node find the first op position for the key
+                    // Search for the place where we need to insert the new operation. First find the
+                    // first op with a key >= the key we're updating
+                    let start = binary_search_by(child, |op| m.key_cmp(&op.key, &self.op.key));
+                    self.start = Some(start);
+                    self.pos = start;
+                    QueryResult::Skip(start)
                 }
-
-                // For the purpose of reporting conflicts, we also need to take into account any
-                // ops for the same key that appear after the new operation
-                let mut later_pos = self.pos;
-                while later_pos < child.len() {
-                    let op = child.get(later_pos).unwrap();
-                    if op.key != self.op.key {
-                        break;
-                    }
-                    // No need to check if `self.op.overwrites(op)` because an operation's `preds`
-                    // must always have lower Lamport timestamps than that op itself, and the ops
-                    // here all have greater opIds than the new op
-                    if op.visible() {
-                        self.values.push(op);
-                    }
-                    later_pos += 1;
-                }
-                QueryResult::Finish
             }
         }
     }
@@ -172,68 +159,128 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
     // Only called when operating on a sequence (list/text) object, since updates of a map are
     // handled in `query_node_with_metadata`.
     fn query_element_with_metadata(&mut self, e: &'a Op, m: &OpSetMetadata) -> QueryResult {
-        let result = if !self.found {
-            // First search for the referenced list element (i.e. the element we're updating, or
-            // after which we're inserting)
-            if self.is_target_insert(e) {
-                self.found = true;
-                if self.op.overwrites(e) {
-                    self.succ.push(self.pos);
-                }
-                if e.visible() {
-                    self.had_value_before = true;
-                }
-            }
-            self.pos += 1;
-            QueryResult::Next
-        } else {
-            // Once we've found the reference element, keep track of any ops that we're overwriting
-            let overwritten = self.op.overwrites(e);
-            if overwritten {
-                self.succ.push(self.pos);
-            }
+        match self.op.key {
+            Key::Map(_) => {
+                if !self.found {
+                    // Iterate over any existing operations for the same key; stop when we reach an
+                    // operation with a different key
+                    if e.key != self.op.key {
+                        return QueryResult::Finish;
+                    }
 
-            // If the new op is an insertion, skip over any existing list elements whose elemId is
-            // greater than the ID of the new insertion
-            if self.op.insert {
-                if self.lesser_insert(e, m) {
-                    // Insert before the first existing list element whose elemId is less than that
-                    // of the new insertion
-                    QueryResult::Finish
-                } else {
-                    self.pos += 1;
-                    QueryResult::Next
-                }
-            } else if e.insert {
-                // If the new op is an update of an existing list element, the first insertion op
-                // we encounter after the reference element indicates the end of the reference elem
-                QueryResult::Finish
-            } else {
-                // When updating an existing list element, keep track of any conflicts on this list
-                // element. We also need to remember if the list element had any visible elements
-                // prior to applying the new operation: if not, the new operation is resurrecting
-                // a deleted list element, so it looks like an insertion in the patch.
-                if e.visible() {
-                    self.had_value_before = true;
-                    if !overwritten {
+                    // Keep track of any ops we're overwriting and any conflicts on this key
+                    if self.op.overwrites(e) {
+                        // when we encounter an increment op we also want to find the counter for
+                        // it.
+                        if self.op.is_inc() && e.is_counter() && e.visible() {
+                            self.values.push(e);
+                        }
+                        self.succ.push(self.pos);
+                    } else if e.visible() {
                         self.values.push(e);
                     }
-                }
 
-                // We now need to put the ops for the same list element into ascending order, so we
-                // skip over any ops whose ID is less than that of the new operation.
-                if !self.greater_opid(e, m) {
+                    // Ops for the same key should be in ascending order of opId, so we break when
+                    // we reach an op with an opId greater than that of the new operation
+                    if m.lamport_cmp(e.id, self.op.id) == Ordering::Greater {
+                        self.found = true;
+                        self.later_pos = self.pos + 1;
+                        return QueryResult::Next;
+                    }
+
                     self.pos += 1;
+                } else {
+                    // For the purpose of reporting conflicts, we also need to take into account any
+                    // ops for the same key that appear after the new operation
+
+                    if e.key != self.op.key {
+                        return QueryResult::Finish;
+                    }
+                    // No need to check if `self.op.overwrites(op)` because an operation's `preds`
+                    // must always have lower Lamport timestamps than that op itself, and the ops
+                    // here all have greater opIds than the new op
+                    if e.visible() {
+                        self.values.push(e);
+                    }
+                    self.later_pos += 1;
                 }
                 QueryResult::Next
             }
-        };
+            Key::Seq(_) => {
+                let result = if !self.found {
+                    // First search for the referenced list element (i.e. the element we're updating, or
+                    // after which we're inserting)
+                    if self.is_target_insert(e) {
+                        self.found = true;
+                        if self.op.overwrites(e) {
+                            // when we encounter an increment op we also want to find the counter for
+                            // it.
+                            if self.op.is_inc() && e.is_counter() && e.visible() {
+                                self.values.push(e);
+                            }
+                            self.succ.push(self.pos);
+                        }
+                        if e.visible() {
+                            self.had_value_before = true;
+                        }
+                    }
+                    self.pos += 1;
+                    QueryResult::Next
+                } else {
+                    // Once we've found the reference element, keep track of any ops that we're overwriting
+                    let overwritten = self.op.overwrites(e);
+                    if overwritten {
+                        // when we encounter an increment op we also want to find the counter for
+                        // it.
+                        if self.op.is_inc() && e.is_counter() && e.visible() {
+                            self.values.push(e);
+                        }
+                        self.succ.push(self.pos);
+                    }
 
-        // The patch needs to know the list index of each operation, so we count the number of
-        // visible list elements up to the insertion position of the new operation
-        if result == QueryResult::Next {
-            self.count_visible(e);
+                    // If the new op is an insertion, skip over any existing list elements whose elemId is
+                    // greater than the ID of the new insertion
+                    if self.op.insert {
+                        if self.lesser_insert(e, m) {
+                            // Insert before the first existing list element whose elemId is less than that
+                            // of the new insertion
+                            QueryResult::Finish
+                        } else {
+                            self.pos += 1;
+                            QueryResult::Next
+                        }
+                    } else if e.insert {
+                        // If the new op is an update of an existing list element, the first insertion op
+                        // we encounter after the reference element indicates the end of the reference elem
+                        QueryResult::Finish
+                    } else {
+                        // When updating an existing list element, keep track of any conflicts on this list
+                        // element. We also need to remember if the list element had any visible elements
+                        // prior to applying the new operation: if not, the new operation is resurrecting
+                        // a deleted list element, so it looks like an insertion in the patch.
+                        if e.visible() {
+                            self.had_value_before = true;
+                            if !overwritten {
+                                self.values.push(e);
+                            }
+                        }
+
+                        // We now need to put the ops for the same list element into ascending order, so we
+                        // skip over any ops whose ID is less than that of the new operation.
+                        if !self.greater_opid(e, m) {
+                            self.pos += 1;
+                        }
+                        QueryResult::Next
+                    }
+                };
+
+                // The patch needs to know the list index of each operation, so we count the number of
+                // visible list elements up to the insertion position of the new operation
+                if result == QueryResult::Next {
+                    self.count_visible(e);
+                }
+                result
+            }
         }
-        result
     }
 }

@@ -1,4 +1,4 @@
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct ApplyOptions<'a, Obs> {
     pub op_observer: Option<&'a mut Obs>,
 }

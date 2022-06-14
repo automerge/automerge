@@ -1,12 +1,10 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
-use crate::{
-    query, Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, Range, RangeAt, ScalarValue,
-    Value, Values, ValuesAt,
-};
+use crate::{Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, ScalarValue, Value, Values};
 use crate::{AutomergeError, Keys};
-
+use crate::{ListRange, ListRangeAt, MapRange, MapRangeAt};
+use crate::query;
 use super::{CommitOptions, Transactable, TransactionInner};
 
 /// A transaction on a document.
@@ -60,7 +58,7 @@ impl<'a> Transaction<'a> {
     /// i64;
     /// tx.commit_with::<()>(CommitOptions::default().with_message("Create todos list").with_time(now));
     /// ```
-    pub fn commit_with<Obs: OpObserver>(mut self, options: CommitOptions<Obs>) -> ChangeHash {
+    pub fn commit_with<Obs: OpObserver>(mut self, options: CommitOptions<'_, Obs>) -> ChangeHash {
         self.inner.take().unwrap().commit(
             self.doc,
             options.message,
@@ -208,32 +206,53 @@ impl<'a> Transactable for Transaction<'a> {
             .splice(self.doc, obj.as_ref(), pos, del, vals)
     }
 
-    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys {
+    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_, '_> {
         self.doc.keys(obj)
     }
 
-    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt {
+    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt<'_, '_> {
         self.doc.keys_at(obj, heads)
     }
 
-    fn range<O: AsRef<ExId>, R: RangeBounds<String>>(&self, obj: O, range: R) -> Range<R> {
-        self.doc.range(obj, range)
+    fn map_range<O: AsRef<ExId>, R: RangeBounds<String>>(
+        &self,
+        obj: O,
+        range: R,
+    ) -> MapRange<'_, R> {
+        self.doc.map_range(obj, range)
     }
 
-    fn range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
+    fn map_range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
         &self,
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> RangeAt<R> {
-        self.doc.range_at(obj, range, heads)
+    ) -> MapRangeAt<'_, R> {
+        self.doc.map_range_at(obj, range, heads)
     }
 
-    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values {
+    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
+        obj: O,
+        range: R,
+    ) -> ListRange<'_, R> {
+        self.doc.list_range(obj, range)
+    }
+
+    fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
+        obj: O,
+        range: R,
+        heads: &[ChangeHash],
+    ) -> ListRangeAt<'_, R> {
+        self.doc.list_range_at(obj, range, heads)
+    }
+
+    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
         self.doc.values(obj)
     }
 
-    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> ValuesAt {
+    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
         self.doc.values_at(obj, heads)
     }
 
@@ -259,18 +278,6 @@ impl<'a> Transactable for Transaction<'a> {
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError> {
         self.doc.text_at(obj, heads)
-    }
-
-    fn list<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<(Value, ExId)>, AutomergeError> {
-        self.doc.list(obj)
-    }
-
-    fn list_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeHash],
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
-        self.doc.list_at(obj, heads)
     }
 
     fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::Span>, AutomergeError> {
@@ -303,7 +310,7 @@ impl<'a> Transactable for Transaction<'a> {
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Option<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
         self.doc.get(obj, prop)
     }
 
@@ -312,7 +319,7 @@ impl<'a> Transactable for Transaction<'a> {
         obj: O,
         prop: P,
         heads: &[ChangeHash],
-    ) -> Result<Option<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
         self.doc.get_at(obj, prop, heads)
     }
 
@@ -320,7 +327,7 @@ impl<'a> Transactable for Transaction<'a> {
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         self.doc.get_all(obj, prop)
     }
 
@@ -329,7 +336,7 @@ impl<'a> Transactable for Transaction<'a> {
         obj: O,
         prop: P,
         heads: &[ChangeHash],
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         self.doc.get_all_at(obj, prop, heads)
     }
 
@@ -337,7 +344,7 @@ impl<'a> Transactable for Transaction<'a> {
         self.doc.parent_object(obj)
     }
 
-    fn parents(&self, obj: ExId) -> crate::Parents {
+    fn parents(&self, obj: ExId) -> crate::Parents<'_> {
         self.doc.parents(obj)
     }
 }

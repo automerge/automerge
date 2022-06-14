@@ -23,10 +23,14 @@ pub enum AutomergeError {
     DuplicateSeqNumber(u64, ActorId),
     #[error("invalid hash {0}")]
     InvalidHash(ChangeHash),
+    #[error("hash {0} does not correspond to a change in this document")]
+    MissingHash(ChangeHash),
     #[error("increment operations must be against a counter value")]
     MissingCounter,
     #[error("general failure")]
     Fail,
+    #[error(transparent)]
+    HexDecode(#[from] hex::FromHexError),
 }
 
 #[cfg(feature = "wasm")]
@@ -43,10 +47,10 @@ pub struct InvalidActorId(pub String);
 #[derive(Error, Debug, PartialEq)]
 #[error("Invalid scalar value, expected {expected} but received {unexpected}")]
 pub(crate) struct InvalidScalarValue {
-    pub raw_value: ScalarValue,
-    pub datatype: DataType,
-    pub unexpected: String,
-    pub expected: String,
+    pub(crate) raw_value: ScalarValue,
+    pub(crate) datatype: DataType,
+    pub(crate) unexpected: String,
+    pub(crate) expected: String,
 }
 
 #[derive(Error, Debug, PartialEq)]

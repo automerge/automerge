@@ -1,5 +1,6 @@
 use crate::{exid::ExId, Automerge, Prop};
 
+#[derive(Debug)]
 pub struct Parents<'a> {
     pub(crate) obj: ExId,
     pub(crate) doc: &'a Automerge,

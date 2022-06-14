@@ -5,9 +5,12 @@ use crate::op_observer::OpObserver;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::Parents;
 use crate::{
-    query, sync, transaction::TransactionInner, ActorId, ApplyOptions, Automerge, AutomergeError,
-    Change, ChangeHash, Keys, KeysAt, ObjType, Prop, Range, RangeAt, ScalarValue, Value, Values,
-    ValuesAt,
+    sync, ApplyOptions, Keys, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType,
+    ScalarValue,
+};
+use crate::{
+    transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop,
+    Value, Values, query
 };
 
 /// An automerge document that automatically manages transactions.
@@ -97,7 +100,7 @@ impl AutoCommit {
 
     pub fn load_with<Obs: OpObserver>(
         data: &[u8],
-        options: ApplyOptions<Obs>,
+        options: ApplyOptions<'_, Obs>,
     ) -> Result<Self, AutomergeError> {
         let doc = Automerge::load_with(data, options)?;
         Ok(Self {
@@ -106,7 +109,7 @@ impl AutoCommit {
         })
     }
 
-    pub fn load_incremental(&mut self, data: &[u8]) -> Result<Vec<ExId>, AutomergeError> {
+    pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.load_incremental(data)
     }
@@ -115,27 +118,30 @@ impl AutoCommit {
         &mut self,
         data: &[u8],
         options: ApplyOptions<'a, Obs>,
-    ) -> Result<Vec<ExId>, AutomergeError> {
+    ) -> Result<usize, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.load_incremental_with(data, options)
     }
 
-    pub fn apply_changes(&mut self, changes: Vec<Change>) -> Result<Vec<ExId>, AutomergeError> {
+    pub fn apply_changes(
+        &mut self,
+        changes: impl IntoIterator<Item = Change>,
+    ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.apply_changes(changes)
     }
 
-    pub fn apply_changes_with<Obs: OpObserver>(
+    pub fn apply_changes_with<I: IntoIterator<Item = Change>, Obs: OpObserver>(
         &mut self,
-        changes: Vec<Change>,
-        options: ApplyOptions<Obs>,
-    ) -> Result<Vec<ExId>, AutomergeError> {
+        changes: I,
+        options: ApplyOptions<'_, Obs>,
+    ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.apply_changes_with(changes, options)
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
-    pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ExId>, AutomergeError> {
+    pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.ensure_transaction_closed();
         other.ensure_transaction_closed();
         self.doc.merge(&mut other.doc)
@@ -146,7 +152,7 @@ impl AutoCommit {
         &mut self,
         other: &mut Self,
         options: ApplyOptions<'a, Obs>,
-    ) -> Result<Vec<ExId>, AutomergeError> {
+    ) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.ensure_transaction_closed();
         other.ensure_transaction_closed();
         self.doc.merge_with(&mut other.doc, options)
@@ -173,7 +179,10 @@ impl AutoCommit {
         self.doc.get_last_local_change()
     }
 
-    pub fn get_changes(&mut self, have_deps: &[ChangeHash]) -> Vec<&Change> {
+    pub fn get_changes(
+        &mut self,
+        have_deps: &[ChangeHash],
+    ) -> Result<Vec<&Change>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.get_changes(have_deps)
     }
@@ -207,7 +216,7 @@ impl AutoCommit {
         &mut self,
         sync_state: &mut sync::State,
         message: sync::Message,
-    ) -> Result<Vec<ExId>, AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.receive_sync_message(sync_state, message)
     }
@@ -217,7 +226,7 @@ impl AutoCommit {
         sync_state: &mut sync::State,
         message: sync::Message,
         options: ApplyOptions<'a, Obs>,
-    ) -> Result<Vec<ExId>, AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
         self.doc
             .receive_sync_message_with(sync_state, message, options)
@@ -255,7 +264,7 @@ impl AutoCommit {
     /// i64;
     /// doc.commit_with::<()>(CommitOptions::default().with_message("Create todos list").with_time(now));
     /// ```
-    pub fn commit_with<Obs: OpObserver>(&mut self, options: CommitOptions<Obs>) -> ChangeHash {
+    pub fn commit_with<Obs: OpObserver>(&mut self, options: CommitOptions<'_, Obs>) -> ChangeHash {
         // ensure that even no changes triggers a change
         self.ensure_transaction_open();
         let tx = self.transaction.take().unwrap();
@@ -288,32 +297,53 @@ impl Transactable for AutoCommit {
     // PropAt::()
     // NthAt::()
 
-    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys {
+    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_, '_> {
         self.doc.keys(obj)
     }
 
-    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt {
+    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt<'_, '_> {
         self.doc.keys_at(obj, heads)
     }
 
-    fn range<O: AsRef<ExId>, R: RangeBounds<String>>(&self, obj: O, range: R) -> Range<R> {
-        self.doc.range(obj, range)
+    fn map_range<O: AsRef<ExId>, R: RangeBounds<String>>(
+        &self,
+        obj: O,
+        range: R,
+    ) -> MapRange<'_, R> {
+        self.doc.map_range(obj, range)
     }
 
-    fn range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
+    fn map_range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
         &self,
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> RangeAt<R> {
-        self.doc.range_at(obj, range, heads)
+    ) -> MapRangeAt<'_, R> {
+        self.doc.map_range_at(obj, range, heads)
     }
 
-    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values {
+    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
+        obj: O,
+        range: R,
+    ) -> ListRange<'_, R> {
+        self.doc.list_range(obj, range)
+    }
+
+    fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
+        obj: O,
+        range: R,
+        heads: &[ChangeHash],
+    ) -> ListRangeAt<'_, R> {
+        self.doc.list_range_at(obj, range, heads)
+    }
+
+    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
         self.doc.values(obj)
     }
 
-    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> ValuesAt {
+    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
         self.doc.values_at(obj, heads)
     }
 
@@ -469,18 +499,6 @@ impl Transactable for AutoCommit {
         self.doc.text_at(obj, heads)
     }
 
-    fn list<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<(Value, ExId)>, AutomergeError> {
-        self.doc.list(obj)
-    }
-
-    fn list_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeHash],
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
-        self.doc.list_at(obj, heads)
-    }
-
     fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::Span>, AutomergeError> {
         self.doc.spans(obj)
     }
@@ -514,7 +532,7 @@ impl Transactable for AutoCommit {
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Option<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
         self.doc.get(obj, prop)
     }
 
@@ -523,7 +541,7 @@ impl Transactable for AutoCommit {
         obj: O,
         prop: P,
         heads: &[ChangeHash],
-    ) -> Result<Option<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
         self.doc.get_at(obj, prop, heads)
     }
 
@@ -531,7 +549,7 @@ impl Transactable for AutoCommit {
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         self.doc.get_all(obj, prop)
     }
 
@@ -540,7 +558,7 @@ impl Transactable for AutoCommit {
         obj: O,
         prop: P,
         heads: &[ChangeHash],
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         self.doc.get_all_at(obj, prop, heads)
     }
 
@@ -548,7 +566,7 @@ impl Transactable for AutoCommit {
         self.doc.parent_object(obj)
     }
 
-    fn parents(&self, obj: ExId) -> Parents {
+    fn parents(&self, obj: ExId) -> Parents<'_> {
         self.doc.parents(obj)
     }
 }

@@ -167,7 +167,7 @@ Maps are key/value stores.  The root object is always a map.  The keys are alway
 
 ### Lists
 
-Lists are index addressable sets of values.  These values can be any scalar or object type.  You can manipulate lists with `insert()`, `put()`, `insertObject()`, `pubObject()`, `push()`, `pushObject()`, `splice()`, and `delete()`.
+Lists are index addressable sets of values.  These values can be any scalar or object type.  You can manipulate lists with `insert()`, `put()`, `insertObject()`, `putObject()`, `push()`, `pushObject()`, `splice()`, and `delete()`.
 
 ```javascript
     let doc = create()

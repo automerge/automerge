@@ -10,7 +10,7 @@ pub trait OpObserver {
     /// - `index`: the index the new value has been inserted at.
     /// - `tagged_value`: the value that has been inserted and the id of the operation that did the
     /// insert.
-    fn insert(&mut self, objid: ExId, index: usize, tagged_value: (Value, ExId));
+    fn insert(&mut self, objid: ExId, index: usize, tagged_value: (Value<'_>, ExId));
 
     /// A new value has been put into the given object.
     ///
@@ -19,7 +19,15 @@ pub trait OpObserver {
     /// - `tagged_value`: the value that has been put into the object and the id of the operation
     /// that did the put.
     /// - `conflict`: whether this put conflicts with other operations.
-    fn put(&mut self, objid: ExId, key: Prop, tagged_value: (Value, ExId), conflict: bool);
+    fn put(&mut self, objid: ExId, key: Prop, tagged_value: (Value<'_>, ExId), conflict: bool);
+
+    /// A counter has been incremented.
+    ///
+    /// - `objid`: the object that contains the counter.
+    /// - `key`: they key that the chounter is at.
+    /// - `tagged_value`: the amount the counter has been incremented by, and the the id of the
+    /// increment operation.
+    fn increment(&mut self, objid: ExId, key: Prop, tagged_value: (i64, ExId));
 
     /// A value has beeen deleted.
     ///
@@ -29,9 +37,12 @@ pub trait OpObserver {
 }
 
 impl OpObserver for () {
-    fn insert(&mut self, _objid: ExId, _index: usize, _tagged_value: (Value, ExId)) {}
+    fn insert(&mut self, _objid: ExId, _index: usize, _tagged_value: (Value<'_>, ExId)) {}
 
-    fn put(&mut self, _objid: ExId, _key: Prop, _tagged_value: (Value, ExId), _conflict: bool) {}
+    fn put(&mut self, _objid: ExId, _key: Prop, _tagged_value: (Value<'_>, ExId), _conflict: bool) {
+    }
+
+    fn increment(&mut self, _objid: ExId, _key: Prop, _tagged_value: (i64, ExId)) {}
 
     fn delete(&mut self, _objid: ExId, _key: Prop) {}
 }
@@ -51,7 +62,7 @@ impl VecOpObserver {
 }
 
 impl OpObserver for VecOpObserver {
-    fn insert(&mut self, obj_id: ExId, index: usize, (value, id): (Value, ExId)) {
+    fn insert(&mut self, obj_id: ExId, index: usize, (value, id): (Value<'_>, ExId)) {
         self.patches.push(Patch::Insert {
             obj: obj_id,
             index,
@@ -59,12 +70,20 @@ impl OpObserver for VecOpObserver {
         });
     }
 
-    fn put(&mut self, objid: ExId, key: Prop, (value, id): (Value, ExId), conflict: bool) {
+    fn put(&mut self, objid: ExId, key: Prop, (value, id): (Value<'_>, ExId), conflict: bool) {
         self.patches.push(Patch::Put {
             obj: objid,
             key,
             value: (value.into_owned(), id),
             conflict,
+        });
+    }
+
+    fn increment(&mut self, objid: ExId, key: Prop, tagged_value: (i64, ExId)) {
+        self.patches.push(Patch::Increment {
+            obj: objid,
+            key,
+            value: tagged_value,
         });
     }
 
@@ -95,6 +114,16 @@ pub enum Patch {
         index: usize,
         /// The value that was inserted, and the id of the operation that inserted it there.
         value: (Value<'static>, ExId),
+    },
+    /// Incrementing a counter.
+    Increment {
+        /// The object that was incremented in.
+        obj: ExId,
+        /// The key that was incremented.
+        key: Prop,
+        /// The amount that the counter was incremented by, and the id of the operation that
+        /// did the increment.
+        value: (i64, ExId),
     },
     /// Deleting an element from a list/text
     Delete {

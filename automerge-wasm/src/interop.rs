@@ -2,15 +2,15 @@ use automerge as am;
 use automerge::transaction::Transactable;
 use automerge::{Change, ChangeHash, Prop};
 use js_sys::{Array, Object, Reflect, Uint8Array};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::fmt::Display;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use crate::{ObjId, ScalarValue, Value};
 
-pub(crate) struct JS(pub JsValue);
-pub(crate) struct AR(pub Array);
+pub(crate) struct JS(pub(crate) JsValue);
+pub(crate) struct AR(pub(crate) Array);
 
 impl From<AR> for JsValue {
     fn from(ar: AR) -> Self {
@@ -68,6 +68,16 @@ impl From<HashSet<ChangeHash>> for JS {
     }
 }
 
+impl From<BTreeSet<ChangeHash>> for JS {
+    fn from(heads: BTreeSet<ChangeHash>) -> Self {
+        let result: JsValue = Object::new().into();
+        for key in &heads {
+            Reflect::set(&result, &key.to_string().into(), &true.into()).unwrap();
+        }
+        JS(result)
+    }
+}
+
 impl From<Option<Vec<ChangeHash>>> for JS {
     fn from(heads: Option<Vec<ChangeHash>>) -> Self {
         if let Some(v) = heads {
@@ -87,6 +97,20 @@ impl TryFrom<JS> for HashSet<ChangeHash> {
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
         let mut result = HashSet::new();
+        for key in Reflect::own_keys(&value.0)?.iter() {
+            if let Some(true) = Reflect::get(&value.0, &key)?.as_bool() {
+                result.insert(key.into_serde().map_err(to_js_err)?);
+            }
+        }
+        Ok(result)
+    }
+}
+
+impl TryFrom<JS> for BTreeSet<ChangeHash> {
+    type Error = JsValue;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        let mut result = BTreeSet::new();
         for key in Reflect::own_keys(&value.0)?.iter() {
             if let Some(true) = Reflect::get(&value.0, &key)?.as_bool() {
                 result.insert(key.into_serde().map_err(to_js_err)?);

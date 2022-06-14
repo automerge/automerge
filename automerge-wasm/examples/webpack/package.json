@@ -1,0 +1,21 @@
+{
+  "name": "webpack-automerge-example",
+  "version": "0.1.0",
+  "description": "",
+  "private": true,
+  "scripts": {
+    "build": "webpack",
+    "start": "serve public",
+    "test": "node dist/node.js"
+  },
+  "author": "",
+  "dependencies": {
+    "automerge-wasm": "^0.1.2"
+  },
+  "devDependencies": {
+    "webpack": "^5.72.1",
+    "webpack-cli": "^4.9.2",
+    "webpack-node-externals": "^3.0.0",
+    "serve": "^13.0.2"
+  }
+}

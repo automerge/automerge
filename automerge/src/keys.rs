@@ -1,5 +1,6 @@
 use crate::{query, Automerge};
 
+#[derive(Debug)]
 pub struct Keys<'a, 'k> {
     keys: Option<query::Keys<'k>>,
     doc: &'a Automerge,

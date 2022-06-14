@@ -313,11 +313,12 @@ describe('Automerge', () => {
       doc1.put("_root", "hello", "world")
       let doc2 = load(doc1.save(), "bbbb");
       let doc3 = load(doc1.save(), "cccc");
+      let heads = doc1.getHeads()
       doc1.put("_root", "cnt", 20)
       doc2.put("_root", "cnt", 0, "counter")
       doc3.put("_root", "cnt", 10, "counter")
-      doc1.applyChanges(doc2.getChanges(doc1.getHeads()))
-      doc1.applyChanges(doc3.getChanges(doc1.getHeads()))
+      doc1.applyChanges(doc2.getChanges(heads))
+      doc1.applyChanges(doc3.getChanges(heads))
       let result = doc1.getAll("_root", "cnt")
       assert.deepEqual(result,[
         ['int',20,'2@aaaa'],
@@ -346,11 +347,12 @@ describe('Automerge', () => {
       doc1.insert(seq, 0, "hello")
       let doc2 = load(doc1.save(), "bbbb");
       let doc3 = load(doc1.save(), "cccc");
+      let heads = doc1.getHeads()
       doc1.put(seq, 0, 20)
       doc2.put(seq, 0, 0, "counter")
       doc3.put(seq, 0, 10, "counter")
-      let touched1 = doc1.applyChanges(doc2.getChanges(doc1.getHeads()))
-      let touched2 = doc1.applyChanges(doc3.getChanges(doc1.getHeads()))
+      let touched1 = doc1.applyChanges(doc2.getChanges(heads))
+      let touched2 = doc1.applyChanges(doc3.getChanges(heads))
       let result = doc1.getAll(seq, 0)
       assert.deepEqual(touched1,["1@aaaa"])
       assert.deepEqual(touched2,["1@aaaa"])
@@ -975,7 +977,7 @@ describe('Automerge', () => {
         doc1.free()
     })
 
-    it.skip('should capture local increment ops', () => {
+    it('should capture local increment ops', () => {
         let doc1 = create('aaaa')
         doc1.enablePatches(true)
         doc1.put('_root', 'counter', 2, 'counter')
@@ -983,7 +985,7 @@ describe('Automerge', () => {
 
         assert.deepEqual(doc1.popPatches(), [
             {action: 'put', obj: '_root', key: 'counter', value: 2, datatype: 'counter', conflict: false},
-            {action: 'put', obj: '_root', key: 'counter', value: 6, datatype: 'counter', conflict: false},
+            {action: 'increment', obj: '_root', key: 'counter', value: 4},
         ])
         doc1.free()
     })
@@ -1005,7 +1007,7 @@ describe('Automerge', () => {
         doc1.free()
     })
 
-    it.skip('should support counters in a map', () => {
+    it('should support counters in a map', () => {
       let doc1 = create('aaaa'), doc2 = create('bbbb')
       doc2.enablePatches(true)
       doc1.put('_root', 'starlings', 2, 'counter')
@@ -1015,12 +1017,31 @@ describe('Automerge', () => {
       assert.deepEqual(doc2.get('_root', 'starlings'), ['counter', 3])
       assert.deepEqual(doc2.popPatches(), [
         {action: 'put', obj: '_root', key: 'starlings', value: 2, datatype: 'counter', conflict: false},
-        {action: 'put', obj: '_root', key: 'starlings', value: 3, datatype: 'counter', conflict: false}
+        {action: 'increment', obj: '_root', key: 'starlings', value: 1}
       ])
       doc1.free(); doc2.free()
     })
 
-    it('should support counters in a list') // TODO
+    it('should support counters in a list', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb')
+      doc2.enablePatches(true)
+      const list = doc1.putObject('_root', 'list', [])
+      doc2.loadIncremental(doc1.saveIncremental())
+      doc1.insert(list, 0, 1, 'counter')
+      doc2.loadIncremental(doc1.saveIncremental())
+      doc1.increment(list, 0, 2)
+      doc2.loadIncremental(doc1.saveIncremental())
+      doc1.increment(list, 0, -5)
+      doc2.loadIncremental(doc1.saveIncremental())
+
+      assert.deepEqual(doc2.popPatches(), [
+          {action: 'put', obj: '_root', key: 'list', value: list, datatype: 'list', conflict: false},
+          {action: 'insert', obj: list, key: 0, value: 1, datatype: 'counter'},
+          {action: 'increment', obj: list, key: 0, value: 2},
+          {action: 'increment', obj: list, key: 0, value: -5},
+      ])
+      doc1.free(); doc2.free()
+    })
 
     it('should delete a counter from a map') // TODO
   })

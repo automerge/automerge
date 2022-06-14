@@ -10,7 +10,9 @@ use std::{
     io::Write,
 };
 
-use crate::{ApplyOptions, OpObserver};
+use crate::{
+    types::HASH_SIZE, ApplyOptions, OpObserver,
+};
 
 mod bloom;
 mod state;
@@ -18,7 +20,6 @@ mod state;
 pub use bloom::BloomFilter;
 pub use state::{Have, State};
 
-const HASH_SIZE: usize = 32; // 256 bits = 32 bytes
 const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identification
 
 impl Automerge {
@@ -61,6 +62,7 @@ impl Automerge {
             sync_state.their_need.as_ref(),
         ) {
             self.get_changes_to_send(their_have.clone(), their_need)
+                .expect("Should have only used hashes that are in the document")
         } else {
             Vec::new()
         };
@@ -99,7 +101,7 @@ impl Automerge {
         &mut self,
         sync_state: &mut State,
         message: Message,
-    ) -> Result<Vec<ExId>, AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         self.receive_sync_message_with::<()>(sync_state, message, ApplyOptions::default())
     }
 
@@ -108,8 +110,7 @@ impl Automerge {
         sync_state: &mut State,
         message: Message,
         options: ApplyOptions<'a, Obs>,
-    ) -> Result<Vec<ExId>, AutomergeError> {
-        let mut result = vec![];
+    ) -> Result<(), AutomergeError> {
         let before_heads = self.get_heads();
 
         let Message {
@@ -121,7 +122,7 @@ impl Automerge {
 
         let changes_is_empty = message_changes.is_empty();
         if !changes_is_empty {
-            result = self.apply_changes_with(message_changes, options)?;
+            self.apply_changes_with(message_changes, options)?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
                 &self.get_heads().into_iter().collect(),
@@ -162,26 +163,30 @@ impl Automerge {
         sync_state.their_heads = Some(message_heads);
         sync_state.their_need = Some(message_need);
 
-        Ok(result)
+        Ok(())
     }
 
     fn make_bloom_filter(&self, last_sync: Vec<ChangeHash>) -> Have {
-        let new_changes = self.get_changes(&last_sync);
-        let hashes = new_changes
-            .into_iter()
-            .map(|change| change.hash)
-            .collect::<Vec<_>>();
+        let new_changes = self
+            .get_changes(&last_sync)
+            .expect("Should have only used hashes that are in the document");
+        let hashes = new_changes.into_iter().map(|change| &change.hash);
         Have {
             last_sync,
-            bloom: BloomFilter::from(&hashes[..]),
+            bloom: BloomFilter::from_hashes(hashes),
         }
     }
 
-    fn get_changes_to_send(&self, have: Vec<Have>, need: &[ChangeHash]) -> Vec<&Change> {
+    fn get_changes_to_send(
+        &self,
+        have: Vec<Have>,
+        need: &[ChangeHash],
+    ) -> Result<Vec<&Change>, AutomergeError> {
         if have.is_empty() {
-            need.iter()
+            Ok(need
+                .iter()
                 .filter_map(|hash| self.get_change_by_hash(hash))
-                .collect()
+                .collect())
         } else {
             let mut last_sync_hashes = HashSet::new();
             let mut bloom_filters = Vec::with_capacity(have.len());
@@ -195,7 +200,7 @@ impl Automerge {
             }
             let last_sync_hashes = last_sync_hashes.into_iter().collect::<Vec<_>>();
 
-            let changes = self.get_changes(&last_sync_hashes);
+            let changes = self.get_changes(&last_sync_hashes)?;
 
             let mut change_hashes = HashSet::with_capacity(changes.len());
             let mut dependents: HashMap<ChangeHash, Vec<ChangeHash>> = HashMap::new();
@@ -243,7 +248,7 @@ impl Automerge {
                     changes_to_send.push(change);
                 }
             }
-            changes_to_send
+            Ok(changes_to_send)
         }
     }
 }
@@ -340,7 +345,7 @@ impl Encodable for &[ChangeHash] {
     }
 }
 
-fn decode_hashes(decoder: &mut Decoder) -> Result<Vec<ChangeHash>, decoding::Error> {
+fn decode_hashes(decoder: &mut Decoder<'_>) -> Result<Vec<ChangeHash>, decoding::Error> {
     let length = decoder.read::<u32>()?;
     let mut hashes = Vec::with_capacity(length as usize);
 

@@ -4,13 +4,13 @@ use crate::types::{ElemId, Op};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ListVals<'a> {
+pub(crate) struct ListVals {
     last_elem: Option<ElemId>,
-    pub ops: Vec<&'a Op>,
+    pub(crate) ops: Vec<Op>,
 }
 
-impl<'a> ListVals<'a> {
-    pub fn new() -> Self {
+impl ListVals {
+    pub(crate) fn new() -> Self {
         ListVals {
             last_elem: None,
             ops: vec![],
@@ -18,7 +18,7 @@ impl<'a> ListVals<'a> {
     }
 }
 
-impl<'a> TreeQuery<'a> for ListVals<'a> {
+impl<'a> TreeQuery<'a> for ListVals {
     fn query_node(&mut self, child: &'a OpTreeNode) -> QueryResult {
         let start = 0;
         for pos in start..child.len() {
@@ -28,7 +28,7 @@ impl<'a> TreeQuery<'a> for ListVals<'a> {
             }
             if self.last_elem.is_none() && op.visible() {
                 self.last_elem = op.elemid();
-                self.ops.push(op);
+                self.ops.push(op.clone());
             }
         }
         QueryResult::Finish

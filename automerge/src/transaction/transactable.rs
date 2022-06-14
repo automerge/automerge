@@ -3,8 +3,8 @@ use std::ops::RangeBounds;
 use crate::exid::ExId;
 use crate::query;
 use crate::{
-    AutomergeError, ChangeHash, Keys, KeysAt, ObjType, Parents, Prop, Range, RangeAt, ScalarValue,
-    Value, Values, ValuesAt,
+    AutomergeError, ChangeHash, Keys, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt,
+    ObjType, Parents, Prop, ScalarValue, Value, Values,
 };
 
 /// A way of mutating a document within a single change.
@@ -113,23 +113,40 @@ pub trait Transactable {
     }
 
     /// Get the keys of the given object, it should be a map.
-    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys;
+    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_, '_>;
 
     /// Get the keys of the given object at a point in history.
-    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt;
+    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt<'_, '_>;
 
-    fn range<O: AsRef<ExId>, R: RangeBounds<String>>(&self, obj: O, range: R) -> Range<R>;
+    fn map_range<O: AsRef<ExId>, R: RangeBounds<String>>(
+        &self,
+        obj: O,
+        range: R,
+    ) -> MapRange<'_, R>;
 
-    fn range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
+    fn map_range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
         &self,
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> RangeAt<R>;
+    ) -> MapRangeAt<'_, R>;
 
-    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values;
+    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
+        obj: O,
+        range: R,
+    ) -> ListRange<'_, R>;
 
-    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> ValuesAt;
+    fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
+        obj: O,
+        range: R,
+        heads: &[ChangeHash],
+    ) -> ListRangeAt<'_, R>;
+
+    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_>;
+
+    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_>;
 
     /// Get the length of the given object.
     fn length<O: AsRef<ExId>>(&self, obj: O) -> usize;
@@ -149,16 +166,6 @@ pub trait Transactable {
         obj: O,
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError>;
-
-    /// Get the string that this text object represents.
-    fn list<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<(Value, ExId)>, AutomergeError>;
-
-    /// Get the string that this text object represents at a point in history.
-    fn list_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeHash],
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError>;
 
     /// test spans api for mark/span experiment
     fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::Span>, AutomergeError>;
@@ -187,7 +194,7 @@ pub trait Transactable {
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Option<(Value, ExId)>, AutomergeError>;
+    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError>;
 
     /// Get the value at this prop in the object at a point in history.
     fn get_at<O: AsRef<ExId>, P: Into<Prop>>(
@@ -195,26 +202,26 @@ pub trait Transactable {
         obj: O,
         prop: P,
         heads: &[ChangeHash],
-    ) -> Result<Option<(Value, ExId)>, AutomergeError>;
+    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError>;
 
     fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError>;
+    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError>;
 
     fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
         heads: &[ChangeHash],
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError>;
+    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError>;
 
     /// Get the object id of the object that contains this object and the prop that this object is
     /// at in that object.
     fn parent_object<O: AsRef<ExId>>(&self, obj: O) -> Option<(ExId, Prop)>;
 
-    fn parents(&self, obj: ExId) -> Parents;
+    fn parents(&self, obj: ExId) -> Parents<'_>;
 
     fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Vec<(ExId, Prop)> {
         let mut path = self.parents(obj.as_ref().clone()).collect::<Vec<_>>();

@@ -1,4 +1,7 @@
-use crate::{op_tree::OpTreeNode, types::ElemId};
+use crate::{
+    op_tree::OpTreeNode,
+    types::{ElemId, Key},
+};
 
 use super::{QueryResult, TreeQuery};
 
@@ -10,7 +13,7 @@ pub(crate) struct ElemIdPos {
 }
 
 impl ElemIdPos {
-    pub fn new(elemid: ElemId) -> Self {
+    pub(crate) fn new(elemid: ElemId) -> Self {
         Self {
             elemid,
             pos: 0,
@@ -18,7 +21,7 @@ impl ElemIdPos {
         }
     }
 
-    pub fn index(&self) -> Option<usize> {
+    pub(crate) fn index(&self) -> Option<usize> {
         if self.found {
             Some(self.pos)
         } else {
@@ -30,7 +33,7 @@ impl ElemIdPos {
 impl<'a> TreeQuery<'a> for ElemIdPos {
     fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
         // if index has our element then we can continue
-        if child.index.has_visible(&Some(self.elemid)) {
+        if child.index.has_visible(&Key::Seq(self.elemid)) {
             // element is in this node somewhere
             QueryResult::Descend
         } else {

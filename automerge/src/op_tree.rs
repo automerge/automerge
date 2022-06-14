@@ -8,7 +8,7 @@ use std::{
 pub(crate) use crate::op_set::OpSetMetadata;
 use crate::{
     clock::Clock,
-    query::{self, Index, QueryResult, TreeQuery},
+    query::{self, Index, QueryResult, ReplaceArgs, TreeQuery},
 };
 use crate::{
     types::{ObjId, Op, OpId},
@@ -18,21 +18,28 @@ use std::collections::HashSet;
 
 pub(crate) const B: usize = 16;
 
+mod iter;
+pub(crate) use iter::OpTreeIter;
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct OpTree {
-    pub internal: OpTreeInternal,
-    pub objtype: ObjType,
+    pub(crate) internal: OpTreeInternal,
+    pub(crate) objtype: ObjType,
     /// The id of the parent object, root has no parent.
-    pub parent: Option<ObjId>,
+    pub(crate) parent: Option<ObjId>,
 }
 
 impl OpTree {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             internal: Default::default(),
             objtype: ObjType::Map,
             parent: None,
         }
+    }
+
+    pub(crate) fn iter(&self) -> OpTreeIter<'_> {
+        self.internal.iter()
     }
 }
 
@@ -43,73 +50,90 @@ pub(crate) struct OpTreeInternal {
 
 #[derive(Clone, Debug)]
 pub(crate) struct OpTreeNode {
-    pub(crate) elements: Vec<Op>,
     pub(crate) children: Vec<OpTreeNode>,
-    pub index: Index,
+    pub(crate) elements: Vec<Op>,
+    pub(crate) index: Index,
     length: usize,
 }
 
 impl OpTreeInternal {
     /// Construct a new, empty, sequence.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { root_node: None }
     }
 
     /// Get the length of the sequence.
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.root_node.as_ref().map_or(0, |n| n.len())
     }
 
-    pub fn keys(&self) -> Option<query::Keys> {
+    pub(crate) fn keys(&self) -> Option<query::Keys<'_>> {
         self.root_node.as_ref().map(query::Keys::new)
     }
 
-    pub fn keys_at(&self, clock: Clock) -> Option<query::KeysAt> {
+    pub(crate) fn keys_at(&self, clock: Clock) -> Option<query::KeysAt<'_>> {
         self.root_node
             .as_ref()
             .map(|root| query::KeysAt::new(root, clock))
     }
 
-    pub fn range<'a, R: RangeBounds<String>>(
+    pub(crate) fn map_range<'a, R: RangeBounds<String>>(
         &'a self,
         range: R,
         meta: &'a OpSetMetadata,
-    ) -> Option<query::Range<'a, R>> {
+    ) -> Option<query::MapRange<'a, R>> {
         self.root_node
             .as_ref()
-            .map(|node| query::Range::new(range, node, meta))
+            .map(|node| query::MapRange::new(range, node, meta))
     }
 
-    pub fn range_at<'a, R: RangeBounds<String>>(
+    pub(crate) fn map_range_at<'a, R: RangeBounds<String>>(
         &'a self,
         range: R,
         meta: &'a OpSetMetadata,
         clock: Clock,
-    ) -> Option<query::RangeAt<'a, R>> {
+    ) -> Option<query::MapRangeAt<'a, R>> {
         self.root_node
             .as_ref()
-            .map(|node| query::RangeAt::new(range, node, meta, clock))
+            .map(|node| query::MapRangeAt::new(range, node, meta, clock))
     }
 
-    pub fn search<'a, 'b: 'a, Q>(&'b self, mut query: Q, m: &OpSetMetadata) -> Q
+    pub(crate) fn list_range<R: RangeBounds<usize>>(
+        &self,
+        range: R,
+    ) -> Option<query::ListRange<'_, R>> {
+        self.root_node
+            .as_ref()
+            .map(|node| query::ListRange::new(range, node))
+    }
+
+    pub(crate) fn list_range_at<R: RangeBounds<usize>>(
+        &self,
+        range: R,
+        clock: Clock,
+    ) -> Option<query::ListRangeAt<'_, R>> {
+        self.root_node
+            .as_ref()
+            .map(|node| query::ListRangeAt::new(range, clock, node))
+    }
+
+    pub(crate) fn search<'a, 'b: 'a, Q>(&'b self, mut query: Q, m: &OpSetMetadata) -> Q
     where
         Q: TreeQuery<'a>,
     {
         self.root_node
             .as_ref()
             .map(|root| match query.query_node_with_metadata(root, m) {
-                QueryResult::Descend => root.search(&mut query, m),
+                QueryResult::Descend => root.search(&mut query, m, None),
+                QueryResult::Skip(skip) => root.search(&mut query, m, Some(skip)),
                 _ => true,
             });
         query
     }
 
     /// Create an iterator through the sequence.
-    pub fn iter(&self) -> Iter {
-        Iter {
-            inner: self,
-            index: 0,
-        }
+    pub(crate) fn iter(&self) -> OpTreeIter<'_> {
+        iter::OpTreeIter::new(self)
     }
 
     /// Insert the `element` into the sequence at `index`.
@@ -117,7 +141,14 @@ impl OpTreeInternal {
     /// # Panics
     ///
     /// Panics if `index > len`.
-    pub fn insert(&mut self, index: usize, element: Op) {
+    pub(crate) fn insert(&mut self, index: usize, element: Op) {
+        assert!(
+            index <= self.len(),
+            "tried to insert at {} but len is {}",
+            index,
+            self.len()
+        );
+
         let old_len = self.len();
         if let Some(root) = self.root_node.as_mut() {
             #[cfg(debug_assertions)]
@@ -160,12 +191,12 @@ impl OpTreeInternal {
     }
 
     /// Get the `element` at `index` in the sequence.
-    pub fn get(&self, index: usize) -> Option<&Op> {
+    pub(crate) fn get(&self, index: usize) -> Option<&Op> {
         self.root_node.as_ref().and_then(|n| n.get(index))
     }
 
     // this replaces get_mut() because it allows the indexes to update correctly
-    pub fn update<F>(&mut self, index: usize, f: F)
+    pub(crate) fn update<F>(&mut self, index: usize, f: F)
     where
         F: FnMut(&mut Op),
     {
@@ -179,7 +210,7 @@ impl OpTreeInternal {
     /// # Panics
     ///
     /// Panics if `index` is out of bounds.
-    pub fn remove(&mut self, index: usize) -> Op {
+    pub(crate) fn remove(&mut self, index: usize) -> Op {
         if let Some(root) = self.root_node.as_mut() {
             #[cfg(debug_assertions)]
             let len = root.check();
@@ -212,31 +243,62 @@ impl OpTreeNode {
         }
     }
 
-    pub fn search<'a, 'b: 'a, Q>(&'b self, query: &mut Q, m: &OpSetMetadata) -> bool
+    pub(crate) fn search<'a, 'b: 'a, Q>(
+        &'b self,
+        query: &mut Q,
+        m: &OpSetMetadata,
+        skip: Option<usize>,
+    ) -> bool
     where
         Q: TreeQuery<'a>,
     {
         if self.is_leaf() {
-            for e in &self.elements {
+            let skip = skip.unwrap_or(0);
+            for e in self.elements.iter().skip(skip) {
                 if query.query_element_with_metadata(e, m) == QueryResult::Finish {
                     return true;
                 }
             }
             false
         } else {
+            let mut skip = skip.unwrap_or(0);
             for (child_index, child) in self.children.iter().enumerate() {
-                match query.query_node_with_metadata(child, m) {
-                    QueryResult::Descend => {
-                        if child.search(query, m) {
-                            return true;
+                match skip.cmp(&child.len()) {
+                    Ordering::Greater => {
+                        // not in this child at all
+                        // take off the number of elements in the child as well as the next element
+                        skip -= child.len() + 1;
+                    }
+                    Ordering::Equal => {
+                        // just try the element
+                        skip -= child.len();
+                        if let Some(e) = self.elements.get(child_index) {
+                            if query.query_element_with_metadata(e, m) == QueryResult::Finish {
+                                return true;
+                            }
                         }
                     }
-                    QueryResult::Finish => return true,
-                    QueryResult::Next => (),
-                }
-                if let Some(e) = self.elements.get(child_index) {
-                    if query.query_element_with_metadata(e, m) == QueryResult::Finish {
-                        return true;
+                    Ordering::Less => {
+                        // descend and try find it
+                        match query.query_node_with_metadata(child, m) {
+                            QueryResult::Descend => {
+                                // search in the child node, passing in the number of items left to
+                                // skip
+                                if child.search(query, m, Some(skip)) {
+                                    return true;
+                                }
+                            }
+                            QueryResult::Finish => return true,
+                            QueryResult::Next => (),
+                            QueryResult::Skip(_) => panic!("had skip from non-root node"),
+                        }
+                        if let Some(e) = self.elements.get(child_index) {
+                            if query.query_element_with_metadata(e, m) == QueryResult::Finish {
+                                return true;
+                            }
+                        }
+                        // reset the skip to zero so we continue iterating normally
+                        skip = 0;
                     }
                 }
             }
@@ -244,7 +306,7 @@ impl OpTreeNode {
         }
     }
 
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.length
     }
 
@@ -278,7 +340,7 @@ impl OpTreeNode {
                 cumulative_len += child.len() + 1;
             }
         }
-        panic!("index not found in node")
+        panic!("index {} not found in node with len {}", index, self.len())
     }
 
     fn insert_into_non_full_node(&mut self, index: usize, element: Op) {
@@ -493,7 +555,7 @@ impl OpTreeNode {
         l
     }
 
-    pub fn remove(&mut self, index: usize) -> Op {
+    pub(crate) fn remove(&mut self, index: usize) -> Op {
         let original_len = self.len();
         if self.is_leaf() {
             let v = self.remove_from_leaf(index);
@@ -552,16 +614,24 @@ impl OpTreeNode {
     /// Update the operation at the given index using the provided function.
     ///
     /// This handles updating the indices after the update.
-    pub fn update<F>(&mut self, index: usize, f: F) -> (Op, &Op)
+    pub(crate) fn update<F>(&mut self, index: usize, f: F) -> ReplaceArgs
     where
         F: FnOnce(&mut Op),
     {
         if self.is_leaf() {
             let new_element = self.elements.get_mut(index).unwrap();
-            let old_element = new_element.clone();
+            let old_id = new_element.id;
+            let old_visible = new_element.visible();
             f(new_element);
-            self.index.replace(&old_element, new_element);
-            (old_element, new_element)
+            let replace_args = ReplaceArgs {
+                old_id,
+                new_id: new_element.id,
+                old_visible,
+                new_visible: new_element.visible(),
+                new_key: new_element.elemid_or_key(),
+            };
+            self.index.replace(&replace_args);
+            replace_args
         } else {
             let mut cumulative_len = 0;
             let len = self.len();
@@ -572,15 +642,23 @@ impl OpTreeNode {
                     }
                     Ordering::Equal => {
                         let new_element = self.elements.get_mut(child_index).unwrap();
-                        let old_element = new_element.clone();
+                        let old_id = new_element.id;
+                        let old_visible = new_element.visible();
                         f(new_element);
-                        self.index.replace(&old_element, new_element);
-                        return (old_element, new_element);
+                        let replace_args = ReplaceArgs {
+                            old_id,
+                            new_id: new_element.id,
+                            old_visible,
+                            new_visible: new_element.visible(),
+                            new_key: new_element.elemid_or_key(),
+                        };
+                        self.index.replace(&replace_args);
+                        return replace_args;
                     }
                     Ordering::Greater => {
-                        let (old_element, new_element) = child.update(index - cumulative_len, f);
-                        self.index.replace(&old_element, new_element);
-                        return (old_element, new_element);
+                        let replace_args = child.update(index - cumulative_len, f);
+                        self.index.replace(&replace_args);
+                        return replace_args;
                     }
                 }
             }
@@ -588,7 +666,7 @@ impl OpTreeNode {
         }
     }
 
-    pub fn last(&self) -> &Op {
+    pub(crate) fn last(&self) -> &Op {
         if self.is_leaf() {
             // node is never empty so this is safe
             self.elements.last().unwrap()
@@ -598,7 +676,7 @@ impl OpTreeNode {
         }
     }
 
-    pub fn get(&self, index: usize) -> Option<&Op> {
+    pub(crate) fn get(&self, index: usize) -> Option<&Op> {
         if self.is_leaf() {
             return self.elements.get(index);
         } else {

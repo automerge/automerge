@@ -1,3 +1,30 @@
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg",
+    html_favicon_url = "https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"
+)]
+#![warn(
+    missing_debug_implementations,
+    // missing_docs, // TODO: add documentation!
+    rust_2021_compatibility,
+    rust_2018_idioms,
+    unreachable_pub,
+    bad_style,
+    const_err,
+    dead_code,
+    improper_ctypes,
+    non_shorthand_field_patterns,
+    no_mangle_generic_items,
+    overflowing_literals,
+    path_statements,
+    patterns_in_fns_without_body,
+    private_in_public,
+    unconditional_recursion,
+    unused,
+    unused_allocation,
+    unused_comparisons,
+    unused_parens,
+    while_true
+)]
 #![allow(clippy::unused_unit)]
 use am::transaction::CommitOptions;
 use am::transaction::Transactable;
@@ -474,6 +501,13 @@ impl Automerge {
                     };
                 }
 
+                Patch::Increment { obj, key, value } => {
+                    js_set(&patch, "action", "increment")?;
+                    js_set(&patch, "obj", obj.to_string())?;
+                    js_set(&patch, "key", key)?;
+                    js_set(&patch, "value", value.0)?;
+                }
+
                 Patch::Delete { obj, key } => {
                     js_set(&patch, "action", "delete")?;
                     js_set(&patch, "obj", obj.to_string())?;
@@ -539,7 +573,7 @@ impl Automerge {
 
     pub fn spans(&mut self, obj: JsValue) -> Result<JsValue, JsValue> {
         let obj = self.import(obj)?;
-        let text = self.doc.list(&obj).map_err(to_js_err)?;
+        let text: Vec<_> = self.doc.list_range(&obj, ..).collect();
         let spans = self.doc.spans(&obj).map_err(to_js_err)?;
         let mut last_pos = 0;
         let result = Array::new();
@@ -556,7 +590,7 @@ impl Automerge {
             if !text_span.is_empty() {
                 let t: String = text_span
                     .iter()
-                    .filter_map(|(v, _)| v.as_string())
+                    .filter_map(|(_, v, _)| v.as_string())
                     .collect();
                 result.push(&t.into());
             }
@@ -571,7 +605,7 @@ impl Automerge {
         if !text_span.is_empty() {
             let t: String = text_span
                 .iter()
-                .filter_map(|(v, _)| v.as_string())
+                .filter_map(|(_, v, _)| v.as_string())
                 .collect();
             result.push(&t.into());
         }
@@ -717,7 +751,7 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = loadIncremental)]
-    pub fn load_incremental(&mut self, data: Uint8Array) -> Result<Array, JsValue> {
+    pub fn load_incremental(&mut self, data: Uint8Array) -> Result<f64, JsValue> {
         self.ensure_transaction_closed();
         let data = data.to_vec();
         let options = if let Some(observer) = self.observer.as_mut() {
@@ -725,16 +759,15 @@ impl Automerge {
         } else {
             ApplyOptions::default()
         };
-        let objs = self
+        let len = self
             .doc
             .load_incremental_with(&data, options)
             .map_err(to_js_err)?;
-        let objs: Array = objs.iter().map(|o| JsValue::from(o.to_string())).collect();
-        Ok(objs)
+        Ok(len as f64)
     }
 
     #[wasm_bindgen(js_name = applyChanges)]
-    pub fn apply_changes(&mut self, changes: JsValue) -> Result<Array, JsValue> {
+    pub fn apply_changes(&mut self, changes: JsValue) -> Result<(), JsValue> {
         self.ensure_transaction_closed();
         let changes: Vec<_> = JS(changes).try_into()?;
         let options = if let Some(observer) = self.observer.as_mut() {
@@ -742,19 +775,18 @@ impl Automerge {
         } else {
             ApplyOptions::default()
         };
-        let objs = self
+        self
             .doc
             .apply_changes_with(changes, options)
             .map_err(to_js_err)?;
-        let objs: Array = objs.iter().map(|o| JsValue::from(o.to_string())).collect();
-        Ok(objs)
+        Ok(())
     }
 
     #[wasm_bindgen(js_name = getChanges)]
     pub fn get_changes(&mut self, have_deps: JsValue) -> Result<Array, JsValue> {
         self.ensure_transaction_closed();
         let deps: Vec<_> = JS(have_deps).try_into()?;
-        let changes = self.doc.get_changes(&deps);
+        let changes = self.doc.get_changes(&deps)?;
         let changes: Array = changes
             .iter()
             .map(|c| Uint8Array::from(c.raw_bytes()))
@@ -834,7 +866,7 @@ impl Automerge {
         &mut self,
         state: &mut SyncState,
         message: Uint8Array,
-    ) -> Result<Array, JsValue> {
+    ) -> Result<(), JsValue> {
         self.ensure_transaction_closed();
         let message = message.to_vec();
         let message = am::sync::Message::decode(message.as_slice()).map_err(to_js_err)?;
@@ -843,12 +875,11 @@ impl Automerge {
         } else {
             ApplyOptions::default()
         };
-        let objs = self
+        self
             .doc
             .receive_sync_message_with(&mut state.0, message, options)
             .map_err(to_js_err)?;
-        let objs: Array = objs.iter().map(|o| JsValue::from(o.to_string())).collect();
-        Ok(objs)
+        Ok(())
     }
 
     #[wasm_bindgen(js_name = generateSyncMessage)]

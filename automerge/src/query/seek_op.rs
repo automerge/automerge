@@ -9,20 +9,23 @@ pub(crate) struct SeekOp<'a> {
     /// the op we are looking for
     op: &'a Op,
     /// The position to insert at
-    pub pos: usize,
+    pub(crate) pos: usize,
     /// The indices of ops that this op overwrites
-    pub succ: Vec<usize>,
+    pub(crate) succ: Vec<usize>,
     /// whether a position has been found
     found: bool,
+    /// The found start position of the key if there is one yet (for map objects).
+    start: Option<usize>,
 }
 
 impl<'a> SeekOp<'a> {
-    pub fn new(op: &'a Op) -> Self {
+    pub(crate) fn new(op: &'a Op) -> Self {
         SeekOp {
             op,
             succ: vec![],
             pos: 0,
             found: false,
+            start: None,
         }
     }
 
@@ -64,52 +67,78 @@ impl<'a> TreeQuery<'a> for SeekOp<'a> {
                 }
             }
             Key::Map(_) => {
-                self.pos = binary_search_by(child, |op| m.key_cmp(&op.key, &self.op.key));
-                while self.pos < child.len() {
-                    let op = child.get(self.pos).unwrap();
-                    if op.key != self.op.key {
-                        break;
+                if let Some(start) = self.start {
+                    if self.pos + child.len() >= start {
+                        // skip empty nodes
+                        if child.index.visible_len() == 0 {
+                            self.pos += child.len();
+                            QueryResult::Next
+                        } else {
+                            QueryResult::Descend
+                        }
+                    } else {
+                        self.pos += child.len();
+                        QueryResult::Next
                     }
-                    if self.op.overwrites(op) {
-                        self.succ.push(self.pos);
-                    }
-                    if m.lamport_cmp(op.id, self.op.id) == Ordering::Greater {
-                        break;
-                    }
-                    self.pos += 1;
+                } else {
+                    // in the root node find the first op position for the key
+                    let start = binary_search_by(child, |op| m.key_cmp(&op.key, &self.op.key));
+                    self.start = Some(start);
+                    self.pos = start;
+                    QueryResult::Skip(start)
                 }
-                QueryResult::Finish
             }
         }
     }
 
     fn query_element_with_metadata(&mut self, e: &Op, m: &OpSetMetadata) -> QueryResult {
-        if !self.found {
-            if self.is_target_insert(e) {
-                self.found = true;
+        match self.op.key {
+            Key::Map(_) => {
+                // don't bother looking at things past our key
+                if e.key != self.op.key {
+                    return QueryResult::Finish;
+                }
+
                 if self.op.overwrites(e) {
                     self.succ.push(self.pos);
                 }
-            }
-            self.pos += 1;
-            QueryResult::Next
-        } else {
-            // we have already found the target
-            if self.op.overwrites(e) {
-                self.succ.push(self.pos);
-            }
-            if self.op.insert {
-                if self.lesser_insert(e, m) {
-                    QueryResult::Finish
-                } else {
-                    self.pos += 1;
-                    QueryResult::Next
+
+                if m.lamport_cmp(e.id, self.op.id) == Ordering::Greater {
+                    return QueryResult::Finish;
                 }
-            } else if e.insert || self.greater_opid(e, m) {
-                QueryResult::Finish
-            } else {
+
                 self.pos += 1;
                 QueryResult::Next
+            }
+            Key::Seq(_) => {
+                if !self.found {
+                    if self.is_target_insert(e) {
+                        self.found = true;
+                        if self.op.overwrites(e) {
+                            self.succ.push(self.pos);
+                        }
+                    }
+                    self.pos += 1;
+                    QueryResult::Next
+                } else {
+                    // we have already found the target
+                    if self.op.overwrites(e) {
+                        self.succ.push(self.pos);
+                    }
+                    if self.op.insert {
+                        if self.lesser_insert(e, m) {
+                            QueryResult::Finish
+                        } else {
+                            self.pos += 1;
+                            QueryResult::Next
+                        }
+                    } else if e.insert || self.greater_opid(e, m) {
+                        QueryResult::Finish
+                    } else {
+                        self.pos += 1;
+                        QueryResult::Next
+                    }
+                }
             }
         }
     }

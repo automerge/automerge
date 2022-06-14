@@ -7,7 +7,7 @@ export type Prop = string | number;
 export type Hash = string;
 export type Heads = Hash[];
 export type Value = string | number | boolean | null | Date | Uint8Array
-export type ObjType = string | Array | Object
+export type ObjType = string | Array<Value> | Object
 export type FullValue =
   ["str", string] |
   ["int", number] |

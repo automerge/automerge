@@ -143,7 +143,7 @@ impl<'de> Deserialize<'de> for Op {
         impl<'de> Visitor<'de> for OperationVisitor {
             type Value = Op;
 
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 formatter.write_str("An operation object")
             }
 

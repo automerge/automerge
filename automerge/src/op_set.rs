@@ -1,7 +1,7 @@
 use crate::clock::Clock;
 use crate::exid::ExId;
 use crate::indexed_cache::IndexedCache;
-use crate::op_tree::OpTree;
+use crate::op_tree::{self, OpTree};
 use crate::query::{self, OpIdSearch, TreeQuery};
 use crate::types::{self, ActorId, Key, ObjId, Op, OpId, OpType};
 use crate::{ObjType, OpObserver};
@@ -19,11 +19,11 @@ pub(crate) struct OpSetInternal {
     /// The number of operations in the opset.
     length: usize,
     /// Metadata about the operations in this opset.
-    pub m: OpSetMetadata,
+    pub(crate) m: OpSetMetadata,
 }
 
 impl OpSetInternal {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let mut trees: HashMap<_, _, _> = Default::default();
         trees.insert(ObjId::root(), OpTree::new());
         OpSetInternal {
@@ -44,24 +44,22 @@ impl OpSetInternal {
         }
     }
 
-    pub fn iter(&self) -> Iter<'_> {
-        let mut objs: Vec<_> = self.trees.keys().collect();
-        objs.sort_by(|a, b| self.m.lamport_cmp(a.0, b.0));
+    pub(crate) fn iter(&self) -> Iter<'_> {
+        let mut objs: Vec<_> = self.trees.iter().collect();
+        objs.sort_by(|a, b| self.m.lamport_cmp((a.0).0, (b.0).0));
         Iter {
-            inner: self,
-            index: 0,
-            sub_index: 0,
-            objs,
+            trees: objs.into_iter(),
+            current: None,
         }
     }
 
-    pub fn parent_object(&self, obj: &ObjId) -> Option<(ObjId, Key)> {
+    pub(crate) fn parent_object(&self, obj: &ObjId) -> Option<(ObjId, Key)> {
         let parent = self.trees.get(obj)?.parent?;
         let key = self.search(&parent, OpIdSearch::new(obj.0)).key().unwrap();
         Some((parent, key))
     }
 
-    pub fn keys(&self, obj: ObjId) -> Option<query::Keys> {
+    pub(crate) fn keys(&self, obj: ObjId) -> Option<query::Keys<'_>> {
         if let Some(tree) = self.trees.get(&obj) {
             tree.internal.keys()
         } else {
@@ -69,7 +67,7 @@ impl OpSetInternal {
         }
     }
 
-    pub fn keys_at(&self, obj: ObjId, clock: Clock) -> Option<query::KeysAt> {
+    pub(crate) fn keys_at(&self, obj: ObjId, clock: Clock) -> Option<query::KeysAt<'_>> {
         if let Some(tree) = self.trees.get(&obj) {
             tree.internal.keys_at(clock)
         } else {
@@ -77,28 +75,57 @@ impl OpSetInternal {
         }
     }
 
-    pub fn range<R: RangeBounds<String>>(&self, obj: ObjId, range: R) -> Option<query::Range<R>> {
+    pub(crate) fn map_range<R: RangeBounds<String>>(
+        &self,
+        obj: ObjId,
+        range: R,
+    ) -> Option<query::MapRange<'_, R>> {
         if let Some(tree) = self.trees.get(&obj) {
-            tree.internal.range(range, &self.m)
+            tree.internal.map_range(range, &self.m)
         } else {
             None
         }
     }
 
-    pub fn range_at<R: RangeBounds<String>>(
+    pub(crate) fn map_range_at<R: RangeBounds<String>>(
         &self,
         obj: ObjId,
         range: R,
         clock: Clock,
-    ) -> Option<query::RangeAt<R>> {
+    ) -> Option<query::MapRangeAt<'_, R>> {
         if let Some(tree) = self.trees.get(&obj) {
-            tree.internal.range_at(range, &self.m, clock)
+            tree.internal.map_range_at(range, &self.m, clock)
         } else {
             None
         }
     }
 
-    pub fn search<'a, 'b: 'a, Q>(&'b self, obj: &ObjId, query: Q) -> Q
+    pub(crate) fn list_range<R: RangeBounds<usize>>(
+        &self,
+        obj: ObjId,
+        range: R,
+    ) -> Option<query::ListRange<'_, R>> {
+        if let Some(tree) = self.trees.get(&obj) {
+            tree.internal.list_range(range)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn list_range_at<R: RangeBounds<usize>>(
+        &self,
+        obj: ObjId,
+        range: R,
+        clock: Clock,
+    ) -> Option<query::ListRangeAt<'_, R>> {
+        if let Some(tree) = self.trees.get(&obj) {
+            tree.internal.list_range_at(range, clock)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn search<'a, 'b: 'a, Q>(&'b self, obj: &ObjId, query: Q) -> Q
     where
         Q: TreeQuery<'a>,
     {
@@ -109,7 +136,7 @@ impl OpSetInternal {
         }
     }
 
-    pub fn replace<F>(&mut self, obj: &ObjId, index: usize, f: F)
+    pub(crate) fn replace<F>(&mut self, obj: &ObjId, index: usize, f: F)
     where
         F: FnMut(&mut Op),
     {
@@ -118,7 +145,7 @@ impl OpSetInternal {
         }
     }
 
-    pub fn remove(&mut self, obj: &ObjId, index: usize) -> Op {
+    pub(crate) fn remove(&mut self, obj: &ObjId, index: usize) -> Op {
         // this happens on rollback - be sure to go back to the old state
         let tree = self.trees.get_mut(obj).unwrap();
         self.length -= 1;
@@ -129,7 +156,11 @@ impl OpSetInternal {
         op
     }
 
-    pub fn insert(&mut self, index: usize, obj: &ObjId, element: Op) {
+    pub(crate) fn len(&self) -> usize {
+        self.length
+    }
+
+    pub(crate) fn insert(&mut self, index: usize, obj: &ObjId, element: Op) {
         if let OpType::Make(typ) = element.action {
             self.trees.insert(
                 element.id.into(),
@@ -198,6 +229,13 @@ impl OpSetInternal {
             } else {
                 observer.delete(ex_obj, key);
             }
+        } else if let Some(value) = op.get_increment_value() {
+            // only observe this increment if the counter is visible, i.e. the counter's
+            // create op is in the values
+            if values.iter().any(|value| op.pred.contains(&value.id)) {
+                // we have observed the value
+                observer.increment(ex_obj, key, (value, self.id_to_exid(op.id)));
+            }
         } else {
             let winner = if let Some(last_value) = values.last() {
                 if self.m.lamport_cmp(op.id, last_value.id) == Ordering::Greater {
@@ -228,12 +266,12 @@ impl OpSetInternal {
         op
     }
 
-    pub fn object_type(&self, id: &ObjId) -> Option<ObjType> {
+    pub(crate) fn object_type(&self, id: &ObjId) -> Option<ObjType> {
         self.trees.get(id).map(|tree| tree.objtype)
     }
 
     #[cfg(feature = "optree-visualisation")]
-    pub fn visualise(&self) -> String {
+    pub(crate) fn visualise(&self) -> String {
         let mut out = Vec::new();
         let graph = super::visualisation::GraphVisualisation::construct(&self.trees, &self.m);
         dot::render(&graph, &mut out).unwrap();
@@ -257,48 +295,49 @@ impl<'a> IntoIterator for &'a OpSetInternal {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct Iter<'a> {
-    inner: &'a OpSetInternal,
-    index: usize,
-    objs: Vec<&'a ObjId>,
-    sub_index: usize,
+    trees: std::vec::IntoIter<(&'a ObjId, &'a op_tree::OpTree)>,
+    current: Option<(&'a ObjId, op_tree::OpTreeIter<'a>)>,
 }
-
 impl<'a> Iterator for Iter<'a> {
     type Item = (&'a ObjId, &'a Op);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut result = None;
-        for obj in self.objs.iter().skip(self.index) {
-            let tree = self.inner.trees.get(obj)?;
-            result = tree.internal.get(self.sub_index).map(|op| (*obj, op));
-            if result.is_some() {
-                self.sub_index += 1;
-                break;
-            } else {
-                self.index += 1;
-                self.sub_index = 0;
+        if let Some((id, tree)) = &mut self.current {
+            if let Some(next) = tree.next() {
+                return Some((id, next));
             }
         }
-        result
+
+        loop {
+            self.current = self.trees.next().map(|o| (o.0, o.1.iter()));
+            if let Some((obj, tree)) = &mut self.current {
+                if let Some(next) = tree.next() {
+                    return Some((obj, next));
+                }
+            } else {
+                return None;
+            }
+        }
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct OpSetMetadata {
-    pub actors: IndexedCache<ActorId>,
-    pub props: IndexedCache<String>,
+    pub(crate) actors: IndexedCache<ActorId>,
+    pub(crate) props: IndexedCache<String>,
 }
 
 impl OpSetMetadata {
-    pub fn key_cmp(&self, left: &Key, right: &Key) -> Ordering {
+    pub(crate) fn key_cmp(&self, left: &Key, right: &Key) -> Ordering {
         match (left, right) {
             (Key::Map(a), Key::Map(b)) => self.props[*a].cmp(&self.props[*b]),
             _ => panic!("can only compare map keys"),
         }
     }
 
-    pub fn lamport_cmp(&self, left: OpId, right: OpId) -> Ordering {
+    pub(crate) fn lamport_cmp(&self, left: OpId, right: OpId) -> Ordering {
         match (left, right) {
             (OpId(0, _), OpId(0, _)) => Ordering::Equal,
             (OpId(0, _), OpId(_, _)) => Ordering::Less,

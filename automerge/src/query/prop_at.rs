@@ -7,13 +7,13 @@ use std::fmt::Debug;
 pub(crate) struct PropAt {
     clock: Clock,
     key: Key,
-    pub ops: Vec<Op>,
-    pub ops_pos: Vec<usize>,
-    pub pos: usize,
+    pub(crate) ops: Vec<Op>,
+    pub(crate) ops_pos: Vec<usize>,
+    pub(crate) pos: usize,
 }
 
 impl PropAt {
-    pub fn new(prop: usize, clock: Clock) -> Self {
+    pub(crate) fn new(prop: usize, clock: Clock) -> Self {
         PropAt {
             clock,
             key: Key::Map(prop),

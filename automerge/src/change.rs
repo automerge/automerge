@@ -200,6 +200,7 @@ fn encode(change: &amp::Change) -> Change {
         deps,
         ops: chunk.ops,
         extra_bytes: chunk.extra_bytes,
+        num_ops: change.operations.len(),
     }
 }
 
@@ -332,6 +333,8 @@ pub struct Change {
     pub deps: Vec<amp::ChangeHash>,
     ops: HashMap<u32, Range<usize>>,
     extra_bytes: Range<usize>,
+    /// The number of operations in this change.
+    num_ops: usize,
 }
 
 impl Change {
@@ -353,8 +356,7 @@ impl Change {
     }
 
     pub fn len(&self) -> usize {
-        // TODO - this could be a lot more efficient
-        self.iter_ops().count()
+        self.num_ops
     }
 
     pub fn max_op(&self) -> u64 {
@@ -393,7 +395,7 @@ impl Change {
         }
     }
 
-    pub(crate) fn iter_ops(&self) -> OperationIterator {
+    pub(crate) fn iter_ops(&self) -> OperationIterator<'_> {
         OperationIterator::new(self.bytes.uncompressed(), self.actors.as_slice(), &self.ops)
     }
 
@@ -550,7 +552,7 @@ impl TryFrom<Vec<u8>> for Change {
         let ops_info = decode_column_info(bytes.uncompressed(), &mut cursor, false)?;
         let ops = decode_columns(&mut cursor, &ops_info);
 
-        Ok(Change {
+        let mut change = Change {
             bytes,
             body_start,
             hash,
@@ -562,7 +564,13 @@ impl TryFrom<Vec<u8>> for Change {
             deps,
             ops,
             extra_bytes: cursor,
-        })
+            num_ops: 0, // filled in below
+        };
+
+        let len = change.iter_ops().count();
+        change.num_ops = len;
+
+        Ok(change)
     }
 }
 

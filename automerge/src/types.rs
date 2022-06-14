@@ -62,6 +62,16 @@ impl TryFrom<&str> for ActorId {
     }
 }
 
+impl TryFrom<String> for ActorId {
+    type Error = error::InvalidActorId;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        hex::decode(&s)
+            .map(ActorId::from)
+            .map_err(|_| error::InvalidActorId(s))
+    }
+}
+
 impl From<uuid::Uuid> for ActorId {
     fn from(u: uuid::Uuid) -> Self {
         ActorId(TinyVec::from(*u.as_bytes()))
@@ -122,7 +132,7 @@ impl fmt::Display for ActorId {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, Copy, Hash)]
 #[serde(rename_all = "camelCase", untagged)]
 pub enum ObjType {
     Map,
@@ -219,11 +229,11 @@ pub(crate) trait Exportable {
 
 impl OpId {
     #[inline]
-    pub fn counter(&self) -> u64 {
+    pub(crate) fn counter(&self) -> u64 {
         self.0
     }
     #[inline]
-    pub fn actor(&self) -> usize {
+    pub(crate) fn actor(&self) -> usize {
         self.1
     }
     #[inline]
@@ -369,7 +379,7 @@ impl Display for Prop {
 }
 
 impl Key {
-    pub fn elemid(&self) -> Option<ElemId> {
+    pub(crate) fn elemid(&self) -> Option<ElemId> {
         match self {
             Key::Map(_) => None,
             Key::Seq(id) => Some(*id),
@@ -378,28 +388,28 @@ impl Key {
 }
 
 #[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq, Copy, Hash, Default)]
-pub(crate) struct OpId(pub u64, pub usize);
+pub(crate) struct OpId(pub(crate) u64, pub(crate) usize);
 
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
-pub(crate) struct ObjId(pub OpId);
+pub(crate) struct ObjId(pub(crate) OpId);
 
 impl ObjId {
-    pub const fn root() -> Self {
+    pub(crate) const fn root() -> Self {
         ObjId(OpId(0, 0))
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
-pub(crate) struct ElemId(pub OpId);
+pub(crate) struct ElemId(pub(crate) OpId);
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Op {
-    pub id: OpId,
-    pub action: OpType,
-    pub key: Key,
-    pub succ: Vec<OpId>,
-    pub pred: Vec<OpId>,
-    pub insert: bool,
+    pub(crate) id: OpId,
+    pub(crate) action: OpType,
+    pub(crate) key: Key,
+    pub(crate) succ: Vec<OpId>,
+    pub(crate) pred: Vec<OpId>,
+    pub(crate) insert: bool,
 }
 
 impl Op {
@@ -433,7 +443,7 @@ impl Op {
         }
     }
 
-    pub fn visible(&self) -> bool {
+    pub(crate) fn visible(&self) -> bool {
         if self.is_inc() || self.is_mark() {
             false
         } else if self.is_counter() {
@@ -443,7 +453,7 @@ impl Op {
         }
     }
 
-    pub fn incs(&self) -> usize {
+    pub(crate) fn incs(&self) -> usize {
         if let OpType::Put(ScalarValue::Counter(Counter { increments, .. })) = &self.action {
             *increments
         } else {
@@ -451,11 +461,11 @@ impl Op {
         }
     }
 
-    pub fn is_delete(&self) -> bool {
+    pub(crate) fn is_delete(&self) -> bool {
         matches!(&self.action, OpType::Delete)
     }
 
-    pub fn is_inc(&self) -> bool {
+    pub(crate) fn is_inc(&self) -> bool {
         matches!(&self.action, OpType::Increment(_))
     }
 
@@ -471,27 +481,27 @@ impl Op {
         matches!(&self.action, OpType::MarkBegin(_) | OpType::MarkEnd(_))
     }
 
-    pub fn is_counter(&self) -> bool {
+    pub(crate) fn is_counter(&self) -> bool {
         matches!(&self.action, OpType::Put(ScalarValue::Counter(_)))
     }
 
-    pub fn is_noop(&self, action: &OpType) -> bool {
+    pub(crate) fn is_noop(&self, action: &OpType) -> bool {
         matches!((&self.action, action), (OpType::Put(n), OpType::Put(m)) if n == m)
     }
 
-    pub fn is_list_op(&self) -> bool {
+    pub(crate) fn is_list_op(&self) -> bool {
         matches!(&self.key, Key::Seq(_))
     }
 
-    pub fn overwrites(&self, other: &Op) -> bool {
+    pub(crate) fn overwrites(&self, other: &Op) -> bool {
         self.pred.iter().any(|i| i == &other.id)
     }
 
-    pub fn elemid(&self) -> Option<ElemId> {
+    pub(crate) fn elemid(&self) -> Option<ElemId> {
         self.elemid_or_key().elemid()
     }
 
-    pub fn elemid_or_key(&self) -> Key {
+    pub(crate) fn elemid_or_key(&self) -> Key {
         if self.insert {
             Key::Seq(ElemId(self.id))
         } else {
@@ -506,7 +516,15 @@ impl Op {
         }
     }
 
-    pub fn value(&self) -> Value {
+    pub(crate) fn get_increment_value(&self) -> Option<i64> {
+        if let OpType::Increment(i) = self.action {
+            Some(i)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn value(&self) -> Value<'_> {
         match &self.action {
             OpType::Make(obj_type) => Value::Object(*obj_type),
             OpType::Put(scalar) => Value::Scalar(Cow::Borrowed(scalar)),
@@ -514,7 +532,7 @@ impl Op {
         }
     }
 
-    pub fn clone_value(&self) -> Value<'static> {
+    pub(crate) fn clone_value(&self) -> Value<'static> {
         match &self.action {
             OpType::Make(obj_type) => Value::Object(*obj_type),
             OpType::Put(scalar) => Value::Scalar(Cow::Owned(scalar.clone())),
@@ -523,7 +541,7 @@ impl Op {
     }
 
     #[allow(dead_code)]
-    pub fn dump(&self) -> String {
+    pub(crate) fn dump(&self) -> String {
         match &self.action {
             OpType::Put(value) if self.insert => format!("i:{}", value),
             OpType::Put(value) => format!("s:{}", value),
@@ -537,11 +555,14 @@ impl Op {
 }
 
 #[derive(Debug, Clone)]
-pub struct Peer {}
+pub(crate) struct Peer {}
+
+/// The number of bytes in a change hash.
+pub(crate) const HASH_SIZE: usize = 32; // 256 bits = 32 bytes
 
 /// The sha256 hash of a change.
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord, Copy)]
-pub struct ChangeHash(pub [u8; 32]);
+pub struct ChangeHash(pub [u8; HASH_SIZE]);
 
 impl fmt::Debug for ChangeHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

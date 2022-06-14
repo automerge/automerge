@@ -52,6 +52,9 @@
                 nodejs
                 yarn
 
+                cmake
+                cmocka
+
                 rnix-lsp
                 nixpkgs-fmt
               ];

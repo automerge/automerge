@@ -8,7 +8,7 @@ use crate::{decoding, decoding::Decoder, encoding::Encodable, ChangeHash};
 const BITS_PER_ENTRY: u32 = 10;
 const NUM_PROBES: u32 = 7;
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BloomFilter {
     num_entries: u32,
     num_bits_per_entry: u32,
@@ -41,7 +41,8 @@ impl BloomFilter {
         let z = u32::from_le_bytes([hash_bytes[8], hash_bytes[9], hash_bytes[10], hash_bytes[11]])
             % modulo;
 
-        let mut probes = vec![x];
+        let mut probes = Vec::with_capacity(self.num_probes as usize);
+        probes.push(x);
         for _ in 1..self.num_probes {
             x = (x + y) % modulo;
             y = (y + z) % modulo;
@@ -82,15 +83,8 @@ impl BloomFilter {
             true
         }
     }
-}
 
-fn bits_capacity(num_entries: u32, num_bits_per_entry: u32) -> usize {
-    let f = ((f64::from(num_entries) * f64::from(num_bits_per_entry)) / 8_f64).ceil();
-    f as usize
-}
-
-impl From<&[ChangeHash]> for BloomFilter {
-    fn from(hashes: &[ChangeHash]) -> Self {
+    pub fn from_hashes<'a>(hashes: impl ExactSizeIterator<Item = &'a ChangeHash>) -> Self {
         let num_entries = hashes.len() as u32;
         let num_bits_per_entry = BITS_PER_ENTRY;
         let num_probes = NUM_PROBES;
@@ -106,6 +100,11 @@ impl From<&[ChangeHash]> for BloomFilter {
         }
         filter
     }
+}
+
+fn bits_capacity(num_entries: u32, num_bits_per_entry: u32) -> usize {
+    let f = ((f64::from(num_entries) * f64::from(num_bits_per_entry)) / 8_f64).ceil();
+    f as usize
 }
 
 impl TryFrom<&[u8]> for BloomFilter {

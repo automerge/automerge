@@ -31,7 +31,12 @@ pub fn examine(
         .map_err(|e| ExamineError::ReadingChanges { source: e })?;
     let doc = am::Automerge::load(&buf)
         .map_err(|e| ExamineError::ApplyingInitialChanges { source: e })?;
-    let uncompressed_changes: Vec<_> = doc.get_changes(&[]).iter().map(|c| c.decode()).collect();
+    let uncompressed_changes: Vec<_> = doc
+        .get_changes(&[])
+        .unwrap()
+        .iter()
+        .map(|c| c.decode())
+        .collect();
     if is_tty {
         let json_changes = serde_json::to_value(uncompressed_changes).unwrap();
         colored_json::write_colored_json(&json_changes, &mut output).unwrap();

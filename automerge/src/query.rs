@@ -1,6 +1,6 @@
 use crate::exid::ExId;
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
-use crate::types::{Clock, Counter, ElemId, Op, OpId, OpType, ScalarValue};
+use crate::types::{Clock, Counter, Key, Op, OpId, OpType, ScalarValue};
 use fxhash::FxBuildHasher;
 use serde::Serialize;
 use std::cmp::Ordering;
@@ -15,15 +15,17 @@ mod keys;
 mod keys_at;
 mod len;
 mod len_at;
+mod list_range;
+mod list_range_at;
 mod list_vals;
 mod list_vals_at;
+mod map_range;
+mod map_range_at;
 mod nth;
 mod nth_at;
 mod opid;
 mod prop;
 mod prop_at;
-mod range;
-mod range_at;
 mod raw_spans;
 mod seek_op;
 mod seek_op_with_patch;
@@ -37,15 +39,17 @@ pub(crate) use keys::Keys;
 pub(crate) use keys_at::KeysAt;
 pub(crate) use len::Len;
 pub(crate) use len_at::LenAt;
+pub(crate) use list_range::ListRange;
+pub(crate) use list_range_at::ListRangeAt;
 pub(crate) use list_vals::ListVals;
 pub(crate) use list_vals_at::ListValsAt;
+pub(crate) use map_range::MapRange;
+pub(crate) use map_range_at::MapRangeAt;
 pub(crate) use nth::Nth;
 pub(crate) use nth_at::NthAt;
 pub(crate) use opid::OpIdSearch;
 pub(crate) use prop::Prop;
 pub(crate) use prop_at::PropAt;
-pub(crate) use range::Range;
-pub(crate) use range_at::RangeAt;
 pub(crate) use raw_spans::RawSpans;
 pub(crate) use seek_op::SeekOp;
 pub(crate) use seek_op_with_patch::SeekOpWithPatch;
@@ -59,6 +63,16 @@ pub struct SpanInfo {
     #[serde(rename = "type")]
     pub span_type: String,
     pub value: ScalarValue,
+}
+
+// use a struct for the args for clarity as they are passed up the update chain in the optree
+#[derive(Debug, Clone)]
+pub(crate) struct ReplaceArgs {
+    pub(crate) old_id: OpId,
+    pub(crate) new_id: OpId,
+    pub(crate) old_visible: bool,
+    pub(crate) new_visible: bool,
+    pub(crate) new_key: Key,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -96,20 +110,22 @@ pub(crate) trait TreeQuery<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum QueryResult {
     Next,
+    /// Skip this many elements, only allowed from the root node.
+    Skip(usize),
     Descend,
     Finish,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Index {
-    /// The map of visible elements to the number of operations targetting them.
-    pub visible: HashMap<ElemId, usize, FxBuildHasher>,
+    /// The map of visible keys to the number of visible operations for that key.
+    pub(crate) visible: HashMap<Key, usize, FxBuildHasher>,
     /// Set of opids found in this node and below.
-    pub ops: HashSet<OpId, FxBuildHasher>,
+    pub(crate) ops: HashSet<OpId, FxBuildHasher>,
 }
 
 impl Index {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Index {
             visible: Default::default(),
             ops: Default::default(),
@@ -117,68 +133,68 @@ impl Index {
     }
 
     /// Get the number of visible elements in this index.
-    pub fn visible_len(&self) -> usize {
+    pub(crate) fn visible_len(&self) -> usize {
         self.visible.len()
     }
 
-    pub fn has_visible(&self, e: &Option<ElemId>) -> bool {
-        if let Some(seen) = e {
-            self.visible.contains_key(seen)
-        } else {
-            false
-        }
+    pub(crate) fn has_visible(&self, seen: &Key) -> bool {
+        self.visible.contains_key(seen)
     }
 
-    pub fn replace(&mut self, old: &Op, new: &Op) {
-        if old.id != new.id {
-            self.ops.remove(&old.id);
-            self.ops.insert(new.id);
+    pub(crate) fn replace(
+        &mut self,
+        ReplaceArgs {
+            old_id,
+            new_id,
+            old_visible,
+            new_visible,
+            new_key,
+        }: &ReplaceArgs,
+    ) {
+        if old_id != new_id {
+            self.ops.remove(old_id);
+            self.ops.insert(*new_id);
         }
 
-        assert!(new.key == old.key);
-
-        match (new.visible(), old.visible(), new.elemid()) {
-            (false, true, Some(elem)) => match self.visible.get(&elem).copied() {
+        match (new_visible, old_visible, new_key) {
+            (false, true, key) => match self.visible.get(key).copied() {
                 Some(n) if n == 1 => {
-                    self.visible.remove(&elem);
+                    self.visible.remove(key);
                 }
                 Some(n) => {
-                    self.visible.insert(elem, n - 1);
+                    self.visible.insert(*key, n - 1);
                 }
                 None => panic!("remove overun in index"),
             },
-            (true, false, Some(elem)) => *self.visible.entry(elem).or_default() += 1,
+            (true, false, key) => *self.visible.entry(*key).or_default() += 1,
             _ => {}
         }
     }
 
-    pub fn insert(&mut self, op: &Op) {
+    pub(crate) fn insert(&mut self, op: &Op) {
         self.ops.insert(op.id);
         if op.visible() {
-            if let Some(elem) = op.elemid() {
-                *self.visible.entry(elem).or_default() += 1;
-            }
+            *self.visible.entry(op.elemid_or_key()).or_default() += 1;
         }
     }
 
-    pub fn remove(&mut self, op: &Op) {
+    pub(crate) fn remove(&mut self, op: &Op) {
         self.ops.remove(&op.id);
         if op.visible() {
-            if let Some(elem) = op.elemid() {
-                match self.visible.get(&elem).copied() {
-                    Some(n) if n == 1 => {
-                        self.visible.remove(&elem);
-                    }
-                    Some(n) => {
-                        self.visible.insert(elem, n - 1);
-                    }
-                    None => panic!("remove overun in index"),
+            let key = op.elemid_or_key();
+            match self.visible.get(&key).copied() {
+                Some(n) if n == 1 => {
+                    self.visible.remove(&key);
                 }
+                Some(n) => {
+                    self.visible.insert(key, n - 1);
+                }
+                None => panic!("remove overun in index"),
             }
         }
     }
 
-    pub fn merge(&mut self, other: &Index) {
+    pub(crate) fn merge(&mut self, other: &Index) {
         for id in &other.ops {
             self.ops.insert(*id);
         }
@@ -243,7 +259,7 @@ impl VisWindow {
         visible
     }
 
-    pub fn seen_op(&self, op: &Op, pos: usize) -> Vec<(usize, Op)> {
+    pub(crate) fn seen_op(&self, op: &Op, pos: usize) -> Vec<(usize, Op)> {
         let mut result = vec![];
         for pred in &op.pred {
             if let Some(entry) = self.counters.get(pred) {

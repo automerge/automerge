@@ -22,6 +22,12 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v1
 
+      - name: Clean docs dir
+        uses: actions-rs/cargo@v1
+        with:
+          command: clean
+          args: --doc
+
       - name: Build docs
         uses: actions-rs/cargo@v1
         with:

@@ -1,11 +1,11 @@
-name: ci
+name: CI
 on:
   push:
     branches:
-    - experiment
+    - main
   pull_request:
     branches:
-    - experiment
+    - main
 jobs:
   fmt:
     runs-on: ubuntu-latest
@@ -14,7 +14,8 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: 1.60.0
+          default: true
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
       - run: ./scripts/ci/fmt
@@ -27,7 +28,8 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: 1.60.0
+          default: true
           components: clippy
       - uses: Swatinem/rust-cache@v1
       - run: ./scripts/ci/lint
@@ -40,7 +42,8 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: 1.60.0
+          default: true
       - uses: Swatinem/rust-cache@v1
       - run: ./scripts/ci/docs
         shell: bash
@@ -77,12 +80,32 @@ jobs:
       - name: run tests
         run: ./scripts/ci/js_tests
 
+  cmake_build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: 1.60.0
+          default: true
+      - uses: Swatinem/rust-cache@v1
+      - name: Install CMocka
+        run: sudo apt-get install -y libcmocka-dev
+      - name: Install/update CMake
+        uses: jwlawson/actions-setup-cmake@v1.12
+        with:
+          cmake-version: latest
+      - name: Build and test C bindings
+        run: ./scripts/ci/cmake-build Release Static
+        shell: bash
+
   linux:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         toolchain:
-          - stable
+          - 1.60.0
           - nightly
     continue-on-error: ${{ matrix.toolchain == 'nightly' }}
     steps:
@@ -91,6 +114,7 @@ jobs:
         with:
           profile: minimal
           toolchain: ${{ matrix.toolchain }}
+          default: true
       - uses: Swatinem/rust-cache@v1
       - run: ./scripts/ci/build-test
         shell: bash
@@ -102,7 +126,8 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: 1.60.0
+          default: true
       - uses: Swatinem/rust-cache@v1
       - run: ./scripts/ci/build-test
         shell: bash
@@ -114,7 +139,8 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: 1.60.0
+          default: true
       - uses: Swatinem/rust-cache@v1
       - run: ./scripts/ci/build-test
         shell: bash

@@ -12,7 +12,7 @@ impl<'de> Deserialize<'de> for ScalarValue {
         impl<'de> de::Visitor<'de> for ValueVisitor {
             type Value = ScalarValue;
 
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 formatter.write_str("a number, string, bool, or null")
             }
 

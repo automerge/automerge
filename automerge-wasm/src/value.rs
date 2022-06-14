@@ -8,7 +8,7 @@ use wasm_bindgen::prelude::*;
 pub struct ScalarValue<'a>(pub(crate) Cow<'a, am::ScalarValue>);
 
 impl<'a> From<ScalarValue<'a>> for JsValue {
-    fn from(val: ScalarValue) -> Self {
+    fn from(val: ScalarValue<'a>) -> Self {
         match &*val.0 {
             am::ScalarValue::Bytes(v) => Uint8Array::from(v.as_slice()).into(),
             am::ScalarValue::Str(v) => v.to_string().into(),

@@ -1,5 +1,11 @@
 # Automerge RS
 
+<img src='./img/sign.svg' width='500' alt='Automerge logo' />
+
+[![homepage](https://img.shields.io/badge/homepage-published-informational)](https://automerge.org/)
+[![main docs](https://img.shields.io/badge/docs-main-informational)](https://automerge.org/automerge-rs/automerge/)
+[![ci](https://github.com/automerge/automerge-rs/actions/workflows/ci.yaml/badge.svg)](https://github.com/automerge/automerge-rs/actions/workflows/ci.yaml)
+
 This is a rust implementation of the [Automerge](https://github.com/automerge/automerge) file format and network protocol.
 
 If you are looking for the origional `automerge-rs` project that can be used as a wasm backend to the javascript implementation, it can be found [here](https://github.com/automerge/automerge-rs/tree/automerge-1.0).
@@ -8,10 +14,10 @@ If you are looking for the origional `automerge-rs` project that can be used as 
 
 This project has 4 components:
 
-1. *automerge* - a rust implementation of the library.  This project is the most mature and being used in a handful of small applications.
-2. *automerge-wasm* - a js/wasm interface to the underlying rust library.  This api is generally mature and in use in a handful of projects as well.
-3. *automerge-js* - this is a javascript library using the wasm interface to export the same public api of the primary automerge project.  Currently this project passes all of automerge's tests but has not been used in any real project or packaged as an NPM.  Alpha testers welcome.
-4. *automerge-c* - this is a c library intended to be an ffi integration point for all other languages.  It is currently a work in progress and not yet ready for any testing.
+1. _automerge_ - a rust implementation of the library. This project is the most mature and being used in a handful of small applications.
+2. _automerge-wasm_ - a js/wasm interface to the underlying rust library. This api is generally mature and in use in a handful of projects as well.
+3. _automerge-js_ - this is a javascript library using the wasm interface to export the same public api of the primary automerge project. Currently this project passes all of automerge's tests but has not been used in any real project or packaged as an NPM. Alpha testers welcome.
+4. _automerge-c_ - this is a c library intended to be an ffi integration point for all other languages. It is currently a work in progress and not yet ready for any testing.
 
 ## How?
 
@@ -69,7 +75,7 @@ To build and test the wasm library:
   $ yarn release
 ```
 
-And finally to test the js library. This is where most of the tests reside.
+To test the js library. This is where most of the tests reside.
 
 ```shell
   ## setup
@@ -80,6 +86,24 @@ And finally to test the js library. This is where most of the tests reside.
   ## testing
   $ yarn test
 ```
+
+And finally, to build and test the C bindings with CMake:
+
+```shell
+## setup
+$ cd automerge-c
+$ mkdir -p build
+$ cd build
+$ cmake -S .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
+## building and testing
+$ cmake --build .
+```
+To add debugging symbols, replace `Release` with `Debug`.
+To build a shared library instead of a static one, replace `OFF` with `ON`.
+
+The C bindings can be built and tested on any platform for which CMake is
+available but the steps for doing so vary across platforms and are too numerous
+to list here.
 
 ## Benchmarking
 
