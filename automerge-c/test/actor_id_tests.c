@@ -40,6 +40,7 @@ static void test_AMactorIdInit(void **state) {
     TestState* test_state = *state;
     AMresult* prior_result = NULL;
     AMbyteSpan prior_bytes;
+    char const* prior_str = NULL;
     AMresult* result = NULL;
     for (size_t i = 0; i != 11; ++i) {
         result = AMactorIdInit();
@@ -50,13 +51,16 @@ static void test_AMactorIdInit(void **state) {
         AMvalue const value = AMresultValue(result);
         assert_int_equal(value.tag, AM_VALUE_ACTOR_ID);
         AMbyteSpan const bytes = AMactorIdBytes(value.actor_id);
+        char const* const str = AMactorIdStr(value.actor_id);
         if (prior_result) {
             size_t const min_count = fmax(bytes.count, prior_bytes.count);
             assert_memory_not_equal(bytes.src, prior_bytes.src, min_count);
+            assert_string_not_equal(str, prior_str);
             AMfree(prior_result);
         }
         prior_result = result;
         prior_bytes = bytes;
+        prior_str = str;
     }
     AMfree(result);
 }
