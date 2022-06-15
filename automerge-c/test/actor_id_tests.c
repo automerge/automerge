@@ -17,27 +17,26 @@ typedef struct {
     uint8_t* src;
     char const* str;
     size_t count;
-} TestState;
+} GroupState;
 
-static int setup(void** state) {
-    TestState* test_state = calloc(1, sizeof(TestState));
-    test_state->str = "000102030405060708090a0b0c0d0e0f";
-    test_state->count = strlen(test_state->str) / 2;
-    test_state->src = malloc(test_state->count);
-    hex_to_bytes(test_state->str, test_state->src, test_state->count);
-    *state = test_state;
+static int group_setup(void** state) {
+    GroupState* group_state = calloc(1, sizeof(GroupState));
+    group_state->str = "000102030405060708090a0b0c0d0e0f";
+    group_state->count = strlen(group_state->str) / 2;
+    group_state->src = malloc(group_state->count);
+    hex_to_bytes(group_state->str, group_state->src, group_state->count);
+    *state = group_state;
     return 0;
 }
 
-static int teardown(void** state) {
-    TestState* test_state = *state;
-    free(test_state->src);
-    free(test_state);
+static int group_teardown(void** state) {
+    GroupState* group_state = *state;
+    free(group_state->src);
+    free(group_state);
     return 0;
 }
 
 static void test_AMactorIdInit(void **state) {
-    TestState* test_state = *state;
     AMresult* prior_result = NULL;
     AMbyteSpan prior_bytes;
     char const* prior_str = NULL;
@@ -66,8 +65,8 @@ static void test_AMactorIdInit(void **state) {
 }
 
 static void test_AMactorIdInitBytes(void **state) {
-    TestState* test_state = *state;
-    AMresult* const result = AMactorIdInitBytes(test_state->src, test_state->count);
+    GroupState* group_state = *state;
+    AMresult* const result = AMactorIdInitBytes(group_state->src, group_state->count);
     if (AMresultStatus(result) != AM_STATUS_OK) {
         fail_msg("%s", AMerrorMessage(result));
     }
@@ -75,14 +74,14 @@ static void test_AMactorIdInitBytes(void **state) {
     AMvalue const value = AMresultValue(result);
     assert_int_equal(value.tag, AM_VALUE_ACTOR_ID);
     AMbyteSpan const bytes = AMactorIdBytes(value.actor_id);
-    assert_int_equal(bytes.count, test_state->count);
-    assert_memory_equal(bytes.src, test_state->src, bytes.count);
+    assert_int_equal(bytes.count, group_state->count);
+    assert_memory_equal(bytes.src, group_state->src, bytes.count);
     AMfree(result);
 }
 
 static void test_AMactorIdInitStr(void **state) {
-    TestState* test_state = *state;
-    AMresult* const result = AMactorIdInitStr(test_state->str);
+    GroupState* group_state = *state;
+    AMresult* const result = AMactorIdInitStr(group_state->str);
     if (AMresultStatus(result) != AM_STATUS_OK) {
         fail_msg("%s", AMerrorMessage(result));
     }
@@ -90,17 +89,17 @@ static void test_AMactorIdInitStr(void **state) {
     AMvalue const value = AMresultValue(result);
     assert_int_equal(value.tag, AM_VALUE_ACTOR_ID);
     char const* const str = AMactorIdStr(value.actor_id);
-    assert_int_equal(strlen(str), test_state->count * 2);
-    assert_string_equal(str, test_state->str);
+    assert_int_equal(strlen(str), group_state->count * 2);
+    assert_string_equal(str, group_state->str);
     AMfree(result);
 }
 
 int run_actor_id_tests(void) {
     const struct CMUnitTest tests[] = {
-        cmocka_unit_test_setup_teardown(test_AMactorIdInit, setup, teardown),
-        cmocka_unit_test_setup_teardown(test_AMactorIdInitBytes, setup, teardown),
-        cmocka_unit_test_setup_teardown(test_AMactorIdInitStr, setup, teardown),
+        cmocka_unit_test(test_AMactorIdInit),
+        cmocka_unit_test(test_AMactorIdInitBytes),
+        cmocka_unit_test(test_AMactorIdInitStr),
     };
 
-    return cmocka_run_group_tests(tests, NULL, NULL);
+    return cmocka_run_group_tests(tests, group_setup, group_teardown);
 }
