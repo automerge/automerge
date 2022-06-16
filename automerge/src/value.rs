@@ -369,7 +369,7 @@ impl Serialize for Counter {
     where
         S: Serializer,
     {
-        serializer.serialize_i64(self.start)
+        serializer.serialize_i64(self.current)
     }
 }
 

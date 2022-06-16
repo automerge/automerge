@@ -1,7 +1,7 @@
 use automerge::transaction::Transactable;
 use automerge::{
-    ActorId, ApplyOptions, AutoCommit, Automerge, AutomergeError, ObjType, ScalarValue, Value,
-    VecOpObserver, ROOT,
+    ActorId, ApplyOptions, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjType,
+    ScalarValue, Value, VecOpObserver, ROOT,
 };
 
 mod helpers;
@@ -853,7 +853,6 @@ fn handle_repeated_out_of_order_changes() -> Result<(), automerge::AutomergeErro
 fn list_counter_del() -> Result<(), automerge::AutomergeError> {
     let mut v = vec![ActorId::random(), ActorId::random(), ActorId::random()];
     v.sort();
-    println!("{:?}", v);
     let actor1 = v[0].clone();
     let actor2 = v[1].clone();
     let actor3 = v[2].clone();
@@ -1011,4 +1010,24 @@ fn increment_non_counter_list() {
     doc1.merge(&mut doc2).unwrap();
 
     assert_eq!(doc1.increment(&list, 0, 2), Ok(()));
+}
+
+#[test]
+fn save_and_load_incremented_counter() {
+    let mut doc = AutoCommit::new();
+    doc.put(ROOT, "counter", ScalarValue::counter(1)).unwrap();
+    doc.commit();
+    doc.increment(ROOT, "counter", 1).unwrap();
+    doc.commit();
+    let changes1: Vec<Change> = doc.get_changes(&[]).unwrap().into_iter().cloned().collect();
+    let json: Vec<_> = changes1
+        .iter()
+        .map(|c| serde_json::to_string(&c.decode()).unwrap())
+        .collect();
+    let changes2: Vec<Change> = json
+        .iter()
+        .map(|j| serde_json::from_str::<ExpandedChange>(j).unwrap().into())
+        .collect();
+
+    assert_eq!(changes1, changes2);
 }

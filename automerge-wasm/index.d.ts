@@ -7,7 +7,8 @@ export type Prop = string | number;
 export type Hash = string;
 export type Heads = Hash[];
 export type Value = string | number | boolean | null | Date | Uint8Array
-export type ObjType = string | Array<Value> | Object
+export type MaterializeValue = { [key:string]: MaterializeValue } | Array<MaterializeValue> | Value
+export type ObjType = string | Array<ObjType | Value> | { [key: string]: ObjType | Value }
 export type FullValue =
   ["str", string] |
   ["int", number] |
@@ -17,8 +18,23 @@ export type FullValue =
   ["timestamp", Date] |
   ["counter", number] |
   ["bytes", Uint8Array] |
-  ["null", Uint8Array] |
+  ["null", null] |
   ["map", ObjID] |
+  ["list", ObjID] |
+  ["text", ObjID] |
+  ["table", ObjID]
+
+export type FullValueWithId =
+  ["str", string, ObjID ] |
+  ["int", number, ObjID ] |
+  ["uint", number, ObjID ] |
+  ["f64", number, ObjID ] |
+  ["boolean", boolean, ObjID ] |
+  ["timestamp", Date, ObjID ] |
+  ["counter", number, ObjID ] |
+  ["bytes", Uint8Array, ObjID ] |
+  ["null", null, ObjID ] |
+  ["map", ObjID ] |
   ["list", ObjID] |
   ["text", ObjID] |
   ["table", ObjID]
@@ -44,10 +60,15 @@ export type Datatype =
   "text" |
   "list";
 
+export type SyncHave = {
+  lastSync: Heads,
+  bloom: Uint8Array,
+}
+
 export type DecodedSyncMessage = {
   heads: Heads,
   need: Heads,
-  have: any[]
+  have: SyncHave[]
   changes: Change[]
 }
 
@@ -60,23 +81,6 @@ export type DecodedChange = {
   deps: Heads,
   hash: Hash,
   ops: Op[]
-}
-
-export type ChangeSetAddition = {
-    actor: string,
-    start: number,
-    end: number,
-}
-
-export type ChangeSetDeletion = {
-    actor: string,
-    pos: number,
-    val: string
-}
-
-export type ChangeSet = {
-  add: ChangeSetAddition[],
-  del: ChangeSetDeletion[]
 }
 
 export type Op = {
@@ -106,36 +110,44 @@ export function encodeSyncMessage(message: DecodedSyncMessage): SyncMessage;
 export function decodeSyncMessage(msg: SyncMessage): DecodedSyncMessage;
 export function encodeSyncState(state: SyncState): Uint8Array;
 export function decodeSyncState(data: Uint8Array): SyncState;
+export function exportSyncState(state: SyncState): JsSyncState;
+export function importSyncState(state: JsSyncState): SyncState;
+
+export class API {
+  create(actor?: Actor): Automerge;
+  load(data: Uint8Array, actor?: Actor): Automerge;
+  encodeChange(change: DecodedChange): Change;
+  decodeChange(change: Change): DecodedChange;
+  initSyncState(): SyncState;
+  encodeSyncMessage(message: DecodedSyncMessage): SyncMessage;
+  decodeSyncMessage(msg: SyncMessage): DecodedSyncMessage;
+  encodeSyncState(state: SyncState): Uint8Array;
+  decodeSyncState(data: Uint8Array): SyncState;
+  exportSyncState(state: SyncState): JsSyncState;
+  importSyncState(state: JsSyncState): SyncState;
+}
 
 export class Automerge {
   // change state
-  put(obj: ObjID, prop: Prop, value: Value, datatype?: Datatype): undefined;
+  put(obj: ObjID, prop: Prop, value: Value, datatype?: Datatype): void;
   putObject(obj: ObjID, prop: Prop, value: ObjType): ObjID;
-  insert(obj: ObjID, index: number, value: Value, datatype?: Datatype): undefined;
+  insert(obj: ObjID, index: number, value: Value, datatype?: Datatype): void;
   insertObject(obj: ObjID, index: number, value: ObjType): ObjID;
-  push(obj: ObjID, value: Value, datatype?: Datatype): undefined;
+  push(obj: ObjID, value: Value, datatype?: Datatype): void;
   pushObject(obj: ObjID, value: ObjType): ObjID;
   splice(obj: ObjID, start: number, delete_count: number, text?: string | Array<Value>): ObjID[] | undefined;
   increment(obj: ObjID, prop: Prop, value: number): void;
   delete(obj: ObjID, prop: Prop): void;
 
   // returns a single value - if there is a conflict return the winner
-  get(obj: ObjID, prop: any, heads?: Heads): FullValue | null;
+  get(obj: ObjID, prop: Prop, heads?: Heads): Value | undefined;
+  getWithType(obj: ObjID, prop: Prop, heads?: Heads): FullValue | null;
   // return all values in case of a conflict
-  getAll(obj: ObjID, arg: any, heads?: Heads): FullValue[];
+  getAll(obj: ObjID, arg: Prop, heads?: Heads): FullValueWithId[];
   keys(obj: ObjID, heads?: Heads): string[];
   text(obj: ObjID, heads?: Heads): string;
   length(obj: ObjID, heads?: Heads): number;
-  materialize(obj?: ObjID, heads?: Heads): any;
-
-  // experimental spans api - unstable!
-  mark(obj: ObjID, name: string, range: string, value: Value, datatype?: Datatype): void;
-  unmark(obj: ObjID, mark: ObjID): void;
-  spans(obj: ObjID): any;
-  raw_spans(obj: ObjID): any;
-  blame(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet[];
-  attribute(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet[];
-  attribute2(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet[];
+  materialize(obj?: ObjID, heads?: Heads): MaterializeValue;
 
   // transactions
   commit(message?: string, time?: number): Hash;
@@ -163,8 +175,17 @@ export class Automerge {
   getChangeByHash(hash: Hash): Change | null;
   getChangesAdded(other: Automerge): Change[];
   getHeads(): Heads;
-  getLastLocalChange(): Change;
+  getLastLocalChange(): Change | null;
   getMissingDeps(heads?: Heads): Heads;
+
+   // experimental spans api - unstable!
+   mark(obj: ObjID, name: string, range: string, value: Value, datatype?: Datatype): void;
+   unmark(obj: ObjID, mark: ObjID): void;
+   spans(obj: ObjID): any;
+   raw_spans(obj: ObjID): any;
+   blame(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet[];
+   attribute(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet[];
+   attribute2(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet[];
 
   // memory management
   free(): void;
@@ -174,17 +195,23 @@ export class Automerge {
 
   // dump internal state to console.log
   dump(): void;
+}
 
-  // dump internal state to a JS object
-  toJS(): any;
+export class JsSyncState {
+    sharedHeads: Heads;
+    lastSentHeads: Heads;
+    theirHeads: Heads | undefined;
+    theirHeed: Heads | undefined;
+    theirHave: SyncHave[] | undefined;
+    sentHashes: Heads;
 }
 
 export class SyncState {
   free(): void;
   clone(): SyncState;
-  lastSentHeads: any;
-  sentHashes: any;
-  readonly sharedHeads: any;
+  lastSentHeads: Heads;
+  sentHashes: Heads;
+  readonly sharedHeads: Heads;
 }
 
-export default function init (): Promise<any>;
+export default function init (): Promise<API>;

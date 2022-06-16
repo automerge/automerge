@@ -1,4 +1,5 @@
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::cmp::Ordering;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::ops::RangeBounds;
@@ -834,62 +835,28 @@ impl Automerge {
     /// Filter the changes down to those that are not transitive dependencies of the heads.
     ///
     /// Thus a graph with these heads has not seen the remaining changes.
-    pub(crate) fn filter_changes(&self, heads: &[ChangeHash], changes: &mut BTreeSet<ChangeHash>) {
-        // Reduce the working set to find to those which we may be able to find.
-        // This filters out those hashes that are successors of or concurrent with all of the
-        // heads.
-        // This can help in avoiding traversing the entire graph back to the roots when we try to
-        // search for a hash we can know won't be found there.
-        let max_head_index = heads
+    pub(crate) fn filter_changes(
+        &self,
+        heads: &[ChangeHash],
+        changes: &mut BTreeSet<ChangeHash>,
+    ) -> Result<(), AutomergeError> {
+        let heads = heads
             .iter()
-            .map(|h| self.history_index.get(h).unwrap_or(&0))
-            .max()
-            .unwrap_or(&0);
-        let mut may_find: HashSet<ChangeHash> = changes
-            .iter()
-            .filter(|hash| {
-                let change_index = self.history_index.get(hash).unwrap_or(&0);
-                change_index <= max_head_index
-            })
+            .filter(|hash| self.history_index.contains_key(hash))
             .copied()
-            .collect();
+            .collect::<Vec<_>>();
+        let heads_clock = self.clock_at(&heads)?;
 
-        if may_find.is_empty() {
-            return;
-        }
-
-        let mut queue: VecDeque<_> = heads.iter().collect();
-        let mut seen = HashSet::new();
-        while let Some(hash) = queue.pop_front() {
-            if seen.contains(hash) {
-                continue;
-            }
-            seen.insert(hash);
-
-            let removed = may_find.remove(hash);
-            changes.remove(hash);
-            if may_find.is_empty() {
-                break;
-            }
-
-            for dep in self
-                .history_index
+        // keep the hashes that are concurrent or after the heads
+        changes.retain(|hash| {
+            self.clocks
                 .get(hash)
-                .and_then(|i| self.history.get(*i))
-                .map(|c| c.deps.as_slice())
-                .unwrap_or_default()
-            {
-                // if we just removed something from our hashes then it is likely there is more
-                // down here so do a quick inspection on the children.
-                // When we don't remove anything it is less likely that there is something down
-                // that chain so delay it.
-                if removed {
-                    queue.push_front(dep);
-                } else {
-                    queue.push_back(dep);
-                }
-            }
-        }
+                .unwrap()
+                .partial_cmp(&heads_clock)
+                .map_or(true, |o| o == Ordering::Greater)
+        });
+
+        Ok(())
     }
 
     /// Get the hashes of the changes in this document that aren't transitive dependencies of the

@@ -28,18 +28,18 @@ static void test_AMmapPut ## suffix(void **state) {                           \
         fail_msg("%s", AMerrorMessage(res));                                  \
     }                                                                         \
     assert_int_equal(AMresultSize(res), 0);                                   \
-    AMvalue value = AMresultValue(res, 0);                                    \
-    assert_int_equal(value.tag, AM_VALUE_VOID);                            \
-    AMfreeResult(res);                                                        \
+    AMvalue value = AMresultValue(res);                                       \
+    assert_int_equal(value.tag, AM_VALUE_VOID);                               \
+    AMfree(res);                                                              \
     res = AMmapGet(group_state->doc, AM_ROOT, #suffix);                       \
     if (AMresultStatus(res) != AM_STATUS_OK) {                                \
         fail_msg("%s", AMerrorMessage(res));                                  \
     }                                                                         \
     assert_int_equal(AMresultSize(res), 1);                                   \
-    value = AMresultValue(res, 0);                                            \
+    value = AMresultValue(res);                                               \
     assert_int_equal(value.tag, AMvalue_discriminant(#suffix));               \
     assert_true(value.member == scalar_value);                                \
-    AMfreeResult(res);                                                        \
+    AMfree(res);                                                              \
 }
 
 #define test_AMmapPutObject(label) test_AMmapPutObject_ ## label
@@ -57,11 +57,11 @@ static void test_AMmapPutObject_ ## label(void **state) {                     \
         fail_msg("%s", AMerrorMessage(res));                                  \
     }                                                                         \
     assert_int_equal(AMresultSize(res), 1);                                   \
-    AMvalue value = AMresultValue(res, 0);                                    \
+    AMvalue value = AMresultValue(res);                                       \
     assert_int_equal(value.tag, AM_VALUE_OBJ_ID);                             \
     assert_non_null(value.obj_id);                                            \
     assert_int_equal(AMobjSize(group_state->doc, value.obj_id), 0);           \
-    AMfreeResult(res);                                                        \
+    AMfree(res);                                                              \
 }
 
 static_void_test_AMmapPut(Bool, boolean, true)
@@ -83,19 +83,19 @@ static void test_AMmapPutBytes(void **state) {
         fail_msg("%s", AMerrorMessage(res));
     }
     assert_int_equal(AMresultSize(res), 0);
-    AMvalue value = AMresultValue(res, 0);
+    AMvalue value = AMresultValue(res);
     assert_int_equal(value.tag, AM_VALUE_VOID);
-    AMfreeResult(res);
+    AMfree(res);
     res = AMmapGet(group_state->doc, AM_ROOT, KEY);
     if (AMresultStatus(res) != AM_STATUS_OK) {
         fail_msg("%s", AMerrorMessage(res));
     }
     assert_int_equal(AMresultSize(res), 1);
-    value = AMresultValue(res, 0);
+    value = AMresultValue(res);
     assert_int_equal(value.tag, AM_VALUE_BYTES);
     assert_int_equal(value.bytes.count, BYTES_SIZE);
     assert_memory_equal(value.bytes.src, BYTES_VALUE, BYTES_SIZE);
-    AMfreeResult(res);
+    AMfree(res);
 }
 
 static_void_test_AMmapPut(Counter, counter, INT64_MAX)
@@ -113,17 +113,17 @@ static void test_AMmapPutNull(void **state) {
         fail_msg("%s", AMerrorMessage(res));
     }
     assert_int_equal(AMresultSize(res), 0);
-    AMvalue value = AMresultValue(res, 0);
+    AMvalue value = AMresultValue(res);
     assert_int_equal(value.tag, AM_VALUE_VOID);
-    AMfreeResult(res);
+    AMfree(res);
     res = AMmapGet(group_state->doc, AM_ROOT, KEY);
     if (AMresultStatus(res) != AM_STATUS_OK) {
         fail_msg("%s", AMerrorMessage(res));
     }
     assert_int_equal(AMresultSize(res), 1);
-    value = AMresultValue(res, 0);
+    value = AMresultValue(res);
     assert_int_equal(value.tag, AM_VALUE_NULL);
-    AMfreeResult(res);
+    AMfree(res);
 }
 
 static_void_test_AMmapPutObject(List)
@@ -148,19 +148,19 @@ static void test_AMmapPutStr(void **state) {
         fail_msg("%s", AMerrorMessage(res));
     }
     assert_int_equal(AMresultSize(res), 0);
-    AMvalue value = AMresultValue(res, 0);
+    AMvalue value = AMresultValue(res);
     assert_int_equal(value.tag, AM_VALUE_VOID);
-    AMfreeResult(res);
+    AMfree(res);
     res = AMmapGet(group_state->doc, AM_ROOT, KEY);
     if (AMresultStatus(res) != AM_STATUS_OK) {
         fail_msg("%s", AMerrorMessage(res));
     }
     assert_int_equal(AMresultSize(res), 1);
-    value = AMresultValue(res, 0);
+    value = AMresultValue(res);
     assert_int_equal(value.tag, AM_VALUE_STR);
     assert_int_equal(strlen(value.str), STR_LEN);
     assert_memory_equal(value.str, STR_VALUE, STR_LEN + 1);
-    AMfreeResult(res);
+    AMfree(res);
 }
 
 static_void_test_AMmapPut(Timestamp, timestamp, INT64_MAX)

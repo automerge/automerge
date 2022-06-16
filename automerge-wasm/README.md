@@ -131,7 +131,10 @@ You can access objects by passing the object id as the first parameter for a cal
 
   // get the id then use it
 
-  let id = doc.get("/", "config")
+  // get returns a single simple javascript value or undefined
+  // getWithType returns an Array of the datatype plus basic type or null
+
+  let id = doc.getWithType("/", "config")
   if (id && id[0] === 'map') {
     doc.put(id[1], "align", "right")
   }
@@ -199,8 +202,8 @@ Text is a specialized list type intended for modifying a text document.  The pri
     let obj = doc.insertObject(notes, 6, { hi: "there" })
 
     doc.text(notes)       // returns "Hello \ufffceveryone"
-    doc.get(notes, 6)   // returns ["map", obj]
-    doc.get(obj, "hi") // returns ["str", "there"]
+    doc.getWithType(notes, 6)   // returns ["map", obj]
+    doc.get(obj, "hi") // returns "there"
     doc.free()
 ```
 
@@ -217,8 +220,8 @@ When querying maps use the `get()` method with the object in question and the pr
     doc1.put("_root", "key1", "val1")
     let key2 = doc1.putObject("_root", "key2", [])
 
-    doc1.get("_root", "key1") // returns ["str", "val1"]
-    doc1.get("_root", "key2") // returns ["list", "2@aabbcc"]
+    doc1.get("_root", "key1") // returns "val1"
+    doc1.getWithType("_root", "key2") // returns ["list", "2@aabbcc"]
     doc1.keys("_root")          // returns ["key1", "key2"]
 
     let doc2 = doc1.fork("ffaaff")
@@ -229,7 +232,7 @@ When querying maps use the `get()` method with the object in question and the pr
 
     doc1.merge(doc2)
 
-    doc1.get("_root","key3")   // returns ["str", "doc2val"]
+    doc1.get("_root","key3")   // returns "doc2val"
     doc1.getAll("_root","key3")  // returns [[ "str", "doc1val"], ["str", "doc2val"]]
     doc1.free(); doc2.free()
 ```
@@ -266,7 +269,7 @@ Generally speaking you don't need to think about transactions when using Automer
 
     doc.put("_root", "key", "val1")
 
-    doc.get("_root", "key")        // returns ["str","val1"]
+    doc.get("_root", "key")        // returns "val1"
     doc.pendingOps()                 // returns 1
 
     doc.rollback()
@@ -280,7 +283,7 @@ Generally speaking you don't need to think about transactions when using Automer
 
     doc.commit("test commit 1")
 
-    doc.get("_root", "key")        // returns ["str","val2"]
+    doc.get("_root", "key")        // returns "val2"
     doc.pendingOps()                 // returns 0
 
     doc.free()
@@ -301,10 +304,10 @@ All query functions can take an optional argument of `heads` which allow you to 
 
     doc.put("_root", "key", "val3")
 
-    doc.get("_root","key")          // returns ["str","val3"]
-    doc.get("_root","key",heads2)   // returns ["str","val2"]
-    doc.get("_root","key",heads1)   // returns ["str","val1"]
-    doc.get("_root","key",[])       // returns null
+    doc.get("_root","key")          // returns "val3"
+    doc.get("_root","key",heads2)   // returns "val2"
+    doc.get("_root","key",heads1)   // returns "val1"
+    doc.get("_root","key",[])       // returns undefined
 
     doc.free()
 ```

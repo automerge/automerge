@@ -1,0 +1,18 @@
+{
+  "collaborators": [
+    "Orion Henry <orion@inkandswitch.com>"
+  ],
+  "name": "automerge-types",
+  "description": "typescript types for low level automerge api",
+  "homepage": "https://github.com/automerge/automerge-rs/tree/main/automerge-wasm",
+  "repository": "github:automerge/automerge-rs",
+  "version": "0.1.4",
+  "license": "MIT",
+  "files": [
+    "LICENSE",
+    "package.json",
+    "index.d.ts"
+  ],
+  "types": "index.d.ts",
+  "main": ""
+}

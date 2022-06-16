@@ -24,10 +24,12 @@
   1. `AMinc{Map|List}(doc, obj, prop, value)`
   1. `AMspliceText(doc, obj, start, num_del, text)`
 
-### Read
+### Read (the heads argument is optional and can be on an `at` variant)
 
   1. `AMkeys(doc, obj, heads)`
   1. `AMlength(doc, obj, heads)`
+  1. `AMlistRange(doc, obj, heads)`
+  1. `AMmapRange(doc, obj, heads)`
   1. `AMvalues(doc, obj, heads)`
   1. `AMtext(doc, obj, heads)`
 

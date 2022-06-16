@@ -1199,18 +1199,15 @@ fn load_broken_list() {
     for action in actions {
         match action {
             Action::InsertText(index, c) => {
-                println!("inserting {} at {}", c, index);
                 tx.insert(&list, index, c).unwrap();
             }
             Action::DelText(index) => {
-                println!("deleting at {} ", index);
                 tx.delete(&list, index).unwrap();
             }
         }
     }
     tx.commit();
     let bytes = doc.save();
-    println!("doc2 time");
     let mut doc2 = Automerge::load(&bytes).unwrap();
     let bytes2 = doc2.save();
     assert_eq!(doc.text(&list).unwrap(), doc2.text(&list).unwrap());
@@ -1252,18 +1249,15 @@ fn load_broken_list_short() {
     for action in actions {
         match action {
             Action::InsertText(index, c) => {
-                println!("inserting {} at {}", c, index);
                 tx.insert(&list, index, c).unwrap();
             }
             Action::DelText(index) => {
-                println!("deleting at {} ", index);
                 tx.delete(&list, index).unwrap();
             }
         }
     }
     tx.commit();
     let bytes = doc.save();
-    println!("doc2 time");
     let mut doc2 = Automerge::load(&bytes).unwrap();
     let bytes2 = doc2.save();
     assert_eq!(doc.text(&list).unwrap(), doc2.text(&list).unwrap());

@@ -366,7 +366,33 @@ impl Automerge {
         obj: JsValue,
         prop: JsValue,
         heads: Option<Array>,
-    ) -> Result<Option<Array>, JsValue> {
+    ) -> Result<JsValue, JsValue> {
+        let obj = self.import(obj)?;
+        let prop = to_prop(prop);
+        let heads = get_heads(heads);
+        if let Ok(prop) = prop {
+            let value = if let Some(h) = heads {
+                self.doc.get_at(&obj, prop, &h)?
+            } else {
+                self.doc.get(&obj, prop)?
+            };
+            match value {
+                Some((Value::Object(_), obj_id)) => Ok(obj_id.to_string().into()),
+                Some((Value::Scalar(value), _)) => Ok(ScalarValue(value).into()),
+                None => Ok(JsValue::undefined()),
+            }
+        } else {
+            Ok(JsValue::undefined())
+        }
+    }
+
+    #[wasm_bindgen(js_name = getWithType)]
+    pub fn get_with_type(
+        &self,
+        obj: JsValue,
+        prop: JsValue,
+        heads: Option<Array>,
+    ) -> Result<JsValue, JsValue> {
         let obj = self.import(obj)?;
         let result = Array::new();
         let prop = to_prop(prop);
@@ -381,17 +407,17 @@ impl Automerge {
                 Some((Value::Object(obj_type), obj_id)) => {
                     result.push(&obj_type.to_string().into());
                     result.push(&obj_id.to_string().into());
-                    Ok(Some(result))
+                    Ok(result.into())
                 }
                 Some((Value::Scalar(value), _)) => {
                     result.push(&datatype(&value).into());
                     result.push(&ScalarValue(value).into());
-                    Ok(Some(result))
+                    Ok(result.into())
                 }
-                None => Ok(None),
+                None => Ok(JsValue::null()),
             }
         } else {
-            Ok(None)
+            Ok(JsValue::null())
         }
     }
 
@@ -834,12 +860,12 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = getLastLocalChange)]
-    pub fn get_last_local_change(&mut self) -> Result<Uint8Array, JsValue> {
+    pub fn get_last_local_change(&mut self) -> Result<JsValue, JsValue> {
         self.ensure_transaction_closed();
         if let Some(change) = self.doc.get_last_local_change() {
-            Ok(Uint8Array::from(change.raw_bytes()))
+            Ok(Uint8Array::from(change.raw_bytes()).into())
         } else {
-            Err(to_js_err("no local changes"))
+            Ok(JsValue::null())
         }
     }
 
