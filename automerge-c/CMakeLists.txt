@@ -91,7 +91,7 @@ install(
 )
 
 if(BUILD_TESTING)
-    add_subdirectory(test)
+    add_subdirectory(test EXCLUDE_FROM_ALL)
 
     enable_testing()
 endif()
