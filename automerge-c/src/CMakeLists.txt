@@ -51,6 +51,7 @@ add_custom_command(
     MAIN_DEPENDENCY
         lib.rs
     DEPENDS
+        actor_id.rs
         byte_span.rs
         change_hashes.rs
         change.rs

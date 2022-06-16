@@ -6,6 +6,16 @@ use crate::byte_span::AMbyteSpan;
 use crate::change_hashes::AMchangeHashes;
 use crate::result::{to_result, AMresult};
 
+macro_rules! to_change {
+    ($handle:expr) => {{
+        let handle = $handle.as_ref();
+        match handle {
+            Some(b) => b,
+            None => return AMresult::err("Invalid AMchange pointer").into(),
+        }
+    }};
+}
+
 /// \struct AMchange
 /// \brief A group of operations performed by an actor.
 pub struct AMchange {
@@ -46,18 +56,21 @@ impl AsRef<am::Change> for AMchange {
 /// \brief Gets the first referenced actor ID in a change.
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
-/// \return An actor ID as an `AMbyteSpan` struct.
 /// \pre \p change must be a valid address.
+/// \return A pointer to an `AMresult` struct containing a pointer to an
+///         `AMactorId` struct.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
 /// change must be a pointer to a valid AMchange
 #[no_mangle]
-pub unsafe extern "C" fn AMchangeActorId(change: *const AMchange) -> AMbyteSpan {
-    match change.as_ref() {
-        Some(change) => change.as_ref().actor_id().into(),
-        None => AMbyteSpan::default(),
-    }
+pub unsafe extern "C" fn AMchangeActorId(change: *const AMchange) -> *mut AMresult {
+    let change = to_change!(change);
+    to_result(Ok::<am::ActorId, am::AutomergeError>(
+        change.as_ref().actor_id().clone(),
+    ))
 }
 
 /// \memberof AMchange

@@ -1,10 +1,9 @@
 use automerge as am;
 use automerge::transaction::{CommitOptions, Transactable};
-use smol_str::SmolStr;
-use std::borrow::Cow;
 use std::ops::{Deref, DerefMut};
 use std::os::raw::c_char;
 
+use crate::actor_id::AMactorId;
 use crate::change::AMchange;
 use crate::change_hashes::AMchangeHashes;
 use crate::obj::AMobjId;
@@ -17,7 +16,7 @@ mod utils;
 
 use crate::changes::AMchanges;
 use crate::doc::utils::to_str;
-use crate::doc::utils::{to_doc, to_obj_id};
+use crate::doc::utils::{to_actor_id, to_doc, to_obj_id};
 
 macro_rules! to_changes {
     ($handle:expr) => {{
@@ -225,27 +224,9 @@ pub unsafe extern "C" fn AMgenerateSyncMessage(
 #[no_mangle]
 pub unsafe extern "C" fn AMgetActor(doc: *mut AMdoc) -> *mut AMresult {
     let doc = to_doc!(doc);
-    to_result(Ok(doc.get_actor().clone()))
-}
-
-/// \memberof AMdoc
-/// \brief Gets an `AMdoc` struct's actor ID value as a hexadecimal string.
-///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \return A pointer to an `AMresult` struct containing a `char const*`.
-/// \pre \p doc must be a valid address.
-/// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMfree()`.
-/// \internal
-///
-/// # Safety
-/// doc must be a pointer to a valid AMdoc
-#[no_mangle]
-pub unsafe extern "C" fn AMgetActorHex(doc: *mut AMdoc) -> *mut AMresult {
-    let doc = to_doc!(doc);
-    let hex_str = doc.get_actor().to_hex_string();
-    let value = am::Value::Scalar(Cow::Owned(am::ScalarValue::Str(SmolStr::new(hex_str))));
-    to_result(Ok(value))
+    to_result(Ok::<am::ActorId, am::AutomergeError>(
+        doc.get_actor().clone(),
+    ))
 }
 
 /// \memberof AMdoc
@@ -602,15 +583,13 @@ pub unsafe extern "C" fn AMsaveIncremental(doc: *mut AMdoc) -> *mut AMresult {
 }
 
 /// \memberof AMdoc
-/// \brief Puts a sequence of bytes as the actor ID value of a document.
+/// \brief Puts the actor ID value of a document.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] value A pointer to a contiguous sequence of bytes.
-/// \param[in] count The number of bytes to copy from \p value.
+/// \param[in] actor_id A pointer to an `AMactorId` struct.
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
-/// \pre \p value must be a valid address.
-/// \pre `0 <=` \p count `<=` length of \p value.
+/// \pre \p actor_id must be a valid address.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
 ///          deallocated with `AMfree()`.
 /// \internal
@@ -619,41 +598,9 @@ pub unsafe extern "C" fn AMsaveIncremental(doc: *mut AMdoc) -> *mut AMresult {
 /// doc must be a pointer to a valid AMdoc
 /// value must be a byte array of length `>= count`
 #[no_mangle]
-pub unsafe extern "C" fn AMsetActor(
-    doc: *mut AMdoc,
-    value: *const u8,
-    count: usize,
-) -> *mut AMresult {
+pub unsafe extern "C" fn AMsetActor(doc: *mut AMdoc, actor_id: *const AMactorId) -> *mut AMresult {
     let doc = to_doc!(doc);
-    let slice = std::slice::from_raw_parts(value, count);
-    doc.set_actor(am::ActorId::from(slice));
+    let actor_id = to_actor_id!(actor_id);
+    doc.set_actor(actor_id.as_ref().clone());
     to_result(Ok(()))
-}
-
-/// \memberof AMdoc
-/// \brief Puts a hexadecimal string as the actor ID value of a document.
-///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] hex_str A string of hexadecimal characters.
-/// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc must be a valid address.
-/// \pre \p hex_str must be a valid address.
-/// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMfree()`.
-/// \internal
-///
-/// # Safety
-/// doc must be a pointer to a valid AMdoc
-/// hex_str must be a null-terminated array of `c_char`
-#[no_mangle]
-pub unsafe extern "C" fn AMsetActorHex(doc: *mut AMdoc, hex_str: *const c_char) -> *mut AMresult {
-    let doc = to_doc!(doc);
-    let slice = std::slice::from_raw_parts(hex_str as *const u8, libc::strlen(hex_str));
-    to_result(match hex::decode(slice) {
-        Ok(vec) => {
-            doc.set_actor(vec.into());
-            Ok(())
-        }
-        Err(error) => Err(am::AutomergeError::HexDecode(error)),
-    })
 }
