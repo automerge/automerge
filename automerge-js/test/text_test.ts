@@ -1,6 +1,9 @@
-const assert = require('assert')
-const Automerge = require('..')
-const { assertEqualsOneOf } = require('./helpers')
+import * as assert from 'assert'
+import * as Automerge from '../src'
+import { assertEqualsOneOf } from './helpers'
+import * as AutomergeWASM from "automerge-wasm"
+
+Automerge.use(AutomergeWASM)
 
 function attributeStateToAttributes(accumulatedAttributes) {
   const attributes = {}
@@ -600,7 +603,8 @@ describe('Automerge.Text', () => {
           applyDeltaDocToAutomergeText(delta, doc)
         })
 
-        assert.strictEqual(s2.text.join(''), 'Hello reader')
+        //assert.strictEqual(s2.text.join(''), 'Hello reader')
+        assert.strictEqual(s2.text.toString(), 'Hello reader')
       })
 
       it('should apply an insert with control characters', () => {

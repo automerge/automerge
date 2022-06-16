@@ -1,7 +1,10 @@
+import * as tt from "automerge-types"
+import * as assert from 'assert'
+import * as util from 'util'
+import * as Automerge from '../src'
+import * as AutomergeWASM from "automerge-wasm"
 
-const assert = require('assert')
-const util = require('util')
-const Automerge = require('..')
+Automerge.use(AutomergeWASM)
 
 describe('Automerge', () => {
     describe('basics', () => {

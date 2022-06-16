@@ -1,31 +1,27 @@
-const { OBJECT_ID } = require('./constants')
-const { isObject } = require('../src/common')
+import { Value } from "automerge-types"
 
-class Text {
-  constructor (text) {
-    const instance = Object.create(Text.prototype)
+export class Text {
+  elems: Value[]
+
+  constructor (text?: string | string[]) {
+    //const instance = Object.create(Text.prototype)
     if (typeof text === 'string') {
-      instance.elems = [...text]
+      this.elems = [...text]
     } else if (Array.isArray(text)) {
-      instance.elems = text
+      this.elems = text
     } else if (text === undefined) {
-      instance.elems = []
+      this.elems = []
     } else {
       throw new TypeError(`Unsupported initial value for Text: ${text}`)
     }
-    return instance
   }
 
-  get length () {
+  get length () : number {
     return this.elems.length
   }
 
-  get (index) {
+  get (index: number) : Value {
     return this.elems[index]
-  }
-
-  getElemId (index) {
-    return undefined
   }
 
   /**
@@ -33,7 +29,8 @@ class Text {
    * inline objects.
    */
   [Symbol.iterator] () {
-    let elems = this.elems, index = -1
+    const elems = this.elems
+    let index = -1
     return {
       next () {
         index += 1
@@ -50,7 +47,7 @@ class Text {
    * Returns the content of the Text object as a simple string, ignoring any
    * non-character elements.
    */
-  toString() {
+  toString() : string {
     // Concatting to a string is faster than creating an array and then
     // .join()ing for small (<100KB) arrays.
     // https://jsperf.com/join-vs-loop-w-type-test
@@ -68,8 +65,8 @@ class Text {
    * For example, the value ['a', 'b', {x: 3}, 'c', 'd'] has spans:
    * => ['ab', {x: 3}, 'cd']
    */
-  toSpans() {
-    let spans = []
+  toSpans() : Value[] {
+    const spans : Value[] = []
     let chars = ''
     for (const elem of this.elems) {
       if (typeof elem === 'string') {
@@ -92,21 +89,21 @@ class Text {
    * Returns the content of the Text object as a simple string, so that the
    * JSON serialization of an Automerge document represents text nicely.
    */
-  toJSON() {
+  toJSON() : string {
     return this.toString()
   }
 
   /**
    * Updates the list item at position `index` to a new value `value`.
    */
-  set (index, value) {
+  set (index: number, value: Value) {
     this.elems[index] = value
   }
 
   /**
    * Inserts new list items `values` starting at position `index`.
    */
-  insertAt(index, ...values) {
+  insertAt(index: number, ...values: Value[]) {
     this.elems.splice(index, 0, ... values)
   }
 
@@ -114,14 +111,20 @@ class Text {
    * Deletes `numDelete` list items starting at position `index`.
    * if `numDelete` is not given, one item is deleted.
    */
-  deleteAt(index, numDelete = 1) {
+  deleteAt(index: number, numDelete = 1) {
     this.elems.splice(index, numDelete)
   }
+
+  map<T>(callback: (e: Value) => T) {
+    this.elems.map(callback)
+  }
+
+
 }
 
 // Read-only methods that can delegate to the JavaScript built-in array
-for (let method of ['concat', 'every', 'filter', 'find', 'findIndex', 'forEach', 'includes',
-                    'indexOf', 'join', 'lastIndexOf', 'map', 'reduce', 'reduceRight',
+for (const method of ['concat', 'every', 'filter', 'find', 'findIndex', 'forEach', 'includes',
+                    'indexOf', 'join', 'lastIndexOf', 'reduce', 'reduceRight',
                     'slice', 'some', 'toLocaleString']) {
   Text.prototype[method] = function (...args) {
     const array = [...this]
@@ -129,4 +132,3 @@ for (let method of ['concat', 'every', 'filter', 'find', 'findIndex', 'forEach',
   }
 }
 
-module.exports = { Text }

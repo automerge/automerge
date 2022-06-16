@@ -222,21 +222,34 @@ function encodeOperationAction(op, columns) {
 }
 
 /**
- * Encodes the integer `value` into the two columns `valLen` and `valRaw`,
- * with the datatype tag set to `typeTag`. If `typeTag` is zero, it is set
- * automatically to signed or unsigned depending on the sign of the value.
- * Values with non-zero type tags are always encoded as signed integers.
+ * Given the datatype for a number, determine the typeTag and the value to encode
+ * otherwise guess
  */
-function encodeInteger(value, typeTag, columns) {
-  let numBytes
-  if (value < 0 || typeTag > 0) {
-    numBytes = columns.valRaw.appendInt53(value)
-    if (!typeTag) typeTag = VALUE_TYPE.LEB128_INT
-  } else {
-    numBytes = columns.valRaw.appendUint53(value)
-    typeTag = VALUE_TYPE.LEB128_UINT
+function getNumberTypeAndValue(op) {
+  switch (op.datatype) {
+    case "counter":
+      return [ VALUE_TYPE.COUNTER, op.value ]
+    case "timestamp":
+      return [ VALUE_TYPE.TIMESTAMP, op.value ]
+    case "uint":
+      return [ VALUE_TYPE.LEB128_UINT, op.value ]
+    case "int":
+      return [ VALUE_TYPE.LEB128_INT, op.value ]
+    case "float64": {
+      const buf64 = new ArrayBuffer(8), view64 = new DataView(buf64)
+      view64.setFloat64(0, op.value, true)
+      return [ VALUE_TYPE.IEEE754,  new Uint8Array(buf64) ]
+    }
+    default:
+      // increment operators get resolved here ...
+      if (Number.isInteger(op.value) && op.value <= Number.MAX_SAFE_INTEGER && op.value >= Number.MIN_SAFE_INTEGER) {
+        return [ VALUE_TYPE.LEB128_INT, op.value ]
+      } else {
+        const buf64 = new ArrayBuffer(8), view64 = new DataView(buf64)
+        view64.setFloat64(0, op.value, true)
+        return [ VALUE_TYPE.IEEE754,  new Uint8Array(buf64) ]
+      }
   }
-  columns.valLen.appendValue(numBytes << 4 | typeTag)
 }
 
 /**
@@ -256,33 +269,23 @@ function encodeValue(op, columns) {
   } else if (ArrayBuffer.isView(op.value)) {
     const numBytes = columns.valRaw.appendRawBytes(new Uint8Array(op.value.buffer))
     columns.valLen.appendValue(numBytes << 4 | VALUE_TYPE.BYTES)
-  } else if (op.datatype === 'counter' && typeof op.value === 'number') {
-    encodeInteger(op.value, VALUE_TYPE.COUNTER, columns)
-  } else if (op.datatype === 'timestamp' && typeof op.value === 'number') {
-    encodeInteger(op.value, VALUE_TYPE.TIMESTAMP, columns)
+  } else if (typeof op.value === 'number') {
+    let [typeTag, value] = getNumberTypeAndValue(op)
+    let numBytes
+    if (typeTag === VALUE_TYPE.LEB128_UINT) {
+      numBytes = columns.valRaw.appendUint53(value)
+    } else if (typeTag === VALUE_TYPE.IEEE754) {
+      numBytes = columns.valRaw.appendRawBytes(value)
+    } else {
+      numBytes = columns.valRaw.appendInt53(value)
+    }
+    columns.valLen.appendValue(numBytes << 4 | typeTag)
   } else if (typeof op.datatype === 'number' && op.datatype >= VALUE_TYPE.MIN_UNKNOWN &&
              op.datatype <= VALUE_TYPE.MAX_UNKNOWN && op.value instanceof Uint8Array) {
     const numBytes = columns.valRaw.appendRawBytes(op.value)
     columns.valLen.appendValue(numBytes << 4 | op.datatype)
   } else if (op.datatype) {
       throw new RangeError(`Unknown datatype ${op.datatype} for value ${op.value}`)
-  } else if (typeof op.value === 'number') {
-    if (Number.isInteger(op.value) && op.value <= Number.MAX_SAFE_INTEGER && op.value >= Number.MIN_SAFE_INTEGER) {
-      encodeInteger(op.value, 0, columns)
-    } else {
-      // Encode number in 32-bit float if this can be done without loss of precision
-      const buf32 = new ArrayBuffer(4), view32 = new DataView(buf32)
-      view32.setFloat32(0, op.value, true) // true means little-endian
-      if (view32.getFloat32(0, true) === op.value) {
-        columns.valRaw.appendRawBytes(new Uint8Array(buf32))
-        columns.valLen.appendValue(4 << 4 | VALUE_TYPE.IEEE754)
-      } else {
-        const buf64 = new ArrayBuffer(8), view64 = new DataView(buf64)
-        view64.setFloat64(0, op.value, true) // true means little-endian
-        columns.valRaw.appendRawBytes(new Uint8Array(buf64))
-        columns.valLen.appendValue(8 << 4 | VALUE_TYPE.IEEE754)
-      }
-    }
   } else {
     throw new RangeError(`Unsupported value in operation: ${op.value}`)
   }
@@ -305,15 +308,13 @@ function decodeValue(sizeTag, bytes) {
     return {value: utf8ToString(bytes)}
   } else {
     if (sizeTag % 16 === VALUE_TYPE.LEB128_UINT) {
-      return {value: new Decoder(bytes).readUint53()}
+      return {value: new Decoder(bytes).readUint53(), datatype: "uint"}
     } else if (sizeTag % 16 === VALUE_TYPE.LEB128_INT) {
-      return {value: new Decoder(bytes).readInt53()}
+      return {value: new Decoder(bytes).readInt53(), datatype: "int"}
     } else if (sizeTag % 16 === VALUE_TYPE.IEEE754) {
       const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-      if (bytes.byteLength === 4) {
-        return {value: view.getFloat32(0, true)} // true means little-endian
-      } else if (bytes.byteLength === 8) {
-        return {value: view.getFloat64(0, true)}
+      if (bytes.byteLength === 8) {
+        return {value: view.getFloat64(0, true), datatype: "float64"}
       } else {
         throw new RangeError(`Invalid length for floating point number: ${bytes.byteLength}`)
       }
@@ -363,8 +364,8 @@ function decodeValueColumns(columns, colIndex, actorIds, result) {
  * Encodes an array of operations in a set of columns. The operations need to
  * be parsed with `parseAllOpIds()` beforehand. If `forDocument` is true, we use
  * the column structure of a whole document, otherwise we use the column
- * structure for an individual change. Returns an array of `{id, name, encoder}`
- * objects.
+ * structure for an individual change. Returns an array of
+ * `{columnId, columnName, encoder}` objects.
  */
 function encodeOps(ops, forDocument) {
   const columns = {
@@ -429,9 +430,17 @@ function encodeOps(ops, forDocument) {
 
   let columnList = []
   for (let {columnName, columnId} of forDocument ? DOC_OPS_COLUMNS : CHANGE_COLUMNS) {
-    if (columns[columnName]) columnList.push({id: columnId, name: columnName, encoder: columns[columnName]})
+    if (columns[columnName]) columnList.push({columnId, columnName, encoder: columns[columnName]})
   }
-  return columnList.sort((a, b) => a.id - b.id)
+  return columnList.sort((a, b) => a.columnId - b.columnId)
+}
+
+function validDatatype(value, datatype) {
+  if (datatype === undefined) {
+    return (typeof value === 'string' || typeof value === 'boolean' || value === null)
+  } else {
+    return typeof value === 'number'
+  }
 }
 
 function expandMultiOps(ops, startOp, actor) {
@@ -441,8 +450,10 @@ function expandMultiOps(ops, startOp, actor) {
     if (op.action === 'set' && op.values && op.insert) {
       if (op.pred.length !== 0) throw new RangeError('multi-insert pred must be empty')
       let lastElemId = op.elemId
+      const datatype = op.datatype
       for (const value of op.values) {
-        expandedOps.push({action: 'set', obj: op.obj, elemId: lastElemId, value, pred: [], insert: true})
+        if (!validDatatype(value, datatype)) throw new RangeError(`Decode failed: bad value/datatype association (${value},${datatype})`)
+        expandedOps.push({action: 'set', obj: op.obj, elemId: lastElemId, datatype, value, pred: [], insert: true})
         lastElemId = `${opNum}@${actor}`
         opNum += 1
       }
@@ -616,7 +627,7 @@ function encodeColumnInfo(encoder, columns) {
   const nonEmptyColumns = columns.filter(column => column.encoder.buffer.byteLength > 0)
   encoder.appendUint53(nonEmptyColumns.length)
   for (let column of nonEmptyColumns) {
-    encoder.appendUint53(column.id)
+    encoder.appendUint53(column.columnId)
     encoder.appendUint53(column.encoder.buffer.byteLength)
   }
 }
@@ -694,17 +705,6 @@ function decodeContainerHeader(decoder, computeHash) {
     header.hash = bytesToHexString(binaryHash)
   }
   return header
-}
-
-/**
- * Returns the checksum of a change (bytes 4 to 7) as a 32-bit unsigned integer.
- */
-function getChangeChecksum(change) {
-  if (change[0] !== MAGIC_BYTES[0] || change[1] !== MAGIC_BYTES[1] ||
-      change[2] !== MAGIC_BYTES[2] || change[3] !== MAGIC_BYTES[3]) {
-    throw new RangeError('Data does not begin with magic bytes 85 6f 4a 83')
-  }
-  return ((change[4] << 24) | (change[5] << 16) | (change[6] << 8) | change[7]) >>> 0
 }
 
 function encodeChange(changeObj) {
@@ -868,76 +868,6 @@ function sortOpIds(a, b) {
   return 0
 }
 
-function groupDocumentOps(changes) {
-  let byObjectId = {}, byReference = {}, objectType = {}
-  for (let change of changes) {
-    for (let i = 0; i < change.ops.length; i++) {
-      const op = change.ops[i], opId = `${op.id.counter}@${op.id.actorId}`
-      const objectId = (op.obj === '_root') ? '_root' : `${op.obj.counter}@${op.obj.actorId}`
-      if (op.action.startsWith('make')) {
-        objectType[opId] = op.action
-        if (op.action === 'makeList' || op.action === 'makeText') {
-          byReference[opId] = {'_head': []}
-        }
-      }
-
-      let key
-      if (objectId === '_root' || objectType[objectId] === 'makeMap' || objectType[objectId] === 'makeTable') {
-        key = op.key
-      } else if (objectType[objectId] === 'makeList' || objectType[objectId] === 'makeText') {
-        if (op.insert) {
-          key = opId
-          const ref = (op.elemId === '_head') ? '_head' : `${op.elemId.counter}@${op.elemId.actorId}`
-          byReference[objectId][ref].push(opId)
-          byReference[objectId][opId] = []
-        } else {
-          key = `${op.elemId.counter}@${op.elemId.actorId}`
-        }
-      } else {
-        throw new RangeError(`Unknown object type for object ${objectId}`)
-      }
-
-      if (!byObjectId[objectId]) byObjectId[objectId] = {}
-      if (!byObjectId[objectId][key]) byObjectId[objectId][key] = {}
-      byObjectId[objectId][key][opId] = op
-      op.succ = []
-
-      for (let pred of op.pred) {
-        const predId = `${pred.counter}@${pred.actorId}`
-        if (!byObjectId[objectId][key][predId]) {
-          throw new RangeError(`No predecessor operation ${predId}`)
-        }
-        byObjectId[objectId][key][predId].succ.push(op.id)
-      }
-    }
-  }
-
-  let ops = []
-  for (let objectId of Object.keys(byObjectId).sort(sortOpIds)) {
-    let keys = []
-    if (objectType[objectId] === 'makeList' || objectType[objectId] === 'makeText') {
-      let stack = ['_head']
-      while (stack.length > 0) {
-        const key = stack.pop()
-        if (key !== '_head') keys.push(key)
-        for (let opId of byReference[objectId][key].sort(sortOpIds)) stack.push(opId)
-      }
-    } else {
-      // FIXME JavaScript sorts based on UTF-16 encoding. We should change this to use the UTF-8
-      // encoding instead (the sort order will be different beyond the basic multilingual plane)
-      keys = Object.keys(byObjectId[objectId]).sort()
-    }
-
-    for (let key of keys) {
-      for (let opId of Object.keys(byObjectId[objectId][key]).sort(sortOpIds)) {
-        const op = byObjectId[objectId][key][opId]
-        if (op.action !== 'del') ops.push(op)
-      }
-    }
-  }
-  return ops
-}
-
 /**
  * Takes a set of operations `ops` loaded from an encoded document, and
  * reconstructs the changes that they originally came from.
@@ -1012,57 +942,6 @@ function groupChangeOps(changes, ops) {
   }
 }
 
-function encodeDocumentChanges(changes) {
-  const columns = { // see DOCUMENT_COLUMNS
-    actor     : new RLEEncoder('uint'),
-    seq       : new DeltaEncoder(),
-    maxOp     : new DeltaEncoder(),
-    time      : new DeltaEncoder(),
-    message   : new RLEEncoder('utf8'),
-    depsNum   : new RLEEncoder('uint'),
-    depsIndex : new DeltaEncoder(),
-    extraLen  : new RLEEncoder('uint'),
-    extraRaw  : new Encoder()
-  }
-  let indexByHash = {} // map from change hash to its index in the changes array
-  let heads = {} // change hashes that are not a dependency of any other change
-
-  for (let i = 0; i < changes.length; i++) {
-    const change = changes[i]
-    indexByHash[change.hash] = i
-    heads[change.hash] = true
-
-    columns.actor.appendValue(change.actorNum)
-    columns.seq.appendValue(change.seq)
-    columns.maxOp.appendValue(change.startOp + change.ops.length - 1)
-    columns.time.appendValue(change.time)
-    columns.message.appendValue(change.message)
-    columns.depsNum.appendValue(change.deps.length)
-
-    for (let dep of change.deps) {
-      if (typeof indexByHash[dep] !== 'number') {
-        throw new RangeError(`Unknown dependency hash: ${dep}`)
-      }
-      columns.depsIndex.appendValue(indexByHash[dep])
-      if (heads[dep]) delete heads[dep]
-    }
-
-    if (change.extraBytes) {
-      columns.extraLen.appendValue(change.extraBytes.byteLength << 4 | VALUE_TYPE.BYTES)
-      columns.extraRaw.appendRawBytes(change.extraBytes)
-    } else {
-      columns.extraLen.appendValue(VALUE_TYPE.BYTES) // zero-length byte array
-    }
-  }
-
-  let changesColumns = []
-  for (let {columnName, columnId} of DOCUMENT_COLUMNS) {
-    changesColumns.push({id: columnId, name: columnName, encoder: columns[columnName]})
-  }
-  changesColumns.sort((a, b) => a.id - b.id)
-  return { changesColumns, heads: Object.keys(heads).sort() }
-}
-
 function decodeDocumentChanges(changes, expectedHeads) {
   let heads = {} // change hashes that are not a dependency of any other change
   for (let i = 0; i < changes.length; i++) {
@@ -1101,13 +980,8 @@ function decodeDocumentChanges(changes, expectedHeads) {
   }
 }
 
-/**
- * Transforms a list of changes into a binary representation of the document state.
- */
-function encodeDocument(binaryChanges) {
-  const { changes, actorIds } = parseAllOpIds(decodeChanges(binaryChanges), false)
-  const { changesColumns, heads } = encodeDocumentChanges(changes)
-  const opsColumns = encodeOps(groupDocumentOps(changes), true)
+function encodeDocumentHeader(doc) {
+  const { changesColumns, opsColumns, actorIds, heads, headsIndexes, extraBytes } = doc
   for (let column of changesColumns) deflateColumn(column)
   for (let column of opsColumns) deflateColumn(column)
 
@@ -1124,6 +998,8 @@ function encodeDocument(binaryChanges) {
     encodeColumnInfo(encoder, opsColumns)
     for (let column of changesColumns) encoder.appendRawBytes(column.encoder.buffer)
     for (let column of opsColumns) encoder.appendRawBytes(column.encoder.buffer)
+    for (let index of headsIndexes) encoder.appendUint53(index)
+    if (extraBytes) encoder.appendRawBytes(extraBytes)
   }).bytes
 }
 
@@ -1138,7 +1014,7 @@ function decodeDocumentHeader(buffer) {
   for (let i = 0; i < numActors; i++) {
     actorIds.push(decoder.readHexString())
   }
-  const heads = [], numHeads = decoder.readUint53()
+  const heads = [], headsIndexes = [], numHeads = decoder.readUint53()
   for (let i = 0; i < numHeads; i++) {
     heads.push(bytesToHexString(decoder.readRawBytes(32)))
   }
@@ -1153,9 +1029,12 @@ function decodeDocumentHeader(buffer) {
     opsColumns[i].buffer = decoder.readRawBytes(opsColumns[i].bufferLen)
     inflateColumn(opsColumns[i])
   }
+  if (!decoder.done) {
+    for (let i = 0; i < numHeads; i++) headsIndexes.push(decoder.readUint53())
+  }
 
   const extraBytes = decoder.readRawBytes(decoder.buf.byteLength - decoder.offset)
-  return { changesColumns, opsColumns, actorIds, heads, extraBytes }
+  return { changesColumns, opsColumns, actorIds, heads, headsIndexes, extraBytes }
 }
 
 function decodeDocument(buffer) {
@@ -1173,7 +1052,7 @@ function decodeDocument(buffer) {
 function deflateColumn(column) {
   if (column.encoder.buffer.byteLength >= DEFLATE_MIN_SIZE) {
     column.encoder = {buffer: pako.deflateRaw(column.encoder.buffer)}
-    column.id |= COLUMN_TYPE_DEFLATE
+    column.columnId |= COLUMN_TYPE_DEFLATE
   }
 }
 
@@ -1187,229 +1066,9 @@ function inflateColumn(column) {
   }
 }
 
-/**
- * Takes all the operations for the same property (i.e. the same key in a map, or the same list
- * element) and mutates the object patch to reflect the current value(s) of that property. There
- * might be multiple values in the case of a conflict. `objects` is a map from objectId to the
- * patch for that object. `property` contains `objId`, `key`, a list of `ops`, and `index` (the
- * current list index if the object is a list). Returns true if one or more values are present,
- * or false if the property has been deleted.
- */
-function addPatchProperty(objects, property) {
-  let values = {}, counter = null
-  for (let op of property.ops) {
-    // Apply counters and their increments regardless of the number of successor operations
-    if (op.actionName === 'set' && op.value.datatype === 'counter') {
-      if (!counter) counter = {opId: op.opId, value: 0, succ: {}}
-      counter.value += op.value.value
-      for (let succId of op.succ) counter.succ[succId] = true
-    } else if (op.actionName === 'inc') {
-      if (!counter) throw new RangeError(`inc operation ${op.opId} without a counter`)
-      counter.value += op.value.value
-      delete counter.succ[op.opId]
-      for (let succId of op.succ) counter.succ[succId] = true
-
-    } else if (op.succ.length === 0) { // Ignore any ops that have been overwritten
-      if (op.actionName.startsWith('make')) {
-        values[op.opId] = objects[op.opId]
-      } else if (op.actionName === 'set') {
-        values[op.opId] = {value: op.value.value, type: 'value'}
-        if (op.value.datatype) {
-          values[op.opId].datatype = op.value.datatype
-        }
-      } else if (op.actionName === 'link') {
-        // NB. This assumes that the ID of the child object is greater than the ID of the current
-        // object. This is true as long as link operations are only used to redo undone make*
-        // operations, but it will cease to be true once subtree moves are allowed.
-        if (!op.childId) throw new RangeError(`link operation ${op.opId} without a childId`)
-        values[op.opId] = objects[op.childId]
-      } else {
-        throw new RangeError(`Unexpected action type: ${op.actionName}`)
-      }
-    }
-  }
-
-  // If the counter had any successor operation that was not an increment, that means the counter
-  // must have been deleted, so we omit it from the patch.
-  if (counter && Object.keys(counter.succ).length === 0) {
-    values[counter.opId] = {type: 'value', value: counter.value, datatype: 'counter'}
-  }
-
-  if (Object.keys(values).length > 0) {
-    let obj = objects[property.objId]
-    if (obj.type === 'map' || obj.type === 'table') {
-      obj.props[property.key] = values
-    } else if (obj.type === 'list' || obj.type === 'text') {
-      makeListEdits(obj, values, property.key, property.index)
-    }
-    return true
-  } else {
-    return false
-  }
-}
-
-/**
- * When constructing a patch to instantiate a loaded document, this function adds the edits to
- * insert one list element. Usually there is one value, but in the case of a conflict there may be
- * several values. `elemId` is the ID of the list element, and `index` is the list index at which
- * the value(s) should be placed.
- */
-function makeListEdits(list, values, elemId, index) {
-  let firstValue = true
-  const opIds = Object.keys(values).sort((id1, id2) => compareParsedOpIds(parseOpId(id1), parseOpId(id2)))
-  for (const opId of opIds) {
-    if (firstValue) {
-      list.edits.push({action: 'insert', value: values[opId], elemId, opId, index})
-    } else {
-      list.edits.push({action: 'update', value: values[opId], opId, index})
-    }
-    firstValue = false
-  }
-}
-
-/**
- * Recursively walks the patch tree, calling appendEdit on every list edit in order to consense
- * consecutive sequences of insertions into multi-inserts.
- */
-function condenseEdits(diff) {
-  if (diff.type === 'list' || diff.type === 'text') {
-    diff.edits.forEach(e => condenseEdits(e.value))
-    let newEdits = diff.edits
-    diff.edits = []
-    for (const edit of newEdits) appendEdit(diff.edits, edit)
-  } else if (diff.type === 'map' || diff.type === 'table') {
-    for (const prop of Object.keys(diff.props)) {
-      for (const opId of Object.keys(diff.props[prop])) {
-        condenseEdits(diff.props[prop][opId])
-      }
-    }
-  }
-}
-
-/**
- * Appends a list edit operation (insert, update, remove) to an array of existing operations. If the
- * last existing operation can be extended (as a multi-op), we do that.
- */
-function appendEdit(existingEdits, nextEdit) {
-  if (existingEdits.length === 0) {
-    existingEdits.push(nextEdit)
-    return
-  }
-
-  let lastEdit = existingEdits[existingEdits.length - 1]
-  if (lastEdit.action === 'insert' && nextEdit.action === 'insert' &&
-      lastEdit.index === nextEdit.index - 1 &&
-      lastEdit.value.type === 'value' && nextEdit.value.type === 'value' &&
-      lastEdit.elemId === lastEdit.opId && nextEdit.elemId === nextEdit.opId &&
-      opIdDelta(lastEdit.elemId, nextEdit.elemId, 1)) {
-    lastEdit.action = 'multi-insert'
-    lastEdit.values = [lastEdit.value.value, nextEdit.value.value]
-    delete lastEdit.value
-    delete lastEdit.opId
-
-  } else if (lastEdit.action === 'multi-insert' && nextEdit.action === 'insert' &&
-             lastEdit.index + lastEdit.values.length === nextEdit.index &&
-             nextEdit.value.type === 'value' && nextEdit.elemId === nextEdit.opId &&
-             opIdDelta(lastEdit.elemId, nextEdit.elemId, lastEdit.values.length)) {
-    lastEdit.values.push(nextEdit.value.value)
-
-  } else if (lastEdit.action === 'remove' && nextEdit.action === 'remove' &&
-             lastEdit.index === nextEdit.index) {
-    lastEdit.count += nextEdit.count
-
-  } else {
-    existingEdits.push(nextEdit)
-  }
-}
-
-/**
- * Returns true if the two given operation IDs have the same actor ID, and the counter of `id2` is
- * exactly `delta` greater than the counter of `id1`.
- */
-function opIdDelta(id1, id2, delta = 1) {
-  const parsed1 = parseOpId(id1), parsed2 = parseOpId(id2)
-  return parsed1.actorId === parsed2.actorId && parsed1.counter + delta === parsed2.counter
-}
-
-/**
- * Parses the document (in compressed binary format) given as `documentBuffer`
- * and returns a patch that can be sent to the frontend to instantiate the
- * current state of that document.
- */
-function constructPatch(documentBuffer) {
-  const { opsColumns, actorIds } = decodeDocumentHeader(documentBuffer)
-  const col = makeDecoders(opsColumns, DOC_OPS_COLUMNS).reduce(
-    (acc, col) => Object.assign(acc, {[col.columnName]: col.decoder}), {})
-
-  let objects = {_root: {objectId: '_root', type: 'map', props: {}}}
-  let property = null
-
-  while (!col.idActor.done) {
-    const opId = `${col.idCtr.readValue()}@${actorIds[col.idActor.readValue()]}`
-    const action = col.action.readValue(), actionName = ACTIONS[action]
-    if (action % 2 === 0) { // even-numbered actions are object creation
-      const type = OBJECT_TYPE[actionName] || 'unknown'
-      if (type === 'list' || type === 'text') {
-        objects[opId] = {objectId: opId, type, edits: []}
-      } else {
-        objects[opId] = {objectId: opId, type, props: {}}
-      }
-    }
-
-    const objActor = col.objActor.readValue(), objCtr = col.objCtr.readValue()
-    const objId = objActor === null ? '_root' : `${objCtr}@${actorIds[objActor]}`
-    let obj = objects[objId]
-    if (!obj) throw new RangeError(`Operation for nonexistent object: ${objId}`)
-
-    const keyActor = col.keyActor.readValue(), keyCtr = col.keyCtr.readValue()
-    const keyStr = col.keyStr.readValue(), insert = !!col.insert.readValue()
-    const chldActor = col.chldActor.readValue(), chldCtr = col.chldCtr.readValue()
-    const childId = chldActor === null ? null : `${chldCtr}@${actorIds[chldActor]}`
-    const sizeTag = col.valLen.readValue()
-    const rawValue = col.valRaw.readRawBytes(sizeTag >> 4)
-    const value = decodeValue(sizeTag, rawValue)
-    const succNum = col.succNum.readValue()
-    let succ = []
-    for (let i = 0; i < succNum; i++) {
-      succ.push(`${col.succCtr.readValue()}@${actorIds[col.succActor.readValue()]}`)
-    }
-
-    if (!actionName || obj.type === 'unknown') continue
-
-    let key
-    if (obj.type === 'list' || obj.type === 'text') {
-      if (keyCtr === null || (keyCtr === 0 && !insert)) {
-        throw new RangeError(`Operation ${opId} on ${obj.type} object has no key`)
-      }
-      key = insert ? opId : `${keyCtr}@${actorIds[keyActor]}`
-    } else {
-      if (keyStr === null) {
-        throw new RangeError(`Operation ${opId} on ${obj.type} object has no key`)
-      }
-      key = keyStr
-    }
-
-    if (!property || property.objId !== objId || property.key !== key) {
-      let index = 0
-      if (property) {
-        index = property.index
-        if (addPatchProperty(objects, property)) index += 1
-        if (property.objId !== objId) index = 0
-      }
-      property = {objId, key, index, ops: []}
-    }
-    property.ops.push({opId, actionName, value, childId, succ})
-  }
-
-  if (property) addPatchProperty(objects, property)
-  condenseEdits(objects._root)
-  return objects._root
-}
-
 module.exports = {
-  COLUMN_TYPE, VALUE_TYPE, ACTIONS, OBJECT_TYPE, DOC_OPS_COLUMNS, CHANGE_COLUMNS,
+  COLUMN_TYPE, VALUE_TYPE, ACTIONS, OBJECT_TYPE, DOC_OPS_COLUMNS, CHANGE_COLUMNS, DOCUMENT_COLUMNS,
   encoderByColumnId, decoderByColumnId, makeDecoders, decodeValue,
   splitContainers, encodeChange, decodeChangeColumns, decodeChange, decodeChangeMeta, decodeChanges,
-  decodeDocumentHeader, encodeDocument, decodeDocument,
-  getChangeChecksum, appendEdit, constructPatch
+  encodeDocumentHeader, decodeDocumentHeader, decodeDocument
 }

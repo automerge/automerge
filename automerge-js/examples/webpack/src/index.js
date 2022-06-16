@@ -1,14 +1,13 @@
-import init, { create } from "automerge-wasm"
+import * as Automerge from "automerge-js"
+import init from "automerge-wasm"
 
 // hello world code that will run correctly on web or node
 
-init().then((Automerge) => {
-  console.log("Automerge=", Automerge)
-  console.log("create=", create)
-  const doc = Automerge.create()
-  doc.put("/", "hello", "world")
-  const result = doc.materialize("/")
-  //const result = xxx
+init().then((api) => {
+  Automerge.use(api)
+  let doc = Automerge.init()
+  doc = Automerge.change(doc, (d) => d.hello = "from automerge-js")
+  const result = JSON.stringify(doc)
 
   if (typeof document !== 'undefined') {
     // browser

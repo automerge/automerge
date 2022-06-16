@@ -1,5 +1,8 @@
-const assert = require('assert')
-const Automerge = require('..')
+import * as assert from 'assert'
+import * as Automerge from '../src'
+import * as AutomergeWASM from "automerge-wasm"
+
+Automerge.use(AutomergeWASM)
 
 const uuid = Automerge.uuid
 
