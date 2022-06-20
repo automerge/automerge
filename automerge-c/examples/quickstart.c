@@ -61,10 +61,10 @@ struct StackNode {
 };
 
 /**
- * \brief Pushes the given result onto the given stack and then either gets a
- *        value with the given discriminant from the result or writes a message
- *        to `stderr`, frees all results in the stack and terminates the
- *        program.
+ * \brief Pushes the given result onto the given stack and then either gets the
+ *        value matching the given discriminant from that result or, failing
+ *        that, prints an error message to `stderr`, frees all results in that
+ *        stack and aborts.
  *
  * \param[in] stack A pointer to a pointer to a `ResultStack` struct.
 .* \param[in] result A pointer to an `AMresult` struct.
@@ -92,7 +92,6 @@ AMvalue push(ResultStack** stack, AMresult* result, AMvalueVariant const discrim
     top->result = result;
     top->next = *stack;
     *stack = top;
-
     AMstatus const status = AMresultStatus(result);
     if (status != AM_STATUS_OK) {
         switch (status) {
@@ -108,27 +107,27 @@ AMvalue push(ResultStack** stack, AMresult* result, AMvalueVariant const discrim
     if (value.tag != discriminant) {
         char const* label = NULL;
         switch (value.tag) {
-            case AM_VALUE_ACTOR_ID:      label = "AM_VALUE_ACTOR_ID";      break;
-            case AM_VALUE_BOOLEAN:       label = "AM_VALUE_BOOLEAN";       break;
-            case AM_VALUE_BYTES:         label = "AM_VALUE_BYTES";         break;
-            case AM_VALUE_CHANGE_HASHES: label = "AM_VALUE_CHANGE_HASHES"; break;
-            case AM_VALUE_CHANGES:       label = "AM_VALUE_CHANGES";       break;
-            case AM_VALUE_COUNTER:       label = "AM_VALUE_COUNTER";       break;
-            case AM_VALUE_DOC:           label = "AM_VALUE_DOC";           break;
-            case AM_VALUE_F64:           label = "AM_VALUE_F64";           break;
-            case AM_VALUE_INT:           label = "AM_VALUE_INT";           break;
-            case AM_VALUE_NULL:          label = "AM_VALUE_NULL";          break;
-            case AM_VALUE_OBJ_ID:        label = "AM_VALUE_OBJ_ID";        break;
-            case AM_VALUE_STR:           label = "AM_VALUE_STR";           break;
-            case AM_VALUE_STRINGS:       label = "AM_VALUE_STRINGS";       break;
-            case AM_VALUE_TIMESTAMP:     label = "AM_VALUE_TIMESTAMP";     break;
-            case AM_VALUE_UINT:          label = "AM_VALUE_UINT";          break;
-            case AM_VALUE_SYNC_MESSAGE:  label = "AM_VALUE_SYNC_MESSAGE";  break;
-            case AM_VALUE_SYNC_STATE:    label = "AM_VALUE_SYNC_STATE";    break;
-            case AM_VALUE_VOID:          label = "AM_VALUE_VOID";          break;
-            default:                     label = "<unknown>";
+            case AM_VALUE_ACTOR_ID:      label = "ACTOR_ID";      break;
+            case AM_VALUE_BOOLEAN:       label = "BOOLEAN";       break;
+            case AM_VALUE_BYTES:         label = "BYTES";         break;
+            case AM_VALUE_CHANGE_HASHES: label = "CHANGE_HASHES"; break;
+            case AM_VALUE_CHANGES:       label = "CHANGES";       break;
+            case AM_VALUE_COUNTER:       label = "COUNTER";       break;
+            case AM_VALUE_DOC:           label = "DOC";           break;
+            case AM_VALUE_F64:           label = "F64";           break;
+            case AM_VALUE_INT:           label = "INT";           break;
+            case AM_VALUE_NULL:          label = "NULL";          break;
+            case AM_VALUE_OBJ_ID:        label = "OBJ_ID";        break;
+            case AM_VALUE_STR:           label = "STR";           break;
+            case AM_VALUE_STRINGS:       label = "STRINGS";       break;
+            case AM_VALUE_TIMESTAMP:     label = "TIMESTAMP";     break;
+            case AM_VALUE_UINT:          label = "UINT";          break;
+            case AM_VALUE_SYNC_MESSAGE:  label = "SYNC_MESSAGE";  break;
+            case AM_VALUE_SYNC_STATE:    label = "SYNC_STATE";    break;
+            case AM_VALUE_VOID:          label = "VOID";          break;
+            default:                     label = "...";
         }
-        fprintf(stderr, "Unexpected `AMvalueVariant` tag `%s` (%d).", label, value.tag);
+        fprintf(stderr, "Unexpected `AMvalueVariant` tag `AM_VALUE_%s` (%d).", label, value.tag);
         free_results(*stack);
         exit(EXIT_FAILURE);
     }
