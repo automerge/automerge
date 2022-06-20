@@ -10,7 +10,7 @@ use crate::result::{to_result, AMresult};
 /// \brief Deletes an index in a list object.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
@@ -36,7 +36,7 @@ pub unsafe extern "C" fn AMlistDelete(
 /// \brief Gets the value at an index in a list object.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index within the list object identified by \p obj_id.
 /// \return A pointer to an `AMresult` struct.
 /// \pre \p doc must be a valid address.
@@ -63,7 +63,7 @@ pub unsafe extern "C" fn AMlistGet(
 ///        value.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing a void.
@@ -91,7 +91,7 @@ pub unsafe extern "C" fn AMlistIncrement(
 /// \brief Puts a boolean as the value at an index in a list object.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \param[in] insert A flag to insert \p value before \p index instead of
 ///            writing \p value over \p index.
@@ -127,17 +127,17 @@ pub unsafe extern "C" fn AMlistPutBool(
 /// \brief Puts a sequence of bytes as the value at an index in a list object.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
-/// \param[in] insert A flag to insert \p value before \p index instead of
-///            writing \p value over \p index.
-/// \param[in] value A pointer to an array of bytes.
-/// \param[in] count The number of bytes to copy from \p value.
+/// \param[in] insert A flag to insert \p src before \p index instead of
+///            writing \p src over \p index.
+/// \param[in] src A pointer to an array of bytes.
+/// \param[in] count The number of bytes to copy from \p src.
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj_id.
-/// \pre \p value must be a valid address.
-/// \pre `0 <=` \p count `<=` length of \p value.
+/// \pre \p src must be a valid address.
+/// \pre `0 <=` \p count `<=` size of \p src.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
 ///          deallocated with `AMfree()`.
 /// \internal
@@ -145,20 +145,20 @@ pub unsafe extern "C" fn AMlistPutBool(
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
 /// obj_id must be a pointer to a valid AMobjId or NULL
-/// value must be a byte array of length `>= count`
+/// src must be a byte array of size `>= count`
 #[no_mangle]
 pub unsafe extern "C" fn AMlistPutBytes(
     doc: *mut AMdoc,
     obj_id: *const AMobjId,
     index: usize,
     insert: bool,
-    value: *const u8,
+    src: *const u8,
     count: usize,
 ) -> *mut AMresult {
     let doc = to_doc!(doc);
     let obj_id = to_obj_id!(obj_id);
     let mut vec = Vec::new();
-    vec.extend_from_slice(std::slice::from_raw_parts(value, count));
+    vec.extend_from_slice(std::slice::from_raw_parts(src, count));
     to_result(if insert {
         doc.insert(obj_id, index, vec)
     } else {
@@ -170,7 +170,7 @@ pub unsafe extern "C" fn AMlistPutBytes(
 /// \brief Puts a CRDT counter as the value at an index in a list object.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \param[in] insert A flag to insert \p value before \p index instead of
 ///            writing \p value over \p index.
@@ -207,7 +207,7 @@ pub unsafe extern "C" fn AMlistPutCounter(
 /// \brief Puts a float as the value at an index in a list object.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \param[in] insert A flag to insert \p value before \p index instead of
 ///            writing \p value over \p index.
@@ -243,7 +243,7 @@ pub unsafe extern "C" fn AMlistPutF64(
 /// \brief Puts a signed integer as the value at an index in a list object.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \param[in] insert A flag to insert \p value before \p index instead of
 ///            writing \p value over \p index.
@@ -279,7 +279,7 @@ pub unsafe extern "C" fn AMlistPutInt(
 /// \brief Puts null as the value at an index in a list object.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \param[in] insert A flag to insert \p value before \p index instead of
 ///            writing \p value over \p index.
@@ -314,7 +314,7 @@ pub unsafe extern "C" fn AMlistPutNull(
 /// \brief Puts an empty object as the value at an index in a list object.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \param[in] insert A flag to insert \p value before \p index instead of
 ///            writing \p value over \p index.
@@ -351,7 +351,7 @@ pub unsafe extern "C" fn AMlistPutObject(
 /// \brief Puts a UTF-8 string as the value at an index in a list object.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \param[in] insert A flag to insert \p value before \p index instead of
 ///            writing \p value over \p index.
@@ -390,7 +390,7 @@ pub unsafe extern "C" fn AMlistPutStr(
 /// \brief Puts a Lamport timestamp as the value at an index in a list object.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \param[in] insert A flag to insert \p value before \p index instead of
 ///            writing \p value over \p index.
@@ -427,7 +427,7 @@ pub unsafe extern "C" fn AMlistPutTimestamp(
 /// \brief Puts an unsigned integer as the value at an index in a list object.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \param[in] insert A flag to insert \p value before \p index instead of
 ///            writing \p value over \p index.
