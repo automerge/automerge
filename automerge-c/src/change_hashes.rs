@@ -4,6 +4,7 @@ use std::ffi::c_void;
 use std::mem::size_of;
 
 use crate::byte_span::AMbyteSpan;
+use crate::result::{to_result, AMresult};
 
 #[repr(C)]
 struct Detail {
@@ -46,7 +47,7 @@ impl Detail {
     }
 
     pub fn next(&mut self, n: isize) -> Option<&am::ChangeHash> {
-        if self.is_stopped() {
+        if n == 0 || self.is_stopped() {
             return None;
         }
         let slice: &[am::ChangeHash] =
@@ -63,7 +64,7 @@ impl Detail {
 
     pub fn prev(&mut self, n: isize) -> Option<&am::ChangeHash> {
         self.advance(n);
-        if self.is_stopped() {
+        if n == 0 || self.is_stopped() {
             return None;
         }
         let slice: &[am::ChangeHash] =
@@ -94,7 +95,10 @@ impl From<Detail> for [u8; USIZE_USIZE_USIZE_] {
 /// \brief A random-access iterator over a sequence of change hashes.
 #[repr(C)]
 pub struct AMchangeHashes {
-    /// Reserved.
+    /// An implementation detail that is intentionally opaque.
+    /// \warning Modifying \p detail will cause undefined behavior.
+    /// \note The actual size of \p detail will vary by platform, this is just
+    ///       the one for the platform this documentation was built on.
     detail: [u8; USIZE_USIZE_USIZE_],
 }
 
@@ -201,6 +205,42 @@ pub unsafe extern "C" fn AMchangeHashesCmp(
         (Some(_), None) => 1,
         (None, None) => 0,
     }
+}
+
+/// \memberof AMchangeHashesInit
+/// \brief Allocates an iterator over a sequence of change hashes and
+///        initializes it from a sequence of byte spans.
+///
+/// \param[in] src A pointer to an array of `AMbyteSpan` structs.
+/// \param[in] count The number of `AMbyteSpan` structs to copy from \p src.
+/// \return A pointer to an `AMresult` struct containing an `AMchangeHashes`
+///         struct.
+/// \pre \p src must be a valid address.
+/// \pre `0 <=` \p count `<=` size of \p src.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfree()`.
+/// \internal
+///
+/// # Safety
+/// src must be an AMbyteSpan array of size `>= count`
+#[no_mangle]
+pub unsafe extern "C" fn AMchangeHashesInit(src: *const AMbyteSpan, count: usize) -> *mut AMresult {
+    let mut change_hashes = Vec::<am::ChangeHash>::new();
+    for n in 0..count {
+        let byte_span = &*src.add(n);
+        let slice = std::slice::from_raw_parts(byte_span.src, byte_span.count);
+        match am::ChangeHash::try_from(slice) {
+            Ok(change_hash) => {
+                change_hashes.push(change_hash);
+            }
+            Err(e) => {
+                return to_result(Err(e));
+            }
+        }
+    }
+    to_result(Ok::<Vec<am::ChangeHash>, am::InvalidChangeHashSlice>(
+        change_hashes,
+    ))
 }
 
 /// \memberof AMchangeHashes
