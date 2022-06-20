@@ -3,121 +3,96 @@
 
 #include <automerge.h>
 
-AMvalue test(AMresult*, AMvalueVariant const);
+typedef struct StackNode ResultStack;
+
+AMvalue push(ResultStack**, AMresult*, AMvalueVariant const);
+
+size_t free_results(ResultStack*);
 
 /*
  *  Based on https://automerge.github.io/docs/quickstart
  */
 int main(int argc, char** argv) {
-    AMresult* const doc1_result = AMcreate();
-    AMdoc* const doc1 = AMresultValue(doc1_result).doc;
-    if (doc1 == NULL) {
-        fprintf(stderr, "`AMcreate()` failure.");
-        exit(EXIT_FAILURE);
-    }
-    AMresult* const cards_result = AMmapPutObject(doc1, AM_ROOT, "cards", AM_OBJ_TYPE_LIST);
-    AMvalue value = test(cards_result, AM_VALUE_OBJ_ID);
-    AMobjId const* const cards = value.obj_id;
-    AMresult* const card1_result = AMlistPutObject(doc1, cards, 0, true, AM_OBJ_TYPE_MAP);
-    value = test(card1_result, AM_VALUE_OBJ_ID);
-    AMobjId const* const card1 = value.obj_id;
-    AMresult* result = AMmapPutStr(doc1, card1, "title", "Rewrite everything in Clojure");
-    test(result, AM_VALUE_VOID);
-    AMfree(result);
-    result = AMmapPutBool(doc1, card1, "done", false);
-    test(result, AM_VALUE_VOID);
-    AMfree(result);
-    AMresult* const card2_result = AMlistPutObject(doc1, cards, 0, true, AM_OBJ_TYPE_MAP);
-    value = test(card2_result, AM_VALUE_OBJ_ID);
-    AMobjId const* const card2 = value.obj_id;
-    result = AMmapPutStr(doc1, card2, "title", "Rewrite everything in Haskell");
-    test(result, AM_VALUE_VOID);
-    AMfree(result);
-    result = AMmapPutBool(doc1, card2, "done", false);
-    test(result, AM_VALUE_VOID);
-    AMfree(result);
-    AMfree(card2_result);
-    result = AMcommit(doc1, "Add card", NULL);
-    test(result, AM_VALUE_CHANGE_HASHES);
-    AMfree(result);
+    ResultStack* results = NULL;
+    AMdoc* const doc1 = push(&results, AMcreate(), AM_VALUE_DOC).doc;
+    AMobjId const* const
+        cards = push(&results, AMmapPutObject(doc1, AM_ROOT, "cards", AM_OBJ_TYPE_LIST), AM_VALUE_OBJ_ID).obj_id;
+    AMobjId const* const
+        card1 = push(&results, AMlistPutObject(doc1, cards, 0, true, AM_OBJ_TYPE_MAP), AM_VALUE_OBJ_ID).obj_id;
+    push(&results, AMmapPutStr(doc1, card1, "title", "Rewrite everything in Clojure"), AM_VALUE_VOID);
+    push(&results, AMmapPutBool(doc1, card1, "done", false), AM_VALUE_VOID);
+    AMobjId const* const
+        card2 = push(&results, AMlistPutObject(doc1, cards, 0, true, AM_OBJ_TYPE_MAP), AM_VALUE_OBJ_ID).obj_id;
+    push(&results, AMmapPutStr(doc1, card2, "title", "Rewrite everything in Haskell"), AM_VALUE_VOID);
+    push(&results, AMmapPutBool(doc1, card2, "done", false), AM_VALUE_VOID);
+    push(&results, AMcommit(doc1, "Add card", NULL), AM_VALUE_CHANGE_HASHES);
 
-    AMresult* doc2_result = AMcreate();
-    AMdoc* doc2 = AMresultValue(doc2_result).doc;
-    if (doc2 == NULL) {
-        fprintf(stderr, "`AMcreate()` failure.");
-        AMfree(card1_result);
-        AMfree(cards_result);
-        AMfree(doc1_result);
-        exit(EXIT_FAILURE);
-    }
-    result = AMmerge(doc2, doc1);
-    test(result, AM_VALUE_CHANGE_HASHES);
-    AMfree(result);
-    AMfree(doc2_result);
+    AMdoc* doc2 = push(&results, AMcreate(), AM_VALUE_DOC).doc;
+    push(&results, AMmerge(doc2, doc1), AM_VALUE_CHANGE_HASHES);
 
-    AMresult* const save_result = AMsave(doc1);
-    value = test(save_result, AM_VALUE_BYTES);
-    AMbyteSpan binary = value.bytes;
-    doc2_result = AMload(binary.src, binary.count);
-    doc2 = AMresultValue(doc2_result).doc;
-    AMfree(save_result);
-    if (doc2 == NULL) {
-        fprintf(stderr, "`AMload()` failure.");
-        AMfree(card1_result);
-        AMfree(cards_result);
-        AMfree(doc1_result);
-        exit(EXIT_FAILURE);
-    }
+    AMbyteSpan const binary = push(&results, AMsave(doc1), AM_VALUE_BYTES).bytes;
+    doc2 = push(&results, AMload(binary.src, binary.count), AM_VALUE_DOC).doc;
 
-    result = AMmapPutBool(doc1, card1, "done", true);
-    test(result, AM_VALUE_VOID);
-    AMfree(result);
-    result = AMcommit(doc1, "Mark card as done", NULL);
-    test(result, AM_VALUE_CHANGE_HASHES);
-    AMfree(result);
-    AMfree(card1_result);
+    push(&results, AMmapPutBool(doc1, card1, "done", true), AM_VALUE_VOID);
+    push(&results, AMcommit(doc1, "Mark card as done", NULL), AM_VALUE_CHANGE_HASHES);
 
-    result = AMlistDelete(doc2, cards, 0);
-    test(result, AM_VALUE_VOID);
-    AMfree(result);
-    result = AMcommit(doc2, "Delete card", NULL);
-    test(result, AM_VALUE_CHANGE_HASHES);
-    AMfree(result);
+    push(&results, AMlistDelete(doc2, cards, 0), AM_VALUE_VOID);
+    push(&results, AMcommit(doc2, "Delete card", NULL), AM_VALUE_CHANGE_HASHES);
 
-    result = AMmerge(doc1, doc2);
-    test(result, AM_VALUE_CHANGE_HASHES);
-    AMfree(result);
-    AMfree(doc2_result);
+    push(&results, AMmerge(doc1, doc2), AM_VALUE_CHANGE_HASHES);
 
-    result = AMgetChanges(doc1, NULL);
-    value = test(result, AM_VALUE_CHANGES);
+    AMchanges changes = push(&results, AMgetChanges(doc1, NULL), AM_VALUE_CHANGES).changes;
     AMchange const* change = NULL;
-    while ((change = AMchangesNext(&value.changes, 1)) != NULL) {
-        size_t const size = AMobjSizeAt(doc1, cards, change);
-        printf("%s %ld\n", AMchangeMessage(change), size);
+    while ((change = AMchangesNext(&changes, 1)) != NULL) {
+        AMbyteSpan const change_hash = AMchangeHash(change);
+        AMchangeHashes const
+            heads = push(&results, AMchangeHashesInit(&change_hash, 1), AM_VALUE_CHANGE_HASHES).change_hashes;
+        printf("%s %ld\n", AMchangeMessage(change), AMobjSize(doc1, cards, &heads));
     }
-    AMfree(result);
-    AMfree(cards_result);
-    AMfree(doc1_result);
+    free_results(results);
 }
 
 /**
- * \brief Extracts a value with the given discriminant from the given result
- *        or writes a message to `stderr`, frees the given result and
- *        terminates the program.
+ * \brief A node in a singly-linked list of `AMresult` struct pointers.
+ */
+struct StackNode {
+    AMresult* result;
+    struct StackNode* next;
+};
+
+/**
+ * \brief Pushes the given result onto the given stack and then either gets a
+ *        value with the given discriminant from the result or writes a message
+ *        to `stderr`, frees all results in the stack and terminates the
+ *        program.
  *
+ * \param[in] stack A pointer to a pointer to a `ResultStack` struct.
 .* \param[in] result A pointer to an `AMresult` struct.
  * \param[in] discriminant An `AMvalueVariant` enum tag.
  * \return An `AMvalue` struct.
+ * \pre \p stack must be a valid address.
  * \pre \p result must be a valid address.
  */
-AMvalue test(AMresult* result, AMvalueVariant const discriminant) {
+AMvalue push(ResultStack** stack, AMresult* result, AMvalueVariant const discriminant) {
     static char prelude[64];
 
-    if (result == NULL) {
-        fprintf(stderr, "NULL `AMresult` struct pointer.");
+    if (stack == NULL) {
+        fprintf(stderr, "Null `ResultStack` struct pointer pointer; previous "
+                        "`AMresult` structs may have leaked!");
+        AMfree(result);
         exit(EXIT_FAILURE);
     }
+    if (result == NULL) {
+        fprintf(stderr, "Null `AMresult` struct pointer.");
+        free_results(*stack);
+        exit(EXIT_FAILURE);
+    }
+    /* Push the result onto the stack. */
+    struct StackNode* top = malloc(sizeof(struct StackNode));
+    top->result = result;
+    top->next = *stack;
+    *stack = top;
+
     AMstatus const status = AMresultStatus(result);
     if (status != AM_STATUS_OK) {
         switch (status) {
@@ -126,7 +101,7 @@ AMvalue test(AMresult* result, AMvalueVariant const discriminant) {
             default: sprintf(prelude, "Unknown `AMstatus` tag %d", status);
         }
         fprintf(stderr, "%s; %s.", prelude, AMerrorMessage(result));
-        AMfree(result);
+        free_results(*stack);
         exit(EXIT_FAILURE);
     }
     AMvalue const value = AMresultValue(result);
@@ -139,19 +114,42 @@ AMvalue test(AMresult* result, AMvalueVariant const discriminant) {
             case AM_VALUE_CHANGE_HASHES: label = "AM_VALUE_CHANGE_HASHES"; break;
             case AM_VALUE_CHANGES:       label = "AM_VALUE_CHANGES";       break;
             case AM_VALUE_COUNTER:       label = "AM_VALUE_COUNTER";       break;
+            case AM_VALUE_DOC:           label = "AM_VALUE_DOC";           break;
             case AM_VALUE_F64:           label = "AM_VALUE_F64";           break;
             case AM_VALUE_INT:           label = "AM_VALUE_INT";           break;
-            case AM_VALUE_VOID:          label = "AM_VALUE_VOID";          break;
             case AM_VALUE_NULL:          label = "AM_VALUE_NULL";          break;
             case AM_VALUE_OBJ_ID:        label = "AM_VALUE_OBJ_ID";        break;
             case AM_VALUE_STR:           label = "AM_VALUE_STR";           break;
+            case AM_VALUE_STRINGS:       label = "AM_VALUE_STRINGS";       break;
             case AM_VALUE_TIMESTAMP:     label = "AM_VALUE_TIMESTAMP";     break;
             case AM_VALUE_UINT:          label = "AM_VALUE_UINT";          break;
+            case AM_VALUE_SYNC_MESSAGE:  label = "AM_VALUE_SYNC_MESSAGE";  break;
+            case AM_VALUE_SYNC_STATE:    label = "AM_VALUE_SYNC_STATE";    break;
+            case AM_VALUE_VOID:          label = "AM_VALUE_VOID";          break;
             default:                     label = "<unknown>";
         }
         fprintf(stderr, "Unexpected `AMvalueVariant` tag `%s` (%d).", label, value.tag);
-        AMfree(result);
+        free_results(*stack);
         exit(EXIT_FAILURE);
     }
     return value;
+}
+
+/**
+ * \brief Frees a stack of `AMresult` structs.
+ *
+ * \param[in] stack A pointer to a `ResultStack` struct.
+ * \return The number of stack nodes freed.
+ * \pre \p stack must be a valid address.
+ */
+size_t free_results(ResultStack* stack) {
+    struct StackNode* prev = NULL;
+    size_t count = 0;
+    for (struct StackNode* node = stack; node; node = node->next, ++count) {
+        free(prev);
+        AMfree(node->result);
+        prev = node;
+    }
+    free(prev);
+    return count;
 }
