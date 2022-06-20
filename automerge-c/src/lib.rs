@@ -6,4 +6,5 @@ mod changes;
 mod doc;
 mod obj;
 mod result;
+mod strings;
 mod sync;
