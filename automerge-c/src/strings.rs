@@ -1,5 +1,4 @@
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
 use std::ffi::{c_void, CString};
 use std::mem::size_of;
 use std::os::raw::c_char;
@@ -9,7 +8,6 @@ struct Detail {
     len: usize,
     offset: isize,
     ptr: *const c_void,
-    storage: *mut c_void,
 }
 
 /// \note cbindgen won't propagate the value of a `std::mem::size_of<T>()` call
@@ -17,16 +15,14 @@ struct Detail {
 ///       propagate the name of a constant initialized from it so if the
 ///       constant's name is a symbolic representation of the value it can be
 ///       converted into a number by post-processing the header it generated.
-pub const USIZE_USIZE_USIZE_USIZE_: usize = size_of::<Detail>();
+pub const USIZE_USIZE_USIZE_: usize = size_of::<Detail>();
 
 impl Detail {
-    fn new(strings: &[String], offset: isize, storage: &mut BTreeMap<usize, CString>) -> Self {
-        let storage: *mut BTreeMap<usize, CString> = storage;
+    fn new(cstrings: &[CString], offset: isize) -> Self {
         Self {
-            len: strings.len(),
+            len: cstrings.len(),
             offset,
-            ptr: strings.as_ptr() as *const c_void,
-            storage: storage as *mut c_void,
+            ptr: cstrings.as_ptr() as *const c_void,
         }
     }
 
@@ -56,19 +52,11 @@ impl Detail {
         if self.is_stopped() {
             return None;
         }
-        let slice: &[String] =
-            unsafe { std::slice::from_raw_parts(self.ptr as *const String, self.len) };
-        let storage = unsafe { &mut *(self.storage as *mut BTreeMap<usize, CString>) };
-        let index = self.get_index();
-        let value = match storage.get_mut(&index) {
-            Some(value) => value,
-            None => {
-                storage.insert(index, CString::new(slice[index].as_str()).unwrap());
-                storage.get_mut(&index).unwrap()
-            }
-        };
+        let slice: &[CString] =
+            unsafe { std::slice::from_raw_parts(self.ptr as *const CString, self.len) };
+        let value = slice[self.get_index()].as_ptr();
         self.advance(n);
-        Some(value.as_ptr())
+        Some(value)
     }
 
     pub fn is_stopped(&self) -> bool {
@@ -83,20 +71,9 @@ impl Detail {
         if (self.offset == prior_offset) || self.is_stopped() {
             return None;
         }
-        let slice: &[String] =
-            unsafe { std::slice::from_raw_parts(self.ptr as *const String, self.len) };
-        let storage = unsafe { &mut *(self.storage as *mut BTreeMap<usize, CString>) };
-        let index = self.get_index();
-        Some(
-            match storage.get_mut(&index) {
-                Some(value) => value,
-                None => {
-                    storage.insert(index, CString::new(slice[index].as_str()).unwrap());
-                    storage.get_mut(&index).unwrap()
-                }
-            }
-            .as_ptr(),
-        )
+        let slice: &[CString] =
+            unsafe { std::slice::from_raw_parts(self.ptr as *const CString, self.len) };
+        Some(slice[self.get_index()].as_ptr())
     }
 
     pub fn reversed(&self) -> Self {
@@ -104,20 +81,16 @@ impl Detail {
             len: self.len,
             offset: -(self.offset + 1),
             ptr: self.ptr,
-            storage: self.storage,
         }
     }
 }
 
-impl From<Detail> for [u8; USIZE_USIZE_USIZE_USIZE_] {
+impl From<Detail> for [u8; USIZE_USIZE_USIZE_] {
     fn from(detail: Detail) -> Self {
         unsafe {
-            std::slice::from_raw_parts(
-                (&detail as *const Detail) as *const u8,
-                USIZE_USIZE_USIZE_USIZE_,
-            )
-            .try_into()
-            .unwrap()
+            std::slice::from_raw_parts((&detail as *const Detail) as *const u8, USIZE_USIZE_USIZE_)
+                .try_into()
+                .unwrap()
         }
     }
 }
@@ -130,13 +103,13 @@ pub struct AMstrings {
     /// \warning Modifying \p detail will cause undefined behavior.
     /// \note The actual size of \p detail will vary by platform, this is just
     ///       the one for the platform this documentation was built on.
-    detail: [u8; USIZE_USIZE_USIZE_USIZE_],
+    detail: [u8; USIZE_USIZE_USIZE_],
 }
 
 impl AMstrings {
-    pub fn new(strings: &[String], storage: &mut BTreeMap<usize, CString>) -> Self {
+    pub fn new(cstrings: &[CString]) -> Self {
         Self {
-            detail: Detail::new(strings, 0, storage).into(),
+            detail: Detail::new(cstrings, 0).into(),
         }
     }
 
@@ -178,7 +151,7 @@ impl AsRef<[String]> for AMstrings {
 impl Default for AMstrings {
     fn default() -> Self {
         Self {
-            detail: [0; USIZE_USIZE_USIZE_USIZE_],
+            detail: [0; USIZE_USIZE_USIZE_],
         }
     }
 }

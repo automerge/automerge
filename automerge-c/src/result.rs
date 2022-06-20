@@ -110,7 +110,7 @@ pub enum AMresult {
     ActorId(AMactorId),
     ChangeHashes(Vec<am::ChangeHash>),
     Changes(Vec<am::Change>, BTreeMap<usize, AMchange>),
-    Strings(Vec<String>, BTreeMap<usize, CString>),
+    Strings(Vec<CString>),
     Doc(Box<AMdoc>),
     Error(CString),
     ObjId(AMobjId),
@@ -140,15 +140,15 @@ impl From<am::ChangeHash> for AMresult {
 
 impl From<am::Keys<'_, '_>> for AMresult {
     fn from(keys: am::Keys<'_, '_>) -> Self {
-        let strings: Vec<String> = keys.collect();
-        AMresult::Strings(strings, BTreeMap::new())
+        let cstrings: Vec<CString> = keys.map(|s| CString::new(s).unwrap()).collect();
+        AMresult::Strings(cstrings)
     }
 }
 
 impl From<am::KeysAt<'_, '_>> for AMresult {
     fn from(keys: am::KeysAt<'_, '_>) -> Self {
-        let strings: Vec<String> = keys.collect();
-        AMresult::Strings(strings, BTreeMap::new())
+        let cstrings: Vec<CString> = keys.map(|s| CString::new(s).unwrap()).collect();
+        AMresult::Strings(cstrings)
     }
 }
 
@@ -427,7 +427,7 @@ pub unsafe extern "C" fn AMresultSize(result: *mut AMresult) -> usize {
             | AMresult::Value(_, _) => 1,
             AMresult::ChangeHashes(change_hashes) => change_hashes.len(),
             AMresult::Changes(changes, _) => changes.len(),
-            AMresult::Strings(strings, _) => strings.len(),
+            AMresult::Strings(cstrings) => cstrings.len(),
         }
     } else {
         0
@@ -482,8 +482,8 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult) -> AMvalue<'a>
             AMresult::ObjId(obj_id) => {
                 content = AMvalue::ObjId(obj_id);
             }
-            AMresult::Strings(strings, storage) => {
-                content = AMvalue::Strings(AMstrings::new(strings, storage));
+            AMresult::Strings(cstrings) => {
+                content = AMvalue::Strings(AMstrings::new(cstrings));
             }
             AMresult::SyncMessage(sync_message) => {
                 content = AMvalue::SyncMessage(sync_message);
