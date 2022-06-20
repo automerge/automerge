@@ -93,6 +93,7 @@ pub use decoding::InvalidChangeError;
 pub use encoding::Error as EncodingError;
 pub use error::AutomergeError;
 pub use error::InvalidActorId;
+pub use error::InvalidChangeHashSlice;
 pub use exid::ExId as ObjId;
 pub use keys::Keys;
 pub use keys_at::KeysAt;
