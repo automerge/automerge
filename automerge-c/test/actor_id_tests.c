@@ -36,7 +36,7 @@ static int group_teardown(void** state) {
     return 0;
 }
 
-static void test_AMactorIdInit(void **state) {
+static void test_AMactorIdInit() {
     AMresult* prior_result = NULL;
     AMbyteSpan prior_bytes;
     char const* prior_str = NULL;

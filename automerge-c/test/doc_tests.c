@@ -8,6 +8,7 @@
 #include <cmocka.h>
 
 /* local */
+#include "automerge.h"
 #include "group_state.h"
 #include "str_utils.h"
 
@@ -35,6 +36,88 @@ static int teardown(void** state) {
     free(test_state->actor_id_bytes);
     free(test_state);
     return 0;
+}
+
+static void test_AMkeys_empty() {
+    AMresult* const doc_result = AMcreate();
+    AMresult* const strings_result = AMkeys(AMresultValue(doc_result).doc, AM_ROOT, NULL);
+    if (AMresultStatus(strings_result) != AM_STATUS_OK) {
+        fail_msg("%s", AMerrorMessage(strings_result));
+    }
+    assert_int_equal(AMresultSize(strings_result), 0);
+    AMvalue value = AMresultValue(strings_result);
+    assert_int_equal(value.tag, AM_VALUE_STRINGS);
+    assert_int_equal(AMstringsSize(&value.strings), 0);
+    AMstrings forward = value.strings;
+    assert_null(AMstringsNext(&forward, 1));
+    AMstrings reverse = AMstringsReversed(&value.strings);
+    assert_null(AMstringsNext(&reverse, 1));
+    AMfree(strings_result);
+    AMfree(doc_result);
+}
+
+static void test_AMkeys_list() {
+    AMresult* const doc_result = AMcreate();
+    AMdoc* const doc = AMresultValue(doc_result).doc;
+    AMfree(AMlistPutInt(doc, AM_ROOT, 0, true, 1));
+    AMfree(AMlistPutInt(doc, AM_ROOT, 1, true, 2));
+    AMfree(AMlistPutInt(doc, AM_ROOT, 2, true, 3));
+    AMresult* const strings_result = AMkeys(doc, AM_ROOT, NULL);
+    if (AMresultStatus(strings_result) != AM_STATUS_OK) {
+        fail_msg("%s", AMerrorMessage(strings_result));
+    }
+    assert_int_equal(AMresultSize(strings_result), 3);
+    AMvalue value = AMresultValue(strings_result);
+    assert_int_equal(value.tag, AM_VALUE_STRINGS);
+    AMstrings forward = value.strings;
+    assert_int_equal(AMstringsSize(&forward), 3);
+    char const* str = AMstringsNext(&forward, 1);
+    assert_ptr_equal(strstr(str, "1@"), str);
+    str = AMstringsNext(&forward, 1);
+    assert_ptr_equal(strstr(str, "2@"), str);
+    str = AMstringsNext(&forward, 1);
+    assert_ptr_equal(strstr(str, "3@"), str);
+    assert_null(AMstringsNext(&forward, 1));
+    AMstrings reverse = AMstringsReversed(&value.strings);
+    assert_int_equal(AMstringsSize(&reverse), 3);
+    str = AMstringsNext(&reverse, 1);
+    assert_ptr_equal(strstr(str, "3@"), str);
+    str = AMstringsNext(&reverse, 1);
+    assert_ptr_equal(strstr(str, "2@"), str);
+    str = AMstringsNext(&reverse, 1);
+    assert_ptr_equal(strstr(str, "1@"), str);
+    assert_null(AMstringsNext(&reverse, 1));
+    AMfree(strings_result);
+    AMfree(doc_result);
+}
+
+static void test_AMkeys_map() {
+    AMresult* const doc_result = AMcreate();
+    AMdoc* const doc = AMresultValue(doc_result).doc;
+    AMfree(AMmapPutInt(doc, AM_ROOT, "one", 1));
+    AMfree(AMmapPutInt(doc, AM_ROOT, "two", 2));
+    AMfree(AMmapPutInt(doc, AM_ROOT, "three", 3));
+    AMresult* const strings_result = AMkeys(doc, AM_ROOT, NULL);
+    if (AMresultStatus(strings_result) != AM_STATUS_OK) {
+        fail_msg("%s", AMerrorMessage(strings_result));
+    }
+    assert_int_equal(AMresultSize(strings_result), 3);
+    AMvalue value = AMresultValue(strings_result);
+    assert_int_equal(value.tag, AM_VALUE_STRINGS);
+    AMstrings forward = value.strings;
+    assert_int_equal(AMstringsSize(&forward), 3);
+    assert_string_equal(AMstringsNext(&forward, 1), "one");
+    assert_string_equal(AMstringsNext(&forward, 1), "three");
+    assert_string_equal(AMstringsNext(&forward, 1), "two");
+    assert_null(AMstringsNext(&forward, 1));
+    AMstrings reverse = AMstringsReversed(&value.strings);
+    assert_int_equal(AMstringsSize(&reverse), 3);
+    assert_string_equal(AMstringsNext(&reverse, 1), "two");
+    assert_string_equal(AMstringsNext(&reverse, 1), "three");
+    assert_string_equal(AMstringsNext(&reverse, 1), "one");
+    assert_null(AMstringsNext(&reverse, 1));
+    AMfree(strings_result);
+    AMfree(doc_result);
 }
 
 static void test_AMputActor_bytes(void **state) {
@@ -94,6 +177,9 @@ static void test_AMputActor_hex(void **state) {
 
 int run_doc_tests(void) {
     const struct CMUnitTest tests[] = {
+        cmocka_unit_test(test_AMkeys_empty),
+        cmocka_unit_test(test_AMkeys_list),
+        cmocka_unit_test(test_AMkeys_map),
         cmocka_unit_test_setup_teardown(test_AMputActor_bytes, setup, teardown),
         cmocka_unit_test_setup_teardown(test_AMputActor_hex, setup, teardown),
     };

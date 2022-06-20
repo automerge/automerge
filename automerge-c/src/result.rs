@@ -10,6 +10,7 @@ use crate::change_hashes::AMchangeHashes;
 use crate::changes::AMchanges;
 use crate::doc::AMdoc;
 use crate::obj::AMobjId;
+use crate::strings::AMstrings;
 use crate::sync::{AMsyncMessage, AMsyncState};
 
 /// \struct AMvalue
@@ -51,6 +52,9 @@ use crate::sync::{AMsyncMessage, AMsyncState};
 /// \var AMvalue::str
 /// A UTF-8 string.
 ///
+/// \var AMvalue::strings
+/// A sequence of UTF-8 strings as an `AMstrings` struct.
+///
 /// \var AMvalue::timestamp
 /// A Lamport timestamp.
 ///
@@ -76,16 +80,14 @@ pub enum AMvalue<'a> {
     F64(f64),
     /// A 64-bit signed integer variant.
     Int(i64),
-    /*
-    /// A keys variant.
-    Keys(_),
-    */
     /// A null variant.
     Null,
     /// An object identifier variant.
     ObjId(&'a AMobjId),
     /// A UTF-8 string variant.
     Str(*const libc::c_char),
+    /// A strings variant.
+    Strings(AMstrings),
     /// A Lamport timestamp variant.
     Timestamp(i64),
     /*
@@ -108,12 +110,13 @@ pub enum AMresult {
     ActorId(AMactorId),
     ChangeHashes(Vec<am::ChangeHash>),
     Changes(Vec<am::Change>, BTreeMap<usize, AMchange>),
+    Strings(Vec<String>, BTreeMap<usize, CString>),
     Doc(Box<AMdoc>),
     Error(CString),
     ObjId(AMobjId),
-    Value(am::Value<'static>, Option<CString>),
     SyncMessage(AMsyncMessage),
     SyncState(AMsyncState),
+    Value(am::Value<'static>, Option<CString>),
     Void,
 }
 
@@ -132,6 +135,20 @@ impl From<am::AutoCommit> for AMresult {
 impl From<am::ChangeHash> for AMresult {
     fn from(change_hash: am::ChangeHash) -> Self {
         AMresult::ChangeHashes(vec![change_hash])
+    }
+}
+
+impl From<am::Keys<'_, '_>> for AMresult {
+    fn from(keys: am::Keys<'_, '_>) -> Self {
+        let strings: Vec<String> = keys.collect();
+        AMresult::Strings(strings, BTreeMap::new())
+    }
+}
+
+impl From<am::KeysAt<'_, '_>> for AMresult {
+    fn from(keys: am::KeysAt<'_, '_>) -> Self {
+        let strings: Vec<String> = keys.collect();
+        AMresult::Strings(strings, BTreeMap::new())
     }
 }
 
@@ -296,6 +313,15 @@ impl From<Result<Vec<am::ChangeHash>, am::AutomergeError>> for AMresult {
     }
 }
 
+impl From<Result<Vec<am::ChangeHash>, am::InvalidChangeHashSlice>> for AMresult {
+    fn from(maybe: Result<Vec<am::ChangeHash>, am::InvalidChangeHashSlice>) -> Self {
+        match maybe {
+            Ok(change_hashes) => AMresult::ChangeHashes(change_hashes),
+            Err(e) => AMresult::err(&e.to_string()),
+        }
+    }
+}
+
 impl From<Result<Vec<u8>, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<Vec<u8>, am::AutomergeError>) -> Self {
         match maybe {
@@ -401,6 +427,7 @@ pub unsafe extern "C" fn AMresultSize(result: *mut AMresult) -> usize {
             | AMresult::Value(_, _) => 1,
             AMresult::ChangeHashes(change_hashes) => change_hashes.len(),
             AMresult::Changes(changes, _) => changes.len(),
+            AMresult::Strings(strings, _) => strings.len(),
         }
     } else {
         0
@@ -455,6 +482,15 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult) -> AMvalue<'a>
             AMresult::ObjId(obj_id) => {
                 content = AMvalue::ObjId(obj_id);
             }
+            AMresult::Strings(strings, storage) => {
+                content = AMvalue::Strings(AMstrings::new(strings, storage));
+            }
+            AMresult::SyncMessage(sync_message) => {
+                content = AMvalue::SyncMessage(sync_message);
+            }
+            AMresult::SyncState(sync_state) => {
+                content = AMvalue::SyncState(sync_state);
+            }
             AMresult::Value(value, hosted_str) => {
                 match value {
                     am::Value::Scalar(scalar) => match scalar.as_ref() {
@@ -493,12 +529,6 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult) -> AMvalue<'a>
                     //       when there's no object ID variant.
                     am::Value::Object(_) => {}
                 }
-            }
-            AMresult::SyncMessage(sync_message) => {
-                content = AMvalue::SyncMessage(sync_message);
-            }
-            AMresult::SyncState(sync_state) => {
-                content = AMvalue::SyncState(sync_state);
             }
             AMresult::Void => {}
         }

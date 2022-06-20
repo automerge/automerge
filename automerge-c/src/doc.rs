@@ -4,7 +4,6 @@ use std::ops::{Deref, DerefMut};
 use std::os::raw::c_char;
 
 use crate::actor_id::AMactorId;
-use crate::change::AMchange;
 use crate::change_hashes::AMchangeHashes;
 use crate::obj::AMobjId;
 use crate::result::{to_result, AMresult};
@@ -295,7 +294,9 @@ pub unsafe extern "C" fn AMgetChangesAdded(doc1: *mut AMdoc, doc2: *mut AMdoc) -
 #[no_mangle]
 pub unsafe extern "C" fn AMgetHeads(doc: *mut AMdoc) -> *mut AMresult {
     let doc = to_doc!(doc);
-    to_result(Ok(doc.get_heads()))
+    to_result(Ok::<Vec<am::ChangeHash>, am::AutomergeError>(
+        doc.get_heads(),
+    ))
 }
 
 /// \memberof AMdoc
@@ -313,6 +314,7 @@ pub unsafe extern "C" fn AMgetHeads(doc: *mut AMdoc) -> *mut AMresult {
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
+/// heads must be a pointer to a valid AMchangeHashes or NULL
 #[no_mangle]
 pub unsafe extern "C" fn AMgetMissingDeps(
     doc: *mut AMdoc,
@@ -347,6 +349,37 @@ pub unsafe extern "C" fn AMgetLastLocalChange(doc: *mut AMdoc) -> *mut AMresult 
 }
 
 /// \memberof AMdoc
+/// \brief Gets the current or historical keys of an object.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
+/// \param[in] heads A pointer to an `AMchangeHashes` struct for historical
+///            keys or `NULL` for current keys.
+/// \return A pointer to an `AMresult` struct containing an `AMstrings` struct.
+/// \pre \p doc must be a valid address.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfree()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj_id must be a pointer to a valid AMobjId or NULL
+/// heads must be a pointer to a valid AMchangeHashes or NULL
+#[no_mangle]
+pub unsafe extern "C" fn AMkeys(
+    doc: *mut AMdoc,
+    obj_id: *const AMobjId,
+    heads: *const AMchangeHashes,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    let obj_id = to_obj_id!(obj_id);
+    match heads.as_ref() {
+        None => to_result(doc.keys(obj_id)),
+        Some(heads) => to_result(doc.keys_at(obj_id, heads.as_ref())),
+    }
+}
+
+/// \memberof AMdoc
 /// \brief Allocates storage for a document and initializes it with the compact
 ///        form of an incremental save.
 ///
@@ -355,13 +388,13 @@ pub unsafe extern "C" fn AMgetLastLocalChange(doc: *mut AMdoc) -> *mut AMresult 
 /// \return A pointer to an `AMresult` struct containing a pointer to an
 ///         `AMdoc` struct.
 /// \pre \p src must be a valid address.
-/// \pre `0 <=` \p count `<=` length of \p src.
+/// \pre `0 <=` \p count `<=` size of \p src.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
 ///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
-/// src must be a byte array of length `>= count`
+/// src must be a byte array of size `>= count`
 #[no_mangle]
 pub unsafe extern "C" fn AMload(src: *const u8, count: usize) -> *mut AMresult {
     let mut data = Vec::new();
@@ -379,14 +412,14 @@ pub unsafe extern "C" fn AMload(src: *const u8, count: usize) -> *mut AMresult {
 ///         operations loaded from \p src.
 /// \pre \p doc must be a valid address.
 /// \pre \p src must be a valid address.
-/// \pre `0 <=` \p count `<=` length of \p src.
+/// \pre `0 <=` \p count `<=` size of \p src.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
 ///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// src must be a byte array of length `>= count`
+/// src must be a byte array of size `>= count`
 #[no_mangle]
 pub unsafe extern "C" fn AMloadIncremental(
     doc: *mut AMdoc,
@@ -423,55 +456,35 @@ pub unsafe extern "C" fn AMmerge(dest: *mut AMdoc, src: *mut AMdoc) -> *mut AMre
 }
 
 /// \memberof AMdoc
-/// \brief Gets the size of an object.
+/// \brief Gets the current or historical size of an object.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
-/// \return The count of values in the object identified by \p obj_id.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
+/// \param[in] heads A pointer to an `AMchangeHashes` struct for historical
+///            size or `NULL` for current size.
+/// \return A 64-bit unsigned integer.
 /// \pre \p doc must be a valid address.
 /// \internal
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
 /// obj_id must be a pointer to a valid AMobjId or NULL
+/// heads must be a pointer to a valid AMchangeHashes or NULL
 #[no_mangle]
-pub unsafe extern "C" fn AMobjSize(doc: *const AMdoc, obj_id: *const AMobjId) -> usize {
+pub unsafe extern "C" fn AMobjSize(
+    doc: *const AMdoc,
+    obj_id: *const AMobjId,
+    heads: *const AMchangeHashes,
+) -> usize {
     if let Some(doc) = doc.as_ref() {
-        doc.length(to_obj_id!(obj_id))
+        let obj_id = to_obj_id!(obj_id);
+        match heads.as_ref() {
+            None => doc.length(obj_id),
+            Some(heads) => doc.length_at(obj_id, heads.as_ref()),
+        }
     } else {
         0
     }
-}
-
-/// \memberof AMdoc
-/// \brief Gets the historical size of an object.
-///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
-/// \param[in] change A pointer to an `AMchange` struct or `NULL`.
-/// \return The count of values in the object identified by \p obj_id at
-///         \p change.
-/// \pre \p doc must be a valid address.
-/// \internal
-///
-/// # Safety
-/// doc must be a pointer to a valid AMdoc
-/// obj_id must be a pointer to a valid AMobjId or NULL
-/// change must be a pointer to a valid AMchange or NULL
-#[no_mangle]
-pub unsafe extern "C" fn AMobjSizeAt(
-    doc: *const AMdoc,
-    obj_id: *const AMobjId,
-    change: *const AMchange,
-) -> usize {
-    if let Some(doc) = doc.as_ref() {
-        if let Some(change) = change.as_ref() {
-            let change: &am::Change = change.as_ref();
-            let change_hashes = vec![change.hash];
-            return doc.length_at(to_obj_id!(obj_id), &change_hashes);
-        }
-    };
-    0
 }
 
 /// \memberof AMdoc
@@ -596,7 +609,7 @@ pub unsafe extern "C" fn AMsaveIncremental(doc: *mut AMdoc) -> *mut AMresult {
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// value must be a byte array of length `>= count`
+/// actor_id must be a pointer to a valid AMactorId
 #[no_mangle]
 pub unsafe extern "C" fn AMsetActor(doc: *mut AMdoc, actor_id: *const AMactorId) -> *mut AMresult {
     let doc = to_doc!(doc);
