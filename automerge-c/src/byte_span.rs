@@ -9,9 +9,9 @@ pub struct AMbyteSpan {
     /// \warning \p src is only valid until the `AMfree()` function is
     ///          called on the `AMresult` struct hosting the array of bytes to
     ///          which it points.
-    src: *const u8,
+    pub src: *const u8,
     /// The number of bytes in the array.
-    count: usize,
+    pub count: usize,
 }
 
 impl Default for AMbyteSpan {
