@@ -49,7 +49,7 @@ impl Detail {
     }
 
     pub fn next(&mut self, n: isize) -> Option<*const AMchange> {
-        if self.is_stopped() {
+        if n == 0 || self.is_stopped() {
             return None;
         }
         let slice: &mut [am::Change] =
@@ -74,7 +74,7 @@ impl Detail {
 
     pub fn prev(&mut self, n: isize) -> Option<*const AMchange> {
         self.advance(n);
-        if self.is_stopped() {
+        if n == 0 || self.is_stopped() {
             return None;
         }
         let slice: &mut [am::Change] =
@@ -117,7 +117,10 @@ impl From<Detail> for [u8; USIZE_USIZE_USIZE_USIZE_] {
 /// \brief A random-access iterator over a sequence of changes.
 #[repr(C)]
 pub struct AMchanges {
-    /// Reserved.
+    /// An implementation detail that is intentionally opaque.
+    /// \warning Modifying \p detail will cause undefined behavior.
+    /// \note The actual size of \p detail will vary by platform, this is just
+    ///       the one for the platform this documentation was built on.
     detail: [u8; USIZE_USIZE_USIZE_USIZE_],
 }
 
