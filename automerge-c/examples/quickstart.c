@@ -7,7 +7,7 @@ typedef struct StackNode ResultStack;
 
 AMvalue push(ResultStack**, AMresult*, AMvalueVariant const);
 
-size_t free_results(ResultStack*);
+size_t free_results(ResultStack**);
 
 /*
  *  Based on https://automerge.github.io/docs/quickstart
@@ -49,7 +49,7 @@ int main(int argc, char** argv) {
             heads = push(&results, AMchangeHashesInit(&change_hash, 1), AM_VALUE_CHANGE_HASHES).change_hashes;
         printf("%s %ld\n", AMchangeMessage(change), AMobjSize(doc1, cards, &heads));
     }
-    free_results(results);
+    free_results(&results);
 }
 
 /**
@@ -66,12 +66,13 @@ struct StackNode {
  *        that, prints an error message to `stderr`, frees all results in that
  *        stack and aborts.
  *
- * \param[in] stack A pointer to a pointer to a `ResultStack` struct.
+ * \param[in,out] stack A pointer to a pointer to a `ResultStack` struct.
 .* \param[in] result A pointer to an `AMresult` struct.
  * \param[in] discriminant An `AMvalueVariant` enum tag.
  * \return An `AMvalue` struct.
  * \pre \p stack must be a valid address.
  * \pre \p result must be a valid address.
+ * \post \p stack `== NULL`.
  */
 AMvalue push(ResultStack** stack, AMresult* result, AMvalueVariant const discriminant) {
     static char prelude[64];
@@ -84,7 +85,7 @@ AMvalue push(ResultStack** stack, AMresult* result, AMvalueVariant const discrim
     }
     if (result == NULL) {
         fprintf(stderr, "Null `AMresult` struct pointer.");
-        free_results(*stack);
+        free_results(stack);
         exit(EXIT_FAILURE);
     }
     /* Push the result onto the stack. */
@@ -100,7 +101,7 @@ AMvalue push(ResultStack** stack, AMresult* result, AMvalueVariant const discrim
             default: sprintf(prelude, "Unknown `AMstatus` tag %d", status);
         }
         fprintf(stderr, "%s; %s.", prelude, AMerrorMessage(result));
-        free_results(*stack);
+        free_results(stack);
         exit(EXIT_FAILURE);
     }
     AMvalue const value = AMresultValue(result);
@@ -128,7 +129,7 @@ AMvalue push(ResultStack** stack, AMresult* result, AMvalueVariant const discrim
             default:                     label = "...";
         }
         fprintf(stderr, "Unexpected `AMvalueVariant` tag `AM_VALUE_%s` (%d).", label, value.tag);
-        free_results(*stack);
+        free_results(stack);
         exit(EXIT_FAILURE);
     }
     return value;
@@ -137,18 +138,20 @@ AMvalue push(ResultStack** stack, AMresult* result, AMvalueVariant const discrim
 /**
  * \brief Frees a stack of `AMresult` structs.
  *
- * \param[in] stack A pointer to a `ResultStack` struct.
+ * \param[in,out] stack A pointer to a pointer to a `ResultStack` struct.
  * \return The number of stack nodes freed.
  * \pre \p stack must be a valid address.
+ * \post \p stack `== NULL`.
  */
-size_t free_results(ResultStack* stack) {
+size_t free_results(ResultStack** stack) {
     struct StackNode* prev = NULL;
     size_t count = 0;
-    for (struct StackNode* node = stack; node; node = node->next, ++count) {
+    for (struct StackNode* node = *stack; node; node = node->next, ++count) {
         free(prev);
         AMfree(node->result);
         prev = node;
     }
     free(prev);
+    *stack = NULL;
     return count;
 }
