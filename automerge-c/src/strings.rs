@@ -31,11 +31,16 @@ impl Detail {
     }
 
     pub fn advance(&mut self, n: isize) {
-        if n != 0 && !self.is_stopped() {
-            let n = if self.offset < 0 { -n } else { n };
-            let len = self.len as isize;
-            self.offset = std::cmp::max(-(len + 1), std::cmp::min(self.offset + n, len));
-        };
+        if n == 0 {
+            return;
+        }
+        let len = self.len as isize;
+        self.offset = if self.offset < 0 {
+            /* It's reversed. */
+            std::cmp::max(-(len + 1), std::cmp::min(self.offset - n, -1))
+        } else {
+            std::cmp::max(0, std::cmp::min(self.offset + n, len))
+        }
     }
 
     pub fn get_index(&self) -> usize {
@@ -48,7 +53,7 @@ impl Detail {
     }
 
     pub fn next(&mut self, n: isize) -> Option<*const c_char> {
-        if n == 0 || self.is_stopped() {
+        if self.is_stopped() {
             return None;
         }
         let slice: &[String] =
@@ -72,8 +77,10 @@ impl Detail {
     }
 
     pub fn prev(&mut self, n: isize) -> Option<*const c_char> {
-        self.advance(n);
-        if n == 0 || self.is_stopped() {
+        /* Check for rewinding. */
+        let prior_offset = self.offset;
+        self.advance(-n);
+        if (self.offset == prior_offset) || self.is_stopped() {
             return None;
         }
         let slice: &[String] =

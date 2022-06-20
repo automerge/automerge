@@ -50,8 +50,10 @@ static void test_AMkeys_empty() {
     assert_int_equal(AMstringsSize(&value.strings), 0);
     AMstrings forward = value.strings;
     assert_null(AMstringsNext(&forward, 1));
+    assert_null(AMstringsPrev(&forward, 1));
     AMstrings reverse = AMstringsReversed(&value.strings);
     assert_null(AMstringsNext(&reverse, 1));
+    assert_null(AMstringsPrev(&reverse, 1));
     AMfree(strings_result);
     AMfree(doc_result);
 }
@@ -71,6 +73,7 @@ static void test_AMkeys_list() {
     assert_int_equal(value.tag, AM_VALUE_STRINGS);
     AMstrings forward = value.strings;
     assert_int_equal(AMstringsSize(&forward), 3);
+    /* Forward iterator forward. */
     char const* str = AMstringsNext(&forward, 1);
     assert_ptr_equal(strstr(str, "1@"), str);
     str = AMstringsNext(&forward, 1);
@@ -78,15 +81,32 @@ static void test_AMkeys_list() {
     str = AMstringsNext(&forward, 1);
     assert_ptr_equal(strstr(str, "3@"), str);
     assert_null(AMstringsNext(&forward, 1));
+    /* Forward iterator reverse. */
+    str = AMstringsPrev(&forward, 1);
+    assert_ptr_equal(strstr(str, "3@"), str);
+    str = AMstringsPrev(&forward, 1);
+    assert_ptr_equal(strstr(str, "2@"), str);
+    str = AMstringsPrev(&forward, 1);
+    assert_ptr_equal(strstr(str, "1@"), str);
+    assert_null(AMstringsPrev(&forward, 1));
     AMstrings reverse = AMstringsReversed(&value.strings);
     assert_int_equal(AMstringsSize(&reverse), 3);
+    /* Reverse iterator forward. */
     str = AMstringsNext(&reverse, 1);
     assert_ptr_equal(strstr(str, "3@"), str);
     str = AMstringsNext(&reverse, 1);
     assert_ptr_equal(strstr(str, "2@"), str);
     str = AMstringsNext(&reverse, 1);
     assert_ptr_equal(strstr(str, "1@"), str);
+    /* Reverse iterator reverse. */
     assert_null(AMstringsNext(&reverse, 1));
+    str = AMstringsPrev(&reverse, 1);
+    assert_ptr_equal(strstr(str, "1@"), str);
+    str = AMstringsPrev(&reverse, 1);
+    assert_ptr_equal(strstr(str, "2@"), str);
+    str = AMstringsPrev(&reverse, 1);
+    assert_ptr_equal(strstr(str, "3@"), str);
+    assert_null(AMstringsPrev(&reverse, 1));
     AMfree(strings_result);
     AMfree(doc_result);
 }
@@ -106,16 +126,28 @@ static void test_AMkeys_map() {
     assert_int_equal(value.tag, AM_VALUE_STRINGS);
     AMstrings forward = value.strings;
     assert_int_equal(AMstringsSize(&forward), 3);
+    /* Forward iterator forward. */
     assert_string_equal(AMstringsNext(&forward, 1), "one");
     assert_string_equal(AMstringsNext(&forward, 1), "three");
     assert_string_equal(AMstringsNext(&forward, 1), "two");
     assert_null(AMstringsNext(&forward, 1));
+    /* Forward iterator reverse. */
+    assert_string_equal(AMstringsPrev(&forward, 1), "two");
+    assert_string_equal(AMstringsPrev(&forward, 1), "three");
+    assert_string_equal(AMstringsPrev(&forward, 1), "one");
+    assert_null(AMstringsPrev(&forward, 1));
     AMstrings reverse = AMstringsReversed(&value.strings);
     assert_int_equal(AMstringsSize(&reverse), 3);
+    /* Reverse iterator forward. */
     assert_string_equal(AMstringsNext(&reverse, 1), "two");
     assert_string_equal(AMstringsNext(&reverse, 1), "three");
     assert_string_equal(AMstringsNext(&reverse, 1), "one");
     assert_null(AMstringsNext(&reverse, 1));
+    /* Reverse iterator reverse. */
+    assert_string_equal(AMstringsPrev(&reverse, 1), "one");
+    assert_string_equal(AMstringsPrev(&reverse, 1), "three");
+    assert_string_equal(AMstringsPrev(&reverse, 1), "two");
+    assert_null(AMstringsPrev(&reverse, 1));
     AMfree(strings_result);
     AMfree(doc_result);
 }
