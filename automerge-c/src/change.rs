@@ -133,13 +133,13 @@ pub unsafe extern "C" fn AMchangeExtraBytes(change: *const AMchange) -> AMbyteSp
 /// \param[in] count The number of bytes in \p src to load.
 /// \return A pointer to an `AMresult` struct containing an `AMchange` struct.
 /// \pre \p src must be a valid address.
-/// \pre `0 <=` \p count `<=` length of \p src.
+/// \pre `0 <=` \p count `<=` size of \p src.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
 ///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
-/// src must be a byte array of length `>= count`
+/// src must be a byte array of size `>= count`
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeFromBytes(src: *const u8, count: usize) -> *mut AMresult {
     let mut data = Vec::new();
@@ -329,13 +329,13 @@ pub unsafe extern "C" fn AMchangeRawBytes(change: *const AMchange) -> AMbyteSpan
 /// \return A pointer to an `AMresult` struct containing a sequence of
 ///         `AMchange` structs.
 /// \pre \p src must be a valid address.
-/// \pre `0 <=` \p count `<=` length of \p src.
+/// \pre `0 <=` \p count `<=` size of \p src.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
 ///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
-/// src must be a byte array of length `>= count`
+/// src must be a byte array of size `>= count`
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeLoadDocument(src: *const u8, count: usize) -> *mut AMresult {
     let mut data = Vec::new();
