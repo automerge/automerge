@@ -5,7 +5,7 @@ import { AutomergeValue, ScalarValue, MapValue, ListValue, TextValue } from "./t
 import { Int, Uint, Float64 } from "./numbers"
 import { Counter, getWriteableCounter } from "./counter"
 import { Text } from "./text"
-import { STATE, HEADS, FROZEN, OBJECT_ID, READ_ONLY } from "./constants"
+import { STATE, HEADS, FROZEN, OBJECT_ID, READ_ONLY, COUNTER, INT, UINT, F64, TEXT } from "./constants"
 
 function parseListIndex(key) {
   if (typeof key === 'string' && /^[0-9]+$/.test(key)) key = parseInt(key, 10)
@@ -59,26 +59,28 @@ function import_value(value) {
       case 'object':
         if (value == null) {
           return [ null, "null"]
-        } else if (value instanceof Uint) {
+        } else if (value[UINT]) {
           return [ value.value, "uint" ]
-        } else if (value instanceof Int) {
+        } else if (value[INT]) {
           return [ value.value, "int" ]
-        } else if (value instanceof Float64) {
+        } else if (value[F64]) {
           return [ value.value, "f64" ]
-        } else if (value instanceof Counter) {
+        } else if (value[COUNTER]) {
           return [ value.value, "counter" ]
+        } else if (value[TEXT]) {
+          return [ value, "text" ]
         } else if (value instanceof Date) {
           return [ value.getTime(), "timestamp" ]
         } else if (value instanceof Uint8Array) {
           return [ value, "bytes" ]
         } else if (value instanceof Array) {
           return [ value, "list" ]
-        } else if (value instanceof Text) {
-          return [ value, "text" ]
+        } else if (Object.getPrototypeOf(value) === Object.getPrototypeOf({})) {
+          return [ value, "map" ]
         } else if (value[OBJECT_ID]) {
           throw new RangeError('Cannot create a reference to an existing document object')
         } else {
-          return [ value, "map" ]
+          throw new RangeError(`Cannot assign unknown object: ${value}`)
         }
         break;
       case 'boolean':

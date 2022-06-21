@@ -1,5 +1,7 @@
 // Convience classes to allow users to stricly specify the number type they want
 
+import { INT, UINT, F64 } from "./constants"
+
 export class Int {
   value: number;
 
@@ -8,6 +10,7 @@ export class Int {
       throw new RangeError(`Value ${value} cannot be a uint`)
     }
     this.value = value
+    Reflect.defineProperty(this, INT, { value: true })
     Object.freeze(this)
   }
 }
@@ -20,6 +23,7 @@ export class Uint {
       throw new RangeError(`Value ${value} cannot be a uint`)
     }
     this.value = value
+    Reflect.defineProperty(this, UINT, { value: true })
     Object.freeze(this)
   }
 }
@@ -32,6 +36,7 @@ export class Float64 {
       throw new RangeError(`Value ${value} cannot be a float64`)
     }
     this.value = value || 0.0
+    Reflect.defineProperty(this, F64, { value: true })
     Object.freeze(this)
   }
 }
