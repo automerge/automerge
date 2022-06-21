@@ -76,7 +76,7 @@ pub unsafe extern "C" fn AMactorIdInit() -> *mut AMresult {
 ///
 /// \param[in] src A pointer to a contiguous sequence of bytes.
 /// \param[in] count The number of bytes to copy from \p src.
-/// \pre `0 <=` \p count `<=` length of \p src.
+/// \pre `0 <=` \p count `<=` size of \p src.
 /// \return A pointer to an `AMresult` struct containing a pointer to an
 ///         `AMactorId` struct.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
@@ -84,7 +84,7 @@ pub unsafe extern "C" fn AMactorIdInit() -> *mut AMresult {
 /// \internal
 ///
 /// # Safety
-/// src must be a byte array of length `>= count`
+/// src must be a byte array of size `>= count`
 #[no_mangle]
 pub unsafe extern "C" fn AMactorIdInitBytes(src: *const u8, count: usize) -> *mut AMresult {
     let slice = std::slice::from_raw_parts(src, count);

@@ -4,6 +4,7 @@ use std::ffi::c_void;
 use std::mem::size_of;
 
 use crate::byte_span::AMbyteSpan;
+use crate::result::{to_result, AMresult};
 
 #[repr(C)]
 struct Detail {
@@ -29,11 +30,16 @@ impl Detail {
     }
 
     pub fn advance(&mut self, n: isize) {
-        if n != 0 && !self.is_stopped() {
-            let n = if self.offset < 0 { -n } else { n };
-            let len = self.len as isize;
-            self.offset = std::cmp::max(-(len + 1), std::cmp::min(self.offset + n, len));
-        };
+        if n == 0 {
+            return;
+        }
+        let len = self.len as isize;
+        self.offset = if self.offset < 0 {
+            /* It's reversed. */
+            std::cmp::max(-(len + 1), std::cmp::min(self.offset - n, -1))
+        } else {
+            std::cmp::max(0, std::cmp::min(self.offset + n, len))
+        }
     }
 
     pub fn get_index(&self) -> usize {
@@ -62,8 +68,10 @@ impl Detail {
     }
 
     pub fn prev(&mut self, n: isize) -> Option<&am::ChangeHash> {
-        self.advance(n);
-        if self.is_stopped() {
+        /* Check for rewinding. */
+        let prior_offset = self.offset;
+        self.advance(-n);
+        if (self.offset == prior_offset) || self.is_stopped() {
             return None;
         }
         let slice: &[am::ChangeHash] =
@@ -94,7 +102,10 @@ impl From<Detail> for [u8; USIZE_USIZE_USIZE_] {
 /// \brief A random-access iterator over a sequence of change hashes.
 #[repr(C)]
 pub struct AMchangeHashes {
-    /// Reserved.
+    /// An implementation detail that is intentionally opaque.
+    /// \warning Modifying \p detail will cause undefined behavior.
+    /// \note The actual size of \p detail will vary by platform, this is just
+    ///       the one for the platform this documentation was built on.
     detail: [u8; USIZE_USIZE_USIZE_],
 }
 
@@ -153,7 +164,7 @@ impl Default for AMchangeHashes {
 ///        \p |n| positions where the sign of \p n is relative to the
 ///        iterator's direction.
 ///
-/// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
+/// \param[in,out] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
 /// \pre \p change_hashes must be a valid address.
@@ -203,13 +214,49 @@ pub unsafe extern "C" fn AMchangeHashesCmp(
     }
 }
 
+/// \memberof AMchangeHashesInit
+/// \brief Allocates an iterator over a sequence of change hashes and
+///        initializes it from a sequence of byte spans.
+///
+/// \param[in] src A pointer to an array of `AMbyteSpan` structs.
+/// \param[in] count The number of `AMbyteSpan` structs to copy from \p src.
+/// \return A pointer to an `AMresult` struct containing an `AMchangeHashes`
+///         struct.
+/// \pre \p src must be a valid address.
+/// \pre `0 <=` \p count `<=` size of \p src.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfree()`.
+/// \internal
+///
+/// # Safety
+/// src must be an AMbyteSpan array of size `>= count`
+#[no_mangle]
+pub unsafe extern "C" fn AMchangeHashesInit(src: *const AMbyteSpan, count: usize) -> *mut AMresult {
+    let mut change_hashes = Vec::<am::ChangeHash>::new();
+    for n in 0..count {
+        let byte_span = &*src.add(n);
+        let slice = std::slice::from_raw_parts(byte_span.src, byte_span.count);
+        match am::ChangeHash::try_from(slice) {
+            Ok(change_hash) => {
+                change_hashes.push(change_hash);
+            }
+            Err(e) => {
+                return to_result(Err(e));
+            }
+        }
+    }
+    to_result(Ok::<Vec<am::ChangeHash>, am::InvalidChangeHashSlice>(
+        change_hashes,
+    ))
+}
+
 /// \memberof AMchangeHashes
 /// \brief Gets the change hash at the current position of an iterator over a
 ///        sequence of change hashes and then advances it by at most \p |n|
 ///        positions where the sign of \p n is relative to the iterator's
 ///        direction.
 ///
-/// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
+/// \param[in,out] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
 /// \return An `AMbyteSpan` struct with `.src == NULL` when \p change_hashes
@@ -238,7 +285,7 @@ pub unsafe extern "C" fn AMchangeHashesNext(
 ///        iterator's direction and then gets the change hash at its new
 ///        position.
 ///
-/// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
+/// \param[in,out] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
 /// \return An `AMbyteSpan` struct with `.src == NULL` when \p change_hashes is

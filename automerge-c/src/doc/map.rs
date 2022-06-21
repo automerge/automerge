@@ -3,15 +3,15 @@ use automerge::transaction::Transactable;
 use std::os::raw::c_char;
 
 use crate::doc::utils::to_str;
-use crate::doc::{to_doc, to_obj_id, AMdoc};
+use crate::doc::{to_doc, to_doc_const, to_obj_id, AMdoc};
 use crate::obj::{AMobjId, AMobjType};
 use crate::result::{to_result, AMresult};
 
 /// \memberof AMdoc
 /// \brief Deletes a key in a map object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
@@ -38,7 +38,7 @@ pub unsafe extern "C" fn AMmapDelete(
 /// \brief Gets the value for a key in a map object.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \return A pointer to an `AMresult` struct.
 /// \pre \p doc must be a valid address.
@@ -53,19 +53,19 @@ pub unsafe extern "C" fn AMmapDelete(
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapGet(
-    doc: *mut AMdoc,
+    doc: *const AMdoc,
     obj_id: *const AMobjId,
     key: *const c_char,
 ) -> *mut AMresult {
-    let doc = to_doc!(doc);
+    let doc = to_doc_const!(doc);
     to_result(doc.get(to_obj_id!(obj_id), to_str(key)))
 }
 
 /// \memberof AMdoc
 /// \brief Increments a counter for a key in a map object by the given value.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing a void.
@@ -93,8 +93,8 @@ pub unsafe extern "C" fn AMmapIncrement(
 /// \memberof AMdoc
 /// \brief Puts a boolean as the value of a key in a map object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A boolean.
 /// \return A pointer to an `AMresult` struct containing a void.
@@ -122,16 +122,16 @@ pub unsafe extern "C" fn AMmapPutBool(
 /// \memberof AMdoc
 /// \brief Puts a sequence of bytes as the value of a key in a map object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
-/// \param[in] value A pointer to an array of bytes.
-/// \param[in] count The number of bytes to copy from \p value.
+/// \param[in] src A pointer to an array of bytes.
+/// \param[in] count The number of bytes to copy from \p src.
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
-/// \pre \p value must be a valid address.
-/// \pre `0 <=` \p count `<=` length of \p value.
+/// \pre \p src must be a valid address.
+/// \pre `0 <=` \p count `<=` size of \p src.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
 ///          deallocated with `AMfree()`.
 /// \internal
@@ -140,26 +140,26 @@ pub unsafe extern "C" fn AMmapPutBool(
 /// doc must be a pointer to a valid AMdoc
 /// obj_id must be a pointer to a valid AMobjId or NULL
 /// key must be a c string of the map key to be used
-/// value must be a byte array of length `>= count`
+/// src must be a byte array of size `>= count`
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutBytes(
     doc: *mut AMdoc,
     obj_id: *const AMobjId,
     key: *const c_char,
-    value: *const u8,
+    src: *const u8,
     count: usize,
 ) -> *mut AMresult {
     let doc = to_doc!(doc);
     let mut vec = Vec::new();
-    vec.extend_from_slice(std::slice::from_raw_parts(value, count));
+    vec.extend_from_slice(std::slice::from_raw_parts(src, count));
     to_result(doc.put(to_obj_id!(obj_id), to_str(key), vec))
 }
 
 /// \memberof AMdoc
 /// \brief Puts a CRDT counter as the value of a key in a map object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing a void.
@@ -191,8 +191,8 @@ pub unsafe extern "C" fn AMmapPutCounter(
 /// \memberof AMdoc
 /// \brief Puts null as the value of a key in a map object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
@@ -218,8 +218,8 @@ pub unsafe extern "C" fn AMmapPutNull(
 /// \memberof AMdoc
 /// \brief Puts an empty object as the value of a key in a map object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] obj_type An `AMobjIdType` enum tag.
 /// \return A pointer to an `AMresult` struct containing a pointer to an `AMobjId` struct.
@@ -247,8 +247,8 @@ pub unsafe extern "C" fn AMmapPutObject(
 /// \memberof AMdoc
 /// \brief Puts a float as the value of a key in a map object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A 64-bit float.
 /// \return A pointer to an `AMresult` struct containing a void.
@@ -276,8 +276,8 @@ pub unsafe extern "C" fn AMmapPutF64(
 /// \memberof AMdoc
 /// \brief Puts a signed integer as the value of a key in a map object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing a void.
@@ -305,8 +305,8 @@ pub unsafe extern "C" fn AMmapPutInt(
 /// \memberof AMdoc
 /// \brief Puts a UTF-8 string as the value of a key in a map object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A UTF-8 string.
 /// \return A pointer to an `AMresult` struct containing a void.
@@ -336,8 +336,8 @@ pub unsafe extern "C" fn AMmapPutStr(
 /// \memberof AMdoc
 /// \brief Puts a Lamport timestamp as the value of a key in a map object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing a void.
@@ -369,8 +369,8 @@ pub unsafe extern "C" fn AMmapPutTimestamp(
 /// \memberof AMdoc
 /// \brief Puts an unsigned integer as the value of a key in a map object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A 64-bit unsigned integer.
 /// \return A pointer to an `AMresult` struct containing a void.

@@ -4,7 +4,6 @@ use std::ops::{Deref, DerefMut};
 use std::os::raw::c_char;
 
 use crate::actor_id::AMactorId;
-use crate::change::AMchange;
 use crate::change_hashes::AMchangeHashes;
 use crate::obj::AMobjId;
 use crate::result::{to_result, AMresult};
@@ -16,7 +15,7 @@ mod utils;
 
 use crate::changes::AMchanges;
 use crate::doc::utils::to_str;
-use crate::doc::utils::{to_actor_id, to_doc, to_obj_id};
+use crate::doc::utils::{to_actor_id, to_doc, to_doc_const, to_obj_id};
 
 macro_rules! to_changes {
     ($handle:expr) => {{
@@ -72,7 +71,7 @@ impl DerefMut for AMdoc {
 /// \memberof AMdoc
 /// \brief Applies a sequence of changes to a document.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] changes A pointer to an `AMchanges` struct.
 /// \pre \p doc must be a valid address.
 /// \pre \p changes must be a valid address.
@@ -110,7 +109,7 @@ pub extern "C" fn AMcreate() -> *mut AMresult {
 /// \brief Commits the current operations on a document with an optional
 ///        message and/or time override as seconds since the epoch.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] message A UTF-8 string or `NULL`.
 /// \param[in] time A pointer to a `time_t` value or `NULL`.
 /// \return A pointer to an `AMresult` struct containing a change hash as an
@@ -143,7 +142,7 @@ pub unsafe extern "C" fn AMcommit(
 /// \brief Allocates storage for a document and initializes it by duplicating
 ///        the given document.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \return A pointer to an `AMresult` struct containing a pointer to an
 ///         `AMdoc` struct.
 /// \pre \p doc must be a valid address.
@@ -154,8 +153,8 @@ pub unsafe extern "C" fn AMcommit(
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
 #[no_mangle]
-pub unsafe extern "C" fn AMdup(doc: *mut AMdoc) -> *mut AMresult {
-    let doc = to_doc!(doc);
+pub unsafe extern "C" fn AMdup(doc: *const AMdoc) -> *mut AMresult {
+    let doc = to_doc_const!(doc);
     to_result(doc.as_ref().clone())
 }
 
@@ -163,8 +162,8 @@ pub unsafe extern "C" fn AMdup(doc: *mut AMdoc) -> *mut AMresult {
 /// \brief Tests the equality of two documents after closing their respective
 ///        transactions.
 ///
-/// \param[in] doc1 An `AMdoc` struct.
-/// \param[in] doc2 An `AMdoc` struct.
+/// \param[in,out] doc1 An `AMdoc` struct.
+/// \param[in,out] doc2 An `AMdoc` struct.
 /// \return `true` if \p doc1 `==` \p doc2 and `false` otherwise.
 /// \pre \p doc1 must be a valid address.
 /// \pre \p doc2 must be a valid address.
@@ -185,8 +184,8 @@ pub unsafe extern "C" fn AMequal(doc1: *mut AMdoc, doc2: *mut AMdoc) -> bool {
 /// \brief Generates a synchronization message for a peer based upon the given
 ///        synchronization state.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] sync_state A pointer to an `AMsyncState` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] sync_state A pointer to an `AMsyncState` struct.
 /// \return A pointer to an `AMresult` struct containing either a pointer to an
 ///         `AMsyncMessage` struct or a void.
 /// \pre \p doc must b e a valid address.
@@ -222,8 +221,8 @@ pub unsafe extern "C" fn AMgenerateSyncMessage(
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
 #[no_mangle]
-pub unsafe extern "C" fn AMgetActor(doc: *mut AMdoc) -> *mut AMresult {
-    let doc = to_doc!(doc);
+pub unsafe extern "C" fn AMgetActor(doc: *const AMdoc) -> *mut AMresult {
+    let doc = to_doc_const!(doc);
     to_result(Ok::<am::ActorId, am::AutomergeError>(
         doc.get_actor().clone(),
     ))
@@ -232,7 +231,7 @@ pub unsafe extern "C" fn AMgetActor(doc: *mut AMdoc) -> *mut AMresult {
 /// \memberof AMdoc
 /// \brief Gets the changes added to a document by their respective hashes.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] have_deps A pointer to an `AMchangeHashes` struct or `NULL`.
 /// \return A pointer to an `AMresult` struct containing an `AMchanges` struct.
 /// \pre \p doc must be a valid address.
@@ -260,8 +259,8 @@ pub unsafe extern "C" fn AMgetChanges(
 /// \brief Gets the changes added to a second document that weren't added to
 ///        a first document.
 ///
-/// \param[in] doc1 An `AMdoc` struct.
-/// \param[in] doc2 An `AMdoc` struct.
+/// \param[in,out] doc1 An `AMdoc` struct.
+/// \param[in,out] doc2 An `AMdoc` struct.
 /// \return A pointer to an `AMresult` struct containing an `AMchanges` struct.
 /// \pre \p doc1 must be a valid address.
 /// \pre \p doc2 must be a valid address.
@@ -282,7 +281,7 @@ pub unsafe extern "C" fn AMgetChangesAdded(doc1: *mut AMdoc, doc2: *mut AMdoc) -
 /// \memberof AMdoc
 /// \brief Gets the current heads of a document.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \return A pointer to an `AMresult` struct containing an `AMchangeHashes`
 ///         struct.
 /// \pre \p doc must be a valid address.
@@ -295,14 +294,16 @@ pub unsafe extern "C" fn AMgetChangesAdded(doc1: *mut AMdoc, doc2: *mut AMdoc) -
 #[no_mangle]
 pub unsafe extern "C" fn AMgetHeads(doc: *mut AMdoc) -> *mut AMresult {
     let doc = to_doc!(doc);
-    to_result(Ok(doc.get_heads()))
+    to_result(Ok::<Vec<am::ChangeHash>, am::AutomergeError>(
+        doc.get_heads(),
+    ))
 }
 
 /// \memberof AMdoc
 /// \brief Gets the hashes of the changes in a document that aren't transitive
 ///        dependencies of the given hashes of changes.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] heads A pointer to an `AMchangeHashes` struct or `NULL`.
 /// \return A pointer to an `AMresult` struct containing an `AMchangeHashes`
 ///         struct.
@@ -313,6 +314,7 @@ pub unsafe extern "C" fn AMgetHeads(doc: *mut AMdoc) -> *mut AMresult {
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
+/// heads must be a pointer to a valid AMchangeHashes or NULL
 #[no_mangle]
 pub unsafe extern "C" fn AMgetMissingDeps(
     doc: *mut AMdoc,
@@ -330,7 +332,7 @@ pub unsafe extern "C" fn AMgetMissingDeps(
 /// \memberof AMdoc
 /// \brief Gets the last change made to a document.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \return A pointer to an `AMresult` struct containing either an `AMchange`
 ///         struct or a void.
 /// \pre \p doc must be a valid address.
@@ -347,6 +349,37 @@ pub unsafe extern "C" fn AMgetLastLocalChange(doc: *mut AMdoc) -> *mut AMresult 
 }
 
 /// \memberof AMdoc
+/// \brief Gets the current or historical keys of an object.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
+/// \param[in] heads A pointer to an `AMchangeHashes` struct for historical
+///            keys or `NULL` for current keys.
+/// \return A pointer to an `AMresult` struct containing an `AMstrings` struct.
+/// \pre \p doc must be a valid address.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfree()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj_id must be a pointer to a valid AMobjId or NULL
+/// heads must be a pointer to a valid AMchangeHashes or NULL
+#[no_mangle]
+pub unsafe extern "C" fn AMkeys(
+    doc: *const AMdoc,
+    obj_id: *const AMobjId,
+    heads: *const AMchangeHashes,
+) -> *mut AMresult {
+    let doc = to_doc_const!(doc);
+    let obj_id = to_obj_id!(obj_id);
+    match heads.as_ref() {
+        None => to_result(doc.keys(obj_id)),
+        Some(heads) => to_result(doc.keys_at(obj_id, heads.as_ref())),
+    }
+}
+
+/// \memberof AMdoc
 /// \brief Allocates storage for a document and initializes it with the compact
 ///        form of an incremental save.
 ///
@@ -355,13 +388,13 @@ pub unsafe extern "C" fn AMgetLastLocalChange(doc: *mut AMdoc) -> *mut AMresult 
 /// \return A pointer to an `AMresult` struct containing a pointer to an
 ///         `AMdoc` struct.
 /// \pre \p src must be a valid address.
-/// \pre `0 <=` \p count `<=` length of \p src.
+/// \pre `0 <=` \p count `<=` size of \p src.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
 ///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
-/// src must be a byte array of length `>= count`
+/// src must be a byte array of size `>= count`
 #[no_mangle]
 pub unsafe extern "C" fn AMload(src: *const u8, count: usize) -> *mut AMresult {
     let mut data = Vec::new();
@@ -372,21 +405,21 @@ pub unsafe extern "C" fn AMload(src: *const u8, count: usize) -> *mut AMresult {
 /// \memberof AMdoc
 /// \brief Loads the compact form of an incremental save into a document.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] src A pointer to an array of bytes.
 /// \param[in] count The number of bytes in \p src to load.
 /// \return A pointer to an `AMresult` struct containing the number of
 ///         operations loaded from \p src.
 /// \pre \p doc must be a valid address.
 /// \pre \p src must be a valid address.
-/// \pre `0 <=` \p count `<=` length of \p src.
+/// \pre `0 <=` \p count `<=` size of \p src.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
 ///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// src must be a byte array of length `>= count`
+/// src must be a byte array of size `>= count`
 #[no_mangle]
 pub unsafe extern "C" fn AMloadIncremental(
     doc: *mut AMdoc,
@@ -403,8 +436,8 @@ pub unsafe extern "C" fn AMloadIncremental(
 /// \brief Applies all of the changes in \p src which are not in \p dest to
 ///        \p dest.
 ///
-/// \param[in] dest A pointer to an `AMdoc` struct.
-/// \param[in] src A pointer to an `AMdoc` struct.
+/// \param[in,out] dest A pointer to an `AMdoc` struct.
+/// \param[in,out] src A pointer to an `AMdoc` struct.
 /// \return A pointer to an `AMresult` struct containing an `AMchangeHashes`
 ///         struct.
 /// \pre \p dest must be a valid address.
@@ -423,55 +456,35 @@ pub unsafe extern "C" fn AMmerge(dest: *mut AMdoc, src: *mut AMdoc) -> *mut AMre
 }
 
 /// \memberof AMdoc
-/// \brief Gets the size of an object.
+/// \brief Gets the current or historical size of an object.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
-/// \return The count of values in the object identified by \p obj_id.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
+/// \param[in] heads A pointer to an `AMchangeHashes` struct for historical
+///            size or `NULL` for current size.
+/// \return A 64-bit unsigned integer.
 /// \pre \p doc must be a valid address.
 /// \internal
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
 /// obj_id must be a pointer to a valid AMobjId or NULL
+/// heads must be a pointer to a valid AMchangeHashes or NULL
 #[no_mangle]
-pub unsafe extern "C" fn AMobjSize(doc: *const AMdoc, obj_id: *const AMobjId) -> usize {
+pub unsafe extern "C" fn AMobjSize(
+    doc: *const AMdoc,
+    obj_id: *const AMobjId,
+    heads: *const AMchangeHashes,
+) -> usize {
     if let Some(doc) = doc.as_ref() {
-        doc.length(to_obj_id!(obj_id))
+        let obj_id = to_obj_id!(obj_id);
+        match heads.as_ref() {
+            None => doc.length(obj_id),
+            Some(heads) => doc.length_at(obj_id, heads.as_ref()),
+        }
     } else {
         0
     }
-}
-
-/// \memberof AMdoc
-/// \brief Gets the historical size of an object.
-///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj_id A pointer to an `AMobjId` struct or `NULL`.
-/// \param[in] change A pointer to an `AMchange` struct or `NULL`.
-/// \return The count of values in the object identified by \p obj_id at
-///         \p change.
-/// \pre \p doc must be a valid address.
-/// \internal
-///
-/// # Safety
-/// doc must be a pointer to a valid AMdoc
-/// obj_id must be a pointer to a valid AMobjId or NULL
-/// change must be a pointer to a valid AMchange or NULL
-#[no_mangle]
-pub unsafe extern "C" fn AMobjSizeAt(
-    doc: *const AMdoc,
-    obj_id: *const AMobjId,
-    change: *const AMchange,
-) -> usize {
-    if let Some(doc) = doc.as_ref() {
-        if let Some(change) = change.as_ref() {
-            let change: &am::Change = change.as_ref();
-            let change_hashes = vec![change.hash];
-            return doc.length_at(to_obj_id!(obj_id), &change_hashes);
-        }
-    };
-    0
 }
 
 /// \memberof AMdoc
@@ -486,8 +499,8 @@ pub unsafe extern "C" fn AMobjSizeAt(
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
 #[no_mangle]
-pub unsafe extern "C" fn AMpendingOps(doc: *mut AMdoc) -> usize {
-    if let Some(doc) = doc.as_mut() {
+pub unsafe extern "C" fn AMpendingOps(doc: *const AMdoc) -> usize {
+    if let Some(doc) = doc.as_ref() {
         doc.pending_ops()
     } else {
         0
@@ -498,8 +511,8 @@ pub unsafe extern "C" fn AMpendingOps(doc: *mut AMdoc) -> usize {
 /// \brief Receives a synchronization message from a peer based upon a given
 ///        synchronization state.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] sync_state A pointer to an `AMsyncState` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] sync_state A pointer to an `AMsyncState` struct.
 /// \param[in] sync_message A pointer to an `AMsyncMessage` struct.
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
@@ -527,7 +540,7 @@ pub unsafe extern "C" fn AMreceiveSyncMessage(
 /// \brief Cancels the pending operations added during a document's current
 ///        transaction and gets the number of cancellations.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \return The count of pending operations for \p doc that were cancelled.
 /// \pre \p doc must be a valid address.
 /// \internal
@@ -546,7 +559,7 @@ pub unsafe extern "C" fn AMrollback(doc: *mut AMdoc) -> usize {
 /// \memberof AMdoc
 /// \brief Saves the entirety of a document into a compact form.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \return A pointer to an `AMresult` struct containing an array of bytes as
 ///         an `AMbyteSpan` struct.
 /// \pre \p doc must be a valid address.
@@ -566,7 +579,7 @@ pub unsafe extern "C" fn AMsave(doc: *mut AMdoc) -> *mut AMresult {
 /// \brief Saves the changes to a document since its last save into a compact
 ///        form.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \return A pointer to an `AMresult` struct containing an array of bytes as
 ///         an `AMbyteSpan` struct.
 /// \pre \p doc must be a valid address.
@@ -585,7 +598,7 @@ pub unsafe extern "C" fn AMsaveIncremental(doc: *mut AMdoc) -> *mut AMresult {
 /// \memberof AMdoc
 /// \brief Puts the actor ID value of a document.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] actor_id A pointer to an `AMactorId` struct.
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc must be a valid address.
@@ -596,11 +609,75 @@ pub unsafe extern "C" fn AMsaveIncremental(doc: *mut AMdoc) -> *mut AMresult {
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// value must be a byte array of length `>= count`
+/// actor_id must be a pointer to a valid AMactorId
 #[no_mangle]
 pub unsafe extern "C" fn AMsetActor(doc: *mut AMdoc, actor_id: *const AMactorId) -> *mut AMresult {
     let doc = to_doc!(doc);
     let actor_id = to_actor_id!(actor_id);
     doc.set_actor(actor_id.as_ref().clone());
     to_result(Ok(()))
+}
+
+/// \memberof AMdoc
+/// \brief Splices new characters into the identified text object at a given
+///        index.
+///
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
+/// \param[in] index An index in the text object identified by \p obj_id.
+/// \param[in] del The number of characters to delete.
+/// \param[in] text A UTF-8 string.
+/// \return A pointer to an `AMresult` struct containing a void.
+/// \pre \p doc must be a valid address.
+/// \pre `0 <=` \p index `<=` length of the text object identified by \p obj_id.
+/// \pre \p text must be a valid address.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfree()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj_id must be a pointer to a valid AMobjId or NULL
+/// text must be a null-terminated array of `c_char`
+#[no_mangle]
+pub unsafe extern "C" fn AMspliceText(
+    doc: *mut AMdoc,
+    obj_id: *const AMobjId,
+    index: usize,
+    del: usize,
+    text: *const c_char,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    to_result(doc.splice_text(to_obj_id!(obj_id), index, del, &to_str(text)))
+}
+
+/// \memberof AMdoc
+/// \brief Gets the current or historical string represented by a text object.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
+/// \param[in] heads A pointer to an `AMchangeHashes` struct for historical
+///                  keys or `NULL` for current keys.
+/// \return A pointer to an `AMresult` struct containing a UTF-8 string.
+/// \pre \p doc must be a valid address.
+/// \warning To avoid a memory leak, the returned `AMresult` struct must be
+///          deallocated with `AMfree()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj_id must be a pointer to a valid AMobjId or NULL
+/// heads must be a pointer to a valid AMchangeHashes or NULL
+#[no_mangle]
+pub unsafe extern "C" fn AMtext(
+    doc: *const AMdoc,
+    obj_id: *const AMobjId,
+    heads: *const AMchangeHashes,
+) -> *mut AMresult {
+    let doc = to_doc_const!(doc);
+    let obj_id = to_obj_id!(obj_id);
+    match heads.as_ref() {
+        None => to_result(doc.text(obj_id)),
+        Some(heads) => to_result(doc.text_at(obj_id, heads.as_ref())),
+    }
 }

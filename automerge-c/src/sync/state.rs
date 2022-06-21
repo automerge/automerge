@@ -61,13 +61,13 @@ impl From<AMsyncState> for *mut AMsyncState {
 /// \return A pointer to an `AMresult` struct containing an `AMsyncState`
 ///         struct.
 /// \pre \p src must be a valid address.
-/// \pre `0 <=` \p count `<=` length of \p src.
+/// \pre `0 <=` \p count `<=` size of \p src.
 /// \warning To avoid a memory leak, the returned `AMresult` struct must be
 ///          deallocated with `AMfree()`.
 /// \internal
 ///
 /// # Safety
-/// src must be a byte array of length `>= count`
+/// src must be a byte array of size `>= count`
 #[no_mangle]
 pub unsafe extern "C" fn AMsyncStateDecode(src: *const u8, count: usize) -> *mut AMresult {
     let mut data = Vec::new();

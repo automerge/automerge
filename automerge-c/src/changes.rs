@@ -32,11 +32,16 @@ impl Detail {
     }
 
     pub fn advance(&mut self, n: isize) {
-        if n != 0 && !self.is_stopped() {
-            let n = if self.offset < 0 { -n } else { n };
-            let len = self.len as isize;
-            self.offset = std::cmp::max(-(len + 1), std::cmp::min(self.offset + n, len));
-        };
+        if n == 0 {
+            return;
+        }
+        let len = self.len as isize;
+        self.offset = if self.offset < 0 {
+            /* It's reversed. */
+            std::cmp::max(-(len + 1), std::cmp::min(self.offset - n, -1))
+        } else {
+            std::cmp::max(0, std::cmp::min(self.offset + n, len))
+        }
     }
 
     pub fn get_index(&self) -> usize {
@@ -73,8 +78,10 @@ impl Detail {
     }
 
     pub fn prev(&mut self, n: isize) -> Option<*const AMchange> {
-        self.advance(n);
-        if self.is_stopped() {
+        /* Check for rewinding. */
+        let prior_offset = self.offset;
+        self.advance(-n);
+        if (self.offset == prior_offset) || self.is_stopped() {
             return None;
         }
         let slice: &mut [am::Change] =
@@ -117,7 +124,10 @@ impl From<Detail> for [u8; USIZE_USIZE_USIZE_USIZE_] {
 /// \brief A random-access iterator over a sequence of changes.
 #[repr(C)]
 pub struct AMchanges {
-    /// Reserved.
+    /// An implementation detail that is intentionally opaque.
+    /// \warning Modifying \p detail will cause undefined behavior.
+    /// \note The actual size of \p detail will vary by platform, this is just
+    ///       the one for the platform this documentation was built on.
     detail: [u8; USIZE_USIZE_USIZE_USIZE_],
 }
 
@@ -176,7 +186,7 @@ impl Default for AMchanges {
 ///        positions where the sign of \p n is relative to the iterator's
 ///        direction.
 ///
-/// \param[in] changes A pointer to an `AMchanges` struct.
+/// \param[in,out] changes A pointer to an `AMchanges` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
 /// \pre \p changes must be a valid address.
@@ -221,7 +231,7 @@ pub unsafe extern "C" fn AMchangesEqual(
 ///        sequence of changes and then advances it by at most \p |n| positions
 ///        where the sign of \p n is relative to the iterator's direction.
 ///
-/// \param[in] changes A pointer to an `AMchanges` struct.
+/// \param[in,out] changes A pointer to an `AMchanges` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
 /// \return A pointer to an `AMchange` struct that's `NULL` when \p changes was
@@ -246,7 +256,7 @@ pub unsafe extern "C" fn AMchangesNext(changes: *mut AMchanges, n: isize) -> *co
 ///        positions where the sign of \p n is relative to the iterator's
 ///        direction and then gets the change at its new position.
 ///
-/// \param[in] changes A pointer to an `AMchanges` struct.
+/// \param[in,out] changes A pointer to an `AMchanges` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
 /// \return A pointer to an `AMchange` struct that's `NULL` when \p changes is

@@ -10,6 +10,7 @@
 #include <cmocka.h>
 
 /* local */
+#include "automerge.h"
 #include "group_state.h"
 #include "macro_utils.h"
 
@@ -96,7 +97,7 @@ static void test_AMmapPutObject_ ## label(void **state) {                     \
     AMvalue value = AMresultValue(res);                                       \
     assert_int_equal(value.tag, AM_VALUE_OBJ_ID);                             \
     assert_non_null(value.obj_id);                                            \
-    assert_int_equal(AMobjSize(group_state->doc, value.obj_id), 0);           \
+    assert_int_equal(AMobjSize(group_state->doc, value.obj_id, NULL), 0);     \
     AMfree(res);                                                              \
 }
 

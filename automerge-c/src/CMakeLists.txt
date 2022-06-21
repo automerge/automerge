@@ -62,6 +62,7 @@ add_custom_command(
         doc/utils.rs
         obj.rs
         result.rs
+        strings.rs
         sync.rs
         sync/have.rs
         sync/haves.rs
@@ -97,7 +98,7 @@ add_custom_command(
         # Compensate for cbindgen's translation of consecutive uppercase letters to "ScreamingSnakeCase".
         ${CMAKE_COMMAND} -DMATCH_REGEX=A_M\([^_]+\)_ -DREPLACE_EXPR=AM_\\1_ -P ${CMAKE_SOURCE_DIR}/cmake/file_regex_replace.cmake -- ${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
     COMMAND
-        # Compensate for cbindgen ignoring `std:mem::size_of<T>()` calls.
+        # Compensate for cbindgen ignoring `std:mem::size_of<usize>()` calls.
         ${CMAKE_COMMAND} -DMATCH_REGEX=USIZE_ -DREPLACE_EXPR=\+${CMAKE_SIZEOF_VOID_P} -P ${CMAKE_SOURCE_DIR}/cmake/file_regex_replace.cmake -- ${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
     WORKING_DIRECTORY
         ${CMAKE_SOURCE_DIR}

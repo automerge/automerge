@@ -25,6 +25,18 @@ macro_rules! to_doc {
 
 pub(crate) use to_doc;
 
+macro_rules! to_doc_const {
+    ($handle:expr) => {{
+        let handle = $handle.as_ref();
+        match handle {
+            Some(b) => b,
+            None => return AMresult::err("Invalid AMdoc pointer").into(),
+        }
+    }};
+}
+
+pub(crate) use to_doc_const;
+
 macro_rules! to_obj_id {
     ($handle:expr) => {{
         match $handle.as_ref() {
