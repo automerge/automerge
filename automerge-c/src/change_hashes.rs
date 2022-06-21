@@ -164,7 +164,7 @@ impl Default for AMchangeHashes {
 ///        \p |n| positions where the sign of \p n is relative to the
 ///        iterator's direction.
 ///
-/// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
+/// \param[in,out] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
 /// \pre \p change_hashes must be a valid address.
@@ -256,7 +256,7 @@ pub unsafe extern "C" fn AMchangeHashesInit(src: *const AMbyteSpan, count: usize
 ///        positions where the sign of \p n is relative to the iterator's
 ///        direction.
 ///
-/// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
+/// \param[in,out] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
 /// \return An `AMbyteSpan` struct with `.src == NULL` when \p change_hashes
@@ -285,7 +285,7 @@ pub unsafe extern "C" fn AMchangeHashesNext(
 ///        iterator's direction and then gets the change hash at its new
 ///        position.
 ///
-/// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
+/// \param[in,out] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
 /// \return An `AMbyteSpan` struct with `.src == NULL` when \p change_hashes is

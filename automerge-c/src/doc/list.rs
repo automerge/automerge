@@ -2,14 +2,14 @@ use automerge as am;
 use automerge::transaction::Transactable;
 use std::os::raw::c_char;
 
-use crate::doc::{to_doc, to_obj_id, to_str, AMdoc};
+use crate::doc::{to_doc, to_doc_const, to_obj_id, to_str, AMdoc};
 use crate::obj::{AMobjId, AMobjType};
 use crate::result::{to_result, AMresult};
 
 /// \memberof AMdoc
 /// \brief Deletes an index in a list object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \return A pointer to an `AMresult` struct containing a void.
@@ -50,11 +50,11 @@ pub unsafe extern "C" fn AMlistDelete(
 /// obj_id must be a pointer to a valid AMobjId or NULL
 #[no_mangle]
 pub unsafe extern "C" fn AMlistGet(
-    doc: *mut AMdoc,
+    doc: *const AMdoc,
     obj_id: *const AMobjId,
     index: usize,
 ) -> *mut AMresult {
-    let doc = to_doc!(doc);
+    let doc = to_doc_const!(doc);
     to_result(doc.get(to_obj_id!(obj_id), index))
 }
 
@@ -62,7 +62,7 @@ pub unsafe extern "C" fn AMlistGet(
 /// \brief Increments a counter at an index in a list object by the given
 ///        value.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \param[in] value A 64-bit signed integer.
@@ -90,7 +90,7 @@ pub unsafe extern "C" fn AMlistIncrement(
 /// \memberof AMdoc
 /// \brief Puts a boolean as the value at an index in a list object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \param[in] insert A flag to insert \p value before \p index instead of
@@ -126,7 +126,7 @@ pub unsafe extern "C" fn AMlistPutBool(
 /// \memberof AMdoc
 /// \brief Puts a sequence of bytes as the value at an index in a list object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \param[in] insert A flag to insert \p src before \p index instead of
@@ -169,7 +169,7 @@ pub unsafe extern "C" fn AMlistPutBytes(
 /// \memberof AMdoc
 /// \brief Puts a CRDT counter as the value at an index in a list object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \param[in] insert A flag to insert \p value before \p index instead of
@@ -206,7 +206,7 @@ pub unsafe extern "C" fn AMlistPutCounter(
 /// \memberof AMdoc
 /// \brief Puts a float as the value at an index in a list object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \param[in] insert A flag to insert \p value before \p index instead of
@@ -242,7 +242,7 @@ pub unsafe extern "C" fn AMlistPutF64(
 /// \memberof AMdoc
 /// \brief Puts a signed integer as the value at an index in a list object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \param[in] insert A flag to insert \p value before \p index instead of
@@ -278,7 +278,7 @@ pub unsafe extern "C" fn AMlistPutInt(
 /// \memberof AMdoc
 /// \brief Puts null as the value at an index in a list object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \param[in] insert A flag to insert \p value before \p index instead of
@@ -313,7 +313,7 @@ pub unsafe extern "C" fn AMlistPutNull(
 /// \memberof AMdoc
 /// \brief Puts an empty object as the value at an index in a list object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \param[in] insert A flag to insert \p value before \p index instead of
@@ -350,7 +350,7 @@ pub unsafe extern "C" fn AMlistPutObject(
 /// \memberof AMdoc
 /// \brief Puts a UTF-8 string as the value at an index in a list object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \param[in] insert A flag to insert \p value before \p index instead of
@@ -389,7 +389,7 @@ pub unsafe extern "C" fn AMlistPutStr(
 /// \memberof AMdoc
 /// \brief Puts a Lamport timestamp as the value at an index in a list object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \param[in] insert A flag to insert \p value before \p index instead of
@@ -426,7 +426,7 @@ pub unsafe extern "C" fn AMlistPutTimestamp(
 /// \memberof AMdoc
 /// \brief Puts an unsigned integer as the value at an index in a list object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] index An index in the list object identified by \p obj_id.
 /// \param[in] insert A flag to insert \p value before \p index instead of

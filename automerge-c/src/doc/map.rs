@@ -3,14 +3,14 @@ use automerge::transaction::Transactable;
 use std::os::raw::c_char;
 
 use crate::doc::utils::to_str;
-use crate::doc::{to_doc, to_obj_id, AMdoc};
+use crate::doc::{to_doc, to_doc_const, to_obj_id, AMdoc};
 use crate::obj::{AMobjId, AMobjType};
 use crate::result::{to_result, AMresult};
 
 /// \memberof AMdoc
 /// \brief Deletes a key in a map object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \return A pointer to an `AMresult` struct containing a void.
@@ -53,18 +53,18 @@ pub unsafe extern "C" fn AMmapDelete(
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapGet(
-    doc: *mut AMdoc,
+    doc: *const AMdoc,
     obj_id: *const AMobjId,
     key: *const c_char,
 ) -> *mut AMresult {
-    let doc = to_doc!(doc);
+    let doc = to_doc_const!(doc);
     to_result(doc.get(to_obj_id!(obj_id), to_str(key)))
 }
 
 /// \memberof AMdoc
 /// \brief Increments a counter for a key in a map object by the given value.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A 64-bit signed integer.
@@ -93,7 +93,7 @@ pub unsafe extern "C" fn AMmapIncrement(
 /// \memberof AMdoc
 /// \brief Puts a boolean as the value of a key in a map object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A boolean.
@@ -122,7 +122,7 @@ pub unsafe extern "C" fn AMmapPutBool(
 /// \memberof AMdoc
 /// \brief Puts a sequence of bytes as the value of a key in a map object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] src A pointer to an array of bytes.
@@ -158,7 +158,7 @@ pub unsafe extern "C" fn AMmapPutBytes(
 /// \memberof AMdoc
 /// \brief Puts a CRDT counter as the value of a key in a map object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A 64-bit signed integer.
@@ -191,7 +191,7 @@ pub unsafe extern "C" fn AMmapPutCounter(
 /// \memberof AMdoc
 /// \brief Puts null as the value of a key in a map object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \return A pointer to an `AMresult` struct containing a void.
@@ -218,7 +218,7 @@ pub unsafe extern "C" fn AMmapPutNull(
 /// \memberof AMdoc
 /// \brief Puts an empty object as the value of a key in a map object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] obj_type An `AMobjIdType` enum tag.
@@ -247,7 +247,7 @@ pub unsafe extern "C" fn AMmapPutObject(
 /// \memberof AMdoc
 /// \brief Puts a float as the value of a key in a map object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A 64-bit float.
@@ -276,7 +276,7 @@ pub unsafe extern "C" fn AMmapPutF64(
 /// \memberof AMdoc
 /// \brief Puts a signed integer as the value of a key in a map object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A 64-bit signed integer.
@@ -305,7 +305,7 @@ pub unsafe extern "C" fn AMmapPutInt(
 /// \memberof AMdoc
 /// \brief Puts a UTF-8 string as the value of a key in a map object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A UTF-8 string.
@@ -336,7 +336,7 @@ pub unsafe extern "C" fn AMmapPutStr(
 /// \memberof AMdoc
 /// \brief Puts a Lamport timestamp as the value of a key in a map object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A 64-bit signed integer.
@@ -369,7 +369,7 @@ pub unsafe extern "C" fn AMmapPutTimestamp(
 /// \memberof AMdoc
 /// \brief Puts an unsigned integer as the value of a key in a map object.
 ///
-/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A 64-bit unsigned integer.

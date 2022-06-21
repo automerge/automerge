@@ -76,7 +76,7 @@ pub unsafe extern "C" fn AMchangeActorId(change: *const AMchange) -> *mut AMresu
 /// \memberof AMchange
 /// \brief Compresses the raw bytes of a change.
 ///
-/// \param[in] change A pointer to an `AMchange` struct.
+/// \param[in,out] change A pointer to an `AMchange` struct.
 /// \pre \p change must be a valid address.
 /// \internal
 ///

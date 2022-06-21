@@ -186,7 +186,7 @@ impl Default for AMchanges {
 ///        positions where the sign of \p n is relative to the iterator's
 ///        direction.
 ///
-/// \param[in] changes A pointer to an `AMchanges` struct.
+/// \param[in,out] changes A pointer to an `AMchanges` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
 /// \pre \p changes must be a valid address.
@@ -231,7 +231,7 @@ pub unsafe extern "C" fn AMchangesEqual(
 ///        sequence of changes and then advances it by at most \p |n| positions
 ///        where the sign of \p n is relative to the iterator's direction.
 ///
-/// \param[in] changes A pointer to an `AMchanges` struct.
+/// \param[in,out] changes A pointer to an `AMchanges` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
 /// \return A pointer to an `AMchange` struct that's `NULL` when \p changes was
@@ -256,7 +256,7 @@ pub unsafe extern "C" fn AMchangesNext(changes: *mut AMchanges, n: isize) -> *co
 ///        positions where the sign of \p n is relative to the iterator's
 ///        direction and then gets the change at its new position.
 ///
-/// \param[in] changes A pointer to an `AMchanges` struct.
+/// \param[in,out] changes A pointer to an `AMchanges` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
 /// \return A pointer to an `AMchange` struct that's `NULL` when \p changes is

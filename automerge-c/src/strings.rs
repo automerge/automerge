@@ -161,7 +161,7 @@ impl Default for AMstrings {
 ///        \p |n| positions where the sign of \p n is relative to the
 ///        iterator's direction.
 ///
-/// \param[in] strings A pointer to an `AMstrings` struct.
+/// \param[in,out] strings A pointer to an `AMstrings` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
 /// \pre \p strings must be a valid address.
@@ -214,7 +214,7 @@ pub unsafe extern "C" fn AMstringsCmp(
 ///        sequence of UTF-8 strings and then advances it by at most \p |n|
 ///        positions where the sign of \p n is relative to the iterator's direction.
 ///
-/// \param[in] strings A pointer to an `AMstrings` struct.
+/// \param[in,out] strings A pointer to an `AMstrings` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
 /// \return A UTF-8 string that's `NULL` when \p strings was previously
@@ -239,7 +239,7 @@ pub unsafe extern "C" fn AMstringsNext(strings: *mut AMstrings, n: isize) -> *co
 ///        \p |n| positions where the sign of \p n is relative to the
 ///        iterator's direction and then gets the key at its new position.
 ///
-/// \param[in] strings A pointer to an `AMstrings` struct.
+/// \param[in,out] strings A pointer to an `AMstrings` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
 /// \return A UTF-8 string that's `NULL` when \p strings is presently advanced

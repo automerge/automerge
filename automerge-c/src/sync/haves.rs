@@ -190,7 +190,7 @@ impl Default for AMsyncHaves {
 ///        most \p |n| positions where the sign of \p n is relative to the
 ///        iterator's direction.
 ///
-/// \param[in] sync_haves A pointer to an `AMsyncHaves` struct.
+/// \param[in,out] sync_haves A pointer to an `AMsyncHaves` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
 /// \pre \p sync_haves must be a valid address.
@@ -236,7 +236,7 @@ pub unsafe extern "C" fn AMsyncHavesEqual(
 ///        most \p |n| positions where the sign of \p n is relative to the
 ///        iterator's direction.
 ///
-/// \param[in] sync_haves A pointer to an `AMsyncHaves` struct.
+/// \param[in,out] sync_haves A pointer to an `AMsyncHaves` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
 /// \return A pointer to an `AMsyncHave` struct that's `NULL` when
@@ -266,7 +266,7 @@ pub unsafe extern "C" fn AMsyncHavesNext(
 ///        iterator's direction and then gets the synchronization have at its
 ///        new position.
 ///
-/// \param[in] sync_haves A pointer to an `AMsyncHaves` struct.
+/// \param[in,out] sync_haves A pointer to an `AMsyncHaves` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
 /// \return A pointer to an `AMsyncHave` struct that's `NULL` when
