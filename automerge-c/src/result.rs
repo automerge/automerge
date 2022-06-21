@@ -110,6 +110,7 @@ pub enum AMresult {
     ActorId(AMactorId),
     ChangeHashes(Vec<am::ChangeHash>),
     Changes(Vec<am::Change>, BTreeMap<usize, AMchange>),
+    String(CString),
     Strings(Vec<CString>),
     Doc(Box<AMdoc>),
     Error(CString),
@@ -273,6 +274,15 @@ impl From<Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>> f
     }
 }
 
+impl From<Result<String, am::AutomergeError>> for AMresult {
+    fn from(maybe: Result<String, am::AutomergeError>) -> Self {
+        match maybe {
+            Ok(string) => AMresult::String(CString::new(string).unwrap()),
+            Err(e) => AMresult::err(&e.to_string()),
+        }
+    }
+}
+
 impl From<Result<usize, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<usize, am::AutomergeError>) -> Self {
         match maybe {
@@ -380,8 +390,8 @@ pub enum AMstatus {
 /// # Safety
 /// result must be a pointer to a valid AMresult
 #[no_mangle]
-pub unsafe extern "C" fn AMerrorMessage(result: *mut AMresult) -> *const c_char {
-    match result.as_mut() {
+pub unsafe extern "C" fn AMerrorMessage(result: *const AMresult) -> *const c_char {
+    match result.as_ref() {
         Some(AMresult::Error(s)) => s.as_ptr(),
         _ => std::ptr::null::<c_char>(),
     }
@@ -390,7 +400,7 @@ pub unsafe extern "C" fn AMerrorMessage(result: *mut AMresult) -> *const c_char 
 /// \memberof AMresult
 /// \brief Deallocates the storage for a result.
 ///
-/// \param[in] result A pointer to an `AMresult` struct.
+/// \param[in,out] result A pointer to an `AMresult` struct.
 /// \pre \p result must be a valid address.
 /// \internal
 ///
@@ -415,13 +425,14 @@ pub unsafe extern "C" fn AMfree(result: *mut AMresult) {
 /// # Safety
 /// result must be a pointer to a valid AMresult
 #[no_mangle]
-pub unsafe extern "C" fn AMresultSize(result: *mut AMresult) -> usize {
-    if let Some(result) = result.as_mut() {
+pub unsafe extern "C" fn AMresultSize(result: *const AMresult) -> usize {
+    if let Some(result) = result.as_ref() {
         match result {
             AMresult::Error(_) | AMresult::Void => 0,
             AMresult::ActorId(_)
             | AMresult::Doc(_)
             | AMresult::ObjId(_)
+            | AMresult::String(_)
             | AMresult::SyncMessage(_)
             | AMresult::SyncState(_)
             | AMresult::Value(_, _) => 1,
@@ -445,8 +456,8 @@ pub unsafe extern "C" fn AMresultSize(result: *mut AMresult) -> usize {
 /// # Safety
 /// result must be a pointer to a valid AMresult
 #[no_mangle]
-pub unsafe extern "C" fn AMresultStatus(result: *mut AMresult) -> AMstatus {
-    match result.as_mut() {
+pub unsafe extern "C" fn AMresultStatus(result: *const AMresult) -> AMstatus {
+    match result.as_ref() {
         Some(AMresult::Error(_)) => AMstatus::Error,
         None => AMstatus::InvalidResult,
         _ => AMstatus::Ok,
@@ -456,7 +467,7 @@ pub unsafe extern "C" fn AMresultStatus(result: *mut AMresult) -> AMstatus {
 /// \memberof AMresult
 /// \brief Gets a result's value.
 ///
-/// \param[in] result A pointer to an `AMresult` struct.
+/// \param[in,out] result A pointer to an `AMresult` struct.
 /// \return An `AMvalue` struct.
 /// \pre \p result must be a valid address.
 /// \internal
@@ -482,6 +493,7 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult) -> AMvalue<'a>
             AMresult::ObjId(obj_id) => {
                 content = AMvalue::ObjId(obj_id);
             }
+            AMresult::String(cstring) => content = AMvalue::Str(cstring.as_ptr()),
             AMresult::Strings(cstrings) => {
                 content = AMvalue::Strings(AMstrings::new(cstrings));
             }
@@ -491,7 +503,7 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult) -> AMvalue<'a>
             AMresult::SyncState(sync_state) => {
                 content = AMvalue::SyncState(sync_state);
             }
-            AMresult::Value(value, hosted_str) => {
+            AMresult::Value(value, value_str) => {
                 match value {
                     am::Value::Scalar(scalar) => match scalar.as_ref() {
                         am::ScalarValue::Boolean(flag) => {
@@ -513,9 +525,9 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult) -> AMvalue<'a>
                             content = AMvalue::Null;
                         }
                         am::ScalarValue::Str(smol_str) => {
-                            *hosted_str = CString::new(smol_str.to_string()).ok();
-                            if let Some(c_str) = hosted_str {
-                                content = AMvalue::Str(c_str.as_ptr());
+                            *value_str = CString::new(smol_str.to_string()).ok();
+                            if let Some(cstring) = value_str {
+                                content = AMvalue::Str(cstring.as_ptr());
                             }
                         }
                         am::ScalarValue::Timestamp(timestamp) => {

@@ -207,6 +207,24 @@ static void test_AMputActor_hex(void **state) {
     AMfree(result);
 }
 
+static void test_AMspliceText() {
+    AMresult* const doc_result = AMcreate();
+    AMdoc* const doc = AMresultValue(doc_result).doc;
+    AMfree(AMspliceText(doc, AM_ROOT, 0, 0, "one + "));
+    AMfree(AMspliceText(doc, AM_ROOT, 4, 2, "two = "));
+    AMfree(AMspliceText(doc, AM_ROOT, 8, 2, "three"));
+    AMresult* const text_result = AMtext(doc, AM_ROOT, NULL);
+    if (AMresultStatus(text_result) != AM_STATUS_OK) {
+        fail_msg("%s", AMerrorMessage(text_result));
+    }
+    assert_int_equal(AMresultSize(text_result), 1);
+    AMvalue value = AMresultValue(text_result);
+    assert_int_equal(value.tag, AM_VALUE_STR);
+    assert_string_equal(value.str, "one two three");
+    AMfree(text_result);
+    AMfree(doc_result);
+}
+
 int run_doc_tests(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_AMkeys_empty),
@@ -214,6 +232,7 @@ int run_doc_tests(void) {
         cmocka_unit_test(test_AMkeys_map),
         cmocka_unit_test_setup_teardown(test_AMputActor_bytes, setup, teardown),
         cmocka_unit_test_setup_teardown(test_AMputActor_hex, setup, teardown),
+        cmocka_unit_test(test_AMspliceText),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);
