@@ -5,6 +5,7 @@
 [![homepage](https://img.shields.io/badge/homepage-published-informational)](https://automerge.org/)
 [![main docs](https://img.shields.io/badge/docs-main-informational)](https://automerge.org/automerge-rs/automerge/)
 [![ci](https://github.com/automerge/automerge-rs/actions/workflows/ci.yaml/badge.svg)](https://github.com/automerge/automerge-rs/actions/workflows/ci.yaml)
+[![docs](https://github.com/automerge/automerge-rs/actions/workflows/docs.yaml/badge.svg)](https://github.com/automerge/automerge-rs/actions/workflows/docs.yaml)
 
 This is a rust implementation of the [Automerge](https://github.com/automerge/automerge) file format and network protocol.
 
