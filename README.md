@@ -15,10 +15,10 @@ If you are looking for the origional `automerge-rs` project that can be used as 
 
 This project has 4 components:
 
-1. _automerge_ - a rust implementation of the library. This project is the most mature and being used in a handful of small applications.
-2. _automerge-wasm_ - a js/wasm interface to the underlying rust library. This api is generally mature and in use in a handful of projects as well.
-3. _automerge-js_ - this is a javascript library using the wasm interface to export the same public api of the primary automerge project. Currently this project passes all of automerge's tests but has not been used in any real project or packaged as an NPM. Alpha testers welcome.
-4. _automerge-c_ - this is a c library intended to be an ffi integration point for all other languages. It is currently a work in progress and not yet ready for any testing.
+1. [_automerge_](automerge) - a rust implementation of the library. This project is the most mature and being used in a handful of small applications.
+2. [_automerge-wasm_](automerge-wasm) - a js/wasm interface to the underlying rust library. This api is generally mature and in use in a handful of projects as well.
+3. [_automerge-js_](automerge-js) - this is a javascript library using the wasm interface to export the same public api of the primary automerge project. Currently this project passes all of automerge's tests but has not been used in any real project or packaged as an NPM. Alpha testers welcome.
+4. [_automerge-c_](automerge-c) - this is a c library intended to be an ffi integration point for all other languages. It is currently a work in progress and not yet ready for any testing.
 
 ## How?
 
