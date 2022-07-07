@@ -99,6 +99,7 @@ $ cmake -S .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
 ## building and testing
 $ cmake --build . --target test_automerge
 ```
+
 To add debugging symbols, replace `Release` with `Debug`.
 To build a shared library instead of a static one, replace `OFF` with `ON`.
 
@@ -108,4 +109,4 @@ to list here.
 
 ## Benchmarking
 
-The `edit-trace` folder has the main code for running the edit trace benchmarking.
+The [`edit-trace`](edit-trace) folder has the main code for running the edit trace benchmarking.

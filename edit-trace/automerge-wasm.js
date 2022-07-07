@@ -1,9 +1,3 @@
-
-// make sure to
-
-// # cd ../automerge-wasm
-// # yarn release
-
 const { edits, finalText } = require('./editing-trace')
 const Automerge = require('../automerge-wasm')
 
