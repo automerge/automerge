@@ -754,6 +754,16 @@ struct SuccEncoder {
     ctr: DeltaEncoder,
 }
 
+fn succ_ord(left: &OpId, right: &OpId, actors: &[usize]) -> Ordering {
+    match (left, right) {
+        (OpId(0, _), OpId(0, _)) => Ordering::Equal,
+        (OpId(0, _), OpId(_, _)) => Ordering::Less,
+        (OpId(_, _), OpId(0, _)) => Ordering::Greater,
+        (OpId(a, x), OpId(b, y)) if a == b => actors[*x].cmp(&actors[*y]),
+        (OpId(a, _), OpId(b, _)) => a.cmp(b),
+    }
+}
+
 impl SuccEncoder {
     fn new() -> SuccEncoder {
         SuccEncoder {
@@ -765,7 +775,9 @@ impl SuccEncoder {
 
     fn append(&mut self, succ: &[OpId], actors: &[usize]) {
         self.num.append_value(succ.len());
-        for s in succ.iter() {
+        let mut sorted_succ = succ.to_vec();
+        sorted_succ.sort_by(|left, right| succ_ord(left, right, actors));
+        for s in sorted_succ.iter() {
             self.ctr.append_value(s.0);
             self.actor.append_value(actors[s.1]);
         }
