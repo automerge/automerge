@@ -1322,9 +1322,18 @@ fn get_parent_objects() {
     doc.insert(&list, 0, 2).unwrap();
     let text = doc.put_object(&list, 0, ObjType::Text).unwrap();
 
-    assert_eq!(doc.parent_object(&map), Some((ROOT, Prop::Map("a".into()))));
-    assert_eq!(doc.parent_object(&list), Some((map, Prop::Seq(0))));
-    assert_eq!(doc.parent_object(&text), Some((list, Prop::Seq(0))));
+    assert_eq!(
+        doc.parents(&map).unwrap().next(),
+        Some((ROOT, Prop::Map("a".into())))
+    );
+    assert_eq!(
+        doc.parents(&list).unwrap().next(),
+        Some((map, Prop::Seq(0)))
+    );
+    assert_eq!(
+        doc.parents(&text).unwrap().next(),
+        Some((list, Prop::Seq(0)))
+    );
 }
 
 #[test]
@@ -1336,15 +1345,15 @@ fn get_path_to_object() {
     let text = doc.put_object(&list, 0, ObjType::Text).unwrap();
 
     assert_eq!(
-        doc.path_to_object(&map),
+        doc.path_to_object(&map).unwrap(),
         vec![(ROOT, Prop::Map("a".into()))]
     );
     assert_eq!(
-        doc.path_to_object(&list),
+        doc.path_to_object(&list).unwrap(),
         vec![(ROOT, Prop::Map("a".into())), (map.clone(), Prop::Seq(0)),]
     );
     assert_eq!(
-        doc.path_to_object(&text),
+        doc.path_to_object(&text).unwrap(),
         vec![
             (ROOT, Prop::Map("a".into())),
             (map, Prop::Seq(0)),
@@ -1361,7 +1370,7 @@ fn parents_iterator() {
     doc.insert(&list, 0, 2).unwrap();
     let text = doc.put_object(&list, 0, ObjType::Text).unwrap();
 
-    let mut parents = doc.parents(text);
+    let mut parents = doc.parents(text).unwrap();
     assert_eq!(parents.next(), Some((list, Prop::Seq(0))));
     assert_eq!(parents.next(), Some((map, Prop::Seq(0))));
     assert_eq!(parents.next(), Some((ROOT, Prop::Map("a".into()))));

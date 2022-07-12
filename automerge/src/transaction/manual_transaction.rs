@@ -287,11 +287,7 @@ impl<'a> Transactable for Transaction<'a> {
         self.doc.get_all_at(obj, prop, heads)
     }
 
-    fn parent_object<O: AsRef<ExId>>(&self, obj: O) -> Option<(ExId, Prop)> {
-        self.doc.parent_object(obj)
-    }
-
-    fn parents(&self, obj: ExId) -> crate::Parents<'_> {
+    fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<crate::Parents<'_>, AutomergeError> {
         self.doc.parents(obj)
     }
 }
