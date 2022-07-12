@@ -4,7 +4,7 @@ set -eoux pipefail
 
 mkdir -p automerge-c/build
 cd automerge-c/build
-cmake -B . -S ..
+cmake -B . -S .. -DBUILD_TESTING=OFF
 cmake --build . --target automerge_docs
 
 echo "Try opening automerge-c/build/src/html/index.html"
