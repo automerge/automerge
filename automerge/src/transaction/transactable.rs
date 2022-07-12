@@ -179,15 +179,22 @@ pub trait Transactable {
         heads: &[ChangeHash],
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError>;
 
-    /// Get the object id of the object that contains this object and the prop that this object is
-    /// at in that object.
-    fn parent_object<O: AsRef<ExId>>(&self, obj: O) -> Option<(ExId, Prop)>;
+    /// Get the parents of an object in the document tree.
+    ///
+    /// ### Errors
+    ///
+    /// Returns an error when the id given is not the id of an object in this document.
+    /// This function does not get the parents of scalar values contained within objects.
+    ///
+    /// ### Experimental
+    ///
+    /// This function may in future be changed to allow getting the parents from the id of a scalar
+    /// value.
+    fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError>;
 
-    fn parents(&self, obj: ExId) -> Parents<'_>;
-
-    fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Vec<(ExId, Prop)> {
-        let mut path = self.parents(obj.as_ref().clone()).collect::<Vec<_>>();
+    fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<(ExId, Prop)>, AutomergeError> {
+        let mut path = self.parents(obj.as_ref().clone())?.collect::<Vec<_>>();
         path.reverse();
-        path
+        Ok(path)
     }
 }

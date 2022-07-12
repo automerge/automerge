@@ -499,11 +499,7 @@ impl Transactable for AutoCommit {
         self.doc.get_all_at(obj, prop, heads)
     }
 
-    fn parent_object<O: AsRef<ExId>>(&self, obj: O) -> Option<(ExId, Prop)> {
-        self.doc.parent_object(obj)
-    }
-
-    fn parents(&self, obj: ExId) -> Parents<'_> {
+    fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
         self.doc.parents(obj)
     }
 }

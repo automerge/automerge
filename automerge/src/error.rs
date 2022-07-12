@@ -5,6 +5,8 @@ use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum AutomergeError {
+    #[error("id was not an object id")]
+    NotAnObject,
     #[error("invalid obj id format `{0}`")]
     InvalidObjIdFormat(String),
     #[error("invalid obj id `{0}`")]
