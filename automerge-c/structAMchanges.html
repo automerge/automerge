@@ -136,7 +136,7 @@ Public Attributes</h2></td></tr>
 <p>Advances an iterator over a sequence of changes by at most <code>|n|</code> positions where the sign of <code>n</code> is relative to the iterator's direction. </p>
 <dl class="params"><dt>Parameters</dt><dd>
   <table class="params">
-    <tr><td class="paramdir">[in]</td><td class="paramname">changes</td><td>A pointer to an <code><a class="el" href="structAMchanges.html" title="A random-access iterator over a sequence of changes.">AMchanges</a></code> struct. </td></tr>
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">changes</td><td>A pointer to an <code><a class="el" href="structAMchanges.html" title="A random-access iterator over a sequence of changes.">AMchanges</a></code> struct. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">n</td><td>The direction (<code>-n</code> -&gt; opposite, <code>n</code> -&gt; same) and maximum number of positions to advance. </td></tr>
   </table>
   </dd>
@@ -215,7 +215,7 @@ Public Attributes</h2></td></tr>
 <p>Gets the change at the current position of an iterator over a sequence of changes and then advances it by at most <code>|n|</code> positions where the sign of <code>n</code> is relative to the iterator's direction. </p>
 <dl class="params"><dt>Parameters</dt><dd>
   <table class="params">
-    <tr><td class="paramdir">[in]</td><td class="paramname">changes</td><td>A pointer to an <code><a class="el" href="structAMchanges.html" title="A random-access iterator over a sequence of changes.">AMchanges</a></code> struct. </td></tr>
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">changes</td><td>A pointer to an <code><a class="el" href="structAMchanges.html" title="A random-access iterator over a sequence of changes.">AMchanges</a></code> struct. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">n</td><td>The direction (<code>-n</code> -&gt; opposite, <code>n</code> -&gt; same) and maximum number of positions to advance. </td></tr>
   </table>
   </dd>
@@ -254,7 +254,7 @@ Public Attributes</h2></td></tr>
 <p>Advances an iterator over a sequence of changes by at most <code>|n|</code> positions where the sign of <code>n</code> is relative to the iterator's direction and then gets the change at its new position. </p>
 <dl class="params"><dt>Parameters</dt><dd>
   <table class="params">
-    <tr><td class="paramdir">[in]</td><td class="paramname">changes</td><td>A pointer to an <code><a class="el" href="structAMchanges.html" title="A random-access iterator over a sequence of changes.">AMchanges</a></code> struct. </td></tr>
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">changes</td><td>A pointer to an <code><a class="el" href="structAMchanges.html" title="A random-access iterator over a sequence of changes.">AMchanges</a></code> struct. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">n</td><td>The direction (<code>-n</code> -&gt; opposite, <code>n</code> -&gt; same) and maximum number of positions to advance. </td></tr>
   </table>
   </dd>
@@ -332,7 +332,8 @@ Public Attributes</h2></td></tr>
         </tr>
       </table>
 </div><div class="memdoc">
-<p>Reserved. </p>
+<p>An implementation detail that is intentionally opaque. </p><dl class="section warning"><dt>Warning</dt><dd>Modifying <code>detail</code> will cause undefined behavior. </dd></dl>
+<dl class="section note"><dt>Note</dt><dd>The actual size of <code>detail</code> will vary by platform, this is just the one for the platform this documentation was built on. </dd></dl>
 
 </div>
 </div>

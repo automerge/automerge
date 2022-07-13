@@ -82,6 +82,8 @@
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Error</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>)]</span>
 <span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">AutomergeError</span> {
+    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;id was not an object id&quot;</span>)]</span>
+    <span class="ident">NotAnObject</span>,
     <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;invalid obj id format `{0}`&quot;</span>)]</span>
     <span class="ident">InvalidObjIdFormat</span>(<span class="ident">String</span>),
     <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;invalid obj id `{0}`&quot;</span>)]</span>
@@ -106,8 +108,6 @@
     <span class="ident">MissingCounter</span>,
     <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;general failure&quot;</span>)]</span>
     <span class="ident">Fail</span>,
-    <span class="attribute">#[<span class="ident">error</span>(<span class="ident">transparent</span>)]</span>
-    <span class="ident">HexDecode</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident">hex::FromHexError</span>),
 }
 
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;wasm&quot;</span>)]</span>
@@ -146,5 +146,5 @@
 <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;Invalid OpID: {0}&quot;</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">InvalidOpId</span>(<span class="kw">pub</span> <span class="ident">String</span>);
 </code></pre></div>
-</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.61.0 (fe5b13d68 2022-05-18)" ></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.62.0 (a8314ef7d 2022-06-27)" ></div>
 </body></html>

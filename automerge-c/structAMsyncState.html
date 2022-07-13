@@ -147,7 +147,7 @@ Public Member Functions</h2></td></tr>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an <code><a class="el" href="structAMsyncState.html" title="The state of synchronization with a peer.">AMsyncState</a></code> struct. </dd></dl>
 <dl class="section pre"><dt>Precondition</dt><dd><code>src</code> must be a valid address. </dd>
 <dd>
-<code>0 &lt;=</code> <code>count</code> <code>&lt;=</code> length of <code>src</code>. </dd></dl>
+<code>0 &lt;=</code> <code>count</code> <code>&lt;=</code> size of <code>src</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>To avoid a memory leak, the returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code>. </dd></dl>
 
 </div>

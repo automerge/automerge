@@ -79,9 +79,9 @@ $(function() {
 <table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a name="pub-methods"></a>
 Public Member Functions</h2></td></tr>
-<tr class="memitem:a13c010502289a746c3fd7d6461423578"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMbyteSpan.html">AMbyteSpan</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMchange.html#a13c010502289a746c3fd7d6461423578">AMchangeActorId</a> (const struct <a class="el" href="structAMchange.html">AMchange</a> *change)</td></tr>
-<tr class="memdesc:a13c010502289a746c3fd7d6461423578"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the first referenced actor ID in a change.  <a href="structAMchange.html#a13c010502289a746c3fd7d6461423578">More...</a><br /></td></tr>
-<tr class="separator:a13c010502289a746c3fd7d6461423578"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:aa4f3cbd2b5cfce83370efcedd1b1e684"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMchange.html#aa4f3cbd2b5cfce83370efcedd1b1e684">AMchangeActorId</a> (const struct <a class="el" href="structAMchange.html">AMchange</a> *change)</td></tr>
+<tr class="memdesc:aa4f3cbd2b5cfce83370efcedd1b1e684"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the first referenced actor ID in a change.  <a href="structAMchange.html#aa4f3cbd2b5cfce83370efcedd1b1e684">More...</a><br /></td></tr>
+<tr class="separator:aa4f3cbd2b5cfce83370efcedd1b1e684"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a210ad3a91825856e3cdf14eb73cd45ba"><td class="memItemLeft" align="right" valign="top">void&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMchange.html#a210ad3a91825856e3cdf14eb73cd45ba">AMchangeCompress</a> (struct <a class="el" href="structAMchange.html">AMchange</a> *change)</td></tr>
 <tr class="memdesc:a210ad3a91825856e3cdf14eb73cd45ba"><td class="mdescLeft">&#160;</td><td class="mdescRight">Compresses the raw bytes of a change.  <a href="structAMchange.html#a210ad3a91825856e3cdf14eb73cd45ba">More...</a><br /></td></tr>
 <tr class="separator:a210ad3a91825856e3cdf14eb73cd45ba"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -128,14 +128,14 @@ Public Member Functions</h2></td></tr>
 <a name="details" id="details"></a><h2 class="groupheader">Detailed Description</h2>
 <div class="textblock"><p>A group of operations performed by an actor. </p>
 </div><h2 class="groupheader">Member Function Documentation</h2>
-<a id="a13c010502289a746c3fd7d6461423578"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a13c010502289a746c3fd7d6461423578">&#9670;&nbsp;</a></span>AMchangeActorId()</h2>
+<a id="aa4f3cbd2b5cfce83370efcedd1b1e684"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#aa4f3cbd2b5cfce83370efcedd1b1e684">&#9670;&nbsp;</a></span>AMchangeActorId()</h2>
 
 <div class="memitem">
 <div class="memproto">
       <table class="memname">
         <tr>
-          <td class="memname">struct <a class="el" href="structAMbyteSpan.html">AMbyteSpan</a> AMchangeActorId </td>
+          <td class="memname">struct <a class="el" href="structAMresult.html">AMresult</a> * AMchangeActorId </td>
           <td>(</td>
           <td class="paramtype">const struct <a class="el" href="structAMchange.html">AMchange</a> *&#160;</td>
           <td class="paramname"><em>change</em></td><td>)</td>
@@ -151,8 +151,9 @@ Public Member Functions</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section return"><dt>Returns</dt><dd>An actor ID as an <code><a class="el" href="structAMbyteSpan.html" title="A contiguous sequence of bytes.">AMbyteSpan</a></code> struct. </dd></dl>
 <dl class="section pre"><dt>Precondition</dt><dd><code>change</code> must be a valid address. </dd></dl>
+<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a pointer to an <code><a class="el" href="structAMactorId.html" title="An actor&#39;s unique identifier.">AMactorId</a></code> struct. </dd></dl>
+<dl class="section warning"><dt>Warning</dt><dd>To avoid a memory leak, the returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code>. </dd></dl>
 
 </div>
 </div>
@@ -175,7 +176,7 @@ Public Member Functions</h2></td></tr>
 <p>Compresses the raw bytes of a change. </p>
 <dl class="params"><dt>Parameters</dt><dd>
   <table class="params">
-    <tr><td class="paramdir">[in]</td><td class="paramname">change</td><td>A pointer to an <code><a class="el" href="structAMchange.html" title="A group of operations performed by an actor.">AMchange</a></code> struct. </td></tr>
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">change</td><td>A pointer to an <code><a class="el" href="structAMchange.html" title="A group of operations performed by an actor.">AMchange</a></code> struct. </td></tr>
   </table>
   </dd>
 </dl>
@@ -276,7 +277,7 @@ Public Member Functions</h2></td></tr>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an <code><a class="el" href="structAMchange.html" title="A group of operations performed by an actor.">AMchange</a></code> struct. </dd></dl>
 <dl class="section pre"><dt>Precondition</dt><dd><code>src</code> must be a valid address. </dd>
 <dd>
-<code>0 &lt;=</code> <code>count</code> <code>&lt;=</code> length of <code>src</code>. </dd></dl>
+<code>0 &lt;=</code> <code>count</code> <code>&lt;=</code> size of <code>src</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>To avoid a memory leak, the returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code>. </dd></dl>
 
 </div>
@@ -374,7 +375,7 @@ Public Member Functions</h2></td></tr>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a sequence of <code><a class="el" href="structAMchange.html" title="A group of operations performed by an actor.">AMchange</a></code> structs. </dd></dl>
 <dl class="section pre"><dt>Precondition</dt><dd><code>src</code> must be a valid address. </dd>
 <dd>
-<code>0 &lt;=</code> <code>count</code> <code>&lt;=</code> length of <code>src</code>. </dd></dl>
+<code>0 &lt;=</code> <code>count</code> <code>&lt;=</code> size of <code>src</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>To avoid a memory leak, the returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code>. </dd></dl>
 
 </div>

@@ -1074,6 +1074,22 @@
 <span id="1067">1067</span>
 <span id="1068">1068</span>
 <span id="1069">1069</span>
+<span id="1070">1070</span>
+<span id="1071">1071</span>
+<span id="1072">1072</span>
+<span id="1073">1073</span>
+<span id="1074">1074</span>
+<span id="1075">1075</span>
+<span id="1076">1076</span>
+<span id="1077">1077</span>
+<span id="1078">1078</span>
+<span id="1079">1079</span>
+<span id="1080">1080</span>
+<span id="1081">1081</span>
+<span id="1082">1082</span>
+<span id="1083">1083</span>
+<span id="1084">1084</span>
+<span id="1085">1085</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::cmp::Ordering</span>;
 <span class="kw">use</span> <span class="ident">std::collections</span>::{<span class="ident">BTreeSet</span>, <span class="ident">HashMap</span>, <span class="ident">HashSet</span>};
 <span class="kw">use</span> <span class="ident">std::fmt::Debug</span>;
@@ -1300,34 +1316,45 @@
 
     <span class="doccomment">/// Get the object id of the object that contains this object and the prop that this object is</span>
     <span class="doccomment">/// at in that object.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">parent_object</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">ExId</span>, <span class="ident">Prop</span>)<span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="ident">obj</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">exid_to_obj</span>(<span class="ident">obj</span>.<span class="ident">as_ref</span>()) {
-            <span class="kw">if</span> <span class="ident">obj</span> <span class="op">==</span> <span class="ident">ObjId::root</span>() {
-                <span class="comment">// root has no parent</span>
-                <span class="prelude-val">None</span>
-            } <span class="kw">else</span> {
-                <span class="self">self</span>.<span class="ident">ops</span>
-                    .<span class="ident">parent_object</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>)
-                    .<span class="ident">map</span>(<span class="op">|</span>(<span class="ident">id</span>, <span class="ident">key</span>)<span class="op">|</span> (<span class="self">self</span>.<span class="ident">id_to_exid</span>(<span class="ident">id</span>.<span class="number">0</span>), <span class="self">self</span>.<span class="ident">export_key</span>(<span class="ident">id</span>, <span class="ident">key</span>)))
-            }
-        } <span class="kw">else</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">parent_object</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">ObjId</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">ObjId</span>, <span class="ident">Key</span>)<span class="op">&gt;</span> {
+        <span class="kw">if</span> <span class="ident">obj</span> <span class="op">==</span> <span class="ident">ObjId::root</span>() {
+            <span class="comment">// root has no parent</span>
             <span class="prelude-val">None</span>
+        } <span class="kw">else</span> {
+            <span class="self">self</span>.<span class="ident">ops</span>.<span class="ident">parent_object</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>)
         }
     }
 
-    <span class="doccomment">/// Get an iterator over the parents of an object.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">parents</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">ExId</span>) -&gt; <span class="ident">Parents</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span> {
-        <span class="ident">Parents</span> { <span class="ident">obj</span>, <span class="ident">doc</span>: <span class="self">self</span> }
+    <span class="doccomment">/// Get the parents of an object in the document tree.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// ### Errors</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// Returns an error when the id given is not the id of an object in this document.</span>
+    <span class="doccomment">/// This function does not get the parents of scalar values contained within objects.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// ### Experimental</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// This function may in future be changed to allow getting the parents from the id of a scalar</span>
+    <span class="doccomment">/// value.</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">parents</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Parents</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
+        <span class="kw">let</span> <span class="ident">obj_id</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">exid_to_obj</span>(<span class="ident">obj</span>.<span class="ident">as_ref</span>())<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(<span class="ident">Parents</span> {
+            <span class="ident">obj</span>: <span class="ident">obj_id</span>,
+            <span class="ident">doc</span>: <span class="self">self</span>,
+        })
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">path_to_object</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">ExId</span>, <span class="ident">Prop</span>)<span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">path</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">parents</span>(<span class="ident">obj</span>.<span class="ident">as_ref</span>().<span class="ident">clone</span>()).<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">path_to_object</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        <span class="ident">obj</span>: <span class="ident">O</span>,
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">ExId</span>, <span class="ident">Prop</span>)<span class="op">&gt;</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">path</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">parents</span>(<span class="ident">obj</span>.<span class="ident">as_ref</span>().<span class="ident">clone</span>())<span class="question-mark">?</span>.<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
         <span class="ident">path</span>.<span class="ident">reverse</span>();
-        <span class="ident">path</span>
+        <span class="prelude-val">Ok</span>(<span class="ident">path</span>)
     }
 
     <span class="doccomment">/// Export a key to a prop.</span>
-    <span class="kw">fn</span> <span class="ident">export_key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">ObjId</span>, <span class="ident">key</span>: <span class="ident">Key</span>) -&gt; <span class="ident">Prop</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">export_key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">ObjId</span>, <span class="ident">key</span>: <span class="ident">Key</span>) -&gt; <span class="ident">Prop</span> {
         <span class="kw">match</span> <span class="ident">key</span> {
             <span class="ident">Key::Map</span>(<span class="ident">m</span>) =&gt; <span class="ident">Prop::Map</span>(<span class="self">self</span>.<span class="ident">ops</span>.<span class="ident">m</span>.<span class="ident">props</span>.<span class="ident">get</span>(<span class="ident">m</span>).<span class="ident">into</span>()),
             <span class="ident">Key::Seq</span>(<span class="ident">opid</span>) =&gt; {
@@ -1496,8 +1523,8 @@
             <span class="ident">ExId::Id</span>(<span class="ident">ctr</span>, <span class="ident">actor</span>, <span class="ident">idx</span>) =&gt; {
                 <span class="comment">// do a direct get here b/c this could be foriegn and not be within the array</span>
                 <span class="comment">// bounds</span>
-                <span class="kw">if</span> <span class="self">self</span>.<span class="ident">ops</span>.<span class="ident">m</span>.<span class="ident">actors</span>.<span class="ident">cache</span>.<span class="ident">get</span>(<span class="kw-2">*</span><span class="ident">idx</span>) <span class="op">==</span> <span class="prelude-val">Some</span>(<span class="ident">actor</span>) {
-                    <span class="prelude-val">Ok</span>(<span class="ident">ObjId</span>(<span class="ident">OpId</span>(<span class="kw-2">*</span><span class="ident">ctr</span>, <span class="kw-2">*</span><span class="ident">idx</span>)))
+                <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="kw">if</span> <span class="self">self</span>.<span class="ident">ops</span>.<span class="ident">m</span>.<span class="ident">actors</span>.<span class="ident">cache</span>.<span class="ident">get</span>(<span class="kw-2">*</span><span class="ident">idx</span>) <span class="op">==</span> <span class="prelude-val">Some</span>(<span class="ident">actor</span>) {
+                    <span class="ident">ObjId</span>(<span class="ident">OpId</span>(<span class="kw-2">*</span><span class="ident">ctr</span>, <span class="kw-2">*</span><span class="ident">idx</span>))
                 } <span class="kw">else</span> {
                     <span class="comment">// FIXME - make a real error</span>
                     <span class="kw">let</span> <span class="ident">idx</span> <span class="op">=</span> <span class="self">self</span>
@@ -1506,7 +1533,12 @@
                         .<span class="ident">actors</span>
                         .<span class="ident">lookup</span>(<span class="ident">actor</span>)
                         .<span class="ident">ok_or</span>(<span class="ident">AutomergeError::Fail</span>)<span class="question-mark">?</span>;
-                    <span class="prelude-val">Ok</span>(<span class="ident">ObjId</span>(<span class="ident">OpId</span>(<span class="kw-2">*</span><span class="ident">ctr</span>, <span class="ident">idx</span>)))
+                    <span class="ident">ObjId</span>(<span class="ident">OpId</span>(<span class="kw-2">*</span><span class="ident">ctr</span>, <span class="ident">idx</span>))
+                };
+                <span class="kw">if</span> <span class="self">self</span>.<span class="ident">ops</span>.<span class="ident">object_type</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>).<span class="ident">is_some</span>() {
+                    <span class="prelude-val">Ok</span>(<span class="ident">obj</span>)
+                } <span class="kw">else</span> {
+                    <span class="prelude-val">Err</span>(<span class="ident">AutomergeError::NotAnObject</span>)
                 }
             }
         }
@@ -2144,5 +2176,5 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">value</span>: <span class="ident">ScalarValue</span>,
 }
 </code></pre></div>
-</section><section id="search" class="content hidden"></section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.61.0 (fe5b13d68 2022-05-18)" ></div>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.62.0 (a8314ef7d 2022-06-27)" ></div>
 </body></html>
