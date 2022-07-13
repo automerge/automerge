@@ -45,7 +45,14 @@ jobs:
           toolchain: 1.60.0
           default: true
       - uses: Swatinem/rust-cache@v1
-      - run: ./scripts/ci/docs
+      - name: Build rust docs
+        run: ./scripts/ci/rust-docs
+        shell: bash
+      - name: Install doxygen
+        run: sudo apt-get install -y doxygen
+        shell: bash
+      - name: Build C docs
+        run: ./scripts/ci/cmake-docs
         shell: bash
 
   cargo-deny:
