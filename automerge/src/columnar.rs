@@ -773,11 +773,18 @@ impl SuccEncoder {
         }
     }
 
-    fn append(&mut self, succ: &[OpId], actors: &[usize]) {
-        self.num.append_value(succ.len());
-        let mut sorted_succ = succ.to_vec();
-        sorted_succ.sort_by(|left, right| succ_ord(left, right, actors));
-        for s in sorted_succ.iter() {
+    fn append<
+        'a,
+        I: IntoIterator<Item = &'a OpId, IntoIter = II>,
+        II: ExactSizeIterator + Iterator<Item = &'a OpId>,
+    >(
+        &mut self,
+        succ: I,
+        actors: &[usize],
+    ) {
+        let iter = succ.into_iter();
+        self.num.append_value(iter.len());
+        for s in iter {
             self.ctr.append_value(s.0);
             self.actor.append_value(actors[s.1]);
         }

@@ -710,11 +710,7 @@ impl Automerge {
                     legacy::ObjectId::Root => ObjId::root(),
                     legacy::ObjectId::Id(id) => ObjId(OpId(id.0, self.ops.m.actors.cache(id.1))),
                 };
-                let pred = c
-                    .pred
-                    .iter()
-                    .map(|i| OpId(i.0, self.ops.m.actors.cache(i.1.clone())))
-                    .collect();
+                let pred = self.ops.m.import_opids(c.pred);
                 let key = match &c.key {
                     legacy::Key::Map(n) => Key::Map(self.ops.m.props.cache(n.to_string())),
                     legacy::Key::Seq(legacy::ElementId::Head) => Key::Seq(types::HEAD),
@@ -1048,7 +1044,7 @@ impl Automerge {
                 OpType::Delete => format!("del{}", 0),
             };
             let pred: Vec<_> = op.pred.iter().map(|id| self.to_string(*id)).collect();
-            let succ: Vec<_> = op.succ.iter().map(|id| self.to_string(*id)).collect();
+            let succ: Vec<_> = op.succ.into_iter().map(|id| self.to_string(*id)).collect();
             log!(
                 "  {:12} {:12} {:12} {:12} {:12?} {:12?}",
                 id,

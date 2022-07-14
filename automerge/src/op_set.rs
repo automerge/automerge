@@ -3,7 +3,7 @@ use crate::exid::ExId;
 use crate::indexed_cache::IndexedCache;
 use crate::op_tree::{self, OpTree};
 use crate::query::{self, OpIdSearch, TreeQuery};
-use crate::types::{self, ActorId, Key, ObjId, Op, OpId, OpType};
+use crate::types::{self, ActorId, Key, ObjId, Op, OpId, OpIds, OpType};
 use crate::{ObjType, OpObserver};
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
@@ -138,10 +138,26 @@ impl OpSetInternal {
 
     pub(crate) fn replace<F>(&mut self, obj: &ObjId, index: usize, f: F)
     where
-        F: FnMut(&mut Op),
+        F: Fn(&mut Op),
     {
         if let Some(tree) = self.trees.get_mut(obj) {
             tree.internal.update(index, f)
+        }
+    }
+
+    /// Add `op` as a successor to each op at `op_indices` in `obj`
+    pub(crate) fn add_succ<I: Iterator<Item = usize>>(
+        &mut self,
+        obj: &ObjId,
+        op_indices: I,
+        op: &Op,
+    ) {
+        if let Some(tree) = self.trees.get_mut(obj) {
+            for i in op_indices {
+                tree.internal.update(i, |old_op| {
+                    old_op.add_succ(op, |left, right| self.m.lamport_cmp(*left, *right))
+                });
+            }
         }
     }
 
@@ -185,9 +201,7 @@ impl OpSetInternal {
         let succ = q.succ;
         let pos = q.pos;
 
-        for i in succ {
-            self.replace(obj, i, |old_op| old_op.add_succ(&op));
-        }
+        self.add_succ(obj, succ.iter().copied(), &op);
 
         if !op.is_delete() {
             self.insert(pos, obj, op.clone());
@@ -255,9 +269,7 @@ impl OpSetInternal {
             }
         }
 
-        for i in succ {
-            self.replace(obj, i, |old_op| old_op.add_succ(&op));
-        }
+        self.add_succ(obj, succ.iter().copied(), &op);
 
         if !op.is_delete() {
             self.insert(pos, obj, op.clone());
@@ -345,5 +357,25 @@ impl OpSetMetadata {
             (OpId(a, x), OpId(b, y)) if a == b => self.actors[x].cmp(&self.actors[y]),
             (OpId(a, _), OpId(b, _)) => a.cmp(&b),
         }
+    }
+
+    pub(crate) fn sorted_opids<I: Iterator<Item = OpId>>(&self, opids: I) -> OpIds {
+        OpIds::new(opids, |left, right| self.lamport_cmp(*left, *right))
+    }
+
+    pub(crate) fn import_opids<I: IntoIterator<Item = crate::legacy::OpId>>(
+        &mut self,
+        external_opids: I,
+    ) -> OpIds {
+        let iter = external_opids.into_iter();
+        let mut result = Vec::with_capacity(iter.size_hint().1.unwrap_or(0));
+        for opid in iter {
+            let crate::legacy::OpId(counter, actor) = opid;
+            let actor_idx = self.actors.cache(actor);
+            result.push(OpId(counter, actor_idx));
+        }
+        OpIds::new(result.into_iter(), |left, right| {
+            self.lamport_cmp(*left, *right)
+        })
     }
 }

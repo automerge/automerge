@@ -260,8 +260,8 @@ mod tests {
             action: OpType::Put(ScalarValue::Uint(counter)),
             id: OpId(counter, 0),
             key: Key::Map(0),
-            succ: Vec::new(),
-            pred: Vec::new(),
+            succ: Default::default(),
+            pred: Default::default(),
             insert: false,
         }
     }

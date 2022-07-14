@@ -209,11 +209,11 @@ impl VisWindow {
                     CounterData {
                         pos,
                         val: start,
-                        succ: op.succ.iter().cloned().collect(),
+                        succ: op.succ.into_iter().cloned().collect(),
                         op: op.clone(),
                     },
                 );
-                if !op.succ.iter().any(|i| clock.covers(i)) {
+                if !op.succ.into_iter().any(|i| clock.covers(i)) {
                     visible = true;
                 }
             }
@@ -231,7 +231,7 @@ impl VisWindow {
                 }
             }
             _ => {
-                if !op.succ.iter().any(|i| clock.covers(i)) {
+                if !op.succ.into_iter().any(|i| clock.covers(i)) {
                     visible = true;
                 }
             }
