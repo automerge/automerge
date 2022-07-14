@@ -162,11 +162,7 @@ impl TransactionInner {
         obj: ObjId,
         succ_pos: &[usize],
     ) {
-        for succ in succ_pos {
-            doc.ops.replace(&obj, *succ, |old_op| {
-                old_op.add_succ(&op);
-            });
-        }
+        doc.ops.add_succ(&obj, succ_pos.iter().copied(), &op);
 
         if !op.is_delete() {
             doc.ops.insert(pos, &obj, op.clone());
@@ -272,7 +268,7 @@ impl TransactionInner {
             return Err(AutomergeError::MissingCounter);
         }
 
-        let pred = query.ops.iter().map(|op| op.id).collect();
+        let pred = doc.ops.m.sorted_opids(query.ops.iter().map(|o| o.id));
 
         let op = Op {
             id,
@@ -300,7 +296,7 @@ impl TransactionInner {
         let query = doc.ops.search(&obj, query::Nth::new(index));
 
         let id = self.next_id();
-        let pred = query.ops.iter().map(|op| op.id).collect();
+        let pred = doc.ops.m.sorted_opids(query.ops.iter().map(|o| o.id));
         let key = query.key()?;
 
         if query.ops.len() == 1 && query.ops[0].is_noop(&action) {

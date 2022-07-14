@@ -8,6 +8,9 @@ use std::fmt::Display;
 use std::str::FromStr;
 use tinyvec::{ArrayVec, TinyVec};
 
+mod opids;
+pub(crate) use opids::OpIds;
+
 pub(crate) use crate::clock::Clock;
 pub(crate) use crate::value::{Counter, ScalarValue, Value};
 
@@ -379,14 +382,14 @@ pub(crate) struct Op {
     pub(crate) id: OpId,
     pub(crate) action: OpType,
     pub(crate) key: Key,
-    pub(crate) succ: Vec<OpId>,
-    pub(crate) pred: Vec<OpId>,
+    pub(crate) succ: OpIds,
+    pub(crate) pred: OpIds,
     pub(crate) insert: bool,
 }
 
 impl Op {
-    pub(crate) fn add_succ(&mut self, op: &Op) {
-        self.succ.push(op.id);
+    pub(crate) fn add_succ<F: Fn(&OpId, &OpId) -> std::cmp::Ordering>(&mut self, op: &Op, cmp: F) {
+        self.succ.add(op.id, cmp);
         if let OpType::Put(ScalarValue::Counter(Counter {
             current,
             increments,
