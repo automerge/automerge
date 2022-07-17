@@ -487,11 +487,11 @@
                     <span class="ident">CounterData</span> {
                         <span class="ident">pos</span>,
                         <span class="ident">val</span>: <span class="ident">start</span>,
-                        <span class="ident">succ</span>: <span class="ident">op</span>.<span class="ident">succ</span>.<span class="ident">iter</span>().<span class="ident">cloned</span>().<span class="ident">collect</span>(),
+                        <span class="ident">succ</span>: <span class="ident">op</span>.<span class="ident">succ</span>.<span class="ident">into_iter</span>().<span class="ident">cloned</span>().<span class="ident">collect</span>(),
                         <span class="ident">op</span>: <span class="ident">op</span>.<span class="ident">clone</span>(),
                     },
                 );
-                <span class="kw">if</span> <span class="op">!</span><span class="ident">op</span>.<span class="ident">succ</span>.<span class="ident">iter</span>().<span class="ident">any</span>(<span class="op">|</span><span class="ident">i</span><span class="op">|</span> <span class="ident">clock</span>.<span class="ident">covers</span>(<span class="ident">i</span>)) {
+                <span class="kw">if</span> <span class="op">!</span><span class="ident">op</span>.<span class="ident">succ</span>.<span class="ident">into_iter</span>().<span class="ident">any</span>(<span class="op">|</span><span class="ident">i</span><span class="op">|</span> <span class="ident">clock</span>.<span class="ident">covers</span>(<span class="ident">i</span>)) {
                     <span class="ident">visible</span> <span class="op">=</span> <span class="bool-val">true</span>;
                 }
             }
@@ -509,7 +509,7 @@
                 }
             }
             <span class="kw">_</span> =&gt; {
-                <span class="kw">if</span> <span class="op">!</span><span class="ident">op</span>.<span class="ident">succ</span>.<span class="ident">iter</span>().<span class="ident">any</span>(<span class="op">|</span><span class="ident">i</span><span class="op">|</span> <span class="ident">clock</span>.<span class="ident">covers</span>(<span class="ident">i</span>)) {
+                <span class="kw">if</span> <span class="op">!</span><span class="ident">op</span>.<span class="ident">succ</span>.<span class="ident">into_iter</span>().<span class="ident">any</span>(<span class="op">|</span><span class="ident">i</span><span class="op">|</span> <span class="ident">clock</span>.<span class="ident">covers</span>(<span class="ident">i</span>)) {
                     <span class="ident">visible</span> <span class="op">=</span> <span class="bool-val">true</span>;
                 }
             }

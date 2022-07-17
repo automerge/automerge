@@ -705,8 +705,8 @@
             <span class="ident">action</span>: <span class="ident">OpType::Put</span>(<span class="ident">ScalarValue::Uint</span>(<span class="ident">counter</span>)),
             <span class="ident">id</span>: <span class="ident">OpId</span>(<span class="ident">counter</span>, <span class="number">0</span>),
             <span class="ident">key</span>: <span class="ident">Key::Map</span>(<span class="number">0</span>),
-            <span class="ident">succ</span>: <span class="ident">Vec::new</span>(),
-            <span class="ident">pred</span>: <span class="ident">Vec::new</span>(),
+            <span class="ident">succ</span>: <span class="ident">Default::default</span>(),
+            <span class="ident">pred</span>: <span class="ident">Default::default</span>(),
             <span class="ident">insert</span>: <span class="bool-val">false</span>,
         }
     }
