@@ -10,14 +10,10 @@ fn main() {
     let config = cbindgen::Config::from_file("cbindgen.toml")
         .expect("Unable to find cbindgen.toml configuration file");
 
-    //    let mut config: cbindgen::Config = Default::default();
-    //    config.language = cbindgen::Language::C;
-
     if let Ok(writer) = cbindgen::generate_with_config(&crate_dir, config) {
-        writer.write_to_file(crate_dir.join("automerge.h"));
-
-        // Also write the generated header into the target directory when
-        // specified (necessary for an out-of-source build a la CMake).
+        // \note CMake sets this environment variable before invoking Cargo so
+        //       that it can direct the generated header file into its
+        //       out-of-source build directory for post-processing.
         if let Ok(target_dir) = env::var("CARGO_TARGET_DIR") {
             writer.write_to_file(PathBuf::from(target_dir).join("automerge.h"));
         }
