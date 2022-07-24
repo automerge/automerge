@@ -57,6 +57,8 @@ macro_rules! __log {
 mod autocommit;
 mod automerge;
 mod change;
+#[cfg(feature = "storage-v2")]
+mod change_v2;
 mod clock;
 mod columnar;
 #[cfg(feature = "storage-v2")]
@@ -85,6 +87,8 @@ mod options;
 mod parents;
 mod query;
 #[cfg(feature = "storage-v2")]
+#[allow(dead_code)]
+#[allow(unused_imports)]
 mod storage;
 pub mod sync;
 pub mod transaction;
@@ -96,7 +100,10 @@ mod visualisation;
 
 pub use crate::automerge::Automerge;
 pub use autocommit::AutoCommit;
+//#[cfg(not(feature = "storage-v2"))]
 pub use change::Change;
+//#[cfg(feature = "storage-v2")]
+//pub use change_v2::{Change, LoadError as LoadChangeError};
 pub use decoding::Error as DecodingError;
 pub use decoding::InvalidChangeError;
 pub use encoding::Error as EncodingError;

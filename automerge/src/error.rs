@@ -68,3 +68,12 @@ pub struct InvalidElementId(pub String);
 #[derive(Error, Debug)]
 #[error("Invalid OpID: {0}")]
 pub struct InvalidOpId(pub String);
+
+#[cfg(feature = "storage-v2")]
+#[derive(Error, Debug)]
+pub(crate) enum InvalidOpType {
+    #[error("unrecognized action index {0}")]
+    UnknownAction(u64),
+    #[error("non numeric argument for inc op")]
+    NonNumericInc,
+}
