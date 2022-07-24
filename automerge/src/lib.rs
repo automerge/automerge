@@ -77,6 +77,8 @@ mod op_tree;
 mod options;
 mod parents;
 mod query;
+#[cfg(feature = "storage-v2")]
+mod storage;
 pub mod sync;
 pub mod transaction;
 mod types;
