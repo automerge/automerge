@@ -11,6 +11,7 @@ description = "A JSON-like data structure (a CRDT) that can be modified concurre
 [features]
 optree-visualisation = ["dot", "rand"]
 wasm = ["js-sys", "wasm-bindgen", "web-sys", "uuid/wasm-bindgen"]
+storage-v2 = []
 
 [dependencies]
 hex = "^0.4.3"
