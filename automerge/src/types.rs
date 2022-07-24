@@ -75,6 +75,12 @@ impl TryFrom<String> for ActorId {
     }
 }
 
+impl AsRef<[u8]> for ActorId {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
 impl From<uuid::Uuid> for ActorId {
     fn from(u: uuid::Uuid) -> Self {
         ActorId(TinyVec::from(*u.as_bytes()))
@@ -187,6 +193,45 @@ pub enum OpType {
     Put(ScalarValue),
 }
 
+impl OpType {
+    /// The index into the action array as specified in [1]
+    ///
+    /// [1]: https://alexjg.github.io/automerge-storage-docs/#action-array
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn action_index(&self) -> u64 {
+        match self {
+            Self::Make(ObjType::Map) => 0,
+            Self::Put(_) => 1,
+            Self::Make(ObjType::List) => 2,
+            Self::Delete => 3,
+            Self::Make(ObjType::Text) => 4,
+            Self::Increment(_) => 5,
+            Self::Make(ObjType::Table) => 6,
+        }
+    }
+
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn from_index_and_value(
+        index: u64,
+        value: ScalarValue,
+    ) -> Result<OpType, error::InvalidOpType> {
+        match index {
+            0 => Ok(Self::Make(ObjType::Map)),
+            1 => Ok(Self::Put(value)),
+            2 => Ok(Self::Make(ObjType::List)),
+            3 => Ok(Self::Delete),
+            4 => Ok(Self::Make(ObjType::Text)),
+            5 => match value {
+                ScalarValue::Int(i) => Ok(Self::Increment(i)),
+                ScalarValue::Uint(i) => Ok(Self::Increment(i as i64)),
+                _ => Err(error::InvalidOpType::NonNumericInc),
+            },
+            6 => Ok(Self::Make(ObjType::Table)),
+            other => Err(error::InvalidOpType::UnknownAction(other)),
+        }
+    }
+}
+
 impl From<ObjType> for OpType {
     fn from(v: ObjType) -> Self {
         OpType::Make(v)
@@ -263,6 +308,12 @@ impl Exportable for Key {
             Key::Map(p) => Export::Prop(*p),
             Key::Seq(e) => e.export(),
         }
+    }
+}
+
+impl From<ObjId> for OpId {
+    fn from(o: ObjId) -> Self {
+        o.0
     }
 }
 
@@ -379,10 +430,32 @@ impl ObjId {
     pub(crate) const fn root() -> Self {
         ObjId(OpId(0, 0))
     }
+
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn is_root(&self) -> bool {
+        self.0.counter() == 0
+    }
+
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn opid(&self) -> &OpId {
+        &self.0
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
 pub(crate) struct ElemId(pub(crate) OpId);
+
+impl ElemId {
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn is_head(&self) -> bool {
+        *self == HEAD
+    }
+
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn head() -> Self {
+        Self(OpId(0, 0))
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Op {
@@ -524,6 +597,24 @@ pub(crate) const HASH_SIZE: usize = 32; // 256 bits = 32 bytes
 /// The sha256 hash of a change.
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord, Copy)]
 pub struct ChangeHash(pub [u8; HASH_SIZE]);
+
+impl ChangeHash {
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn checksum(&self) -> [u8; 4] {
+        [self.0[0], self.0[1], self.0[2], self.0[3]]
+    }
+}
+
+impl AsRef<[u8]> for ChangeHash {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
 
 impl fmt::Debug for ChangeHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

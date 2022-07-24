@@ -157,7 +157,7 @@ impl<T> SortedVec<T> {
         self.0.get_mut(index)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &T> {
+    pub fn iter(&self) -> std::slice::Iter<'_, T> {
         self.0.iter()
     }
 }
