@@ -152,3 +152,45 @@ jobs:
       - run: ./scripts/ci/build-test
         shell: bash
 
+  linux-storage-v2:
+    name: 'storage-v2: Linux'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: 1.60.0
+          default: true
+      - uses: Swatinem/rust-cache@v1
+      - run: ./scripts/ci/build-test-storage-v2
+        shell: bash
+
+  macos-storage-2:
+    name: 'storage-v2: MacOS'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: 1.60.0
+          default: true
+      - uses: Swatinem/rust-cache@v1
+      - run: ./scripts/ci/build-test-storage-v2
+        shell: bash
+
+  windows-storage-v2:
+    name: 'storage-v2: Windows'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: 1.60.0
+          default: true
+      - uses: Swatinem/rust-cache@v1
+      - run: ./scripts/ci/build-test-storage-v2
+        shell: bash
+

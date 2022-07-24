@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -eoux pipefail
+
+cargo build -p automerge --features storage-v2 --all-targets
+
+RUST_LOG=error cargo test -p automerge --features storage-v2

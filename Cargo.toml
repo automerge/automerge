@@ -6,6 +6,7 @@ members = [
     "automerge-wasm",
     "edit-trace",
 ]
+resolver = "2"
 
 [profile.release]
 debug = true
