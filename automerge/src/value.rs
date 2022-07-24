@@ -357,6 +357,16 @@ pub struct Counter {
     pub(crate) increments: usize,
 }
 
+impl Counter {
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn increment<I: Iterator<Item = i64>>(&mut self, increments: I) {
+        for inc in increments {
+            self.current += inc;
+            self.increments += 1;
+        }
+    }
+}
+
 impl Serialize for Counter {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

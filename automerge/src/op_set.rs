@@ -6,6 +6,8 @@ use crate::query::{self, OpIdSearch, TreeQuery};
 use crate::types::{self, ActorId, Key, ObjId, Op, OpId, OpIds, OpType};
 use crate::{ObjType, OpObserver};
 use fxhash::FxBuildHasher;
+#[cfg(feature = "storage-v2")]
+use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::RangeBounds;
@@ -341,7 +343,24 @@ pub(crate) struct OpSetMetadata {
     pub(crate) props: IndexedCache<String>,
 }
 
+impl Default for OpSetMetadata {
+    fn default() -> Self {
+        Self {
+            actors: IndexedCache::new(),
+            props: IndexedCache::new(),
+        }
+    }
+}
+
 impl OpSetMetadata {
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn from_actors(actors: Vec<ActorId>) -> Self {
+        Self {
+            props: IndexedCache::new(),
+            actors: actors.into_iter().collect(),
+        }
+    }
+
     pub(crate) fn key_cmp(&self, left: &Key, right: &Key) -> Ordering {
         match (left, right) {
             (Key::Map(a), Key::Map(b)) => self.props[*a].cmp(&self.props[*b]),
@@ -363,6 +382,13 @@ impl OpSetMetadata {
         OpIds::new(opids, |left, right| self.lamport_cmp(*left, *right))
     }
 
+    /// If `opids` are in ascending lamport timestamp order with respect to the actor IDs in
+    /// this `OpSetMetadata` then this returns `Some(OpIds)`, otherwise returns `None`.
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn try_sorted_opids(&self, opids: Vec<OpId>) -> Option<OpIds> {
+        OpIds::new_if_sorted(opids, |a, b| self.lamport_cmp(*a, *b))
+    }
+
     pub(crate) fn import_opids<I: IntoIterator<Item = crate::legacy::OpId>>(
         &mut self,
         external_opids: I,
@@ -377,5 +403,10 @@ impl OpSetMetadata {
         OpIds::new(result.into_iter(), |left, right| {
             self.lamport_cmp(*left, *right)
         })
+    }
+
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn import_prop<S: Borrow<str>>(&mut self, key: S) -> usize {
+        self.props.cache(key.borrow().to_string())
     }
 }
