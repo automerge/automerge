@@ -1,157 +1,138 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <automerge.h>
 
-typedef struct StackNode ResultStack;
-
-AMvalue push(ResultStack**, AMresult*, AMvalueVariant const);
-
-size_t free_results(ResultStack**);
+static void abort_cb(AMresultStack**, uint8_t);
 
 /*
  *  Based on https://automerge.github.io/docs/quickstart
  */
 int main(int argc, char** argv) {
-    ResultStack* results = NULL;
-    AMdoc* const doc1 = push(&results, AMcreate(), AM_VALUE_DOC).doc;
+    AMresultStack* results = NULL;
+    AMdoc* const doc1 = AMpush(&results, AMcreate(), AM_VALUE_DOC, abort_cb).doc;
     AMobjId const* const
-        cards = push(&results, AMmapPutObject(doc1, AM_ROOT, "cards", AM_OBJ_TYPE_LIST), AM_VALUE_OBJ_ID).obj_id;
+        cards = AMpush(&results, AMmapPutObject(doc1, AM_ROOT, "cards", AM_OBJ_TYPE_LIST), AM_VALUE_OBJ_ID, abort_cb).obj_id;
     AMobjId const* const
-        card1 = push(&results, AMlistPutObject(doc1, cards, 0, true, AM_OBJ_TYPE_MAP), AM_VALUE_OBJ_ID).obj_id;
-    push(&results, AMmapPutStr(doc1, card1, "title", "Rewrite everything in Clojure"), AM_VALUE_VOID);
-    push(&results, AMmapPutBool(doc1, card1, "done", false), AM_VALUE_VOID);
+        card1 = AMpush(&results, AMlistPutObject(doc1, cards, 0, true, AM_OBJ_TYPE_MAP), AM_VALUE_OBJ_ID, abort_cb).obj_id;
+    AMpush(&results, AMmapPutStr(doc1, card1, "title", "Rewrite everything in Clojure"), AM_VALUE_VOID, abort_cb);
+    AMpush(&results, AMmapPutBool(doc1, card1, "done", false), AM_VALUE_VOID, abort_cb);
     AMobjId const* const
-        card2 = push(&results, AMlistPutObject(doc1, cards, 0, true, AM_OBJ_TYPE_MAP), AM_VALUE_OBJ_ID).obj_id;
-    push(&results, AMmapPutStr(doc1, card2, "title", "Rewrite everything in Haskell"), AM_VALUE_VOID);
-    push(&results, AMmapPutBool(doc1, card2, "done", false), AM_VALUE_VOID);
-    push(&results, AMcommit(doc1, "Add card", NULL), AM_VALUE_CHANGE_HASHES);
+        card2 = AMpush(&results, AMlistPutObject(doc1, cards, 0, true, AM_OBJ_TYPE_MAP), AM_VALUE_OBJ_ID, abort_cb).obj_id;
+    AMpush(&results, AMmapPutStr(doc1, card2, "title", "Rewrite everything in Haskell"), AM_VALUE_VOID, abort_cb);
+    AMpush(&results, AMmapPutBool(doc1, card2, "done", false), AM_VALUE_VOID, abort_cb);
+    AMpush(&results, AMcommit(doc1, "Add card", NULL), AM_VALUE_CHANGE_HASHES, abort_cb);
 
-    AMdoc* doc2 = push(&results, AMcreate(), AM_VALUE_DOC).doc;
-    push(&results, AMmerge(doc2, doc1), AM_VALUE_CHANGE_HASHES);
+    AMdoc* doc2 = AMpush(&results, AMcreate(), AM_VALUE_DOC, abort_cb).doc;
+    AMpush(&results, AMmerge(doc2, doc1), AM_VALUE_CHANGE_HASHES, abort_cb);
 
-    AMbyteSpan const binary = push(&results, AMsave(doc1), AM_VALUE_BYTES).bytes;
-    doc2 = push(&results, AMload(binary.src, binary.count), AM_VALUE_DOC).doc;
+    AMbyteSpan const binary = AMpush(&results, AMsave(doc1), AM_VALUE_BYTES, abort_cb).bytes;
+    doc2 = AMpush(&results, AMload(binary.src, binary.count), AM_VALUE_DOC, abort_cb).doc;
 
-    push(&results, AMmapPutBool(doc1, card1, "done", true), AM_VALUE_VOID);
-    push(&results, AMcommit(doc1, "Mark card as done", NULL), AM_VALUE_CHANGE_HASHES);
+    AMpush(&results, AMmapPutBool(doc1, card1, "done", true), AM_VALUE_VOID, abort_cb);
+    AMpush(&results, AMcommit(doc1, "Mark card as done", NULL), AM_VALUE_CHANGE_HASHES, abort_cb);
 
-    push(&results, AMlistDelete(doc2, cards, 0), AM_VALUE_VOID);
-    push(&results, AMcommit(doc2, "Delete card", NULL), AM_VALUE_CHANGE_HASHES);
+    AMpush(&results, AMlistDelete(doc2, cards, 0), AM_VALUE_VOID, abort_cb);
+    AMpush(&results, AMcommit(doc2, "Delete card", NULL), AM_VALUE_CHANGE_HASHES, abort_cb);
 
-    push(&results, AMmerge(doc1, doc2), AM_VALUE_CHANGE_HASHES);
+    AMpush(&results, AMmerge(doc1, doc2), AM_VALUE_CHANGE_HASHES, abort_cb);
 
-    AMchanges changes = push(&results, AMgetChanges(doc1, NULL), AM_VALUE_CHANGES).changes;
+    AMchanges changes = AMpush(&results, AMgetChanges(doc1, NULL), AM_VALUE_CHANGES, abort_cb).changes;
     AMchange const* change = NULL;
     while ((change = AMchangesNext(&changes, 1)) != NULL) {
         AMbyteSpan const change_hash = AMchangeHash(change);
         AMchangeHashes const
-            heads = push(&results, AMchangeHashesInit(&change_hash, 1), AM_VALUE_CHANGE_HASHES).change_hashes;
+            heads = AMpush(&results, AMchangeHashesInit(&change_hash, 1), AM_VALUE_CHANGE_HASHES, abort_cb).change_hashes;
         printf("%s %ld\n", AMchangeMessage(change), AMobjSize(doc1, cards, &heads));
     }
-    free_results(&results);
+    AMfreeStack(&results);
 }
 
-/**
- * \brief A node in a singly-linked list of `AMresult` struct pointers.
- */
-struct StackNode {
-    AMresult* result;
-    struct StackNode* next;
-};
+static char const* discriminant_suffix(AMvalueVariant const);
 
 /**
- * \brief Pushes the given result onto the given stack and then either gets the
- *        value matching the given discriminant from that result or, failing
- *        that, prints an error message to `stderr`, frees all results in that
- *        stack and aborts.
+ * \brief Prints an error message to `stderr`, deallocates all results in the
+ *        given stack and exits.
  *
- * \param[in,out] stack A pointer to a pointer to a `ResultStack` struct.
-.* \param[in] result A pointer to an `AMresult` struct.
+ * \param[in,out] stack A pointer to a pointer to an `AMresultStack` struct.
  * \param[in] discriminant An `AMvalueVariant` enum tag.
- * \return An `AMvalue` struct.
- * \pre \p stack must be a valid address.
- * \pre \p result must be a valid address.
- * \post \p stack `== NULL`.
+ * \pre \p stack` != NULL`.
+ * \post `*stack == NULL`.
  */
-AMvalue push(ResultStack** stack, AMresult* result, AMvalueVariant const discriminant) {
-    static char prelude[64];
+static void abort_cb(AMresultStack** stack, uint8_t discriminant) {
+    static char buffer[512] = {0};
 
-    if (stack == NULL) {
-        fprintf(stderr, "Null `ResultStack` struct pointer pointer; previous "
-                        "`AMresult` structs may have leaked!");
-        AMfree(result);
-        exit(EXIT_FAILURE);
+    char const* suffix = NULL;
+    if (!stack) {
+        suffix = "Stack*";
     }
-    if (result == NULL) {
-        fprintf(stderr, "Null `AMresult` struct pointer.");
-        free_results(stack);
-        exit(EXIT_FAILURE);
+    else if (!*stack) {
+        suffix = "Stack";
     }
-    /* Push the result onto the stack. */
-    struct StackNode* top = malloc(sizeof(struct StackNode));
-    top->result = result;
-    top->next = *stack;
-    *stack = top;
-    AMstatus const status = AMresultStatus(result);
-    if (status != AM_STATUS_OK) {
-        switch (status) {
-            case AM_STATUS_ERROR:          sprintf(prelude, "Error");          break;
-            case AM_STATUS_INVALID_RESULT: sprintf(prelude, "Invalid result"); break;
-            default: sprintf(prelude, "Unknown `AMstatus` tag %d", status);
-        }
-        fprintf(stderr, "%s; %s.", prelude, AMerrorMessage(result));
-        free_results(stack);
-        exit(EXIT_FAILURE);
+    else if (!(*stack)->result) {
+        suffix = "";
     }
-    AMvalue const value = AMresultValue(result);
-    if (value.tag != discriminant) {
-        char const* label = NULL;
-        switch (value.tag) {
-            case AM_VALUE_ACTOR_ID:      label = "ACTOR_ID";      break;
-            case AM_VALUE_BOOLEAN:       label = "BOOLEAN";       break;
-            case AM_VALUE_BYTES:         label = "BYTES";         break;
-            case AM_VALUE_CHANGE_HASHES: label = "CHANGE_HASHES"; break;
-            case AM_VALUE_CHANGES:       label = "CHANGES";       break;
-            case AM_VALUE_COUNTER:       label = "COUNTER";       break;
-            case AM_VALUE_DOC:           label = "DOC";           break;
-            case AM_VALUE_F64:           label = "F64";           break;
-            case AM_VALUE_INT:           label = "INT";           break;
-            case AM_VALUE_NULL:          label = "NULL";          break;
-            case AM_VALUE_OBJ_ID:        label = "OBJ_ID";        break;
-            case AM_VALUE_STR:           label = "STR";           break;
-            case AM_VALUE_STRINGS:       label = "STRINGS";       break;
-            case AM_VALUE_TIMESTAMP:     label = "TIMESTAMP";     break;
-            case AM_VALUE_UINT:          label = "UINT";          break;
-            case AM_VALUE_SYNC_MESSAGE:  label = "SYNC_MESSAGE";  break;
-            case AM_VALUE_SYNC_STATE:    label = "SYNC_STATE";    break;
-            case AM_VALUE_VOID:          label = "VOID";          break;
-            default:                     label = "...";
-        }
-        fprintf(stderr, "Unexpected `AMvalueVariant` tag `AM_VALUE_%s` (%d).", label, value.tag);
-        free_results(stack);
+    if (suffix) {
+        fprintf(stderr, "Null `AMresult%s*`.", suffix);
+        AMfreeStack(stack);
         exit(EXIT_FAILURE);
+        return;
     }
-    return value;
+    AMstatus const status = AMresultStatus((*stack)->result);
+    switch (status) {
+        case AM_STATUS_ERROR:          strcpy(buffer, "Error");          break;
+        case AM_STATUS_INVALID_RESULT: strcpy(buffer, "Invalid result"); break;
+        case AM_STATUS_OK:                                               break;
+        default: sprintf(buffer, "Unknown `AMstatus` tag %d", status);
+    }
+    if (buffer[0]) {
+        fprintf(stderr, "%s; %s.", buffer, AMerrorMessage((*stack)->result));
+        AMfreeStack(stack);
+        exit(EXIT_FAILURE);
+        return;
+    }
+    AMvalue const value = AMresultValue((*stack)->result);
+    fprintf(stderr, "Unexpected tag `AM_VALUE_%s` (%d); expected `AM_VALUE_%s`.",
+        discriminant_suffix(value.tag),
+        value.tag,
+        discriminant_suffix(discriminant));
+    AMfreeStack(stack);
+    exit(EXIT_FAILURE);
 }
 
 /**
- * \brief Frees a stack of `AMresult` structs.
+ * \brief Gets the suffix for a discriminant's corresponding string
+ *        representation.
  *
- * \param[in,out] stack A pointer to a pointer to a `ResultStack` struct.
- * \return The number of stack nodes freed.
- * \pre \p stack must be a valid address.
- * \post \p stack `== NULL`.
+ * \param[in] discriminant An `AMvalueVariant` enum tag.
+ * \return A UTF-8 string.
  */
-size_t free_results(ResultStack** stack) {
-    struct StackNode* prev = NULL;
-    size_t count = 0;
-    for (struct StackNode* node = *stack; node; node = node->next, ++count) {
-        free(prev);
-        AMfree(node->result);
-        prev = node;
+static char const* discriminant_suffix(AMvalueVariant const discriminant) {
+    char const* suffix = NULL;
+    switch (discriminant) {
+        case AM_VALUE_ACTOR_ID:      suffix = "ACTOR_ID";      break;
+        case AM_VALUE_BOOLEAN:       suffix = "BOOLEAN";       break;
+        case AM_VALUE_BYTES:         suffix = "BYTES";         break;
+        case AM_VALUE_CHANGE_HASHES: suffix = "CHANGE_HASHES"; break;
+        case AM_VALUE_CHANGES:       suffix = "CHANGES";       break;
+        case AM_VALUE_COUNTER:       suffix = "COUNTER";       break;
+        case AM_VALUE_DOC:           suffix = "DOC";           break;
+        case AM_VALUE_F64:           suffix = "F64";           break;
+        case AM_VALUE_INT:           suffix = "INT";           break;
+        case AM_VALUE_LIST_ITEMS:    suffix = "LIST_ITEMS";    break;
+        case AM_VALUE_MAP_ITEMS:     suffix = "MAP_ITEMS";     break;
+        case AM_VALUE_NULL:          suffix = "NULL";          break;
+        case AM_VALUE_OBJ_ID:        suffix = "OBJ_ID";        break;
+        case AM_VALUE_OBJ_ITEMS:     suffix = "OBJ_ITEMS";     break;
+        case AM_VALUE_STR:           suffix = "STR";           break;
+        case AM_VALUE_STRS:          suffix = "STRINGS";       break;
+        case AM_VALUE_SYNC_MESSAGE:  suffix = "SYNC_MESSAGE";  break;
+        case AM_VALUE_SYNC_STATE:    suffix = "SYNC_STATE";    break;
+        case AM_VALUE_TIMESTAMP:     suffix = "TIMESTAMP";     break;
+        case AM_VALUE_UINT:          suffix = "UINT";          break;
+        case AM_VALUE_VOID:          suffix = "VOID";          break;
+        default:                     suffix = "...";
     }
-    free(prev);
-    *stack = NULL;
-    return count;
+    return suffix;
 }
