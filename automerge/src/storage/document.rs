@@ -12,6 +12,7 @@ use doc_change_columns::DocChangeColumns;
 pub(crate) use doc_change_columns::{AsChangeMeta, ChangeMetadata, ReadChangeError};
 mod compression;
 
+#[allow(dead_code)]
 pub(crate) enum CompressConfig {
     None,
     Threshold(usize),

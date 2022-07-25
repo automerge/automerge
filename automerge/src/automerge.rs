@@ -4,24 +4,31 @@ use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::ops::RangeBounds;
 
+#[cfg(not(feature = "storage-v2"))]
 use crate::change::encode_document;
 use crate::clock::ClockData;
+#[cfg(feature = "storage-v2")]
+use crate::clocks::Clocks;
+#[cfg(feature = "storage-v2")]
+use crate::columnar_2::Key as EncodedKey;
 use crate::exid::ExId;
 use crate::keys::Keys;
 use crate::op_observer::OpObserver;
 use crate::op_set::OpSet;
 use crate::parents::Parents;
+#[cfg(feature = "storage-v2")]
+use crate::storage::{self, load};
 use crate::transaction::{self, CommitOptions, Failure, Success, Transaction, TransactionInner};
 use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType,
     ScalarValue, Value,
 };
-use crate::KeysAt;
+#[cfg(not(feature = "storage-v2"))]
+use crate::{legacy, types};
 use crate::{
-    legacy, query, types, ApplyOptions, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType,
-    Values,
+    query, ApplyOptions, AutomergeError, Change, KeysAt, ListRange, ListRangeAt, MapRange,
+    MapRangeAt, ObjType, Prop, Values,
 };
-use crate::{AutomergeError, Change, Prop};
 use serde::Serialize;
 
 #[cfg(test)]
@@ -136,7 +143,9 @@ impl Automerge {
             start_op: NonZeroU64::new(self.max_op + 1).unwrap(),
             time: 0,
             message: None,
+            #[cfg(not(feature = "storage-v2"))]
             extra_bytes: Default::default(),
+            #[cfg(not(feature = "storage-v2"))]
             hash: None,
             operations: vec![],
             deps,
@@ -526,7 +535,7 @@ impl Automerge {
         prop: P,
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let result = match prop.into() {
+        let mut result = match prop.into() {
             Prop::Map(p) => {
                 let prop = self.ops.m.props.lookup(&p);
                 if let Some(p) = prop {
@@ -548,6 +557,7 @@ impl Automerge {
                 .map(|o| (o.value(), self.id_to_exid(o.id)))
                 .collect(),
         };
+        result.sort_by(|a, b| b.1.cmp(&a.1));
         Ok(result)
     }
 
@@ -592,6 +602,7 @@ impl Automerge {
     }
 
     /// Load a document.
+    #[cfg(not(feature = "storage-v2"))]
     pub fn load_with<Obs: OpObserver>(
         data: &[u8],
         options: ApplyOptions<'_, Obs>,
@@ -600,6 +611,87 @@ impl Automerge {
         let mut doc = Self::new();
         doc.apply_changes_with(changes, options)?;
         Ok(doc)
+    }
+
+    #[cfg(feature = "storage-v2")]
+    pub fn load_with<Obs: OpObserver>(
+        data: &[u8],
+        mut options: ApplyOptions<'_, Obs>,
+    ) -> Result<Self, AutomergeError> {
+        if data.is_empty() {
+            return Ok(Self::new());
+        }
+        let (remaining, first_chunk) = storage::Chunk::parse(storage::parse::Input::new(data))
+            .map_err(|e| load::Error::Parse(Box::new(e)))?;
+        if !first_chunk.checksum_valid() {
+            return Err(load::Error::BadChecksum.into());
+        }
+        let observer = &mut options.op_observer;
+
+        let mut am = match first_chunk {
+            storage::Chunk::Document(d) => {
+                let storage::load::Reconstructed {
+                    max_op,
+                    result: op_set,
+                    changes,
+                    heads,
+                } = match observer {
+                    Some(o) => storage::load::reconstruct_document(&d, OpSet::observed_builder(*o)),
+                    None => storage::load::reconstruct_document(&d, OpSet::builder()),
+                }
+                .map_err(|e| load::Error::InflateDocument(Box::new(e)))?;
+                let mut hashes_by_index = HashMap::new();
+                let mut actor_to_history: HashMap<usize, Vec<usize>> = HashMap::new();
+                let mut clocks = Clocks::new();
+                for (index, change) in changes.iter().enumerate() {
+                    // SAFETY: This should be fine because we just constructed an opset containing
+                    // all the changes
+                    let actor_index = op_set.m.actors.lookup(change.actor_id()).unwrap();
+                    actor_to_history.entry(actor_index).or_default().push(index);
+                    hashes_by_index.insert(index, change.hash());
+                    clocks.add_change(change, actor_index)?;
+                }
+                let history_index = hashes_by_index.into_iter().map(|(k, v)| (v, k)).collect();
+                Self {
+                    queue: vec![],
+                    history: changes,
+                    history_index,
+                    states: actor_to_history,
+                    clocks: clocks.into(),
+                    ops: op_set,
+                    deps: heads.into_iter().collect(),
+                    saved: Default::default(),
+                    actor: Actor::Unused(ActorId::random()),
+                    max_op,
+                }
+            }
+            storage::Chunk::Change(stored_change) => {
+                let change = Change::new_from_unverified(stored_change.into_owned(), None)
+                    .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?;
+                let mut am = Self::new();
+                am.apply_change(change, observer);
+                am
+            }
+            storage::Chunk::CompressedChange(stored_change, compressed) => {
+                let change = Change::new_from_unverified(
+                    stored_change.into_owned(),
+                    Some(compressed.into_owned()),
+                )
+                .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?;
+                let mut am = Self::new();
+                am.apply_change(change, observer);
+                am
+            }
+        };
+        match load::load_changes(remaining.reset()) {
+            load::LoadedChanges::Complete(c) => {
+                for change in c {
+                    am.apply_change(change, observer);
+                }
+            }
+            load::LoadedChanges::Partial { error, .. } => return Err(error.into()),
+        }
+        Ok(am)
     }
 
     /// Load an incremental save of a document.
@@ -613,7 +705,16 @@ impl Automerge {
         data: &[u8],
         options: ApplyOptions<'_, Obs>,
     ) -> Result<usize, AutomergeError> {
+        #[cfg(not(feature = "storage-v2"))]
         let changes = Change::load_document(data)?;
+        #[cfg(feature = "storage-v2")]
+        let changes = match load::load_changes(storage::parse::Input::new(data)) {
+            load::LoadedChanges::Complete(c) => c,
+            load::LoadedChanges::Partial { error, loaded, .. } => {
+                tracing::warn!(successful_chunks=loaded.len(), err=?error, "partial load");
+                loaded
+            }
+        };
         let start = self.ops.len();
         self.apply_changes_with(changes, options)?;
         let delta = self.ops.len() - start;
@@ -699,6 +800,7 @@ impl Automerge {
         None
     }
 
+    #[cfg(not(feature = "storage-v2"))]
     fn import_ops(&mut self, change: &Change) -> Vec<(ObjId, Op)> {
         change
             .iter_ops()
@@ -723,6 +825,55 @@ impl Automerge {
                     Op {
                         id,
                         action: c.action,
+                        key,
+                        succ: Default::default(),
+                        pred,
+                        insert: c.insert,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    #[cfg(feature = "storage-v2")]
+    fn import_ops(&mut self, change: &Change) -> Vec<(ObjId, Op)> {
+        let actor = self.ops.m.actors.cache(change.actor_id().clone());
+        let mut actors = Vec::with_capacity(change.other_actor_ids().len() + 1);
+        actors.push(actor);
+        actors.extend(
+            change
+                .other_actor_ids()
+                .iter()
+                .map(|a| self.ops.m.actors.cache(a.clone()))
+                .collect::<Vec<_>>(),
+        );
+        change
+            .iter_ops()
+            .enumerate()
+            .map(|(i, c)| {
+                let id = OpId(change.start_op().get() + i as u64, actor);
+                let key = match &c.key {
+                    EncodedKey::Prop(n) => Key::Map(self.ops.m.props.cache(n.to_string())),
+                    EncodedKey::Elem(e) if e.is_head() => Key::Seq(ElemId::head()),
+                    EncodedKey::Elem(ElemId(o)) => {
+                        Key::Seq(ElemId(OpId::new(actors[o.actor()], o.counter())))
+                    }
+                };
+                let obj = if c.obj.is_root() {
+                    ObjId::root()
+                } else {
+                    ObjId(OpId(c.obj.opid().counter(), actors[c.obj.opid().actor()]))
+                };
+                let pred = c
+                    .pred
+                    .iter()
+                    .map(|p| OpId::new(actors[p.actor()], p.counter()));
+                let pred = self.ops.m.sorted_opids(pred);
+                (
+                    obj,
+                    Op {
+                        id,
+                        action: OpType::from_index_and_value(c.action, c.val).unwrap(),
                         key,
                         succ: Default::default(),
                         pred,
@@ -759,8 +910,23 @@ impl Automerge {
     pub fn save(&mut self) -> Vec<u8> {
         let heads = self.get_heads();
         let c = self.history.iter();
-        let ops = self.ops.iter();
-        let bytes = encode_document(heads, c, ops, &self.ops.m.actors, &self.ops.m.props.cache);
+        #[cfg(not(feature = "storage-v2"))]
+        let bytes = encode_document(
+            heads,
+            c,
+            self.ops.iter(),
+            &self.ops.m.actors,
+            &self.ops.m.props.cache,
+        );
+        #[cfg(feature = "storage-v2")]
+        let bytes = crate::storage::save::save_document(
+            c,
+            self.ops.iter(),
+            &self.ops.m.actors,
+            &self.ops.m.props,
+            &heads,
+            None,
+        );
         self.saved = self.get_heads();
         bytes
     }
@@ -960,6 +1126,7 @@ impl Automerge {
             .or_default()
             .push(history_index);
 
+        self.history_index.insert(change.hash(), history_index);
         let mut clock = Clock::new();
         for hash in change.deps() {
             let c = self

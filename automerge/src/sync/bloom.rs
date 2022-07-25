@@ -1,6 +1,12 @@
-use std::borrow::{Borrow, Cow};
+use std::borrow::Borrow;
+#[cfg(not(feature = "storage-v2"))]
+use std::borrow::Cow;
 
-use crate::{decoding, decoding::Decoder, encoding::Encodable, ChangeHash};
+#[cfg(feature = "storage-v2")]
+use crate::storage::parse;
+use crate::ChangeHash;
+#[cfg(not(feature = "storage-v2"))]
+use crate::{decoding, decoding::Decoder, encoding::Encodable};
 
 // These constants correspond to a 1% false positive rate. The values can be changed without
 // breaking compatibility of the network protocol, since the parameters used for a particular
@@ -16,7 +22,15 @@ pub struct BloomFilter {
     bits: Vec<u8>,
 }
 
+#[cfg(feature = "storage-v2")]
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ParseError {
+    #[error(transparent)]
+    Leb128(#[from] parse::leb128::Error),
+}
+
 impl BloomFilter {
+    #[cfg(not(feature = "storage-v2"))]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::new();
         if self.num_entries != 0 {
@@ -26,6 +40,39 @@ impl BloomFilter {
             buf.extend(&self.bits);
         }
         buf
+    }
+
+    #[cfg(feature = "storage-v2")]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        if self.num_entries != 0 {
+            leb128::write::unsigned(&mut buf, self.num_entries as u64).unwrap();
+            leb128::write::unsigned(&mut buf, self.num_bits_per_entry as u64).unwrap();
+            leb128::write::unsigned(&mut buf, self.num_probes as u64).unwrap();
+            buf.extend(&self.bits);
+        }
+        buf
+    }
+
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn parse(input: parse::Input<'_>) -> parse::ParseResult<'_, Self, ParseError> {
+        if input.is_empty() {
+            Ok((input, Self::default()))
+        } else {
+            let (i, num_entries) = parse::leb128_u32(input)?;
+            let (i, num_bits_per_entry) = parse::leb128_u32(i)?;
+            let (i, num_probes) = parse::leb128_u32(i)?;
+            let (i, bits) = parse::take_n(bits_capacity(num_entries, num_bits_per_entry), i)?;
+            Ok((
+                i,
+                Self {
+                    num_entries,
+                    num_bits_per_entry,
+                    num_probes,
+                    bits: bits.to_vec(),
+                },
+            ))
+        }
     }
 
     fn get_probes(&self, hash: &ChangeHash) -> Vec<u32> {
@@ -107,6 +154,7 @@ fn bits_capacity(num_entries: u32, num_bits_per_entry: u32) -> usize {
     f as usize
 }
 
+#[cfg(not(feature = "storage-v2"))]
 impl TryFrom<&[u8]> for BloomFilter {
     type Error = decoding::Error;
 
@@ -127,5 +175,21 @@ impl TryFrom<&[u8]> for BloomFilter {
                 bits: bits.to_vec(),
             })
         }
+    }
+}
+
+#[cfg(feature = "storage-v2")]
+#[derive(thiserror::Error, Debug)]
+#[error("{0}")]
+pub struct DecodeError(String);
+
+#[cfg(feature = "storage-v2")]
+impl TryFrom<&[u8]> for BloomFilter {
+    type Error = DecodeError;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        Self::parse(parse::Input::new(bytes))
+            .map(|(_, b)| b)
+            .map_err(|e| DecodeError(e.to_string()))
     }
 }
