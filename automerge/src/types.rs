@@ -365,6 +365,13 @@ impl Key {
 #[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq, Copy, Hash, Default)]
 pub(crate) struct OpId(pub(crate) u64, pub(crate) usize);
 
+impl OpId {
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn new(actor: usize, counter: u64) -> Self {
+        Self(counter, actor)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
 pub(crate) struct ObjId(pub(crate) OpId);
 
