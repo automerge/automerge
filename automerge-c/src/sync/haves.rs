@@ -41,10 +41,22 @@ impl Detail {
         }
         let len = self.len as isize;
         self.offset = if self.offset < 0 {
-            /* It's reversed. */
-            std::cmp::max(-(len + 1), std::cmp::min(self.offset - n, -1))
+            // It's reversed.
+            let unclipped = self.offset.checked_sub(n).unwrap_or(isize::MIN);
+            if unclipped >= 0 {
+                // Clip it to the forward stop.
+                len
+            } else {
+                std::cmp::min(std::cmp::max(-(len + 1), unclipped), -1)
+            }
         } else {
-            std::cmp::max(0, std::cmp::min(self.offset + n, len))
+            let unclipped = self.offset.checked_add(n).unwrap_or(isize::MAX);
+            if unclipped < 0 {
+                // Clip it to the reverse stop.
+                -(len + 1)
+            } else {
+                std::cmp::max(0, std::cmp::min(unclipped, len))
+            }
         }
     }
 
@@ -82,10 +94,8 @@ impl Detail {
     }
 
     pub fn prev(&mut self, n: isize) -> Option<*const AMsyncHave> {
-        /* Check for rewinding. */
-        let prior_offset = self.offset;
         self.advance(-n);
-        if (self.offset == prior_offset) || self.is_stopped() {
+        if self.is_stopped() {
             return None;
         }
         let slice: &[am::sync::Have] =
@@ -109,6 +119,15 @@ impl Detail {
             storage: self.storage,
         }
     }
+
+    pub fn rewound(&self) -> Self {
+        Self {
+            len: self.len,
+            offset: if self.offset < 0 { -1 } else { 0 },
+            ptr: self.ptr,
+            storage: self.storage,
+        }
+    }
 }
 
 impl From<Detail> for [u8; USIZE_USIZE_USIZE_USIZE_] {
@@ -127,6 +146,7 @@ impl From<Detail> for [u8; USIZE_USIZE_USIZE_USIZE_] {
 /// \struct AMsyncHaves
 /// \brief A random-access iterator over a sequence of synchronization haves.
 #[repr(C)]
+#[derive(PartialEq)]
 pub struct AMsyncHaves {
     /// An implementation detail that is intentionally opaque.
     /// \warning Modifying \p detail will cause undefined behavior.
@@ -168,6 +188,13 @@ impl AMsyncHaves {
             detail: detail.reversed().into(),
         }
     }
+
+    pub fn rewound(&self) -> Self {
+        let detail = unsafe { &*(self.detail.as_ptr() as *const Detail) };
+        Self {
+            detail: detail.rewound().into(),
+        }
+    }
 }
 
 impl AsRef<[am::sync::Have]> for AMsyncHaves {
@@ -193,11 +220,11 @@ impl Default for AMsyncHaves {
 /// \param[in,out] sync_haves A pointer to an `AMsyncHaves` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
-/// \pre \p sync_haves must be a valid address.
+/// \pre \p sync_haves` != NULL`.
 /// \internal
 ///
 /// #Safety
-/// sync_haves must be a pointer to a valid AMsyncHaves
+/// sync_haves must be a valid pointer to an AMsyncHaves
 #[no_mangle]
 pub unsafe extern "C" fn AMsyncHavesAdvance(sync_haves: *mut AMsyncHaves, n: isize) {
     if let Some(sync_haves) = sync_haves.as_mut() {
@@ -211,14 +238,14 @@ pub unsafe extern "C" fn AMsyncHavesAdvance(sync_haves: *mut AMsyncHaves, n: isi
 ///
 /// \param[in] sync_haves1 A pointer to an `AMsyncHaves` struct.
 /// \param[in] sync_haves2 A pointer to an `AMsyncHaves` struct.
-/// \return `true` if \p sync_haves1 `==` \p sync_haves2 and `false` otherwise.
-/// \pre \p sync_haves1 must be a valid address.
-/// \pre \p sync_haves2 must be a valid address.
+/// \return `true` if \p sync_haves1` == `\p sync_haves2 and `false` otherwise.
+/// \pre \p sync_haves1` != NULL`.
+/// \pre \p sync_haves2` != NULL`.
 /// \internal
 ///
 /// #Safety
-/// sync_haves1 must be a pointer to a valid AMsyncHaves
-/// sync_haves2 must be a pointer to a valid AMsyncHaves
+/// sync_haves1 must be a valid pointer to an AMsyncHaves
+/// sync_haves2 must be a valid pointer to an AMsyncHaves
 #[no_mangle]
 pub unsafe extern "C" fn AMsyncHavesEqual(
     sync_haves1: *const AMsyncHaves,
@@ -242,11 +269,11 @@ pub unsafe extern "C" fn AMsyncHavesEqual(
 /// \return A pointer to an `AMsyncHave` struct that's `NULL` when
 ///         \p sync_haves was previously advanced past its forward/reverse
 ///         limit.
-/// \pre \p sync_haves must be a valid address.
+/// \pre \p sync_haves` != NULL`.
 /// \internal
 ///
 /// #Safety
-/// sync_haves must be a pointer to a valid AMsyncHaves
+/// sync_haves must be a valid pointer to an AMsyncHaves
 #[no_mangle]
 pub unsafe extern "C" fn AMsyncHavesNext(
     sync_haves: *mut AMsyncHaves,
@@ -271,11 +298,11 @@ pub unsafe extern "C" fn AMsyncHavesNext(
 ///              number of positions to advance.
 /// \return A pointer to an `AMsyncHave` struct that's `NULL` when
 ///         \p sync_haves is presently advanced past its forward/reverse limit.
-/// \pre \p sync_haves must be a valid address.
+/// \pre \p sync_haves` != NULL`.
 /// \internal
 ///
 /// #Safety
-/// sync_haves must be a pointer to a valid AMsyncHaves
+/// sync_haves must be a valid pointer to an AMsyncHaves
 #[no_mangle]
 pub unsafe extern "C" fn AMsyncHavesPrev(
     sync_haves: *mut AMsyncHaves,
@@ -295,11 +322,11 @@ pub unsafe extern "C" fn AMsyncHavesPrev(
 ///
 /// \param[in] sync_haves A pointer to an `AMsyncHaves` struct.
 /// \return The count of values in \p sync_haves.
-/// \pre \p sync_haves must be a valid address.
+/// \pre \p sync_haves` != NULL`.
 /// \internal
 ///
 /// #Safety
-/// sync_haves must be a pointer to a valid AMsyncHaves
+/// sync_haves must be a valid pointer to an AMsyncHaves
 #[no_mangle]
 pub unsafe extern "C" fn AMsyncHavesSize(sync_haves: *const AMsyncHaves) -> usize {
     if let Some(sync_haves) = sync_haves.as_ref() {
@@ -315,15 +342,35 @@ pub unsafe extern "C" fn AMsyncHavesSize(sync_haves: *const AMsyncHaves) -> usiz
 ///
 /// \param[in] sync_haves A pointer to an `AMsyncHaves` struct.
 /// \return An `AMsyncHaves` struct
-/// \pre \p sync_haves must be a valid address.
+/// \pre \p sync_haves` != NULL`.
 /// \internal
 ///
 /// #Safety
-/// sync_haves must be a pointer to a valid AMsyncHaves
+/// sync_haves must be a valid pointer to an AMsyncHaves
 #[no_mangle]
 pub unsafe extern "C" fn AMsyncHavesReversed(sync_haves: *const AMsyncHaves) -> AMsyncHaves {
     if let Some(sync_haves) = sync_haves.as_ref() {
         sync_haves.reversed()
+    } else {
+        AMsyncHaves::default()
+    }
+}
+
+/// \memberof AMsyncHaves
+/// \brief Creates an iterator at the starting position over the same sequence
+///        of synchronization haves as the given one.
+///
+/// \param[in] sync_haves A pointer to an `AMsyncHaves` struct.
+/// \return An `AMsyncHaves` struct
+/// \pre \p sync_haves` != NULL`.
+/// \internal
+///
+/// #Safety
+/// sync_haves must be a valid pointer to an AMsyncHaves
+#[no_mangle]
+pub unsafe extern "C" fn AMsyncHavesRewound(sync_haves: *const AMsyncHaves) -> AMsyncHaves {
+    if let Some(sync_haves) = sync_haves.as_ref() {
+        sync_haves.rewound()
     } else {
         AMsyncHaves::default()
     }

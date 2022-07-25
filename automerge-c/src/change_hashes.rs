@@ -35,10 +35,22 @@ impl Detail {
         }
         let len = self.len as isize;
         self.offset = if self.offset < 0 {
-            /* It's reversed. */
-            std::cmp::max(-(len + 1), std::cmp::min(self.offset - n, -1))
+            // It's reversed.
+            let unclipped = self.offset.checked_sub(n).unwrap_or(isize::MIN);
+            if unclipped >= 0 {
+                // Clip it to the forward stop.
+                len
+            } else {
+                std::cmp::min(std::cmp::max(-(len + 1), unclipped), -1)
+            }
         } else {
-            std::cmp::max(0, std::cmp::min(self.offset + n, len))
+            let unclipped = self.offset.checked_add(n).unwrap_or(isize::MAX);
+            if unclipped < 0 {
+                // Clip it to the reverse stop.
+                -(len + 1)
+            } else {
+                std::cmp::max(0, std::cmp::min(unclipped, len))
+            }
         }
     }
 
@@ -68,10 +80,8 @@ impl Detail {
     }
 
     pub fn prev(&mut self, n: isize) -> Option<&am::ChangeHash> {
-        /* Check for rewinding. */
-        let prior_offset = self.offset;
         self.advance(-n);
-        if (self.offset == prior_offset) || self.is_stopped() {
+        if self.is_stopped() {
             return None;
         }
         let slice: &[am::ChangeHash] =
@@ -83,6 +93,14 @@ impl Detail {
         Self {
             len: self.len,
             offset: -(self.offset + 1),
+            ptr: self.ptr,
+        }
+    }
+
+    pub fn rewound(&self) -> Self {
+        Self {
+            len: self.len,
+            offset: if self.offset < 0 { -1 } else { 0 },
             ptr: self.ptr,
         }
     }
@@ -101,6 +119,7 @@ impl From<Detail> for [u8; USIZE_USIZE_USIZE_] {
 /// \struct AMchangeHashes
 /// \brief A random-access iterator over a sequence of change hashes.
 #[repr(C)]
+#[derive(PartialEq)]
 pub struct AMchangeHashes {
     /// An implementation detail that is intentionally opaque.
     /// \warning Modifying \p detail will cause undefined behavior.
@@ -142,6 +161,13 @@ impl AMchangeHashes {
             detail: detail.reversed().into(),
         }
     }
+
+    pub fn rewound(&self) -> Self {
+        let detail = unsafe { &*(self.detail.as_ptr() as *const Detail) };
+        Self {
+            detail: detail.rewound().into(),
+        }
+    }
 }
 
 impl AsRef<[am::ChangeHash]> for AMchangeHashes {
@@ -167,11 +193,11 @@ impl Default for AMchangeHashes {
 /// \param[in,out] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
-/// \pre \p change_hashes must be a valid address.
+/// \pre \p change_hashes` != NULL`.
 /// \internal
 ///
 /// #Safety
-/// change_hashes must be a pointer to a valid AMchangeHashes
+/// change_hashes must be a valid pointer to an AMchangeHashes
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeHashesAdvance(change_hashes: *mut AMchangeHashes, n: isize) {
     if let Some(change_hashes) = change_hashes.as_mut() {
@@ -186,15 +212,15 @@ pub unsafe extern "C" fn AMchangeHashesAdvance(change_hashes: *mut AMchangeHashe
 /// \param[in] change_hashes1 A pointer to an `AMchangeHashes` struct.
 /// \param[in] change_hashes2 A pointer to an `AMchangeHashes` struct.
 /// \return `-1` if \p change_hashes1 `<` \p change_hashes2, `0` if
-///         \p change_hashes1 `==` \p change_hashes2 and `1` if
+///         \p change_hashes1` == `\p change_hashes2 and `1` if
 ///         \p change_hashes1 `>` \p change_hashes2.
-/// \pre \p change_hashes1 must be a valid address.
-/// \pre \p change_hashes2 must be a valid address.
+/// \pre \p change_hashes1` != NULL`.
+/// \pre \p change_hashes2` != NULL`.
 /// \internal
 ///
 /// #Safety
-/// change_hashes1 must be a pointer to a valid AMchangeHashes
-/// change_hashes2 must be a pointer to a valid AMchangeHashes
+/// change_hashes1 must be a valid pointer to an AMchangeHashes
+/// change_hashes2 must be a valid pointer to an AMchangeHashes
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeHashesCmp(
     change_hashes1: *const AMchangeHashes,
@@ -222,12 +248,11 @@ pub unsafe extern "C" fn AMchangeHashesCmp(
 /// \param[in] count The number of `AMbyteSpan` structs to copy from \p src.
 /// \return A pointer to an `AMresult` struct containing an `AMchangeHashes`
 ///         struct.
-/// \pre \p src must be a valid address.
-/// \pre `0 <=` \p count `<=` size of \p src.
-/// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMfree()`.
+/// \pre \p src` != NULL`.
+/// \pre `0 <=` \p count` <= `size of \p src.
+/// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
+///          in order to prevent a memory leak.
 /// \internal
-///
 /// # Safety
 /// src must be an AMbyteSpan array of size `>= count`
 #[no_mangle]
@@ -261,11 +286,11 @@ pub unsafe extern "C" fn AMchangeHashesInit(src: *const AMbyteSpan, count: usize
 ///              number of positions to advance.
 /// \return An `AMbyteSpan` struct with `.src == NULL` when \p change_hashes
 ///         was previously advanced past its forward/reverse limit.
-/// \pre \p change_hashes must be a valid address.
+/// \pre \p change_hashes` != NULL`.
 /// \internal
 ///
 /// #Safety
-/// change_hashes must be a pointer to a valid AMchangeHashes
+/// change_hashes must be a valid pointer to an AMchangeHashes
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeHashesNext(
     change_hashes: *mut AMchangeHashes,
@@ -290,11 +315,11 @@ pub unsafe extern "C" fn AMchangeHashesNext(
 ///              number of positions to advance.
 /// \return An `AMbyteSpan` struct with `.src == NULL` when \p change_hashes is
 ///         presently advanced past its forward/reverse limit.
-/// \pre \p change_hashes must be a valid address.
+/// \pre \p change_hashes` != NULL`.
 /// \internal
 ///
 /// #Safety
-/// change_hashes must be a pointer to a valid AMchangeHashes
+/// change_hashes must be a valid pointer to an AMchangeHashes
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeHashesPrev(
     change_hashes: *mut AMchangeHashes,
@@ -314,11 +339,11 @@ pub unsafe extern "C" fn AMchangeHashesPrev(
 ///
 /// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \return The count of values in \p change_hashes.
-/// \pre \p change_hashes must be a valid address.
+/// \pre \p change_hashes` != NULL`.
 /// \internal
 ///
 /// #Safety
-/// change_hashes must be a pointer to a valid AMchangeHashes
+/// change_hashes must be a valid pointer to an AMchangeHashes
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeHashesSize(change_hashes: *const AMchangeHashes) -> usize {
     if let Some(change_hashes) = change_hashes.as_ref() {
@@ -334,17 +359,39 @@ pub unsafe extern "C" fn AMchangeHashesSize(change_hashes: *const AMchangeHashes
 ///
 /// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \return An `AMchangeHashes` struct
-/// \pre \p change_hashes must be a valid address.
+/// \pre \p change_hashes` != NULL`.
 /// \internal
 ///
 /// #Safety
-/// change_hashes must be a pointer to a valid AMchangeHashes
+/// change_hashes must be a valid pointer to an AMchangeHashes
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeHashesReversed(
     change_hashes: *const AMchangeHashes,
 ) -> AMchangeHashes {
     if let Some(change_hashes) = change_hashes.as_ref() {
         change_hashes.reversed()
+    } else {
+        AMchangeHashes::default()
+    }
+}
+
+/// \memberof AMchangeHashes
+/// \brief Creates an iterator at the starting position over the same sequence
+///        of change hashes as the given one.
+///
+/// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
+/// \return An `AMchangeHashes` struct
+/// \pre \p change_hashes` != NULL`.
+/// \internal
+///
+/// #Safety
+/// change_hashes must be a valid pointer to an AMchangeHashes
+#[no_mangle]
+pub unsafe extern "C" fn AMchangeHashesRewound(
+    change_hashes: *const AMchangeHashes,
+) -> AMchangeHashes {
+    if let Some(change_hashes) = change_hashes.as_ref() {
+        change_hashes.rewound()
     } else {
         AMchangeHashes::default()
     }

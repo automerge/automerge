@@ -32,10 +32,22 @@ impl Detail {
         }
         let len = self.len as isize;
         self.offset = if self.offset < 0 {
-            /* It's reversed. */
-            std::cmp::max(-(len + 1), std::cmp::min(self.offset - n, -1))
+            // It's reversed.
+            let unclipped = self.offset.checked_sub(n).unwrap_or(isize::MIN);
+            if unclipped >= 0 {
+                // Clip it to the forward stop.
+                len
+            } else {
+                std::cmp::min(std::cmp::max(-(len + 1), unclipped), -1)
+            }
         } else {
-            std::cmp::max(0, std::cmp::min(self.offset + n, len))
+            let unclipped = self.offset.checked_add(n).unwrap_or(isize::MAX);
+            if unclipped < 0 {
+                // Clip it to the reverse stop.
+                -(len + 1)
+            } else {
+                std::cmp::max(0, std::cmp::min(unclipped, len))
+            }
         }
     }
 
@@ -65,10 +77,8 @@ impl Detail {
     }
 
     pub fn prev(&mut self, n: isize) -> Option<*const c_char> {
-        /* Check for rewinding. */
-        let prior_offset = self.offset;
         self.advance(-n);
-        if (self.offset == prior_offset) || self.is_stopped() {
+        if self.is_stopped() {
             return None;
         }
         let slice: &[CString] =
@@ -80,6 +90,14 @@ impl Detail {
         Self {
             len: self.len,
             offset: -(self.offset + 1),
+            ptr: self.ptr,
+        }
+    }
+
+    pub fn rewound(&self) -> Self {
+        Self {
+            len: self.len,
+            offset: if self.offset < 0 { -1 } else { 0 },
             ptr: self.ptr,
         }
     }
@@ -95,10 +113,11 @@ impl From<Detail> for [u8; USIZE_USIZE_USIZE_] {
     }
 }
 
-/// \struct AMstrings
+/// \struct AMstrs
 /// \brief A random-access iterator over a sequence of UTF-8 strings.
 #[repr(C)]
-pub struct AMstrings {
+#[derive(PartialEq)]
+pub struct AMstrs {
     /// An implementation detail that is intentionally opaque.
     /// \warning Modifying \p detail will cause undefined behavior.
     /// \note The actual size of \p detail will vary by platform, this is just
@@ -106,7 +125,7 @@ pub struct AMstrings {
     detail: [u8; USIZE_USIZE_USIZE_],
 }
 
-impl AMstrings {
+impl AMstrs {
     pub fn new(cstrings: &[CString]) -> Self {
         Self {
             detail: Detail::new(cstrings, 0).into(),
@@ -139,16 +158,23 @@ impl AMstrings {
             detail: detail.reversed().into(),
         }
     }
+
+    pub fn rewound(&self) -> Self {
+        let detail = unsafe { &*(self.detail.as_ptr() as *const Detail) };
+        Self {
+            detail: detail.rewound().into(),
+        }
+    }
 }
 
-impl AsRef<[String]> for AMstrings {
+impl AsRef<[String]> for AMstrs {
     fn as_ref(&self) -> &[String] {
         let detail = unsafe { &*(self.detail.as_ptr() as *const Detail) };
         unsafe { std::slice::from_raw_parts(detail.ptr as *const String, detail.len) }
     }
 }
 
-impl Default for AMstrings {
+impl Default for AMstrs {
     fn default() -> Self {
         Self {
             detail: [0; USIZE_USIZE_USIZE_],
@@ -156,49 +182,46 @@ impl Default for AMstrings {
     }
 }
 
-/// \memberof AMstrings
+/// \memberof AMstrs
 /// \brief Advances an iterator over a sequence of UTF-8 strings by at most
 ///        \p |n| positions where the sign of \p n is relative to the
 ///        iterator's direction.
 ///
-/// \param[in,out] strings A pointer to an `AMstrings` struct.
+/// \param[in,out] strs A pointer to an `AMstrs` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
-/// \pre \p strings must be a valid address.
+/// \pre \p strs` != NULL`.
 /// \internal
 ///
 /// #Safety
-/// strings must be a pointer to a valid AMstrings
+/// strs must be a valid pointer to an AMstrs
 #[no_mangle]
-pub unsafe extern "C" fn AMstringsAdvance(strings: *mut AMstrings, n: isize) {
-    if let Some(strings) = strings.as_mut() {
-        strings.advance(n);
+pub unsafe extern "C" fn AMstrsAdvance(strs: *mut AMstrs, n: isize) {
+    if let Some(strs) = strs.as_mut() {
+        strs.advance(n);
     };
 }
 
-/// \memberof AMstrings
+/// \memberof AMstrs
 /// \brief Compares the sequences of UTF-8 strings underlying a pair of
 ///        iterators.
 ///
-/// \param[in] strings1 A pointer to an `AMstrings` struct.
-/// \param[in] strings2 A pointer to an `AMstrings` struct.
-/// \return `-1` if \p strings1 `<` \p strings2, `0` if
-///         \p strings1 `==` \p strings2 and `1` if
-///         \p strings1 `>` \p strings2.
-/// \pre \p strings1 must be a valid address.
-/// \pre \p strings2 must be a valid address.
+/// \param[in] strs1 A pointer to an `AMstrs` struct.
+/// \param[in] strs2 A pointer to an `AMstrs` struct.
+/// \return `-1` if \p strs1 `<` \p strs2, `0` if
+///         \p strs1` == `\p strs2 and `1` if
+///         \p strs1 `>` \p strs2.
+/// \pre \p strs1` != NULL`.
+/// \pre \p strs2` != NULL`.
 /// \internal
 ///
 /// #Safety
-/// strings1 must be a pointer to a valid AMstrings
-/// strings2 must be a pointer to a valid AMstrings
+/// strs1 must be a valid pointer to an AMstrs
+/// strs2 must be a valid pointer to an AMstrs
 #[no_mangle]
-pub unsafe extern "C" fn AMstringsCmp(
-    strings1: *const AMstrings,
-    strings2: *const AMstrings,
-) -> isize {
-    match (strings1.as_ref(), strings2.as_ref()) {
-        (Some(strings1), Some(strings2)) => match strings1.as_ref().cmp(strings2.as_ref()) {
+pub unsafe extern "C" fn AMstrsCmp(strs1: *const AMstrs, strs2: *const AMstrs) -> isize {
+    match (strs1.as_ref(), strs2.as_ref()) {
+        (Some(strs1), Some(strs2)) => match strs1.as_ref().cmp(strs2.as_ref()) {
             Ordering::Less => -1,
             Ordering::Equal => 0,
             Ordering::Greater => 1,
@@ -209,92 +232,112 @@ pub unsafe extern "C" fn AMstringsCmp(
     }
 }
 
-/// \memberof AMstrings
-/// \brief Gets the key at the current position of an iterator over a
-///        sequence of UTF-8 strings and then advances it by at most \p |n|
-///        positions where the sign of \p n is relative to the iterator's direction.
+/// \memberof AMstrs
+/// \brief Gets the key at the current position of an iterator over a sequence
+///        of UTF-8 strings and then advances it by at most \p |n| positions
+///        where the sign of \p n is relative to the iterator's direction.
 ///
-/// \param[in,out] strings A pointer to an `AMstrings` struct.
+/// \param[in,out] strs A pointer to an `AMstrs` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
-/// \return A UTF-8 string that's `NULL` when \p strings was previously
-///         advanced past its forward/reverse limit.
-/// \pre \p strings must be a valid address.
+/// \return A UTF-8 string that's `NULL` when \p strs was previously advanced
+///         past its forward/reverse limit.
+/// \pre \p strs` != NULL`.
 /// \internal
 ///
 /// #Safety
-/// strings must be a pointer to a valid AMstrings
+/// strs must be a valid pointer to an AMstrs
 #[no_mangle]
-pub unsafe extern "C" fn AMstringsNext(strings: *mut AMstrings, n: isize) -> *const c_char {
-    if let Some(strings) = strings.as_mut() {
-        if let Some(key) = strings.next(n) {
+pub unsafe extern "C" fn AMstrsNext(strs: *mut AMstrs, n: isize) -> *const c_char {
+    if let Some(strs) = strs.as_mut() {
+        if let Some(key) = strs.next(n) {
             return key;
         }
     }
     std::ptr::null()
 }
 
-/// \memberof AMstrings
+/// \memberof AMstrs
 /// \brief Advances an iterator over a sequence of UTF-8 strings by at most
 ///        \p |n| positions where the sign of \p n is relative to the
 ///        iterator's direction and then gets the key at its new position.
 ///
-/// \param[in,out] strings A pointer to an `AMstrings` struct.
+/// \param[in,out] strs A pointer to an `AMstrs` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
-/// \return A UTF-8 string that's `NULL` when \p strings is presently advanced
+/// \return A UTF-8 string that's `NULL` when \p strs is presently advanced
 ///         past its forward/reverse limit.
-/// \pre \p strings must be a valid address.
+/// \pre \p strs` != NULL`.
 /// \internal
 ///
 /// #Safety
-/// strings must be a pointer to a valid AMstrings
+/// strs must be a valid pointer to an AMstrs
 #[no_mangle]
-pub unsafe extern "C" fn AMstringsPrev(strings: *mut AMstrings, n: isize) -> *const c_char {
-    if let Some(strings) = strings.as_mut() {
-        if let Some(key) = strings.prev(n) {
+pub unsafe extern "C" fn AMstrsPrev(strs: *mut AMstrs, n: isize) -> *const c_char {
+    if let Some(strs) = strs.as_mut() {
+        if let Some(key) = strs.prev(n) {
             return key;
         }
     }
     std::ptr::null()
 }
 
-/// \memberof AMstrings
+/// \memberof AMstrs
 /// \brief Gets the size of the sequence of UTF-8 strings underlying an
 ///        iterator.
 ///
-/// \param[in] strings A pointer to an `AMstrings` struct.
-/// \return The count of values in \p strings.
-/// \pre \p strings must be a valid address.
+/// \param[in] strs A pointer to an `AMstrs` struct.
+/// \return The count of values in \p strs.
+/// \pre \p strs` != NULL`.
 /// \internal
 ///
 /// #Safety
-/// strings must be a pointer to a valid AMstrings
+/// strs must be a valid pointer to an AMstrs
 #[no_mangle]
-pub unsafe extern "C" fn AMstringsSize(strings: *const AMstrings) -> usize {
-    if let Some(strings) = strings.as_ref() {
-        strings.len()
+pub unsafe extern "C" fn AMstrsSize(strs: *const AMstrs) -> usize {
+    if let Some(strs) = strs.as_ref() {
+        strs.len()
     } else {
         0
     }
 }
 
-/// \memberof AMstrings
+/// \memberof AMstrs
 /// \brief Creates an iterator over the same sequence of UTF-8 strings as the
 ///        given one but with the opposite position and direction.
 ///
-/// \param[in] strings A pointer to an `AMstrings` struct.
-/// \return An `AMstrings` struct.
-/// \pre \p strings must be a valid address.
+/// \param[in] strs A pointer to an `AMstrs` struct.
+/// \return An `AMstrs` struct.
+/// \pre \p strs` != NULL`.
 /// \internal
 ///
 /// #Safety
-/// strings must be a pointer to a valid AMstrings
+/// strs must be a valid pointer to an AMstrs
 #[no_mangle]
-pub unsafe extern "C" fn AMstringsReversed(strings: *const AMstrings) -> AMstrings {
-    if let Some(strings) = strings.as_ref() {
-        strings.reversed()
+pub unsafe extern "C" fn AMstrsReversed(strs: *const AMstrs) -> AMstrs {
+    if let Some(strs) = strs.as_ref() {
+        strs.reversed()
     } else {
-        AMstrings::default()
+        AMstrs::default()
+    }
+}
+
+/// \memberof AMstrs
+/// \brief Creates an iterator at the starting position over the same sequence
+///        of UTF-8 strings as the given one.
+///
+/// \param[in] strs A pointer to an `AMstrs` struct.
+/// \return An `AMstrs` struct
+/// \pre \p strs` != NULL`.
+/// \internal
+///
+/// #Safety
+/// strs must be a valid pointer to an AMstrs
+#[no_mangle]
+pub unsafe extern "C" fn AMstrsRewound(strs: *const AMstrs) -> AMstrs {
+    if let Some(strs) = strs.as_ref() {
+        strs.rewound()
+    } else {
+        AMstrs::default()
     }
 }
