@@ -17,7 +17,7 @@ use crate::op_observer::OpObserver;
 use crate::op_set::OpSet;
 use crate::parents::Parents;
 #[cfg(feature = "storage-v2")]
-use crate::storage::{self, load};
+use crate::storage::{self, load, CompressConfig};
 use crate::transaction::{self, CommitOptions, Failure, Success, Transaction, TransactionInner};
 use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType,
@@ -915,6 +915,22 @@ impl Automerge {
             &self.ops.m.props,
             &heads,
             None,
+        );
+        self.saved = self.get_heads();
+        bytes
+    }
+
+    #[cfg(feature = "storage-v2")]
+    pub fn save_nocompress(&mut self) -> Vec<u8> {
+        let heads = self.get_heads();
+        let c = self.history.iter();
+        let bytes = crate::storage::save::save_document(
+            c,
+            self.ops.iter(),
+            &self.ops.m.actors,
+            &self.ops.m.props,
+            &heads,
+            Some(CompressConfig::None),
         );
         self.saved = self.get_heads();
         bytes
