@@ -363,6 +363,26 @@ impl Change {
         self.start_op.get() + (self.len() as u64) - 1
     }
 
+    pub fn deps(&self) -> &[amp::ChangeHash] {
+        &self.deps
+    }
+
+    pub fn seq(&self) -> u64 {
+        self.seq
+    }
+
+    pub fn hash(&self) -> amp::ChangeHash {
+        self.hash
+    }
+
+    pub fn start_op(&self) -> NonZeroU64 {
+        self.start_op
+    }
+
+    pub fn timestamp(&self) -> i64 {
+        self.time
+    }
+
     pub fn message(&self) -> Option<String> {
         let m = &self.bytes.uncompressed()[self.message.clone()];
         if m.is_empty() {
@@ -405,6 +425,13 @@ impl Change {
 
     pub fn compress(&mut self) {
         self.bytes.compress(self.body_start);
+    }
+
+    pub fn compressed_bytes(&self) -> &[u8] {
+        match &self.bytes {
+            ChangeBytes::Compressed { compressed, .. } => compressed,
+            ChangeBytes::Uncompressed(uncompressed) => uncompressed,
+        }
     }
 
     pub fn raw_bytes(&self) -> &[u8] {
@@ -513,6 +540,14 @@ pub(crate) fn export_change(
         extra_bytes: change.extra_bytes,
     }
     .into()
+}
+
+impl<'a> TryFrom<&'a [u8]> for Change {
+    type Error = decoding::Error;
+
+    fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
+        Self::try_from(value.to_vec())
+    }
 }
 
 impl TryFrom<Vec<u8>> for Change {

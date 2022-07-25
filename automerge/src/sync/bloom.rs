@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::borrow::{Borrow, Cow};
 
 use crate::{decoding, decoding::Decoder, encoding::Encodable, ChangeHash};
 
@@ -84,7 +84,7 @@ impl BloomFilter {
         }
     }
 
-    pub fn from_hashes<'a>(hashes: impl ExactSizeIterator<Item = &'a ChangeHash>) -> Self {
+    pub fn from_hashes<H: Borrow<ChangeHash>>(hashes: impl ExactSizeIterator<Item = H>) -> Self {
         let num_entries = hashes.len() as u32;
         let num_bits_per_entry = BITS_PER_ENTRY;
         let num_probes = NUM_PROBES;
@@ -96,7 +96,7 @@ impl BloomFilter {
             bits,
         };
         for hash in hashes {
-            filter.add_hash(hash);
+            filter.add_hash(hash.borrow());
         }
         filter
     }

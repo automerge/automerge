@@ -51,7 +51,7 @@ fn main() {
     doc1.merge(&mut doc2).unwrap();
 
     for change in doc1.get_changes(&[]).unwrap() {
-        let length = doc1.length_at(&cards, &[change.hash]);
+        let length = doc1.length_at(&cards, &[change.hash()]);
         println!("{} {}", change.message().unwrap(), length);
     }
 }
