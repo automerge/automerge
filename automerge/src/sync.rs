@@ -80,7 +80,7 @@ impl Automerge {
         let changes_to_send = changes_to_send
             .into_iter()
             .filter_map(|change| {
-                if !sync_state.sent_hashes.contains(&change.hash) {
+                if !sync_state.sent_hashes.contains(&change.hash()) {
                     Some(change.clone())
                 } else {
                     None
@@ -91,7 +91,7 @@ impl Automerge {
         sync_state.last_sent_heads = our_heads.clone();
         sync_state
             .sent_hashes
-            .extend(changes_to_send.iter().map(|c| c.hash));
+            .extend(changes_to_send.iter().map(|c| c.hash()));
 
         let sync_message = Message {
             heads: our_heads,
@@ -176,7 +176,7 @@ impl Automerge {
         let new_changes = self
             .get_changes(&last_sync)
             .expect("Should have only used hashes that are in the document");
-        let hashes = new_changes.into_iter().map(|change| &change.hash);
+        let hashes = new_changes.iter().map(|change| change.hash());
         Have {
             last_sync,
             bloom: BloomFilter::from_hashes(hashes),
@@ -211,17 +211,17 @@ impl Automerge {
             let mut hashes_to_send = HashSet::new();
 
             for change in &changes {
-                change_hashes.insert(change.hash);
+                change_hashes.insert(change.hash());
 
-                for dep in &change.deps {
-                    dependents.entry(*dep).or_default().push(change.hash);
+                for dep in change.deps() {
+                    dependents.entry(*dep).or_default().push(change.hash());
                 }
 
                 if bloom_filters
                     .iter()
-                    .all(|bloom| !bloom.contains_hash(&change.hash))
+                    .all(|bloom| !bloom.contains_hash(&change.hash()))
                 {
-                    hashes_to_send.insert(change.hash);
+                    hashes_to_send.insert(change.hash());
                 }
             }
 
@@ -248,7 +248,7 @@ impl Automerge {
             }
 
             for change in changes {
-                if hashes_to_send.contains(&change.hash) {
+                if hashes_to_send.contains(&change.hash()) {
                     changes_to_send.push(change);
                 }
             }
@@ -285,7 +285,7 @@ impl Message {
         (self.changes.len() as u32).encode_vec(&mut buf);
         for mut change in self.changes {
             change.compress();
-            change.raw_bytes().encode_vec(&mut buf);
+            change.compressed_bytes().encode_vec(&mut buf);
         }
 
         buf

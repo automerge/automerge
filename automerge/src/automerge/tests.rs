@@ -1114,12 +1114,12 @@ fn delete_nothing_in_list_returns_error() {
 fn loaded_doc_changes_have_hash() {
     let mut doc = Automerge::new();
     let mut tx = doc.transaction();
-    tx.put(ROOT, "a", 1).unwrap();
+    tx.put(ROOT, "a", 1_u64).unwrap();
     tx.commit();
-    let hash = doc.get_last_local_change().unwrap().hash;
+    let hash = doc.get_last_local_change().unwrap().hash();
     let bytes = doc.save();
     let doc = Automerge::load(&bytes).unwrap();
-    assert_eq!(doc.get_change_by_hash(&hash).unwrap().hash, hash);
+    assert_eq!(doc.get_change_by_hash(&hash).unwrap().hash(), hash);
 }
 
 #[test]
