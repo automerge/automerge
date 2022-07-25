@@ -283,8 +283,23 @@ impl serde::Serialize for OrdScalarValue {
     where
         S: serde::Serializer,
     {
-        let s = automerge::ScalarValue::from(self);
-        s.serialize(serializer)
+        match self {
+            OrdScalarValue::Bytes(v) => serializer.serialize_bytes(v),
+            OrdScalarValue::Str(v) => serializer.serialize_str(v.as_str()),
+            OrdScalarValue::Int(v) => serializer.serialize_i64(*v),
+            OrdScalarValue::Uint(v) => serializer.serialize_u64(*v),
+            OrdScalarValue::F64(v) => serializer.serialize_f64(v.into_inner()),
+            OrdScalarValue::Counter(v) => {
+                serializer.serialize_str(format!("Counter({})", v).as_str())
+            }
+            OrdScalarValue::Timestamp(v) => {
+                serializer.serialize_str(format!("Timestamp({})", v).as_str())
+            }
+            OrdScalarValue::Boolean(v) => serializer.serialize_bool(*v),
+            OrdScalarValue::Null => serializer.serialize_none(),
+            OrdScalarValue::Unknown { type_code, .. } => serializer
+                .serialize_str(format!("An unknown type with code {}", type_code).as_str()),
+        }
     }
 }
 
