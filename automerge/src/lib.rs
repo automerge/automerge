@@ -61,6 +61,10 @@ mod clock;
 mod columnar;
 #[cfg(feature = "storage-v2")]
 #[allow(dead_code)]
+#[allow(unused_imports)]
+mod columnar_2;
+#[cfg(feature = "storage-v2")]
+#[allow(dead_code)]
 mod convert;
 mod decoding;
 mod encoding;
