@@ -78,6 +78,15 @@ jobs:
       - name: run tests
         run: ./scripts/ci/wasm_tests
 
+  wasm_tests_storage_v2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: run tests
+        run: ./scripts/ci/wasm_tests
+
   js_tests:
     runs-on: ubuntu-latest
     steps:
@@ -86,6 +95,15 @@ jobs:
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - name: run tests
         run: ./scripts/ci/js_tests
+
+  js_tests_storage_v2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: run tests
+        run: ./scripts/ci/js_tests_storage_v2
 
   cmake_build:
     runs-on: ubuntu-latest

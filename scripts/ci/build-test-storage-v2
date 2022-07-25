@@ -3,5 +3,6 @@ set -eoux pipefail
 
 cargo build -p automerge --features storage-v2 --all-targets
 cargo build -p automerge-c --features storage-v2 --all-targets
+cargo build -p automerge-wasm --features storage-v2 --all-targets
 
 RUST_LOG=error cargo test -p automerge --features storage-v2
