@@ -200,7 +200,7 @@ impl Automerge {
         while let Some(hash) = heads.pop() {
             if let Some(idx) = self.history_index.get(&hash) {
                 let change = &self.history[*idx];
-                for dep in &change.deps {
+                for dep in change.deps() {
                     if !seen.contains(dep) {
                         heads.push(*dep);
                     }
@@ -624,7 +624,7 @@ impl Automerge {
         let mut dup = false;
         if let Some(actor_index) = self.ops.m.actors.lookup(change.actor_id()) {
             if let Some(s) = self.states.get(&actor_index) {
-                dup = s.len() >= change.seq as usize;
+                dup = s.len() >= change.seq() as usize;
             }
         }
         dup
@@ -645,10 +645,10 @@ impl Automerge {
         mut options: ApplyOptions<'_, Obs>,
     ) -> Result<(), AutomergeError> {
         for c in changes {
-            if !self.history_index.contains_key(&c.hash) {
+            if !self.history_index.contains_key(&c.hash()) {
                 if self.duplicate_seq(&c) {
                     return Err(AutomergeError::DuplicateSeqNumber(
-                        c.seq,
+                        c.seq(),
                         c.actor_id().clone(),
                     ));
                 }
@@ -660,7 +660,7 @@ impl Automerge {
             }
         }
         while let Some(c) = self.pop_next_causally_ready_change() {
-            if !self.history_index.contains_key(&c.hash) {
+            if !self.history_index.contains_key(&c.hash()) {
                 self.apply_change(c, &mut options.op_observer);
             }
         }
@@ -683,7 +683,7 @@ impl Automerge {
 
     fn is_causally_ready(&self, change: &Change) -> bool {
         change
-            .deps
+            .deps()
             .iter()
             .all(|d| self.history_index.contains_key(d))
     }
@@ -750,6 +750,7 @@ impl Automerge {
             .into_iter()
             .cloned()
             .collect::<Vec<_>>();
+        tracing::trace!(changes=?changes.iter().map(|c| c.hash()).collect::<Vec<_>>(), "merging new changes");
         self.apply_changes_with(changes, options)?;
         Ok(self.get_heads())
     }
@@ -809,10 +810,10 @@ impl Automerge {
     /// Get the hashes of the changes in this document that aren't transitive dependencies of the
     /// given `heads`.
     pub fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
-        let in_queue: HashSet<_> = self.queue.iter().map(|change| change.hash).collect();
+        let in_queue: HashSet<_> = self.queue.iter().map(|change| change.hash()).collect();
         let mut missing = HashSet::new();
 
-        for head in self.queue.iter().flat_map(|change| &change.deps) {
+        for head in self.queue.iter().flat_map(|change| change.deps()) {
             if !self.history_index.contains_key(head) {
                 missing.insert(head);
             }
@@ -904,10 +905,12 @@ impl Automerge {
     }
 
     /// Get the changes that the other document added compared to this document.
+    #[tracing::instrument(skip(self, other))]
     pub fn get_changes_added<'a>(&self, other: &'a Self) -> Vec<&'a Change> {
         // Depth-first traversal from the heads through the dependency graph,
         // until we reach a change that is already present in other
         let mut stack: Vec<_> = other.get_heads();
+        tracing::trace!(their_heads=?stack, "finding changes to merge");
         let mut seen_hashes = HashSet::new();
         let mut added_change_hashes = Vec::new();
         while let Some(hash) = stack.pop() {
@@ -915,7 +918,7 @@ impl Automerge {
                 seen_hashes.insert(hash);
                 added_change_hashes.push(hash);
                 if let Some(change) = other.get_change_by_hash(&hash) {
-                    stack.extend(&change.deps);
+                    stack.extend(change.deps());
                 }
             }
         }
@@ -940,12 +943,12 @@ impl Automerge {
             .get(&actor)
             .and_then(|v| v.get(seq as usize - 1))
             .and_then(|&i| self.history.get(i))
-            .map(|c| c.hash)
+            .map(|c| c.hash())
             .ok_or(AutomergeError::InvalidSeq(seq))
     }
 
     pub(crate) fn update_history(&mut self, change: Change, num_ops: usize) -> usize {
-        self.max_op = std::cmp::max(self.max_op, change.start_op.get() + num_ops as u64 - 1);
+        self.max_op = std::cmp::max(self.max_op, change.start_op().get() + num_ops as u64 - 1);
 
         self.update_deps(&change);
 
@@ -958,7 +961,7 @@ impl Automerge {
             .push(history_index);
 
         let mut clock = Clock::new();
-        for hash in &change.deps {
+        for hash in change.deps() {
             let c = self
                 .clocks
                 .get(hash)
@@ -969,22 +972,22 @@ impl Automerge {
             actor_index,
             ClockData {
                 max_op: change.max_op(),
-                seq: change.seq,
+                seq: change.seq(),
             },
         );
-        self.clocks.insert(change.hash, clock);
+        self.clocks.insert(change.hash(), clock);
 
-        self.history_index.insert(change.hash, history_index);
+        self.history_index.insert(change.hash(), history_index);
         self.history.push(change);
 
         history_index
     }
 
     fn update_deps(&mut self, change: &Change) {
-        for d in &change.deps {
+        for d in change.deps() {
             self.deps.remove(d);
         }
-        self.deps.insert(change.hash);
+        self.deps.insert(change.hash());
     }
 
     pub fn import(&self, s: &str) -> Result<ExId, AutomergeError> {

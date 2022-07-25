@@ -64,7 +64,7 @@ impl TransactionInner {
 
         let num_ops = self.pending_ops();
         let change = export_change(self, &doc.ops.m.actors, &doc.ops.m.props);
-        let hash = change.hash;
+        let hash = change.hash();
         doc.update_history(change, num_ops);
         debug_assert_eq!(doc.get_heads(), vec![hash]);
         hash
