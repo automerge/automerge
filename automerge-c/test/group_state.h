@@ -1,11 +1,11 @@
-#ifndef GROUP_STATE_INCLUDED
-#define GROUP_STATE_INCLUDED
+#ifndef GROUP_STATE_H
+#define GROUP_STATE_H
 
 /* local */
 #include "automerge.h"
 
 typedef struct {
-    AMresult* doc_result;
+    AMresultStack* stack;
     AMdoc* doc;
 } GroupState;
 
@@ -13,4 +13,4 @@ int group_setup(void** state);
 
 int group_teardown(void** state);
 
-#endif
+#endif  /* GROUP_STATE_H */
