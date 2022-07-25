@@ -1,11 +1,15 @@
 use std::num::NonZeroU64;
 
 use crate::automerge::Actor;
+#[cfg(not(feature = "storage-v2"))]
+use crate::change::export_change;
 use crate::exid::ExId;
 use crate::query::{self, OpIdSearch};
+#[cfg(feature = "storage-v2")]
+use crate::storage::Change as StoredChange;
 use crate::types::{Key, ObjId, OpId};
-use crate::{change::export_change, types::Op, Automerge, ChangeHash, Prop};
-use crate::{AutomergeError, ObjType, OpObserver, OpType, ScalarValue};
+use crate::{op_tree::OpSetMetadata, types::Op, Automerge, Change, ChangeHash, OpObserver, Prop};
+use crate::{AutomergeError, ObjType, OpType, ScalarValue};
 
 #[derive(Debug, Clone)]
 pub(crate) struct TransactionInner {
@@ -14,7 +18,9 @@ pub(crate) struct TransactionInner {
     pub(crate) start_op: NonZeroU64,
     pub(crate) time: i64,
     pub(crate) message: Option<String>,
+    #[cfg(not(feature = "storage-v2"))]
     pub(crate) extra_bytes: Vec<u8>,
+    #[cfg(not(feature = "storage-v2"))]
     pub(crate) hash: Option<ChangeHash>,
     pub(crate) deps: Vec<ChangeHash>,
     pub(crate) operations: Vec<(ObjId, Prop, Op)>,
@@ -27,6 +33,7 @@ impl TransactionInner {
 
     /// Commit the operations performed in this transaction, returning the hashes corresponding to
     /// the new heads.
+    #[tracing::instrument(skip(self, doc, op_observer))]
     pub(crate) fn commit<Obs: OpObserver>(
         mut self,
         doc: &mut Automerge,
@@ -63,11 +70,59 @@ impl TransactionInner {
         }
 
         let num_ops = self.pending_ops();
-        let change = export_change(self, &doc.ops.m.actors, &doc.ops.m.props);
+        let change = self.export(&doc.ops.m);
         let hash = change.hash();
+        #[cfg(not(debug_assertions))]
+        tracing::trace!(commit=?hash, deps=?change.deps(), "committing transaction");
+        #[cfg(debug_assertions)]
+        {
+            let ops = change.iter_ops().collect::<Vec<_>>();
+            tracing::trace!(commit=?hash, ?ops, deps=?change.deps(), "committing transaction");
+        }
         doc.update_history(change, num_ops);
         debug_assert_eq!(doc.get_heads(), vec![hash]);
         hash
+    }
+
+    #[cfg(feature = "storage-v2")]
+    #[tracing::instrument(skip(self, metadata))]
+    pub(crate) fn export(self, metadata: &OpSetMetadata) -> Change {
+        use crate::storage::{change::PredOutOfOrder, convert::op_as_actor_id};
+
+        let actor = metadata.actors.get(self.actor).clone();
+        let ops = self.operations.iter().map(|o| (&o.0, &o.2));
+        //let (ops, other_actors) = encode_change_ops(ops, actor.clone(), actors, props);
+        let deps = self.deps.clone();
+        let stored = match StoredChange::builder()
+            .with_actor(actor)
+            .with_seq(self.seq)
+            .with_start_op(self.start_op)
+            .with_message(self.message.clone())
+            .with_dependencies(deps)
+            .with_timestamp(self.time)
+            .build(
+                ops.into_iter()
+                    .map(|(obj, op)| op_as_actor_id(obj, op, metadata)),
+            ) {
+            Ok(s) => s,
+            Err(PredOutOfOrder) => {
+                // SAFETY: types::Op::preds is `types::OpIds` which ensures ops are always sorted
+                panic!("preds out of order");
+            }
+        };
+        #[cfg(debug_assertions)]
+        {
+            let realized_ops = self.operations.iter().collect::<Vec<_>>();
+            tracing::trace!(?stored, ops=?realized_ops, "committing change");
+        }
+        #[cfg(not(debug_assertions))]
+        tracing::trace!(?stored, "committing change");
+        Change::new(stored)
+    }
+
+    #[cfg(not(feature = "storage-v2"))]
+    pub(crate) fn export(self, meta: &OpSetMetadata) -> Change {
+        export_change(self, &meta.actors, &meta.props)
     }
 
     /// Undo the operations added in this transaction, returning the number of cancelled
@@ -180,6 +235,7 @@ impl TransactionInner {
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(ex_obj)?;
         let value = value.into();
+        tracing::trace!(obj=?obj, value=?value, "inserting value");
         self.do_insert(doc, obj, index, value.into())?;
         Ok(())
     }
