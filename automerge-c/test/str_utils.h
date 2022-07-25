@@ -1,5 +1,5 @@
-#ifndef STR_UTILS_INCLUDED
-#define STR_UTILS_INCLUDED
+#ifndef STR_UTILS_H
+#define STR_UTILS_H
 
 /**
  * \brief Converts a hexadecimal string into a sequence of bytes.
@@ -11,4 +11,4 @@
  */
 void hex_to_bytes(char const* hex_str, uint8_t* src, size_t const count);
 
-#endif
+#endif  /* STR_UTILS_H */
