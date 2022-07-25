@@ -59,6 +59,9 @@ mod automerge;
 mod change;
 mod clock;
 mod columnar;
+#[cfg(feature = "storage-v2")]
+#[allow(dead_code)]
+mod convert;
 mod decoding;
 mod encoding;
 mod error;
