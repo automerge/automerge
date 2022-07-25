@@ -58,11 +58,18 @@ add_custom_command(
         changes.rs
         doc.rs
         doc/list.rs
+        doc/list/item.rs
+        doc/list/items.rs
         doc/map.rs
+        doc/map/item.rs
+        doc/map/items.rs
         doc/utils.rs
         obj.rs
+        obj/item.rs
+        obj/items.rs
         result.rs
-        strings.rs
+        result_stack.rs
+        strs.rs
         sync.rs
         sync/have.rs
         sync/haves.rs
