@@ -100,6 +100,8 @@ pub enum AMvalue<'a> {
     SyncMessage(&'a AMsyncMessage),
     /// A synchronization state variant.
     SyncState(&'a mut AMsyncState),
+    /// An Unknown scalar value
+    Unknown(AMUnknownValue),
     /// A void variant.
     Void,
 }
@@ -536,6 +538,12 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult) -> AMvalue<'a>
                         am::ScalarValue::Uint(uint) => {
                             content = AMvalue::Uint(*uint);
                         }
+                        am::ScalarValue::Unknown { bytes, type_code } => {
+                            content = AMvalue::Unknown(AMUnknownValue {
+                                bytes: bytes.as_slice().into(),
+                                type_code: *type_code,
+                            })
+                        }
                     },
                     // \todo Confirm that an object variant should be ignored
                     //       when there's no object ID variant.
@@ -546,4 +554,13 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult) -> AMvalue<'a>
         }
     };
     content
+}
+
+/// \struct AMUknownValue
+/// \brief A value (typically for a 'set' operation) which we don't know the type of
+///
+#[repr(C)]
+pub struct AMUnknownValue {
+    bytes: AMbyteSpan,
+    type_code: u8,
 }

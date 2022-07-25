@@ -19,6 +19,7 @@ impl<'a> From<ScalarValue<'a>> for JsValue {
             am::ScalarValue::Timestamp(v) => js_sys::Date::new(&(*v as f64).into()).into(),
             am::ScalarValue::Boolean(v) => (*v).into(),
             am::ScalarValue::Null => JsValue::null(),
+            am::ScalarValue::Unknown { bytes, .. } => Uint8Array::from(bytes.as_slice()).into(),
         }
     }
 }
@@ -34,5 +35,6 @@ pub(crate) fn datatype(s: &am::ScalarValue) -> String {
         am::ScalarValue::Timestamp(_) => "timestamp".into(),
         am::ScalarValue::Boolean(_) => "boolean".into(),
         am::ScalarValue::Null => "null".into(),
+        am::ScalarValue::Unknown { type_code, .. } => format!("unknown{}", type_code),
     }
 }
