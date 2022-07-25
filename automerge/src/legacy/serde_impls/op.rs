@@ -216,6 +216,9 @@ impl<'de> Deserialize<'de> for Op {
                         Some(ScalarValue::Bytes(s)) => {
                             Err(Error::invalid_value(Unexpected::Bytes(&s), &"a number"))
                         }
+                        Some(ScalarValue::Unknown { bytes, .. }) => {
+                            Err(Error::invalid_value(Unexpected::Bytes(&bytes), &"a number"))
+                        }
                         Some(ScalarValue::Str(s)) => {
                             Err(Error::invalid_value(Unexpected::Str(&s), &"a number"))
                         }

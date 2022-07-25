@@ -427,6 +427,7 @@ pub enum ScalarValue {
     Counter(Counter),
     Timestamp(i64),
     Boolean(bool),
+    Unknown { type_code: u8, bytes: Vec<u8> },
     Null,
 }
 
@@ -718,6 +719,7 @@ impl fmt::Display for ScalarValue {
             ScalarValue::Timestamp(i) => write!(f, "Timestamp: {}", i),
             ScalarValue::Boolean(b) => write!(f, "{}", b),
             ScalarValue::Null => write!(f, "null"),
+            ScalarValue::Unknown { type_code, .. } => write!(f, "unknown type {}", type_code),
         }
     }
 }
