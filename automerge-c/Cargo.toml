@@ -6,6 +6,9 @@ edition = "2021"
 license = "MIT"
 rust-version = "1.57.0"
 
+[features]
+storage-v2 =[ "automerge/storage-v2" ]
+
 [lib]
 name = "automerge"
 crate-type = ["cdylib", "staticlib"]

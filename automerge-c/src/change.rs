@@ -85,7 +85,7 @@ pub unsafe extern "C" fn AMchangeActorId(change: *const AMchange) -> *mut AMresu
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeCompress(change: *mut AMchange) {
     if let Some(change) = change.as_mut() {
-        change.as_mut().compress();
+        let _ = change.as_mut().compressed_bytes();
     };
 }
 
@@ -340,5 +340,8 @@ pub unsafe extern "C" fn AMchangeRawBytes(change: *const AMchange) -> AMbyteSpan
 pub unsafe extern "C" fn AMchangeLoadDocument(src: *const u8, count: usize) -> *mut AMresult {
     let mut data = Vec::new();
     data.extend_from_slice(std::slice::from_raw_parts(src, count));
-    to_result(am::Change::load_document(&data))
+    to_result::<Result<Vec<am::Change>, _>>(
+        am::Automerge::load(&data)
+            .and_then(|d| d.get_changes(&[]).map(|c| c.into_iter().cloned().collect())),
+    )
 }
