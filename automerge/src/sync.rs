@@ -1,20 +1,21 @@
 use itertools::Itertools;
-use std::{
-    borrow::Cow,
-    collections::{HashMap, HashSet},
-    io,
-    io::Write,
-};
+use std::collections::{HashMap, HashSet};
 
-use crate::{
-    decoding, decoding::Decoder, encoding::Encodable, types::HASH_SIZE, ApplyOptions, Automerge,
-    AutomergeError, Change, ChangeHash, OpObserver,
-};
+use crate::{ApplyOptions, Automerge, AutomergeError, Change, ChangeHash, OpObserver};
+#[cfg(not(feature = "storage-v2"))]
+use std::{borrow::Cow, io, io::Write};
+
+#[cfg(feature = "storage-v2")]
+use crate::storage::{parse, Change as StoredChange, ReadChangeOpError};
+#[cfg(not(feature = "storage-v2"))]
+use crate::{decoding, decoding::Decoder, encoding::Encodable, types::HASH_SIZE};
 
 mod bloom;
 mod state;
 
 pub use bloom::BloomFilter;
+#[cfg(feature = "storage-v2")]
+pub use state::DecodeError as DecodeStateError;
 pub use state::{Have, State};
 
 const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identification
@@ -257,6 +258,57 @@ impl Automerge {
     }
 }
 
+#[cfg(feature = "storage-v2")]
+#[derive(Debug, thiserror::Error)]
+pub enum ReadMessageError {
+    #[error("expected {expected_one_of:?} but found {found}")]
+    WrongType { expected_one_of: Vec<u8>, found: u8 },
+    #[error("{0}")]
+    Parse(String),
+    #[error(transparent)]
+    ReadChangeOps(#[from] ReadChangeOpError),
+    #[error("not enough input")]
+    NotEnoughInput,
+}
+
+#[cfg(feature = "storage-v2")]
+impl From<parse::leb128::Error> for ReadMessageError {
+    fn from(e: parse::leb128::Error) -> Self {
+        ReadMessageError::Parse(e.to_string())
+    }
+}
+
+#[cfg(feature = "storage-v2")]
+impl From<bloom::ParseError> for ReadMessageError {
+    fn from(e: bloom::ParseError) -> Self {
+        ReadMessageError::Parse(e.to_string())
+    }
+}
+
+#[cfg(feature = "storage-v2")]
+impl From<crate::storage::change::ParseError> for ReadMessageError {
+    fn from(e: crate::storage::change::ParseError) -> Self {
+        ReadMessageError::Parse(format!("error parsing changes: {}", e))
+    }
+}
+
+#[cfg(feature = "storage-v2")]
+impl From<ReadMessageError> for parse::ParseError<ReadMessageError> {
+    fn from(e: ReadMessageError) -> Self {
+        parse::ParseError::Error(e)
+    }
+}
+
+#[cfg(feature = "storage-v2")]
+impl From<parse::ParseError<ReadMessageError>> for ReadMessageError {
+    fn from(p: parse::ParseError<ReadMessageError>) -> Self {
+        match p {
+            parse::ParseError::Error(e) => e,
+            parse::ParseError::Incomplete(..) => Self::NotEnoughInput,
+        }
+    }
+}
+
 /// The sync message to be sent.
 #[derive(Debug, Clone)]
 pub struct Message {
@@ -270,7 +322,91 @@ pub struct Message {
     pub changes: Vec<Change>,
 }
 
+#[cfg(feature = "storage-v2")]
+fn parse_have(input: parse::Input<'_>) -> parse::ParseResult<'_, Have, ReadMessageError> {
+    let (i, last_sync) = parse::length_prefixed(parse::change_hash)(input)?;
+    let (i, bloom_bytes) = parse::length_prefixed_bytes(i)?;
+    let (_, bloom) = BloomFilter::parse(parse::Input::new(bloom_bytes)).map_err(|e| e.lift())?;
+    Ok((i, Have { last_sync, bloom }))
+}
+
 impl Message {
+    #[cfg(feature = "storage-v2")]
+    pub fn decode(input: &[u8]) -> Result<Self, ReadMessageError> {
+        let input = parse::Input::new(input);
+        match Self::parse(input) {
+            Ok((_, msg)) => Ok(msg),
+            Err(parse::ParseError::Error(e)) => Err(e),
+            Err(parse::ParseError::Incomplete(_)) => Err(ReadMessageError::NotEnoughInput),
+        }
+    }
+
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn parse(input: parse::Input<'_>) -> parse::ParseResult<'_, Self, ReadMessageError> {
+        let (i, message_type) = parse::take1(input)?;
+        if message_type != MESSAGE_TYPE_SYNC {
+            return Err(parse::ParseError::Error(ReadMessageError::WrongType {
+                expected_one_of: vec![MESSAGE_TYPE_SYNC],
+                found: message_type,
+            }));
+        }
+
+        let (i, heads) = parse::length_prefixed(parse::change_hash)(i)?;
+        let (i, need) = parse::length_prefixed(parse::change_hash)(i)?;
+        let (i, have) = parse::length_prefixed(parse_have)(i)?;
+
+        let change_parser = |i| {
+            let (i, bytes) = parse::length_prefixed_bytes(i)?;
+            let (_, change) =
+                StoredChange::parse(parse::Input::new(bytes)).map_err(|e| e.lift())?;
+            Ok((i, change))
+        };
+        let (i, stored_changes) = parse::length_prefixed(change_parser)(i)?;
+        let changes_len = stored_changes.len();
+        let changes: Vec<Change> = stored_changes
+            .into_iter()
+            .try_fold::<_, _, Result<_, ReadMessageError>>(
+                Vec::with_capacity(changes_len),
+                |mut acc, stored| {
+                    let change = Change::new_from_unverified(stored.into_owned(), None)
+                        .map_err(ReadMessageError::ReadChangeOps)?;
+                    acc.push(change);
+                    Ok(acc)
+                },
+            )?;
+
+        Ok((
+            i,
+            Message {
+                heads,
+                need,
+                have,
+                changes,
+            },
+        ))
+    }
+
+    #[cfg(feature = "storage-v2")]
+    pub fn encode(mut self) -> Vec<u8> {
+        let mut buf = vec![MESSAGE_TYPE_SYNC];
+
+        encode_hashes(&mut buf, &self.heads);
+        encode_hashes(&mut buf, &self.need);
+        encode_many(&mut buf, self.have.iter(), |buf, h| {
+            encode_hashes(buf, &h.last_sync);
+            leb128::write::unsigned(buf, h.bloom.to_bytes().len() as u64).unwrap();
+            buf.extend(h.bloom.to_bytes());
+        });
+
+        encode_many(&mut buf, self.changes.iter_mut(), |buf, change| {
+            leb128::write::unsigned(buf, change.raw_bytes().len() as u64).unwrap();
+            buf.extend(change.compressed_bytes().as_ref())
+        });
+
+        buf
+    }
+
+    #[cfg(not(feature = "storage-v2"))]
     pub fn encode(self) -> Vec<u8> {
         let mut buf = vec![MESSAGE_TYPE_SYNC];
 
@@ -291,6 +427,7 @@ impl Message {
         buf
     }
 
+    #[cfg(not(feature = "storage-v2"))]
     pub fn decode(bytes: &[u8]) -> Result<Message, decoding::Error> {
         let mut decoder = Decoder::new(Cow::Borrowed(bytes));
 
@@ -329,6 +466,7 @@ impl Message {
     }
 }
 
+#[cfg(not(feature = "storage-v2"))]
 fn encode_hashes(buf: &mut Vec<u8>, hashes: &[ChangeHash]) {
     debug_assert!(
         hashes.windows(2).all(|h| h[0] <= h[1]),
@@ -337,6 +475,28 @@ fn encode_hashes(buf: &mut Vec<u8>, hashes: &[ChangeHash]) {
     hashes.encode_vec(buf);
 }
 
+#[cfg(feature = "storage-v2")]
+fn encode_many<'a, I, It, F>(out: &mut Vec<u8>, data: I, f: F)
+where
+    I: Iterator<Item = It> + ExactSizeIterator + 'a,
+    F: Fn(&mut Vec<u8>, It),
+{
+    leb128::write::unsigned(out, data.len() as u64).unwrap();
+    for datum in data {
+        f(out, datum)
+    }
+}
+
+#[cfg(feature = "storage-v2")]
+fn encode_hashes(buf: &mut Vec<u8>, hashes: &[ChangeHash]) {
+    debug_assert!(
+        hashes.windows(2).all(|h| h[0] <= h[1]),
+        "hashes were not sorted"
+    );
+    encode_many(buf, hashes.iter(), |buf, hash| buf.extend(hash.as_bytes()))
+}
+
+#[cfg(not(feature = "storage-v2"))]
 impl Encodable for &[ChangeHash] {
     fn encode<W: Write>(&self, buf: &mut W) -> io::Result<usize> {
         let head = self.len().encode(buf)?;
@@ -349,6 +509,7 @@ impl Encodable for &[ChangeHash] {
     }
 }
 
+#[cfg(not(feature = "storage-v2"))]
 fn decode_hashes(decoder: &mut Decoder<'_>) -> Result<Vec<ChangeHash>, decoding::Error> {
     let length = decoder.read::<u32>()?;
     let mut hashes = Vec::with_capacity(length as usize);

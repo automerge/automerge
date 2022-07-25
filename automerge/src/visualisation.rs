@@ -192,6 +192,7 @@ impl OpTable {
                 <td>prop</td>\
                 <td>action</td>\
                 <td>succ</td>\
+                <td>pred</td>\
             </tr>\
             <hr/>\
             {}\
@@ -207,6 +208,7 @@ struct OpTableRow {
     prop: String,
     op_description: String,
     succ: String,
+    pred: String,
 }
 
 impl OpTableRow {
@@ -217,6 +219,7 @@ impl OpTableRow {
             &self.prop,
             &self.op_description,
             &self.succ,
+            &self.pred,
         ];
         let row = rows
             .iter()
@@ -248,12 +251,18 @@ impl OpTableRow {
             .iter()
             .map(|s| format!(",{}", print_opid(s, actor_shorthands)))
             .collect();
+        let pred = op
+            .pred
+            .iter()
+            .map(|s| format!(",{}", print_opid(s, actor_shorthands)))
+            .collect();
         OpTableRow {
             op_description,
             obj_id: print_opid(&obj.0, actor_shorthands),
             op_id: print_opid(&op.id, actor_shorthands),
             prop,
             succ,
+            pred,
         }
     }
 }

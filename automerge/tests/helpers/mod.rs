@@ -49,7 +49,7 @@ pub fn sorted_actors() -> (automerge::ActorId, automerge::ActorId) {
 ///     &doc,
 ///     map!{
 ///         "todos" => {
-///             todos => list![
+///             list![
 ///                 { map!{ title = "water plants" } }
 ///             ]
 ///         }
@@ -72,8 +72,8 @@ pub fn sorted_actors() -> (automerge::ActorId, automerge::ActorId) {
 ///     &doc1,
 ///     map!{
 ///         "field" => {
-///             op1 => "one",
-///             op2.translate(&doc2) => "two"
+///             "one",
+///             "two"
 ///         }
 ///     }
 /// );
@@ -188,10 +188,10 @@ macro_rules! list {
     ($($inner:tt,)+) => { list!($($inner),+) };
     ($($inner:tt),*) => {
         {
+            use std::collections::BTreeSet;
             let _cap = list!(@count $($inner),*);
             let mut _list: Vec<BTreeSet<RealizedObject>> = Vec::new();
             $(
-                //println!("{}", stringify!($inner));
                 let inner = list!(@inner $inner);
                 let _ = _list.push(inner);
             )*
@@ -407,6 +407,30 @@ impl From<usize> for RealizedObject {
     }
 }
 
+impl From<u64> for RealizedObject {
+    fn from(v: u64) -> Self {
+        RealizedObject::Value(OrdScalarValue::Uint(v))
+    }
+}
+
+impl From<u32> for RealizedObject {
+    fn from(v: u32) -> Self {
+        RealizedObject::Value(OrdScalarValue::Uint(v.into()))
+    }
+}
+
+impl From<i64> for RealizedObject {
+    fn from(v: i64) -> Self {
+        RealizedObject::Value(OrdScalarValue::Int(v))
+    }
+}
+
+impl From<i32> for RealizedObject {
+    fn from(v: i32) -> Self {
+        RealizedObject::Value(OrdScalarValue::Int(v.into()))
+    }
+}
+
 impl From<automerge::ScalarValue> for RealizedObject {
     fn from(s: automerge::ScalarValue) -> Self {
         RealizedObject::Value(OrdScalarValue::from(s))
@@ -416,6 +440,20 @@ impl From<automerge::ScalarValue> for RealizedObject {
 impl From<&str> for RealizedObject {
     fn from(s: &str) -> Self {
         RealizedObject::Value(OrdScalarValue::Str(smol_str::SmolStr::from(s)))
+    }
+}
+
+impl From<Vec<u64>> for RealizedObject {
+    fn from(vals: Vec<u64>) -> Self {
+        RealizedObject::Sequence(
+            vals.into_iter()
+                .map(|i| {
+                    let mut set = BTreeSet::new();
+                    set.insert(i.into());
+                    set
+                })
+                .collect(),
+        )
     }
 }
 

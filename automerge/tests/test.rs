@@ -1,7 +1,7 @@
 use automerge::transaction::Transactable;
 use automerge::{
     ActorId, ApplyOptions, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjType,
-    ScalarValue, Value, VecOpObserver, ROOT,
+    ScalarValue, VecOpObserver, ROOT,
 };
 
 mod helpers;
@@ -884,33 +884,49 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
     doc1.merge(&mut doc2).unwrap();
     doc1.merge(&mut doc3).unwrap();
 
-    let values = doc1.get_all(&list, 1)?;
-    assert_eq!(values.len(), 3);
-    assert_eq!(&values[0].0, &Value::counter(1));
-    assert_eq!(&values[1].0, &Value::counter(10));
-    assert_eq!(&values[2].0, &Value::counter(100));
-
-    let values = doc1.get_all(&list, 2)?;
-    assert_eq!(values.len(), 3);
-    assert_eq!(&values[0].0, &Value::counter(1));
-    assert_eq!(&values[1].0, &Value::counter(10));
-    assert_eq!(&values[2].0, &Value::int(100));
+    assert_obj!(
+        doc1.document(),
+        &automerge::ROOT,
+        "list",
+        list![
+            {
+                "a",
+            },
+            {
+                ScalarValue::counter(1),
+                ScalarValue::counter(10),
+                ScalarValue::counter(100)
+            },
+            {
+                ScalarValue::Int(100),
+                ScalarValue::counter(1),
+                ScalarValue::counter(10),
+            }
+        ]
+    );
 
     doc1.increment(&list, 1, 1)?;
     doc1.increment(&list, 2, 1)?;
 
-    let values = doc1.get_all(&list, 1)?;
-    assert_eq!(values.len(), 3);
-    assert_eq!(&values[0].0, &Value::counter(2));
-    assert_eq!(&values[1].0, &Value::counter(11));
-    assert_eq!(&values[2].0, &Value::counter(101));
-
-    let values = doc1.get_all(&list, 2)?;
-    assert_eq!(values.len(), 2);
-    assert_eq!(&values[0].0, &Value::counter(2));
-    assert_eq!(&values[1].0, &Value::counter(11));
-
-    assert_eq!(doc1.length(&list), 3);
+    assert_obj!(
+        doc1.document(),
+        &automerge::ROOT,
+        "list",
+        list![
+            {
+                "a",
+            },
+            {
+                ScalarValue::counter(2),
+                ScalarValue::counter(11),
+                ScalarValue::counter(101)
+            },
+            {
+                ScalarValue::counter(2),
+                ScalarValue::counter(11),
+            }
+        ]
+    );
 
     doc1.delete(&list, 2)?;
 
@@ -952,21 +968,21 @@ fn observe_counter_change_application() {
 fn increment_non_counter_map() {
     let mut doc = AutoCommit::new();
     // can't increment nothing
-    assert_eq!(
+    assert!(matches!(
         doc.increment(ROOT, "nothing", 2),
         Err(AutomergeError::MissingCounter)
-    );
+    ));
 
     // can't increment a non-counter
     doc.put(ROOT, "non-counter", "mystring").unwrap();
-    assert_eq!(
+    assert!(matches!(
         doc.increment(ROOT, "non-counter", 2),
         Err(AutomergeError::MissingCounter)
-    );
+    ));
 
     // can increment a counter still
     doc.put(ROOT, "counter", ScalarValue::counter(1)).unwrap();
-    assert_eq!(doc.increment(ROOT, "counter", 2), Ok(()));
+    assert!(matches!(doc.increment(ROOT, "counter", 2), Ok(())));
 
     // can increment a counter that is part of a conflict
     let mut doc1 = AutoCommit::new();
@@ -978,7 +994,7 @@ fn increment_non_counter_map() {
     doc2.put(ROOT, "key", "mystring").unwrap();
     doc1.merge(&mut doc2).unwrap();
 
-    assert_eq!(doc1.increment(ROOT, "key", 2), Ok(()));
+    assert!(matches!(doc1.increment(ROOT, "key", 2), Ok(())));
 }
 
 #[test]
@@ -988,14 +1004,14 @@ fn increment_non_counter_list() {
 
     // can't increment a non-counter
     doc.insert(&list, 0, "mystring").unwrap();
-    assert_eq!(
+    assert!(matches!(
         doc.increment(&list, 0, 2),
         Err(AutomergeError::MissingCounter)
-    );
+    ));
 
     // can increment a counter
     doc.insert(&list, 0, ScalarValue::counter(1)).unwrap();
-    assert_eq!(doc.increment(&list, 0, 2), Ok(()));
+    assert!(matches!(doc.increment(&list, 0, 2), Ok(())));
 
     // can increment a counter that is part of a conflict
     let mut doc1 = AutoCommit::new();
@@ -1009,7 +1025,7 @@ fn increment_non_counter_list() {
     doc2.put(&list, 0, "mystring").unwrap();
     doc1.merge(&mut doc2).unwrap();
 
-    assert_eq!(doc1.increment(&list, 0, 2), Ok(()));
+    assert!(matches!(doc1.increment(&list, 0, 2), Ok(())));
 }
 
 #[test]

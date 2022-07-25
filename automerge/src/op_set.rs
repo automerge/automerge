@@ -12,6 +12,11 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::RangeBounds;
 
+#[cfg(feature = "storage-v2")]
+mod load;
+#[cfg(feature = "storage-v2")]
+pub(crate) use load::{ObservedOpSetBuilder, OpSetBuilder};
+
 pub(crate) type OpSet = OpSetInternal;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,6 +30,18 @@ pub(crate) struct OpSetInternal {
 }
 
 impl OpSetInternal {
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn builder() -> OpSetBuilder {
+        OpSetBuilder::new()
+    }
+
+    /// Create a builder which passes each operation to `observer`. This will be significantly
+    /// slower than `OpSetBuilder`
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn observed_builder<O: OpObserver>(observer: &mut O) -> ObservedOpSetBuilder<'_, O> {
+        ObservedOpSetBuilder::new(observer)
+    }
+
     pub(crate) fn new() -> Self {
         let mut trees: HashMap<_, _, _> = Default::default();
         trees.insert(ObjId::root(), OpTree::new());
@@ -50,6 +67,7 @@ impl OpSetInternal {
         let mut objs: Vec<_> = self.trees.iter().collect();
         objs.sort_by(|a, b| self.m.lamport_cmp((a.0).0, (b.0).0));
         Iter {
+            opset: self,
             trees: objs.into_iter(),
             current: None,
         }
@@ -178,6 +196,7 @@ impl OpSetInternal {
         self.length
     }
 
+    #[tracing::instrument(skip(self, index))]
     pub(crate) fn insert(&mut self, index: usize, obj: &ObjId, element: Op) {
         if let OpType::Make(typ) = element.action {
             self.trees.insert(
@@ -194,6 +213,8 @@ impl OpSetInternal {
             //let tree = self.trees.get_mut(&element.obj).unwrap();
             tree.internal.insert(index, element);
             self.length += 1;
+        } else {
+            tracing::warn!("attempting to insert op for unknown object");
         }
     }
 
@@ -311,6 +332,7 @@ impl<'a> IntoIterator for &'a OpSetInternal {
 
 #[derive(Clone)]
 pub(crate) struct Iter<'a> {
+    opset: &'a OpSet,
     trees: std::vec::IntoIter<(&'a ObjId, &'a op_tree::OpTree)>,
     current: Option<(&'a ObjId, op_tree::OpTreeIter<'a>)>,
 }
@@ -334,6 +356,12 @@ impl<'a> Iterator for Iter<'a> {
                 return None;
             }
         }
+    }
+}
+
+impl<'a> ExactSizeIterator for Iter<'a> {
+    fn len(&self) -> usize {
+        self.opset.len()
     }
 }
 
@@ -389,6 +417,7 @@ impl OpSetMetadata {
         OpIds::new_if_sorted(opids, |a, b| self.lamport_cmp(*a, *b))
     }
 
+    #[cfg(not(feature = "storage-v2"))]
     pub(crate) fn import_opids<I: IntoIterator<Item = crate::legacy::OpId>>(
         &mut self,
         external_opids: I,
