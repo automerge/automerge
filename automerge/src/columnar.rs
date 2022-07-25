@@ -592,6 +592,9 @@ impl ValEncoder {
                 let len = (*n).encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_IEEE754);
             }
+            ScalarValue::Unknown { type_code, bytes } => {
+                panic!("unknown value")
+            }
         }
     }
 
@@ -635,6 +638,9 @@ impl ValEncoder {
             ScalarValue::F64(n) => {
                 let len = (*n).encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_IEEE754);
+            }
+            ScalarValue::Unknown { type_code, bytes } => {
+                panic!("unknown value")
             }
         }
     }

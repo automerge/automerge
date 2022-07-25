@@ -236,6 +236,7 @@ pub enum OrdScalarValue {
     Timestamp(i64),
     Boolean(bool),
     Null,
+    Unknown { type_code: u8, bytes: Vec<u8> },
 }
 
 impl From<automerge::ScalarValue> for OrdScalarValue {
@@ -250,6 +251,9 @@ impl From<automerge::ScalarValue> for OrdScalarValue {
             automerge::ScalarValue::Timestamp(v) => OrdScalarValue::Timestamp(v),
             automerge::ScalarValue::Boolean(v) => OrdScalarValue::Boolean(v),
             automerge::ScalarValue::Null => OrdScalarValue::Null,
+            automerge::ScalarValue::Unknown { type_code, bytes } => {
+                OrdScalarValue::Unknown { type_code, bytes }
+            }
         }
     }
 }
@@ -266,6 +270,10 @@ impl From<&OrdScalarValue> for automerge::ScalarValue {
             OrdScalarValue::Timestamp(v) => automerge::ScalarValue::Timestamp(*v),
             OrdScalarValue::Boolean(v) => automerge::ScalarValue::Boolean(*v),
             OrdScalarValue::Null => automerge::ScalarValue::Null,
+            OrdScalarValue::Unknown { type_code, bytes } => automerge::ScalarValue::Unknown {
+                type_code: *type_code,
+                bytes: bytes.to_vec(),
+            },
         }
     }
 }

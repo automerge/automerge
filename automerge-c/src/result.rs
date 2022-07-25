@@ -133,6 +133,8 @@ pub enum AMvalue<'a> {
     Timestamp(i64),
     /// A 64-bit unsigned integer variant.
     Uint(u64),
+    /// An unknown type of scalar value variant.
+    Unknown(AMUnknownValue),
 }
 
 impl<'a> PartialEq for AMvalue<'a> {
@@ -159,6 +161,7 @@ impl<'a> PartialEq for AMvalue<'a> {
             (SyncState(lhs), SyncState(rhs)) => *lhs == *rhs,
             (Timestamp(lhs), Timestamp(rhs)) => lhs == rhs,
             (Uint(lhs), Uint(rhs)) => lhs == rhs,
+            (Unknown(lhs), Unknown(rhs)) => lhs == rhs,
             (Null, Null) | (Void, Void) => true,
             _ => false,
         }
@@ -187,6 +190,10 @@ impl From<(&am::Value<'_>, &RefCell<Option<CString>>)> for AMvalue<'_> {
                 }
                 am::ScalarValue::Timestamp(timestamp) => AMvalue::Timestamp(*timestamp),
                 am::ScalarValue::Uint(uint) => AMvalue::Uint(*uint),
+                am::ScalarValue::Unknown { bytes, type_code } => AMvalue::Unknown(AMUnknownValue {
+                    bytes: bytes.as_slice().into(),
+                    type_code: *type_code,
+                }),
             },
             // \todo Confirm that an object variant should be ignored
             //       when there's no object ID variant.
@@ -199,6 +206,8 @@ impl From<&AMvalue<'_>> for u8 {
     fn from(value: &AMvalue) -> Self {
         use AMvalue::*;
 
+        // Note that these numbers are the order of appearance of the respective variants in the
+        // source of AMValue.
         match value {
             ActorId(_) => 1,
             Boolean(_) => 2,
@@ -220,6 +229,7 @@ impl From<&AMvalue<'_>> for u8 {
             SyncState(_) => 18,
             Timestamp(_) => 19,
             Uint(_) => 20,
+            Unknown(..) => 21,
             Void => 0,
         }
     }
@@ -249,6 +259,13 @@ impl TryFrom<&AMvalue<'_>> for am::ScalarValue {
             Timestamp(t) => Ok(am::ScalarValue::Timestamp(*t)),
             Uint(u) => Ok(am::ScalarValue::Uint(*u)),
             Null => Ok(am::ScalarValue::Null),
+            Unknown(AMUnknownValue { bytes, type_code }) => {
+                let slice = unsafe { std::slice::from_raw_parts(bytes.src, bytes.count) };
+                Ok(am::ScalarValue::Unknown {
+                    bytes: slice.to_vec(),
+                    type_code: *type_code,
+                })
+            }
             ActorId(_) => Err(InvalidValueType {
                 expected,
                 unexpected: type_name::<AMactorId>().to_string(),
@@ -876,4 +893,14 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult) -> AMvalue<'a>
         }
     };
     content
+}
+
+/// \struct AMUknownValue
+/// \brief A value (typically for a 'set' operation) which we don't know the type of
+///
+#[derive(PartialEq)]
+#[repr(C)]
+pub struct AMUnknownValue {
+    bytes: AMbyteSpan,
+    type_code: u8,
 }
