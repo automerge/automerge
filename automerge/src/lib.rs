@@ -56,6 +56,7 @@ macro_rules! __log {
 
 mod autocommit;
 mod automerge;
+mod autoserde;
 mod change;
 #[cfg(feature = "storage-v2")]
 mod change_v2;
