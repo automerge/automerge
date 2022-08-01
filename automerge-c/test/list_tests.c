@@ -228,7 +228,7 @@ static void test_get_list_values(void** state) {
                                      AM_VALUE_CHANGE_HASHES,
                                      cmocka_cb).change_hashes;
     AMdoc* const doc2 = AMpush(&stack,
-                               AMfork(doc1),
+                               AMfork(doc1, NULL),
                                AM_VALUE_DOC,
                                cmocka_cb).doc;
 

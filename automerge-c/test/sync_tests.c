@@ -261,11 +261,11 @@ static void test_converged_works_with_prior_sync_state(void **state) {
 static void test_converged_no_message_once_synced(void **state) {
     /* Create & synchronize two nodes. */
     TestState* test_state = *state;
-    AMfree(AMsetActor(test_state->doc1, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(test_state->doc1, AMpush(&test_state->stack,
                                                AMactorIdInitStr("abc123"),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
-    AMfree(AMsetActor(test_state->doc2, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(test_state->doc2, AMpush(&test_state->stack,
                                                AMactorIdInitStr("def456"),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
@@ -346,11 +346,11 @@ static void test_converged_no_message_once_synced(void **state) {
 static void test_converged_allow_simultaneous_messages(void **state) {
     /* Create & synchronize two nodes. */
     TestState* test_state = *state;
-    AMfree(AMsetActor(test_state->doc1, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(test_state->doc1, AMpush(&test_state->stack,
                                                AMactorIdInitStr("abc123"),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
-    AMfree(AMsetActor(test_state->doc2, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(test_state->doc2, AMpush(&test_state->stack,
                                                AMactorIdInitStr("def456"),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
@@ -523,11 +523,11 @@ static void test_converged_allow_simultaneous_messages(void **state) {
  */
 static void test_converged_assume_sent_changes_were_received(void **state) {
     TestState* test_state = *state;
-    AMfree(AMsetActor(test_state->doc1, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(test_state->doc1, AMpush(&test_state->stack,
                                                AMactorIdInitStr("01234567"),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
-    AMfree(AMsetActor(test_state->doc2, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(test_state->doc2, AMpush(&test_state->stack,
                                                AMactorIdInitStr("89abcdef"),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
@@ -623,11 +623,11 @@ static void test_diverged_works_without_prior_sync_state(void **state) {
 
     /* Create two peers both with divergent commits. */
     TestState* test_state = *state;
-    AMfree(AMsetActor(test_state->doc1, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(test_state->doc1, AMpush(&test_state->stack,
                                                AMactorIdInitStr("01234567"),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
-    AMfree(AMsetActor(test_state->doc2, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(test_state->doc2, AMpush(&test_state->stack,
                                                AMactorIdInitStr("89abcdef"),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
@@ -681,11 +681,11 @@ static void test_diverged_works_with_prior_sync_state(void **state) {
 
     /* Create two peers both with divergent commits. */
     TestState* test_state = *state;
-    AMfree(AMsetActor(test_state->doc1, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(test_state->doc1, AMpush(&test_state->stack,
                                                AMactorIdInitStr("01234567"),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
-    AMfree(AMsetActor(test_state->doc2, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(test_state->doc2, AMpush(&test_state->stack,
                                                AMactorIdInitStr("89abcdef"),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
@@ -746,11 +746,11 @@ static void test_diverged_works_with_prior_sync_state(void **state) {
  */
 static void test_diverged_ensure_not_empty_after_sync(void **state) {
     TestState* test_state = *state;
-    AMfree(AMsetActor(test_state->doc1, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(test_state->doc1, AMpush(&test_state->stack,
                                                AMactorIdInitStr("01234567"),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
-    AMfree(AMsetActor(test_state->doc2, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(test_state->doc2, AMpush(&test_state->stack,
                                                AMactorIdInitStr("89abcdef"),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
@@ -788,11 +788,11 @@ static void test_diverged_resync_after_node_crash_with_data_loss(void **state) {
        * We want to successfully sync (n1) with (r), even though (n1) believes
        * it's talking to (n2). */
     TestState* test_state = *state;
-    AMfree(AMsetActor(test_state->doc1, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(test_state->doc1, AMpush(&test_state->stack,
                                                AMactorIdInitStr("01234567"),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
-    AMfree(AMsetActor(test_state->doc2, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(test_state->doc2, AMpush(&test_state->stack,
                                                AMactorIdInitStr("89abcdef"),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
@@ -810,7 +810,7 @@ static void test_diverged_resync_after_node_crash_with_data_loss(void **state) {
 
     /* Save a copy of n2 as "r" to simulate recovering from a crash. */
     AMdoc* r = AMpush(&test_state->stack,
-                      AMdup(test_state->doc2),
+                      AMclone(test_state->doc2),
                       AM_VALUE_DOC,
                       cmocka_cb).doc;
     AMbyteSpan encoded = AMpush(&test_state->stack,
@@ -889,11 +889,11 @@ static void test_diverged_resync_after_node_crash_with_data_loss(void **state) {
  */
 static void test_diverged_resync_after_data_loss_without_disconnection(void **state) {
     TestState* test_state = *state;
-    AMfree(AMsetActor(test_state->doc1, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(test_state->doc1, AMpush(&test_state->stack,
                                                AMactorIdInitStr("01234567"),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
-    AMfree(AMsetActor(test_state->doc2, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(test_state->doc2, AMpush(&test_state->stack,
                                                AMactorIdInitStr("89abcdef"),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
@@ -924,7 +924,7 @@ static void test_diverged_resync_after_data_loss_without_disconnection(void **st
                                          AMcreate(),
                                          AM_VALUE_DOC,
                                          cmocka_cb).doc;
-    AMfree(AMsetActor(doc2_after_data_loss, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(doc2_after_data_loss, AMpush(&test_state->stack,
                                                    AMactorIdInitStr("89abcdef"),
                                                    AM_VALUE_ACTOR_ID,
                                                    cmocka_cb).actor_id));
@@ -958,11 +958,11 @@ static void test_diverged_resync_after_data_loss_without_disconnection(void **st
  */
 static void test_diverged_handles_concurrent_changes(void **state) {
     TestState* test_state = *state;
-    AMfree(AMsetActor(test_state->doc1, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(test_state->doc1, AMpush(&test_state->stack,
                                                AMactorIdInitStr("01234567"),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
-    AMfree(AMsetActor(test_state->doc2, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(test_state->doc2, AMpush(&test_state->stack,
                                                AMactorIdInitStr("89abcdef"),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
@@ -970,7 +970,7 @@ static void test_diverged_handles_concurrent_changes(void **state) {
                          AMcreate(),
                          AM_VALUE_DOC,
                          cmocka_cb).doc;
-    AMfree(AMsetActor(doc3, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(doc3, AMpush(&test_state->stack,
                                    AMactorIdInitStr("fedcba98"),
                                    AM_VALUE_ACTOR_ID,
                                    cmocka_cb).actor_id));
@@ -1033,11 +1033,11 @@ static void test_diverged_handles_concurrent_changes(void **state) {
  */
 static void test_diverged_handles_histories_of_branching_and_merging(void **state) {
     TestState* test_state = *state;
-    AMfree(AMsetActor(test_state->doc1, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(test_state->doc1, AMpush(&test_state->stack,
                                                AMactorIdInitStr("01234567"),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
-    AMfree(AMsetActor(test_state->doc2, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(test_state->doc2, AMpush(&test_state->stack,
                                                AMactorIdInitStr("89abcdef"),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
@@ -1045,7 +1045,7 @@ static void test_diverged_handles_histories_of_branching_and_merging(void **stat
                          AMcreate(),
                          AM_VALUE_DOC,
                          cmocka_cb).doc;
-    AMfree(AMsetActor(doc3, AMpush(&test_state->stack,
+    AMfree(AMsetActorId(doc3, AMpush(&test_state->stack,
                                    AMactorIdInitStr("fedcba98"),
                                    AM_VALUE_ACTOR_ID,
                                    cmocka_cb).actor_id));

@@ -144,7 +144,7 @@ static void test_range_iter_map(void** state) {
     AMfree(AMmapPutUint(doc, AM_ROOT, "d", 9));
     AMfree(AMcommit(doc, NULL, NULL));
     AMactorId const* const actor_id = AMpush(&stack,
-                                             AMgetActor(doc),
+                                             AMgetActorId(doc),
                                              AM_VALUE_ACTOR_ID,
                                              cmocka_cb).actor_id;
     AMmapItems map_items = AMpush(&stack,
@@ -322,7 +322,7 @@ static void test_map_range_back_and_forth_single(void** state) {
     AMresultStack* stack = *state;
     AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
     AMactorId const* const actor_id = AMpush(&stack,
-                                             AMgetActor(doc),
+                                             AMgetActorId(doc),
                                              AM_VALUE_ACTOR_ID,
                                              cmocka_cb).actor_id;
 
@@ -488,7 +488,7 @@ static void test_map_range_back_and_forth_double(void** state) {
                                              AMactorIdInitBytes("\0", 1),
                                              AM_VALUE_ACTOR_ID,
                                              cmocka_cb).actor_id;
-    AMfree(AMsetActor(doc1, actor_id1));
+    AMfree(AMsetActorId(doc1, actor_id1));
 
     AMfree(AMmapPutStr(doc1, AM_ROOT, "1", "a"));
     AMfree(AMmapPutStr(doc1, AM_ROOT, "2", "b"));
@@ -500,7 +500,7 @@ static void test_map_range_back_and_forth_double(void** state) {
                                               AMactorIdInitBytes("\1", 1),
                                               AM_VALUE_ACTOR_ID,
                                               cmocka_cb).actor_id;
-    AMfree(AMsetActor(doc2, actor_id2));
+    AMfree(AMsetActorId(doc2, actor_id2));
     AMfree(AMmapPutStr(doc2, AM_ROOT, "1", "aa"));
     AMfree(AMmapPutStr(doc2, AM_ROOT, "2", "bb"));
     AMfree(AMmapPutStr(doc2, AM_ROOT, "3", "cc"));
@@ -662,7 +662,7 @@ static void test_map_range_at_back_and_forth_single(void** state) {
     AMresultStack* stack = *state;
     AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
     AMactorId const* const actor_id = AMpush(&stack,
-                                             AMgetActor(doc),
+                                             AMgetActorId(doc),
                                              AM_VALUE_ACTOR_ID,
                                              cmocka_cb).actor_id;
 
@@ -833,7 +833,7 @@ static void test_map_range_at_back_and_forth_double(void** state) {
                                              AMactorIdInitBytes("\0", 1),
                                              AM_VALUE_ACTOR_ID,
                                              cmocka_cb).actor_id;
-    AMfree(AMsetActor(doc1, actor_id1));
+    AMfree(AMsetActorId(doc1, actor_id1));
 
     AMfree(AMmapPutStr(doc1, AM_ROOT, "1", "a"));
     AMfree(AMmapPutStr(doc1, AM_ROOT, "2", "b"));
@@ -845,7 +845,7 @@ static void test_map_range_at_back_and_forth_double(void** state) {
                                              AMactorIdInitBytes("\1", 1),
                                              AM_VALUE_ACTOR_ID,
                                              cmocka_cb).actor_id;
-    AMfree(AMsetActor(doc2, actor_id2));
+    AMfree(AMsetActorId(doc2, actor_id2));
     AMfree(AMmapPutStr(doc2, AM_ROOT, "1", "aa"));
     AMfree(AMmapPutStr(doc2, AM_ROOT, "2", "bb"));
     AMfree(AMmapPutStr(doc2, AM_ROOT, "3", "cc"));
@@ -1020,7 +1020,7 @@ static void test_get_range_values(void** state) {
                                      AMgetHeads(doc1),
                                      AM_VALUE_CHANGE_HASHES,
                                      cmocka_cb).change_hashes;
-    AMdoc* const doc2 = AMpush(&stack, AMfork(doc1), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc2 = AMpush(&stack, AMfork(doc1, NULL), AM_VALUE_DOC, cmocka_cb).doc;
 
     AMfree(AMmapPutStr(doc1, AM_ROOT, "cc", "ccc V2"));
     AMfree(AMcommit(doc1, NULL, NULL));

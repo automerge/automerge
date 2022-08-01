@@ -93,6 +93,25 @@ pub unsafe extern "C" fn AMapplyChanges(
 }
 
 /// \memberof AMdoc
+/// \brief Allocates storage for a document and initializes it by duplicating
+///        the given document.
+///
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
+/// \return A pointer to an `AMresult` struct containing a pointer to an
+///         `AMdoc` struct.
+/// \pre \p doc` != NULL`.
+/// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
+///          in order to prevent a memory leak.
+/// \internal
+/// # Safety
+/// doc must be a valid pointer to an AMdoc
+#[no_mangle]
+pub unsafe extern "C" fn AMclone(doc: *const AMdoc) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    to_result(doc.as_ref().clone())
+}
+
+/// \memberof AMdoc
 /// \brief Allocates a new document and initializes it with defaults.
 ///
 /// \return A pointer to an `AMresult` struct containing a pointer to an
@@ -111,8 +130,8 @@ pub extern "C" fn AMcreate() -> *mut AMresult {
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] message A UTF-8 string or `NULL`.
 /// \param[in] time A pointer to a `time_t` value or `NULL`.
-/// \return A pointer to an `AMresult` struct containing a change hash as an
-///         `AMbyteSpan` struct.
+/// \return A pointer to an `AMresult` struct containing an `AMchangeHashes`
+///         with one element.
 /// \pre \p doc` != NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
@@ -134,25 +153,6 @@ pub unsafe extern "C" fn AMcommit(
         options.set_time(*time);
     }
     to_result(doc.commit_with::<()>(options))
-}
-
-/// \memberof AMdoc
-/// \brief Allocates storage for a document and initializes it by duplicating
-///        the given document.
-///
-/// \param[in,out] doc A pointer to an `AMdoc` struct.
-/// \return A pointer to an `AMresult` struct containing a pointer to an
-///         `AMdoc` struct.
-/// \pre \p doc` != NULL`.
-/// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
-///          in order to prevent a memory leak.
-/// \internal
-/// # Safety
-/// doc must be a valid pointer to an AMdoc
-#[no_mangle]
-pub unsafe extern "C" fn AMdup(doc: *const AMdoc) -> *mut AMresult {
-    let doc = to_doc!(doc);
-    to_result(doc.as_ref().clone())
 }
 
 /// \memberof AMdoc
@@ -178,9 +178,11 @@ pub unsafe extern "C" fn AMequal(doc1: *mut AMdoc, doc2: *mut AMdoc) -> bool {
 }
 
 /// \memberof AMdoc
-/// \brief Forks this document at the current point for use by a different
-///        actor.
+/// \brief Forks this document at the current or a historical point for use by
+///        a different actor.
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
+/// \param[in] heads A pointer to an `AMchangeHashes` struct for a historical
+///                  point or `NULL` for the current point.
 /// \return A pointer to an `AMresult` struct containing a pointer to an
 ///         `AMdoc` struct.
 /// \pre \p doc` != NULL`.
@@ -189,10 +191,14 @@ pub unsafe extern "C" fn AMequal(doc1: *mut AMdoc, doc2: *mut AMdoc) -> bool {
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
+/// heads must be a valid pointer to an AMchangeHashes or NULL
 #[no_mangle]
-pub unsafe extern "C" fn AMfork(doc: *mut AMdoc) -> *mut AMresult {
+pub unsafe extern "C" fn AMfork(doc: *mut AMdoc, heads: *const AMchangeHashes) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
-    to_result(doc.fork())
+    match heads.as_ref() {
+        None => to_result(doc.fork()),
+        Some(heads) => to_result(doc.fork_at(heads.as_ref())),
+    }
 }
 
 /// \memberof AMdoc
@@ -235,7 +241,7 @@ pub unsafe extern "C" fn AMgenerateSyncMessage(
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 #[no_mangle]
-pub unsafe extern "C" fn AMgetActor(doc: *const AMdoc) -> *mut AMresult {
+pub unsafe extern "C" fn AMgetActorId(doc: *const AMdoc) -> *mut AMresult {
     let doc = to_doc!(doc);
     to_result(Ok::<am::ActorId, am::AutomergeError>(
         doc.get_actor().clone(),
@@ -644,7 +650,10 @@ pub unsafe extern "C" fn AMsaveIncremental(doc: *mut AMdoc) -> *mut AMresult {
 /// doc must be a valid pointer to an AMdoc
 /// actor_id must be a valid pointer to an AMactorId
 #[no_mangle]
-pub unsafe extern "C" fn AMsetActor(doc: *mut AMdoc, actor_id: *const AMactorId) -> *mut AMresult {
+pub unsafe extern "C" fn AMsetActorId(
+    doc: *mut AMdoc,
+    actor_id: *const AMactorId,
+) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let actor_id = to_actor_id!(actor_id);
     doc.set_actor(actor_id.as_ref().clone());

@@ -148,9 +148,9 @@ static void test_AMputActor_bytes(void **state) {
                                            test_state->actor_id_size),
                                        AM_VALUE_ACTOR_ID,
                                        cmocka_cb).actor_id;
-    AMfree(AMsetActor(test_state->group_state->doc, actor_id));
+    AMfree(AMsetActorId(test_state->group_state->doc, actor_id));
     actor_id = AMpush(&test_state->group_state->stack,
-                      AMgetActor(test_state->group_state->doc),
+                      AMgetActorId(test_state->group_state->doc),
                       AM_VALUE_ACTOR_ID,
                       cmocka_cb).actor_id;
     AMbyteSpan const bytes = AMactorIdBytes(actor_id);
@@ -164,9 +164,9 @@ static void test_AMputActor_hex(void **state) {
                                        AMactorIdInitStr(test_state->actor_id_str),
                                        AM_VALUE_ACTOR_ID,
                                        cmocka_cb).actor_id;
-    AMfree(AMsetActor(test_state->group_state->doc, actor_id));
+    AMfree(AMsetActorId(test_state->group_state->doc, actor_id));
     actor_id = AMpush(&test_state->group_state->stack,
-                      AMgetActor(test_state->group_state->doc),
+                      AMgetActorId(test_state->group_state->doc),
                       AM_VALUE_ACTOR_ID,
                       cmocka_cb).actor_id;
     char const* const str = AMactorIdStr(actor_id);
