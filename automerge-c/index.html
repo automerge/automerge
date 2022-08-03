@@ -68,7 +68,7 @@ $(function() {
 <div class="title">Methods we need to support </div>  </div>
 </div><!--header-->
 <div class="contents">
-<div class="textblock"><h2><a class="anchor" id="autotoc_md89"></a>
+<div class="textblock"><h2><a class="anchor" id="autotoc_md107"></a>
 Basic management</h2>
 <ol type="1">
 <li><code><a class="el" href="structAMdoc.html#a0be75204f0f27936559fcda7b9534314" title="Allocates a new document and initializes it with defaults.">AMcreate()</a></code></li>
@@ -85,7 +85,7 @@ Basic management</h2>
 <ol type="1">
 <li><code>actor = get_actor(doc)</code></li>
 </ol>
-<h2><a class="anchor" id="autotoc_md90"></a>
+<h2><a class="anchor" id="autotoc_md108"></a>
 Transactions</h2>
 <ol type="1">
 <li><code>AMpendingOps(doc)</code></li>
@@ -96,7 +96,7 @@ Transactions</h2>
 <ol type="1">
 <li><code>AMrollback(doc)</code></li>
 </ol>
-<h2><a class="anchor" id="autotoc_md91"></a>
+<h2><a class="anchor" id="autotoc_md109"></a>
 Write</h2>
 <ol type="1">
 <li><code>AMset{Map|List}(doc, obj, prop, value)</code></li>
@@ -116,7 +116,7 @@ Write</h2>
 <ol type="1">
 <li><code>AMspliceText(doc, obj, start, num_del, text)</code></li>
 </ol>
-<h2><a class="anchor" id="autotoc_md92"></a>
+<h2><a class="anchor" id="autotoc_md110"></a>
 Read (the heads argument is optional and can be on an &lt;tt&gt;at&lt;/tt&gt; variant)</h2>
 <ol type="1">
 <li><code>AMkeys(doc, obj, heads)</code></li>
@@ -136,7 +136,7 @@ Read (the heads argument is optional and can be on an &lt;tt&gt;at&lt;/tt&gt; va
 <ol type="1">
 <li><code>AMtext(doc, obj, heads)</code></li>
 </ol>
-<h2><a class="anchor" id="autotoc_md93"></a>
+<h2><a class="anchor" id="autotoc_md111"></a>
 Sync</h2>
 <ol type="1">
 <li><code>AMgenerateSyncMessage(doc, state)</code></li>
@@ -147,7 +147,7 @@ Sync</h2>
 <ol type="1">
 <li><code>AMinitSyncState()</code></li>
 </ol>
-<h2><a class="anchor" id="autotoc_md94"></a>
+<h2><a class="anchor" id="autotoc_md112"></a>
 Save / Load</h2>
 <ol type="1">
 <li><code>AMload(data)</code></li>
@@ -161,7 +161,7 @@ Save / Load</h2>
 <ol type="1">
 <li><code>AMsaveIncremental(doc)</code></li>
 </ol>
-<h2><a class="anchor" id="autotoc_md95"></a>
+<h2><a class="anchor" id="autotoc_md113"></a>
 Low Level Access</h2>
 <ol type="1">
 <li><code>AMapplyChanges(doc, changes)</code></li>
@@ -181,7 +181,7 @@ Low Level Access</h2>
 <ol type="1">
 <li><code>AMgetMissingDeps(doc, heads)</code></li>
 </ol>
-<h2><a class="anchor" id="autotoc_md96"></a>
+<h2><a class="anchor" id="autotoc_md114"></a>
 Encode/Decode</h2>
 <ol type="1">
 <li><code>AMencodeChange(change)</code></li>
@@ -201,11 +201,11 @@ Encode/Decode</h2>
 <ol type="1">
 <li><code>AMdecodeSyncState(change)</code></li>
 </ol>
-<h1><a class="anchor" id="autotoc_md97"></a>
+<h1><a class="anchor" id="autotoc_md115"></a>
 Open Question - Memory management</h1>
 <p>Most of these calls return one or more items of arbitrary length. Doing memory management in C is tricky. This is my proposed solution...</p>
-<h2><a class="anchor" id="autotoc_md98"></a>
-autotoc_md98</h2>
+<h2><a class="anchor" id="autotoc_md116"></a>
+autotoc_md116</h2>
 <div class="fragment"><div class="line">// returns 1 or zero opids</div>
 <div class="line">n = automerge_set(doc, &quot;_root&quot;, &quot;hello&quot;, datatype, value);</div>
 <div class="line">if (n) {</div>
@@ -218,7 +218,7 @@ autotoc_md98</h2>
 <div class="line">  automerge_pop_value(doc, &amp;value, &amp;datatype, len);</div>
 <div class="line">}</div>
 </div><!-- fragment --><p>There would be one pop method per object type. Users allocs and frees the buffers. Multiple return values would result in multiple pops. Too small buffers would error and allow retry.</p>
-<h2><a class="anchor" id="autotoc_md99"></a>
+<h2><a class="anchor" id="autotoc_md117"></a>
 Formats</h2>
 <p>Actors - We could do (bytes,len) or a hex encoded string?. <br  />
  ObjIds - We could do flat bytes of the ExId struct but lets do human readable strings for now - the struct would be faster but opque Heads - Might as well make it a flat buffer <code>(n, hash, hash, ...)</code> Changes - Put them all in a flat concatenated buffer Encode/Decode - to json strings? </p>

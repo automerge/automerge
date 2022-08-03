@@ -145,10 +145,10 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an <code><a class="el" href="structAMsyncState.html" title="The state of synchronization with a peer.">AMsyncState</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>src</code> must be a valid address. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>src<code>!=</code> NULL</code>. </dd>
 <dd>
-<code>0 &lt;=</code> <code>count</code> <code>&lt;=</code> size of <code>src</code>. </dd></dl>
-<dl class="section warning"><dt>Warning</dt><dd>To avoid a memory leak, the returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code>. </dd></dl>
+<code>0 &lt;=</code> <code>count<code>&lt;=</code>size</code> of <code>src</code>. </dd></dl>
+<dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
 </div>
@@ -176,8 +176,8 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an array of bytes as an <code><a class="el" href="structAMbyteSpan.html" title="A contiguous sequence of bytes.">AMbyteSpan</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>sync_state</code> must be a valid address. </dd></dl>
-<dl class="section warning"><dt>Warning</dt><dd>To avoid a memory leak, the returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>sync_state<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
 </div>
@@ -215,10 +215,10 @@ Public Member Functions</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section return"><dt>Returns</dt><dd><code>true</code> if <code>sync_state1</code> <code>==</code> <code>sync_state2</code> and <code>false</code> otherwise. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>sync_state1</code> must be a valid address. </dd>
+<dl class="section return"><dt>Returns</dt><dd><code>true</code> if <code>sync_state1<code>==</code><code>sync_state2</code> and</code> <code>false</code> otherwise. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>sync_state1<code>!=</code> NULL</code>. </dd>
 <dd>
-<code>sync_state2</code> must be a valid address. </dd></dl>
+<code>sync_state2<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -240,7 +240,7 @@ Public Member Functions</h2></td></tr>
 
 <p>Allocates a new synchronization state and initializes it with defaults. </p>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a pointer to an <code><a class="el" href="structAMsyncState.html" title="The state of synchronization with a peer.">AMsyncState</a></code> struct. </dd></dl>
-<dl class="section warning"><dt>Warning</dt><dd>To avoid a memory leak, the returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code>. </dd></dl>
+<dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
 </div>
@@ -268,7 +268,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMchangeHashes.html" title="A random-access iterator over a sequence of change hashes.">AMchangeHashes</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>sync_state</code> must be a valid address. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>sync_state<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -296,7 +296,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMchangeHashes.html" title="A random-access iterator over a sequence of change hashes.">AMchangeHashes</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>sync_state</code> must be a valid address. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>sync_state<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -335,9 +335,9 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>An <code>AMhaves</code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>sync_state</code> must be a valid address. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>sync_state<code>!=</code> NULL</code>. </dd>
 <dd>
-<code>has_value</code> must be a valid address. </dd></dl>
+<code>has_value<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -376,9 +376,9 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMchangeHashes.html" title="A random-access iterator over a sequence of change hashes.">AMchangeHashes</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>sync_state</code> must be a valid address. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>sync_state<code>!=</code> NULL</code>. </dd>
 <dd>
-<code>has_value</code> must be a valid address. </dd></dl>
+<code>has_value<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -417,9 +417,9 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMchangeHashes.html" title="A random-access iterator over a sequence of change hashes.">AMchangeHashes</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>sync_state</code> must be a valid address. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>sync_state<code>!=</code> NULL</code>. </dd>
 <dd>
-<code>has_value</code> must be a valid address. </dd></dl>
+<code>has_value<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>

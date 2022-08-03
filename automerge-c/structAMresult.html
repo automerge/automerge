@@ -91,9 +91,9 @@ Public Member Functions</h2></td></tr>
 <tr class="memitem:a7ad6ce858e48ba8c90a212ee5783e049"><td class="memItemLeft" align="right" valign="top"><a class="el" href="group__enumerations.html#ga95d2f1b79b11e5da8ebe5c78ae7b1527">AMstatus</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMresult.html#a7ad6ce858e48ba8c90a212ee5783e049">AMresultStatus</a> (const struct <a class="el" href="structAMresult.html">AMresult</a> *result)</td></tr>
 <tr class="memdesc:a7ad6ce858e48ba8c90a212ee5783e049"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the status code of a result.  <a href="structAMresult.html#a7ad6ce858e48ba8c90a212ee5783e049">More...</a><br /></td></tr>
 <tr class="separator:a7ad6ce858e48ba8c90a212ee5783e049"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a89d407ee7e057d9040ae851dc55e4654"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMvalue.html">AMvalue</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMresult.html#a89d407ee7e057d9040ae851dc55e4654">AMresultValue</a> (struct <a class="el" href="structAMresult.html">AMresult</a> *result)</td></tr>
-<tr class="memdesc:a89d407ee7e057d9040ae851dc55e4654"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets a result's value.  <a href="structAMresult.html#a89d407ee7e057d9040ae851dc55e4654">More...</a><br /></td></tr>
-<tr class="separator:a89d407ee7e057d9040ae851dc55e4654"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a9821cdfacaa9c5ca01c84bde7ea202ed"><td class="memItemLeft" align="right" valign="top">union <a class="el" href="unionAMvalue.html">AMvalue</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMresult.html#a9821cdfacaa9c5ca01c84bde7ea202ed">AMresultValue</a> (struct <a class="el" href="structAMresult.html">AMresult</a> *result)</td></tr>
+<tr class="memdesc:a9821cdfacaa9c5ca01c84bde7ea202ed"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets a result's value.  <a href="structAMresult.html#a9821cdfacaa9c5ca01c84bde7ea202ed">More...</a><br /></td></tr>
+<tr class="separator:a9821cdfacaa9c5ca01c84bde7ea202ed"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table>
 <a name="details" id="details"></a><h2 class="groupheader">Detailed Description</h2>
 <div class="textblock"><p>A discriminated union of result variants. </p>
@@ -122,7 +122,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A UTF-8 string value or <code>NULL</code>. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>result</code> must be a valid address. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>result<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -149,7 +149,7 @@ Public Member Functions</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>result</code> must be a valid address. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>result<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -177,7 +177,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>The count of values in <code>result</code>. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>result</code> must be a valid address. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>result<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -205,18 +205,18 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>An <code>AMstatus</code> enum tag. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>result</code> must be a valid address. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>result<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
-<a id="a89d407ee7e057d9040ae851dc55e4654"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a89d407ee7e057d9040ae851dc55e4654">&#9670;&nbsp;</a></span>AMresultValue()</h2>
+<a id="a9821cdfacaa9c5ca01c84bde7ea202ed"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a9821cdfacaa9c5ca01c84bde7ea202ed">&#9670;&nbsp;</a></span>AMresultValue()</h2>
 
 <div class="memitem">
 <div class="memproto">
       <table class="memname">
         <tr>
-          <td class="memname">struct <a class="el" href="structAMvalue.html">AMvalue</a> AMresultValue </td>
+          <td class="memname">union <a class="el" href="unionAMvalue.html">AMvalue</a> AMresultValue </td>
           <td>(</td>
           <td class="paramtype">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td>
           <td class="paramname"><em>result</em></td><td>)</td>
@@ -228,12 +228,12 @@ Public Member Functions</h2></td></tr>
 <p>Gets a result's value. </p>
 <dl class="params"><dt>Parameters</dt><dd>
   <table class="params">
-    <tr><td class="paramdir">[in,out]</td><td class="paramname">result</td><td>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">result</td><td>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct. </td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMvalue.html" title="A discriminated union of value type variants for a result.">AMvalue</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>result</code> must be a valid address. </dd></dl>
+<dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="unionAMvalue.html" title="A discriminated union of value type variants for a result.">AMvalue</a></code> struct. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>result<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>

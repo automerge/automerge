@@ -1,4 +1,4 @@
 var searchData=
 [
-  ['uint_177',['uint',['../structAMvalue.html#a38b90ea274a71531faf11414b2894a06',1,'AMvalue']]]
+  ['result_223',['result',['../structAMresultStack.html#a97062ef30f4673348e0daa5d95bf2486',1,'AMresultStack']]]
 ];

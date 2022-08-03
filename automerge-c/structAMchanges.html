@@ -95,6 +95,9 @@ Public Member Functions</h2></td></tr>
 <tr class="memitem:ad02d4fc626c0741c676882e8143071b0"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMchanges.html">AMchanges</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMchanges.html#ad02d4fc626c0741c676882e8143071b0">AMchangesReversed</a> (const struct <a class="el" href="structAMchanges.html">AMchanges</a> *changes)</td></tr>
 <tr class="memdesc:ad02d4fc626c0741c676882e8143071b0"><td class="mdescLeft">&#160;</td><td class="mdescRight">Creates an iterator over the same sequence of changes as the given one but with the opposite position and direction.  <a href="structAMchanges.html#ad02d4fc626c0741c676882e8143071b0">More...</a><br /></td></tr>
 <tr class="separator:ad02d4fc626c0741c676882e8143071b0"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a414c70b1917bd399ef470ff45321d2e2"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMchanges.html">AMchanges</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMchanges.html#a414c70b1917bd399ef470ff45321d2e2">AMchangesRewound</a> (const struct <a class="el" href="structAMchanges.html">AMchanges</a> *changes)</td></tr>
+<tr class="memdesc:a414c70b1917bd399ef470ff45321d2e2"><td class="mdescLeft">&#160;</td><td class="mdescRight">Creates an iterator at the starting position over the same sequence of changes as the given one.  <a href="structAMchanges.html#a414c70b1917bd399ef470ff45321d2e2">More...</a><br /></td></tr>
+<tr class="separator:a414c70b1917bd399ef470ff45321d2e2"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:acacb5cd8e7a1bbfbb3488d58dc6132e5"><td class="memItemLeft" align="right" valign="top">size_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMchanges.html#acacb5cd8e7a1bbfbb3488d58dc6132e5">AMchangesSize</a> (const struct <a class="el" href="structAMchanges.html">AMchanges</a> *changes)</td></tr>
 <tr class="memdesc:acacb5cd8e7a1bbfbb3488d58dc6132e5"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the size of the sequence of changes underlying an iterator.  <a href="structAMchanges.html#acacb5cd8e7a1bbfbb3488d58dc6132e5">More...</a><br /></td></tr>
 <tr class="separator:acacb5cd8e7a1bbfbb3488d58dc6132e5"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -141,7 +144,7 @@ Public Attributes</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>changes</code> must be a valid address. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>changes<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -179,10 +182,10 @@ Public Attributes</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section return"><dt>Returns</dt><dd><code>true</code> if <code>changes1</code> <code>==</code> <code>changes2</code> and <code>false</code> otherwise. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>changes1</code> must be a valid address. </dd>
+<dl class="section return"><dt>Returns</dt><dd><code>true</code> if <code>changes1<code>==</code><code>changes2</code> and</code> <code>false</code> otherwise. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>changes1<code>!=</code> NULL</code>. </dd>
 <dd>
-<code>changes2</code> must be a valid address. </dd></dl>
+<code>changes2<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -221,7 +224,7 @@ Public Attributes</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMchange.html" title="A group of operations performed by an actor.">AMchange</a></code> struct that's <code>NULL</code> when <code>changes</code> was previously advanced past its forward/reverse limit. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>changes</code> must be a valid address. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>changes<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -260,7 +263,7 @@ Public Attributes</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMchange.html" title="A group of operations performed by an actor.">AMchange</a></code> struct that's <code>NULL</code> when <code>changes</code> is presently advanced past its forward/reverse limit. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>changes</code> must be a valid address. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>changes<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -288,7 +291,35 @@ Public Attributes</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMchanges.html" title="A random-access iterator over a sequence of changes.">AMchanges</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>changes</code> must be a valid address. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>changes<code>!=</code> NULL</code>. </dd></dl>
+
+</div>
+</div>
+<a id="a414c70b1917bd399ef470ff45321d2e2"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a414c70b1917bd399ef470ff45321d2e2">&#9670;&nbsp;</a></span>AMchangesRewound()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">struct <a class="el" href="structAMchanges.html">AMchanges</a> AMchangesRewound </td>
+          <td>(</td>
+          <td class="paramtype">const struct <a class="el" href="structAMchanges.html">AMchanges</a> *&#160;</td>
+          <td class="paramname"><em>changes</em></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Creates an iterator at the starting position over the same sequence of changes as the given one. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">changes</td><td>A pointer to an <code><a class="el" href="structAMchanges.html" title="A random-access iterator over a sequence of changes.">AMchanges</a></code> struct. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMchanges.html" title="A random-access iterator over a sequence of changes.">AMchanges</a></code> struct </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>changes<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -316,7 +347,7 @@ Public Attributes</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>The count of values in <code>changes</code>. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>changes</code> must be a valid address. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>changes<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>

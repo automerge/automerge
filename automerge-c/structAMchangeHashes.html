@@ -95,6 +95,9 @@ Public Member Functions</h2></td></tr>
 <tr class="memitem:a52246301e5645a870b5e32c8c43c7d9d"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMchangeHashes.html">AMchangeHashes</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMchangeHashes.html#a52246301e5645a870b5e32c8c43c7d9d">AMchangeHashesReversed</a> (const struct <a class="el" href="structAMchangeHashes.html">AMchangeHashes</a> *change_hashes)</td></tr>
 <tr class="memdesc:a52246301e5645a870b5e32c8c43c7d9d"><td class="mdescLeft">&#160;</td><td class="mdescRight">Creates an iterator over the same sequence of change hashes as the given one but with the opposite position and direction.  <a href="structAMchangeHashes.html#a52246301e5645a870b5e32c8c43c7d9d">More...</a><br /></td></tr>
 <tr class="separator:a52246301e5645a870b5e32c8c43c7d9d"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:ae76c86e0241e47f0c6d35bbec8894ce7"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMchangeHashes.html">AMchangeHashes</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMchangeHashes.html#ae76c86e0241e47f0c6d35bbec8894ce7">AMchangeHashesRewound</a> (const struct <a class="el" href="structAMchangeHashes.html">AMchangeHashes</a> *change_hashes)</td></tr>
+<tr class="memdesc:ae76c86e0241e47f0c6d35bbec8894ce7"><td class="mdescLeft">&#160;</td><td class="mdescRight">Creates an iterator at the starting position over the same sequence of change hashes as the given one.  <a href="structAMchangeHashes.html#ae76c86e0241e47f0c6d35bbec8894ce7">More...</a><br /></td></tr>
+<tr class="separator:ae76c86e0241e47f0c6d35bbec8894ce7"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a6cf40f923acf737af7bd153b210f2a1d"><td class="memItemLeft" align="right" valign="top">size_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMchangeHashes.html#a6cf40f923acf737af7bd153b210f2a1d">AMchangeHashesSize</a> (const struct <a class="el" href="structAMchangeHashes.html">AMchangeHashes</a> *change_hashes)</td></tr>
 <tr class="memdesc:a6cf40f923acf737af7bd153b210f2a1d"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the size of the sequence of change hashes underlying an iterator.  <a href="structAMchangeHashes.html#a6cf40f923acf737af7bd153b210f2a1d">More...</a><br /></td></tr>
 <tr class="separator:a6cf40f923acf737af7bd153b210f2a1d"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -141,7 +144,7 @@ Public Attributes</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>change_hashes</code> must be a valid address. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>change_hashes<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -179,10 +182,10 @@ Public Attributes</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section return"><dt>Returns</dt><dd><code>-1</code> if <code>change_hashes1</code> <code>&lt;</code> <code>change_hashes2</code>, <code>0</code> if <code>change_hashes1</code> <code>==</code> <code>change_hashes2</code> and <code>1</code> if <code>change_hashes1</code> <code>&gt;</code> <code>change_hashes2</code>. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>change_hashes1</code> must be a valid address. </dd>
+<dl class="section return"><dt>Returns</dt><dd><code>-1</code> if <code>change_hashes1</code> <code>&lt;</code> <code>change_hashes2</code>, <code>0</code> if <code>change_hashes1<code>==</code><code>change_hashes2</code> and</code> <code>1</code> if <code>change_hashes1</code> <code>&gt;</code> <code>change_hashes2</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>change_hashes1<code>!=</code> NULL</code>. </dd>
 <dd>
-<code>change_hashes2</code> must be a valid address. </dd></dl>
+<code>change_hashes2<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -221,7 +224,7 @@ Public Attributes</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMbyteSpan.html" title="A contiguous sequence of bytes.">AMbyteSpan</a></code> struct with <code>.src == NULL</code> when <code>change_hashes</code> was previously advanced past its forward/reverse limit. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>change_hashes</code> must be a valid address. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>change_hashes<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -260,7 +263,7 @@ Public Attributes</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMbyteSpan.html" title="A contiguous sequence of bytes.">AMbyteSpan</a></code> struct with <code>.src == NULL</code> when <code>change_hashes</code> is presently advanced past its forward/reverse limit. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>change_hashes</code> must be a valid address. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>change_hashes<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -288,7 +291,35 @@ Public Attributes</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMchangeHashes.html" title="A random-access iterator over a sequence of change hashes.">AMchangeHashes</a></code> struct </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>change_hashes</code> must be a valid address. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>change_hashes<code>!=</code> NULL</code>. </dd></dl>
+
+</div>
+</div>
+<a id="ae76c86e0241e47f0c6d35bbec8894ce7"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#ae76c86e0241e47f0c6d35bbec8894ce7">&#9670;&nbsp;</a></span>AMchangeHashesRewound()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">struct <a class="el" href="structAMchangeHashes.html">AMchangeHashes</a> AMchangeHashesRewound </td>
+          <td>(</td>
+          <td class="paramtype">const struct <a class="el" href="structAMchangeHashes.html">AMchangeHashes</a> *&#160;</td>
+          <td class="paramname"><em>change_hashes</em></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Creates an iterator at the starting position over the same sequence of change hashes as the given one. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">change_hashes</td><td>A pointer to an <code><a class="el" href="structAMchangeHashes.html" title="A random-access iterator over a sequence of change hashes.">AMchangeHashes</a></code> struct. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMchangeHashes.html" title="A random-access iterator over a sequence of change hashes.">AMchangeHashes</a></code> struct </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>change_hashes<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -316,7 +347,7 @@ Public Attributes</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>The count of values in <code>change_hashes</code>. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>change_hashes</code> must be a valid address. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>change_hashes<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>

@@ -64,6 +64,9 @@ $(function() {
 
 </div><!-- top -->
 <div class="header">
+  <div class="summary">
+<a href="#pub-methods">Public Member Functions</a> &#124;
+<a href="structAMobjId-members.html">List of all members</a>  </div>
   <div class="headertitle">
 <div class="title">AMobjId Struct Reference</div>  </div>
 </div><!--header-->
@@ -73,9 +76,151 @@ $(function() {
  <a href="structAMobjId.html#details">More...</a></p>
 
 <p><code>#include &lt;<a class="el" href="automerge_8h_source.html">automerge.h</a>&gt;</code></p>
+<table class="memberdecls">
+<tr class="heading"><td colspan="2"><h2 class="groupheader"><a name="pub-methods"></a>
+Public Member Functions</h2></td></tr>
+<tr class="memitem:aeda36ef2e4a5443a520cd79b453b0b5a"><td class="memItemLeft" align="right" valign="top">const struct <a class="el" href="structAMactorId.html">AMactorId</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMobjId.html#aeda36ef2e4a5443a520cd79b453b0b5a">AMobjIdActorId</a> (const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id)</td></tr>
+<tr class="memdesc:aeda36ef2e4a5443a520cd79b453b0b5a"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the actor identifier of an object identifier.  <a href="structAMobjId.html#aeda36ef2e4a5443a520cd79b453b0b5a">More...</a><br /></td></tr>
+<tr class="separator:aeda36ef2e4a5443a520cd79b453b0b5a"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:acc04a710c01a0a500f5047e91aee587a"><td class="memItemLeft" align="right" valign="top">uint64_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMobjId.html#acc04a710c01a0a500f5047e91aee587a">AMobjIdCounter</a> (const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id)</td></tr>
+<tr class="memdesc:acc04a710c01a0a500f5047e91aee587a"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the counter of an object identifier.  <a href="structAMobjId.html#acc04a710c01a0a500f5047e91aee587a">More...</a><br /></td></tr>
+<tr class="separator:acc04a710c01a0a500f5047e91aee587a"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a7fb4a3e768ccdda7cd73dff3b7aa55c2"><td class="memItemLeft" align="right" valign="top">bool&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMobjId.html#a7fb4a3e768ccdda7cd73dff3b7aa55c2">AMobjIdEqual</a> (const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id1, const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id2)</td></tr>
+<tr class="memdesc:a7fb4a3e768ccdda7cd73dff3b7aa55c2"><td class="mdescLeft">&#160;</td><td class="mdescRight">Tests the equality of two object identifiers.  <a href="structAMobjId.html#a7fb4a3e768ccdda7cd73dff3b7aa55c2">More...</a><br /></td></tr>
+<tr class="separator:a7fb4a3e768ccdda7cd73dff3b7aa55c2"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:aa121a250ab64a1ec2c3a0bd708b0a492"><td class="memItemLeft" align="right" valign="top">size_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMobjId.html#aa121a250ab64a1ec2c3a0bd708b0a492">AMobjIdIndex</a> (const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id)</td></tr>
+<tr class="memdesc:aa121a250ab64a1ec2c3a0bd708b0a492"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the index of an object identifier.  <a href="structAMobjId.html#aa121a250ab64a1ec2c3a0bd708b0a492">More...</a><br /></td></tr>
+<tr class="separator:aa121a250ab64a1ec2c3a0bd708b0a492"><td class="memSeparator" colspan="2">&#160;</td></tr>
+</table>
 <a name="details" id="details"></a><h2 class="groupheader">Detailed Description</h2>
 <div class="textblock"><p>An object's unique identifier. </p>
-</div><hr/>The documentation for this struct was generated from the following file:<ul>
+</div><h2 class="groupheader">Member Function Documentation</h2>
+<a id="aeda36ef2e4a5443a520cd79b453b0b5a"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#aeda36ef2e4a5443a520cd79b453b0b5a">&#9670;&nbsp;</a></span>AMobjIdActorId()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">const struct <a class="el" href="structAMactorId.html">AMactorId</a> * AMobjIdActorId </td>
+          <td>(</td>
+          <td class="paramtype">const struct <a class="el" href="structAMobjId.html">AMobjId</a> *&#160;</td>
+          <td class="paramname"><em>obj_id</em></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Gets the actor identifier of an object identifier. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMactorId.html" title="An actor&#39;s unique identifier.">AMactorId</a></code> struct or <code>NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>obj_id<code>!=</code> NULL</code>. </dd></dl>
+
+</div>
+</div>
+<a id="acc04a710c01a0a500f5047e91aee587a"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#acc04a710c01a0a500f5047e91aee587a">&#9670;&nbsp;</a></span>AMobjIdCounter()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">uint64_t AMobjIdCounter </td>
+          <td>(</td>
+          <td class="paramtype">const struct <a class="el" href="structAMobjId.html">AMobjId</a> *&#160;</td>
+          <td class="paramname"><em>obj_id</em></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Gets the counter of an object identifier. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>A 64-bit unsigned integer. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>obj_id<code>!=</code> NULL</code>. </dd></dl>
+
+</div>
+</div>
+<a id="a7fb4a3e768ccdda7cd73dff3b7aa55c2"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a7fb4a3e768ccdda7cd73dff3b7aa55c2">&#9670;&nbsp;</a></span>AMobjIdEqual()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">bool AMobjIdEqual </td>
+          <td>(</td>
+          <td class="paramtype">const struct <a class="el" href="structAMobjId.html">AMobjId</a> *&#160;</td>
+          <td class="paramname"><em>obj_id1</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const struct <a class="el" href="structAMobjId.html">AMobjId</a> *&#160;</td>
+          <td class="paramname"><em>obj_id2</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Tests the equality of two object identifiers. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">obj_id1</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">obj_id2</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd><code>true</code> if <code>obj_id1<code>==</code><code>obj_id2</code> and</code> <code>false</code> otherwise. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>obj_id1<code>!=</code> NULL</code>. </dd>
+<dd>
+<code>obj_id2<code>!=</code> NULL</code>. </dd></dl>
+
+</div>
+</div>
+<a id="aa121a250ab64a1ec2c3a0bd708b0a492"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#aa121a250ab64a1ec2c3a0bd708b0a492">&#9670;&nbsp;</a></span>AMobjIdIndex()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">size_t AMobjIdIndex </td>
+          <td>(</td>
+          <td class="paramtype">const struct <a class="el" href="structAMobjId.html">AMobjId</a> *&#160;</td>
+          <td class="paramname"><em>obj_id</em></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Gets the index of an object identifier. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>A 64-bit unsigned integer. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>obj_id<code>!=</code> NULL</code>. </dd></dl>
+
+</div>
+</div>
+<hr/>The documentation for this struct was generated from the following file:<ul>
 <li>build/Cargo/target/<a class="el" href="automerge_8h_source.html">automerge.h</a></li>
 </ul>
 </div><!-- contents -->

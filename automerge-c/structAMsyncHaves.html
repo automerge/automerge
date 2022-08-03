@@ -95,6 +95,9 @@ Public Member Functions</h2></td></tr>
 <tr class="memitem:a27ac3ecf31ff2b2795a1304db9094016"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMsyncHaves.html">AMsyncHaves</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMsyncHaves.html#a27ac3ecf31ff2b2795a1304db9094016">AMsyncHavesReversed</a> (const struct <a class="el" href="structAMsyncHaves.html">AMsyncHaves</a> *sync_haves)</td></tr>
 <tr class="memdesc:a27ac3ecf31ff2b2795a1304db9094016"><td class="mdescLeft">&#160;</td><td class="mdescRight">Creates an iterator over the same sequence of synchronization haves as the given one but with the opposite position and direction.  <a href="structAMsyncHaves.html#a27ac3ecf31ff2b2795a1304db9094016">More...</a><br /></td></tr>
 <tr class="separator:a27ac3ecf31ff2b2795a1304db9094016"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a091b6b9cb4e99f5e65df2f0cc2868cbd"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMsyncHaves.html">AMsyncHaves</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMsyncHaves.html#a091b6b9cb4e99f5e65df2f0cc2868cbd">AMsyncHavesRewound</a> (const struct <a class="el" href="structAMsyncHaves.html">AMsyncHaves</a> *sync_haves)</td></tr>
+<tr class="memdesc:a091b6b9cb4e99f5e65df2f0cc2868cbd"><td class="mdescLeft">&#160;</td><td class="mdescRight">Creates an iterator at the starting position over the same sequence of synchronization haves as the given one.  <a href="structAMsyncHaves.html#a091b6b9cb4e99f5e65df2f0cc2868cbd">More...</a><br /></td></tr>
+<tr class="separator:a091b6b9cb4e99f5e65df2f0cc2868cbd"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a91442c16aa900ec0220808c24b5cdf8f"><td class="memItemLeft" align="right" valign="top">size_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMsyncHaves.html#a91442c16aa900ec0220808c24b5cdf8f">AMsyncHavesSize</a> (const struct <a class="el" href="structAMsyncHaves.html">AMsyncHaves</a> *sync_haves)</td></tr>
 <tr class="memdesc:a91442c16aa900ec0220808c24b5cdf8f"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the size of the sequence of synchronization haves underlying an iterator.  <a href="structAMsyncHaves.html#a91442c16aa900ec0220808c24b5cdf8f">More...</a><br /></td></tr>
 <tr class="separator:a91442c16aa900ec0220808c24b5cdf8f"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -141,7 +144,7 @@ Public Attributes</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>sync_haves</code> must be a valid address. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>sync_haves<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -179,10 +182,10 @@ Public Attributes</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section return"><dt>Returns</dt><dd><code>true</code> if <code>sync_haves1</code> <code>==</code> <code>sync_haves2</code> and <code>false</code> otherwise. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>sync_haves1</code> must be a valid address. </dd>
+<dl class="section return"><dt>Returns</dt><dd><code>true</code> if <code>sync_haves1<code>==</code><code>sync_haves2</code> and</code> <code>false</code> otherwise. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>sync_haves1<code>!=</code> NULL</code>. </dd>
 <dd>
-<code>sync_haves2</code> must be a valid address. </dd></dl>
+<code>sync_haves2<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -221,7 +224,7 @@ Public Attributes</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMsyncHave.html" title="A summary of the changes that the sender of a synchronization message already has.">AMsyncHave</a></code> struct that's <code>NULL</code> when <code>sync_haves</code> was previously advanced past its forward/reverse limit. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>sync_haves</code> must be a valid address. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>sync_haves<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -260,7 +263,7 @@ Public Attributes</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMsyncHave.html" title="A summary of the changes that the sender of a synchronization message already has.">AMsyncHave</a></code> struct that's <code>NULL</code> when <code>sync_haves</code> is presently advanced past its forward/reverse limit. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>sync_haves</code> must be a valid address. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>sync_haves<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -288,7 +291,35 @@ Public Attributes</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMsyncHaves.html" title="A random-access iterator over a sequence of synchronization haves.">AMsyncHaves</a></code> struct </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>sync_haves</code> must be a valid address. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>sync_haves<code>!=</code> NULL</code>. </dd></dl>
+
+</div>
+</div>
+<a id="a091b6b9cb4e99f5e65df2f0cc2868cbd"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a091b6b9cb4e99f5e65df2f0cc2868cbd">&#9670;&nbsp;</a></span>AMsyncHavesRewound()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">struct <a class="el" href="structAMsyncHaves.html">AMsyncHaves</a> AMsyncHavesRewound </td>
+          <td>(</td>
+          <td class="paramtype">const struct <a class="el" href="structAMsyncHaves.html">AMsyncHaves</a> *&#160;</td>
+          <td class="paramname"><em>sync_haves</em></td><td>)</td>
+          <td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Creates an iterator at the starting position over the same sequence of synchronization haves as the given one. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">sync_haves</td><td>A pointer to an <code><a class="el" href="structAMsyncHaves.html" title="A random-access iterator over a sequence of synchronization haves.">AMsyncHaves</a></code> struct. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMsyncHaves.html" title="A random-access iterator over a sequence of synchronization haves.">AMsyncHaves</a></code> struct </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>sync_haves<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -316,7 +347,7 @@ Public Attributes</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>The count of values in <code>sync_haves</code>. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>sync_haves</code> must be a valid address. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>sync_haves<code>!=</code> NULL</code>. </dd></dl>
 
 </div>
 </div>
