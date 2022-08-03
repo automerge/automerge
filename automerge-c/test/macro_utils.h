@@ -1,5 +1,5 @@
-#ifndef MACRO_UTILS_INCLUDED
-#define MACRO_UTILS_INCLUDED
+#ifndef MACRO_UTILS_H
+#define MACRO_UTILS_H
 
 /* local */
 #include "automerge.h"
@@ -21,4 +21,4 @@ AMvalueVariant AMvalue_discriminant(char const* suffix);
  */
 AMobjType AMobjType_tag(char const* obj_type_label);
 
-#endif
+#endif  /* MACRO_UTILS_H */

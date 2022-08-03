@@ -20,10 +20,10 @@ typedef struct {
 } GroupState;
 
 static int group_setup(void** state) {
-    GroupState* group_state = calloc(1, sizeof(GroupState));
+    GroupState* group_state = test_calloc(1, sizeof(GroupState));
     group_state->str = "000102030405060708090a0b0c0d0e0f";
     group_state->count = strlen(group_state->str) / 2;
-    group_state->src = malloc(group_state->count);
+    group_state->src = test_malloc(group_state->count);
     hex_to_bytes(group_state->str, group_state->src, group_state->count);
     *state = group_state;
     return 0;
@@ -31,8 +31,8 @@ static int group_setup(void** state) {
 
 static int group_teardown(void** state) {
     GroupState* group_state = *state;
-    free(group_state->src);
-    free(group_state);
+    test_free(group_state->src);
+    test_free(group_state);
     return 0;
 }
 

@@ -11,6 +11,7 @@ add_executable(
         macro_utils.c
         main.c
         map_tests.c
+        stack_utils.c
         str_utils.c
         sync_tests.c
 )

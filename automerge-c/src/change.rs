@@ -1,4 +1,5 @@
 use automerge as am;
+use std::cell::RefCell;
 use std::ffi::CString;
 use std::os::raw::c_char;
 
@@ -18,25 +19,33 @@ macro_rules! to_change {
 
 /// \struct AMchange
 /// \brief A group of operations performed by an actor.
+#[derive(PartialEq)]
 pub struct AMchange {
     body: *mut am::Change,
-    c_message: Option<CString>,
+    c_msg: RefCell<Option<CString>>,
 }
 
 impl AMchange {
-    pub fn new(change: &mut am::Change) -> Self {
-        let c_message = match change.message() {
-            Some(c_message) => CString::new(c_message).ok(),
-            None => None,
-        };
+    pub fn new(body: &mut am::Change) -> Self {
         Self {
-            body: change,
-            c_message,
+            body,
+            c_msg: RefCell::<Option<CString>>::default(),
         }
     }
 
-    pub fn c_message(&self) -> Option<&CString> {
-        self.c_message.as_ref()
+    pub fn message(&self) -> *const c_char {
+        let mut c_msg = self.c_msg.borrow_mut();
+        match c_msg.as_mut() {
+            None => {
+                if let Some(message) = unsafe { (*self.body).message() } {
+                    return c_msg.insert(CString::new(message).unwrap()).as_ptr();
+                }
+            }
+            Some(message) => {
+                return message.as_ptr();
+            }
+        }
+        std::ptr::null()
     }
 }
 
@@ -53,18 +62,17 @@ impl AsRef<am::Change> for AMchange {
 }
 
 /// \memberof AMchange
-/// \brief Gets the first referenced actor ID in a change.
+/// \brief Gets the first referenced actor identifier in a change.
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
-/// \pre \p change must be a valid address.
+/// \pre \p change` != NULL`.
 /// \return A pointer to an `AMresult` struct containing a pointer to an
 ///         `AMactorId` struct.
-/// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMfree()`.
+/// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
+///          in order to prevent a memory leak.
 /// \internal
-///
 /// # Safety
-/// change must be a pointer to a valid AMchange
+/// change must be a valid pointer to an AMchange
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeActorId(change: *const AMchange) -> *mut AMresult {
     let change = to_change!(change);
@@ -77,11 +85,11 @@ pub unsafe extern "C" fn AMchangeActorId(change: *const AMchange) -> *mut AMresu
 /// \brief Compresses the raw bytes of a change.
 ///
 /// \param[in,out] change A pointer to an `AMchange` struct.
-/// \pre \p change must be a valid address.
+/// \pre \p change` != NULL`.
 /// \internal
 ///
 /// # Safety
-/// change must be a pointer to a valid AMchange
+/// change must be a valid pointer to an AMchange
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeCompress(change: *mut AMchange) {
     if let Some(change) = change.as_mut() {
@@ -94,11 +102,11 @@ pub unsafe extern "C" fn AMchangeCompress(change: *mut AMchange) {
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A pointer to an `AMchangeHashes` struct or `NULL`.
-/// \pre \p change must be a valid address.
+/// \pre \p change` != NULL`.
 /// \internal
 ///
 /// # Safety
-/// change must be a pointer to a valid AMchange
+/// change must be a valid pointer to an AMchange
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeDeps(change: *const AMchange) -> AMchangeHashes {
     match change.as_ref() {
@@ -112,11 +120,11 @@ pub unsafe extern "C" fn AMchangeDeps(change: *const AMchange) -> AMchangeHashes
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return An `AMbyteSpan` struct.
-/// \pre \p change must be a valid address.
+/// \pre \p change` != NULL`.
 /// \internal
 ///
 /// # Safety
-/// change must be a pointer to a valid AMchange
+/// change must be a valid pointer to an AMchange
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeExtraBytes(change: *const AMchange) -> AMbyteSpan {
     if let Some(change) = change.as_ref() {
@@ -132,12 +140,11 @@ pub unsafe extern "C" fn AMchangeExtraBytes(change: *const AMchange) -> AMbyteSp
 /// \param[in] src A pointer to an array of bytes.
 /// \param[in] count The number of bytes in \p src to load.
 /// \return A pointer to an `AMresult` struct containing an `AMchange` struct.
-/// \pre \p src must be a valid address.
-/// \pre `0 <=` \p count `<=` size of \p src.
-/// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMfree()`.
+/// \pre \p src` != NULL`.
+/// \pre `0 <=` \p count` <= `size of \p src.
+/// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
+///          in order to prevent a memory leak.
 /// \internal
-///
 /// # Safety
 /// src must be a byte array of size `>= count`
 #[no_mangle]
@@ -152,11 +159,11 @@ pub unsafe extern "C" fn AMchangeFromBytes(src: *const u8, count: usize) -> *mut
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A change hash as an `AMbyteSpan` struct.
-/// \pre \p change must be a valid address.
+/// \pre \p change` != NULL`.
 /// \internal
 ///
 /// # Safety
-/// change must be a pointer to a valid AMchange
+/// change must be a valid pointer to an AMchange
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeHash(change: *const AMchange) -> AMbyteSpan {
     match change.as_ref() {
@@ -173,11 +180,11 @@ pub unsafe extern "C" fn AMchangeHash(change: *const AMchange) -> AMbyteSpan {
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A boolean.
-/// \pre \p change must be a valid address.
+/// \pre \p change` != NULL`.
 /// \internal
 ///
 /// # Safety
-/// change must be a pointer to a valid AMchange
+/// change must be a valid pointer to an AMchange
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeIsEmpty(change: *const AMchange) -> bool {
     if let Some(change) = change.as_ref() {
@@ -192,11 +199,11 @@ pub unsafe extern "C" fn AMchangeIsEmpty(change: *const AMchange) -> bool {
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A 64-bit unsigned integer.
-/// \pre \p change must be a valid address.
+/// \pre \p change` != NULL`.
 /// \internal
 ///
 /// # Safety
-/// change must be a pointer to a valid AMchange
+/// change must be a valid pointer to an AMchange
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeMaxOp(change: *const AMchange) -> u64 {
     if let Some(change) = change.as_ref() {
@@ -211,19 +218,17 @@ pub unsafe extern "C" fn AMchangeMaxOp(change: *const AMchange) -> u64 {
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A UTF-8 string or `NULL`.
-/// \pre \p change must be a valid address.
+/// \pre \p change` != NULL`.
 /// \internal
 ///
 /// # Safety
-/// change must be a pointer to a valid AMchange
+/// change must be a valid pointer to an AMchange
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeMessage(change: *const AMchange) -> *const c_char {
     if let Some(change) = change.as_ref() {
-        if let Some(c_message) = change.c_message() {
-            return c_message.as_ptr();
-        }
-    }
-    std::ptr::null::<c_char>()
+        return change.message();
+    };
+    std::ptr::null()
 }
 
 /// \memberof AMchange
@@ -231,11 +236,11 @@ pub unsafe extern "C" fn AMchangeMessage(change: *const AMchange) -> *const c_ch
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A 64-bit unsigned integer.
-/// \pre \p change must be a valid address.
+/// \pre \p change` != NULL`.
 /// \internal
 ///
 /// # Safety
-/// change must be a pointer to a valid AMchange
+/// change must be a valid pointer to an AMchange
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeSeq(change: *const AMchange) -> u64 {
     if let Some(change) = change.as_ref() {
@@ -250,11 +255,11 @@ pub unsafe extern "C" fn AMchangeSeq(change: *const AMchange) -> u64 {
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A 64-bit unsigned integer.
-/// \pre \p change must be a valid address.
+/// \pre \p change` != NULL`.
 /// \internal
 ///
 /// # Safety
-/// change must be a pointer to a valid AMchange
+/// change must be a valid pointer to an AMchange
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeSize(change: *const AMchange) -> usize {
     if let Some(change) = change.as_ref() {
@@ -269,11 +274,11 @@ pub unsafe extern "C" fn AMchangeSize(change: *const AMchange) -> usize {
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A 64-bit unsigned integer.
-/// \pre \p change must be a valid address.
+/// \pre \p change` != NULL`.
 /// \internal
 ///
 /// # Safety
-/// change must be a pointer to a valid AMchange
+/// change must be a valid pointer to an AMchange
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeStartOp(change: *const AMchange) -> u64 {
     if let Some(change) = change.as_ref() {
@@ -288,11 +293,11 @@ pub unsafe extern "C" fn AMchangeStartOp(change: *const AMchange) -> u64 {
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A 64-bit signed integer.
-/// \pre \p change must be a valid address.
+/// \pre \p change` != NULL`.
 /// \internal
 ///
 /// # Safety
-/// change must be a pointer to a valid AMchange
+/// change must be a valid pointer to an AMchange
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeTime(change: *const AMchange) -> i64 {
     if let Some(change) = change.as_ref() {
@@ -307,11 +312,11 @@ pub unsafe extern "C" fn AMchangeTime(change: *const AMchange) -> i64 {
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return An `AMbyteSpan` struct.
-/// \pre \p change must be a valid address.
+/// \pre \p change` != NULL`.
 /// \internal
 ///
 /// # Safety
-/// change must be a pointer to a valid AMchange
+/// change must be a valid pointer to an AMchange
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeRawBytes(change: *const AMchange) -> AMbyteSpan {
     if let Some(change) = change.as_ref() {
@@ -328,12 +333,11 @@ pub unsafe extern "C" fn AMchangeRawBytes(change: *const AMchange) -> AMbyteSpan
 /// \param[in] count The number of bytes in \p src to load.
 /// \return A pointer to an `AMresult` struct containing a sequence of
 ///         `AMchange` structs.
-/// \pre \p src must be a valid address.
-/// \pre `0 <=` \p count `<=` size of \p src.
-/// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMfree()`.
+/// \pre \p src` != NULL`.
+/// \pre `0 <=` \p count` <= `size of \p src.
+/// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
+///          in order to prevent a memory leak.
 /// \internal
-///
 /// # Safety
 /// src must be a byte array of size `>= count`
 #[no_mangle]

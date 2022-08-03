@@ -19,7 +19,7 @@ header = """
  * All constants, functions and types in the Automerge library's C API.
  */
  """
-include_guard = "automerge_h"
+include_guard = "AUTOMERGE_H"
 includes = []
 language = "C"
 line_length = 140
@@ -36,4 +36,4 @@ prefix_with_name = true
 rename_variants = "ScreamingSnakeCase"
 
 [export]
-item_types = ["enums", "structs", "opaque", "constants", "functions"]
+item_types = ["constants", "enums", "functions", "opaque", "structs", "typedefs"]
