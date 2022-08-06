@@ -29,6 +29,11 @@ pub enum AutomergeError {
     MissingHash(ChangeHash),
     #[error("increment operations must be against a counter value")]
     MissingCounter,
+    #[error("invalid type of value, expected `{expected}` but received `{unexpected}`")]
+    InvalidValueType {
+        expected: String,
+        unexpected: String,
+    },
     #[error("general failure")]
     Fail,
 }

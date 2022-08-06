@@ -536,7 +536,10 @@ impl fmt::Display for ChangeHash {
 pub enum ParseChangeHashError {
     #[error(transparent)]
     HexDecode(#[from] hex::FromHexError),
-    #[error("incorrect length, change hash should be 32 bytes, got {actual}")]
+    #[error(
+        "incorrect length, change hash should be {} bytes, got {actual}",
+        HASH_SIZE
+    )]
     IncorrectLength { actual: usize },
 }
 
@@ -545,7 +548,7 @@ impl FromStr for ChangeHash {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let bytes = hex::decode(s)?;
-        if bytes.len() == 32 {
+        if bytes.len() == HASH_SIZE {
             Ok(ChangeHash(bytes.try_into().unwrap()))
         } else {
             Err(ParseChangeHashError::IncorrectLength {
@@ -559,10 +562,10 @@ impl TryFrom<&[u8]> for ChangeHash {
     type Error = error::InvalidChangeHashSlice;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        if bytes.len() != 32 {
+        if bytes.len() != HASH_SIZE {
             Err(error::InvalidChangeHashSlice(Vec::from(bytes)))
         } else {
-            let mut array = [0; 32];
+            let mut array = [0; HASH_SIZE];
             array.copy_from_slice(bytes);
             Ok(ChangeHash(array))
         }
