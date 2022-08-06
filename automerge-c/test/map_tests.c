@@ -443,6 +443,8 @@ static void test_map_range_back_and_forth_single(void** state) {
     assert_int_equal(AMobjIdCounter(next_obj_id), 3);
     assert_int_equal(AMactorIdCmp(AMobjIdActorId(next_obj_id), actor_id), 0);
     assert_int_equal(AMobjIdIndex(next_obj_id), 0);
+    /* Forward stop */
+    assert_null(AMmapItemsNext(&range_all, 1));
 
     /* Back, back, back. */
     range_back_all = AMmapItemsRewound(&range_back_all);
@@ -479,6 +481,8 @@ static void test_map_range_back_and_forth_single(void** state) {
     assert_int_equal(AMobjIdCounter(next_back_obj_id), 1);
     assert_int_equal(AMactorIdCmp(AMobjIdActorId(next_back_obj_id), actor_id), 0);
     assert_int_equal(AMobjIdIndex(next_back_obj_id), 0);
+    /* Back stop */
+    assert_null(AMmapItemsNext(&range_back_all, 1));
 }
 
 static void test_map_range_back_and_forth_double(void** state) {
@@ -620,6 +624,8 @@ static void test_map_range_back_and_forth_double(void** state) {
     assert_int_equal(AMobjIdCounter(next_obj_id), 3);
     assert_int_equal(AMactorIdCmp(AMobjIdActorId(next_obj_id), actor_id2), 0);
     assert_int_equal(AMobjIdIndex(next_obj_id), 1);
+    /* Forward stop */
+    assert_null(AMmapItemsNext(&range_all, 1));
 
     /* Back, back, back. */
     range_back_all = AMmapItemsRewound(&range_back_all);
@@ -656,6 +662,8 @@ static void test_map_range_back_and_forth_double(void** state) {
     assert_int_equal(AMobjIdCounter(next_back_obj_id), 1);
     assert_int_equal(AMactorIdCmp(AMobjIdActorId(next_back_obj_id), actor_id2), 0);
     assert_int_equal(AMobjIdIndex(next_back_obj_id), 1);
+    /* Back stop */
+    assert_null(AMmapItemsNext(&range_back_all, 1));
 }
 
 static void test_map_range_at_back_and_forth_single(void** state) {
@@ -788,6 +796,8 @@ static void test_map_range_at_back_and_forth_single(void** state) {
     assert_int_equal(AMobjIdCounter(next_obj_id), 3);
     assert_int_equal(AMactorIdCmp(AMobjIdActorId(next_obj_id), actor_id), 0);
     assert_int_equal(AMobjIdIndex(next_obj_id), 0);
+    /* Forward stop */
+    assert_null(AMmapItemsNext(&range_all, 1));
 
     /* Back, back, back. */
     range_back_all = AMmapItemsRewound(&range_back_all);
@@ -824,6 +834,8 @@ static void test_map_range_at_back_and_forth_single(void** state) {
     assert_int_equal(AMobjIdCounter(next_back_obj_id), 1);
     assert_int_equal(AMactorIdCmp(AMobjIdActorId(next_back_obj_id), actor_id), 0);
     assert_int_equal(AMobjIdIndex(next_back_obj_id), 0);
+    /* Back stop */
+    assert_null(AMmapItemsNext(&range_back_all, 1));
 }
 
 static void test_map_range_at_back_and_forth_double(void** state) {
@@ -969,6 +981,8 @@ static void test_map_range_at_back_and_forth_double(void** state) {
     assert_int_equal(AMobjIdCounter(next_obj_id), 3);
     assert_int_equal(AMactorIdCmp(AMobjIdActorId(next_obj_id), actor_id2), 0);
     assert_int_equal(AMobjIdIndex(next_obj_id), 1);
+    /* Forward stop */
+    assert_null(AMmapItemsNext(&range_all, 1));
 
     /* Back, back, back. */
     range_back_all = AMmapItemsRewound(&range_back_all);
@@ -1005,6 +1019,8 @@ static void test_map_range_at_back_and_forth_double(void** state) {
     assert_int_equal(AMobjIdCounter(next_back_obj_id), 1);
     assert_int_equal(AMactorIdCmp(AMobjIdActorId(next_back_obj_id), actor_id2), 0);
     assert_int_equal(AMobjIdIndex(next_back_obj_id), 1);
+    /* Back stop */
+    assert_null(AMmapItemsNext(&range_back_all, 1));
 }
 
 static void test_get_range_values(void** state) {
