@@ -13,7 +13,9 @@ add_executable(
         map_tests.c
         stack_utils.c
         str_utils.c
-        sync_tests.c
+        ported_wasm/basic_tests.c
+        ported_wasm/suite.c
+        ported_wasm/sync_tests.c
 )
 
 set_target_properties(test_${LIBRARY_NAME} PROPERTIES LINKER_LANGUAGE C)
