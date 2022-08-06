@@ -10,6 +10,18 @@ use crate::result::{to_result, AMresult};
 pub mod item;
 pub mod items;
 
+macro_rules! adjust {
+    ($index:expr, $insert:expr, $len:expr) => {{
+        // An empty object can only be inserted into.
+        let insert = $insert || $len == 0;
+        let end = if insert { $len } else { $len - 1 };
+        if $index > end && $index != usize::MAX {
+            return AMresult::err(&format!("Invalid index {}", $index)).into();
+        }
+        (std::cmp::min($index, end), insert)
+    }};
+}
+
 macro_rules! to_range {
     ($begin:expr, $end:expr) => {{
         if $begin > $end {
@@ -24,10 +36,11 @@ macro_rules! to_range {
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] index An index in the list object identified by \p obj_id.
+/// \param[in] index An index in the list object identified by \p obj_id or
+///                  `SIZE_MAX` to indicate its last index.
 /// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc` != NULL`.
-/// \pre `0 <=` \p index` <= `length of the list object identified by \p obj_id.
+/// \pre \p doc `!= NULL`.
+/// \pre `0 <=` \p index `<= AMobjSize(`\p obj_id`)` or \p index `== SIZE_MAX`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
@@ -41,7 +54,9 @@ pub unsafe extern "C" fn AMlistDelete(
     index: usize,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
-    to_result(doc.delete(to_obj_id!(obj_id), index))
+    let obj_id = to_obj_id!(obj_id);
+    let (index, _) = adjust!(index, false, doc.length(obj_id));
+    to_result(doc.delete(obj_id, index))
 }
 
 /// \memberof AMdoc
@@ -49,12 +64,13 @@ pub unsafe extern "C" fn AMlistDelete(
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] index An index within the list object identified by \p obj_id.
+/// \param[in] index An index in the list object identified by \p obj_id or
+///                  `SIZE_MAX` to indicate its last index.
 /// \param[in] heads A pointer to an `AMchangeHashes` struct for a historical
 ///                  value or `NULL` for the current value.
-/// \return A pointer to an `AMresult` struct.
-/// \pre \p doc` != NULL`.
-/// \pre `0 <=` \p index` <= `length of the list object identified by \p obj_id.
+/// \return A pointer to an `AMresult` struct that doesn't contain a void.
+/// \pre \p doc `!= NULL`.
+/// \pre `0 <=` \p index `<= AMobjSize(`\p obj_id`)` or \p index `== SIZE_MAX`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
@@ -71,9 +87,46 @@ pub unsafe extern "C" fn AMlistGet(
 ) -> *mut AMresult {
     let doc = to_doc!(doc);
     let obj_id = to_obj_id!(obj_id);
+    let (index, _) = adjust!(index, false, doc.length(obj_id));
     match heads.as_ref() {
         None => to_result(doc.get(obj_id, index)),
         Some(heads) => to_result(doc.get_at(obj_id, index, heads.as_ref())),
+    }
+}
+
+/// \memberof AMdoc
+/// \brief Gets all of the historical values at an index in a list object until
+///        its current one or a specific one.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
+/// \param[in] index An index in the list object identified by \p obj_id or
+///                  `SIZE_MAX` to indicate its last index.
+/// \param[in] heads A pointer to an `AMchangeHashes` struct for a historical
+///                  last value or `NULL` for the current last value.
+/// \return A pointer to an `AMresult` struct containing an `AMobjItems` struct.
+/// \pre \p doc `!= NULL`.
+/// \pre `0 <=` \p index `<= AMobjSize(`\p obj_id`)` or \p index `== SIZE_MAX`.
+/// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
+///          in order to prevent a memory leak.
+/// \internal
+/// # Safety
+/// doc must be a valid pointer to an AMdoc
+/// obj_id must be a valid pointer to an AMobjId or NULL
+/// heads must be a valid pointer to an AMchangeHashes or NULL
+#[no_mangle]
+pub unsafe extern "C" fn AMlistGetAll(
+    doc: *const AMdoc,
+    obj_id: *const AMobjId,
+    index: usize,
+    heads: *const AMchangeHashes,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    let obj_id = to_obj_id!(obj_id);
+    let (index, _) = adjust!(index, false, doc.length(obj_id));
+    match heads.as_ref() {
+        None => to_result(doc.get_all(obj_id, index)),
+        Some(heads) => to_result(doc.get_all_at(obj_id, index, heads.as_ref())),
     }
 }
 
@@ -83,11 +136,12 @@ pub unsafe extern "C" fn AMlistGet(
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] index An index in the list object identified by \p obj_id.
+/// \param[in] index An index in the list object identified by \p obj_id or
+///                  `SIZE_MAX` to indicate its last index.
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc` != NULL`.
-/// \pre `0 <=` \p index` <= `length of the list object identified by \p obj_id.
+/// \pre \p doc `!= NULL`.
+/// \pre `0 <=` \p index `<= AMobjSize(`\p obj_id`)` or \p index `== SIZE_MAX`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
@@ -102,7 +156,9 @@ pub unsafe extern "C" fn AMlistIncrement(
     value: i64,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
-    to_result(doc.increment(to_obj_id!(obj_id), index, value))
+    let obj_id = to_obj_id!(obj_id);
+    let (index, _) = adjust!(index, false, doc.length(obj_id));
+    to_result(doc.increment(obj_id, index, value))
 }
 
 /// \memberof AMdoc
@@ -110,12 +166,16 @@ pub unsafe extern "C" fn AMlistIncrement(
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] index An index in the list object identified by \p obj_id.
+/// \param[in] index An index in the list object identified by \p obj_id or
+///                  `SIZE_MAX` to indicate its last index if \p insert
+///                  `== false` or one past its last index if \p insert
+///                  `== true`.
 /// \param[in] insert A flag to insert \p value before \p index instead of
 ///            writing \p value over \p index.
 /// \param[in] value A boolean.
 /// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc` != NULL`.
+/// \pre \p doc `!= NULL`.
+/// \pre `0 <=` \p index `<= AMobjSize(`\p obj_id`)` or \p index `== SIZE_MAX`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
@@ -132,6 +192,7 @@ pub unsafe extern "C" fn AMlistPutBool(
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let obj_id = to_obj_id!(obj_id);
+    let (index, insert) = adjust!(index, insert, doc.length(obj_id));
     let value = am::ScalarValue::Boolean(value);
     to_result(if insert {
         doc.insert(obj_id, index, value)
@@ -145,16 +206,19 @@ pub unsafe extern "C" fn AMlistPutBool(
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] index An index in the list object identified by \p obj_id.
+/// \param[in] index An index in the list object identified by \p obj_id or
+///                  `SIZE_MAX` to indicate its last index if \p insert
+///                  `== false` or one past its last index if \p insert
+///                  `== true`.
 /// \param[in] insert A flag to insert \p src before \p index instead of
 ///            writing \p src over \p index.
 /// \param[in] src A pointer to an array of bytes.
 /// \param[in] count The number of bytes to copy from \p src.
 /// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc` != NULL`.
-/// \pre `0 <=` \p index` <= `length of the list object identified by \p obj_id.
-/// \pre \p src` != NULL`.
-/// \pre `0 <=` \p count` <= `size of \p src.
+/// \pre \p doc `!= NULL`.
+/// \pre `0 <=` \p index `<= AMobjSize(`\p obj_id`)` or \p index `== SIZE_MAX`.
+/// \pre \p src `!= NULL`.
+/// \pre `0 <` \p count `<= sizeof(`\p src`)`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
@@ -173,12 +237,13 @@ pub unsafe extern "C" fn AMlistPutBytes(
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let obj_id = to_obj_id!(obj_id);
-    let mut vec = Vec::new();
-    vec.extend_from_slice(std::slice::from_raw_parts(src, count));
+    let (index, insert) = adjust!(index, insert, doc.length(obj_id));
+    let mut value = Vec::new();
+    value.extend_from_slice(std::slice::from_raw_parts(src, count));
     to_result(if insert {
-        doc.insert(obj_id, index, vec)
+        doc.insert(obj_id, index, value)
     } else {
-        doc.put(obj_id, index, vec)
+        doc.put(obj_id, index, value)
     })
 }
 
@@ -187,13 +252,16 @@ pub unsafe extern "C" fn AMlistPutBytes(
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] index An index in the list object identified by \p obj_id.
+/// \param[in] index An index in the list object identified by \p obj_id or
+///                  `SIZE_MAX` to indicate its last index if \p insert
+///                  `== false` or one past its last index if \p insert
+///                  `== true`.
 /// \param[in] insert A flag to insert \p value before \p index instead of
 ///            writing \p value over \p index.
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc` != NULL`.
-/// \pre `0 <=` \p index` <= `length of the list object identified by \p obj_id.
+/// \pre \p doc `!= NULL`.
+/// \pre `0 <=` \p index `<= AMobjSize(`\p obj_id`)` or \p index `== SIZE_MAX`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
@@ -210,6 +278,7 @@ pub unsafe extern "C" fn AMlistPutCounter(
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let obj_id = to_obj_id!(obj_id);
+    let (index, insert) = adjust!(index, insert, doc.length(obj_id));
     let value = am::ScalarValue::Counter(value.into());
     to_result(if insert {
         doc.insert(obj_id, index, value)
@@ -223,13 +292,16 @@ pub unsafe extern "C" fn AMlistPutCounter(
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] index An index in the list object identified by \p obj_id.
+/// \param[in] index An index in the list object identified by \p obj_id or
+///                  `SIZE_MAX` to indicate its last index if \p insert
+///                  `== false` or one past its last index if \p insert
+///                  `== true`.
 /// \param[in] insert A flag to insert \p value before \p index instead of
 ///            writing \p value over \p index.
 /// \param[in] value A 64-bit float.
 /// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc` != NULL`.
-/// \pre `0 <=` \p index` <= `length of the list object identified by \p obj_id.
+/// \pre \p doc `!= NULL`.
+/// \pre `0 <=` \p index `<= AMobjSize(`\p obj_id`)` or \p index `== SIZE_MAX`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
@@ -246,6 +318,7 @@ pub unsafe extern "C" fn AMlistPutF64(
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let obj_id = to_obj_id!(obj_id);
+    let (index, insert) = adjust!(index, insert, doc.length(obj_id));
     to_result(if insert {
         doc.insert(obj_id, index, value)
     } else {
@@ -258,13 +331,16 @@ pub unsafe extern "C" fn AMlistPutF64(
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] index An index in the list object identified by \p obj_id.
+/// \param[in] index An index in the list object identified by \p obj_id or
+///                  `SIZE_MAX` to indicate its last index if \p insert
+///                  `== false` or one past its last index if \p insert
+///                  `== true`.
 /// \param[in] insert A flag to insert \p value before \p index instead of
 ///            writing \p value over \p index.
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc` != NULL`.
-/// \pre `0 <=` \p index` <= `length of the list object identified by \p obj_id.
+/// \pre \p doc `!= NULL`.
+/// \pre `0 <=` \p index `<= AMobjSize(`\p obj_id`)` or \p index `== SIZE_MAX`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
@@ -281,6 +357,7 @@ pub unsafe extern "C" fn AMlistPutInt(
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let obj_id = to_obj_id!(obj_id);
+    let (index, insert) = adjust!(index, insert, doc.length(obj_id));
     to_result(if insert {
         doc.insert(obj_id, index, value)
     } else {
@@ -293,12 +370,15 @@ pub unsafe extern "C" fn AMlistPutInt(
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] index An index in the list object identified by \p obj_id.
+/// \param[in] index An index in the list object identified by \p obj_id or
+///                  `SIZE_MAX` to indicate its last index if \p insert
+///                  `== false` or one past its last index if \p insert
+///                  `== true`.
 /// \param[in] insert A flag to insert \p value before \p index instead of
 ///            writing \p value over \p index.
 /// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc` != NULL`.
-/// \pre `0 <=` \p index` <= `length of the list object identified by \p obj_id.
+/// \pre \p doc `!= NULL`.
+/// \pre `0 <=` \p index `<= AMobjSize(`\p obj_id`)` or \p index `== SIZE_MAX`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
@@ -314,11 +394,11 @@ pub unsafe extern "C" fn AMlistPutNull(
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let obj_id = to_obj_id!(obj_id);
-    let value = ();
+    let (index, insert) = adjust!(index, insert, doc.length(obj_id));
     to_result(if insert {
-        doc.insert(obj_id, index, value)
+        doc.insert(obj_id, index, ())
     } else {
-        doc.put(obj_id, index, value)
+        doc.put(obj_id, index, ())
     })
 }
 
@@ -327,14 +407,17 @@ pub unsafe extern "C" fn AMlistPutNull(
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] index An index in the list object identified by \p obj_id.
+/// \param[in] index An index in the list object identified by \p obj_id or
+///                  `SIZE_MAX` to indicate its last index if \p insert
+///                  `== false` or one past its last index if \p insert
+///                  `== true`.
 /// \param[in] insert A flag to insert \p value before \p index instead of
 ///                   writing \p value over \p index.
 /// \param[in] obj_type An `AMobjIdType` enum tag.
 /// \return A pointer to an `AMresult` struct containing a pointer to an
 ///         `AMobjId` struct.
-/// \pre \p doc` != NULL`.
-/// \pre `0 <=` \p index` <= `length of the list object identified by \p obj_id.
+/// \pre \p doc `!= NULL`.
+/// \pre `0 <=` \p index `<= AMobjSize(`\p obj_id`)` or \p index `== SIZE_MAX`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
@@ -351,11 +434,12 @@ pub unsafe extern "C" fn AMlistPutObject(
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let obj_id = to_obj_id!(obj_id);
-    let value = obj_type.into();
+    let (index, insert) = adjust!(index, insert, doc.length(obj_id));
+    let object = obj_type.into();
     to_result(if insert {
-        doc.insert_object(obj_id, index, value)
+        doc.insert_object(obj_id, index, object)
     } else {
-        doc.put_object(&obj_id, index, value)
+        doc.put_object(obj_id, index, object)
     })
 }
 
@@ -364,14 +448,17 @@ pub unsafe extern "C" fn AMlistPutObject(
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] index An index in the list object identified by \p obj_id.
+/// \param[in] index An index in the list object identified by \p obj_id or
+///                  `SIZE_MAX` to indicate its last index if \p insert
+///                  `== false` or one past its last index if \p insert
+///                  `== true`.
 /// \param[in] insert A flag to insert \p value before \p index instead of
 ///            writing \p value over \p index.
 /// \param[in] value A UTF-8 string.
 /// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc` != NULL`.
-/// \pre `0 <=` \p index` <= `length of the list object identified by \p obj_id.
-/// \pre \p value` != NULL`.
+/// \pre \p doc `!= NULL`.
+/// \pre `0 <=` \p index `<= AMobjSize(`\p obj_id`)` or \p index `== SIZE_MAX`.
+/// \pre \p value `!= NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
@@ -389,6 +476,7 @@ pub unsafe extern "C" fn AMlistPutStr(
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let obj_id = to_obj_id!(obj_id);
+    let (index, insert) = adjust!(index, insert, doc.length(obj_id));
     let value = to_str(value);
     to_result(if insert {
         doc.insert(obj_id, index, value)
@@ -402,13 +490,16 @@ pub unsafe extern "C" fn AMlistPutStr(
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] index An index in the list object identified by \p obj_id.
+/// \param[in] index An index in the list object identified by \p obj_id or
+///                  `SIZE_MAX` to indicate its last index if \p insert
+///                  `== false` or one past its last index if \p insert
+///                  `== true`.
 /// \param[in] insert A flag to insert \p value before \p index instead of
 ///            writing \p value over \p index.
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc` != NULL`.
-/// \pre `0 <=` \p index` <= `length of the list object identified by \p obj_id.
+/// \pre \p doc `!= NULL`.
+/// \pre `0 <=` \p index `<= AMobjSize(`\p obj_id`)` or \p index `== SIZE_MAX`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
@@ -425,6 +516,7 @@ pub unsafe extern "C" fn AMlistPutTimestamp(
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let obj_id = to_obj_id!(obj_id);
+    let (index, insert) = adjust!(index, insert, doc.length(obj_id));
     let value = am::ScalarValue::Timestamp(value);
     to_result(if insert {
         doc.insert(obj_id, index, value)
@@ -438,13 +530,16 @@ pub unsafe extern "C" fn AMlistPutTimestamp(
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] index An index in the list object identified by \p obj_id.
+/// \param[in] index An index in the list object identified by \p obj_id or
+///                  `SIZE_MAX` to indicate its last index if \p insert
+///                  `== false` or one past its last index if \p insert
+///                  `== true`.
 /// \param[in] insert A flag to insert \p value before \p index instead of
 ///            writing \p value over \p index.
 /// \param[in] value A 64-bit unsigned integer.
 /// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc` != NULL`.
-/// \pre `0 <=` \p index` <= `length of the list object identified by \p obj_id.
+/// \pre \p doc `!= NULL`.
+/// \pre `0 <=` \p index `<= AMobjSize(`\p obj_id`)` or \p index `== SIZE_MAX`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
@@ -461,6 +556,7 @@ pub unsafe extern "C" fn AMlistPutUint(
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let obj_id = to_obj_id!(obj_id);
+    let (index, insert) = adjust!(index, insert, doc.length(obj_id));
     to_result(if insert {
         doc.insert(obj_id, index, value)
     } else {
@@ -481,9 +577,8 @@ pub unsafe extern "C" fn AMlistPutUint(
 ///                  values.
 /// \return A pointer to an `AMresult` struct containing an `AMlistItems`
 ///         struct.
-/// \pre \p doc` != NULL`.
-/// \pre \p begin` <= `\p end.
-/// \pre \p end` <= SIZE_MAX`.
+/// \pre \p doc `!= NULL`.
+/// \pre \p begin `<=` \p end `<= SIZE_MAX`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal

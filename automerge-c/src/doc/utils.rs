@@ -49,5 +49,9 @@ macro_rules! to_obj_id {
 pub(crate) use to_obj_id;
 
 pub(crate) unsafe fn to_str(c: *const c_char) -> String {
-    CStr::from_ptr(c).to_string_lossy().to_string()
+    if !c.is_null() {
+        CStr::from_ptr(c).to_string_lossy().to_string()
+    } else {
+        String::default()
+    }
 }
