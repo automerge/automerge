@@ -18,11 +18,11 @@ struct Detail {
 pub const USIZE_USIZE_USIZE_: usize = size_of::<Detail>();
 
 impl Detail {
-    fn new(cstrings: &[CString], offset: isize) -> Self {
+    fn new(c_strings: &[CString], offset: isize) -> Self {
         Self {
-            len: cstrings.len(),
+            len: c_strings.len(),
             offset,
-            ptr: cstrings.as_ptr() as *const c_void,
+            ptr: c_strings.as_ptr() as *const c_void,
         }
     }
 
@@ -126,9 +126,9 @@ pub struct AMstrs {
 }
 
 impl AMstrs {
-    pub fn new(cstrings: &[CString]) -> Self {
+    pub fn new(c_strings: &[CString]) -> Self {
         Self {
-            detail: Detail::new(cstrings, 0).into(),
+            detail: Detail::new(c_strings, 0).into(),
         }
     }
 
@@ -167,10 +167,10 @@ impl AMstrs {
     }
 }
 
-impl AsRef<[String]> for AMstrs {
-    fn as_ref(&self) -> &[String] {
+impl AsRef<[CString]> for AMstrs {
+    fn as_ref(&self) -> &[CString] {
         let detail = unsafe { &*(self.detail.as_ptr() as *const Detail) };
-        unsafe { std::slice::from_raw_parts(detail.ptr as *const String, detail.len) }
+        unsafe { std::slice::from_raw_parts(detail.ptr as *const CString, detail.len) }
     }
 }
 
@@ -190,7 +190,7 @@ impl Default for AMstrs {
 /// \param[in,out] strs A pointer to an `AMstrs` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
-/// \pre \p strs` != NULL`.
+/// \pre \p strs `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -209,10 +209,10 @@ pub unsafe extern "C" fn AMstrsAdvance(strs: *mut AMstrs, n: isize) {
 /// \param[in] strs1 A pointer to an `AMstrs` struct.
 /// \param[in] strs2 A pointer to an `AMstrs` struct.
 /// \return `-1` if \p strs1 `<` \p strs2, `0` if
-///         \p strs1` == `\p strs2 and `1` if
+///         \p strs1 `==` \p strs2 and `1` if
 ///         \p strs1 `>` \p strs2.
-/// \pre \p strs1` != NULL`.
-/// \pre \p strs2` != NULL`.
+/// \pre \p strs1 `!= NULL`.
+/// \pre \p strs2 `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -242,7 +242,7 @@ pub unsafe extern "C" fn AMstrsCmp(strs1: *const AMstrs, strs2: *const AMstrs) -
 ///              number of positions to advance.
 /// \return A UTF-8 string that's `NULL` when \p strs was previously advanced
 ///         past its forward/reverse limit.
-/// \pre \p strs` != NULL`.
+/// \pre \p strs `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -267,7 +267,7 @@ pub unsafe extern "C" fn AMstrsNext(strs: *mut AMstrs, n: isize) -> *const c_cha
 ///              number of positions to advance.
 /// \return A UTF-8 string that's `NULL` when \p strs is presently advanced
 ///         past its forward/reverse limit.
-/// \pre \p strs` != NULL`.
+/// \pre \p strs `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -288,7 +288,7 @@ pub unsafe extern "C" fn AMstrsPrev(strs: *mut AMstrs, n: isize) -> *const c_cha
 ///
 /// \param[in] strs A pointer to an `AMstrs` struct.
 /// \return The count of values in \p strs.
-/// \pre \p strs` != NULL`.
+/// \pre \p strs `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -308,7 +308,7 @@ pub unsafe extern "C" fn AMstrsSize(strs: *const AMstrs) -> usize {
 ///
 /// \param[in] strs A pointer to an `AMstrs` struct.
 /// \return An `AMstrs` struct.
-/// \pre \p strs` != NULL`.
+/// \pre \p strs `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -328,7 +328,7 @@ pub unsafe extern "C" fn AMstrsReversed(strs: *const AMstrs) -> AMstrs {
 ///
 /// \param[in] strs A pointer to an `AMstrs` struct.
 /// \return An `AMstrs` struct
-/// \pre \p strs` != NULL`.
+/// \pre \p strs `!= NULL`.
 /// \internal
 ///
 /// #Safety
