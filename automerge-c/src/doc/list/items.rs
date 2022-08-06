@@ -190,7 +190,7 @@ impl Default for AMlistItems {
 /// \param[in,out] list_items A pointer to an `AMlistItems` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
-/// \pre \p list_items` != NULL`.
+/// \pre \p list_items `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -208,9 +208,9 @@ pub unsafe extern "C" fn AMlistItemsAdvance(list_items: *mut AMlistItems, n: isi
 ///
 /// \param[in] list_items1 A pointer to an `AMlistItems` struct.
 /// \param[in] list_items2 A pointer to an `AMlistItems` struct.
-/// \return `true` if \p list_items1` == `\p list_items2 and `false` otherwise.
-/// \pre \p list_items1` != NULL`.
-/// \pre \p list_items2` != NULL`.
+/// \return `true` if \p list_items1 `==` \p list_items2 and `false` otherwise.
+/// \pre \p list_items1 `!= NULL`.
+/// \pre \p list_items2 `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -239,7 +239,7 @@ pub unsafe extern "C" fn AMlistItemsEqual(
 /// \return A pointer to an `AMlistItem` struct that's `NULL` when
 ///         \p list_items was previously advanced past its forward/reverse
 ///         limit.
-/// \pre \p list_items` != NULL`.
+/// \pre \p list_items `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -268,7 +268,7 @@ pub unsafe extern "C" fn AMlistItemsNext(
 ///              number of positions to advance.
 /// \return A pointer to an `AMlistItem` struct that's `NULL` when
 ///         \p list_items is presently advanced past its forward/reverse limit.
-/// \pre \p list_items` != NULL`.
+/// \pre \p list_items `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -292,7 +292,7 @@ pub unsafe extern "C" fn AMlistItemsPrev(
 ///
 /// \param[in] list_items A pointer to an `AMlistItems` struct.
 /// \return The count of values in \p list_items.
-/// \pre \p list_items` != NULL`.
+/// \pre \p list_items `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -312,7 +312,7 @@ pub unsafe extern "C" fn AMlistItemsSize(list_items: *const AMlistItems) -> usiz
 ///
 /// \param[in] list_items A pointer to an `AMlistItems` struct.
 /// \return An `AMlistItems` struct
-/// \pre \p list_items` != NULL`.
+/// \pre \p list_items `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -332,7 +332,7 @@ pub unsafe extern "C" fn AMlistItemsReversed(list_items: *const AMlistItems) -> 
 ///
 /// \param[in] list_items A pointer to an `AMlistItems` struct.
 /// \return An `AMlistItems` struct
-/// \pre \p list_items` != NULL`.
+/// \pre \p list_items `!= NULL`.
 /// \internal
 ///
 /// #Safety

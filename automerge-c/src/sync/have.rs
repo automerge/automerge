@@ -25,7 +25,7 @@ impl AsRef<am::sync::Have> for AMsyncHave {
 ///
 /// \param[in] sync_have A pointer to an `AMsyncHave` struct.
 /// \return An `AMchangeHashes` struct.
-/// \pre \p sync_have` != NULL`.
+/// \pre \p sync_have `!= NULL`.
 /// \internal
 ///
 /// # Safety

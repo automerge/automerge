@@ -216,7 +216,7 @@ impl Default for AMchanges {
 /// \param[in,out] changes A pointer to an `AMchanges` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
-/// \pre \p changes` != NULL`.
+/// \pre \p changes `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -234,9 +234,9 @@ pub unsafe extern "C" fn AMchangesAdvance(changes: *mut AMchanges, n: isize) {
 ///
 /// \param[in] changes1 A pointer to an `AMchanges` struct.
 /// \param[in] changes2 A pointer to an `AMchanges` struct.
-/// \return `true` if \p changes1` == `\p changes2 and `false` otherwise.
-/// \pre \p changes1` != NULL`.
-/// \pre \p changes2` != NULL`.
+/// \return `true` if \p changes1 `==` \p changes2 and `false` otherwise.
+/// \pre \p changes1 `!= NULL`.
+/// \pre \p changes2 `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -263,7 +263,7 @@ pub unsafe extern "C" fn AMchangesEqual(
 ///              number of positions to advance.
 /// \return A pointer to an `AMchange` struct that's `NULL` when \p changes was
 ///         previously advanced past its forward/reverse limit.
-/// \pre \p changes` != NULL`.
+/// \pre \p changes `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -288,7 +288,7 @@ pub unsafe extern "C" fn AMchangesNext(changes: *mut AMchanges, n: isize) -> *co
 ///              number of positions to advance.
 /// \return A pointer to an `AMchange` struct that's `NULL` when \p changes is
 ///         presently advanced past its forward/reverse limit.
-/// \pre \p changes` != NULL`.
+/// \pre \p changes `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -308,7 +308,7 @@ pub unsafe extern "C" fn AMchangesPrev(changes: *mut AMchanges, n: isize) -> *co
 ///
 /// \param[in] changes A pointer to an `AMchanges` struct.
 /// \return The count of values in \p changes.
-/// \pre \p changes` != NULL`.
+/// \pre \p changes `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -328,7 +328,7 @@ pub unsafe extern "C" fn AMchangesSize(changes: *const AMchanges) -> usize {
 ///
 /// \param[in] changes A pointer to an `AMchanges` struct.
 /// \return An `AMchanges` struct.
-/// \pre \p changes` != NULL`.
+/// \pre \p changes `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -348,7 +348,7 @@ pub unsafe extern "C" fn AMchangesReversed(changes: *const AMchanges) -> AMchang
 ///
 /// \param[in] changes A pointer to an `AMchanges` struct.
 /// \return An `AMchanges` struct
-/// \pre \p changes` != NULL`.
+/// \pre \p changes `!= NULL`.
 /// \internal
 ///
 /// #Safety

@@ -51,7 +51,7 @@ impl AsRef<am::sync::Message> for AMsyncMessage {
 ///
 /// \param[in] sync_message A pointer to an `AMsyncMessage` struct.
 /// \return An `AMchanges` struct.
-/// \pre \p sync_message` != NULL`.
+/// \pre \p sync_message `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -75,8 +75,8 @@ pub unsafe extern "C" fn AMsyncMessageChanges(sync_message: *const AMsyncMessage
 /// \param[in] count The number of bytes in \p src to decode.
 /// \return A pointer to an `AMresult` struct containing an `AMsyncMessage`
 ///         struct.
-/// \pre \p src` != NULL`.
-/// \pre `0 <=` \p count` <= `size of \p src.
+/// \pre \p src `!= NULL`.
+/// \pre `0 <` \p count `<= sizeof(`\p src`)`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
@@ -95,7 +95,7 @@ pub unsafe extern "C" fn AMsyncMessageDecode(src: *const u8, count: usize) -> *m
 /// \param[in] sync_message A pointer to an `AMsyncMessage` struct.
 /// \return A pointer to an `AMresult` struct containing an array of bytes as
 ///         an `AMbyteSpan` struct.
-/// \pre \p sync_message` != NULL`.
+/// \pre \p sync_message `!= NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
@@ -112,7 +112,7 @@ pub unsafe extern "C" fn AMsyncMessageEncode(sync_message: *const AMsyncMessage)
 ///
 /// \param[in] sync_message A pointer to an `AMsyncMessage` struct.
 /// \return An `AMhaves` struct.
-/// \pre \p sync_message` != NULL`.
+/// \pre \p sync_message `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -134,7 +134,7 @@ pub unsafe extern "C" fn AMsyncMessageHaves(sync_message: *const AMsyncMessage) 
 ///
 /// \param[in] sync_message A pointer to an `AMsyncMessage` struct.
 /// \return An `AMchangeHashes` struct.
-/// \pre \p sync_message` != NULL`.
+/// \pre \p sync_message `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -154,7 +154,7 @@ pub unsafe extern "C" fn AMsyncMessageHeads(sync_message: *const AMsyncMessage) 
 ///
 /// \param[in] sync_message A pointer to an `AMsyncMessage` struct.
 /// \return An `AMchangeHashes` struct.
-/// \pre \p sync_message` != NULL`.
+/// \pre \p sync_message `!= NULL`.
 /// \internal
 ///
 /// # Safety

@@ -5,7 +5,7 @@ use std::ffi::CString;
 use crate::obj::AMobjId;
 use crate::result::AMvalue;
 
-/// \enum AMlistItem
+/// \struct AMlistItem
 /// \brief An item in a list object.
 #[repr(C)]
 pub struct AMlistItem {
@@ -46,7 +46,7 @@ impl From<&AMlistItem> for (usize, am::Value<'static>, am::ObjId) {
 ///
 /// \param[in] list_item A pointer to an `AMlistItem` struct.
 /// \return A 64-bit unsigned integer.
-/// \pre \p list_item` != NULL`.
+/// \pre \p list_item `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -65,7 +65,7 @@ pub unsafe extern "C" fn AMlistItemIndex(list_item: *const AMlistItem) -> usize 
 ///
 /// \param[in] list_item A pointer to an `AMlistItem` struct.
 /// \return A pointer to an `AMobjId` struct.
-/// \pre \p list_item` != NULL`.
+/// \pre \p list_item `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -84,7 +84,7 @@ pub unsafe extern "C" fn AMlistItemObjId(list_item: *const AMlistItem) -> *const
 ///
 /// \param[in] list_item A pointer to an `AMlistItem` struct.
 /// \return An `AMvalue` struct.
-/// \pre \p list_item` != NULL`.
+/// \pre \p list_item `!= NULL`.
 /// \internal
 ///
 /// # Safety

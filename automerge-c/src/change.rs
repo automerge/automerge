@@ -65,7 +65,7 @@ impl AsRef<am::Change> for AMchange {
 /// \brief Gets the first referenced actor identifier in a change.
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
-/// \pre \p change` != NULL`.
+/// \pre \p change `!= NULL`.
 /// \return A pointer to an `AMresult` struct containing a pointer to an
 ///         `AMactorId` struct.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
@@ -85,7 +85,7 @@ pub unsafe extern "C" fn AMchangeActorId(change: *const AMchange) -> *mut AMresu
 /// \brief Compresses the raw bytes of a change.
 ///
 /// \param[in,out] change A pointer to an `AMchange` struct.
-/// \pre \p change` != NULL`.
+/// \pre \p change `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -102,7 +102,7 @@ pub unsafe extern "C" fn AMchangeCompress(change: *mut AMchange) {
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A pointer to an `AMchangeHashes` struct or `NULL`.
-/// \pre \p change` != NULL`.
+/// \pre \p change `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -120,7 +120,7 @@ pub unsafe extern "C" fn AMchangeDeps(change: *const AMchange) -> AMchangeHashes
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return An `AMbyteSpan` struct.
-/// \pre \p change` != NULL`.
+/// \pre \p change `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -140,8 +140,8 @@ pub unsafe extern "C" fn AMchangeExtraBytes(change: *const AMchange) -> AMbyteSp
 /// \param[in] src A pointer to an array of bytes.
 /// \param[in] count The number of bytes in \p src to load.
 /// \return A pointer to an `AMresult` struct containing an `AMchange` struct.
-/// \pre \p src` != NULL`.
-/// \pre `0 <=` \p count` <= `size of \p src.
+/// \pre \p src `!= NULL`.
+/// \pre `0 <` \p count `<= sizeof(`\p src`)`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
@@ -159,7 +159,7 @@ pub unsafe extern "C" fn AMchangeFromBytes(src: *const u8, count: usize) -> *mut
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A change hash as an `AMbyteSpan` struct.
-/// \pre \p change` != NULL`.
+/// \pre \p change `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -180,7 +180,7 @@ pub unsafe extern "C" fn AMchangeHash(change: *const AMchange) -> AMbyteSpan {
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A boolean.
-/// \pre \p change` != NULL`.
+/// \pre \p change `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -199,7 +199,7 @@ pub unsafe extern "C" fn AMchangeIsEmpty(change: *const AMchange) -> bool {
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A 64-bit unsigned integer.
-/// \pre \p change` != NULL`.
+/// \pre \p change `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -218,7 +218,7 @@ pub unsafe extern "C" fn AMchangeMaxOp(change: *const AMchange) -> u64 {
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A UTF-8 string or `NULL`.
-/// \pre \p change` != NULL`.
+/// \pre \p change `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -236,7 +236,7 @@ pub unsafe extern "C" fn AMchangeMessage(change: *const AMchange) -> *const c_ch
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A 64-bit unsigned integer.
-/// \pre \p change` != NULL`.
+/// \pre \p change `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -255,7 +255,7 @@ pub unsafe extern "C" fn AMchangeSeq(change: *const AMchange) -> u64 {
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A 64-bit unsigned integer.
-/// \pre \p change` != NULL`.
+/// \pre \p change `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -274,7 +274,7 @@ pub unsafe extern "C" fn AMchangeSize(change: *const AMchange) -> usize {
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A 64-bit unsigned integer.
-/// \pre \p change` != NULL`.
+/// \pre \p change `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -293,7 +293,7 @@ pub unsafe extern "C" fn AMchangeStartOp(change: *const AMchange) -> u64 {
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A 64-bit signed integer.
-/// \pre \p change` != NULL`.
+/// \pre \p change `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -312,7 +312,7 @@ pub unsafe extern "C" fn AMchangeTime(change: *const AMchange) -> i64 {
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return An `AMbyteSpan` struct.
-/// \pre \p change` != NULL`.
+/// \pre \p change `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -333,8 +333,8 @@ pub unsafe extern "C" fn AMchangeRawBytes(change: *const AMchange) -> AMbyteSpan
 /// \param[in] count The number of bytes in \p src to load.
 /// \return A pointer to an `AMresult` struct containing a sequence of
 ///         `AMchange` structs.
-/// \pre \p src` != NULL`.
-/// \pre `0 <=` \p count` <= `size of \p src.
+/// \pre \p src `!= NULL`.
+/// \pre `0 <` \p count `<= sizeof(`\p src`)`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal

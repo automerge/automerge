@@ -5,7 +5,7 @@ use std::ffi::CString;
 use crate::obj::AMobjId;
 use crate::result::AMvalue;
 
-/// \enum AMobjItem
+/// \struct AMobjItem
 /// \brief An item in an object.
 #[repr(C)]
 pub struct AMobjItem {
@@ -41,7 +41,7 @@ impl From<&AMobjItem> for (am::Value<'static>, am::ObjId) {
 ///
 /// \param[in] obj_item A pointer to an `AMobjItem` struct.
 /// \return A pointer to an `AMobjId` struct.
-/// \pre \p obj_item` != NULL`.
+/// \pre \p obj_item `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -60,7 +60,7 @@ pub unsafe extern "C" fn AMobjItemObjId(obj_item: *const AMobjItem) -> *const AM
 ///
 /// \param[in] obj_item A pointer to an `AMobjItem` struct.
 /// \return An `AMvalue` struct.
-/// \pre \p obj_item` != NULL`.
+/// \pre \p obj_item `!= NULL`.
 /// \internal
 ///
 /// # Safety

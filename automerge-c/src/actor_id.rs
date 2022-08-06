@@ -46,7 +46,7 @@ impl AsRef<am::ActorId> for AMactorId {
 /// \brief Gets the value of an actor identifier as a sequence of bytes.
 ///
 /// \param[in] actor_id A pointer to an `AMactorId` struct.
-/// \pre \p actor_id` != NULL`.
+/// \pre \p actor_id `!= NULL`.
 /// \return An `AMbyteSpan` struct.
 /// \internal
 ///
@@ -66,10 +66,10 @@ pub unsafe extern "C" fn AMactorIdBytes(actor_id: *const AMactorId) -> AMbyteSpa
 /// \param[in] actor_id1 A pointer to an `AMactorId` struct.
 /// \param[in] actor_id2 A pointer to an `AMactorId` struct.
 /// \return `-1` if \p actor_id1 `<` \p actor_id2, `0` if
-///         \p actor_id1` == `\p actor_id2 and `1` if
+///         \p actor_id1 `==` \p actor_id2 and `1` if
 ///         \p actor_id1 `>` \p actor_id2.
-/// \pre \p actor_id1` != NULL`.
-/// \pre \p actor_id2` != NULL`.
+/// \pre \p actor_id1 `!= NULL`.
+/// \pre \p actor_id2 `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -111,7 +111,7 @@ pub unsafe extern "C" fn AMactorIdInit() -> *mut AMresult {
 ///
 /// \param[in] src A pointer to a contiguous sequence of bytes.
 /// \param[in] count The number of bytes to copy from \p src.
-/// \pre `0 <=` \p count` <= `size of \p src.
+/// \pre `0 <` \p count `<= sizeof(`\p src`)`.
 /// \return A pointer to an `AMresult` struct containing a pointer to an
 ///         `AMactorId` struct.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
@@ -150,7 +150,7 @@ pub unsafe extern "C" fn AMactorIdInitStr(hex_str: *const c_char) -> *mut AMresu
 /// \brief Gets the value of an actor identifier as a hexadecimal string.
 ///
 /// \param[in] actor_id A pointer to an `AMactorId` struct.
-/// \pre \p actor_id` != NULL`.
+/// \pre \p actor_id `!= NULL`.
 /// \return A UTF-8 string.
 /// \internal
 ///
