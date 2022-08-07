@@ -81,7 +81,7 @@ use crate::sync::{AMsyncMessage, AMsyncState};
 /// A synchronization state as a pointer to an `AMsyncState` struct.
 ///
 /// \var AMvalue::tag
-/// The variant discriminator of an `AMvalue` struct.
+/// The variant discriminator.
 ///
 /// \var AMvalue::timestamp
 /// A Lamport timestamp.
