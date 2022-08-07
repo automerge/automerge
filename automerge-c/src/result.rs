@@ -83,6 +83,15 @@ use crate::sync::{AMsyncMessage, AMsyncState};
 /// \var AMvalue::tag
 /// The variant discriminator.
 ///
+/// \var AMvalue::sync_message
+/// A synchronization message as a pointer to an `AMsyncMessage` struct.
+///
+/// \var AMvalue::sync_state
+/// A synchronization state as a pointer to an `AMsyncState` struct.
+///
+/// \var AMvalue::tag
+/// The variant discriminator.
+///
 /// \var AMvalue::timestamp
 /// A Lamport timestamp.
 ///
@@ -134,7 +143,7 @@ pub enum AMvalue<'a> {
     /// A 64-bit unsigned integer variant.
     Uint(u64),
     /// An unknown type of scalar value variant.
-    Unknown(AMUnknownValue),
+    Unknown(AMunknownValue),
 }
 
 impl<'a> PartialEq for AMvalue<'a> {
@@ -190,7 +199,7 @@ impl From<(&am::Value<'_>, &RefCell<Option<CString>>)> for AMvalue<'_> {
                 }
                 am::ScalarValue::Timestamp(timestamp) => AMvalue::Timestamp(*timestamp),
                 am::ScalarValue::Uint(uint) => AMvalue::Uint(*uint),
-                am::ScalarValue::Unknown { bytes, type_code } => AMvalue::Unknown(AMUnknownValue {
+                am::ScalarValue::Unknown { bytes, type_code } => AMvalue::Unknown(AMunknownValue {
                     bytes: bytes.as_slice().into(),
                     type_code: *type_code,
                 }),
@@ -259,7 +268,7 @@ impl TryFrom<&AMvalue<'_>> for am::ScalarValue {
             Timestamp(t) => Ok(am::ScalarValue::Timestamp(*t)),
             Uint(u) => Ok(am::ScalarValue::Uint(*u)),
             Null => Ok(am::ScalarValue::Null),
-            Unknown(AMUnknownValue { bytes, type_code }) => {
+            Unknown(AMunknownValue { bytes, type_code }) => {
                 let slice = unsafe { std::slice::from_raw_parts(bytes.src, bytes.count) };
                 Ok(am::ScalarValue::Unknown {
                     bytes: slice.to_vec(),
@@ -582,7 +591,7 @@ impl From<Result<am::Change, am::DecodingError>> for AMresult {
 impl From<Result<am::Change, am::LoadChangeError>> for AMresult {
     fn from(maybe: Result<am::Change, am::LoadChangeError>) -> Self {
         match maybe {
-            Ok(change) => AMresult::Changes(vec![change], BTreeMap::new()),
+            Ok(change) => AMresult::Changes(vec![change], None),
             Err(e) => AMresult::err(&e.to_string()),
         }
     }
@@ -631,7 +640,7 @@ impl From<Result<am::sync::State, am::DecodingError>> for AMresult {
 impl From<Result<am::sync::State, am::sync::DecodeStateError>> for AMresult {
     fn from(maybe: Result<am::sync::State, am::sync::DecodeStateError>) -> Self {
         match maybe {
-            Ok(state) => AMresult::SyncState(AMsyncState::new(state)),
+            Ok(state) => AMresult::SyncState(Box::new(AMsyncState::new(state))),
             Err(e) => AMresult::err(&e.to_string()),
         }
     }
@@ -928,12 +937,12 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult) -> AMvalue<'a>
     content
 }
 
-/// \struct AMUknownValue
-/// \brief A value (typically for a 'set' operation) which we don't know the type of
+/// \struct AMunknownValue
+/// \brief A value (typically for a `set` operation) whose type is unknown.
 ///
 #[derive(PartialEq)]
 #[repr(C)]
-pub struct AMUnknownValue {
+pub struct AMunknownValue {
     bytes: AMbyteSpan,
     type_code: u8,
 }
