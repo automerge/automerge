@@ -427,7 +427,7 @@ impl Change {
         self.bytes.compress(self.body_start);
     }
 
-    pub fn compressed_bytes(&self) -> &[u8] {
+    pub fn bytes(&self) -> &[u8] {
         match &self.bytes {
             ChangeBytes::Compressed { compressed, .. } => compressed,
             ChangeBytes::Uncompressed(uncompressed) => uncompressed,

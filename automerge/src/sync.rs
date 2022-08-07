@@ -400,7 +400,7 @@ impl Message {
 
         encode_many(&mut buf, self.changes.iter_mut(), |buf, change| {
             leb128::write::unsigned(buf, change.raw_bytes().len() as u64).unwrap();
-            buf.extend(change.compressed_bytes().as_ref())
+            buf.extend(change.bytes().as_ref())
         });
 
         buf
@@ -421,7 +421,7 @@ impl Message {
         (self.changes.len() as u32).encode_vec(&mut buf);
         for mut change in self.changes {
             change.compress();
-            change.compressed_bytes().encode_vec(&mut buf);
+            change.bytes().encode_vec(&mut buf);
         }
 
         buf
