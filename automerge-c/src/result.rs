@@ -19,11 +19,8 @@ use crate::sync::{AMsyncMessage, AMsyncState};
 /// \enum AMvalueVariant
 /// \brief A value type discriminant.
 ///
-/// \var AMvalue::tag
-/// The variant discriminator of an `AMvalue` struct.
-///
 /// \var AMvalue::actor_id
-/// An actor ID as an `AMactorId` struct.
+/// An actor identifier as a pointer to an `AMactorId` struct.
 ///
 /// \var AMvalue::boolean
 /// A boolean.
@@ -40,6 +37,9 @@ use crate::sync::{AMsyncMessage, AMsyncState};
 /// \var AMvalue::counter
 /// A CRDT counter.
 ///
+/// \var AMvalue::doc
+/// A document as a pointer to an `AMdoc` struct.
+///
 /// \var AMvalue::f64
 /// A 64-bit float.
 ///
@@ -47,13 +47,22 @@ use crate::sync::{AMsyncMessage, AMsyncState};
 /// A 64-bit signed integer.
 ///
 /// \var AMvalue::obj_id
-/// An object identifier.
+/// An object identifier as a pointer to an `AMobjId` struct.
 ///
 /// \var AMvalue::str
 /// A UTF-8 string.
 ///
 /// \var AMvalue::strings
 /// A sequence of UTF-8 strings as an `AMstrings` struct.
+///
+/// \var AMvalue::sync_message
+/// A synchronization message as a pointer to an `AMsyncMessage` struct.
+///
+/// \var AMvalue::sync_state
+/// A synchronization state as a pointer to an `AMsyncState` struct.
+///
+/// \var AMvalue::tag
+/// The variant discriminator.
 ///
 /// \var AMvalue::timestamp
 /// A Lamport timestamp.
@@ -62,7 +71,10 @@ use crate::sync::{AMsyncMessage, AMsyncState};
 /// A 64-bit unsigned integer.
 #[repr(C)]
 pub enum AMvalue<'a> {
-    /// An actor ID variant.
+    /// A void variant.
+    /// \note This tag is unalphabetized so that a zeroed struct will have it.
+    Void,
+    /// An actor identifier variant.
     ActorId(&'a AMactorId),
     /// A boolean variant.
     Boolean(bool),
@@ -88,22 +100,16 @@ pub enum AMvalue<'a> {
     Str(*const libc::c_char),
     /// A strings variant.
     Strings(AMstrings),
-    /// A Lamport timestamp variant.
-    Timestamp(i64),
-    /*
-    /// A transaction variant.
-    Transaction(_),
-    */
-    /// A 64-bit unsigned integer variant.
-    Uint(u64),
     /// A synchronization message variant.
     SyncMessage(&'a AMsyncMessage),
     /// A synchronization state variant.
     SyncState(&'a mut AMsyncState),
-    /// An Unknown scalar value
-    Unknown(AMUnknownValue),
-    /// A void variant.
-    Void,
+    /// A Lamport timestamp variant.
+    Timestamp(i64),
+    /// A 64-bit unsigned integer variant.
+    Uint(u64),
+    /// An unknown type of scalar value variant.
+    Unknown(AMunknownValue),
 }
 
 /// \struct AMresult
@@ -572,7 +578,7 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult) -> AMvalue<'a>
                             content = AMvalue::Uint(*uint);
                         }
                         am::ScalarValue::Unknown { bytes, type_code } => {
-                            content = AMvalue::Unknown(AMUnknownValue {
+                            content = AMvalue::Unknown(AMunknownValue {
                                 bytes: bytes.as_slice().into(),
                                 type_code: *type_code,
                             })
@@ -589,11 +595,11 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult) -> AMvalue<'a>
     content
 }
 
-/// \struct AMUknownValue
-/// \brief A value (typically for a 'set' operation) which we don't know the type of
+/// \struct AMunknownValue
+/// \brief A value (typically for a `set` operation) whose type is unknown.
 ///
 #[repr(C)]
-pub struct AMUnknownValue {
+pub struct AMunknownValue {
     bytes: AMbyteSpan,
     type_code: u8,
 }

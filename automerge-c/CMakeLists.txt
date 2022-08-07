@@ -57,6 +57,8 @@ include(CTest)
 
 option(BUILD_SHARED_LIBS "Enable the choice of a shared or static library.")
 
+option(FEATURE_FLAG_STORAGE_V2 "Toggle the \"storage-v2\" feature flag.")
+
 include(CMakePackageConfigHelpers)
 
 include(GNUInstallDirs)
