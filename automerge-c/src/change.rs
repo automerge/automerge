@@ -99,7 +99,7 @@ pub unsafe extern "C" fn AMchangeActorId(change: *const AMchange) -> *mut AMresu
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeCompress(change: *mut AMchange) {
     if let Some(change) = change.as_mut() {
-        let _ = change.as_mut().compressed_bytes();
+        let _ = change.as_mut().bytes();
     };
 }
 

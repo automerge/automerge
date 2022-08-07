@@ -88,7 +88,7 @@ impl Change {
         self.stored.timestamp()
     }
 
-    pub fn compressed_bytes(&mut self) -> Cow<'_, [u8]> {
+    pub fn bytes(&mut self) -> Cow<'_, [u8]> {
         if let CompressionState::NotCompressed = self.compression {
             if let Some(compressed) = self.stored.compress() {
                 self.compression = CompressionState::Compressed(compressed);

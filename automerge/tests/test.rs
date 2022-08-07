@@ -1238,7 +1238,7 @@ fn test_compressed_changes() {
     assert!(uncompressed.len() > 256);
     #[cfg(not(feature = "storage-v2"))]
     change.compress();
-    let compressed = change.compressed_bytes().to_vec();
+    let compressed = change.bytes().to_vec();
     assert!(compressed.len() < uncompressed.len());
 
     let reloaded = automerge::Change::try_from(&compressed[..]).unwrap();
