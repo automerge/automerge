@@ -42,7 +42,9 @@ impl AMchange {
         match c_msg.as_mut() {
             None => {
                 if let Some(message) = unsafe { (*self.body).message() } {
-                    return c_msg.insert(CString::new(message).unwrap()).as_ptr();
+                    return c_msg
+                        .insert(CString::new(message.as_bytes()).unwrap())
+                        .as_ptr();
                 }
             }
             Some(message) => {
