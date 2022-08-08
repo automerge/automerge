@@ -25,7 +25,7 @@ pub mod items;
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapDelete(
@@ -54,9 +54,9 @@ pub unsafe extern "C" fn AMmapDelete(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
-/// heads must be a valid pointer to an AMchangeHashes or NULL
+/// heads must be a valid pointer to an AMchangeHashes or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMmapGet(
     doc: *const AMdoc,
@@ -90,9 +90,9 @@ pub unsafe extern "C" fn AMmapGet(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
-/// heads must be a valid pointer to an AMchangeHashes or NULL
+/// heads must be a valid pointer to an AMchangeHashes or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMmapGetAll(
     doc: *const AMdoc,
@@ -123,7 +123,7 @@ pub unsafe extern "C" fn AMmapGetAll(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapIncrement(
@@ -151,7 +151,7 @@ pub unsafe extern "C" fn AMmapIncrement(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutBool(
@@ -182,7 +182,7 @@ pub unsafe extern "C" fn AMmapPutBool(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 /// src must be a byte array of size `>= count`
 #[no_mangle]
@@ -214,7 +214,7 @@ pub unsafe extern "C" fn AMmapPutBytes(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutCounter(
@@ -245,7 +245,7 @@ pub unsafe extern "C" fn AMmapPutCounter(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutNull(
@@ -273,7 +273,7 @@ pub unsafe extern "C" fn AMmapPutNull(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutObject(
@@ -301,7 +301,7 @@ pub unsafe extern "C" fn AMmapPutObject(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutF64(
@@ -329,7 +329,7 @@ pub unsafe extern "C" fn AMmapPutF64(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutInt(
@@ -358,7 +358,7 @@ pub unsafe extern "C" fn AMmapPutInt(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 /// value must be a null-terminated array of `c_char`
 #[no_mangle]
@@ -387,7 +387,7 @@ pub unsafe extern "C" fn AMmapPutStr(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutTimestamp(
@@ -419,7 +419,7 @@ pub unsafe extern "C" fn AMmapPutTimestamp(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutUint(
@@ -453,8 +453,8 @@ pub unsafe extern "C" fn AMmapPutUint(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
-/// heads must be a valid pointer to an AMchangeHashes or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
+/// heads must be a valid pointer to an AMchangeHashes or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMmapRange(
     doc: *const AMdoc,

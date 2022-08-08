@@ -46,7 +46,7 @@ macro_rules! to_range {
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMlistDelete(
     doc: *mut AMdoc,
@@ -76,8 +76,8 @@ pub unsafe extern "C" fn AMlistDelete(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
-/// heads must be a valid pointer to an AMchangeHashes or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
+/// heads must be a valid pointer to an AMchangeHashes or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMlistGet(
     doc: *const AMdoc,
@@ -112,8 +112,8 @@ pub unsafe extern "C" fn AMlistGet(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
-/// heads must be a valid pointer to an AMchangeHashes or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
+/// heads must be a valid pointer to an AMchangeHashes or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMlistGetAll(
     doc: *const AMdoc,
@@ -147,7 +147,7 @@ pub unsafe extern "C" fn AMlistGetAll(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMlistIncrement(
     doc: *mut AMdoc,
@@ -181,7 +181,7 @@ pub unsafe extern "C" fn AMlistIncrement(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMlistPutBool(
     doc: *mut AMdoc,
@@ -224,7 +224,7 @@ pub unsafe extern "C" fn AMlistPutBool(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// src must be a byte array of size `>= count`
 #[no_mangle]
 pub unsafe extern "C" fn AMlistPutBytes(
@@ -267,7 +267,7 @@ pub unsafe extern "C" fn AMlistPutBytes(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMlistPutCounter(
     doc: *mut AMdoc,
@@ -307,7 +307,7 @@ pub unsafe extern "C" fn AMlistPutCounter(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMlistPutF64(
     doc: *mut AMdoc,
@@ -346,7 +346,7 @@ pub unsafe extern "C" fn AMlistPutF64(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMlistPutInt(
     doc: *mut AMdoc,
@@ -384,7 +384,7 @@ pub unsafe extern "C" fn AMlistPutInt(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMlistPutNull(
     doc: *mut AMdoc,
@@ -423,7 +423,7 @@ pub unsafe extern "C" fn AMlistPutNull(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMlistPutObject(
     doc: *mut AMdoc,
@@ -464,7 +464,7 @@ pub unsafe extern "C" fn AMlistPutObject(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// value must be a null-terminated array of `c_char`
 #[no_mangle]
 pub unsafe extern "C" fn AMlistPutStr(
@@ -505,7 +505,7 @@ pub unsafe extern "C" fn AMlistPutStr(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMlistPutTimestamp(
     doc: *mut AMdoc,
@@ -545,7 +545,7 @@ pub unsafe extern "C" fn AMlistPutTimestamp(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMlistPutUint(
     doc: *mut AMdoc,
@@ -584,8 +584,8 @@ pub unsafe extern "C" fn AMlistPutUint(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
-/// heads must be a valid pointer to an AMchangeHashes or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
+/// heads must be a valid pointer to an AMchangeHashes or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMlistRange(
     doc: *const AMdoc,

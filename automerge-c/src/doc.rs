@@ -200,7 +200,7 @@ pub unsafe extern "C" fn AMequal(doc1: *mut AMdoc, doc2: *mut AMdoc) -> bool {
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// heads must be a valid pointer to an AMchangeHashes or NULL
+/// heads must be a valid pointer to an AMchangeHashes or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMfork(doc: *mut AMdoc, heads: *const AMchangeHashes) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
@@ -369,7 +369,7 @@ pub unsafe extern "C" fn AMgetHeads(doc: *mut AMdoc) -> *mut AMresult {
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// heads must be a valid pointer to an AMchangeHashes or NULL
+/// heads must be a valid pointer to an AMchangeHashes or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMgetMissingDeps(
     doc: *mut AMdoc,
@@ -416,8 +416,8 @@ pub unsafe extern "C" fn AMgetLastLocalChange(doc: *mut AMdoc) -> *mut AMresult 
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
-/// heads must be a valid pointer to an AMchangeHashes or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
+/// heads must be a valid pointer to an AMchangeHashes or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMkeys(
     doc: *const AMdoc,
@@ -518,8 +518,8 @@ pub unsafe extern "C" fn AMmerge(dest: *mut AMdoc, src: *mut AMdoc) -> *mut AMre
 ///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
-/// heads must be a valid pointer to an AMchangeHashes or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
+/// heads must be a valid pointer to an AMchangeHashes or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMobjSize(
     doc: *const AMdoc,
@@ -552,8 +552,8 @@ pub unsafe extern "C" fn AMobjSize(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
-/// heads must be a valid pointer to an AMchangeHashes or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
+/// heads must be a valid pointer to an AMchangeHashes or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMobjValues(
     doc: *const AMdoc,
@@ -722,8 +722,8 @@ pub unsafe extern "C" fn AMsetActorId(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
-/// src must be an AMvalue array of size `>= count` or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
+/// src must be an AMvalue array of size `>= count` or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMsplice(
     doc: *mut AMdoc,
@@ -775,7 +775,7 @@ pub unsafe extern "C" fn AMsplice(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// text must be a null-terminated array of `c_char` or NULL.
 #[no_mangle]
 pub unsafe extern "C" fn AMspliceText(
@@ -807,8 +807,8 @@ pub unsafe extern "C" fn AMspliceText(
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
-/// heads must be a valid pointer to an AMchangeHashes or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
+/// heads must be a valid pointer to an AMchangeHashes or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMtext(
     doc: *const AMdoc,
