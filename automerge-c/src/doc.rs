@@ -751,7 +751,7 @@ pub unsafe extern "C" fn AMsplice(
     if !(src.is_null() || count == 0) {
         let c_vals = std::slice::from_raw_parts(src, count);
         for c_val in c_vals {
-            match c_val.into() {
+            match c_val.try_into() {
                 Ok(s) => {
                     vals.push(s);
                 }

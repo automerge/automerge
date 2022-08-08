@@ -165,8 +165,70 @@ impl<'a> PartialEq for AMvalue<'a> {
     }
 }
 
-impl From<&AMvalue<'_>> for Result<am::ScalarValue, am::AutomergeError> {
-    fn from(c_value: &AMvalue) -> Self {
+impl From<(&am::Value<'_>, &RefCell<Option<CString>>)> for AMvalue<'_> {
+    fn from((value, c_str): (&am::Value<'_>, &RefCell<Option<CString>>)) -> Self {
+        match value {
+            am::Value::Scalar(scalar) => match scalar.as_ref() {
+                am::ScalarValue::Boolean(flag) => AMvalue::Boolean(*flag),
+                am::ScalarValue::Bytes(bytes) => AMvalue::Bytes(bytes.as_slice().into()),
+                am::ScalarValue::Counter(counter) => AMvalue::Counter(counter.into()),
+                am::ScalarValue::F64(float) => AMvalue::F64(*float),
+                am::ScalarValue::Int(int) => AMvalue::Int(*int),
+                am::ScalarValue::Null => AMvalue::Null,
+                am::ScalarValue::Str(smol_str) => {
+                    let mut c_str = c_str.borrow_mut();
+                    AMvalue::Str(match c_str.as_mut() {
+                        None => {
+                            let value_str = CString::new(smol_str.to_string()).unwrap();
+                            c_str.insert(value_str).as_ptr()
+                        }
+                        Some(value_str) => value_str.as_ptr(),
+                    })
+                }
+                am::ScalarValue::Timestamp(timestamp) => AMvalue::Timestamp(*timestamp),
+                am::ScalarValue::Uint(uint) => AMvalue::Uint(*uint),
+            },
+            // \todo Confirm that an object variant should be ignored
+            //       when there's no object ID variant.
+            am::Value::Object(_) => AMvalue::Void,
+        }
+    }
+}
+
+impl From<&AMvalue<'_>> for u8 {
+    fn from(value: &AMvalue) -> Self {
+        use AMvalue::*;
+
+        match value {
+            ActorId(_) => 1,
+            Boolean(_) => 2,
+            Bytes(_) => 3,
+            ChangeHashes(_) => 4,
+            Changes(_) => 5,
+            Counter(_) => 6,
+            Doc(_) => 7,
+            F64(_) => 8,
+            Int(_) => 9,
+            ListItems(_) => 10,
+            MapItems(_) => 11,
+            Null => 12,
+            ObjId(_) => 13,
+            ObjItems(_) => 14,
+            Str(_) => 15,
+            Strs(_) => 16,
+            SyncMessage(_) => 17,
+            SyncState(_) => 18,
+            Timestamp(_) => 19,
+            Uint(_) => 20,
+            Void => 0,
+        }
+    }
+}
+
+impl TryFrom<&AMvalue<'_>> for am::ScalarValue {
+    type Error = am::AutomergeError;
+
+    fn try_from(c_value: &AMvalue) -> Result<Self, Self::Error> {
         use am::AutomergeError::InvalidValueType;
         use AMvalue::*;
 
@@ -235,66 +297,6 @@ impl From<&AMvalue<'_>> for Result<am::ScalarValue, am::AutomergeError> {
                 expected,
                 unexpected: type_name::<()>().to_string(),
             }),
-        }
-    }
-}
-
-impl From<(&am::Value<'_>, &RefCell<Option<CString>>)> for AMvalue<'_> {
-    fn from((value, c_str): (&am::Value<'_>, &RefCell<Option<CString>>)) -> Self {
-        match value {
-            am::Value::Scalar(scalar) => match scalar.as_ref() {
-                am::ScalarValue::Boolean(flag) => AMvalue::Boolean(*flag),
-                am::ScalarValue::Bytes(bytes) => AMvalue::Bytes(bytes.as_slice().into()),
-                am::ScalarValue::Counter(counter) => AMvalue::Counter(counter.into()),
-                am::ScalarValue::F64(float) => AMvalue::F64(*float),
-                am::ScalarValue::Int(int) => AMvalue::Int(*int),
-                am::ScalarValue::Null => AMvalue::Null,
-                am::ScalarValue::Str(smol_str) => {
-                    let mut c_str = c_str.borrow_mut();
-                    AMvalue::Str(match c_str.as_mut() {
-                        None => {
-                            let value_str = CString::new(smol_str.to_string()).unwrap();
-                            c_str.insert(value_str).as_ptr()
-                        }
-                        Some(value_str) => value_str.as_ptr(),
-                    })
-                }
-                am::ScalarValue::Timestamp(timestamp) => AMvalue::Timestamp(*timestamp),
-                am::ScalarValue::Uint(uint) => AMvalue::Uint(*uint),
-            },
-            // \todo Confirm that an object variant should be ignored
-            //       when there's no object ID variant.
-            am::Value::Object(_) => AMvalue::Void,
-        }
-    }
-}
-
-impl From<&AMvalue<'_>> for u8 {
-    fn from(value: &AMvalue) -> Self {
-        use AMvalue::*;
-
-        match value {
-            ActorId(_) => 1,
-            Boolean(_) => 2,
-            Bytes(_) => 3,
-            ChangeHashes(_) => 4,
-            Changes(_) => 5,
-            Counter(_) => 6,
-            Doc(_) => 7,
-            F64(_) => 8,
-            Int(_) => 9,
-            ListItems(_) => 10,
-            MapItems(_) => 11,
-            Null => 12,
-            ObjId(_) => 13,
-            ObjItems(_) => 14,
-            Str(_) => 15,
-            Strs(_) => 16,
-            SyncMessage(_) => 17,
-            SyncState(_) => 18,
-            Timestamp(_) => 19,
-            Uint(_) => 20,
-            Void => 0,
         }
     }
 }
