@@ -27,21 +27,12 @@ macro_rules! to_changes {
     }};
 }
 
-macro_rules! to_del {
-    ($del:expr, $len:expr) => {{
-        if $del > $len && $del != usize::MAX {
-            return AMresult::err(&format!("Invalid del {}", $del)).into();
+macro_rules! to_index {
+    ($index:expr, $len:expr, $param_name:expr) => {{
+        if $index > $len && $index != usize::MAX {
+            return AMresult::err(&format!("Invalid {} {}", $param_name, $index)).into();
         }
-        std::cmp::min($del, $len)
-    }};
-}
-
-macro_rules! to_pos {
-    ($pos:expr, $len:expr) => {{
-        if $pos > $len && $pos != usize::MAX {
-            return AMresult::err(&format!("Invalid pos {}", $pos)).into();
-        }
-        std::cmp::min($pos, $len)
+        std::cmp::min($index, $len)
     }};
 }
 
@@ -745,8 +736,8 @@ pub unsafe extern "C" fn AMsplice(
     let doc = to_doc_mut!(doc);
     let obj_id = to_obj_id!(obj_id);
     let len = doc.length(obj_id);
-    let pos = to_pos!(pos, len);
-    let del = to_del!(del, len);
+    let pos = to_index!(pos, len, "pos");
+    let del = to_index!(del, len, "del");
     let mut vals: Vec<am::ScalarValue> = vec![];
     if !(src.is_null() || count == 0) {
         let c_vals = std::slice::from_raw_parts(src, count);
@@ -797,8 +788,8 @@ pub unsafe extern "C" fn AMspliceText(
     let doc = to_doc_mut!(doc);
     let obj_id = to_obj_id!(obj_id);
     let len = doc.length(obj_id);
-    let pos = to_pos!(pos, len);
-    let del = to_del!(del, len);
+    let pos = to_index!(pos, len, "pos");
+    let del = to_index!(del, len, "del");
     to_result(doc.splice_text(obj_id, pos, del, &to_str(text)))
 }
 
