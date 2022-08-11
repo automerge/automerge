@@ -39,9 +39,15 @@ let api = {
   importSyncState
 }
 
-import init from "./bindgen.js"
-export default function() {
-  return new Promise((resolve,reject) => init().then(() => {
-    resolve({ ... api, load, create, foo: "bar" })
+import wasm_init from "./bindgen.js"
+
+export function init() {
+  return new Promise((resolve,reject) => wasm_init().then(() => {
+    resolve({ ... api, load, create })
   }))
+}
+
+// depricating default export
+export default function() {
+  return init()
 }

@@ -3,7 +3,7 @@ import { describe, it } from 'mocha';
 import assert from 'assert'
 //@ts-ignore
 import { BloomFilter } from './helpers/sync'
-import init, { create, load, SyncState, Automerge, encodeChange, decodeChange, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState, encodeSyncMessage } from '..'
+import { init, create, load, SyncState, Automerge, encodeChange, decodeChange, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState, encodeSyncMessage } from '..'
 import { DecodedSyncMessage, Hash } from '..';
 
 function sync(a: Automerge, b: Automerge, aSyncState = initSyncState(), bSyncState = initSyncState()) {
