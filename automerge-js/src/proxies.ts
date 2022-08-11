@@ -194,7 +194,9 @@ const MapHandler = {
 
   ownKeys (target) {
     const { context, objectId, heads} = target
-    return context.keys(objectId, heads)
+    // FIXME - this is a tmp workaround until fix the dupe key bug in keys()
+    let keys = context.keys(objectId, heads)
+    return [...new Set<string>(keys)]
   },
 }
 
