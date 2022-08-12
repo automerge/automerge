@@ -18,14 +18,14 @@ pub mod items;
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc` != NULL`.
-/// \pre \p key` != NULL`.
+/// \pre \p doc `!= NULL`.
+/// \pre \p key `!= NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapDelete(
@@ -46,16 +46,17 @@ pub unsafe extern "C" fn AMmapDelete(
 ///                \p obj_id.
 /// \param[in] heads A pointer to an `AMchangeHashes` struct for a historical
 ///                  value or `NULL` for the current value.
-/// \return A pointer to an `AMresult` struct.
-/// \pre \p doc` != NULL`.
-/// \pre \p key` != NULL`.
+/// \return A pointer to an `AMresult` struct that doesn't contain a void.
+/// \pre \p doc `!= NULL`.
+/// \pre \p key `!= NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
+/// heads must be a valid pointer to an AMchangeHashes or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMmapGet(
     doc: *const AMdoc,
@@ -72,6 +73,42 @@ pub unsafe extern "C" fn AMmapGet(
 }
 
 /// \memberof AMdoc
+/// \brief Gets all of the historical values for a key in a map object until
+///        its current one or a specific one.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
+/// \param[in] key A UTF-8 string key for the map object identified by
+///                \p obj_id.
+/// \param[in] heads A pointer to an `AMchangeHashes` struct for a historical
+///                  last value or `NULL` for the current last value.
+/// \return A pointer to an `AMresult` struct containing an `AMobjItems` struct.
+/// \pre \p doc `!= NULL`.
+/// \pre \p key `!= NULL`.
+/// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
+///          in order to prevent a memory leak.
+/// \internal
+/// # Safety
+/// doc must be a valid pointer to an AMdoc
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
+/// key must be a c string of the map key to be used
+/// heads must be a valid pointer to an AMchangeHashes or std::ptr::null()
+#[no_mangle]
+pub unsafe extern "C" fn AMmapGetAll(
+    doc: *const AMdoc,
+    obj_id: *const AMobjId,
+    key: *const c_char,
+    heads: *const AMchangeHashes,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    let obj_id = to_obj_id!(obj_id);
+    match heads.as_ref() {
+        None => to_result(doc.get_all(obj_id, to_str(key))),
+        Some(heads) => to_result(doc.get_all_at(obj_id, to_str(key), heads.as_ref())),
+    }
+}
+
+/// \memberof AMdoc
 /// \brief Increments a counter for a key in a map object by the given value.
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
@@ -79,14 +116,14 @@ pub unsafe extern "C" fn AMmapGet(
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc` != NULL`.
-/// \pre \p key` != NULL`.
+/// \pre \p doc `!= NULL`.
+/// \pre \p key `!= NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapIncrement(
@@ -107,14 +144,14 @@ pub unsafe extern "C" fn AMmapIncrement(
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A boolean.
 /// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc` != NULL`.
-/// \pre \p key` != NULL`.
+/// \pre \p doc `!= NULL`.
+/// \pre \p key `!= NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutBool(
@@ -136,16 +173,16 @@ pub unsafe extern "C" fn AMmapPutBool(
 /// \param[in] src A pointer to an array of bytes.
 /// \param[in] count The number of bytes to copy from \p src.
 /// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc` != NULL`.
-/// \pre \p key` != NULL`.
-/// \pre \p src` != NULL`.
-/// \pre `0 <=` \p count` <= `size of \p src.
+/// \pre \p doc `!= NULL`.
+/// \pre \p key `!= NULL`.
+/// \pre \p src `!= NULL`.
+/// \pre `0 <` \p count `<= sizeof(`\p src`)`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 /// src must be a byte array of size `>= count`
 #[no_mangle]
@@ -170,14 +207,14 @@ pub unsafe extern "C" fn AMmapPutBytes(
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc` != NULL`.
-/// \pre \p key` != NULL`.
+/// \pre \p doc `!= NULL`.
+/// \pre \p key `!= NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutCounter(
@@ -201,14 +238,14 @@ pub unsafe extern "C" fn AMmapPutCounter(
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc` != NULL`.
-/// \pre \p key` != NULL`.
+/// \pre \p doc `!= NULL`.
+/// \pre \p key `!= NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutNull(
@@ -229,14 +266,14 @@ pub unsafe extern "C" fn AMmapPutNull(
 /// \param[in] obj_type An `AMobjIdType` enum tag.
 /// \return A pointer to an `AMresult` struct containing a pointer to an
 ///         `AMobjId` struct.
-/// \pre \p doc` != NULL`.
-/// \pre \p key` != NULL`.
+/// \pre \p doc `!= NULL`.
+/// \pre \p key `!= NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutObject(
@@ -257,14 +294,14 @@ pub unsafe extern "C" fn AMmapPutObject(
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A 64-bit float.
 /// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc` != NULL`.
-/// \pre \p key` != NULL`.
+/// \pre \p doc `!= NULL`.
+/// \pre \p key `!= NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutF64(
@@ -285,14 +322,14 @@ pub unsafe extern "C" fn AMmapPutF64(
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc` != NULL`.
-/// \pre \p key` != NULL`.
+/// \pre \p doc `!= NULL`.
+/// \pre \p key `!= NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutInt(
@@ -313,15 +350,15 @@ pub unsafe extern "C" fn AMmapPutInt(
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A UTF-8 string.
 /// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc` != NULL`.
-/// \pre \p key` != NULL`.
-/// \pre \p value` != NULL`.
+/// \pre \p doc `!= NULL`.
+/// \pre \p key `!= NULL`.
+/// \pre \p value `!= NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 /// value must be a null-terminated array of `c_char`
 #[no_mangle]
@@ -343,14 +380,14 @@ pub unsafe extern "C" fn AMmapPutStr(
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc` != NULL`.
-/// \pre \p key` != NULL`.
+/// \pre \p doc `!= NULL`.
+/// \pre \p key `!= NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutTimestamp(
@@ -375,14 +412,14 @@ pub unsafe extern "C" fn AMmapPutTimestamp(
 /// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
 /// \param[in] value A 64-bit unsigned integer.
 /// \return A pointer to an `AMresult` struct containing a void.
-/// \pre \p doc` != NULL`.
-/// \pre \p key` != NULL`.
+/// \pre \p doc `!= NULL`.
+/// \pre \p key `!= NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
 /// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutUint(
@@ -401,21 +438,23 @@ pub unsafe extern "C" fn AMmapPutUint(
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] begin The first key in a range of keys or `NULL`.
-/// \param[in] end One past the last key in a range of keys or `NULL`.
+/// \param[in] begin The first key in a subrange or `NULL` to indicate the
+///                  absolute first key.
+/// \param[in] end The key one past the last key in a subrange or `NULL` to
+///                indicate one past the absolute last key.
 /// \param[in] heads A pointer to an `AMchangeHashes` struct for historical
 ///                  keys and values or `NULL` for current keys and values.
 /// \return A pointer to an `AMresult` struct containing an `AMmapItems`
 ///         struct.
-/// \pre \p doc` != NULL`.
-/// \pre \p begin` <= `\p end if \p end` != NULL`.
+/// \pre \p doc `!= NULL`.
+/// \pre `strcmp(`\p begin, \p end`) != 1` if \p begin `!= NULL` and \p end `!= NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
-/// obj_id must be a valid pointer to an AMobjId or NULL
-/// heads must be a valid pointer to an AMchangeHashes or NULL
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
+/// heads must be a valid pointer to an AMchangeHashes or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMmapRange(
     doc: *const AMdoc,

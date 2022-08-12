@@ -21,7 +21,7 @@ impl AMresultStack {
 ///
 /// \param[in,out] stack A pointer to a pointer to an `AMresultStack` struct.
 /// \return The number of `AMresult` structs freed.
-/// \pre \p stack` != NULL`.
+/// \pre \p stack `!= NULL`.
 /// \post `*stack == NULL`.
 /// \internal
 ///
@@ -45,7 +45,7 @@ pub unsafe extern "C" fn AMfreeStack(stack: *mut *mut AMresultStack) -> usize {
 ///
 /// \param[in,out] stack A pointer to a pointer to an `AMresultStack` struct.
 /// \return A pointer to an `AMresult` struct or `NULL`.
-/// \pre \p stack` != NULL`.
+/// \pre \p stack `!= NULL`.
 /// \post `*stack == NULL`.
 /// \internal
 ///
@@ -81,9 +81,9 @@ pub type AMpushCallback =
 /// \param[in] callback A pointer to a function with the same signature as
 ///                     `AMpushCallback()` or `NULL`.
 /// \return An `AMvalue` struct.
-/// \pre \p stack` != NULL`.
-/// \pre \p result` != NULL`.
-/// \warning If \p stack` == NULL` then \p result is deallocated in order to
+/// \pre \p stack `!= NULL`.
+/// \pre \p result `!= NULL`.
+/// \warning If \p stack `== NULL` then \p result is deallocated in order to
 ///          prevent a memory leak.
 /// \internal
 ///

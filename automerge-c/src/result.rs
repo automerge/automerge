@@ -1,5 +1,7 @@
 use automerge as am;
 use libc::strcmp;
+use smol_str::SmolStr;
+use std::any::type_name;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ffi::CString;
@@ -13,6 +15,7 @@ use crate::change_hashes::AMchangeHashes;
 use crate::changes::AMchanges;
 use crate::doc::list::{item::AMlistItem, items::AMlistItems};
 use crate::doc::map::{item::AMmapItem, items::AMmapItems};
+use crate::doc::utils::to_str;
 use crate::doc::AMdoc;
 use crate::obj::item::AMobjItem;
 use crate::obj::items::AMobjItems;
@@ -59,9 +62,6 @@ use crate::sync::{AMsyncMessage, AMsyncState};
 /// \var AMvalue::map_items
 /// A sequence of map object items as an `AMmapItems` struct.
 ///
-/// \var AMvalue::null
-/// A null.
-///
 /// \var AMvalue::obj_id
 /// An object identifier as a pointer to an `AMobjId` struct.
 ///
@@ -81,16 +81,13 @@ use crate::sync::{AMsyncMessage, AMsyncState};
 /// A synchronization state as a pointer to an `AMsyncState` struct.
 ///
 /// \var AMvalue::tag
-/// The variant discriminator of an `AMvalue` struct.
+/// The variant discriminator.
 ///
 /// \var AMvalue::timestamp
 /// A Lamport timestamp.
 ///
 /// \var AMvalue::uint
 /// A 64-bit unsigned integer.
-///
-/// \var AMvalue::void
-/// A void.
 #[repr(u8)]
 pub enum AMvalue<'a> {
     /// A void variant.
@@ -228,14 +225,90 @@ impl From<&AMvalue<'_>> for u8 {
     }
 }
 
+impl TryFrom<&AMvalue<'_>> for am::ScalarValue {
+    type Error = am::AutomergeError;
+
+    fn try_from(c_value: &AMvalue) -> Result<Self, Self::Error> {
+        use am::AutomergeError::InvalidValueType;
+        use AMvalue::*;
+
+        let expected = type_name::<am::ScalarValue>().to_string();
+        match c_value {
+            Boolean(b) => Ok(am::ScalarValue::Boolean(*b)),
+            Bytes(span) => {
+                let slice = unsafe { std::slice::from_raw_parts(span.src, span.count) };
+                Ok(am::ScalarValue::Bytes(slice.to_vec()))
+            }
+            Counter(c) => Ok(am::ScalarValue::Counter(c.into())),
+            F64(f) => Ok(am::ScalarValue::F64(*f)),
+            Int(i) => Ok(am::ScalarValue::Int(*i)),
+            Str(c_str) => {
+                let smol_str = unsafe { SmolStr::new(to_str(*c_str)) };
+                Ok(am::ScalarValue::Str(smol_str))
+            }
+            Timestamp(t) => Ok(am::ScalarValue::Timestamp(*t)),
+            Uint(u) => Ok(am::ScalarValue::Uint(*u)),
+            Null => Ok(am::ScalarValue::Null),
+            ActorId(_) => Err(InvalidValueType {
+                expected,
+                unexpected: type_name::<AMactorId>().to_string(),
+            }),
+            ChangeHashes(_) => Err(InvalidValueType {
+                expected,
+                unexpected: type_name::<AMchangeHashes>().to_string(),
+            }),
+            Changes(_) => Err(InvalidValueType {
+                expected,
+                unexpected: type_name::<AMchanges>().to_string(),
+            }),
+            Doc(_) => Err(InvalidValueType {
+                expected,
+                unexpected: type_name::<AMdoc>().to_string(),
+            }),
+            ListItems(_) => Err(InvalidValueType {
+                expected,
+                unexpected: type_name::<AMlistItems>().to_string(),
+            }),
+            MapItems(_) => Err(InvalidValueType {
+                expected,
+                unexpected: type_name::<AMmapItems>().to_string(),
+            }),
+            ObjId(_) => Err(InvalidValueType {
+                expected,
+                unexpected: type_name::<AMobjId>().to_string(),
+            }),
+            ObjItems(_) => Err(InvalidValueType {
+                expected,
+                unexpected: type_name::<AMobjItems>().to_string(),
+            }),
+            Strs(_) => Err(InvalidValueType {
+                expected,
+                unexpected: type_name::<AMstrs>().to_string(),
+            }),
+            SyncMessage(_) => Err(InvalidValueType {
+                expected,
+                unexpected: type_name::<AMsyncMessage>().to_string(),
+            }),
+            SyncState(_) => Err(InvalidValueType {
+                expected,
+                unexpected: type_name::<AMsyncState>().to_string(),
+            }),
+            Void => Err(InvalidValueType {
+                expected,
+                unexpected: type_name::<()>().to_string(),
+            }),
+        }
+    }
+}
+
 /// \memberof AMvalue
 /// \brief Tests the equality of two values.
 ///
 /// \param[in] value1 A pointer to an `AMvalue` struct.
 /// \param[in] value2 A pointer to an `AMvalue` struct.
-/// \return `true` if \p value1` == `\p value2 and `false` otherwise.
-/// \pre \p value1` != NULL`.
-/// \pre \p value2` != NULL`.
+/// \return `true` if \p value1 `==` \p value2 and `false` otherwise.
+/// \pre \p value1 `!= NULL`.
+/// \pre \p value2 `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -400,8 +473,22 @@ impl From<am::sync::State> for AMresult {
 }
 
 impl From<am::Values<'static>> for AMresult {
-    fn from(values: am::Values<'static>) -> Self {
-        AMresult::ObjItems(values.map(|(v, o)| AMobjItem::new(v.clone(), o)).collect())
+    fn from(pairs: am::Values<'static>) -> Self {
+        AMresult::ObjItems(pairs.map(|(v, o)| AMobjItem::new(v.clone(), o)).collect())
+    }
+}
+
+impl From<Result<Vec<(am::Value<'static>, am::ObjId)>, am::AutomergeError>> for AMresult {
+    fn from(maybe: Result<Vec<(am::Value<'static>, am::ObjId)>, am::AutomergeError>) -> Self {
+        match maybe {
+            Ok(pairs) => AMresult::ObjItems(
+                pairs
+                    .into_iter()
+                    .map(|(v, o)| AMobjItem::new(v, o))
+                    .collect(),
+            ),
+            Err(e) => AMresult::err(&e.to_string()),
+        }
     }
 }
 
@@ -512,8 +599,10 @@ impl From<Result<am::Value<'static>, am::AutomergeError>> for AMresult {
 impl From<Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>) -> Self {
         match maybe {
-            // \todo Ensure that it's alright to ignore the `am::ObjId` value.
-            Ok(Some((value, _))) => AMresult::Value(value, RefCell::<Option<CString>>::default()),
+            Ok(Some((value, obj_id))) => match value {
+                am::Value::Object(_) => AMresult::ObjId(AMobjId::new(obj_id)),
+                _ => AMresult::Value(value, RefCell::<Option<CString>>::default()),
+            },
             Ok(None) => AMresult::Void,
             Err(e) => AMresult::err(&e.to_string()),
         }
@@ -639,7 +728,7 @@ pub enum AMstatus {
 ///
 /// \param[in] result A pointer to an `AMresult` struct.
 /// \return A UTF-8 string value or `NULL`.
-/// \pre \p result` != NULL`.
+/// \pre \p result `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -656,7 +745,7 @@ pub unsafe extern "C" fn AMerrorMessage(result: *const AMresult) -> *const c_cha
 /// \brief Deallocates the storage for a result.
 ///
 /// \param[in,out] result A pointer to an `AMresult` struct.
-/// \pre \p result` != NULL`.
+/// \pre \p result `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -674,7 +763,7 @@ pub unsafe extern "C" fn AMfree(result: *mut AMresult) {
 ///
 /// \param[in] result A pointer to an `AMresult` struct.
 /// \return The count of values in \p result.
-/// \pre \p result` != NULL`.
+/// \pre \p result `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -710,7 +799,7 @@ pub unsafe extern "C" fn AMresultSize(result: *const AMresult) -> usize {
 ///
 /// \param[in] result A pointer to an `AMresult` struct.
 /// \return An `AMstatus` enum tag.
-/// \pre \p result` != NULL`.
+/// \pre \p result `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -729,7 +818,7 @@ pub unsafe extern "C" fn AMresultStatus(result: *const AMresult) -> AMstatus {
 ///
 /// \param[in] result A pointer to an `AMresult` struct.
 /// \return An `AMvalue` struct.
-/// \pre \p result` != NULL`.
+/// \pre \p result `!= NULL`.
 /// \internal
 ///
 /// # Safety

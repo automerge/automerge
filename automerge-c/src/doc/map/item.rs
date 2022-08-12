@@ -6,7 +6,7 @@ use std::os::raw::c_char;
 use crate::obj::AMobjId;
 use crate::result::AMvalue;
 
-/// \enum AMmapItem
+/// \struct AMmapItem
 /// \brief An item in a map object.
 #[repr(C)]
 pub struct AMmapItem {
@@ -47,7 +47,7 @@ impl From<&AMmapItem> for (String, am::Value<'static>, am::ObjId) {
 ///
 /// \param[in] map_item A pointer to an `AMmapItem` struct.
 /// \return A 64-bit unsigned integer.
-/// \pre \p map_item` != NULL`.
+/// \pre \p map_item `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -66,7 +66,7 @@ pub unsafe extern "C" fn AMmapItemKey(map_item: *const AMmapItem) -> *const c_ch
 ///
 /// \param[in] map_item A pointer to an `AMmapItem` struct.
 /// \return A pointer to an `AMobjId` struct.
-/// \pre \p map_item` != NULL`.
+/// \pre \p map_item `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -85,7 +85,7 @@ pub unsafe extern "C" fn AMmapItemObjId(map_item: *const AMmapItem) -> *const AM
 ///
 /// \param[in] map_item A pointer to an `AMmapItem` struct.
 /// \return An `AMvalue` struct.
-/// \pre \p map_item` != NULL`.
+/// \pre \p map_item `!= NULL`.
 /// \internal
 ///
 /// # Safety

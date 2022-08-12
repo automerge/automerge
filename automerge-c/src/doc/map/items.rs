@@ -190,7 +190,7 @@ impl Default for AMmapItems {
 /// \param[in,out] map_items A pointer to an `AMmapItems` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
-/// \pre \p map_items` != NULL`.
+/// \pre \p map_items `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -208,9 +208,9 @@ pub unsafe extern "C" fn AMmapItemsAdvance(map_items: *mut AMmapItems, n: isize)
 ///
 /// \param[in] map_items1 A pointer to an `AMmapItems` struct.
 /// \param[in] map_items2 A pointer to an `AMmapItems` struct.
-/// \return `true` if \p map_items1` == `\p map_items2 and `false` otherwise.
-/// \pre \p map_items1` != NULL`.
-/// \pre \p map_items2` != NULL`.
+/// \return `true` if \p map_items1 `==` \p map_items2 and `false` otherwise.
+/// \pre \p map_items1 `!= NULL`.
+/// \pre \p map_items2 `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -238,7 +238,7 @@ pub unsafe extern "C" fn AMmapItemsEqual(
 ///              number of positions to advance.
 /// \return A pointer to an `AMmapItem` struct that's `NULL` when \p map_items
 ///         was previously advanced past its forward/reverse limit.
-/// \pre \p map_items` != NULL`.
+/// \pre \p map_items `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -264,7 +264,7 @@ pub unsafe extern "C" fn AMmapItemsNext(map_items: *mut AMmapItems, n: isize) ->
 ///              number of positions to advance.
 /// \return A pointer to an `AMmapItem` struct that's `NULL` when \p map_items
 ///         is presently advanced past its forward/reverse limit.
-/// \pre \p map_items` != NULL`.
+/// \pre \p map_items `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -285,7 +285,7 @@ pub unsafe extern "C" fn AMmapItemsPrev(map_items: *mut AMmapItems, n: isize) ->
 ///
 /// \param[in] map_items A pointer to an `AMmapItems` struct.
 /// \return The count of values in \p map_items.
-/// \pre \p map_items` != NULL`.
+/// \pre \p map_items `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -305,7 +305,7 @@ pub unsafe extern "C" fn AMmapItemsSize(map_items: *const AMmapItems) -> usize {
 ///
 /// \param[in] map_items A pointer to an `AMmapItems` struct.
 /// \return An `AMmapItems` struct
-/// \pre \p map_items` != NULL`.
+/// \pre \p map_items `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -324,7 +324,7 @@ pub unsafe extern "C" fn AMmapItemsReversed(map_items: *const AMmapItems) -> AMm
 ///
 /// \param[in] map_items A pointer to an `AMmapItems` struct.
 /// \return An `AMmapItems` struct
-/// \pre \p map_items` != NULL`.
+/// \pre \p map_items `!= NULL`.
 /// \internal
 ///
 /// #Safety

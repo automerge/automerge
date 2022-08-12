@@ -220,7 +220,7 @@ impl Default for AMsyncHaves {
 /// \param[in,out] sync_haves A pointer to an `AMsyncHaves` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
-/// \pre \p sync_haves` != NULL`.
+/// \pre \p sync_haves `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -238,9 +238,9 @@ pub unsafe extern "C" fn AMsyncHavesAdvance(sync_haves: *mut AMsyncHaves, n: isi
 ///
 /// \param[in] sync_haves1 A pointer to an `AMsyncHaves` struct.
 /// \param[in] sync_haves2 A pointer to an `AMsyncHaves` struct.
-/// \return `true` if \p sync_haves1` == `\p sync_haves2 and `false` otherwise.
-/// \pre \p sync_haves1` != NULL`.
-/// \pre \p sync_haves2` != NULL`.
+/// \return `true` if \p sync_haves1 `==` \p sync_haves2 and `false` otherwise.
+/// \pre \p sync_haves1 `!= NULL`.
+/// \pre \p sync_haves2 `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -269,7 +269,7 @@ pub unsafe extern "C" fn AMsyncHavesEqual(
 /// \return A pointer to an `AMsyncHave` struct that's `NULL` when
 ///         \p sync_haves was previously advanced past its forward/reverse
 ///         limit.
-/// \pre \p sync_haves` != NULL`.
+/// \pre \p sync_haves `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -298,7 +298,7 @@ pub unsafe extern "C" fn AMsyncHavesNext(
 ///              number of positions to advance.
 /// \return A pointer to an `AMsyncHave` struct that's `NULL` when
 ///         \p sync_haves is presently advanced past its forward/reverse limit.
-/// \pre \p sync_haves` != NULL`.
+/// \pre \p sync_haves `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -322,7 +322,7 @@ pub unsafe extern "C" fn AMsyncHavesPrev(
 ///
 /// \param[in] sync_haves A pointer to an `AMsyncHaves` struct.
 /// \return The count of values in \p sync_haves.
-/// \pre \p sync_haves` != NULL`.
+/// \pre \p sync_haves `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -342,7 +342,7 @@ pub unsafe extern "C" fn AMsyncHavesSize(sync_haves: *const AMsyncHaves) -> usiz
 ///
 /// \param[in] sync_haves A pointer to an `AMsyncHaves` struct.
 /// \return An `AMsyncHaves` struct
-/// \pre \p sync_haves` != NULL`.
+/// \pre \p sync_haves `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -362,7 +362,7 @@ pub unsafe extern "C" fn AMsyncHavesReversed(sync_haves: *const AMsyncHaves) -> 
 ///
 /// \param[in] sync_haves A pointer to an `AMsyncHaves` struct.
 /// \return An `AMsyncHaves` struct
-/// \pre \p sync_haves` != NULL`.
+/// \pre \p sync_haves `!= NULL`.
 /// \internal
 ///
 /// #Safety

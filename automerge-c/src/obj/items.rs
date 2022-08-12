@@ -190,7 +190,7 @@ impl Default for AMobjItems {
 /// \param[in,out] obj_items A pointer to an `AMobjItems` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
-/// \pre \p obj_items` != NULL`.
+/// \pre \p obj_items `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -208,9 +208,9 @@ pub unsafe extern "C" fn AMobjItemsAdvance(obj_items: *mut AMobjItems, n: isize)
 ///
 /// \param[in] obj_items1 A pointer to an `AMobjItems` struct.
 /// \param[in] obj_items2 A pointer to an `AMobjItems` struct.
-/// \return `true` if \p obj_items1` == `\p obj_items2 and `false` otherwise.
-/// \pre \p obj_items1` != NULL`.
-/// \pre \p obj_items2` != NULL`.
+/// \return `true` if \p obj_items1 `==` \p obj_items2 and `false` otherwise.
+/// \pre \p obj_items1 `!= NULL`.
+/// \pre \p obj_items2 `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -238,7 +238,7 @@ pub unsafe extern "C" fn AMobjItemsEqual(
 ///              number of positions to advance.
 /// \return A pointer to an `AMobjItem` struct that's `NULL` when \p obj_items
 ///         was previously advanced past its forward/reverse limit.
-/// \pre \p obj_items` != NULL`.
+/// \pre \p obj_items `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -264,7 +264,7 @@ pub unsafe extern "C" fn AMobjItemsNext(obj_items: *mut AMobjItems, n: isize) ->
 ///              number of positions to advance.
 /// \return A pointer to an `AMobjItem` struct that's `NULL` when \p obj_items
 ///         is presently advanced past its forward/reverse limit.
-/// \pre \p obj_items` != NULL`.
+/// \pre \p obj_items `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -285,7 +285,7 @@ pub unsafe extern "C" fn AMobjItemsPrev(obj_items: *mut AMobjItems, n: isize) ->
 ///
 /// \param[in] obj_items A pointer to an `AMobjItems` struct.
 /// \return The count of values in \p obj_items.
-/// \pre \p obj_items` != NULL`.
+/// \pre \p obj_items `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -305,7 +305,7 @@ pub unsafe extern "C" fn AMobjItemsSize(obj_items: *const AMobjItems) -> usize {
 ///
 /// \param[in] obj_items A pointer to an `AMobjItems` struct.
 /// \return An `AMobjItems` struct
-/// \pre \p obj_items` != NULL`.
+/// \pre \p obj_items `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -325,7 +325,7 @@ pub unsafe extern "C" fn AMobjItemsReversed(obj_items: *const AMobjItems) -> AMo
 ///
 /// \param[in] obj_items A pointer to an `AMobjItems` struct.
 /// \return An `AMobjItems` struct
-/// \pre \p obj_items` != NULL`.
+/// \pre \p obj_items `!= NULL`.
 /// \internal
 ///
 /// #Safety

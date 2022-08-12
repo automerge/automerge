@@ -58,7 +58,7 @@ impl Deref for AMobjId {
 ///
 /// \param[in] obj_id A pointer to an `AMobjId` struct.
 /// \return A pointer to an `AMactorId` struct or `NULL`.
-/// \pre \p obj_id` != NULL`.
+/// \pre \p obj_id `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -76,7 +76,7 @@ pub unsafe extern "C" fn AMobjIdActorId(obj_id: *const AMobjId) -> *const AMacto
 ///
 /// \param[in] obj_id A pointer to an `AMobjId` struct.
 /// \return A 64-bit unsigned integer.
-/// \pre \p obj_id` != NULL`.
+/// \pre \p obj_id `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -98,9 +98,9 @@ pub unsafe extern "C" fn AMobjIdCounter(obj_id: *const AMobjId) -> u64 {
 ///
 /// \param[in] obj_id1 A pointer to an `AMobjId` struct.
 /// \param[in] obj_id2 A pointer to an `AMobjId` struct.
-/// \return `true` if \p obj_id1` == `\p obj_id2 and `false` otherwise.
-/// \pre \p obj_id1` != NULL`.
-/// \pre \p obj_id2` != NULL`.
+/// \return `true` if \p obj_id1 `==` \p obj_id2 and `false` otherwise.
+/// \pre \p obj_id1 `!= NULL`.
+/// \pre \p obj_id2 `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -119,7 +119,7 @@ pub unsafe extern "C" fn AMobjIdEqual(obj_id1: *const AMobjId, obj_id2: *const A
 ///
 /// \param[in] obj_id A pointer to an `AMobjId` struct.
 /// \return A 64-bit unsigned integer.
-/// \pre \p obj_id` != NULL`.
+/// \pre \p obj_id `!= NULL`.
 /// \internal
 ///
 /// # Safety

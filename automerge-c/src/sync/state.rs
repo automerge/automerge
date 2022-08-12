@@ -61,8 +61,8 @@ impl From<AMsyncState> for *mut AMsyncState {
 /// \param[in] count The number of bytes in \p src to decode.
 /// \return A pointer to an `AMresult` struct containing an `AMsyncState`
 ///         struct.
-/// \pre \p src` != NULL`.
-/// \pre `0 <=` \p count` <= `size of \p src.
+/// \pre \p src `!= NULL`.
+/// \pre `0 <` \p count `<= sizeof(`\p src`)`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
@@ -81,7 +81,7 @@ pub unsafe extern "C" fn AMsyncStateDecode(src: *const u8, count: usize) -> *mut
 /// \param[in] sync_state A pointer to an `AMsyncState` struct.
 /// \return A pointer to an `AMresult` struct containing an array of bytes as
 ///         an `AMbyteSpan` struct.
-/// \pre \p sync_state` != NULL`.
+/// \pre \p sync_state `!= NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
@@ -98,9 +98,9 @@ pub unsafe extern "C" fn AMsyncStateEncode(sync_state: *const AMsyncState) -> *m
 ///
 /// \param[in] sync_state1 A pointer to an `AMsyncState` struct.
 /// \param[in] sync_state2 A pointer to an `AMsyncState` struct.
-/// \return `true` if \p sync_state1` == `\p sync_state2 and `false` otherwise.
-/// \pre \p sync_state1` != NULL`.
-/// \pre \p sync_state2` != NULL`.
+/// \return `true` if \p sync_state1 `==` \p sync_state2 and `false` otherwise.
+/// \pre \p sync_state1 `!= NULL`.
+/// \pre \p sync_state2 `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -135,7 +135,7 @@ pub extern "C" fn AMsyncStateInit() -> *mut AMresult {
 ///
 /// \param[in] sync_state A pointer to an `AMsyncState` struct.
 /// \return An `AMchangeHashes` struct.
-/// \pre \p sync_state` != NULL`.
+/// \pre \p sync_state `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -154,7 +154,7 @@ pub unsafe extern "C" fn AMsyncStateSharedHeads(sync_state: *const AMsyncState) 
 ///
 /// \param[in] sync_state A pointer to an `AMsyncState` struct.
 /// \return An `AMchangeHashes` struct.
-/// \pre \p sync_state` != NULL`.
+/// \pre \p sync_state `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -177,8 +177,8 @@ pub unsafe extern "C" fn AMsyncStateLastSentHeads(
 /// \param[out] has_value A pointer to a boolean flag that is set to `true` if
 ///             the returned `AMhaves` struct is relevant, `false` otherwise.
 /// \return An `AMhaves` struct.
-/// \pre \p sync_state` != NULL`.
-/// \pre \p has_value` != NULL`.
+/// \pre \p sync_state `!= NULL`.
+/// \pre \p has_value `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -207,8 +207,8 @@ pub unsafe extern "C" fn AMsyncStateTheirHaves(
 ///             the returned `AMchangeHashes` struct is relevant, `false`
 ///             otherwise.
 /// \return An `AMchangeHashes` struct.
-/// \pre \p sync_state` != NULL`.
-/// \pre \p has_value` != NULL`.
+/// \pre \p sync_state `!= NULL`.
+/// \pre \p has_value `!= NULL`.
 /// \internal
 ///
 /// # Safety
@@ -237,8 +237,8 @@ pub unsafe extern "C" fn AMsyncStateTheirHeads(
 ///             the returned `AMchangeHashes` struct is relevant, `false`
 ///             otherwise.
 /// \return An `AMchangeHashes` struct.
-/// \pre \p sync_state` != NULL`.
-/// \pre \p has_value` != NULL`.
+/// \pre \p sync_state `!= NULL`.
+/// \pre \p has_value `!= NULL`.
 /// \internal
 ///
 /// # Safety

@@ -14,7 +14,7 @@ extern int run_list_tests(void);
 
 extern int run_map_tests(void);
 
-extern int run_sync_tests(void);
+extern int run_ported_wasm_suite(void);
 
 int main(void) {
     return (
@@ -22,6 +22,6 @@ int main(void) {
         run_doc_tests() +
         run_list_tests() +
         run_map_tests() +
-        run_sync_tests()
+        run_ported_wasm_suite()
     );
 }

@@ -193,7 +193,7 @@ impl Default for AMchangeHashes {
 /// \param[in,out] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
-/// \pre \p change_hashes` != NULL`.
+/// \pre \p change_hashes `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -212,10 +212,10 @@ pub unsafe extern "C" fn AMchangeHashesAdvance(change_hashes: *mut AMchangeHashe
 /// \param[in] change_hashes1 A pointer to an `AMchangeHashes` struct.
 /// \param[in] change_hashes2 A pointer to an `AMchangeHashes` struct.
 /// \return `-1` if \p change_hashes1 `<` \p change_hashes2, `0` if
-///         \p change_hashes1` == `\p change_hashes2 and `1` if
+///         \p change_hashes1 `==` \p change_hashes2 and `1` if
 ///         \p change_hashes1 `>` \p change_hashes2.
-/// \pre \p change_hashes1` != NULL`.
-/// \pre \p change_hashes2` != NULL`.
+/// \pre \p change_hashes1 `!= NULL`.
+/// \pre \p change_hashes2 `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -240,7 +240,7 @@ pub unsafe extern "C" fn AMchangeHashesCmp(
     }
 }
 
-/// \memberof AMchangeHashesInit
+/// \memberof AMchangeHashes
 /// \brief Allocates an iterator over a sequence of change hashes and
 ///        initializes it from a sequence of byte spans.
 ///
@@ -248,8 +248,8 @@ pub unsafe extern "C" fn AMchangeHashesCmp(
 /// \param[in] count The number of `AMbyteSpan` structs to copy from \p src.
 /// \return A pointer to an `AMresult` struct containing an `AMchangeHashes`
 ///         struct.
-/// \pre \p src` != NULL`.
-/// \pre `0 <=` \p count` <= `size of \p src.
+/// \pre \p src `!= NULL`.
+/// \pre `0 <` \p count `<= sizeof(`\p src`) / sizeof(AMbyteSpan)`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
@@ -286,7 +286,7 @@ pub unsafe extern "C" fn AMchangeHashesInit(src: *const AMbyteSpan, count: usize
 ///              number of positions to advance.
 /// \return An `AMbyteSpan` struct with `.src == NULL` when \p change_hashes
 ///         was previously advanced past its forward/reverse limit.
-/// \pre \p change_hashes` != NULL`.
+/// \pre \p change_hashes `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -315,7 +315,7 @@ pub unsafe extern "C" fn AMchangeHashesNext(
 ///              number of positions to advance.
 /// \return An `AMbyteSpan` struct with `.src == NULL` when \p change_hashes is
 ///         presently advanced past its forward/reverse limit.
-/// \pre \p change_hashes` != NULL`.
+/// \pre \p change_hashes `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -339,7 +339,7 @@ pub unsafe extern "C" fn AMchangeHashesPrev(
 ///
 /// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \return The count of values in \p change_hashes.
-/// \pre \p change_hashes` != NULL`.
+/// \pre \p change_hashes `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -359,7 +359,7 @@ pub unsafe extern "C" fn AMchangeHashesSize(change_hashes: *const AMchangeHashes
 ///
 /// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \return An `AMchangeHashes` struct
-/// \pre \p change_hashes` != NULL`.
+/// \pre \p change_hashes `!= NULL`.
 /// \internal
 ///
 /// #Safety
@@ -381,7 +381,7 @@ pub unsafe extern "C" fn AMchangeHashesReversed(
 ///
 /// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \return An `AMchangeHashes` struct
-/// \pre \p change_hashes` != NULL`.
+/// \pre \p change_hashes `!= NULL`.
 /// \internal
 ///
 /// #Safety
