@@ -86,10 +86,10 @@ Public Member Functions</h2></td></tr>
 <tr class="memitem:a10eb8236bae9014fca457db405b6bb49"><td class="memItemLeft" align="right" valign="top">bool&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMmapItems.html#a10eb8236bae9014fca457db405b6bb49">AMmapItemsEqual</a> (const struct <a class="el" href="structAMmapItems.html">AMmapItems</a> *map_items1, const struct <a class="el" href="structAMmapItems.html">AMmapItems</a> *map_items2)</td></tr>
 <tr class="memdesc:a10eb8236bae9014fca457db405b6bb49"><td class="mdescLeft">&#160;</td><td class="mdescRight">Tests the equality of two sequences of map object items underlying a pair of iterators.  <a href="structAMmapItems.html#a10eb8236bae9014fca457db405b6bb49">More...</a><br /></td></tr>
 <tr class="separator:a10eb8236bae9014fca457db405b6bb49"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a0bab093f0a85e02fa1a4d3e10bccde26"><td class="memItemLeft" align="right" valign="top">const struct AMmapItem *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMmapItems.html#a0bab093f0a85e02fa1a4d3e10bccde26">AMmapItemsNext</a> (struct <a class="el" href="structAMmapItems.html">AMmapItems</a> *map_items, ptrdiff_t n)</td></tr>
+<tr class="memitem:a0bab093f0a85e02fa1a4d3e10bccde26"><td class="memItemLeft" align="right" valign="top">const struct <a class="el" href="structAMmapItem.html">AMmapItem</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMmapItems.html#a0bab093f0a85e02fa1a4d3e10bccde26">AMmapItemsNext</a> (struct <a class="el" href="structAMmapItems.html">AMmapItems</a> *map_items, ptrdiff_t n)</td></tr>
 <tr class="memdesc:a0bab093f0a85e02fa1a4d3e10bccde26"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the map object item at the current position of an iterator over a sequence of map object items and then advances it by at most <code>|n|</code> positions where the sign of <code>n</code> is relative to the iterator's direction.  <a href="structAMmapItems.html#a0bab093f0a85e02fa1a4d3e10bccde26">More...</a><br /></td></tr>
 <tr class="separator:a0bab093f0a85e02fa1a4d3e10bccde26"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a3dfa65b5b61344e9aedd1e78764496cc"><td class="memItemLeft" align="right" valign="top">const struct AMmapItem *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMmapItems.html#a3dfa65b5b61344e9aedd1e78764496cc">AMmapItemsPrev</a> (struct <a class="el" href="structAMmapItems.html">AMmapItems</a> *map_items, ptrdiff_t n)</td></tr>
+<tr class="memitem:a3dfa65b5b61344e9aedd1e78764496cc"><td class="memItemLeft" align="right" valign="top">const struct <a class="el" href="structAMmapItem.html">AMmapItem</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMmapItems.html#a3dfa65b5b61344e9aedd1e78764496cc">AMmapItemsPrev</a> (struct <a class="el" href="structAMmapItems.html">AMmapItems</a> *map_items, ptrdiff_t n)</td></tr>
 <tr class="memdesc:a3dfa65b5b61344e9aedd1e78764496cc"><td class="mdescLeft">&#160;</td><td class="mdescRight">Advances an iterator over a sequence of map object items by at most <code>|n|</code> positions where the sign of <code>n</code> is relative to the iterator's direction and then gets the map object item at its new position.  <a href="structAMmapItems.html#a3dfa65b5b61344e9aedd1e78764496cc">More...</a><br /></td></tr>
 <tr class="separator:a3dfa65b5b61344e9aedd1e78764496cc"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:aee895fccda18ccd794c103f7048ada1b"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMmapItems.html">AMmapItems</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMmapItems.html#aee895fccda18ccd794c103f7048ada1b">AMmapItemsReversed</a> (const struct <a class="el" href="structAMmapItems.html">AMmapItems</a> *map_items)</td></tr>
@@ -144,7 +144,7 @@ Public Attributes</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>map_items<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>map_items</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -182,10 +182,10 @@ Public Attributes</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section return"><dt>Returns</dt><dd><code>true</code> if <code>map_items1<code>==</code><code>map_items2</code> and</code> <code>false</code> otherwise. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>map_items1<code>!=</code> NULL</code>. </dd>
+<dl class="section return"><dt>Returns</dt><dd><code>true</code> if <code>map_items1</code> <code>==</code> <code>map_items2</code> and <code>false</code> otherwise. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>map_items1</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>map_items2<code>!=</code> NULL</code>. </dd></dl>
+<code>map_items2</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -196,7 +196,7 @@ Public Attributes</h2></td></tr>
 <div class="memproto">
       <table class="memname">
         <tr>
-          <td class="memname">const struct AMmapItem * AMmapItemsNext </td>
+          <td class="memname">const struct <a class="el" href="structAMmapItem.html">AMmapItem</a> * AMmapItemsNext </td>
           <td>(</td>
           <td class="paramtype">struct <a class="el" href="structAMmapItems.html">AMmapItems</a> *&#160;</td>
           <td class="paramname"><em>map_items</em>, </td>
@@ -223,8 +223,8 @@ Public Attributes</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code>AMmapItem</code> struct that's <code>NULL</code> when <code>map_items</code> was previously advanced past its forward/reverse limit. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>map_items<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMmapItem.html" title="An item in a map object.">AMmapItem</a></code> struct that's <code>NULL</code> when <code>map_items</code> was previously advanced past its forward/reverse limit. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>map_items</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -235,7 +235,7 @@ Public Attributes</h2></td></tr>
 <div class="memproto">
       <table class="memname">
         <tr>
-          <td class="memname">const struct AMmapItem * AMmapItemsPrev </td>
+          <td class="memname">const struct <a class="el" href="structAMmapItem.html">AMmapItem</a> * AMmapItemsPrev </td>
           <td>(</td>
           <td class="paramtype">struct <a class="el" href="structAMmapItems.html">AMmapItems</a> *&#160;</td>
           <td class="paramname"><em>map_items</em>, </td>
@@ -262,8 +262,8 @@ Public Attributes</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code>AMmapItem</code> struct that's <code>NULL</code> when <code>map_items</code> is presently advanced past its forward/reverse limit. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>map_items<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMmapItem.html" title="An item in a map object.">AMmapItem</a></code> struct that's <code>NULL</code> when <code>map_items</code> is presently advanced past its forward/reverse limit. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>map_items</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -291,7 +291,7 @@ Public Attributes</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMmapItems.html" title="A random-access iterator over a sequence of map object items.">AMmapItems</a></code> struct </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>map_items<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>map_items</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -319,7 +319,7 @@ Public Attributes</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMmapItems.html" title="A random-access iterator over a sequence of map object items.">AMmapItems</a></code> struct </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>map_items<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>map_items</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -347,7 +347,7 @@ Public Attributes</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>The count of values in <code>map_items</code>. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>map_items<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>map_items</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>

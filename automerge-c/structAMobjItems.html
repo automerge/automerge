@@ -86,10 +86,10 @@ Public Member Functions</h2></td></tr>
 <tr class="memitem:a3d9a8c48faecd2482ecdbb32bb2e72b9"><td class="memItemLeft" align="right" valign="top">bool&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMobjItems.html#a3d9a8c48faecd2482ecdbb32bb2e72b9">AMobjItemsEqual</a> (const struct <a class="el" href="structAMobjItems.html">AMobjItems</a> *obj_items1, const struct <a class="el" href="structAMobjItems.html">AMobjItems</a> *obj_items2)</td></tr>
 <tr class="memdesc:a3d9a8c48faecd2482ecdbb32bb2e72b9"><td class="mdescLeft">&#160;</td><td class="mdescRight">Tests the equality of two sequences of object items underlying a pair of iterators.  <a href="structAMobjItems.html#a3d9a8c48faecd2482ecdbb32bb2e72b9">More...</a><br /></td></tr>
 <tr class="separator:a3d9a8c48faecd2482ecdbb32bb2e72b9"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a767c4cb170712b5a817aff4bfd52fa55"><td class="memItemLeft" align="right" valign="top">const struct AMobjItem *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMobjItems.html#a767c4cb170712b5a817aff4bfd52fa55">AMobjItemsNext</a> (struct <a class="el" href="structAMobjItems.html">AMobjItems</a> *obj_items, ptrdiff_t n)</td></tr>
+<tr class="memitem:a767c4cb170712b5a817aff4bfd52fa55"><td class="memItemLeft" align="right" valign="top">const struct <a class="el" href="structAMobjItem.html">AMobjItem</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMobjItems.html#a767c4cb170712b5a817aff4bfd52fa55">AMobjItemsNext</a> (struct <a class="el" href="structAMobjItems.html">AMobjItems</a> *obj_items, ptrdiff_t n)</td></tr>
 <tr class="memdesc:a767c4cb170712b5a817aff4bfd52fa55"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the object item at the current position of an iterator over a sequence of object items and then advances it by at most <code>|n|</code> positions where the sign of <code>n</code> is relative to the iterator's direction.  <a href="structAMobjItems.html#a767c4cb170712b5a817aff4bfd52fa55">More...</a><br /></td></tr>
 <tr class="separator:a767c4cb170712b5a817aff4bfd52fa55"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a2d20a471c81085cea886902c3bedd464"><td class="memItemLeft" align="right" valign="top">const struct AMobjItem *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMobjItems.html#a2d20a471c81085cea886902c3bedd464">AMobjItemsPrev</a> (struct <a class="el" href="structAMobjItems.html">AMobjItems</a> *obj_items, ptrdiff_t n)</td></tr>
+<tr class="memitem:a2d20a471c81085cea886902c3bedd464"><td class="memItemLeft" align="right" valign="top">const struct <a class="el" href="structAMobjItem.html">AMobjItem</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMobjItems.html#a2d20a471c81085cea886902c3bedd464">AMobjItemsPrev</a> (struct <a class="el" href="structAMobjItems.html">AMobjItems</a> *obj_items, ptrdiff_t n)</td></tr>
 <tr class="memdesc:a2d20a471c81085cea886902c3bedd464"><td class="mdescLeft">&#160;</td><td class="mdescRight">Advances an iterator over a sequence of object items by at most <code>|n|</code> positions where the sign of <code>n</code> is relative to the iterator's direction and then gets the object item at its new position.  <a href="structAMobjItems.html#a2d20a471c81085cea886902c3bedd464">More...</a><br /></td></tr>
 <tr class="separator:a2d20a471c81085cea886902c3bedd464"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a8c77d3fb97d70cae7111ce817da96954"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMobjItems.html">AMobjItems</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMobjItems.html#a8c77d3fb97d70cae7111ce817da96954">AMobjItemsReversed</a> (const struct <a class="el" href="structAMobjItems.html">AMobjItems</a> *obj_items)</td></tr>
@@ -144,7 +144,7 @@ Public Attributes</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>obj_items<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>obj_items</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -182,10 +182,10 @@ Public Attributes</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section return"><dt>Returns</dt><dd><code>true</code> if <code>obj_items1<code>==</code><code>obj_items2</code> and</code> <code>false</code> otherwise. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>obj_items1<code>!=</code> NULL</code>. </dd>
+<dl class="section return"><dt>Returns</dt><dd><code>true</code> if <code>obj_items1</code> <code>==</code> <code>obj_items2</code> and <code>false</code> otherwise. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>obj_items1</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>obj_items2<code>!=</code> NULL</code>. </dd></dl>
+<code>obj_items2</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -196,7 +196,7 @@ Public Attributes</h2></td></tr>
 <div class="memproto">
       <table class="memname">
         <tr>
-          <td class="memname">const struct AMobjItem * AMobjItemsNext </td>
+          <td class="memname">const struct <a class="el" href="structAMobjItem.html">AMobjItem</a> * AMobjItemsNext </td>
           <td>(</td>
           <td class="paramtype">struct <a class="el" href="structAMobjItems.html">AMobjItems</a> *&#160;</td>
           <td class="paramname"><em>obj_items</em>, </td>
@@ -223,8 +223,8 @@ Public Attributes</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code>AMobjItem</code> struct that's <code>NULL</code> when <code>obj_items</code> was previously advanced past its forward/reverse limit. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>obj_items<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMobjItem.html" title="An item in an object.">AMobjItem</a></code> struct that's <code>NULL</code> when <code>obj_items</code> was previously advanced past its forward/reverse limit. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>obj_items</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -235,7 +235,7 @@ Public Attributes</h2></td></tr>
 <div class="memproto">
       <table class="memname">
         <tr>
-          <td class="memname">const struct AMobjItem * AMobjItemsPrev </td>
+          <td class="memname">const struct <a class="el" href="structAMobjItem.html">AMobjItem</a> * AMobjItemsPrev </td>
           <td>(</td>
           <td class="paramtype">struct <a class="el" href="structAMobjItems.html">AMobjItems</a> *&#160;</td>
           <td class="paramname"><em>obj_items</em>, </td>
@@ -262,8 +262,8 @@ Public Attributes</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code>AMobjItem</code> struct that's <code>NULL</code> when <code>obj_items</code> is presently advanced past its forward/reverse limit. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>obj_items<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMobjItem.html" title="An item in an object.">AMobjItem</a></code> struct that's <code>NULL</code> when <code>obj_items</code> is presently advanced past its forward/reverse limit. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>obj_items</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -291,7 +291,7 @@ Public Attributes</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMobjItems.html" title="A random-access iterator over a sequence of object items.">AMobjItems</a></code> struct </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>obj_items<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>obj_items</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -319,7 +319,7 @@ Public Attributes</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMobjItems.html" title="A random-access iterator over a sequence of object items.">AMobjItems</a></code> struct </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>obj_items<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>obj_items</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -347,7 +347,7 @@ Public Attributes</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>The count of values in <code>obj_items</code>. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>obj_items<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>obj_items</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>

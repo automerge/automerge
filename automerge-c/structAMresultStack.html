@@ -132,7 +132,7 @@ Public Attributes</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>The number of <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> structs freed. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>stack<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>stack</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section post"><dt>Postcondition</dt><dd><code>*stack == NULL</code>. </dd></dl>
 
 </div>
@@ -161,7 +161,7 @@ Public Attributes</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct or <code>NULL</code>. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>stack<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>stack</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section post"><dt>Postcondition</dt><dd><code>*stack == NULL</code>. </dd></dl>
 
 </div>
@@ -215,10 +215,10 @@ Public Attributes</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="unionAMvalue.html" title="A discriminated union of value type variants for a result.">AMvalue</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>stack<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>stack</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>result<code>!=</code> NULL</code>. </dd></dl>
-<dl class="section warning"><dt>Warning</dt><dd>If <code>stack<code>==</code> NULL</code> then <code>result</code> is deallocated in order to prevent a memory leak. </dd></dl>
+<code>result</code> <code>!= NULL</code>. </dd></dl>
+<dl class="section warning"><dt>Warning</dt><dd>If <code>stack</code> <code>== NULL</code> then <code>result</code> is deallocated in order to prevent a memory leak. </dd></dl>
 
 </div>
 </div>

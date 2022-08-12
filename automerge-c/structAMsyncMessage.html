@@ -125,7 +125,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMchanges.html" title="A random-access iterator over a sequence of changes.">AMchanges</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>sync_message<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>sync_message</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -164,9 +164,9 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an <code><a class="el" href="structAMsyncMessage.html" title="A synchronization message for a peer.">AMsyncMessage</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>src<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>src</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>0 &lt;=</code> <code>count<code>&lt;=</code>size</code> of <code>src</code>. </dd></dl>
+<code>0 &lt;</code> <code>count</code> <code>&lt;= sizeof(</code><code>src<code></code>)</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -195,7 +195,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an array of bytes as an <code><a class="el" href="structAMbyteSpan.html" title="A contiguous sequence of bytes.">AMbyteSpan</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>sync_message<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>sync_message</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -224,7 +224,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>An <code>AMhaves</code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>sync_message<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>sync_message</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -252,7 +252,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMchangeHashes.html" title="A random-access iterator over a sequence of change hashes.">AMchangeHashes</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>sync_message<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>sync_message</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -280,7 +280,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMchangeHashes.html" title="A random-access iterator over a sequence of change hashes.">AMchangeHashes</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>sync_message<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>sync_message</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>

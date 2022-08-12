@@ -76,6 +76,11 @@
 <span id="68">68</span>
 <span id="69">69</span>
 <span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::types</span>::{<span class="ident">ActorId</span>, <span class="ident">ScalarValue</span>};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::value::DataType</span>;
 <span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">decoding</span>, <span class="ident">encoding</span>, <span class="ident">ChangeHash</span>};
@@ -107,6 +112,11 @@
     <span class="ident">MissingHash</span>(<span class="ident">ChangeHash</span>),
     <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;increment operations must be against a counter value&quot;</span>)]</span>
     <span class="ident">MissingCounter</span>,
+    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;invalid type of value, expected `{expected}` but received `{unexpected}`&quot;</span>)]</span>
+    <span class="ident">InvalidValueType</span> {
+        <span class="ident">expected</span>: <span class="ident">String</span>,
+        <span class="ident">unexpected</span>: <span class="ident">String</span>,
+    },
     <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;general failure&quot;</span>)]</span>
     <span class="ident">Fail</span>,
 }

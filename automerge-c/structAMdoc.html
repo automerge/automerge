@@ -103,6 +103,9 @@ Public Member Functions</h2></td></tr>
 <tr class="memitem:ab12f2048d8fb759aed650aa7f7c4af22"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#ab12f2048d8fb759aed650aa7f7c4af22">AMgetActorId</a> (const struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc)</td></tr>
 <tr class="memdesc:ab12f2048d8fb759aed650aa7f7c4af22"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets a document's actor identifier.  <a href="structAMdoc.html#ab12f2048d8fb759aed650aa7f7c4af22">More...</a><br /></td></tr>
 <tr class="separator:ab12f2048d8fb759aed650aa7f7c4af22"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a2b4d29afbbf4116dd099a548516653b2"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a2b4d29afbbf4116dd099a548516653b2">AMgetChangeByHash</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const uint8_t *src, size_t count)</td></tr>
+<tr class="memdesc:a2b4d29afbbf4116dd099a548516653b2"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the change added to a document by its respective hash.  <a href="structAMdoc.html#a2b4d29afbbf4116dd099a548516653b2">More...</a><br /></td></tr>
+<tr class="separator:a2b4d29afbbf4116dd099a548516653b2"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:adfbb03c8ca920834e48086af46d115eb"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#adfbb03c8ca920834e48086af46d115eb">AMgetChanges</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMchangeHashes.html">AMchangeHashes</a> *have_deps)</td></tr>
 <tr class="memdesc:adfbb03c8ca920834e48086af46d115eb"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the changes added to a document by their respective hashes.  <a href="structAMdoc.html#adfbb03c8ca920834e48086af46d115eb">More...</a><br /></td></tr>
 <tr class="separator:adfbb03c8ca920834e48086af46d115eb"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -119,7 +122,7 @@ Public Member Functions</h2></td></tr>
 <tr class="memdesc:ac643fc819215e6d9add683f148198c1b"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the hashes of the changes in a document that aren't transitive dependencies of the given hashes of changes.  <a href="structAMdoc.html#ac643fc819215e6d9add683f148198c1b">More...</a><br /></td></tr>
 <tr class="separator:ac643fc819215e6d9add683f148198c1b"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a7c9420ddc91043dd716d47511709cbbe"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a7c9420ddc91043dd716d47511709cbbe">AMkeys</a> (const struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id, const struct <a class="el" href="structAMchangeHashes.html">AMchangeHashes</a> *heads)</td></tr>
-<tr class="memdesc:a7c9420ddc91043dd716d47511709cbbe"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the current or historical keys of an object.  <a href="structAMdoc.html#a7c9420ddc91043dd716d47511709cbbe">More...</a><br /></td></tr>
+<tr class="memdesc:a7c9420ddc91043dd716d47511709cbbe"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the current or historical keys of a map object.  <a href="structAMdoc.html#a7c9420ddc91043dd716d47511709cbbe">More...</a><br /></td></tr>
 <tr class="separator:a7c9420ddc91043dd716d47511709cbbe"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a6951be810036ff609650e64dc53ffb1c"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a6951be810036ff609650e64dc53ffb1c">AMlistDelete</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id, size_t index)</td></tr>
 <tr class="memdesc:a6951be810036ff609650e64dc53ffb1c"><td class="mdescLeft">&#160;</td><td class="mdescRight">Deletes an index in a list object.  <a href="structAMdoc.html#a6951be810036ff609650e64dc53ffb1c">More...</a><br /></td></tr>
@@ -127,6 +130,9 @@ Public Member Functions</h2></td></tr>
 <tr class="memitem:a13c167733b699e7f0e65778334554d61"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a13c167733b699e7f0e65778334554d61">AMlistGet</a> (const struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id, size_t index, const struct <a class="el" href="structAMchangeHashes.html">AMchangeHashes</a> *heads)</td></tr>
 <tr class="memdesc:a13c167733b699e7f0e65778334554d61"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the current or historical value at an index in a list object.  <a href="structAMdoc.html#a13c167733b699e7f0e65778334554d61">More...</a><br /></td></tr>
 <tr class="separator:a13c167733b699e7f0e65778334554d61"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a9d481ad32708b81d21332d2b2f2e6cb1"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a9d481ad32708b81d21332d2b2f2e6cb1">AMlistGetAll</a> (const struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id, size_t index, const struct <a class="el" href="structAMchangeHashes.html">AMchangeHashes</a> *heads)</td></tr>
+<tr class="memdesc:a9d481ad32708b81d21332d2b2f2e6cb1"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets all of the historical values at an index in a list object until its current one or a specific one.  <a href="structAMdoc.html#a9d481ad32708b81d21332d2b2f2e6cb1">More...</a><br /></td></tr>
+<tr class="separator:a9d481ad32708b81d21332d2b2f2e6cb1"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a1df2b38eab17c09ac95586857d451455"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a1df2b38eab17c09ac95586857d451455">AMlistIncrement</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id, size_t index, int64_t value)</td></tr>
 <tr class="memdesc:a1df2b38eab17c09ac95586857d451455"><td class="mdescLeft">&#160;</td><td class="mdescRight">Increments a counter at an index in a list object by the given value.  <a href="structAMdoc.html#a1df2b38eab17c09ac95586857d451455">More...</a><br /></td></tr>
 <tr class="separator:a1df2b38eab17c09ac95586857d451455"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -175,6 +181,9 @@ Public Member Functions</h2></td></tr>
 <tr class="memitem:a4e0d039e882e776a7f8a66e94e1b52b7"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a4e0d039e882e776a7f8a66e94e1b52b7">AMmapGet</a> (const struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id, const char *key, const struct <a class="el" href="structAMchangeHashes.html">AMchangeHashes</a> *heads)</td></tr>
 <tr class="memdesc:a4e0d039e882e776a7f8a66e94e1b52b7"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the current or historical value for a key in a map object.  <a href="structAMdoc.html#a4e0d039e882e776a7f8a66e94e1b52b7">More...</a><br /></td></tr>
 <tr class="separator:a4e0d039e882e776a7f8a66e94e1b52b7"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a52064afd1d0e046992b616fb71c8002b"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a52064afd1d0e046992b616fb71c8002b">AMmapGetAll</a> (const struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id, const char *key, const struct <a class="el" href="structAMchangeHashes.html">AMchangeHashes</a> *heads)</td></tr>
+<tr class="memdesc:a52064afd1d0e046992b616fb71c8002b"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets all of the historical values for a key in a map object until its current one or a specific one.  <a href="structAMdoc.html#a52064afd1d0e046992b616fb71c8002b">More...</a><br /></td></tr>
+<tr class="separator:a52064afd1d0e046992b616fb71c8002b"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a5c51f815a3ecb6486ae355f01d633503"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a5c51f815a3ecb6486ae355f01d633503">AMmapIncrement</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id, const char *key, int64_t value)</td></tr>
 <tr class="memdesc:a5c51f815a3ecb6486ae355f01d633503"><td class="mdescLeft">&#160;</td><td class="mdescRight">Increments a counter for a key in a map object by the given value.  <a href="structAMdoc.html#a5c51f815a3ecb6486ae355f01d633503">More...</a><br /></td></tr>
 <tr class="separator:a5c51f815a3ecb6486ae355f01d633503"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -218,7 +227,7 @@ Public Member Functions</h2></td></tr>
 <tr class="memdesc:aff5ad5e7f125b1249d279332169ee21a"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the current or historical size of an object.  <a href="structAMdoc.html#aff5ad5e7f125b1249d279332169ee21a">More...</a><br /></td></tr>
 <tr class="separator:aff5ad5e7f125b1249d279332169ee21a"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:adb4ab90c3f35634dfb899a5b0be4be23"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#adb4ab90c3f35634dfb899a5b0be4be23">AMobjValues</a> (const struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id, const struct <a class="el" href="structAMchangeHashes.html">AMchangeHashes</a> *heads)</td></tr>
-<tr class="memdesc:adb4ab90c3f35634dfb899a5b0be4be23"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the current or historical values of an object within the given range.  <a href="structAMdoc.html#adb4ab90c3f35634dfb899a5b0be4be23">More...</a><br /></td></tr>
+<tr class="memdesc:adb4ab90c3f35634dfb899a5b0be4be23"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the current or historical values of an object within its entire range.  <a href="structAMdoc.html#adb4ab90c3f35634dfb899a5b0be4be23">More...</a><br /></td></tr>
 <tr class="separator:adb4ab90c3f35634dfb899a5b0be4be23"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a3269826f52ea951994a11e3e7dc74a85"><td class="memItemLeft" align="right" valign="top">size_t&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a3269826f52ea951994a11e3e7dc74a85">AMpendingOps</a> (const struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc)</td></tr>
 <tr class="memdesc:a3269826f52ea951994a11e3e7dc74a85"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the number of pending operations added during a document's current transaction.  <a href="structAMdoc.html#a3269826f52ea951994a11e3e7dc74a85">More...</a><br /></td></tr>
@@ -238,9 +247,12 @@ Public Member Functions</h2></td></tr>
 <tr class="memitem:a49728bf4023d612be699013043b473ed"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a49728bf4023d612be699013043b473ed">AMsetActorId</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMactorId.html">AMactorId</a> *actor_id)</td></tr>
 <tr class="memdesc:a49728bf4023d612be699013043b473ed"><td class="mdescLeft">&#160;</td><td class="mdescRight">Puts the actor identifier of a document.  <a href="structAMdoc.html#a49728bf4023d612be699013043b473ed">More...</a><br /></td></tr>
 <tr class="separator:a49728bf4023d612be699013043b473ed"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a82eeca27761d7e4e6f3570f2f195c67e"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a82eeca27761d7e4e6f3570f2f195c67e">AMspliceText</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id, size_t index, size_t del, const char *text)</td></tr>
-<tr class="memdesc:a82eeca27761d7e4e6f3570f2f195c67e"><td class="mdescLeft">&#160;</td><td class="mdescRight">Splices new characters into the identified text object at a given index.  <a href="structAMdoc.html#a82eeca27761d7e4e6f3570f2f195c67e">More...</a><br /></td></tr>
-<tr class="separator:a82eeca27761d7e4e6f3570f2f195c67e"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a1b6f1ce2fe88c89811efe4d35913e34b"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a1b6f1ce2fe88c89811efe4d35913e34b">AMsplice</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id, size_t pos, size_t del, const union <a class="el" href="unionAMvalue.html">AMvalue</a> *src, size_t count)</td></tr>
+<tr class="memdesc:a1b6f1ce2fe88c89811efe4d35913e34b"><td class="mdescLeft">&#160;</td><td class="mdescRight">Splices values into and/or removes values from the identified object at a given position within it.  <a href="structAMdoc.html#a1b6f1ce2fe88c89811efe4d35913e34b">More...</a><br /></td></tr>
+<tr class="separator:a1b6f1ce2fe88c89811efe4d35913e34b"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a9b8bc58bdec29bab91336088d0709aff"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#a9b8bc58bdec29bab91336088d0709aff">AMspliceText</a> (struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id, size_t pos, size_t del, const char *text)</td></tr>
+<tr class="memdesc:a9b8bc58bdec29bab91336088d0709aff"><td class="mdescLeft">&#160;</td><td class="mdescRight">Splices characters into and/or removes characters from the identified object at a given position within it.  <a href="structAMdoc.html#a9b8bc58bdec29bab91336088d0709aff">More...</a><br /></td></tr>
+<tr class="separator:a9b8bc58bdec29bab91336088d0709aff"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:ad7ff723c2fe1dabd7b367a8c5a720c09"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMdoc.html#ad7ff723c2fe1dabd7b367a8c5a720c09">AMtext</a> (const struct <a class="el" href="structAMdoc.html">AMdoc</a> *doc, const struct <a class="el" href="structAMobjId.html">AMobjId</a> *obj_id, const struct <a class="el" href="structAMchangeHashes.html">AMchangeHashes</a> *heads)</td></tr>
 <tr class="memdesc:ad7ff723c2fe1dabd7b367a8c5a720c09"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the current or historical string represented by a text object.  <a href="structAMdoc.html#ad7ff723c2fe1dabd7b367a8c5a720c09">More...</a><br /></td></tr>
 <tr class="separator:ad7ff723c2fe1dabd7b367a8c5a720c09"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -282,9 +294,9 @@ Public Member Functions</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>changes<code>!=</code> NULL</code>. </dd></dl>
+<code>changes</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
@@ -314,7 +326,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -361,7 +373,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an <code><a class="el" href="structAMchangeHashes.html" title="A random-access iterator over a sequence of change hashes.">AMchangeHashes</a></code> with one element. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -422,10 +434,10 @@ Public Member Functions</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section return"><dt>Returns</dt><dd><code>true</code> if <code>doc1<code>==</code><code>doc2</code> and</code> <code>false</code> otherwise. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc1<code>!=</code> NULL</code>. </dd>
+<dl class="section return"><dt>Returns</dt><dd><code>true</code> if <code>doc1</code> <code>==</code> <code>doc2</code> and <code>false</code> otherwise. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc1</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>doc2<code>!=</code> NULL</code>. </dd></dl>
+<code>doc2</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -464,7 +476,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -504,9 +516,9 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing either a pointer to an <code><a class="el" href="structAMsyncMessage.html" title="A synchronization message for a peer.">AMsyncMessage</a></code> struct or a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> must b e a valid address. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>sync_state<code>!=</code> NULL</code>. </dd></dl>
+<code>sync_state</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -535,7 +547,58 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a pointer to an <code><a class="el" href="structAMactorId.html" title="An actor&#39;s unique identifier.">AMactorId</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd></dl>
+<dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
+
+</div>
+</div>
+<a id="a2b4d29afbbf4116dd099a548516653b2"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a2b4d29afbbf4116dd099a548516653b2">&#9670;&nbsp;</a></span>AMgetChangeByHash()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">struct <a class="el" href="structAMresult.html">AMresult</a> * AMgetChangeByHash </td>
+          <td>(</td>
+          <td class="paramtype">struct <a class="el" href="structAMdoc.html">AMdoc</a> *&#160;</td>
+          <td class="paramname"><em>doc</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const uint8_t *&#160;</td>
+          <td class="paramname"><em>src</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">size_t&#160;</td>
+          <td class="paramname"><em>count</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Gets the change added to a document by its respective hash. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">src</td><td>A pointer to an array of bytes. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">count</td><td>The number of bytes in <code>src</code>. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an <code><a class="el" href="structAMchanges.html" title="A random-access iterator over a sequence of changes.">AMchanges</a></code> struct. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
+<dd>
+<code>src</code> <code>!= NULL</code>. </dd>
+<dd>
+<code>count</code> <code>&gt;= AM_CHANGE_HASH_SIZE</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -575,7 +638,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an <code><a class="el" href="structAMchanges.html" title="A random-access iterator over a sequence of changes.">AMchanges</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -615,9 +678,9 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an <code><a class="el" href="structAMchanges.html" title="A random-access iterator over a sequence of changes.">AMchanges</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc1<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc1</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>doc2<code>!=</code> NULL</code>. </dd></dl>
+<code>doc2</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -646,7 +709,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an <code><a class="el" href="structAMchangeHashes.html" title="A random-access iterator over a sequence of change hashes.">AMchangeHashes</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -675,7 +738,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing either an <code><a class="el" href="structAMchange.html" title="A group of operations performed by an actor.">AMchange</a></code> struct or a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -715,7 +778,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an <code><a class="el" href="structAMchangeHashes.html" title="A random-access iterator over a sequence of change hashes.">AMchangeHashes</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -752,7 +815,7 @@ Public Member Functions</h2></td></tr>
       </table>
 </div><div class="memdoc">
 
-<p>Gets the current or historical keys of an object. </p>
+<p>Gets the current or historical keys of a map object. </p>
 <dl class="params"><dt>Parameters</dt><dd>
   <table class="params">
     <tr><td class="paramdir">[in]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
@@ -762,7 +825,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an <code><a class="el" href="structAMstrs.html" title="A random-access iterator over a sequence of UTF-8 strings.">AMstrs</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -804,14 +867,14 @@ Public Member Functions</h2></td></tr>
   <table class="params">
     <tr><td class="paramdir">[in,out]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct or <code>AM_ROOT</code>. </td></tr>
-    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code> or <code>SIZE_MAX</code> to indicate its last index. </td></tr>
   </table>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>0 &lt;=</code> <code>index<code>&lt;=</code>length</code> of the list object identified by <code>obj_id</code>. </dd></dl>
+<code>0 &lt;=</code> <code>index</code> <code>&lt;= AMobjSize(</code><code>obj_id<code></code>)</code> or <code>index</code> <code>== SIZE_MAX</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -859,15 +922,71 @@ Public Member Functions</h2></td></tr>
   <table class="params">
     <tr><td class="paramdir">[in]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct or <code>AM_ROOT</code>. </td></tr>
-    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index within the list object identified by <code>obj_id</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code> or <code>SIZE_MAX</code> to indicate its last index. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">heads</td><td>A pointer to an <code><a class="el" href="structAMchangeHashes.html" title="A random-access iterator over a sequence of change hashes.">AMchangeHashes</a></code> struct for a historical value or <code>NULL</code> for the current value. </td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct that doesn't contain a void. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>0 &lt;=</code> <code>index<code>&lt;=</code>length</code> of the list object identified by <code>obj_id</code>. </dd></dl>
+<code>0 &lt;=</code> <code>index</code> <code>&lt;= AMobjSize(</code><code>obj_id<code></code>)</code> or <code>index</code> <code>== SIZE_MAX</code>. </dd></dl>
+<dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
+
+</div>
+</div>
+<a id="a9d481ad32708b81d21332d2b2f2e6cb1"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a9d481ad32708b81d21332d2b2f2e6cb1">&#9670;&nbsp;</a></span>AMlistGetAll()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">struct <a class="el" href="structAMresult.html">AMresult</a> * AMlistGetAll </td>
+          <td>(</td>
+          <td class="paramtype">const struct <a class="el" href="structAMdoc.html">AMdoc</a> *&#160;</td>
+          <td class="paramname"><em>doc</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const struct <a class="el" href="structAMobjId.html">AMobjId</a> *&#160;</td>
+          <td class="paramname"><em>obj_id</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">size_t&#160;</td>
+          <td class="paramname"><em>index</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const struct <a class="el" href="structAMchangeHashes.html">AMchangeHashes</a> *&#160;</td>
+          <td class="paramname"><em>heads</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Gets all of the historical values at an index in a list object until its current one or a specific one. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct or <code>AM_ROOT</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code> or <code>SIZE_MAX</code> to indicate its last index. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">heads</td><td>A pointer to an <code><a class="el" href="structAMchangeHashes.html" title="A random-access iterator over a sequence of change hashes.">AMchangeHashes</a></code> struct for a historical last value or <code>NULL</code> for the current last value. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an <code><a class="el" href="structAMobjItems.html" title="A random-access iterator over a sequence of object items.">AMobjItems</a></code> struct. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
+<dd>
+<code>0 &lt;=</code> <code>index</code> <code>&lt;= AMobjSize(</code><code>obj_id<code></code>)</code> or <code>index</code> <code>== SIZE_MAX</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -915,15 +1034,15 @@ Public Member Functions</h2></td></tr>
   <table class="params">
     <tr><td class="paramdir">[in,out]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct or <code>AM_ROOT</code>. </td></tr>
-    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code> or <code>SIZE_MAX</code> to indicate its last index. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">value</td><td>A 64-bit signed integer. </td></tr>
   </table>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>0 &lt;=</code> <code>index<code>&lt;=</code>length</code> of the list object identified by <code>obj_id</code>. </dd></dl>
+<code>0 &lt;=</code> <code>index</code> <code>&lt;= AMobjSize(</code><code>obj_id<code></code>)</code> or <code>index</code> <code>== SIZE_MAX</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -977,14 +1096,16 @@ Public Member Functions</h2></td></tr>
   <table class="params">
     <tr><td class="paramdir">[in,out]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct or <code>AM_ROOT</code>. </td></tr>
-    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code> or <code>SIZE_MAX</code> to indicate its last index if <code>insert</code> <code>== false</code> or one past its last index if <code>insert</code> <code>== true</code>. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">insert</td><td>A flag to insert <code>value</code> before <code>index</code> instead of writing <code>value</code> over <code>index</code>. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">value</td><td>A boolean. </td></tr>
   </table>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
+<dd>
+<code>0 &lt;=</code> <code>index</code> <code>&lt;= AMobjSize(</code><code>obj_id<code></code>)</code> or <code>index</code> <code>== SIZE_MAX</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -1044,7 +1165,7 @@ Public Member Functions</h2></td></tr>
   <table class="params">
     <tr><td class="paramdir">[in,out]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct or <code>AM_ROOT</code>. </td></tr>
-    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code> or <code>SIZE_MAX</code> to indicate its last index if <code>insert</code> <code>== false</code> or one past its last index if <code>insert</code> <code>== true</code>. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">insert</td><td>A flag to insert <code>src</code> before <code>index</code> instead of writing <code>src</code> over <code>index</code>. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">src</td><td>A pointer to an array of bytes. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">count</td><td>The number of bytes to copy from <code>src</code>. </td></tr>
@@ -1052,13 +1173,13 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>0 &lt;=</code> <code>index<code>&lt;=</code>length</code> of the list object identified by <code>obj_id</code>. </dd>
+<code>0 &lt;=</code> <code>index</code> <code>&lt;= AMobjSize(</code><code>obj_id<code></code>)</code> or <code>index</code> <code>== SIZE_MAX</code>. </dd>
 <dd>
-<code>src<code>!=</code> NULL</code>. </dd>
+<code>src</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>0 &lt;=</code> <code>count<code>&lt;=</code>size</code> of <code>src</code>. </dd></dl>
+<code>0 &lt;</code> <code>count</code> <code>&lt;= sizeof(</code><code>src<code></code>)</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -1112,16 +1233,16 @@ Public Member Functions</h2></td></tr>
   <table class="params">
     <tr><td class="paramdir">[in,out]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct or <code>AM_ROOT</code>. </td></tr>
-    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code> or <code>SIZE_MAX</code> to indicate its last index if <code>insert</code> <code>== false</code> or one past its last index if <code>insert</code> <code>== true</code>. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">insert</td><td>A flag to insert <code>value</code> before <code>index</code> instead of writing <code>value</code> over <code>index</code>. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">value</td><td>A 64-bit signed integer. </td></tr>
   </table>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>0 &lt;=</code> <code>index<code>&lt;=</code>length</code> of the list object identified by <code>obj_id</code>. </dd></dl>
+<code>0 &lt;=</code> <code>index</code> <code>&lt;= AMobjSize(</code><code>obj_id<code></code>)</code> or <code>index</code> <code>== SIZE_MAX</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -1175,16 +1296,16 @@ Public Member Functions</h2></td></tr>
   <table class="params">
     <tr><td class="paramdir">[in,out]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct or <code>AM_ROOT</code>. </td></tr>
-    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code> or <code>SIZE_MAX</code> to indicate its last index if <code>insert</code> <code>== false</code> or one past its last index if <code>insert</code> <code>== true</code>. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">insert</td><td>A flag to insert <code>value</code> before <code>index</code> instead of writing <code>value</code> over <code>index</code>. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">value</td><td>A 64-bit float. </td></tr>
   </table>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>0 &lt;=</code> <code>index<code>&lt;=</code>length</code> of the list object identified by <code>obj_id</code>. </dd></dl>
+<code>0 &lt;=</code> <code>index</code> <code>&lt;= AMobjSize(</code><code>obj_id<code></code>)</code> or <code>index</code> <code>== SIZE_MAX</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -1238,16 +1359,16 @@ Public Member Functions</h2></td></tr>
   <table class="params">
     <tr><td class="paramdir">[in,out]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct or <code>AM_ROOT</code>. </td></tr>
-    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code> or <code>SIZE_MAX</code> to indicate its last index if <code>insert</code> <code>== false</code> or one past its last index if <code>insert</code> <code>== true</code>. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">insert</td><td>A flag to insert <code>value</code> before <code>index</code> instead of writing <code>value</code> over <code>index</code>. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">value</td><td>A 64-bit signed integer. </td></tr>
   </table>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>0 &lt;=</code> <code>index<code>&lt;=</code>length</code> of the list object identified by <code>obj_id</code>. </dd></dl>
+<code>0 &lt;=</code> <code>index</code> <code>&lt;= AMobjSize(</code><code>obj_id<code></code>)</code> or <code>index</code> <code>== SIZE_MAX</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -1295,15 +1416,15 @@ Public Member Functions</h2></td></tr>
   <table class="params">
     <tr><td class="paramdir">[in,out]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct or <code>AM_ROOT</code>. </td></tr>
-    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code> or <code>SIZE_MAX</code> to indicate its last index if <code>insert</code> <code>== false</code> or one past its last index if <code>insert</code> <code>== true</code>. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">insert</td><td>A flag to insert <code>value</code> before <code>index</code> instead of writing <code>value</code> over <code>index</code>. </td></tr>
   </table>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>0 &lt;=</code> <code>index<code>&lt;=</code>length</code> of the list object identified by <code>obj_id</code>. </dd></dl>
+<code>0 &lt;=</code> <code>index</code> <code>&lt;= AMobjSize(</code><code>obj_id<code></code>)</code> or <code>index</code> <code>== SIZE_MAX</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -1357,16 +1478,16 @@ Public Member Functions</h2></td></tr>
   <table class="params">
     <tr><td class="paramdir">[in,out]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct or <code>AM_ROOT</code>. </td></tr>
-    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code> or <code>SIZE_MAX</code> to indicate its last index if <code>insert</code> <code>== false</code> or one past its last index if <code>insert</code> <code>== true</code>. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">insert</td><td>A flag to insert <code>value</code> before <code>index</code> instead of writing <code>value</code> over <code>index</code>. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">obj_type</td><td>An <code>AMobjIdType</code> enum tag. </td></tr>
   </table>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>0 &lt;=</code> <code>index<code>&lt;=</code>length</code> of the list object identified by <code>obj_id</code>. </dd></dl>
+<code>0 &lt;=</code> <code>index</code> <code>&lt;= AMobjSize(</code><code>obj_id<code></code>)</code> or <code>index</code> <code>== SIZE_MAX</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -1420,18 +1541,18 @@ Public Member Functions</h2></td></tr>
   <table class="params">
     <tr><td class="paramdir">[in,out]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct or <code>AM_ROOT</code>. </td></tr>
-    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code> or <code>SIZE_MAX</code> to indicate its last index if <code>insert</code> <code>== false</code> or one past its last index if <code>insert</code> <code>== true</code>. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">insert</td><td>A flag to insert <code>value</code> before <code>index</code> instead of writing <code>value</code> over <code>index</code>. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">value</td><td>A UTF-8 string. </td></tr>
   </table>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>0 &lt;=</code> <code>index<code>&lt;=</code>length</code> of the list object identified by <code>obj_id</code>. </dd>
+<code>0 &lt;=</code> <code>index</code> <code>&lt;= AMobjSize(</code><code>obj_id<code></code>)</code> or <code>index</code> <code>== SIZE_MAX</code>. </dd>
 <dd>
-<code>value<code>!=</code> NULL</code>. </dd></dl>
+<code>value</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -1485,16 +1606,16 @@ Public Member Functions</h2></td></tr>
   <table class="params">
     <tr><td class="paramdir">[in,out]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct or <code>AM_ROOT</code>. </td></tr>
-    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code> or <code>SIZE_MAX</code> to indicate its last index if <code>insert</code> <code>== false</code> or one past its last index if <code>insert</code> <code>== true</code>. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">insert</td><td>A flag to insert <code>value</code> before <code>index</code> instead of writing <code>value</code> over <code>index</code>. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">value</td><td>A 64-bit signed integer. </td></tr>
   </table>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>0 &lt;=</code> <code>index<code>&lt;=</code>length</code> of the list object identified by <code>obj_id</code>. </dd></dl>
+<code>0 &lt;=</code> <code>index</code> <code>&lt;= AMobjSize(</code><code>obj_id<code></code>)</code> or <code>index</code> <code>== SIZE_MAX</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -1548,16 +1669,16 @@ Public Member Functions</h2></td></tr>
   <table class="params">
     <tr><td class="paramdir">[in,out]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct or <code>AM_ROOT</code>. </td></tr>
-    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the list object identified by <code>obj_id</code> or <code>SIZE_MAX</code> to indicate its last index if <code>insert</code> <code>== false</code> or one past its last index if <code>insert</code> <code>== true</code>. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">insert</td><td>A flag to insert <code>value</code> before <code>index</code> instead of writing <code>value</code> over <code>index</code>. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">value</td><td>A 64-bit unsigned integer. </td></tr>
   </table>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>0 &lt;=</code> <code>index<code>&lt;=</code>length</code> of the list object identified by <code>obj_id</code>. </dd></dl>
+<code>0 &lt;=</code> <code>index</code> <code>&lt;= AMobjSize(</code><code>obj_id<code></code>)</code> or <code>index</code> <code>== SIZE_MAX</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -1618,11 +1739,9 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an <code><a class="el" href="structAMlistItems.html" title="A random-access iterator over a sequence of list object items.">AMlistItems</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>begin<code>&lt;=</code><code>end</code>.</code> </dd>
-<dd>
-<code>end<code>&lt;=</code> SIZE_MAX</code>. </dd></dl>
+<code>begin</code> <code>&lt;=</code> <code>end</code> <code>&lt;= SIZE_MAX</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -1662,9 +1781,9 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>src<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>src</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>0 &lt;=</code> <code>count<code>&lt;=</code>size</code> of <code>src</code>. </dd></dl>
+<code>0 &lt;</code> <code>count</code> <code>&lt;= sizeof(</code><code>src<code></code>)</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -1711,11 +1830,11 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing the number of operations loaded from <code>src</code>. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>src<code>!=</code> NULL</code>. </dd>
+<code>src</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>0 &lt;=</code> <code>count<code>&lt;=</code>size</code> of <code>src</code>. </dd></dl>
+<code>0 &lt;</code> <code>count</code> <code>&lt;= sizeof(</code><code>src<code></code>)</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -1762,9 +1881,9 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>key<code>!=</code> NULL</code>. </dd></dl>
+<code>key</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -1817,10 +1936,66 @@ Public Member Functions</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct that doesn't contain a void. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>key<code>!=</code> NULL</code>. </dd></dl>
+<code>key</code> <code>!= NULL</code>. </dd></dl>
+<dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
+
+</div>
+</div>
+<a id="a52064afd1d0e046992b616fb71c8002b"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a52064afd1d0e046992b616fb71c8002b">&#9670;&nbsp;</a></span>AMmapGetAll()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">struct <a class="el" href="structAMresult.html">AMresult</a> * AMmapGetAll </td>
+          <td>(</td>
+          <td class="paramtype">const struct <a class="el" href="structAMdoc.html">AMdoc</a> *&#160;</td>
+          <td class="paramname"><em>doc</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const struct <a class="el" href="structAMobjId.html">AMobjId</a> *&#160;</td>
+          <td class="paramname"><em>obj_id</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const char *&#160;</td>
+          <td class="paramname"><em>key</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const struct <a class="el" href="structAMchangeHashes.html">AMchangeHashes</a> *&#160;</td>
+          <td class="paramname"><em>heads</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Gets all of the historical values for a key in a map object until its current one or a specific one. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct or <code>AM_ROOT</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">key</td><td>A UTF-8 string key for the map object identified by <code>obj_id</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">heads</td><td>A pointer to an <code><a class="el" href="structAMchangeHashes.html" title="A random-access iterator over a sequence of change hashes.">AMchangeHashes</a></code> struct for a historical last value or <code>NULL</code> for the current last value. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an <code><a class="el" href="structAMobjItems.html" title="A random-access iterator over a sequence of object items.">AMobjItems</a></code> struct. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
+<dd>
+<code>key</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -1874,9 +2049,9 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>key<code>!=</code> NULL</code>. </dd></dl>
+<code>key</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -1930,9 +2105,9 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>key<code>!=</code> NULL</code>. </dd></dl>
+<code>key</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -1993,13 +2168,13 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>key<code>!=</code> NULL</code>. </dd>
+<code>key</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>src<code>!=</code> NULL</code>. </dd>
+<code>src</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>0 &lt;=</code> <code>count<code>&lt;=</code>size</code> of <code>src</code>. </dd></dl>
+<code>0 &lt;</code> <code>count</code> <code>&lt;= sizeof(</code><code>src<code></code>)</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -2053,9 +2228,9 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>key<code>!=</code> NULL</code>. </dd></dl>
+<code>key</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -2109,9 +2284,9 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>key<code>!=</code> NULL</code>. </dd></dl>
+<code>key</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -2165,9 +2340,9 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>key<code>!=</code> NULL</code>. </dd></dl>
+<code>key</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -2214,9 +2389,9 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>key<code>!=</code> NULL</code>. </dd></dl>
+<code>key</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -2270,9 +2445,9 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>key<code>!=</code> NULL</code>. </dd></dl>
+<code>key</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -2326,11 +2501,11 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>key<code>!=</code> NULL</code>. </dd>
+<code>key</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>value<code>!=</code> NULL</code>. </dd></dl>
+<code>value</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -2384,9 +2559,9 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>key<code>!=</code> NULL</code>. </dd></dl>
+<code>key</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -2440,9 +2615,9 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>key<code>!=</code> NULL</code>. </dd></dl>
+<code>key</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -2496,16 +2671,16 @@ Public Member Functions</h2></td></tr>
   <table class="params">
     <tr><td class="paramdir">[in]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct or <code>AM_ROOT</code>. </td></tr>
-    <tr><td class="paramdir">[in]</td><td class="paramname">begin</td><td>The first key in a range of keys or <code>NULL</code>. </td></tr>
-    <tr><td class="paramdir">[in]</td><td class="paramname">end</td><td>One past the last key in a range of keys or <code>NULL</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">begin</td><td>The first key in a subrange or <code>NULL</code> to indicate the absolute first key. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">end</td><td>The key one past the last key in a subrange or <code>NULL</code> to indicate one past the absolute last key. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">heads</td><td>A pointer to an <code><a class="el" href="structAMchangeHashes.html" title="A random-access iterator over a sequence of change hashes.">AMchangeHashes</a></code> struct for historical keys and values or <code>NULL</code> for current keys and values. </td></tr>
   </table>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an <code><a class="el" href="structAMmapItems.html" title="A random-access iterator over a sequence of map object items.">AMmapItems</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>begin<code>&lt;=</code><code>end</code> if</code> <code>end<code>!=</code> NULL</code>. </dd></dl>
+<code>strcmp(</code><code>begin</code>, <code>end<code></code>) != 1</code> if <code>begin</code> <code>!= NULL</code> and <code>end</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -2545,9 +2720,9 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an <code><a class="el" href="structAMchangeHashes.html" title="A random-access iterator over a sequence of change hashes.">AMchangeHashes</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>dest<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>dest</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>src<code>!=</code> NULL</code>. </dd></dl>
+<code>src</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -2594,7 +2769,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A 64-bit unsigned integer. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -2630,7 +2805,7 @@ Public Member Functions</h2></td></tr>
       </table>
 </div><div class="memdoc">
 
-<p>Gets the current or historical values of an object within the given range. </p>
+<p>Gets the current or historical values of an object within its entire range. </p>
 <dl class="params"><dt>Parameters</dt><dd>
   <table class="params">
     <tr><td class="paramdir">[in]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
@@ -2640,7 +2815,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an <code><a class="el" href="structAMobjItems.html" title="A random-access iterator over a sequence of object items.">AMobjItems</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -2669,7 +2844,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>The count of pending operations for <code>doc</code>. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -2715,11 +2890,11 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>sync_state<code>!=</code> NULL</code>. </dd>
+<code>sync_state</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>sync_message<code>!=</code> NULL</code>. </dd></dl>
+<code>sync_message</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -2747,7 +2922,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>The count of pending operations for <code>doc</code> that were cancelled. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -2775,7 +2950,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an array of bytes as an <code><a class="el" href="structAMbyteSpan.html" title="A contiguous sequence of bytes.">AMbyteSpan</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -2804,7 +2979,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an array of bytes as an <code><a class="el" href="structAMbyteSpan.html" title="A contiguous sequence of bytes.">AMbyteSpan</a></code> struct. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -2844,15 +3019,89 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>actor_id<code>!=</code> NULL</code>. </dd></dl>
+<code>actor_id</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
 </div>
-<a id="a82eeca27761d7e4e6f3570f2f195c67e"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a82eeca27761d7e4e6f3570f2f195c67e">&#9670;&nbsp;</a></span>AMspliceText()</h2>
+<a id="a1b6f1ce2fe88c89811efe4d35913e34b"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a1b6f1ce2fe88c89811efe4d35913e34b">&#9670;&nbsp;</a></span>AMsplice()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">struct <a class="el" href="structAMresult.html">AMresult</a> * AMsplice </td>
+          <td>(</td>
+          <td class="paramtype">struct <a class="el" href="structAMdoc.html">AMdoc</a> *&#160;</td>
+          <td class="paramname"><em>doc</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const struct <a class="el" href="structAMobjId.html">AMobjId</a> *&#160;</td>
+          <td class="paramname"><em>obj_id</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">size_t&#160;</td>
+          <td class="paramname"><em>pos</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">size_t&#160;</td>
+          <td class="paramname"><em>del</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">const union <a class="el" href="unionAMvalue.html">AMvalue</a> *&#160;</td>
+          <td class="paramname"><em>src</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">size_t&#160;</td>
+          <td class="paramname"><em>count</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Splices values into and/or removes values from the identified object at a given position within it. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in,out]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct or <code>AM_ROOT</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">pos</td><td>A position in the object identified by <code>obj_id</code> or <code>SIZE_MAX</code> to indicate one past its end. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">del</td><td>The number of characters to delete or <code>SIZE_MAX</code> to indicate all of them. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">src</td><td>A pointer to an array of <code><a class="el" href="unionAMvalue.html" title="A discriminated union of value type variants for a result.">AMvalue</a></code> structs. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">count</td><td>The number of <code><a class="el" href="unionAMvalue.html" title="A discriminated union of value type variants for a result.">AMvalue</a></code> structs in <code>src</code> to load. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
+<dd>
+<code>0 &lt;=</code> <code>pos</code> <code>&lt;= AMobjSize(</code><code>obj_id<code></code>)</code> or <code>pos</code> <code>== SIZE_MAX</code>. </dd>
+<dd>
+<code>0 &lt;=</code> <code>del</code> <code>&lt;= AMobjSize(</code><code>obj_id<code></code>)</code> or <code>del</code> <code>== SIZE_MAX</code>. </dd>
+<dd>
+<code>(</code><code>src</code> <code>!= NULL and 1 &lt;=</code> <code>count</code> <code>&lt;= sizeof(</code><code>src<code></code>)/ sizeof(AMvalue)) or</code><code>src</code> <code>== NULL or</code><code>count</code> <code>== 0</code>. </dd></dl>
+<dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
+
+</div>
+</div>
+<a id="a9b8bc58bdec29bab91336088d0709aff"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a9b8bc58bdec29bab91336088d0709aff">&#9670;&nbsp;</a></span>AMspliceText()</h2>
 
 <div class="memitem">
 <div class="memproto">
@@ -2873,7 +3122,7 @@ Public Member Functions</h2></td></tr>
           <td class="paramkey"></td>
           <td></td>
           <td class="paramtype">size_t&#160;</td>
-          <td class="paramname"><em>index</em>, </td>
+          <td class="paramname"><em>pos</em>, </td>
         </tr>
         <tr>
           <td class="paramkey"></td>
@@ -2895,23 +3144,23 @@ Public Member Functions</h2></td></tr>
       </table>
 </div><div class="memdoc">
 
-<p>Splices new characters into the identified text object at a given index. </p>
+<p>Splices characters into and/or removes characters from the identified object at a given position within it. </p>
 <dl class="params"><dt>Parameters</dt><dd>
   <table class="params">
     <tr><td class="paramdir">[in,out]</td><td class="paramname">doc</td><td>A pointer to an <code><a class="el" href="structAMdoc.html" title="A JSON-like CRDT.">AMdoc</a></code> struct. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">obj_id</td><td>A pointer to an <code><a class="el" href="structAMobjId.html" title="An object&#39;s unique identifier.">AMobjId</a></code> struct or <code>AM_ROOT</code>. </td></tr>
-    <tr><td class="paramdir">[in]</td><td class="paramname">index</td><td>An index in the text object identified by <code>obj_id</code>. </td></tr>
-    <tr><td class="paramdir">[in]</td><td class="paramname">del</td><td>The number of characters to delete. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">pos</td><td>A position in the text object identified by <code>obj_id</code> or <code>SIZE_MAX</code> to indicate one past its end. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">del</td><td>The number of characters to delete or <code>SIZE_MAX</code> to indicate all of them. </td></tr>
     <tr><td class="paramdir">[in]</td><td class="paramname">text</td><td>A UTF-8 string. </td></tr>
   </table>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a void. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>0 &lt;=</code> <code>index<code>&lt;=</code>length</code> of the text object identified by <code>obj_id</code>. </dd>
+<code>0 &lt;=</code> <code>pos</code> <code>&lt;= AMobjSize(</code><code>obj_id<code></code>)</code> or <code>pos</code> <code>== SIZE_MAX</code>. </dd>
 <dd>
-<code>text<code>!=</code> NULL</code>. </dd></dl>
+<code>0 &lt;=</code> <code>del</code> <code>&lt;= AMobjSize(</code><code>obj_id<code></code>)</code> or <code>del</code> <code>== SIZE_MAX</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
@@ -2958,7 +3207,7 @@ Public Member Functions</h2></td></tr>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a UTF-8 string. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>doc<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>doc</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>

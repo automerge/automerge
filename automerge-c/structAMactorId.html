@@ -124,7 +124,7 @@ Public Member Functions</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>actor_id<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>actor_id</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMbyteSpan.html" title="A contiguous sequence of bytes.">AMbyteSpan</a></code> struct. </dd></dl>
 
 </div>
@@ -163,10 +163,10 @@ Public Member Functions</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section return"><dt>Returns</dt><dd><code>-1</code> if <code>actor_id1</code> <code>&lt;</code> <code>actor_id2</code>, <code>0</code> if <code>actor_id1<code>==</code><code>actor_id2</code> and</code> <code>1</code> if <code>actor_id1</code> <code>&gt;</code> <code>actor_id2</code>. </dd></dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>actor_id1<code>!=</code> NULL</code>. </dd>
+<dl class="section return"><dt>Returns</dt><dd><code>-1</code> if <code>actor_id1</code> <code>&lt;</code> <code>actor_id2</code>, <code>0</code> if <code>actor_id1</code> <code>==</code> <code>actor_id2</code> and <code>1</code> if <code>actor_id1</code> <code>&gt;</code> <code>actor_id2</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>actor_id1</code> <code>!= NULL</code>. </dd>
 <dd>
-<code>actor_id2<code>!=</code> NULL</code>. </dd></dl>
+<code>actor_id2</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
 </div>
@@ -226,7 +226,7 @@ Public Member Functions</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>0 &lt;=</code> <code>count<code>&lt;=</code>size</code> of <code>src</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>0 &lt;</code> <code>count</code> <code>&lt;= sizeof(</code><code>src<code></code>)</code>. </dd></dl>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing a pointer to an <code><a class="el" href="structAMactorId.html" title="An actor&#39;s unique identifier.">AMactorId</a></code> struct. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
@@ -283,7 +283,7 @@ Public Member Functions</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section pre"><dt>Precondition</dt><dd><code>actor_id<code>!=</code> NULL</code>. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>actor_id</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section return"><dt>Returns</dt><dd>A UTF-8 string. </dd></dl>
 
 </div>
