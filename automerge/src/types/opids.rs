@@ -19,7 +19,6 @@ impl<'a> IntoIterator for &'a OpIds {
 }
 
 impl OpIds {
-    #[cfg(feature = "storage-v2")]
     pub(crate) fn empty() -> Self {
         Self(Vec::new())
     }
@@ -36,7 +35,6 @@ impl OpIds {
     /// Create a new OpIds if `opids` are sorted with respect to `cmp` and contain no duplicates.
     ///
     /// Returns `Some(OpIds)` if `opids` is sorted and has no duplicates, otherwise returns `None`
-    #[cfg(feature = "storage-v2")]
     pub(crate) fn new_if_sorted<F: Fn(&OpId, &OpId) -> std::cmp::Ordering>(
         opids: Vec<OpId>,
         cmp: F,
@@ -95,13 +93,11 @@ impl OpIds {
         self.0.contains(op)
     }
 
-    #[cfg(feature = "storage-v2")]
     pub(crate) fn get(&self, idx: usize) -> Option<&OpId> {
         self.0.get(idx)
     }
 }
 
-#[cfg(feature = "storage-v2")]
 fn are_sorted_and_unique<
     'a,
     I: Iterator<Item = &'a OpId>,
@@ -147,7 +143,6 @@ mod tests {
             .prop_map(move |opids| (actors.clone(), opids))
     }
 
-    #[cfg(feature = "storage-v2")]
     fn duplicate_unsorted_scenario() -> impl Strategy<Value = (Vec<ActorId>, Vec<OpId>)> {
         scenario(1..100).prop_map(|(actors, mut opids)| {
             let mut sorted_opids = opids.clone();
@@ -179,7 +174,6 @@ mod tests {
         }
 
         #[test]
-        #[cfg(feature = "storage-v2")]
         fn test_new_if_sorted((actors, opids) in duplicate_unsorted_scenario()) {
             let mut expected = opids.clone();
             assert_eq!(OpIds::new_if_sorted(opids, |left, right| cmp(&actors, left, right)), None);

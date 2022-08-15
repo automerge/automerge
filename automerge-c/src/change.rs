@@ -61,10 +61,7 @@ impl AMchange {
             let ptr = c_changehash.insert(hash);
             AMbyteSpan {
                 src: ptr.0.as_ptr(),
-                #[cfg(feature = "storage-v2")]
                 count: hash.as_ref().len(),
-                #[cfg(not(feature = "storage-v2"))]
-                count: hash.0.len(),
             }
         }
     }
@@ -188,9 +185,7 @@ pub unsafe extern "C" fn AMchangeFromBytes(src: *const u8, count: usize) -> *mut
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeHash(change: *const AMchange) -> AMbyteSpan {
     match change.as_ref() {
-        Some(change) => {
-            change.hash()
-        }
+        Some(change) => change.hash(),
         None => AMbyteSpan::default(),
     }
 }

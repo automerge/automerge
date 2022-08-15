@@ -197,7 +197,6 @@ impl OpType {
     /// The index into the action array as specified in [1]
     ///
     /// [1]: https://alexjg.github.io/automerge-storage-docs/#action-array
-    #[cfg(feature = "storage-v2")]
     pub(crate) fn action_index(&self) -> u64 {
         match self {
             Self::Make(ObjType::Map) => 0,
@@ -210,7 +209,6 @@ impl OpType {
         }
     }
 
-    #[cfg(feature = "storage-v2")]
     pub(crate) fn from_index_and_value(
         index: u64,
         value: ScalarValue,
@@ -417,7 +415,6 @@ impl Key {
 pub(crate) struct OpId(pub(crate) u64, pub(crate) usize);
 
 impl OpId {
-    #[cfg(feature = "storage-v2")]
     pub(crate) fn new(actor: usize, counter: u64) -> Self {
         Self(counter, actor)
     }
@@ -431,12 +428,10 @@ impl ObjId {
         ObjId(OpId(0, 0))
     }
 
-    #[cfg(feature = "storage-v2")]
     pub(crate) fn is_root(&self) -> bool {
         self.0.counter() == 0
     }
 
-    #[cfg(feature = "storage-v2")]
     pub(crate) fn opid(&self) -> &OpId {
         &self.0
     }
@@ -446,12 +441,10 @@ impl ObjId {
 pub(crate) struct ElemId(pub(crate) OpId);
 
 impl ElemId {
-    #[cfg(feature = "storage-v2")]
     pub(crate) fn is_head(&self) -> bool {
         *self == HEAD
     }
 
-    #[cfg(feature = "storage-v2")]
     pub(crate) fn head() -> Self {
         Self(OpId(0, 0))
     }
@@ -599,12 +592,10 @@ pub(crate) const HASH_SIZE: usize = 32; // 256 bits = 32 bytes
 pub struct ChangeHash(pub [u8; HASH_SIZE]);
 
 impl ChangeHash {
-    #[cfg(feature = "storage-v2")]
     pub(crate) fn as_bytes(&self) -> &[u8] {
         &self.0
     }
 
-    #[cfg(feature = "storage-v2")]
     pub(crate) fn checksum(&self) -> [u8; 4] {
         [self.0[0], self.0[1], self.0[2], self.0[3]]
     }

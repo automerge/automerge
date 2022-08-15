@@ -1,6 +1,0 @@
-THIS_SCRIPT=$(dirname "$0");
-WASM_PROJECT=$THIS_SCRIPT/../../automerge-wasm;
-
-yarn --cwd $WASM_PROJECT install;
-yarn --cwd $WASM_PROJECT build-storage-v2;
-yarn --cwd $WASM_PROJECT test-storage-v2;

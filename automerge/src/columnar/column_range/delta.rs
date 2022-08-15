@@ -1,6 +1,6 @@
 use std::{borrow::Cow, convert::Infallible, ops::Range};
 
-use crate::columnar_2::{
+use crate::columnar::{
     encoding::{raw, DeltaDecoder, DeltaEncoder, Sink},
     SpliceError,
 };
@@ -97,7 +97,7 @@ impl From<DeltaRange> for Range<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::columnar_2::encoding::properties::option_splice_scenario;
+    use crate::columnar::encoding::properties::option_splice_scenario;
     use proptest::prelude::*;
 
     fn encode<I: Iterator<Item = Option<i64>>>(vals: I) -> (DeltaRange, Vec<u8>) {

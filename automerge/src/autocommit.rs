@@ -157,7 +157,6 @@ impl AutoCommit {
         self.doc.save()
     }
 
-    #[cfg(feature = "storage-v2")]
     pub fn save_nocompress(&mut self) -> Vec<u8> {
         self.ensure_transaction_closed();
         self.doc.save_nocompress()

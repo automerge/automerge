@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::{columnar_2::encoding::DecodeColumnError, ScalarValue};
+use crate::{columnar::encoding::DecodeColumnError, ScalarValue};
 
 use super::{ValueIter, ValueRange};
 mod simple;

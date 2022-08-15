@@ -1,7 +1,7 @@
 use std::{borrow::Cow, convert::TryFrom};
 
 use crate::{
-    columnar_2::{
+    columnar::{
         column_range::{
             generic::{GenericColumnRange, GroupRange, GroupedColumnRange, SimpleColRange},
             BooleanRange, DeltaRange, Key, KeyEncoder, KeyIter, KeyRange, ObjIdEncoder, ObjIdIter,

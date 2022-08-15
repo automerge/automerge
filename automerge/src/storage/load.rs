@@ -1,7 +1,7 @@
 use tracing::instrument;
 
 use crate::{
-    change_v2::Change,
+    change::Change,
     storage::{self, parse},
 };
 

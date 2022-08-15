@@ -6,15 +6,12 @@ use crate::query::{self, OpIdSearch, TreeQuery};
 use crate::types::{self, ActorId, Key, ObjId, Op, OpId, OpIds, OpType};
 use crate::{ObjType, OpObserver};
 use fxhash::FxBuildHasher;
-#[cfg(feature = "storage-v2")]
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::RangeBounds;
 
-#[cfg(feature = "storage-v2")]
 mod load;
-#[cfg(feature = "storage-v2")]
 pub(crate) use load::{ObservedOpSetBuilder, OpSetBuilder};
 
 pub(crate) type OpSet = OpSetInternal;
@@ -30,14 +27,12 @@ pub(crate) struct OpSetInternal {
 }
 
 impl OpSetInternal {
-    #[cfg(feature = "storage-v2")]
     pub(crate) fn builder() -> OpSetBuilder {
         OpSetBuilder::new()
     }
 
     /// Create a builder which passes each operation to `observer`. This will be significantly
     /// slower than `OpSetBuilder`
-    #[cfg(feature = "storage-v2")]
     pub(crate) fn observed_builder<O: OpObserver>(observer: &mut O) -> ObservedOpSetBuilder<'_, O> {
         ObservedOpSetBuilder::new(observer)
     }
@@ -381,7 +376,6 @@ impl Default for OpSetMetadata {
 }
 
 impl OpSetMetadata {
-    #[cfg(feature = "storage-v2")]
     pub(crate) fn from_actors(actors: Vec<ActorId>) -> Self {
         Self {
             props: IndexedCache::new(),
@@ -412,29 +406,10 @@ impl OpSetMetadata {
 
     /// If `opids` are in ascending lamport timestamp order with respect to the actor IDs in
     /// this `OpSetMetadata` then this returns `Some(OpIds)`, otherwise returns `None`.
-    #[cfg(feature = "storage-v2")]
     pub(crate) fn try_sorted_opids(&self, opids: Vec<OpId>) -> Option<OpIds> {
         OpIds::new_if_sorted(opids, |a, b| self.lamport_cmp(*a, *b))
     }
 
-    #[cfg(not(feature = "storage-v2"))]
-    pub(crate) fn import_opids<I: IntoIterator<Item = crate::legacy::OpId>>(
-        &mut self,
-        external_opids: I,
-    ) -> OpIds {
-        let iter = external_opids.into_iter();
-        let mut result = Vec::with_capacity(iter.size_hint().1.unwrap_or(0));
-        for opid in iter {
-            let crate::legacy::OpId(counter, actor) = opid;
-            let actor_idx = self.actors.cache(actor);
-            result.push(OpId(counter, actor_idx));
-        }
-        OpIds::new(result.into_iter(), |left, right| {
-            self.lamport_cmp(*left, *right)
-        })
-    }
-
-    #[cfg(feature = "storage-v2")]
     pub(crate) fn import_prop<S: Borrow<str>>(&mut self, key: S) -> usize {
         self.props.cache(key.borrow().to_string())
     }

@@ -4,27 +4,20 @@ use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::ops::RangeBounds;
 
-#[cfg(not(feature = "storage-v2"))]
-use crate::change::encode_document;
 use crate::clock::ClockData;
-#[cfg(feature = "storage-v2")]
 use crate::clocks::Clocks;
-#[cfg(feature = "storage-v2")]
-use crate::columnar_2::Key as EncodedKey;
+use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
 use crate::keys::Keys;
 use crate::op_observer::OpObserver;
 use crate::op_set::OpSet;
 use crate::parents::Parents;
-#[cfg(feature = "storage-v2")]
 use crate::storage::{self, load, CompressConfig};
 use crate::transaction::{self, CommitOptions, Failure, Success, Transaction, TransactionInner};
 use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType,
     ScalarValue, Value,
 };
-#[cfg(not(feature = "storage-v2"))]
-use crate::{legacy, types};
 use crate::{
     query, ApplyOptions, AutomergeError, Change, KeysAt, ListRange, ListRangeAt, MapRange,
     MapRangeAt, ObjType, Prop, Values,
@@ -143,10 +136,6 @@ impl Automerge {
             start_op: NonZeroU64::new(self.max_op + 1).unwrap(),
             time: 0,
             message: None,
-            #[cfg(not(feature = "storage-v2"))]
-            extra_bytes: Default::default(),
-            #[cfg(not(feature = "storage-v2"))]
-            hash: None,
             operations: vec![],
             deps,
         }
@@ -602,18 +591,6 @@ impl Automerge {
     }
 
     /// Load a document.
-    #[cfg(not(feature = "storage-v2"))]
-    pub fn load_with<Obs: OpObserver>(
-        data: &[u8],
-        options: ApplyOptions<'_, Obs>,
-    ) -> Result<Self, AutomergeError> {
-        let changes = Change::load_document(data)?;
-        let mut doc = Self::new();
-        doc.apply_changes_with(changes, options)?;
-        Ok(doc)
-    }
-
-    #[cfg(feature = "storage-v2")]
     pub fn load_with<Obs: OpObserver>(
         data: &[u8],
         mut options: ApplyOptions<'_, Obs>,
@@ -705,9 +682,6 @@ impl Automerge {
         data: &[u8],
         options: ApplyOptions<'_, Obs>,
     ) -> Result<usize, AutomergeError> {
-        #[cfg(not(feature = "storage-v2"))]
-        let changes = Change::load_document(data)?;
-        #[cfg(feature = "storage-v2")]
         let changes = match load::load_changes(storage::parse::Input::new(data)) {
             load::LoadedChanges::Complete(c) => c,
             load::LoadedChanges::Partial { error, loaded, .. } => {
@@ -800,42 +774,6 @@ impl Automerge {
         None
     }
 
-    #[cfg(not(feature = "storage-v2"))]
-    fn import_ops(&mut self, change: &Change) -> Vec<(ObjId, Op)> {
-        change
-            .iter_ops()
-            .enumerate()
-            .map(|(i, c)| {
-                let actor = self.ops.m.actors.cache(change.actor_id().clone());
-                let id = OpId(change.start_op.get() + i as u64, actor);
-                let obj = match c.obj {
-                    legacy::ObjectId::Root => ObjId::root(),
-                    legacy::ObjectId::Id(id) => ObjId(OpId(id.0, self.ops.m.actors.cache(id.1))),
-                };
-                let pred = self.ops.m.import_opids(c.pred);
-                let key = match &c.key {
-                    legacy::Key::Map(n) => Key::Map(self.ops.m.props.cache(n.to_string())),
-                    legacy::Key::Seq(legacy::ElementId::Head) => Key::Seq(types::HEAD),
-                    legacy::Key::Seq(legacy::ElementId::Id(i)) => {
-                        Key::Seq(ElemId(OpId(i.0, self.ops.m.actors.cache(i.1.clone()))))
-                    }
-                };
-                (
-                    obj,
-                    Op {
-                        id,
-                        action: c.action,
-                        key,
-                        succ: Default::default(),
-                        pred,
-                        insert: c.insert,
-                    },
-                )
-            })
-            .collect()
-    }
-
-    #[cfg(feature = "storage-v2")]
     fn import_ops(&mut self, change: &Change) -> Vec<(ObjId, Op)> {
         let actor = self.ops.m.actors.cache(change.actor_id().clone());
         let mut actors = Vec::with_capacity(change.other_actor_ids().len() + 1);
@@ -910,15 +848,6 @@ impl Automerge {
     pub fn save(&mut self) -> Vec<u8> {
         let heads = self.get_heads();
         let c = self.history.iter();
-        #[cfg(not(feature = "storage-v2"))]
-        let bytes = encode_document(
-            heads,
-            c,
-            self.ops.iter(),
-            &self.ops.m.actors,
-            &self.ops.m.props.cache,
-        );
-        #[cfg(feature = "storage-v2")]
         let bytes = crate::storage::save::save_document(
             c,
             self.ops.iter(),
@@ -931,7 +860,6 @@ impl Automerge {
         bytes
     }
 
-    #[cfg(feature = "storage-v2")]
     pub fn save_nocompress(&mut self) -> Vec<u8> {
         let heads = self.get_heads();
         let c = self.history.iter();

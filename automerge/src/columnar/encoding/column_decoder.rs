@@ -1,5 +1,5 @@
 use crate::{
-    columnar_2::{
+    columnar::{
         column_range::{DepsIter, KeyIter, ObjIdIter, OpIdIter, OpIdListIter, ValueIter},
         encoding, Key,
     },

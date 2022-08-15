@@ -1,12 +1,7 @@
 use std::borrow::Borrow;
-#[cfg(not(feature = "storage-v2"))]
-use std::borrow::Cow;
 
-#[cfg(feature = "storage-v2")]
 use crate::storage::parse;
 use crate::ChangeHash;
-#[cfg(not(feature = "storage-v2"))]
-use crate::{decoding, decoding::Decoder, encoding::Encodable};
 
 // These constants correspond to a 1% false positive rate. The values can be changed without
 // breaking compatibility of the network protocol, since the parameters used for a particular
@@ -22,7 +17,6 @@ pub struct BloomFilter {
     bits: Vec<u8>,
 }
 
-#[cfg(feature = "storage-v2")]
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ParseError {
     #[error(transparent)]
@@ -30,19 +24,6 @@ pub(crate) enum ParseError {
 }
 
 impl BloomFilter {
-    #[cfg(not(feature = "storage-v2"))]
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
-        if self.num_entries != 0 {
-            self.num_entries.encode_vec(&mut buf);
-            self.num_bits_per_entry.encode_vec(&mut buf);
-            self.num_probes.encode_vec(&mut buf);
-            buf.extend(&self.bits);
-        }
-        buf
-    }
-
-    #[cfg(feature = "storage-v2")]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::new();
         if self.num_entries != 0 {
@@ -54,7 +35,6 @@ impl BloomFilter {
         buf
     }
 
-    #[cfg(feature = "storage-v2")]
     pub(crate) fn parse(input: parse::Input<'_>) -> parse::ParseResult<'_, Self, ParseError> {
         if input.is_empty() {
             Ok((input, Self::default()))
@@ -154,36 +134,10 @@ fn bits_capacity(num_entries: u32, num_bits_per_entry: u32) -> usize {
     f as usize
 }
 
-#[cfg(not(feature = "storage-v2"))]
-impl TryFrom<&[u8]> for BloomFilter {
-    type Error = decoding::Error;
-
-    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        if bytes.is_empty() {
-            Ok(Self::default())
-        } else {
-            let mut decoder = Decoder::new(Cow::Borrowed(bytes));
-            let num_entries = decoder.read()?;
-            let num_bits_per_entry = decoder.read()?;
-            let num_probes = decoder.read()?;
-            let bits =
-                decoder.read_bytes(bits_capacity(num_entries, num_bits_per_entry) as usize)?;
-            Ok(Self {
-                num_entries,
-                num_bits_per_entry,
-                num_probes,
-                bits: bits.to_vec(),
-            })
-        }
-    }
-}
-
-#[cfg(feature = "storage-v2")]
 #[derive(thiserror::Error, Debug)]
 #[error("{0}")]
 pub struct DecodeError(String);
 
-#[cfg(feature = "storage-v2")]
 impl TryFrom<&[u8]> for BloomFilter {
     type Error = DecodeError;
 

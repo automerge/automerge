@@ -1,6 +1,6 @@
 use std::{borrow::Cow, ops::Range};
 
-use crate::columnar_2::encoding::RawDecoder;
+use crate::columnar::encoding::RawDecoder;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RawRange(Range<usize>);

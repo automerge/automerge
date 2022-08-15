@@ -57,23 +57,11 @@ macro_rules! __log {
 mod autocommit;
 mod automerge;
 mod autoserde;
-#[cfg(not(feature = "storage-v2"))]
 mod change;
-#[cfg(feature = "storage-v2")]
-mod change_v2;
 mod clock;
-#[cfg(feature = "storage-v2")]
 mod clocks;
-#[cfg(not(feature = "storage-v2"))]
 mod columnar;
-#[cfg(feature = "storage-v2")]
-mod columnar_2;
-#[cfg(feature = "storage-v2")]
 mod convert;
-#[cfg(not(feature = "storage-v2"))]
-mod decoding;
-#[cfg(not(feature = "storage-v2"))]
-mod encoding;
 mod error;
 mod exid;
 mod indexed_cache;
@@ -90,7 +78,6 @@ mod op_tree;
 mod options;
 mod parents;
 mod query;
-#[cfg(feature = "storage-v2")]
 mod storage;
 pub mod sync;
 pub mod transaction;
@@ -103,16 +90,7 @@ mod visualisation;
 pub use crate::automerge::Automerge;
 pub use autocommit::AutoCommit;
 pub use autoserde::AutoSerde;
-#[cfg(not(feature = "storage-v2"))]
-pub use change::Change;
-#[cfg(feature = "storage-v2")]
-pub use change_v2::{Change, LoadError as LoadChangeError};
-#[cfg(not(feature = "storage-v2"))]
-pub use decoding::Error as DecodingError;
-#[cfg(not(feature = "storage-v2"))]
-pub use decoding::InvalidChangeError;
-#[cfg(not(feature = "storage-v2"))]
-pub use encoding::Error as EncodingError;
+pub use change::{Change, LoadError as LoadChangeError};
 pub use error::AutomergeError;
 pub use error::InvalidActorId;
 pub use error::InvalidChangeHashSlice;

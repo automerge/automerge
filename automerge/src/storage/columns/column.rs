@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::columnar_2::column_range::generic::GenericColumnRange;
+use crate::columnar::column_range::generic::GenericColumnRange;
 
 use super::{ColumnId, ColumnSpec, ColumnType};
 

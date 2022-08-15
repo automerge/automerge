@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use super::{DeltaRange, RleRange};
 use crate::{
-    columnar_2::{
+    columnar::{
         encoding::{
             raw, DecodeColumnError, DeltaDecoder, DeltaEncoder, RleDecoder, RleEncoder, Sink,
         },
@@ -169,7 +169,7 @@ impl OpIdEncoder<Vec<u8>> {
 mod tests {
     use super::*;
     use crate::{
-        columnar_2::encoding::properties::{opid, splice_scenario},
+        columnar::encoding::properties::{opid, splice_scenario},
         types::OpId,
     };
     use proptest::prelude::*;

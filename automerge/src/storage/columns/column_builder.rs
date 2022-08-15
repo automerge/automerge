@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::columnar_2::column_range::{
+use crate::columnar::column_range::{
     generic::{GenericColumnRange, GroupRange, GroupedColumnRange, SimpleColRange},
     BooleanRange, DeltaRange, RawRange, RleRange, ValueRange,
 };

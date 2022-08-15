@@ -2,7 +2,7 @@ use std::{convert::Infallible, ops::Range};
 
 use super::{DeltaRange, RleRange};
 use crate::{
-    columnar_2::{
+    columnar::{
         encoding::{
             raw, DecodeColumnError, DeltaDecoder, DeltaEncoder, RleDecoder, RleEncoder, Sink,
         },
@@ -286,7 +286,7 @@ mod tests {
     use proptest::collection::vec as propvec;
     use proptest::prelude::*;
 
-    use crate::columnar_2::encoding::properties::{opid, splice_scenario};
+    use crate::columnar::encoding::properties::{opid, splice_scenario};
 
     fn encode(opids: Vec<Vec<OpId>>) -> (OpIdListRange, Vec<u8>) {
         let mut out = Vec::new();
