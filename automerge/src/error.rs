@@ -1,10 +1,7 @@
-#[cfg(feature = "storage-v2")]
 use crate::storage::load::Error as LoadError;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
 use crate::ChangeHash;
-#[cfg(not(feature = "storage-v2"))]
-use crate::{decoding, encoding};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -15,12 +12,6 @@ pub enum AutomergeError {
     InvalidObjIdFormat(String),
     #[error("invalid obj id `{0}`")]
     InvalidObjId(String),
-    #[error("there was an encoding problem: {0}")]
-    #[cfg(not(feature = "storage-v2"))]
-    Encoding(#[from] encoding::Error),
-    #[error("there was a decoding problem: {0}")]
-    #[cfg(not(feature = "storage-v2"))]
-    Decoding(#[from] decoding::Error),
     #[error("key must not be an empty string")]
     EmptyStringKey,
     #[error("invalid seq {0}")]
@@ -42,16 +33,12 @@ pub enum AutomergeError {
     },
     #[error("general failure")]
     Fail,
-    #[cfg(feature = "storage-v2")]
     #[error(transparent)]
     Load(#[from] LoadError),
-    #[cfg(feature = "storage-v2")]
     #[error("failed to load compressed data: {0}")]
     Deflate(#[source] std::io::Error),
-    #[cfg(feature = "storage-v2")]
     #[error("compressed chunk was not a change")]
     NonChangeCompressed,
-    #[cfg(feature = "storage-v2")]
     #[error(transparent)]
     Clocks(#[from] crate::clocks::MissingDep),
 }
@@ -92,7 +79,6 @@ pub struct InvalidElementId(pub String);
 #[error("Invalid OpID: {0}")]
 pub struct InvalidOpId(pub String);
 
-#[cfg(feature = "storage-v2")]
 #[derive(Error, Debug)]
 pub(crate) enum InvalidOpType {
     #[error("unrecognized action index {0}")]

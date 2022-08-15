@@ -53,7 +53,6 @@ where
         &self.cache[index]
     }
 
-    #[cfg(feature = "storage-v2")]
     pub(crate) fn safe_get(&self, index: usize) -> Option<&T> {
         self.cache.get(index)
     }

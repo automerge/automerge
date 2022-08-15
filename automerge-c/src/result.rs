@@ -574,17 +574,6 @@ impl From<Result<am::AutoCommit, am::AutomergeError>> for AMresult {
     }
 }
 
-#[cfg(not(feature = "storage-v2"))]
-impl From<Result<am::Change, am::DecodingError>> for AMresult {
-    fn from(maybe: Result<am::Change, am::DecodingError>) -> Self {
-        match maybe {
-            Ok(change) => AMresult::Changes(vec![change], None),
-            Err(e) => AMresult::err(&e.to_string()),
-        }
-    }
-}
-
-#[cfg(feature = "storage-v2")]
 impl From<Result<am::Change, am::LoadChangeError>> for AMresult {
     fn from(maybe: Result<am::Change, am::LoadChangeError>) -> Self {
         match maybe {
@@ -603,17 +592,6 @@ impl From<Result<am::ObjId, am::AutomergeError>> for AMresult {
     }
 }
 
-#[cfg(not(feature = "storage-v2"))]
-impl From<Result<am::sync::Message, am::DecodingError>> for AMresult {
-    fn from(maybe: Result<am::sync::Message, am::DecodingError>) -> Self {
-        match maybe {
-            Ok(message) => AMresult::SyncMessage(AMsyncMessage::new(message)),
-            Err(e) => AMresult::err(&e.to_string()),
-        }
-    }
-}
-
-#[cfg(feature = "storage-v2")]
 impl From<Result<am::sync::Message, am::sync::ReadMessageError>> for AMresult {
     fn from(maybe: Result<am::sync::Message, am::sync::ReadMessageError>) -> Self {
         match maybe {
@@ -623,17 +601,6 @@ impl From<Result<am::sync::Message, am::sync::ReadMessageError>> for AMresult {
     }
 }
 
-#[cfg(not(feature = "storage-v2"))]
-impl From<Result<am::sync::State, am::DecodingError>> for AMresult {
-    fn from(maybe: Result<am::sync::State, am::DecodingError>) -> Self {
-        match maybe {
-            Ok(state) => AMresult::SyncState(Box::new(AMsyncState::new(state))),
-            Err(e) => AMresult::err(&e.to_string()),
-        }
-    }
-}
-
-#[cfg(feature = "storage-v2")]
 impl From<Result<am::sync::State, am::sync::DecodeStateError>> for AMresult {
     fn from(maybe: Result<am::sync::State, am::sync::DecodeStateError>) -> Self {
         match maybe {

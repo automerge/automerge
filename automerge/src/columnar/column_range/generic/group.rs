@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use super::{CellValue, SimpleColIter, SimpleColRange, SimpleValue};
-use crate::columnar_2::{
+use crate::columnar::{
     column_range::{RleRange, ValueIter, ValueRange},
     encoding::{col_error::DecodeColumnError, RleDecoder},
 };

@@ -1,6 +1,6 @@
 use std::{borrow::Cow, ops::Range};
 
-use crate::columnar_2::encoding::{BooleanDecoder, BooleanEncoder};
+use crate::columnar::encoding::{BooleanDecoder, BooleanEncoder};
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct BooleanRange(Range<usize>);

@@ -42,7 +42,6 @@ impl OpTree {
         self.internal.iter()
     }
 
-    #[cfg(feature = "storage-v2")]
     pub(crate) fn len(&self) -> usize {
         self.internal.len()
     }

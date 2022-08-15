@@ -3,8 +3,8 @@ use std::collections::{BTreeSet, HashMap};
 use tracing::instrument;
 
 use crate::{
-    change_v2::Change,
-    columnar_2::Key as DocOpKey,
+    change::Change,
+    columnar::Key as DocOpKey,
     op_tree::OpSetMetadata,
     storage::{DocOp, Document},
     types::{ChangeHash, ElemId, Key, ObjId, ObjType, Op, OpId, OpIds, OpType},

@@ -6,7 +6,7 @@ use proptest::prelude::*;
 use smol_str::SmolStr;
 
 use crate::{
-    columnar_2::Key,
+    columnar::Key,
     types::{ElemId, OpId, ScalarValue},
 };
 

@@ -358,7 +358,6 @@ pub struct Counter {
 }
 
 impl Counter {
-    #[cfg(feature = "storage-v2")]
     pub(crate) fn increment<I: Iterator<Item = i64>>(&mut self, increments: I) {
         for inc in increments {
             self.current += inc;

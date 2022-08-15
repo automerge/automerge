@@ -1,7 +1,7 @@
 use std::{convert::TryFrom, ops::Range};
 
 use crate::{
-    columnar_2::{
+    columnar::{
         column_range::{
             generic::{GenericColumnRange, GroupRange, GroupedColumnRange, SimpleColRange},
             BooleanRange, DeltaRange, Key, KeyEncoder, KeyIter, KeyRange, ObjIdEncoder, ObjIdIter,
@@ -447,7 +447,7 @@ impl TryFrom<Columns> for ChangeOpsColumns {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::columnar_2::encoding::properties::{key, opid, scalar_value};
+    use crate::columnar::encoding::properties::{key, opid, scalar_value};
     use proptest::prelude::*;
 
     prop_compose! {

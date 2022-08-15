@@ -1,7 +1,7 @@
 use std::{borrow::Cow, ops::Range};
 
 use crate::{
-    columnar_2::{
+    columnar::{
         encoding::{
             leb128::{lebsize, ulebsize},
             raw, DecodeColumnError, RawBytes, RawDecoder, RawEncoder, RleDecoder, RleEncoder, Sink,
@@ -407,7 +407,7 @@ impl ValueMeta {
     }
 }
 
-impl<'a> From<&ScalarValue> for ValueMeta {
+impl From<&ScalarValue> for ValueMeta {
     fn from(p: &ScalarValue) -> Self {
         match p {
             ScalarValue::Uint(i) => Self((ulebsize(*i) << 4) | 3),
@@ -441,7 +441,7 @@ impl From<ValueMeta> for u64 {
     }
 }
 
-impl<'a> From<&ScalarValue> for ValueType {
+impl From<&ScalarValue> for ValueType {
     fn from(p: &ScalarValue) -> Self {
         match p {
             ScalarValue::Uint(_) => ValueType::Uleb,
@@ -481,7 +481,7 @@ impl From<ValueType> for u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::columnar_2::encoding::properties::{scalar_value, splice_scenario};
+    use crate::columnar::encoding::properties::{scalar_value, splice_scenario};
     use proptest::prelude::*;
     use std::borrow::Cow;
 

@@ -28,12 +28,10 @@
   "scripts": {
     "lint": "eslint test/*.ts",
     "build": "cross-env PROFILE=dev TARGET=nodejs FEATURES='' yarn target",
-    "build-storage-v2": "cross-env PROFILE=dev TARGET=nodejs FEATURES='--features=automerge-wasm/storage-v2' yarn target",
     "release": "cross-env PROFILE=release yarn buildall",
     "buildall": "cross-env TARGET=nodejs yarn target && cross-env TARGET=web yarn target",
     "target": "rimraf ./$TARGET && wasm-pack build --target $TARGET --$PROFILE --out-name bindgen -d $TARGET -- $FEATURES  && cp $TARGET-index.js $TARGET/index.js",
-    "test": "ts-mocha -p tsconfig.json --type-check --bail --full-trace test/*.ts",
-    "test-storage-v2": "yarn build-storage-v2 && ts-mocha -p tsconfig.json --type-check --bail --full-trace test/*.ts"
+    "test": "ts-mocha -p tsconfig.json --type-check --bail --full-trace test/*.ts"
   },
   "devDependencies": {
     "@types/expect": "^24.3.0",

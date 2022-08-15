@@ -1,19 +1,11 @@
 use std::collections::BTreeSet;
 
-#[cfg(not(feature = "storage-v2"))]
-use super::decode_hashes;
 use super::{encode_hashes, BloomFilter};
-#[cfg(feature = "storage-v2")]
 use crate::storage::parse;
 use crate::ChangeHash;
-#[cfg(not(feature = "storage-v2"))]
-use crate::{decoding, decoding::Decoder};
-#[cfg(not(feature = "storage-v2"))]
-use std::borrow::Cow;
 
 const SYNC_STATE_TYPE: u8 = 0x43; // first byte of an encoded sync state, for identification
 
-#[cfg(feature = "storage-v2")]
 #[derive(Debug, thiserror::Error)]
 pub enum DecodeError {
     #[error("{0:?}")]
@@ -24,7 +16,6 @@ pub enum DecodeError {
     NotEnoughInput,
 }
 
-#[cfg(feature = "storage-v2")]
 impl From<parse::leb128::Error> for DecodeError {
     fn from(_: parse::leb128::Error) -> Self {
         Self::Parse("bad leb128 encoding".to_string())
@@ -65,30 +56,6 @@ impl State {
         buf
     }
 
-    #[cfg(not(feature = "storage-v2"))]
-    pub fn decode(bytes: &[u8]) -> Result<Self, decoding::Error> {
-        let mut decoder = Decoder::new(Cow::Borrowed(bytes));
-
-        let record_type = decoder.read::<u8>()?;
-        if record_type != SYNC_STATE_TYPE {
-            return Err(decoding::Error::WrongType {
-                expected_one_of: vec![SYNC_STATE_TYPE],
-                found: record_type,
-            });
-        }
-
-        let shared_heads = decode_hashes(&mut decoder)?;
-        Ok(Self {
-            shared_heads,
-            last_sent_heads: Vec::new(),
-            their_heads: None,
-            their_need: None,
-            their_have: Some(Vec::new()),
-            sent_hashes: BTreeSet::new(),
-        })
-    }
-
-    #[cfg(feature = "storage-v2")]
     pub fn decode(input: &[u8]) -> Result<Self, DecodeError> {
         let input = parse::Input::new(input);
         match Self::parse(input) {
@@ -98,7 +65,6 @@ impl State {
         }
     }
 
-    #[cfg(feature = "storage-v2")]
     pub(crate) fn parse(input: parse::Input<'_>) -> parse::ParseResult<'_, Self, DecodeError> {
         let (i, record_type) = parse::take1(input)?;
         if record_type != SYNC_STATE_TYPE {

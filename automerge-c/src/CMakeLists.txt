@@ -23,11 +23,7 @@ else()
     set(CARGO_FLAG "--release")
 endif()
 
-if(FEATURE_FLAG_STORAGE_V2)
-    set(CARGO_FEATURES --features storage-v2)
-else()
-    set(CARGO_FEATURES "")
-endif()
+set(CARGO_FEATURES "")
 
 set(CARGO_CURRENT_BINARY_DIR "${CARGO_TARGET_DIR}/${CARGO_BUILD_TYPE}")
 

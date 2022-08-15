@@ -5,7 +5,7 @@ use std::{
     ops::Range,
 };
 
-use crate::columnar_2::{
+use crate::columnar::{
     encoding::{raw, Decodable, Encodable, RleDecoder, RleEncoder, Sink},
     SpliceError,
 };
@@ -137,7 +137,7 @@ impl<T> From<RleRange<T>> for Range<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::columnar_2::encoding::properties::option_splice_scenario;
+    use crate::columnar::encoding::properties::option_splice_scenario;
     use proptest::prelude::*;
     use std::{borrow::Cow, convert::Infallible};
 

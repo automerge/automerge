@@ -1,5 +1,5 @@
 use super::{DeltaRange, RleRange};
-use crate::columnar_2::encoding::{DecodeColumnError, DeltaDecoder, RleDecoder};
+use crate::columnar::encoding::{DecodeColumnError, DeltaDecoder, RleDecoder};
 
 /// A grouped column containing lists of u64s
 #[derive(Clone, Debug)]

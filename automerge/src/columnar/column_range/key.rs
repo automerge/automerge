@@ -2,7 +2,7 @@ use std::{convert::Infallible, ops::Range};
 
 use super::{DeltaRange, RleRange};
 use crate::{
-    columnar_2::{
+    columnar::{
         encoding::{
             raw, DecodeColumnError, DeltaDecoder, DeltaEncoder, RleDecoder, RleEncoder, Sink,
         },

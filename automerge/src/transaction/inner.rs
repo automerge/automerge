@@ -1,11 +1,8 @@
 use std::num::NonZeroU64;
 
 use crate::automerge::Actor;
-#[cfg(not(feature = "storage-v2"))]
-use crate::change::export_change;
 use crate::exid::ExId;
 use crate::query::{self, OpIdSearch};
-#[cfg(feature = "storage-v2")]
 use crate::storage::Change as StoredChange;
 use crate::types::{Key, ObjId, OpId};
 use crate::{op_tree::OpSetMetadata, types::Op, Automerge, Change, ChangeHash, OpObserver, Prop};
@@ -18,10 +15,6 @@ pub(crate) struct TransactionInner {
     pub(crate) start_op: NonZeroU64,
     pub(crate) time: i64,
     pub(crate) message: Option<String>,
-    #[cfg(not(feature = "storage-v2"))]
-    pub(crate) extra_bytes: Vec<u8>,
-    #[cfg(not(feature = "storage-v2"))]
-    pub(crate) hash: Option<ChangeHash>,
     pub(crate) deps: Vec<ChangeHash>,
     pub(crate) operations: Vec<(ObjId, Prop, Op)>,
 }
@@ -84,7 +77,6 @@ impl TransactionInner {
         hash
     }
 
-    #[cfg(feature = "storage-v2")]
     #[tracing::instrument(skip(self, metadata))]
     pub(crate) fn export(self, metadata: &OpSetMetadata) -> Change {
         use crate::storage::{change::PredOutOfOrder, convert::op_as_actor_id};
@@ -118,11 +110,6 @@ impl TransactionInner {
         #[cfg(not(debug_assertions))]
         tracing::trace!(?stored, "committing change");
         Change::new(stored)
-    }
-
-    #[cfg(not(feature = "storage-v2"))]
-    pub(crate) fn export(self, meta: &OpSetMetadata) -> Change {
-        export_change(self, &meta.actors, &meta.props)
     }
 
     /// Undo the operations added in this transaction, returning the number of cancelled

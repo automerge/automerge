@@ -1236,8 +1236,6 @@ fn test_compressed_changes() {
     let mut change = doc.get_last_local_change().unwrap().clone();
     let uncompressed = change.raw_bytes().to_vec();
     assert!(uncompressed.len() > 256);
-    #[cfg(not(feature = "storage-v2"))]
-    change.compress();
     let compressed = change.bytes().to_vec();
     assert!(compressed.len() < uncompressed.len());
 
@@ -1245,7 +1243,6 @@ fn test_compressed_changes() {
     assert_eq!(change.raw_bytes(), reloaded.raw_bytes());
 }
 
-#[cfg(feature = "storage-v2")]
 #[test]
 fn test_compressed_doc_cols() {
     // In this test, the keyCtr column is long enough for deflate compression to kick in, but the
@@ -1270,7 +1267,6 @@ fn test_compressed_doc_cols() {
     );
 }
 
-#[cfg(feature = "storage-v2")]
 #[test]
 fn test_change_encoding_expanded_change_round_trip() {
     let change_bytes: Vec<u8> = vec![

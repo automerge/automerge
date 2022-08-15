@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::columnar_2::{
+use crate::columnar::{
     column_range::{BooleanRange, DeltaRange, RleRange},
     encoding::{raw, BooleanDecoder, DeltaDecoder, RleDecoder},
 };

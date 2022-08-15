@@ -1,7 +1,7 @@
 use std::{convert::Infallible, ops::Range};
 
 use crate::{
-    columnar_2::{
+    columnar::{
         encoding::{raw, DecodeColumnError, RleDecoder, RleEncoder, Sink},
         SpliceError,
     },
