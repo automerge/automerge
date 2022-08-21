@@ -1,6 +1,7 @@
 use crate::result::{AMfree, AMresult, AMresultStatus, AMresultValue, AMstatus, AMvalue};
 
 /// \struct AMresultStack
+/// \installed_headerfile
 /// \brief A node in a singly-linked list of result pointers.
 #[repr(C)]
 pub struct AMresultStack {

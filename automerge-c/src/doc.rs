@@ -47,6 +47,7 @@ macro_rules! to_sync_state_mut {
 }
 
 /// \struct AMdoc
+/// \installed_headerfile
 /// \brief A JSON-like CRDT.
 #[derive(Clone)]
 pub struct AMdoc(am::AutoCommit);

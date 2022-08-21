@@ -14,7 +14,7 @@ fn main() {
         // \note CMake sets this environment variable before invoking Cargo so
         //       that it can direct the generated header file into its
         //       out-of-source build directory for post-processing.
-        if let Ok(target_dir) = env::var("CARGO_TARGET_DIR") {
+        if let Ok(target_dir) = env::var("CBINDGEN_TARGET_DIR") {
             writer.write_to_file(PathBuf::from(target_dir).join("automerge.h"));
         }
     }

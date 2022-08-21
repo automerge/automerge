@@ -144,6 +144,7 @@ impl From<Detail> for [u8; USIZE_USIZE_USIZE_USIZE_] {
 }
 
 /// \struct AMsyncHaves
+/// \installed_headerfile
 /// \brief A random-access iterator over a sequence of synchronization haves.
 #[repr(C)]
 #[derive(PartialEq)]

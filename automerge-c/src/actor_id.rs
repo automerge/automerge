@@ -9,6 +9,7 @@ use crate::byte_span::AMbyteSpan;
 use crate::result::{to_result, AMresult};
 
 /// \struct AMactorId
+/// \installed_headerfile
 /// \brief An actor's unique identifier.
 #[derive(PartialEq)]
 pub struct AMactorId {

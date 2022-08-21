@@ -1,6 +1,7 @@
 use automerge as am;
 
 /// \struct AMbyteSpan
+/// \installed_headerfile
 /// \brief A contiguous sequence of bytes.
 #[repr(C)]
 #[derive(PartialEq)]

@@ -67,6 +67,10 @@ string(TOUPPER ${SYMBOL_PREFIX} SYMBOL_PREFIX)
 
 set(CARGO_TARGET_DIR "${CMAKE_CURRENT_BINARY_DIR}/Cargo/target")
 
+set(CBINDGEN_INCLUDEDIR "${CARGO_TARGET_DIR}/${CMAKE_INSTALL_INCLUDEDIR}")
+
+set(CBINDGEN_TARGET_DIR "${CBINDGEN_INCLUDEDIR}/${PROJECT_NAME}")
+
 add_subdirectory(src)
 
 # Generate and install the configuration header.

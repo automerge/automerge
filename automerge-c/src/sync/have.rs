@@ -3,6 +3,7 @@ use automerge as am;
 use crate::change_hashes::AMchangeHashes;
 
 /// \struct AMsyncHave
+/// \installed_headerfile
 /// \brief A summary of the changes that the sender of a synchronization
 ///        message already has.
 #[derive(Clone, PartialEq)]

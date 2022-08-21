@@ -6,6 +6,7 @@ use crate::obj::AMobjId;
 use crate::result::AMvalue;
 
 /// \struct AMlistItem
+/// \installed_headerfile
 /// \brief An item in a list object.
 #[repr(C)]
 pub struct AMlistItem {

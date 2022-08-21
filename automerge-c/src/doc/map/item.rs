@@ -7,6 +7,7 @@ use crate::obj::AMobjId;
 use crate::result::AMvalue;
 
 /// \struct AMmapItem
+/// \installed_headerfile
 /// \brief An item in a map object.
 #[repr(C)]
 pub struct AMmapItem {

@@ -24,6 +24,7 @@ use crate::strs::AMstrs;
 use crate::sync::{AMsyncMessage, AMsyncState};
 
 /// \struct AMvalue
+/// \installed_headerfile
 /// \brief A discriminated union of value type variants for a result.
 ///
 /// \enum AMvalueVariant
@@ -73,15 +74,6 @@ use crate::sync::{AMsyncMessage, AMsyncState};
 ///
 /// \var AMvalue::strs
 /// A sequence of UTF-8 strings as an `AMstrs` struct.
-///
-/// \var AMvalue::sync_message
-/// A synchronization message as a pointer to an `AMsyncMessage` struct.
-///
-/// \var AMvalue::sync_state
-/// A synchronization state as a pointer to an `AMsyncState` struct.
-///
-/// \var AMvalue::tag
-/// The variant discriminator.
 ///
 /// \var AMvalue::sync_message
 /// A synchronization message as a pointer to an `AMsyncMessage` struct.
@@ -215,8 +207,8 @@ impl From<&AMvalue<'_>> for u8 {
     fn from(value: &AMvalue) -> Self {
         use AMvalue::*;
 
-        // Note that these numbers are the order of appearance of the respective variants in the
-        // source of AMValue.
+        // \warning These numbers must correspond to the order in which the
+        //          variants of an AMvalue are declared within it.
         match value {
             ActorId(_) => 1,
             Boolean(_) => 2,
@@ -349,6 +341,7 @@ pub unsafe extern "C" fn AMvalueEqual(value1: *const AMvalue, value2: *const AMv
 }
 
 /// \struct AMresult
+/// \installed_headerfile
 /// \brief A discriminated union of result variants.
 pub enum AMresult {
     ActorId(am::ActorId, Option<AMactorId>),
@@ -905,8 +898,8 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult) -> AMvalue<'a>
 }
 
 /// \struct AMunknownValue
+/// \installed_headerfile
 /// \brief A value (typically for a `set` operation) whose type is unknown.
-///
 #[derive(PartialEq)]
 #[repr(C)]
 pub struct AMunknownValue {

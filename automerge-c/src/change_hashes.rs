@@ -117,6 +117,7 @@ impl From<Detail> for [u8; USIZE_USIZE_USIZE_] {
 }
 
 /// \struct AMchangeHashes
+/// \installed_headerfile
 /// \brief A random-access iterator over a sequence of change hashes.
 #[repr(C)]
 #[derive(PartialEq)]

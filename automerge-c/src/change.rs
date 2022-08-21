@@ -18,6 +18,7 @@ macro_rules! to_change {
 }
 
 /// \struct AMchange
+/// \installed_headerfile
 /// \brief A group of operations performed by an actor.
 #[derive(PartialEq)]
 pub struct AMchange {

@@ -10,7 +10,7 @@
 #include <cmocka.h>
 
 /* local */
-#include "automerge.h"
+#include <automerge-c/automerge.h>
 #include "group_state.h"
 #include "macro_utils.h"
 #include "stack_utils.h"

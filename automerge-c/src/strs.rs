@@ -114,6 +114,7 @@ impl From<Detail> for [u8; USIZE_USIZE_USIZE_] {
 }
 
 /// \struct AMstrs
+/// \installed_headerfile
 /// \brief A random-access iterator over a sequence of UTF-8 strings.
 #[repr(C)]
 #[derive(PartialEq)]

@@ -6,6 +6,7 @@ use crate::obj::AMobjId;
 use crate::result::AMvalue;
 
 /// \struct AMobjItem
+/// \installed_headerfile
 /// \brief An item in an object.
 #[repr(C)]
 pub struct AMobjItem {

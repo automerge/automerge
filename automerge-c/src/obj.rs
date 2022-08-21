@@ -8,6 +8,7 @@ pub mod item;
 pub mod items;
 
 /// \struct AMobjId
+/// \installed_headerfile
 /// \brief An object's unique identifier.
 #[derive(PartialEq)]
 pub struct AMobjId {
