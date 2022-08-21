@@ -83,15 +83,6 @@ use crate::sync::{AMsyncMessage, AMsyncState};
 /// \var AMvalue::tag
 /// The variant discriminator.
 ///
-/// \var AMvalue::sync_message
-/// A synchronization message as a pointer to an `AMsyncMessage` struct.
-///
-/// \var AMvalue::sync_state
-/// A synchronization state as a pointer to an `AMsyncState` struct.
-///
-/// \var AMvalue::tag
-/// The variant discriminator.
-///
 /// \var AMvalue::timestamp
 /// A Lamport timestamp.
 ///
@@ -138,12 +129,12 @@ pub enum AMvalue<'a> {
     SyncMessage(&'a AMsyncMessage),
     /// A synchronization state variant.
     SyncState(&'a mut AMsyncState),
-    /// An unknown type of scalar value variant.
-    Unknown(AMunknownValue),
     /// A Lamport timestamp variant.
     Timestamp(i64),
     /// A 64-bit unsigned integer variant.
     Uint(u64),
+    /// An unknown type of scalar value variant.
+    Unknown(AMunknownValue),
 }
 
 impl<'a> PartialEq for AMvalue<'a> {
