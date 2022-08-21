@@ -1173,23 +1173,23 @@ static void test_should_be_able_to_fetch_changes_by_hash(void** state) {
                                   cmocka_cb).change_hashes;
     /* const change1 = doc1.getChangeByHash(head1[0])
        if (change1 === null) { throw new RangeError("change1 should not be null") }*/
-    AMbyteSpan const change_hash1 = AMchangeHashesNext(&head1, 1);
+    AMbyteSpan const head1_0 = AMchangeHashesNext(&head1, 1);
     AMchanges change1 = AMpush(
         &stack,
-        AMgetChangeByHash(doc1, change_hash1.src, change_hash1.count),
+        AMgetChangeByHash(doc1, head1_0.src, head1_0.count),
         AM_VALUE_CHANGES,
         cmocka_cb).changes;
     /* const change2 = doc1.getChangeByHash(head2[0])
        assert.deepEqual(change2, null)                                       */
-    AMbyteSpan const change_hash2 = AMchangeHashesNext(&head2, 1);
+    AMbyteSpan const head2_0 = AMchangeHashesNext(&head2, 1);
     AMpush(&stack,
-           AMgetChangeByHash(doc1, change_hash2.src, change_hash2.count),
+           AMgetChangeByHash(doc1, head2_0.src, head2_0.count),
            AM_VALUE_VOID,
            cmocka_cb);
     /* assert.deepEqual(decodeChange(change1).hash, head1[0])                */
     assert_memory_equal(AMchangeHash(AMchangesNext(&change1, 1)).src,
-                        change_hash1.src,
-                        change_hash1.count);
+                        head1_0.src,
+                        head1_0.count);
 }
 
 /**
