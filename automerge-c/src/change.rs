@@ -26,14 +26,10 @@ pub struct AMchange {
 }
 
 impl AMchange {
-    pub fn new(change: &mut am::Change) -> Self {
-        let c_message = match change.message() {
-            Some(c_message) => CString::new(c_message.as_bytes()).ok(),
-            None => None,
-        };
+    pub fn new(body: &mut am::Change) -> Self {
         Self {
-            body: change,
-            c_msg: RefCell::new(c_message),
+            body,
+            c_msg: RefCell::<Option<CString>>::default(),
         }
     }
 
