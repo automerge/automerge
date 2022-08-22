@@ -4,7 +4,7 @@
     "Orion Henry <orion@inkandswitch.com>",
     "Martin Kleppmann"
   ],
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Reimplementation of `automerge` on top of the automerge-wasm backend",
   "homepage": "https://github.com/automerge/automerge-rs/tree/main/automerge-js",
   "repository": "github:automerge/automerge-rs",

@@ -77,6 +77,7 @@ type Conflicts = {
 };
 
 export function use(api: LowLevelApi): void;
+export function getBackend<T>(doc: Doc<T>) : LowLevelApi;
 export function init<T>(actor?: ActorId): Doc<T>;
 export function clone<T>(doc: Doc<T>): Doc<T>;
 export function free<T>(doc: Doc<T>): void;
