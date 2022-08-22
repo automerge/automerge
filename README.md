@@ -5,34 +5,29 @@
 [![homepage](https://img.shields.io/badge/homepage-published-informational)](https://automerge.org/)
 [![main docs](https://img.shields.io/badge/docs-main-informational)](https://automerge.org/automerge-rs/automerge/)
 [![ci](https://github.com/automerge/automerge-rs/actions/workflows/ci.yaml/badge.svg)](https://github.com/automerge/automerge-rs/actions/workflows/ci.yaml)
+[![docs](https://github.com/automerge/automerge-rs/actions/workflows/docs.yaml/badge.svg)](https://github.com/automerge/automerge-rs/actions/workflows/docs.yaml)
 
-This is a rust implementation of the [Automerge](https://github.com/automerge/automerge) file format and network protocol.
+This is a Rust library implementation of the [Automerge](https://github.com/automerge/automerge) file format and network protocol. Its focus is to support the creation of Automerge implementations in other languages, currently; WASM, JS and C. A `libautomerge` if you will.
 
-If you are looking for the origional `automerge-rs` project that can be used as a wasm backend to the javascript implementation, it can be found [here](https://github.com/automerge/automerge-rs/tree/automerge-1.0).
+The original [Automerge](https://github.com/automerge/automerge) project (written in JS from the ground up) is still very much maintained and recommended. Indeed it is because of the success of that project that the next stage of Automerge is being explored here. Hopefully Rust can offer a more performant and scalable Automerge, opening up even more use cases. 
 
 ## Status
 
-This project has 4 components:
+The project has 5 components:
 
-1. _automerge_ - a rust implementation of the library. This project is the most mature and being used in a handful of small applications.
-2. _automerge-wasm_ - a js/wasm interface to the underlying rust library. This api is generally mature and in use in a handful of projects as well.
-3. _automerge-js_ - this is a javascript library using the wasm interface to export the same public api of the primary automerge project. Currently this project passes all of automerge's tests but has not been used in any real project or packaged as an NPM. Alpha testers welcome.
-4. _automerge-c_ - this is a c library intended to be an ffi integration point for all other languages. It is currently a work in progress and not yet ready for any testing.
+1. [_automerge_](automerge) - The main Rust implementation of the library.
+2. [_automerge-wasm_](automerge-wasm) - A JS/WASM interface to the underlying Rust library. This API is generally mature and in use in a handful of projects.
+3. [_automerge-js_](automerge-js) - This is a Javascript library using the WASM interface to export the same public API of the primary Automerge project. Currently this project passes all of Automerge's tests but has not been used in any real project or packaged as an NPM. Alpha testers welcome.
+4. [_automerge-c_](automerge-c) - This is a C library intended to be an FFI integration point for all other languages. It is currently a work in progress and not yet ready for any testing.
+5. [_automerge-cli_](automerge-cli) - An experimental CLI wrapper around the Rust library. Currently not functional.
 
 ## How?
 
-The current iteration of automerge-rs is complicated to work with because it
-adopts the frontend/backend split architecture of the JS implementation. This
-architecture was necessary due to basic operations on the automerge opset being
-too slow to perform on the UI thread. Recently @orionz has been able to improve
-the performance to the point where the split is no longer necessary. This means
-we can adopt a much simpler mutable API.
-
-The architecture is now built around the `OpTree`. This is a data structure
+The magic of the architecture is built around the `OpTree`. This is a data structure
 which supports efficiently inserting new operations and realising values of
 existing operations. Most interactions with the `OpTree` are in the form of
 implementations of `TreeQuery` - a trait which can be used to traverse the
-optree and producing state of some kind. User facing operations are exposed on
+`OpTree` and producing state of some kind. User facing operations are exposed on
 an `Automerge` object, under the covers these operations typically instantiate
 some `TreeQuery` and run it over the `OpTree`.
 
@@ -96,8 +91,9 @@ $ mkdir -p build
 $ cd build
 $ cmake -S .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
 ## building and testing
-$ cmake --build .
+$ cmake --build . --target test_automerge
 ```
+
 To add debugging symbols, replace `Release` with `Debug`.
 To build a shared library instead of a static one, replace `OFF` with `ON`.
 
@@ -107,4 +103,7 @@ to list here.
 
 ## Benchmarking
 
-The `edit-trace` folder has the main code for running the edit trace benchmarking.
+The [`edit-trace`](edit-trace) folder has the main code for running the edit trace benchmarking.
+
+## The old Rust project
+If you are looking for the origional `automerge-rs` project that can be used as a wasm backend to the javascript implementation, it can be found [here](https://github.com/automerge/automerge-rs/tree/automerge-1.0).

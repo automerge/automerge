@@ -20,7 +20,7 @@ Heads refers to a set of hashes that uniquely identifies a point in time in a do
 
 ### Using the Library and Creating a Document
 
-This is a rust/wasm package and will work in a node or web environment.  Node is able to load wasm synchronously but a web environment is not.  The default import of the package is a function that returns a promise that resolves once the wasm is loaded.
+This is a rust/wasm package and will work in a node or web environment.  Node is able to load wasm synchronously but a web environment is not.  The 'init' export of the package is a function that returns a promise that resolves once the wasm is loaded.
 
 This creates a document in node.  The memory allocated is handled by wasm and isn't managed by the javascript garbage collector and thus needs to be manually freed.
 
@@ -35,7 +35,7 @@ This creates a document in node.  The memory allocated is handled by wasm and is
 While this will work in both node and in a web context
 
 ```javascript
-  import init, { create } from "automerge-wasm"
+  import { init, create } from "automerge-wasm"
 
   init().then(_ => {
     let doc = create()

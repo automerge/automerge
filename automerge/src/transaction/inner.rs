@@ -162,11 +162,7 @@ impl TransactionInner {
         obj: ObjId,
         succ_pos: &[usize],
     ) {
-        for succ in succ_pos {
-            doc.ops.replace(&obj, *succ, |old_op| {
-                old_op.add_succ(&op);
-            });
-        }
+        doc.ops.add_succ(&obj, succ_pos.iter().copied(), &op);
 
         if !op.is_delete() {
             doc.ops.insert(pos, &obj, op.clone());
@@ -207,19 +203,20 @@ impl TransactionInner {
         mark: O,
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(obj.as_ref())?;
-        let markid = doc.exid_to_obj(mark.as_ref())?.0;
+        let markid = doc.exid_to_obj_tmp_unchecked(mark.as_ref())?.0;
         let op1 = Op {
             id: self.next_id(),
             action: OpType::Delete,
             key: markid.into(),
             succ: Default::default(),
-            pred: vec![markid],
+            pred: doc.ops.m.sorted_opids(vec![markid].into_iter()),
             insert: false,
         };
         let q1 = doc.ops.search(&obj, query::SeekOp::new(&op1));
-        for i in q1.succ {
-            doc.ops.replace(&obj, i, |old_op| old_op.add_succ(&op1));
-        }
+        doc.ops.add_succ(&obj, q1.succ.into_iter(), &op1);
+        //for i in q1.succ {
+        //    doc.ops.replace(&obj, i, |old_op| old_op.add_succ(&op1));
+        //}
         self.operations.push((obj, Prop::Map("".into()), op1));
 
         let markid = markid.next();
@@ -228,14 +225,15 @@ impl TransactionInner {
             action: OpType::Delete,
             key: markid.into(),
             succ: Default::default(),
-            pred: vec![markid],
+            pred: doc.ops.m.sorted_opids(vec![markid].into_iter()),
             insert: false,
         };
         let q2 = doc.ops.search(&obj, query::SeekOp::new(&op2));
 
-        for i in q2.succ {
-            doc.ops.replace(&obj, i, |old_op| old_op.add_succ(&op2));
-        }
+        doc.ops.add_succ(&obj, q2.succ.into_iter(), &op2);
+        //for i in q2.succ {
+        //    doc.ops.replace(&obj, i, |old_op| old_op.add_succ(&op2));
+        //}
         self.operations.push((obj, Prop::Map("".into()), op2));
         Ok(())
     }
@@ -337,7 +335,7 @@ impl TransactionInner {
             return Err(AutomergeError::MissingCounter);
         }
 
-        let pred = query.ops.iter().map(|op| op.id).collect();
+        let pred = doc.ops.m.sorted_opids(query.ops.iter().map(|o| o.id));
 
         let op = Op {
             id,
@@ -365,7 +363,7 @@ impl TransactionInner {
         let query = doc.ops.search(&obj, query::Nth::new(index));
 
         let id = self.next_id();
-        let pred = query.ops.iter().map(|op| op.id).collect();
+        let pred = doc.ops.m.sorted_opids(query.ops.iter().map(|o| o.id));
         let key = query.key()?;
 
         if query.ops.len() == 1 && query.ops[0].is_noop(&action) {

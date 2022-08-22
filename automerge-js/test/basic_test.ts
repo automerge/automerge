@@ -163,5 +163,10 @@ describe('Automerge', () => {
             })
             assert.deepEqual(doc6, { list: [2,1,9,100,101,10,3,11,12] });
         })
+
+        it('allows access to the backend', () => {
+          let doc = Automerge.init()
+          assert.deepEqual(Object.keys(Automerge.getBackend(doc)), ["ptr"])
+        })
     })
 })

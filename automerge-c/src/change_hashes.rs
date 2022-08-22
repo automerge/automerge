@@ -4,6 +4,7 @@ use std::ffi::c_void;
 use std::mem::size_of;
 
 use crate::byte_span::AMbyteSpan;
+use crate::result::{to_result, AMresult};
 
 #[repr(C)]
 struct Detail {
@@ -29,11 +30,28 @@ impl Detail {
     }
 
     pub fn advance(&mut self, n: isize) {
-        if n != 0 && !self.is_stopped() {
-            let n = if self.offset < 0 { -n } else { n };
-            let len = self.len as isize;
-            self.offset = std::cmp::max(-(len + 1), std::cmp::min(self.offset + n, len));
-        };
+        if n == 0 {
+            return;
+        }
+        let len = self.len as isize;
+        self.offset = if self.offset < 0 {
+            // It's reversed.
+            let unclipped = self.offset.checked_sub(n).unwrap_or(isize::MIN);
+            if unclipped >= 0 {
+                // Clip it to the forward stop.
+                len
+            } else {
+                std::cmp::min(std::cmp::max(-(len + 1), unclipped), -1)
+            }
+        } else {
+            let unclipped = self.offset.checked_add(n).unwrap_or(isize::MAX);
+            if unclipped < 0 {
+                // Clip it to the reverse stop.
+                -(len + 1)
+            } else {
+                std::cmp::max(0, std::cmp::min(unclipped, len))
+            }
+        }
     }
 
     pub fn get_index(&self) -> usize {
@@ -62,7 +80,7 @@ impl Detail {
     }
 
     pub fn prev(&mut self, n: isize) -> Option<&am::ChangeHash> {
-        self.advance(n);
+        self.advance(-n);
         if self.is_stopped() {
             return None;
         }
@@ -75,6 +93,14 @@ impl Detail {
         Self {
             len: self.len,
             offset: -(self.offset + 1),
+            ptr: self.ptr,
+        }
+    }
+
+    pub fn rewound(&self) -> Self {
+        Self {
+            len: self.len,
+            offset: if self.offset < 0 { -1 } else { 0 },
             ptr: self.ptr,
         }
     }
@@ -93,8 +119,12 @@ impl From<Detail> for [u8; USIZE_USIZE_USIZE_] {
 /// \struct AMchangeHashes
 /// \brief A random-access iterator over a sequence of change hashes.
 #[repr(C)]
+#[derive(PartialEq)]
 pub struct AMchangeHashes {
-    /// Reserved.
+    /// An implementation detail that is intentionally opaque.
+    /// \warning Modifying \p detail will cause undefined behavior.
+    /// \note The actual size of \p detail will vary by platform, this is just
+    ///       the one for the platform this documentation was built on.
     detail: [u8; USIZE_USIZE_USIZE_],
 }
 
@@ -131,6 +161,13 @@ impl AMchangeHashes {
             detail: detail.reversed().into(),
         }
     }
+
+    pub fn rewound(&self) -> Self {
+        let detail = unsafe { &*(self.detail.as_ptr() as *const Detail) };
+        Self {
+            detail: detail.rewound().into(),
+        }
+    }
 }
 
 impl AsRef<[am::ChangeHash]> for AMchangeHashes {
@@ -153,14 +190,14 @@ impl Default for AMchangeHashes {
 ///        \p |n| positions where the sign of \p n is relative to the
 ///        iterator's direction.
 ///
-/// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
+/// \param[in,out] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
-/// \pre \p change_hashes must be a valid address.
+/// \pre \p change_hashes `!= NULL`.
 /// \internal
 ///
 /// #Safety
-/// change_hashes must be a pointer to a valid AMchangeHashes
+/// change_hashes must be a valid pointer to an AMchangeHashes
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeHashesAdvance(change_hashes: *mut AMchangeHashes, n: isize) {
     if let Some(change_hashes) = change_hashes.as_mut() {
@@ -177,13 +214,13 @@ pub unsafe extern "C" fn AMchangeHashesAdvance(change_hashes: *mut AMchangeHashe
 /// \return `-1` if \p change_hashes1 `<` \p change_hashes2, `0` if
 ///         \p change_hashes1 `==` \p change_hashes2 and `1` if
 ///         \p change_hashes1 `>` \p change_hashes2.
-/// \pre \p change_hashes1 must be a valid address.
-/// \pre \p change_hashes2 must be a valid address.
+/// \pre \p change_hashes1 `!= NULL`.
+/// \pre \p change_hashes2 `!= NULL`.
 /// \internal
 ///
 /// #Safety
-/// change_hashes1 must be a pointer to a valid AMchangeHashes
-/// change_hashes2 must be a pointer to a valid AMchangeHashes
+/// change_hashes1 must be a valid pointer to an AMchangeHashes
+/// change_hashes2 must be a valid pointer to an AMchangeHashes
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeHashesCmp(
     change_hashes1: *const AMchangeHashes,
@@ -204,21 +241,56 @@ pub unsafe extern "C" fn AMchangeHashesCmp(
 }
 
 /// \memberof AMchangeHashes
+/// \brief Allocates an iterator over a sequence of change hashes and
+///        initializes it from a sequence of byte spans.
+///
+/// \param[in] src A pointer to an array of `AMbyteSpan` structs.
+/// \param[in] count The number of `AMbyteSpan` structs to copy from \p src.
+/// \return A pointer to an `AMresult` struct containing an `AMchangeHashes`
+///         struct.
+/// \pre \p src `!= NULL`.
+/// \pre `0 <` \p count `<= sizeof(`\p src`) / sizeof(AMbyteSpan)`.
+/// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
+///          in order to prevent a memory leak.
+/// \internal
+/// # Safety
+/// src must be an AMbyteSpan array of size `>= count`
+#[no_mangle]
+pub unsafe extern "C" fn AMchangeHashesInit(src: *const AMbyteSpan, count: usize) -> *mut AMresult {
+    let mut change_hashes = Vec::<am::ChangeHash>::new();
+    for n in 0..count {
+        let byte_span = &*src.add(n);
+        let slice = std::slice::from_raw_parts(byte_span.src, byte_span.count);
+        match am::ChangeHash::try_from(slice) {
+            Ok(change_hash) => {
+                change_hashes.push(change_hash);
+            }
+            Err(e) => {
+                return to_result(Err(e));
+            }
+        }
+    }
+    to_result(Ok::<Vec<am::ChangeHash>, am::InvalidChangeHashSlice>(
+        change_hashes,
+    ))
+}
+
+/// \memberof AMchangeHashes
 /// \brief Gets the change hash at the current position of an iterator over a
 ///        sequence of change hashes and then advances it by at most \p |n|
 ///        positions where the sign of \p n is relative to the iterator's
 ///        direction.
 ///
-/// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
+/// \param[in,out] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
 /// \return An `AMbyteSpan` struct with `.src == NULL` when \p change_hashes
 ///         was previously advanced past its forward/reverse limit.
-/// \pre \p change_hashes must be a valid address.
+/// \pre \p change_hashes `!= NULL`.
 /// \internal
 ///
 /// #Safety
-/// change_hashes must be a pointer to a valid AMchangeHashes
+/// change_hashes must be a valid pointer to an AMchangeHashes
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeHashesNext(
     change_hashes: *mut AMchangeHashes,
@@ -238,16 +310,16 @@ pub unsafe extern "C" fn AMchangeHashesNext(
 ///        iterator's direction and then gets the change hash at its new
 ///        position.
 ///
-/// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
+/// \param[in,out] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
 /// \return An `AMbyteSpan` struct with `.src == NULL` when \p change_hashes is
 ///         presently advanced past its forward/reverse limit.
-/// \pre \p change_hashes must be a valid address.
+/// \pre \p change_hashes `!= NULL`.
 /// \internal
 ///
 /// #Safety
-/// change_hashes must be a pointer to a valid AMchangeHashes
+/// change_hashes must be a valid pointer to an AMchangeHashes
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeHashesPrev(
     change_hashes: *mut AMchangeHashes,
@@ -267,11 +339,11 @@ pub unsafe extern "C" fn AMchangeHashesPrev(
 ///
 /// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \return The count of values in \p change_hashes.
-/// \pre \p change_hashes must be a valid address.
+/// \pre \p change_hashes `!= NULL`.
 /// \internal
 ///
 /// #Safety
-/// change_hashes must be a pointer to a valid AMchangeHashes
+/// change_hashes must be a valid pointer to an AMchangeHashes
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeHashesSize(change_hashes: *const AMchangeHashes) -> usize {
     if let Some(change_hashes) = change_hashes.as_ref() {
@@ -287,17 +359,39 @@ pub unsafe extern "C" fn AMchangeHashesSize(change_hashes: *const AMchangeHashes
 ///
 /// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
 /// \return An `AMchangeHashes` struct
-/// \pre \p change_hashes must be a valid address.
+/// \pre \p change_hashes `!= NULL`.
 /// \internal
 ///
 /// #Safety
-/// change_hashes must be a pointer to a valid AMchangeHashes
+/// change_hashes must be a valid pointer to an AMchangeHashes
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeHashesReversed(
     change_hashes: *const AMchangeHashes,
 ) -> AMchangeHashes {
     if let Some(change_hashes) = change_hashes.as_ref() {
         change_hashes.reversed()
+    } else {
+        AMchangeHashes::default()
+    }
+}
+
+/// \memberof AMchangeHashes
+/// \brief Creates an iterator at the starting position over the same sequence
+///        of change hashes as the given one.
+///
+/// \param[in] change_hashes A pointer to an `AMchangeHashes` struct.
+/// \return An `AMchangeHashes` struct
+/// \pre \p change_hashes `!= NULL`.
+/// \internal
+///
+/// #Safety
+/// change_hashes must be a valid pointer to an AMchangeHashes
+#[no_mangle]
+pub unsafe extern "C" fn AMchangeHashesRewound(
+    change_hashes: *const AMchangeHashes,
+) -> AMchangeHashes {
+    if let Some(change_hashes) = change_hashes.as_ref() {
+        change_hashes.rewound()
     } else {
         AMchangeHashes::default()
     }

@@ -1,157 +1,138 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <automerge.h>
 
-AMvalue test(AMresult*, AMvalueVariant const);
+static void abort_cb(AMresultStack**, uint8_t);
 
 /*
  *  Based on https://automerge.github.io/docs/quickstart
  */
 int main(int argc, char** argv) {
-    AMresult* const doc1_result = AMcreate();
-    AMdoc* const doc1 = AMresultValue(doc1_result).doc;
-    if (doc1 == NULL) {
-        fprintf(stderr, "`AMcreate()` failure.");
-        exit(EXIT_FAILURE);
-    }
-    AMresult* const cards_result = AMmapPutObject(doc1, AM_ROOT, "cards", AM_OBJ_TYPE_LIST);
-    AMvalue value = test(cards_result, AM_VALUE_OBJ_ID);
-    AMobjId const* const cards = value.obj_id;
-    AMresult* const card1_result = AMlistPutObject(doc1, cards, 0, true, AM_OBJ_TYPE_MAP);
-    value = test(card1_result, AM_VALUE_OBJ_ID);
-    AMobjId const* const card1 = value.obj_id;
-    AMresult* result = AMmapPutStr(doc1, card1, "title", "Rewrite everything in Clojure");
-    test(result, AM_VALUE_VOID);
-    AMfree(result);
-    result = AMmapPutBool(doc1, card1, "done", false);
-    test(result, AM_VALUE_VOID);
-    AMfree(result);
-    AMresult* const card2_result = AMlistPutObject(doc1, cards, 0, true, AM_OBJ_TYPE_MAP);
-    value = test(card2_result, AM_VALUE_OBJ_ID);
-    AMobjId const* const card2 = value.obj_id;
-    result = AMmapPutStr(doc1, card2, "title", "Rewrite everything in Haskell");
-    test(result, AM_VALUE_VOID);
-    AMfree(result);
-    result = AMmapPutBool(doc1, card2, "done", false);
-    test(result, AM_VALUE_VOID);
-    AMfree(result);
-    AMfree(card2_result);
-    result = AMcommit(doc1, "Add card", NULL);
-    test(result, AM_VALUE_CHANGE_HASHES);
-    AMfree(result);
+    AMresultStack* results = NULL;
+    AMdoc* const doc1 = AMpush(&results, AMcreate(), AM_VALUE_DOC, abort_cb).doc;
+    AMobjId const* const
+        cards = AMpush(&results, AMmapPutObject(doc1, AM_ROOT, "cards", AM_OBJ_TYPE_LIST), AM_VALUE_OBJ_ID, abort_cb).obj_id;
+    AMobjId const* const
+        card1 = AMpush(&results, AMlistPutObject(doc1, cards, 0, true, AM_OBJ_TYPE_MAP), AM_VALUE_OBJ_ID, abort_cb).obj_id;
+    AMpush(&results, AMmapPutStr(doc1, card1, "title", "Rewrite everything in Clojure"), AM_VALUE_VOID, abort_cb);
+    AMpush(&results, AMmapPutBool(doc1, card1, "done", false), AM_VALUE_VOID, abort_cb);
+    AMobjId const* const
+        card2 = AMpush(&results, AMlistPutObject(doc1, cards, 0, true, AM_OBJ_TYPE_MAP), AM_VALUE_OBJ_ID, abort_cb).obj_id;
+    AMpush(&results, AMmapPutStr(doc1, card2, "title", "Rewrite everything in Haskell"), AM_VALUE_VOID, abort_cb);
+    AMpush(&results, AMmapPutBool(doc1, card2, "done", false), AM_VALUE_VOID, abort_cb);
+    AMpush(&results, AMcommit(doc1, "Add card", NULL), AM_VALUE_CHANGE_HASHES, abort_cb);
 
-    AMresult* doc2_result = AMcreate();
-    AMdoc* doc2 = AMresultValue(doc2_result).doc;
-    if (doc2 == NULL) {
-        fprintf(stderr, "`AMcreate()` failure.");
-        AMfree(card1_result);
-        AMfree(cards_result);
-        AMfree(doc1_result);
-        exit(EXIT_FAILURE);
-    }
-    result = AMmerge(doc2, doc1);
-    test(result, AM_VALUE_CHANGE_HASHES);
-    AMfree(result);
-    AMfree(doc2_result);
+    AMdoc* doc2 = AMpush(&results, AMcreate(), AM_VALUE_DOC, abort_cb).doc;
+    AMpush(&results, AMmerge(doc2, doc1), AM_VALUE_CHANGE_HASHES, abort_cb);
 
-    AMresult* const save_result = AMsave(doc1);
-    value = test(save_result, AM_VALUE_BYTES);
-    AMbyteSpan binary = value.bytes;
-    doc2_result = AMload(binary.src, binary.count);
-    doc2 = AMresultValue(doc2_result).doc;
-    AMfree(save_result);
-    if (doc2 == NULL) {
-        fprintf(stderr, "`AMload()` failure.");
-        AMfree(card1_result);
-        AMfree(cards_result);
-        AMfree(doc1_result);
-        exit(EXIT_FAILURE);
-    }
+    AMbyteSpan const binary = AMpush(&results, AMsave(doc1), AM_VALUE_BYTES, abort_cb).bytes;
+    doc2 = AMpush(&results, AMload(binary.src, binary.count), AM_VALUE_DOC, abort_cb).doc;
 
-    result = AMmapPutBool(doc1, card1, "done", true);
-    test(result, AM_VALUE_VOID);
-    AMfree(result);
-    result = AMcommit(doc1, "Mark card as done", NULL);
-    test(result, AM_VALUE_CHANGE_HASHES);
-    AMfree(result);
-    AMfree(card1_result);
+    AMpush(&results, AMmapPutBool(doc1, card1, "done", true), AM_VALUE_VOID, abort_cb);
+    AMpush(&results, AMcommit(doc1, "Mark card as done", NULL), AM_VALUE_CHANGE_HASHES, abort_cb);
 
-    result = AMlistDelete(doc2, cards, 0);
-    test(result, AM_VALUE_VOID);
-    AMfree(result);
-    result = AMcommit(doc2, "Delete card", NULL);
-    test(result, AM_VALUE_CHANGE_HASHES);
-    AMfree(result);
+    AMpush(&results, AMlistDelete(doc2, cards, 0), AM_VALUE_VOID, abort_cb);
+    AMpush(&results, AMcommit(doc2, "Delete card", NULL), AM_VALUE_CHANGE_HASHES, abort_cb);
 
-    result = AMmerge(doc1, doc2);
-    test(result, AM_VALUE_CHANGE_HASHES);
-    AMfree(result);
-    AMfree(doc2_result);
+    AMpush(&results, AMmerge(doc1, doc2), AM_VALUE_CHANGE_HASHES, abort_cb);
 
-    result = AMgetChanges(doc1, NULL);
-    value = test(result, AM_VALUE_CHANGES);
+    AMchanges changes = AMpush(&results, AMgetChanges(doc1, NULL), AM_VALUE_CHANGES, abort_cb).changes;
     AMchange const* change = NULL;
-    while ((change = AMchangesNext(&value.changes, 1)) != NULL) {
-        size_t const size = AMobjSizeAt(doc1, cards, change);
-        printf("%s %ld\n", AMchangeMessage(change), size);
+    while ((change = AMchangesNext(&changes, 1)) != NULL) {
+        AMbyteSpan const change_hash = AMchangeHash(change);
+        AMchangeHashes const
+            heads = AMpush(&results, AMchangeHashesInit(&change_hash, 1), AM_VALUE_CHANGE_HASHES, abort_cb).change_hashes;
+        printf("%s %ld\n", AMchangeMessage(change), AMobjSize(doc1, cards, &heads));
     }
-    AMfree(result);
-    AMfree(cards_result);
-    AMfree(doc1_result);
+    AMfreeStack(&results);
+}
+
+static char const* discriminant_suffix(AMvalueVariant const);
+
+/**
+ * \brief Prints an error message to `stderr`, deallocates all results in the
+ *        given stack and exits.
+ *
+ * \param[in,out] stack A pointer to a pointer to an `AMresultStack` struct.
+ * \param[in] discriminant An `AMvalueVariant` enum tag.
+ * \pre \p stack` != NULL`.
+ * \post `*stack == NULL`.
+ */
+static void abort_cb(AMresultStack** stack, uint8_t discriminant) {
+    static char buffer[512] = {0};
+
+    char const* suffix = NULL;
+    if (!stack) {
+        suffix = "Stack*";
+    }
+    else if (!*stack) {
+        suffix = "Stack";
+    }
+    else if (!(*stack)->result) {
+        suffix = "";
+    }
+    if (suffix) {
+        fprintf(stderr, "Null `AMresult%s*`.", suffix);
+        AMfreeStack(stack);
+        exit(EXIT_FAILURE);
+        return;
+    }
+    AMstatus const status = AMresultStatus((*stack)->result);
+    switch (status) {
+        case AM_STATUS_ERROR:          strcpy(buffer, "Error");          break;
+        case AM_STATUS_INVALID_RESULT: strcpy(buffer, "Invalid result"); break;
+        case AM_STATUS_OK:                                               break;
+        default: sprintf(buffer, "Unknown `AMstatus` tag %d", status);
+    }
+    if (buffer[0]) {
+        fprintf(stderr, "%s; %s.", buffer, AMerrorMessage((*stack)->result));
+        AMfreeStack(stack);
+        exit(EXIT_FAILURE);
+        return;
+    }
+    AMvalue const value = AMresultValue((*stack)->result);
+    fprintf(stderr, "Unexpected tag `AM_VALUE_%s` (%d); expected `AM_VALUE_%s`.",
+        discriminant_suffix(value.tag),
+        value.tag,
+        discriminant_suffix(discriminant));
+    AMfreeStack(stack);
+    exit(EXIT_FAILURE);
 }
 
 /**
- * \brief Extracts a value with the given discriminant from the given result
- *        or writes a message to `stderr`, frees the given result and
- *        terminates the program.
+ * \brief Gets the suffix for a discriminant's corresponding string
+ *        representation.
  *
-.* \param[in] result A pointer to an `AMresult` struct.
  * \param[in] discriminant An `AMvalueVariant` enum tag.
- * \return An `AMvalue` struct.
- * \pre \p result must be a valid address.
+ * \return A UTF-8 string.
  */
-AMvalue test(AMresult* result, AMvalueVariant const discriminant) {
-    static char prelude[64];
-
-    if (result == NULL) {
-        fprintf(stderr, "NULL `AMresult` struct pointer.");
-        exit(EXIT_FAILURE);
+static char const* discriminant_suffix(AMvalueVariant const discriminant) {
+    char const* suffix = NULL;
+    switch (discriminant) {
+        case AM_VALUE_ACTOR_ID:      suffix = "ACTOR_ID";      break;
+        case AM_VALUE_BOOLEAN:       suffix = "BOOLEAN";       break;
+        case AM_VALUE_BYTES:         suffix = "BYTES";         break;
+        case AM_VALUE_CHANGE_HASHES: suffix = "CHANGE_HASHES"; break;
+        case AM_VALUE_CHANGES:       suffix = "CHANGES";       break;
+        case AM_VALUE_COUNTER:       suffix = "COUNTER";       break;
+        case AM_VALUE_DOC:           suffix = "DOC";           break;
+        case AM_VALUE_F64:           suffix = "F64";           break;
+        case AM_VALUE_INT:           suffix = "INT";           break;
+        case AM_VALUE_LIST_ITEMS:    suffix = "LIST_ITEMS";    break;
+        case AM_VALUE_MAP_ITEMS:     suffix = "MAP_ITEMS";     break;
+        case AM_VALUE_NULL:          suffix = "NULL";          break;
+        case AM_VALUE_OBJ_ID:        suffix = "OBJ_ID";        break;
+        case AM_VALUE_OBJ_ITEMS:     suffix = "OBJ_ITEMS";     break;
+        case AM_VALUE_STR:           suffix = "STR";           break;
+        case AM_VALUE_STRS:          suffix = "STRINGS";       break;
+        case AM_VALUE_SYNC_MESSAGE:  suffix = "SYNC_MESSAGE";  break;
+        case AM_VALUE_SYNC_STATE:    suffix = "SYNC_STATE";    break;
+        case AM_VALUE_TIMESTAMP:     suffix = "TIMESTAMP";     break;
+        case AM_VALUE_UINT:          suffix = "UINT";          break;
+        case AM_VALUE_VOID:          suffix = "VOID";          break;
+        default:                     suffix = "...";
     }
-    AMstatus const status = AMresultStatus(result);
-    if (status != AM_STATUS_OK) {
-        switch (status) {
-            case AM_STATUS_ERROR:          sprintf(prelude, "Error");          break;
-            case AM_STATUS_INVALID_RESULT: sprintf(prelude, "Invalid result"); break;
-            default: sprintf(prelude, "Unknown `AMstatus` tag %d", status);
-        }
-        fprintf(stderr, "%s; %s.", prelude, AMerrorMessage(result));
-        AMfree(result);
-        exit(EXIT_FAILURE);
-    }
-    AMvalue const value = AMresultValue(result);
-    if (value.tag != discriminant) {
-        char const* label = NULL;
-        switch (value.tag) {
-            case AM_VALUE_ACTOR_ID:      label = "AM_VALUE_ACTOR_ID";      break;
-            case AM_VALUE_BOOLEAN:       label = "AM_VALUE_BOOLEAN";       break;
-            case AM_VALUE_BYTES:         label = "AM_VALUE_BYTES";         break;
-            case AM_VALUE_CHANGE_HASHES: label = "AM_VALUE_CHANGE_HASHES"; break;
-            case AM_VALUE_CHANGES:       label = "AM_VALUE_CHANGES";       break;
-            case AM_VALUE_COUNTER:       label = "AM_VALUE_COUNTER";       break;
-            case AM_VALUE_F64:           label = "AM_VALUE_F64";           break;
-            case AM_VALUE_INT:           label = "AM_VALUE_INT";           break;
-            case AM_VALUE_VOID:          label = "AM_VALUE_VOID";          break;
-            case AM_VALUE_NULL:          label = "AM_VALUE_NULL";          break;
-            case AM_VALUE_OBJ_ID:        label = "AM_VALUE_OBJ_ID";        break;
-            case AM_VALUE_STR:           label = "AM_VALUE_STR";           break;
-            case AM_VALUE_TIMESTAMP:     label = "AM_VALUE_TIMESTAMP";     break;
-            case AM_VALUE_UINT:          label = "AM_VALUE_UINT";          break;
-            default:                     label = "<unknown>";
-        }
-        fprintf(stderr, "Unexpected `AMvalueVariant` tag `%s` (%d).", label, value.tag);
-        AMfree(result);
-        exit(EXIT_FAILURE);
-    }
-    return value;
+    return suffix;
 }

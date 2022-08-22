@@ -1,8 +1,7 @@
 import { describe, it } from 'mocha';
 import * as assert from 'assert'
 //@ts-ignore
-import init from '..'
-import { create, load } from '..'
+import { init, create, load } from '..'
 
 describe('Automerge', () => {
   describe('Readme Examples', () => {

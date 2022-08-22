@@ -4,7 +4,7 @@ set -eou pipefail
 ./scripts/ci/fmt
 ./scripts/ci/lint
 ./scripts/ci/build-test
-./scripts/ci/docs
+./scripts/ci/rust-docs
 ./scripts/ci/advisory
 ./scripts/ci/wasm_tests
 ./scripts/ci/js_tests

@@ -5,6 +5,8 @@ use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum AutomergeError {
+    #[error("id was not an object id")]
+    NotAnObject,
     #[error("invalid obj id format `{0}`")]
     InvalidObjIdFormat(String),
     #[error("invalid obj id `{0}`")]
@@ -27,10 +29,13 @@ pub enum AutomergeError {
     MissingHash(ChangeHash),
     #[error("increment operations must be against a counter value")]
     MissingCounter,
+    #[error("invalid type of value, expected `{expected}` but received `{unexpected}`")]
+    InvalidValueType {
+        expected: String,
+        unexpected: String,
+    },
     #[error("general failure")]
     Fail,
-    #[error(transparent)]
-    HexDecode(#[from] hex::FromHexError),
 }
 
 #[cfg(feature = "wasm")]

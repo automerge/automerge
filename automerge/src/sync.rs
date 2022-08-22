@@ -258,7 +258,7 @@ impl Automerge {
 }
 
 /// The sync message to be sent.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Message {
     /// The heads of the sender.
     pub heads: Vec<ChangeHash>,

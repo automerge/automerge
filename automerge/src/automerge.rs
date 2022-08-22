@@ -224,34 +224,45 @@ impl Automerge {
 
     /// Get the object id of the object that contains this object and the prop that this object is
     /// at in that object.
-    pub fn parent_object<O: AsRef<ExId>>(&self, obj: O) -> Option<(ExId, Prop)> {
-        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
-            if obj == ObjId::root() {
-                // root has no parent
-                None
-            } else {
-                self.ops
-                    .parent_object(&obj)
-                    .map(|(id, key)| (self.id_to_exid(id.0), self.export_key(id, key)))
-            }
-        } else {
+    pub(crate) fn parent_object(&self, obj: ObjId) -> Option<(ObjId, Key)> {
+        if obj == ObjId::root() {
+            // root has no parent
             None
+        } else {
+            self.ops.parent_object(&obj)
         }
     }
 
-    /// Get an iterator over the parents of an object.
-    pub fn parents(&self, obj: ExId) -> Parents<'_> {
-        Parents { obj, doc: self }
+    /// Get the parents of an object in the document tree.
+    ///
+    /// ### Errors
+    ///
+    /// Returns an error when the id given is not the id of an object in this document.
+    /// This function does not get the parents of scalar values contained within objects.
+    ///
+    /// ### Experimental
+    ///
+    /// This function may in future be changed to allow getting the parents from the id of a scalar
+    /// value.
+    pub fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
+        let obj_id = self.exid_to_obj(obj.as_ref())?;
+        Ok(Parents {
+            obj: obj_id,
+            doc: self,
+        })
     }
 
-    pub fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Vec<(ExId, Prop)> {
-        let mut path = self.parents(obj.as_ref().clone()).collect::<Vec<_>>();
+    pub fn path_to_object<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+    ) -> Result<Vec<(ExId, Prop)>, AutomergeError> {
+        let mut path = self.parents(obj.as_ref().clone())?.collect::<Vec<_>>();
         path.reverse();
-        path
+        Ok(path)
     }
 
     /// Export a key to a prop.
-    fn export_key(&self, obj: ObjId, key: Key) -> Prop {
+    pub(crate) fn export_key(&self, obj: ObjId, key: Key) -> Prop {
         match key {
             Key::Map(m) => Prop::Map(self.ops.m.props.get(m).into()),
             Key::Seq(opid) => {
@@ -415,6 +426,33 @@ impl Automerge {
     }
 
     pub(crate) fn exid_to_obj(&self, id: &ExId) -> Result<ObjId, AutomergeError> {
+        match id {
+            ExId::Root => Ok(ObjId::root()),
+            ExId::Id(ctr, actor, idx) => {
+                // do a direct get here b/c this could be foriegn and not be within the array
+                // bounds
+                let obj = if self.ops.m.actors.cache.get(*idx) == Some(actor) {
+                    ObjId(OpId(*ctr, *idx))
+                } else {
+                    // FIXME - make a real error
+                    let idx = self
+                        .ops
+                        .m
+                        .actors
+                        .lookup(actor)
+                        .ok_or(AutomergeError::Fail)?;
+                    ObjId(OpId(*ctr, idx))
+                };
+                if self.ops.object_type(&obj).is_some() {
+                    Ok(obj)
+                } else {
+                    Err(AutomergeError::NotAnObject)
+                }
+            }
+        }
+    }
+
+    pub(crate) fn exid_to_obj_tmp_unchecked(&self, id: &ExId) -> Result<ObjId, AutomergeError> {
         match id {
             ExId::Root => Ok(ObjId::root()),
             ExId::Id(ctr, actor, idx) => {
@@ -759,11 +797,7 @@ impl Automerge {
                     legacy::ObjectId::Root => ObjId::root(),
                     legacy::ObjectId::Id(id) => ObjId(OpId(id.0, self.ops.m.actors.cache(id.1))),
                 };
-                let pred = c
-                    .pred
-                    .iter()
-                    .map(|i| OpId(i.0, self.ops.m.actors.cache(i.1.clone())))
-                    .collect();
+                let pred = self.ops.m.import_opids(c.pred);
                 let key = match &c.key {
                     legacy::Key::Map(n) => Key::Map(self.ops.m.props.cache(n.to_string())),
                     legacy::Key::Seq(legacy::ElementId::Head) => Key::Seq(types::HEAD),
@@ -1099,7 +1133,7 @@ impl Automerge {
                 OpType::Delete => format!("del{}", 0),
             };
             let pred: Vec<_> = op.pred.iter().map(|id| self.to_string(*id)).collect();
-            let succ: Vec<_> = op.succ.iter().map(|id| self.to_string(*id)).collect();
+            let succ: Vec<_> = op.succ.into_iter().map(|id| self.to_string(*id)).collect();
             log!(
                 "  {:12} {:12} {:12} {:12} {:12?} {:12?}",
                 id,

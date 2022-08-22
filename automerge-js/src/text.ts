@@ -1,4 +1,5 @@
 import { Value } from "automerge-types"
+import { TEXT } from "./constants"
 
 export class Text {
   elems: Value[]
@@ -14,6 +15,7 @@ export class Text {
     } else {
       throw new TypeError(`Unsupported initial value for Text: ${text}`)
     }
+    Reflect.defineProperty(this, TEXT, { value: true })
   }
 
   get length () : number {

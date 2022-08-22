@@ -23,6 +23,7 @@ pub(crate) use to_sync_message;
 
 /// \struct AMsyncMessage
 /// \brief A synchronization message for a peer.
+#[derive(PartialEq)]
 pub struct AMsyncMessage {
     body: am::sync::Message,
     changes_storage: RefCell<BTreeMap<usize, AMchange>>,
@@ -50,11 +51,11 @@ impl AsRef<am::sync::Message> for AMsyncMessage {
 ///
 /// \param[in] sync_message A pointer to an `AMsyncMessage` struct.
 /// \return An `AMchanges` struct.
-/// \pre \p sync_message must be a valid address.
+/// \pre \p sync_message `!= NULL`.
 /// \internal
 ///
 /// # Safety
-/// sync_message must be a pointer to a valid AMsyncMessage
+/// sync_message must be a valid pointer to an AMsyncMessage
 #[no_mangle]
 pub unsafe extern "C" fn AMsyncMessageChanges(sync_message: *const AMsyncMessage) -> AMchanges {
     if let Some(sync_message) = sync_message.as_ref() {
@@ -74,14 +75,13 @@ pub unsafe extern "C" fn AMsyncMessageChanges(sync_message: *const AMsyncMessage
 /// \param[in] count The number of bytes in \p src to decode.
 /// \return A pointer to an `AMresult` struct containing an `AMsyncMessage`
 ///         struct.
-/// \pre \p src must be a valid address.
-/// \pre `0 <=` \p count `<=` length of \p src.
-/// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMfree()`.
+/// \pre \p src `!= NULL`.
+/// \pre `0 <` \p count `<= sizeof(`\p src`)`.
+/// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
+///          in order to prevent a memory leak.
 /// \internal
-///
 /// # Safety
-/// src must be a byte array of length `>= count`
+/// src must be a byte array of size `>= count`
 #[no_mangle]
 pub unsafe extern "C" fn AMsyncMessageDecode(src: *const u8, count: usize) -> *mut AMresult {
     let mut data = Vec::new();
@@ -95,13 +95,12 @@ pub unsafe extern "C" fn AMsyncMessageDecode(src: *const u8, count: usize) -> *m
 /// \param[in] sync_message A pointer to an `AMsyncMessage` struct.
 /// \return A pointer to an `AMresult` struct containing an array of bytes as
 ///         an `AMbyteSpan` struct.
-/// \pre \p sync_message must be a valid address.
-/// \warning To avoid a memory leak, the returned `AMresult` struct must be
-///          deallocated with `AMfree()`.
+/// \pre \p sync_message `!= NULL`.
+/// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
+///          in order to prevent a memory leak.
 /// \internal
-///
 /// # Safety
-/// sync_message must be a pointer to a valid AMsyncMessage
+/// sync_message must be a valid pointer to an AMsyncMessage
 #[no_mangle]
 pub unsafe extern "C" fn AMsyncMessageEncode(sync_message: *const AMsyncMessage) -> *mut AMresult {
     let sync_message = to_sync_message!(sync_message);
@@ -113,11 +112,11 @@ pub unsafe extern "C" fn AMsyncMessageEncode(sync_message: *const AMsyncMessage)
 ///
 /// \param[in] sync_message A pointer to an `AMsyncMessage` struct.
 /// \return An `AMhaves` struct.
-/// \pre \p sync_message must be a valid address.
+/// \pre \p sync_message `!= NULL`.
 /// \internal
 ///
 /// # Safety
-/// sync_message must be a pointer to a valid AMsyncMessage
+/// sync_message must be a valid pointer to an AMsyncMessage
 #[no_mangle]
 pub unsafe extern "C" fn AMsyncMessageHaves(sync_message: *const AMsyncMessage) -> AMsyncHaves {
     if let Some(sync_message) = sync_message.as_ref() {
@@ -135,11 +134,11 @@ pub unsafe extern "C" fn AMsyncMessageHaves(sync_message: *const AMsyncMessage) 
 ///
 /// \param[in] sync_message A pointer to an `AMsyncMessage` struct.
 /// \return An `AMchangeHashes` struct.
-/// \pre \p sync_message must be a valid address.
+/// \pre \p sync_message `!= NULL`.
 /// \internal
 ///
 /// # Safety
-/// sync_message must be a pointer to a valid AMsyncMessage
+/// sync_message must be a valid pointer to an AMsyncMessage
 #[no_mangle]
 pub unsafe extern "C" fn AMsyncMessageHeads(sync_message: *const AMsyncMessage) -> AMchangeHashes {
     if let Some(sync_message) = sync_message.as_ref() {
@@ -155,11 +154,11 @@ pub unsafe extern "C" fn AMsyncMessageHeads(sync_message: *const AMsyncMessage) 
 ///
 /// \param[in] sync_message A pointer to an `AMsyncMessage` struct.
 /// \return An `AMchangeHashes` struct.
-/// \pre \p sync_message must be a valid address.
+/// \pre \p sync_message `!= NULL`.
 /// \internal
 ///
 /// # Safety
-/// sync_message must be a pointer to a valid AMsyncMessage
+/// sync_message must be a valid pointer to an AMsyncMessage
 #[no_mangle]
 pub unsafe extern "C" fn AMsyncMessageNeeds(sync_message: *const AMsyncMessage) -> AMchangeHashes {
     if let Some(sync_message) = sync_message.as_ref() {

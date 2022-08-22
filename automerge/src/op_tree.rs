@@ -762,8 +762,8 @@ mod tests {
             id: zero,
             action: amp::OpType::Put(0.into()),
             key: zero.into(),
-            succ: vec![],
-            pred: vec![],
+            succ: Default::default(),
+            pred: Default::default(),
             insert: false,
         }
     }

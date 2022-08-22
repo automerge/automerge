@@ -1,4 +1,5 @@
 import { Automerge, ObjID, Prop } from "automerge-types"
+import { COUNTER } from "./constants"
 /**
  * The most basic CRDT: an integer value that can be changed only by
  * incrementing and decrementing. Since addition of integers is commutative,
@@ -9,6 +10,7 @@ export class Counter {
 
   constructor(value?: number) {
     this.value = value || 0
+    Reflect.defineProperty(this, COUNTER, { value: true })
   }
 
   /**

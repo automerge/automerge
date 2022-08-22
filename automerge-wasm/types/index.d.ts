@@ -206,3 +206,4 @@ export class SyncState {
 }
 
 export default function init (): Promise<API>;
+export function init (): Promise<API>;

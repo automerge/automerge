@@ -51,16 +51,25 @@ add_custom_command(
     MAIN_DEPENDENCY
         lib.rs
     DEPENDS
+        actor_id.rs
         byte_span.rs
         change_hashes.rs
         change.rs
         changes.rs
         doc.rs
         doc/list.rs
+        doc/list/item.rs
+        doc/list/items.rs
         doc/map.rs
+        doc/map/item.rs
+        doc/map/items.rs
         doc/utils.rs
         obj.rs
+        obj/item.rs
+        obj/items.rs
         result.rs
+        result_stack.rs
+        strs.rs
         sync.rs
         sync/have.rs
         sync/haves.rs
@@ -77,7 +86,7 @@ add_custom_command(
 )
 
 add_custom_target(
-    ${LIBRARY_NAME}_artifacts
+    ${LIBRARY_NAME}_artifacts ALL
     DEPENDS ${CARGO_OUTPUT}
 )
 
@@ -96,7 +105,7 @@ add_custom_command(
         # Compensate for cbindgen's translation of consecutive uppercase letters to "ScreamingSnakeCase".
         ${CMAKE_COMMAND} -DMATCH_REGEX=A_M\([^_]+\)_ -DREPLACE_EXPR=AM_\\1_ -P ${CMAKE_SOURCE_DIR}/cmake/file_regex_replace.cmake -- ${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
     COMMAND
-        # Compensate for cbindgen ignoring `std:mem::size_of<T>()` calls.
+        # Compensate for cbindgen ignoring `std:mem::size_of<usize>()` calls.
         ${CMAKE_COMMAND} -DMATCH_REGEX=USIZE_ -DREPLACE_EXPR=\+${CMAKE_SIZEOF_VOID_P} -P ${CMAKE_SOURCE_DIR}/cmake/file_regex_replace.cmake -- ${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
     WORKING_DIRECTORY
         ${CMAKE_SOURCE_DIR}

@@ -4,13 +4,18 @@ find_package(cmocka REQUIRED)
 
 add_executable(
     test_${LIBRARY_NAME}
-        group_state.c
+        actor_id_tests.c
         doc_tests.c
+        group_state.c
         list_tests.c
-        map_tests.c
         macro_utils.c
         main.c
-        sync_tests.c
+        map_tests.c
+        stack_utils.c
+        str_utils.c
+        ported_wasm/basic_tests.c
+        ported_wasm/suite.c
+        ported_wasm/sync_tests.c
 )
 
 set_target_properties(test_${LIBRARY_NAME} PROPERTIES LINKER_LANGUAGE C)

@@ -28,6 +28,10 @@ export function use(api: API) {
   UseApi(api)
 }
 
+export function getBackend<T>(doc: Doc<T>) : Automerge {
+  return _state(doc)
+}
+
 function _state<T>(doc: Doc<T>) : Automerge {
   const state = Reflect.get(doc,STATE)
   if (state == undefined) {

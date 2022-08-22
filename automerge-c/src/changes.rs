@@ -32,11 +32,28 @@ impl Detail {
     }
 
     pub fn advance(&mut self, n: isize) {
-        if n != 0 && !self.is_stopped() {
-            let n = if self.offset < 0 { -n } else { n };
-            let len = self.len as isize;
-            self.offset = std::cmp::max(-(len + 1), std::cmp::min(self.offset + n, len));
-        };
+        if n == 0 {
+            return;
+        }
+        let len = self.len as isize;
+        self.offset = if self.offset < 0 {
+            // It's reversed.
+            let unclipped = self.offset.checked_sub(n).unwrap_or(isize::MIN);
+            if unclipped >= 0 {
+                // Clip it to the forward stop.
+                len
+            } else {
+                std::cmp::min(std::cmp::max(-(len + 1), unclipped), -1)
+            }
+        } else {
+            let unclipped = self.offset.checked_add(n).unwrap_or(isize::MAX);
+            if unclipped < 0 {
+                // Clip it to the reverse stop.
+                -(len + 1)
+            } else {
+                std::cmp::max(0, std::cmp::min(unclipped, len))
+            }
+        }
     }
 
     pub fn get_index(&self) -> usize {
@@ -73,7 +90,7 @@ impl Detail {
     }
 
     pub fn prev(&mut self, n: isize) -> Option<*const AMchange> {
-        self.advance(n);
+        self.advance(-n);
         if self.is_stopped() {
             return None;
         }
@@ -98,6 +115,15 @@ impl Detail {
             storage: self.storage,
         }
     }
+
+    pub fn rewound(&self) -> Self {
+        Self {
+            len: self.len,
+            offset: if self.offset < 0 { -1 } else { 0 },
+            ptr: self.ptr,
+            storage: self.storage,
+        }
+    }
 }
 
 impl From<Detail> for [u8; USIZE_USIZE_USIZE_USIZE_] {
@@ -116,15 +142,19 @@ impl From<Detail> for [u8; USIZE_USIZE_USIZE_USIZE_] {
 /// \struct AMchanges
 /// \brief A random-access iterator over a sequence of changes.
 #[repr(C)]
+#[derive(PartialEq)]
 pub struct AMchanges {
-    /// Reserved.
+    /// An implementation detail that is intentionally opaque.
+    /// \warning Modifying \p detail will cause undefined behavior.
+    /// \note The actual size of \p detail will vary by platform, this is just
+    ///       the one for the platform this documentation was built on.
     detail: [u8; USIZE_USIZE_USIZE_USIZE_],
 }
 
 impl AMchanges {
     pub fn new(changes: &[am::Change], storage: &mut BTreeMap<usize, AMchange>) -> Self {
         Self {
-            detail: Detail::new(changes, 0, storage).into(),
+            detail: Detail::new(changes, 0, &mut *storage).into(),
         }
     }
 
@@ -154,6 +184,13 @@ impl AMchanges {
             detail: detail.reversed().into(),
         }
     }
+
+    pub fn rewound(&self) -> Self {
+        let detail = unsafe { &*(self.detail.as_ptr() as *const Detail) };
+        Self {
+            detail: detail.rewound().into(),
+        }
+    }
 }
 
 impl AsRef<[am::Change]> for AMchanges {
@@ -176,14 +213,14 @@ impl Default for AMchanges {
 ///        positions where the sign of \p n is relative to the iterator's
 ///        direction.
 ///
-/// \param[in] changes A pointer to an `AMchanges` struct.
+/// \param[in,out] changes A pointer to an `AMchanges` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
-/// \pre \p changes must be a valid address.
+/// \pre \p changes `!= NULL`.
 /// \internal
 ///
 /// #Safety
-/// changes must be a pointer to a valid AMchanges
+/// changes must be a valid pointer to an AMchanges
 #[no_mangle]
 pub unsafe extern "C" fn AMchangesAdvance(changes: *mut AMchanges, n: isize) {
     if let Some(changes) = changes.as_mut() {
@@ -192,19 +229,19 @@ pub unsafe extern "C" fn AMchangesAdvance(changes: *mut AMchanges, n: isize) {
 }
 
 /// \memberof AMchanges
-/// \brief Tests the equality of two sequences of changes underlying a pair
-///        of iterators.
+/// \brief Tests the equality of two sequences of changes underlying a pair of
+///        iterators.
 ///
 /// \param[in] changes1 A pointer to an `AMchanges` struct.
 /// \param[in] changes2 A pointer to an `AMchanges` struct.
 /// \return `true` if \p changes1 `==` \p changes2 and `false` otherwise.
-/// \pre \p changes1 must be a valid address.
-/// \pre \p changes2 must be a valid address.
+/// \pre \p changes1 `!= NULL`.
+/// \pre \p changes2 `!= NULL`.
 /// \internal
 ///
 /// #Safety
-/// changes1 must be a pointer to a valid AMchanges
-/// changes2 must be a pointer to a valid AMchanges
+/// changes1 must be a valid pointer to an AMchanges
+/// changes2 must be a valid pointer to an AMchanges
 #[no_mangle]
 pub unsafe extern "C" fn AMchangesEqual(
     changes1: *const AMchanges,
@@ -221,16 +258,16 @@ pub unsafe extern "C" fn AMchangesEqual(
 ///        sequence of changes and then advances it by at most \p |n| positions
 ///        where the sign of \p n is relative to the iterator's direction.
 ///
-/// \param[in] changes A pointer to an `AMchanges` struct.
+/// \param[in,out] changes A pointer to an `AMchanges` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
 /// \return A pointer to an `AMchange` struct that's `NULL` when \p changes was
 ///         previously advanced past its forward/reverse limit.
-/// \pre \p changes must be a valid address.
+/// \pre \p changes `!= NULL`.
 /// \internal
 ///
 /// #Safety
-/// changes must be a pointer to a valid AMchanges
+/// changes must be a valid pointer to an AMchanges
 #[no_mangle]
 pub unsafe extern "C" fn AMchangesNext(changes: *mut AMchanges, n: isize) -> *const AMchange {
     if let Some(changes) = changes.as_mut() {
@@ -246,16 +283,16 @@ pub unsafe extern "C" fn AMchangesNext(changes: *mut AMchanges, n: isize) -> *co
 ///        positions where the sign of \p n is relative to the iterator's
 ///        direction and then gets the change at its new position.
 ///
-/// \param[in] changes A pointer to an `AMchanges` struct.
+/// \param[in,out] changes A pointer to an `AMchanges` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
 /// \return A pointer to an `AMchange` struct that's `NULL` when \p changes is
 ///         presently advanced past its forward/reverse limit.
-/// \pre \p changes must be a valid address.
+/// \pre \p changes `!= NULL`.
 /// \internal
 ///
 /// #Safety
-/// changes must be a pointer to a valid AMchanges
+/// changes must be a valid pointer to an AMchanges
 #[no_mangle]
 pub unsafe extern "C" fn AMchangesPrev(changes: *mut AMchanges, n: isize) -> *const AMchange {
     if let Some(changes) = changes.as_mut() {
@@ -271,11 +308,11 @@ pub unsafe extern "C" fn AMchangesPrev(changes: *mut AMchanges, n: isize) -> *co
 ///
 /// \param[in] changes A pointer to an `AMchanges` struct.
 /// \return The count of values in \p changes.
-/// \pre \p changes must be a valid address.
+/// \pre \p changes `!= NULL`.
 /// \internal
 ///
 /// #Safety
-/// changes must be a pointer to a valid AMchanges
+/// changes must be a valid pointer to an AMchanges
 #[no_mangle]
 pub unsafe extern "C" fn AMchangesSize(changes: *const AMchanges) -> usize {
     if let Some(changes) = changes.as_ref() {
@@ -291,15 +328,35 @@ pub unsafe extern "C" fn AMchangesSize(changes: *const AMchanges) -> usize {
 ///
 /// \param[in] changes A pointer to an `AMchanges` struct.
 /// \return An `AMchanges` struct.
-/// \pre \p changes must be a valid address.
+/// \pre \p changes `!= NULL`.
 /// \internal
 ///
 /// #Safety
-/// changes must be a pointer to a valid AMchanges
+/// changes must be a valid pointer to an AMchanges
 #[no_mangle]
 pub unsafe extern "C" fn AMchangesReversed(changes: *const AMchanges) -> AMchanges {
     if let Some(changes) = changes.as_ref() {
         changes.reversed()
+    } else {
+        AMchanges::default()
+    }
+}
+
+/// \memberof AMchanges
+/// \brief Creates an iterator at the starting position over the same sequence
+///        of changes as the given one.
+///
+/// \param[in] changes A pointer to an `AMchanges` struct.
+/// \return An `AMchanges` struct
+/// \pre \p changes `!= NULL`.
+/// \internal
+///
+/// #Safety
+/// changes must be a valid pointer to an AMchanges
+#[no_mangle]
+pub unsafe extern "C" fn AMchangesRewound(changes: *const AMchanges) -> AMchanges {
+    if let Some(changes) = changes.as_ref() {
+        changes.rewound()
     } else {
         AMchanges::default()
     }
