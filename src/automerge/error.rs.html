@@ -81,12 +81,26 @@
 <span id="73">73</span>
 <span id="74">74</span>
 <span id="75">75</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::types</span>::{<span class="ident">ActorId</span>, <span class="ident">ScalarValue</span>};
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::storage::load::Error</span> <span class="kw">as</span> <span class="ident">LoadError</span>;
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::types</span>::{<span class="ident">ActorId</span>, <span class="ident">ScalarValue</span>};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::value::DataType</span>;
-<span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">decoding</span>, <span class="ident">encoding</span>, <span class="ident">ChangeHash</span>};
+<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::ChangeHash</span>;
 <span class="kw">use</span> <span class="ident">thiserror::Error</span>;
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Error</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>)]</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Error</span>, <span class="ident">Debug</span>)]</span>
 <span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">AutomergeError</span> {
     <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;id was not an object id&quot;</span>)]</span>
     <span class="ident">NotAnObject</span>,
@@ -94,10 +108,6 @@
     <span class="ident">InvalidObjIdFormat</span>(<span class="ident">String</span>),
     <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;invalid obj id `{0}`&quot;</span>)]</span>
     <span class="ident">InvalidObjId</span>(<span class="ident">String</span>),
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;there was an encoding problem: {0}&quot;</span>)]</span>
-    <span class="ident">Encoding</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident">encoding::Error</span>),
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;there was a decoding problem: {0}&quot;</span>)]</span>
-    <span class="ident">Decoding</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident">decoding::Error</span>),
     <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;key must not be an empty string&quot;</span>)]</span>
     <span class="ident">EmptyStringKey</span>,
     <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;invalid seq {0}&quot;</span>)]</span>
@@ -119,6 +129,14 @@
     },
     <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;general failure&quot;</span>)]</span>
     <span class="ident">Fail</span>,
+    <span class="attribute">#[<span class="ident">error</span>(<span class="ident">transparent</span>)]</span>
+    <span class="ident">Load</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident">LoadError</span>),
+    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;failed to load compressed data: {0}&quot;</span>)]</span>
+    <span class="ident">Deflate</span>(<span class="attribute">#[<span class="ident">source</span>]</span> <span class="ident">std::io::Error</span>),
+    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;compressed chunk was not a change&quot;</span>)]</span>
+    <span class="ident">NonChangeCompressed</span>,
+    <span class="attribute">#[<span class="ident">error</span>(<span class="ident">transparent</span>)]</span>
+    <span class="ident">Clocks</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident"><span class="kw">crate</span>::clocks::MissingDep</span>),
 }
 
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;wasm&quot;</span>)]</span>
@@ -156,6 +174,14 @@
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Error</span>, <span class="ident">Debug</span>)]</span>
 <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;Invalid OpID: {0}&quot;</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">InvalidOpId</span>(<span class="kw">pub</span> <span class="ident">String</span>);
+
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Error</span>, <span class="ident">Debug</span>)]</span>
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">InvalidOpType</span> {
+    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;unrecognized action index {0}&quot;</span>)]</span>
+    <span class="ident">UnknownAction</span>(<span class="ident">u64</span>),
+    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;non numeric argument for inc op&quot;</span>)]</span>
+    <span class="ident">NonNumericInc</span>,
+}
 </code></pre></div>
 </section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.63.0 (4b91a6ea7 2022-08-08)" ></div>
 </body></html>

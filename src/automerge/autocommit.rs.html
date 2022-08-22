@@ -511,6 +511,11 @@
 <span id="503">503</span>
 <span id="504">504</span>
 <span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::ops::RangeBounds</span>;
 
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::exid::ExId</span>;
@@ -668,6 +673,11 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">save</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">ensure_transaction_closed</span>();
         <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">save</span>()
+    }
+
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">save_nocompress</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+        <span class="self">self</span>.<span class="ident">ensure_transaction_closed</span>();
+        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">save_nocompress</span>()
     }
 
     <span class="comment">// should this return an empty vec instead of None?</span>

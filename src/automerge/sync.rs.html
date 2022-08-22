@@ -395,23 +395,68 @@
 <span id="387">387</span>
 <span id="388">388</span>
 <span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
+<span id="403">403</span>
+<span id="404">404</span>
+<span id="405">405</span>
+<span id="406">406</span>
+<span id="407">407</span>
+<span id="408">408</span>
+<span id="409">409</span>
+<span id="410">410</span>
+<span id="411">411</span>
+<span id="412">412</span>
+<span id="413">413</span>
+<span id="414">414</span>
+<span id="415">415</span>
+<span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
+<span id="431">431</span>
+<span id="432">432</span>
+<span id="433">433</span>
+<span id="434">434</span>
+<span id="435">435</span>
+<span id="436">436</span>
+<span id="437">437</span>
+<span id="438">438</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">itertools::Itertools</span>;
-<span class="kw">use</span> <span class="ident">std</span>::{
-    <span class="ident">borrow::Cow</span>,
-    <span class="ident">collections</span>::{<span class="ident">HashMap</span>, <span class="ident">HashSet</span>},
-    <span class="ident">io</span>,
-    <span class="ident">io::Write</span>,
-};
+<span class="kw">use</span> <span class="ident">std::collections</span>::{<span class="ident">HashMap</span>, <span class="ident">HashSet</span>};
 
 <span class="kw">use</span> <span class="kw">crate</span>::{
-    <span class="ident">decoding</span>, <span class="ident">decoding::Decoder</span>, <span class="ident">encoding::Encodable</span>, <span class="ident">types::HASH_SIZE</span>, <span class="ident">ApplyOptions</span>, <span class="ident">Automerge</span>,
-    <span class="ident">AutomergeError</span>, <span class="ident">Change</span>, <span class="ident">ChangeHash</span>, <span class="ident">OpObserver</span>,
+    <span class="ident">storage</span>::{<span class="ident">parse</span>, <span class="ident">Change</span> <span class="kw">as</span> <span class="ident">StoredChange</span>, <span class="ident">ReadChangeOpError</span>},
+    <span class="ident">ApplyOptions</span>, <span class="ident">Automerge</span>, <span class="ident">AutomergeError</span>, <span class="ident">Change</span>, <span class="ident">ChangeHash</span>, <span class="ident">OpObserver</span>,
 };
 
 <span class="kw">mod</span> <span class="ident">bloom</span>;
 <span class="kw">mod</span> <span class="ident">state</span>;
 
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">bloom::BloomFilter</span>;
+<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">state::DecodeError</span> <span class="kw">as</span> <span class="ident">DecodeStateError</span>;
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">state</span>::{<span class="ident">Have</span>, <span class="ident">State</span>};
 
 <span class="kw">const</span> <span class="ident">MESSAGE_TYPE_SYNC</span>: <span class="ident">u8</span> <span class="op">=</span> <span class="number">0x42</span>; <span class="comment">// first byte of a sync message, for identification</span>
@@ -477,7 +522,7 @@
         <span class="kw">let</span> <span class="ident">changes_to_send</span> <span class="op">=</span> <span class="ident">changes_to_send</span>
             .<span class="ident">into_iter</span>()
             .<span class="ident">filter_map</span>(<span class="op">|</span><span class="ident">change</span><span class="op">|</span> {
-                <span class="kw">if</span> <span class="op">!</span><span class="ident">sync_state</span>.<span class="ident">sent_hashes</span>.<span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="ident">change</span>.<span class="ident">hash</span>) {
+                <span class="kw">if</span> <span class="op">!</span><span class="ident">sync_state</span>.<span class="ident">sent_hashes</span>.<span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="ident">change</span>.<span class="ident">hash</span>()) {
                     <span class="prelude-val">Some</span>(<span class="ident">change</span>.<span class="ident">clone</span>())
                 } <span class="kw">else</span> {
                     <span class="prelude-val">None</span>
@@ -488,7 +533,7 @@
         <span class="ident">sync_state</span>.<span class="ident">last_sent_heads</span> <span class="op">=</span> <span class="ident">our_heads</span>.<span class="ident">clone</span>();
         <span class="ident">sync_state</span>
             .<span class="ident">sent_hashes</span>
-            .<span class="ident">extend</span>(<span class="ident">changes_to_send</span>.<span class="ident">iter</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">c</span><span class="op">|</span> <span class="ident">c</span>.<span class="ident">hash</span>));
+            .<span class="ident">extend</span>(<span class="ident">changes_to_send</span>.<span class="ident">iter</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">c</span><span class="op">|</span> <span class="ident">c</span>.<span class="ident">hash</span>()));
 
         <span class="kw">let</span> <span class="ident">sync_message</span> <span class="op">=</span> <span class="ident">Message</span> {
             <span class="ident">heads</span>: <span class="ident">our_heads</span>,
@@ -573,7 +618,7 @@
         <span class="kw">let</span> <span class="ident">new_changes</span> <span class="op">=</span> <span class="self">self</span>
             .<span class="ident">get_changes</span>(<span class="kw-2">&amp;</span><span class="ident">last_sync</span>)
             .<span class="ident">expect</span>(<span class="string">&quot;Should have only used hashes that are in the document&quot;</span>);
-        <span class="kw">let</span> <span class="ident">hashes</span> <span class="op">=</span> <span class="ident">new_changes</span>.<span class="ident">into_iter</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">change</span><span class="op">|</span> <span class="kw-2">&amp;</span><span class="ident">change</span>.<span class="ident">hash</span>);
+        <span class="kw">let</span> <span class="ident">hashes</span> <span class="op">=</span> <span class="ident">new_changes</span>.<span class="ident">iter</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">change</span><span class="op">|</span> <span class="ident">change</span>.<span class="ident">hash</span>());
         <span class="ident">Have</span> {
             <span class="ident">last_sync</span>,
             <span class="ident">bloom</span>: <span class="ident">BloomFilter::from_hashes</span>(<span class="ident">hashes</span>),
@@ -608,17 +653,17 @@
             <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">hashes_to_send</span> <span class="op">=</span> <span class="ident">HashSet::new</span>();
 
             <span class="kw">for</span> <span class="ident">change</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">changes</span> {
-                <span class="ident">change_hashes</span>.<span class="ident">insert</span>(<span class="ident">change</span>.<span class="ident">hash</span>);
+                <span class="ident">change_hashes</span>.<span class="ident">insert</span>(<span class="ident">change</span>.<span class="ident">hash</span>());
 
-                <span class="kw">for</span> <span class="ident">dep</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">change</span>.<span class="ident">deps</span> {
-                    <span class="ident">dependents</span>.<span class="ident">entry</span>(<span class="kw-2">*</span><span class="ident">dep</span>).<span class="ident">or_default</span>().<span class="ident">push</span>(<span class="ident">change</span>.<span class="ident">hash</span>);
+                <span class="kw">for</span> <span class="ident">dep</span> <span class="kw">in</span> <span class="ident">change</span>.<span class="ident">deps</span>() {
+                    <span class="ident">dependents</span>.<span class="ident">entry</span>(<span class="kw-2">*</span><span class="ident">dep</span>).<span class="ident">or_default</span>().<span class="ident">push</span>(<span class="ident">change</span>.<span class="ident">hash</span>());
                 }
 
                 <span class="kw">if</span> <span class="ident">bloom_filters</span>
                     .<span class="ident">iter</span>()
-                    .<span class="ident">all</span>(<span class="op">|</span><span class="ident">bloom</span><span class="op">|</span> <span class="op">!</span><span class="ident">bloom</span>.<span class="ident">contains_hash</span>(<span class="kw-2">&amp;</span><span class="ident">change</span>.<span class="ident">hash</span>))
+                    .<span class="ident">all</span>(<span class="op">|</span><span class="ident">bloom</span><span class="op">|</span> <span class="op">!</span><span class="ident">bloom</span>.<span class="ident">contains_hash</span>(<span class="kw-2">&amp;</span><span class="ident">change</span>.<span class="ident">hash</span>()))
                 {
-                    <span class="ident">hashes_to_send</span>.<span class="ident">insert</span>(<span class="ident">change</span>.<span class="ident">hash</span>);
+                    <span class="ident">hashes_to_send</span>.<span class="ident">insert</span>(<span class="ident">change</span>.<span class="ident">hash</span>());
                 }
             }
 
@@ -645,11 +690,56 @@
             }
 
             <span class="kw">for</span> <span class="ident">change</span> <span class="kw">in</span> <span class="ident">changes</span> {
-                <span class="kw">if</span> <span class="ident">hashes_to_send</span>.<span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="ident">change</span>.<span class="ident">hash</span>) {
+                <span class="kw">if</span> <span class="ident">hashes_to_send</span>.<span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="ident">change</span>.<span class="ident">hash</span>()) {
                     <span class="ident">changes_to_send</span>.<span class="ident">push</span>(<span class="ident">change</span>);
                 }
             }
             <span class="prelude-val">Ok</span>(<span class="ident">changes_to_send</span>)
+        }
+    }
+}
+
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">thiserror::Error</span>)]</span>
+<span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">ReadMessageError</span> {
+    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;expected {expected_one_of:?} but found {found}&quot;</span>)]</span>
+    <span class="ident">WrongType</span> { <span class="ident">expected_one_of</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>, <span class="ident">found</span>: <span class="ident">u8</span> },
+    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;{0}&quot;</span>)]</span>
+    <span class="ident">Parse</span>(<span class="ident">String</span>),
+    <span class="attribute">#[<span class="ident">error</span>(<span class="ident">transparent</span>)]</span>
+    <span class="ident">ReadChangeOps</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident">ReadChangeOpError</span>),
+    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;not enough input&quot;</span>)]</span>
+    <span class="ident">NotEnoughInput</span>,
+}
+
+<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">parse::leb128::Error</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ReadMessageError</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">e</span>: <span class="ident">parse::leb128::Error</span>) -&gt; <span class="self">Self</span> {
+        <span class="ident">ReadMessageError::Parse</span>(<span class="ident">e</span>.<span class="ident">to_string</span>())
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">bloom::ParseError</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ReadMessageError</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">e</span>: <span class="ident">bloom::ParseError</span>) -&gt; <span class="self">Self</span> {
+        <span class="ident">ReadMessageError::Parse</span>(<span class="ident">e</span>.<span class="ident">to_string</span>())
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident"><span class="kw">crate</span>::storage::change::ParseError</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ReadMessageError</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">e</span>: <span class="ident"><span class="kw">crate</span>::storage::change::ParseError</span>) -&gt; <span class="self">Self</span> {
+        <span class="ident">ReadMessageError::Parse</span>(<span class="macro">format!</span>(<span class="string">&quot;error parsing changes: {}&quot;</span>, <span class="ident">e</span>))
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">ReadMessageError</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">parse::ParseError</span><span class="op">&lt;</span><span class="ident">ReadMessageError</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">e</span>: <span class="ident">ReadMessageError</span>) -&gt; <span class="self">Self</span> {
+        <span class="ident">parse::ParseError::Error</span>(<span class="ident">e</span>)
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">parse::ParseError</span><span class="op">&lt;</span><span class="ident">ReadMessageError</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ReadMessageError</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">p</span>: <span class="ident">parse::ParseError</span><span class="op">&lt;</span><span class="ident">ReadMessageError</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
+        <span class="kw">match</span> <span class="ident">p</span> {
+            <span class="ident">parse::ParseError::Error</span>(<span class="ident">e</span>) =&gt; <span class="ident">e</span>,
+            <span class="ident">parse::ParseError::Incomplete</span>(..) =&gt; <span class="ident"><span class="self">Self</span>::NotEnoughInput</span>,
         }
     }
 }
@@ -667,62 +757,95 @@
     <span class="kw">pub</span> <span class="ident">changes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Change</span><span class="op">&gt;</span>,
 }
 
+<span class="kw">fn</span> <span class="ident">parse_have</span>(<span class="ident">input</span>: <span class="ident">parse::Input</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">parse::ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">Have</span>, <span class="ident">ReadMessageError</span><span class="op">&gt;</span> {
+    <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">last_sync</span>) <span class="op">=</span> <span class="ident">parse::length_prefixed</span>(<span class="ident">parse::change_hash</span>)(<span class="ident">input</span>)<span class="question-mark">?</span>;
+    <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">bloom_bytes</span>) <span class="op">=</span> <span class="ident">parse::length_prefixed_bytes</span>(<span class="ident">i</span>)<span class="question-mark">?</span>;
+    <span class="kw">let</span> (<span class="kw">_</span>, <span class="ident">bloom</span>) <span class="op">=</span> <span class="ident">BloomFilter::parse</span>(<span class="ident">parse::Input::new</span>(<span class="ident">bloom_bytes</span>)).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">lift</span>())<span class="question-mark">?</span>;
+    <span class="prelude-val">Ok</span>((<span class="ident">i</span>, <span class="ident">Have</span> { <span class="ident">last_sync</span>, <span class="ident">bloom</span> }))
+}
+
 <span class="kw">impl</span> <span class="ident">Message</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">encode</span>(<span class="self">self</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">decode</span>(<span class="ident">input</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">ReadMessageError</span><span class="op">&gt;</span> {
+        <span class="kw">let</span> <span class="ident">input</span> <span class="op">=</span> <span class="ident">parse::Input::new</span>(<span class="ident">input</span>);
+        <span class="kw">match</span> <span class="ident"><span class="self">Self</span>::parse</span>(<span class="ident">input</span>) {
+            <span class="prelude-val">Ok</span>((<span class="kw">_</span>, <span class="ident">msg</span>)) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">msg</span>),
+            <span class="prelude-val">Err</span>(<span class="ident">parse::ParseError::Error</span>(<span class="ident">e</span>)) =&gt; <span class="prelude-val">Err</span>(<span class="ident">e</span>),
+            <span class="prelude-val">Err</span>(<span class="ident">parse::ParseError::Incomplete</span>(<span class="kw">_</span>)) =&gt; <span class="prelude-val">Err</span>(<span class="ident">ReadMessageError::NotEnoughInput</span>),
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">parse</span>(<span class="ident">input</span>: <span class="ident">parse::Input</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">parse::ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="self">Self</span>, <span class="ident">ReadMessageError</span><span class="op">&gt;</span> {
+        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">message_type</span>) <span class="op">=</span> <span class="ident">parse::take1</span>(<span class="ident">input</span>)<span class="question-mark">?</span>;
+        <span class="kw">if</span> <span class="ident">message_type</span> <span class="op">!</span><span class="op">=</span> <span class="ident">MESSAGE_TYPE_SYNC</span> {
+            <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">parse::ParseError::Error</span>(<span class="ident">ReadMessageError::WrongType</span> {
+                <span class="ident">expected_one_of</span>: <span class="macro">vec!</span>[<span class="ident">MESSAGE_TYPE_SYNC</span>],
+                <span class="ident">found</span>: <span class="ident">message_type</span>,
+            }));
+        }
+
+        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">heads</span>) <span class="op">=</span> <span class="ident">parse::length_prefixed</span>(<span class="ident">parse::change_hash</span>)(<span class="ident">i</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">need</span>) <span class="op">=</span> <span class="ident">parse::length_prefixed</span>(<span class="ident">parse::change_hash</span>)(<span class="ident">i</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">have</span>) <span class="op">=</span> <span class="ident">parse::length_prefixed</span>(<span class="ident">parse_have</span>)(<span class="ident">i</span>)<span class="question-mark">?</span>;
+
+        <span class="kw">let</span> <span class="ident">change_parser</span> <span class="op">=</span> <span class="op">|</span><span class="ident">i</span><span class="op">|</span> {
+            <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">bytes</span>) <span class="op">=</span> <span class="ident">parse::length_prefixed_bytes</span>(<span class="ident">i</span>)<span class="question-mark">?</span>;
+            <span class="kw">let</span> (<span class="kw">_</span>, <span class="ident">change</span>) <span class="op">=</span>
+                <span class="ident">StoredChange::parse</span>(<span class="ident">parse::Input::new</span>(<span class="ident">bytes</span>)).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">lift</span>())<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>((<span class="ident">i</span>, <span class="ident">change</span>))
+        };
+        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">stored_changes</span>) <span class="op">=</span> <span class="ident">parse::length_prefixed</span>(<span class="ident">change_parser</span>)(<span class="ident">i</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">changes_len</span> <span class="op">=</span> <span class="ident">stored_changes</span>.<span class="ident">len</span>();
+        <span class="kw">let</span> <span class="ident">changes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Change</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">stored_changes</span>
+            .<span class="ident">into_iter</span>()
+            .<span class="ident">try_fold</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="kw">_</span>, <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">ReadMessageError</span><span class="op">&gt;</span><span class="op">&gt;</span>(
+                <span class="ident">Vec::with_capacity</span>(<span class="ident">changes_len</span>),
+                <span class="op">|</span><span class="kw-2">mut</span> <span class="ident">acc</span>, <span class="ident">stored</span><span class="op">|</span> {
+                    <span class="kw">let</span> <span class="ident">change</span> <span class="op">=</span> <span class="ident">Change::new_from_unverified</span>(<span class="ident">stored</span>.<span class="ident">into_owned</span>(), <span class="prelude-val">None</span>)
+                        .<span class="ident">map_err</span>(<span class="ident">ReadMessageError::ReadChangeOps</span>)<span class="question-mark">?</span>;
+                    <span class="ident">acc</span>.<span class="ident">push</span>(<span class="ident">change</span>);
+                    <span class="prelude-val">Ok</span>(<span class="ident">acc</span>)
+                },
+            )<span class="question-mark">?</span>;
+
+        <span class="prelude-val">Ok</span>((
+            <span class="ident">i</span>,
+            <span class="ident">Message</span> {
+                <span class="ident">heads</span>,
+                <span class="ident">need</span>,
+                <span class="ident">have</span>,
+                <span class="ident">changes</span>,
+            },
+        ))
+    }
+
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">encode</span>(<span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">buf</span> <span class="op">=</span> <span class="macro">vec!</span>[<span class="ident">MESSAGE_TYPE_SYNC</span>];
 
         <span class="ident">encode_hashes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">buf</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">heads</span>);
         <span class="ident">encode_hashes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">buf</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">need</span>);
-        (<span class="self">self</span>.<span class="ident">have</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u32</span>).<span class="ident">encode_vec</span>(<span class="kw-2">&amp;mut</span> <span class="ident">buf</span>);
-        <span class="kw">for</span> <span class="ident">have</span> <span class="kw">in</span> <span class="self">self</span>.<span class="ident">have</span> {
-            <span class="ident">encode_hashes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">buf</span>, <span class="kw-2">&amp;</span><span class="ident">have</span>.<span class="ident">last_sync</span>);
-            <span class="ident">have</span>.<span class="ident">bloom</span>.<span class="ident">to_bytes</span>().<span class="ident">encode_vec</span>(<span class="kw-2">&amp;mut</span> <span class="ident">buf</span>);
-        }
+        <span class="ident">encode_many</span>(<span class="kw-2">&amp;mut</span> <span class="ident">buf</span>, <span class="self">self</span>.<span class="ident">have</span>.<span class="ident">iter</span>(), <span class="op">|</span><span class="ident">buf</span>, <span class="ident">h</span><span class="op">|</span> {
+            <span class="ident">encode_hashes</span>(<span class="ident">buf</span>, <span class="kw-2">&amp;</span><span class="ident">h</span>.<span class="ident">last_sync</span>);
+            <span class="ident">leb128::write::unsigned</span>(<span class="ident">buf</span>, <span class="ident">h</span>.<span class="ident">bloom</span>.<span class="ident">to_bytes</span>().<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>).<span class="ident">unwrap</span>();
+            <span class="ident">buf</span>.<span class="ident">extend</span>(<span class="ident">h</span>.<span class="ident">bloom</span>.<span class="ident">to_bytes</span>());
+        });
 
-        (<span class="self">self</span>.<span class="ident">changes</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u32</span>).<span class="ident">encode_vec</span>(<span class="kw-2">&amp;mut</span> <span class="ident">buf</span>);
-        <span class="kw">for</span> <span class="kw-2">mut</span> <span class="ident">change</span> <span class="kw">in</span> <span class="self">self</span>.<span class="ident">changes</span> {
-            <span class="ident">change</span>.<span class="ident">compress</span>();
-            <span class="ident">change</span>.<span class="ident">raw_bytes</span>().<span class="ident">encode_vec</span>(<span class="kw-2">&amp;mut</span> <span class="ident">buf</span>);
-        }
+        <span class="ident">encode_many</span>(<span class="kw-2">&amp;mut</span> <span class="ident">buf</span>, <span class="self">self</span>.<span class="ident">changes</span>.<span class="ident">iter_mut</span>(), <span class="op">|</span><span class="ident">buf</span>, <span class="ident">change</span><span class="op">|</span> {
+            <span class="ident">leb128::write::unsigned</span>(<span class="ident">buf</span>, <span class="ident">change</span>.<span class="ident">raw_bytes</span>().<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>).<span class="ident">unwrap</span>();
+            <span class="ident">buf</span>.<span class="ident">extend</span>(<span class="ident">change</span>.<span class="ident">bytes</span>().<span class="ident">as_ref</span>())
+        });
 
         <span class="ident">buf</span>
     }
+}
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">decode</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Message</span>, <span class="ident">decoding::Error</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">decoder</span> <span class="op">=</span> <span class="ident">Decoder::new</span>(<span class="ident">Cow::Borrowed</span>(<span class="ident">bytes</span>));
-
-        <span class="kw">let</span> <span class="ident">message_type</span> <span class="op">=</span> <span class="ident">decoder</span>.<span class="ident">read</span>::<span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>()<span class="question-mark">?</span>;
-        <span class="kw">if</span> <span class="ident">message_type</span> <span class="op">!</span><span class="op">=</span> <span class="ident">MESSAGE_TYPE_SYNC</span> {
-            <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">decoding::Error::WrongType</span> {
-                <span class="ident">expected_one_of</span>: <span class="macro">vec!</span>[<span class="ident">MESSAGE_TYPE_SYNC</span>],
-                <span class="ident">found</span>: <span class="ident">message_type</span>,
-            });
-        }
-
-        <span class="kw">let</span> <span class="ident">heads</span> <span class="op">=</span> <span class="ident">decode_hashes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">decoder</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">need</span> <span class="op">=</span> <span class="ident">decode_hashes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">decoder</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">have_count</span> <span class="op">=</span> <span class="ident">decoder</span>.<span class="ident">read</span>::<span class="op">&lt;</span><span class="ident">u32</span><span class="op">&gt;</span>()<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">have</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">have_count</span> <span class="kw">as</span> <span class="ident">usize</span>);
-        <span class="kw">for</span> <span class="kw">_</span> <span class="kw">in</span> <span class="number">0</span>..<span class="ident">have_count</span> {
-            <span class="kw">let</span> <span class="ident">last_sync</span> <span class="op">=</span> <span class="ident">decode_hashes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">decoder</span>)<span class="question-mark">?</span>;
-            <span class="kw">let</span> <span class="ident">bloom_bytes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">decoder</span>.<span class="ident">read</span>()<span class="question-mark">?</span>;
-            <span class="kw">let</span> <span class="ident">bloom</span> <span class="op">=</span> <span class="ident">BloomFilter::try_from</span>(<span class="ident">bloom_bytes</span>.<span class="ident">as_slice</span>())<span class="question-mark">?</span>;
-            <span class="ident">have</span>.<span class="ident">push</span>(<span class="ident">Have</span> { <span class="ident">last_sync</span>, <span class="ident">bloom</span> });
-        }
-
-        <span class="kw">let</span> <span class="ident">change_count</span> <span class="op">=</span> <span class="ident">decoder</span>.<span class="ident">read</span>::<span class="op">&lt;</span><span class="ident">u32</span><span class="op">&gt;</span>()<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">changes</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">change_count</span> <span class="kw">as</span> <span class="ident">usize</span>);
-        <span class="kw">for</span> <span class="kw">_</span> <span class="kw">in</span> <span class="number">0</span>..<span class="ident">change_count</span> {
-            <span class="kw">let</span> <span class="ident">change</span> <span class="op">=</span> <span class="ident">decoder</span>.<span class="ident">read</span>()<span class="question-mark">?</span>;
-            <span class="ident">changes</span>.<span class="ident">push</span>(<span class="ident">Change::from_bytes</span>(<span class="ident">change</span>)<span class="question-mark">?</span>);
-        }
-
-        <span class="prelude-val">Ok</span>(<span class="ident">Message</span> {
-            <span class="ident">heads</span>,
-            <span class="ident">need</span>,
-            <span class="ident">have</span>,
-            <span class="ident">changes</span>,
-        })
+<span class="kw">fn</span> <span class="ident">encode_many</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">I</span>, <span class="ident">It</span>, <span class="ident">F</span><span class="op">&gt;</span>(<span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>, <span class="ident">data</span>: <span class="ident">I</span>, <span class="ident">f</span>: <span class="ident">F</span>)
+<span class="kw">where</span>
+    <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">It</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">ExactSizeIterator</span> <span class="op">+</span> <span class="lifetime">&#39;a</span>,
+    <span class="ident">F</span>: <span class="ident">Fn</span>(<span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>, <span class="ident">It</span>),
+{
+    <span class="ident">leb128::write::unsigned</span>(<span class="ident">out</span>, <span class="ident">data</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>).<span class="ident">unwrap</span>();
+    <span class="kw">for</span> <span class="ident">datum</span> <span class="kw">in</span> <span class="ident">data</span> {
+        <span class="ident">f</span>(<span class="ident">out</span>, <span class="ident">datum</span>)
     }
 }
 
@@ -731,32 +854,7 @@
         <span class="ident">hashes</span>.<span class="ident">windows</span>(<span class="number">2</span>).<span class="ident">all</span>(<span class="op">|</span><span class="ident">h</span><span class="op">|</span> <span class="ident">h</span>[<span class="number">0</span>] <span class="op">&lt;</span><span class="op">=</span> <span class="ident">h</span>[<span class="number">1</span>]),
         <span class="string">&quot;hashes were not sorted&quot;</span>
     );
-    <span class="ident">hashes</span>.<span class="ident">encode_vec</span>(<span class="ident">buf</span>);
-}
-
-<span class="kw">impl</span> <span class="ident">Encodable</span> <span class="kw">for</span> <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>] {
-    <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="ident">W</span>: <span class="ident">Write</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">buf</span>: <span class="kw-2">&amp;mut</span> <span class="ident">W</span>) -&gt; <span class="ident">io::Result</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">head</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">len</span>().<span class="ident">encode</span>(<span class="ident">buf</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">body</span> <span class="op">=</span> <span class="number">0</span>;
-        <span class="kw">for</span> <span class="ident">hash</span> <span class="kw">in</span> <span class="self">self</span>.<span class="ident">iter</span>() {
-            <span class="ident">buf</span>.<span class="ident">write_all</span>(<span class="kw-2">&amp;</span><span class="ident">hash</span>.<span class="number">0</span>)<span class="question-mark">?</span>;
-            <span class="ident">body</span> <span class="op">+</span><span class="op">=</span> <span class="ident">hash</span>.<span class="number">0</span>.<span class="ident">len</span>();
-        }
-        <span class="prelude-val">Ok</span>(<span class="ident">head</span> <span class="op">+</span> <span class="ident">body</span>)
-    }
-}
-
-<span class="kw">fn</span> <span class="ident">decode_hashes</span>(<span class="ident">decoder</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Decoder</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>, <span class="ident">decoding::Error</span><span class="op">&gt;</span> {
-    <span class="kw">let</span> <span class="ident">length</span> <span class="op">=</span> <span class="ident">decoder</span>.<span class="ident">read</span>::<span class="op">&lt;</span><span class="ident">u32</span><span class="op">&gt;</span>()<span class="question-mark">?</span>;
-    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">hashes</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">length</span> <span class="kw">as</span> <span class="ident">usize</span>);
-
-    <span class="kw">for</span> <span class="kw">_</span> <span class="kw">in</span> <span class="number">0</span>..<span class="ident">length</span> {
-        <span class="kw">let</span> <span class="ident">hash_bytes</span> <span class="op">=</span> <span class="ident">decoder</span>.<span class="ident">read_bytes</span>(<span class="ident">HASH_SIZE</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">hash</span> <span class="op">=</span> <span class="ident">ChangeHash::try_from</span>(<span class="ident">hash_bytes</span>).<span class="ident">map_err</span>(<span class="ident">decoding::Error::BadChangeFormat</span>)<span class="question-mark">?</span>;
-        <span class="ident">hashes</span>.<span class="ident">push</span>(<span class="ident">hash</span>);
-    }
-
-    <span class="prelude-val">Ok</span>(<span class="ident">hashes</span>)
+    <span class="ident">encode_many</span>(<span class="ident">buf</span>, <span class="ident">hashes</span>.<span class="ident">iter</span>(), <span class="op">|</span><span class="ident">buf</span>, <span class="ident">hash</span><span class="op">|</span> <span class="ident">buf</span>.<span class="ident">extend</span>(<span class="ident">hash</span>.<span class="ident">as_bytes</span>()))
 }
 
 <span class="kw">fn</span> <span class="ident">advance_heads</span>(

@@ -178,11 +178,12 @@
 
 <span class="kw">mod</span> <span class="ident">autocommit</span>;
 <span class="kw">mod</span> <span class="ident">automerge</span>;
+<span class="kw">mod</span> <span class="ident">autoserde</span>;
 <span class="kw">mod</span> <span class="ident">change</span>;
 <span class="kw">mod</span> <span class="ident">clock</span>;
+<span class="kw">mod</span> <span class="ident">clocks</span>;
 <span class="kw">mod</span> <span class="ident">columnar</span>;
-<span class="kw">mod</span> <span class="ident">decoding</span>;
-<span class="kw">mod</span> <span class="ident">encoding</span>;
+<span class="kw">mod</span> <span class="ident">convert</span>;
 <span class="kw">mod</span> <span class="ident">error</span>;
 <span class="kw">mod</span> <span class="ident">exid</span>;
 <span class="kw">mod</span> <span class="ident">indexed_cache</span>;
@@ -199,6 +200,7 @@
 <span class="kw">mod</span> <span class="ident">options</span>;
 <span class="kw">mod</span> <span class="ident">parents</span>;
 <span class="kw">mod</span> <span class="ident">query</span>;
+<span class="kw">mod</span> <span class="ident">storage</span>;
 <span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">sync</span>;
 <span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">transaction</span>;
 <span class="kw">mod</span> <span class="ident">types</span>;
@@ -209,10 +211,8 @@
 
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::automerge::Automerge</span>;
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">autocommit::AutoCommit</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">change::Change</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">decoding::Error</span> <span class="kw">as</span> <span class="ident">DecodingError</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">decoding::InvalidChangeError</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">encoding::Error</span> <span class="kw">as</span> <span class="ident">EncodingError</span>;
+<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">autoserde::AutoSerde</span>;
+<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">change</span>::{<span class="ident">Change</span>, <span class="ident">LoadError</span> <span class="kw">as</span> <span class="ident">LoadChangeError</span>};
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">error::AutomergeError</span>;
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">error::InvalidActorId</span>;
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">error::InvalidChangeHashSlice</span>;

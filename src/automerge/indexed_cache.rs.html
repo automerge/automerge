@@ -107,6 +107,42 @@
 <span id="99">99</span>
 <span id="100">100</span>
 <span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">itertools::Itertools</span>;
 <span class="kw">use</span> <span class="ident">std::collections::HashMap</span>;
 <span class="kw">use</span> <span class="ident">std::hash::Hash</span>;
@@ -153,12 +189,17 @@
         <span class="self">self</span>.<span class="ident">lookup</span>.<span class="ident">get</span>(<span class="ident">item</span>).<span class="ident">cloned</span>()
     }
 
+    <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">dead_code</span>)]</span>
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">len</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
         <span class="self">self</span>.<span class="ident">cache</span>.<span class="ident">len</span>()
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">get</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">index</span>: <span class="ident">usize</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">T</span> {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">cache</span>[<span class="ident">index</span>]
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">safe_get</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">index</span>: <span class="ident">usize</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">T</span><span class="op">&gt;</span> {
+        <span class="self">self</span>.<span class="ident">cache</span>.<span class="ident">get</span>(<span class="ident">index</span>)
     }
 
     <span class="doccomment">/// Remove the last inserted entry into this cache.</span>
@@ -184,6 +225,25 @@
         <span class="ident">sorted</span>
     }
 
+    <span class="doccomment">/// Create a vector from positions in this index to positions in an equivalent sorted index</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// This is useful primarily when encoding an `IndexedCache&lt;ActorId&gt;` in the document format.</span>
+    <span class="doccomment">/// In this case we encode the actors in sorted order in the document and all ops reference the</span>
+    <span class="doccomment">/// offset into this sorted actor array. But the `IndexedCache&lt;ActorId&gt;` we have in the</span>
+    <span class="doccomment">/// application does not contain actors in sorted order because we add them as we encounter</span>
+    <span class="doccomment">/// them, so we must map from the actor IDs in the application to the actor IDs in the document</span>
+    <span class="doccomment">/// format</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// # Examples</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// ```rust,ignore</span>
+    <span class="doccomment">/// let idx: IndexedCache&lt;String&gt; = IndexedCache::new();</span>
+    <span class="doccomment">/// let first_idx = idx.cache(&quot;b&quot;); // first_idx is `0`</span>
+    <span class="doccomment">/// let second_idx = idx.cache(&quot;a&quot;); // second_idx i `1`</span>
+    <span class="doccomment">/// let encoded = idx.encode_index();</span>
+    <span class="doccomment">/// // first_idx (0) maps to `1` whilst second_idx (1) maps to `0` because &quot;a&quot; &lt; &quot;b&quot;</span>
+    <span class="doccomment">/// assert_eq!(encoded, vec![1,0])</span>
+    <span class="doccomment">/// ```</span>
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">encode_index</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">sorted</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">cache</span>.<span class="ident">iter</span>().<span class="ident">sorted</span>().<span class="ident">cloned</span>().<span class="ident">collect</span>();
         <span class="self">self</span>.<span class="ident">cache</span>
@@ -206,6 +266,18 @@
     <span class="kw">type</span> <span class="ident">Output</span> <span class="op">=</span> <span class="ident">T</span>;
     <span class="kw">fn</span> <span class="ident">index</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">i</span>: <span class="ident">usize</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">T</span> {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">cache</span>[<span class="ident">i</span>]
+    }
+}
+
+<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">A</span>: <span class="ident">Hash</span> <span class="op">+</span> <span class="ident">Eq</span> <span class="op">+</span> <span class="ident">Clone</span><span class="op">&gt;</span> <span class="ident">FromIterator</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">IndexedCache</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">from_iter</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">IntoIterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">A</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="ident">iter</span>: <span class="ident">T</span>) -&gt; <span class="self">Self</span> {
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">cache</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">lookup</span> <span class="op">=</span> <span class="ident">HashMap::new</span>();
+        <span class="kw">for</span> (<span class="ident">index</span>, <span class="ident">elem</span>) <span class="kw">in</span> <span class="ident">iter</span>.<span class="ident">into_iter</span>().<span class="ident">enumerate</span>() {
+            <span class="ident">cache</span>.<span class="ident">push</span>(<span class="ident">elem</span>.<span class="ident">clone</span>());
+            <span class="ident">lookup</span>.<span class="ident">insert</span>(<span class="ident">elem</span>, <span class="ident">index</span>);
+        }
+        <span class="self">Self</span> { <span class="ident">cache</span>, <span class="ident">lookup</span> }
     }
 }
 </code></pre></div>

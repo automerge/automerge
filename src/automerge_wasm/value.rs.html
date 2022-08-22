@@ -44,6 +44,8 @@
 <span id="36">36</span>
 <span id="37">37</span>
 <span id="38">38</span>
+<span id="39">39</span>
+<span id="40">40</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::borrow::Cow</span>;
 
 <span class="kw">use</span> <span class="ident">automerge</span> <span class="kw">as</span> <span class="ident">am</span>;
@@ -65,6 +67,7 @@
             <span class="ident">am::ScalarValue::Timestamp</span>(<span class="ident">v</span>) =&gt; <span class="ident">js_sys::Date::new</span>(<span class="kw-2">&amp;</span>(<span class="kw-2">*</span><span class="ident">v</span> <span class="kw">as</span> <span class="ident">f64</span>).<span class="ident">into</span>()).<span class="ident">into</span>(),
             <span class="ident">am::ScalarValue::Boolean</span>(<span class="ident">v</span>) =&gt; (<span class="kw-2">*</span><span class="ident">v</span>).<span class="ident">into</span>(),
             <span class="ident">am::ScalarValue::Null</span> =&gt; <span class="ident">JsValue::null</span>(),
+            <span class="ident">am::ScalarValue::Unknown</span> { <span class="ident">bytes</span>, .. } =&gt; <span class="ident">Uint8Array::from</span>(<span class="ident">bytes</span>.<span class="ident">as_slice</span>()).<span class="ident">into</span>(),
         }
     }
 }
@@ -80,6 +83,7 @@
         <span class="ident">am::ScalarValue::Timestamp</span>(<span class="kw">_</span>) =&gt; <span class="string">&quot;timestamp&quot;</span>.<span class="ident">into</span>(),
         <span class="ident">am::ScalarValue::Boolean</span>(<span class="kw">_</span>) =&gt; <span class="string">&quot;boolean&quot;</span>.<span class="ident">into</span>(),
         <span class="ident">am::ScalarValue::Null</span> =&gt; <span class="string">&quot;null&quot;</span>.<span class="ident">into</span>(),
+        <span class="ident">am::ScalarValue::Unknown</span> { <span class="ident">type_code</span>, .. } =&gt; <span class="macro">format!</span>(<span class="string">&quot;unknown{}&quot;</span>, <span class="ident">type_code</span>),
     }
 }
 </code></pre></div>

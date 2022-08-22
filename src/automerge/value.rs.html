@@ -729,6 +729,17 @@
 <span id="721">721</span>
 <span id="722">722</span>
 <span id="723">723</span>
+<span id="724">724</span>
+<span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
+<span id="734">734</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::error</span>;
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::types::ObjType</span>;
 <span class="kw">use</span> <span class="ident">serde</span>::{<span class="ident">Deserialize</span>, <span class="ident">Serialize</span>, <span class="ident">Serializer</span>};
@@ -1088,6 +1099,15 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">increments</span>: <span class="ident">usize</span>,
 }
 
+<span class="kw">impl</span> <span class="ident">Counter</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">increment</span><span class="op">&lt;</span><span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">i64</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">increments</span>: <span class="ident">I</span>) {
+        <span class="kw">for</span> <span class="ident">inc</span> <span class="kw">in</span> <span class="ident">increments</span> {
+            <span class="self">self</span>.<span class="ident">current</span> <span class="op">+</span><span class="op">=</span> <span class="ident">inc</span>;
+            <span class="self">self</span>.<span class="ident">increments</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
+        }
+    }
+}
+
 <span class="kw">impl</span> <span class="ident">Serialize</span> <span class="kw">for</span> <span class="ident">Counter</span> {
     <span class="kw">fn</span> <span class="ident">serialize</span><span class="op">&lt;</span><span class="ident">S</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">serializer</span>: <span class="ident">S</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">S::Ok</span>, <span class="ident">S::Error</span><span class="op">&gt;</span>
     <span class="kw">where</span>
@@ -1158,6 +1178,7 @@
     <span class="ident">Counter</span>(<span class="ident">Counter</span>),
     <span class="ident">Timestamp</span>(<span class="ident">i64</span>),
     <span class="ident">Boolean</span>(<span class="ident">bool</span>),
+    <span class="ident">Unknown</span> { <span class="ident">type_code</span>: <span class="ident">u8</span>, <span class="ident">bytes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> },
     <span class="ident">Null</span>,
 }
 
@@ -1449,6 +1470,7 @@
             <span class="ident">ScalarValue::Timestamp</span>(<span class="ident">i</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Timestamp: {}&quot;</span>, <span class="ident">i</span>),
             <span class="ident">ScalarValue::Boolean</span>(<span class="ident">b</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="ident">b</span>),
             <span class="ident">ScalarValue::Null</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;null&quot;</span>),
+            <span class="ident">ScalarValue::Unknown</span> { <span class="ident">type_code</span>, .. } =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;unknown type {}&quot;</span>, <span class="ident">type_code</span>),
         }
     }
 }

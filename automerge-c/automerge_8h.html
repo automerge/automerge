@@ -113,6 +113,9 @@ Classes</h2></td></tr>
 <tr class="memitem:"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMsyncHaves.html">AMsyncHaves</a></td></tr>
 <tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">A random-access iterator over a sequence of synchronization haves.  <a href="structAMsyncHaves.html#details">More...</a><br /></td></tr>
 <tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMunknownValue.html">AMunknownValue</a></td></tr>
+<tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">A value (typically for a <code>set</code> operation) whose type is unknown.  <a href="structAMunknownValue.html#details">More...</a><br /></td></tr>
+<tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:"><td class="memItemLeft" align="right" valign="top">struct &#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="unionAMvalue.html">AMvalue</a></td></tr>
 <tr class="memdesc:"><td class="mdescLeft">&#160;</td><td class="mdescRight">A discriminated union of value type variants for a result.  <a href="unionAMvalue.html#details">More...</a><br /></td></tr>
 <tr class="separator:"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -196,6 +199,9 @@ typedef struct <a class="el" href="structAMsyncMessage.html">AMsyncMessage</a>&#
 <tr class="memitem:a52d67abfd5825f0127f384f4d28b560f"><td class="memItemLeft" align="right" valign="top"><a id="a52d67abfd5825f0127f384f4d28b560f"></a>
 typedef struct <a class="el" href="structAMsyncState.html">AMsyncState</a>&#160;</td><td class="memItemRight" valign="bottom"><b>AMsyncState</b></td></tr>
 <tr class="separator:a52d67abfd5825f0127f384f4d28b560f"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a1a825846ce2ade134d66c5a2e57a8dbf"><td class="memItemLeft" align="right" valign="top"><a id="a1a825846ce2ade134d66c5a2e57a8dbf"></a>
+typedef struct <a class="el" href="structAMunknownValue.html">AMunknownValue</a>&#160;</td><td class="memItemRight" valign="bottom"><b>AMunknownValue</b></td></tr>
+<tr class="separator:a1a825846ce2ade134d66c5a2e57a8dbf"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:aab6f9f268bccb38117972e2afe13e0f4"><td class="memItemLeft" align="right" valign="top"><a id="aab6f9f268bccb38117972e2afe13e0f4"></a>
 typedef union <a class="el" href="unionAMvalue.html">AMvalue</a>&#160;</td><td class="memItemRight" valign="bottom"><b>AMvalue</b></td></tr>
 <tr class="separator:aab6f9f268bccb38117972e2afe13e0f4"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -243,7 +249,8 @@ Enumerations</h2></td></tr>
 <a class="el" href="automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1a689ff53e808c6c7b401537adba148f9e">AM_VALUE_SYNC_STATE</a>, 
 <a class="el" href="automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1ac47f9ab563b29f3bd94f7f86b9337522">AM_VALUE_TIMESTAMP</a>, 
 <br />
-&#160;&#160;<a class="el" href="automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1a6ec698d0af0bfef3a72432a588224a6e">AM_VALUE_UINT</a>
+&#160;&#160;<a class="el" href="automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1a6ec698d0af0bfef3a72432a588224a6e">AM_VALUE_UINT</a>, 
+<a class="el" href="automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1a64dec161b89170ec46dd14e43b643b34">AM_VALUE_UNKNOWN</a>
 <br />
  }</td></tr>
 <tr class="memdesc:a51bf0ba752a9a689d46a3c6dce6c86c1"><td class="mdescLeft">&#160;</td><td class="mdescRight">A value type discriminant.  <a href="automerge_8h.html#a51bf0ba752a9a689d46a3c6dce6c86c1">More...</a><br /></td></tr>
@@ -307,6 +314,8 @@ Enumerations</h2></td></tr>
 <tr><td class="fieldname"><a id="a51bf0ba752a9a689d46a3c6dce6c86c1ac47f9ab563b29f3bd94f7f86b9337522"></a>AM_VALUE_TIMESTAMP&#160;</td><td class="fielddoc"><p>A Lamport timestamp variant. </p>
 </td></tr>
 <tr><td class="fieldname"><a id="a51bf0ba752a9a689d46a3c6dce6c86c1a6ec698d0af0bfef3a72432a588224a6e"></a>AM_VALUE_UINT&#160;</td><td class="fielddoc"><p>A 64-bit unsigned integer variant. </p>
+</td></tr>
+<tr><td class="fieldname"><a id="a51bf0ba752a9a689d46a3c6dce6c86c1a64dec161b89170ec46dd14e43b643b34"></a>AM_VALUE_UNKNOWN&#160;</td><td class="fielddoc"><p>An unknown type of scalar value variant. </p>
 </td></tr>
 </table>
 

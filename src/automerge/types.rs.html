@@ -589,6 +589,95 @@
 <span id="581">581</span>
 <span id="582">582</span>
 <span id="583">583</span>
+<span id="584">584</span>
+<span id="585">585</span>
+<span id="586">586</span>
+<span id="587">587</span>
+<span id="588">588</span>
+<span id="589">589</span>
+<span id="590">590</span>
+<span id="591">591</span>
+<span id="592">592</span>
+<span id="593">593</span>
+<span id="594">594</span>
+<span id="595">595</span>
+<span id="596">596</span>
+<span id="597">597</span>
+<span id="598">598</span>
+<span id="599">599</span>
+<span id="600">600</span>
+<span id="601">601</span>
+<span id="602">602</span>
+<span id="603">603</span>
+<span id="604">604</span>
+<span id="605">605</span>
+<span id="606">606</span>
+<span id="607">607</span>
+<span id="608">608</span>
+<span id="609">609</span>
+<span id="610">610</span>
+<span id="611">611</span>
+<span id="612">612</span>
+<span id="613">613</span>
+<span id="614">614</span>
+<span id="615">615</span>
+<span id="616">616</span>
+<span id="617">617</span>
+<span id="618">618</span>
+<span id="619">619</span>
+<span id="620">620</span>
+<span id="621">621</span>
+<span id="622">622</span>
+<span id="623">623</span>
+<span id="624">624</span>
+<span id="625">625</span>
+<span id="626">626</span>
+<span id="627">627</span>
+<span id="628">628</span>
+<span id="629">629</span>
+<span id="630">630</span>
+<span id="631">631</span>
+<span id="632">632</span>
+<span id="633">633</span>
+<span id="634">634</span>
+<span id="635">635</span>
+<span id="636">636</span>
+<span id="637">637</span>
+<span id="638">638</span>
+<span id="639">639</span>
+<span id="640">640</span>
+<span id="641">641</span>
+<span id="642">642</span>
+<span id="643">643</span>
+<span id="644">644</span>
+<span id="645">645</span>
+<span id="646">646</span>
+<span id="647">647</span>
+<span id="648">648</span>
+<span id="649">649</span>
+<span id="650">650</span>
+<span id="651">651</span>
+<span id="652">652</span>
+<span id="653">653</span>
+<span id="654">654</span>
+<span id="655">655</span>
+<span id="656">656</span>
+<span id="657">657</span>
+<span id="658">658</span>
+<span id="659">659</span>
+<span id="660">660</span>
+<span id="661">661</span>
+<span id="662">662</span>
+<span id="663">663</span>
+<span id="664">664</span>
+<span id="665">665</span>
+<span id="666">666</span>
+<span id="667">667</span>
+<span id="668">668</span>
+<span id="669">669</span>
+<span id="670">670</span>
+<span id="671">671</span>
+<span id="672">672</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::error</span>;
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::legacy</span> <span class="kw">as</span> <span class="ident">amp</span>;
 <span class="kw">use</span> <span class="ident">serde</span>::{<span class="ident">Deserialize</span>, <span class="ident">Serialize</span>};
@@ -663,6 +752,12 @@
         <span class="ident">hex::decode</span>(<span class="kw-2">&amp;</span><span class="ident">s</span>)
             .<span class="ident">map</span>(<span class="ident">ActorId::from</span>)
             .<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">error::InvalidActorId</span>(<span class="ident">s</span>))
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">AsRef</span><span class="op">&lt;</span>[<span class="ident">u8</span>]<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ActorId</span> {
+    <span class="kw">fn</span> <span class="ident">as_ref</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>
     }
 }
 
@@ -778,6 +873,43 @@
     <span class="ident">Put</span>(<span class="ident">ScalarValue</span>),
 }
 
+<span class="kw">impl</span> <span class="ident">OpType</span> {
+    <span class="doccomment">/// The index into the action array as specified in [1]</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// [1]: https://alexjg.github.io/automerge-storage-docs/#action-array</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">action_index</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u64</span> {
+        <span class="kw">match</span> <span class="self">self</span> {
+            <span class="ident"><span class="self">Self</span>::Make</span>(<span class="ident">ObjType::Map</span>) =&gt; <span class="number">0</span>,
+            <span class="ident"><span class="self">Self</span>::Put</span>(<span class="kw">_</span>) =&gt; <span class="number">1</span>,
+            <span class="ident"><span class="self">Self</span>::Make</span>(<span class="ident">ObjType::List</span>) =&gt; <span class="number">2</span>,
+            <span class="ident"><span class="self">Self</span>::Delete</span> =&gt; <span class="number">3</span>,
+            <span class="ident"><span class="self">Self</span>::Make</span>(<span class="ident">ObjType::Text</span>) =&gt; <span class="number">4</span>,
+            <span class="ident"><span class="self">Self</span>::Increment</span>(<span class="kw">_</span>) =&gt; <span class="number">5</span>,
+            <span class="ident"><span class="self">Self</span>::Make</span>(<span class="ident">ObjType::Table</span>) =&gt; <span class="number">6</span>,
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">from_index_and_value</span>(
+        <span class="ident">index</span>: <span class="ident">u64</span>,
+        <span class="ident">value</span>: <span class="ident">ScalarValue</span>,
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">OpType</span>, <span class="ident">error::InvalidOpType</span><span class="op">&gt;</span> {
+        <span class="kw">match</span> <span class="ident">index</span> {
+            <span class="number">0</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident"><span class="self">Self</span>::Make</span>(<span class="ident">ObjType::Map</span>)),
+            <span class="number">1</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident"><span class="self">Self</span>::Put</span>(<span class="ident">value</span>)),
+            <span class="number">2</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident"><span class="self">Self</span>::Make</span>(<span class="ident">ObjType::List</span>)),
+            <span class="number">3</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident"><span class="self">Self</span>::Delete</span>),
+            <span class="number">4</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident"><span class="self">Self</span>::Make</span>(<span class="ident">ObjType::Text</span>)),
+            <span class="number">5</span> =&gt; <span class="kw">match</span> <span class="ident">value</span> {
+                <span class="ident">ScalarValue::Int</span>(<span class="ident">i</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident"><span class="self">Self</span>::Increment</span>(<span class="ident">i</span>)),
+                <span class="ident">ScalarValue::Uint</span>(<span class="ident">i</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident"><span class="self">Self</span>::Increment</span>(<span class="ident">i</span> <span class="kw">as</span> <span class="ident">i64</span>)),
+                <span class="kw">_</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">error::InvalidOpType::NonNumericInc</span>),
+            },
+            <span class="number">6</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident"><span class="self">Self</span>::Make</span>(<span class="ident">ObjType::Table</span>)),
+            <span class="ident">other</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">error::InvalidOpType::UnknownAction</span>(<span class="ident">other</span>)),
+        }
+    }
+}
+
 <span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">ObjType</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">OpType</span> {
     <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">v</span>: <span class="ident">ObjType</span>) -&gt; <span class="self">Self</span> {
         <span class="ident">OpType::Make</span>(<span class="ident">v</span>)
@@ -854,6 +986,12 @@
             <span class="ident">Key::Map</span>(<span class="ident">p</span>) =&gt; <span class="ident">Export::Prop</span>(<span class="kw-2">*</span><span class="ident">p</span>),
             <span class="ident">Key::Seq</span>(<span class="ident">e</span>) =&gt; <span class="ident">e</span>.<span class="ident">export</span>(),
         }
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">ObjId</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">OpId</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">o</span>: <span class="ident">ObjId</span>) -&gt; <span class="self">Self</span> {
+        <span class="ident">o</span>.<span class="number">0</span>
     }
 }
 
@@ -956,6 +1094,12 @@
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialOrd</span>, <span class="ident">Ord</span>, <span class="ident">Eq</span>, <span class="ident">PartialEq</span>, <span class="ident">Copy</span>, <span class="ident">Hash</span>, <span class="ident">Default</span>)]</span>
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">OpId</span>(<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">u64</span>, <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">usize</span>);
 
+<span class="kw">impl</span> <span class="ident">OpId</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">actor</span>: <span class="ident">usize</span>, <span class="ident">counter</span>: <span class="ident">u64</span>) -&gt; <span class="self">Self</span> {
+        <span class="self">Self</span>(<span class="ident">counter</span>, <span class="ident">actor</span>)
+    }
+}
+
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">Copy</span>, <span class="ident">PartialOrd</span>, <span class="ident">Eq</span>, <span class="ident">PartialEq</span>, <span class="ident">Ord</span>, <span class="ident">Hash</span>, <span class="ident">Default</span>)]</span>
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">ObjId</span>(<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">OpId</span>);
 
@@ -963,10 +1107,28 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const</span> <span class="kw">fn</span> <span class="ident">root</span>() -&gt; <span class="self">Self</span> {
         <span class="ident">ObjId</span>(<span class="ident">OpId</span>(<span class="number">0</span>, <span class="number">0</span>))
     }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">is_root</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
+        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">counter</span>() <span class="op">==</span> <span class="number">0</span>
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">opid</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">OpId</span> {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>
+    }
 }
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">Copy</span>, <span class="ident">PartialOrd</span>, <span class="ident">Eq</span>, <span class="ident">PartialEq</span>, <span class="ident">Ord</span>, <span class="ident">Hash</span>, <span class="ident">Default</span>)]</span>
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">ElemId</span>(<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">OpId</span>);
+
+<span class="kw">impl</span> <span class="ident">ElemId</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">is_head</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
+        <span class="kw-2">*</span><span class="self">self</span> <span class="op">==</span> <span class="ident">HEAD</span>
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">head</span>() -&gt; <span class="self">Self</span> {
+        <span class="self">Self</span>(<span class="ident">OpId</span>(<span class="number">0</span>, <span class="number">0</span>))
+    }
+}
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>)]</span>
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">Op</span> {
@@ -1108,6 +1270,22 @@
 <span class="doccomment">/// The sha256 hash of a change.</span>
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Eq</span>, <span class="ident">PartialEq</span>, <span class="ident">Hash</span>, <span class="ident">Clone</span>, <span class="ident">PartialOrd</span>, <span class="ident">Ord</span>, <span class="ident">Copy</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">ChangeHash</span>(<span class="kw">pub</span> [<span class="ident">u8</span>; <span class="ident">HASH_SIZE</span>]);
+
+<span class="kw">impl</span> <span class="ident">ChangeHash</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">as_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">checksum</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; [<span class="ident">u8</span>; <span class="number">4</span>] {
+        [<span class="self">self</span>.<span class="number">0</span>[<span class="number">0</span>], <span class="self">self</span>.<span class="number">0</span>[<span class="number">1</span>], <span class="self">self</span>.<span class="number">0</span>[<span class="number">2</span>], <span class="self">self</span>.<span class="number">0</span>[<span class="number">3</span>]]
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">AsRef</span><span class="op">&lt;</span>[<span class="ident">u8</span>]<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ChangeHash</span> {
+    <span class="kw">fn</span> <span class="ident">as_ref</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>
+    }
+}
 
 <span class="kw">impl</span> <span class="ident">fmt::Debug</span> <span class="kw">for</span> <span class="ident">ChangeHash</span> {
     <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">fmt::Result</span> {
