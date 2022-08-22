@@ -531,6 +531,8 @@ impl Op {
         match &self.action {
             OpType::Make(obj_type) => Value::Object(*obj_type),
             OpType::Put(scalar) => Value::Scalar(Cow::Borrowed(scalar)),
+            OpType::MarkBegin(mark) => Value::Scalar(Cow::Owned(format!("markBegin[{}]={}",mark.name, mark.value).into())),
+            OpType::MarkEnd(_) => Value::Scalar(Cow::Owned("markEnd".into())),
             _ => panic!("cant convert op into a value - {:?}", self),
         }
     }
@@ -539,6 +541,8 @@ impl Op {
         match &self.action {
             OpType::Make(obj_type) => Value::Object(*obj_type),
             OpType::Put(scalar) => Value::Scalar(Cow::Owned(scalar.clone())),
+            OpType::MarkBegin(mark) => Value::Scalar(Cow::Owned(format!("markBegin[{}]={}",mark.name, mark.value).into())),
+            OpType::MarkEnd(_) => Value::Scalar(Cow::Owned("markEnd".into())),
             _ => panic!("cant convert op into a value - {:?}", self),
         }
     }
