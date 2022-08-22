@@ -84,7 +84,7 @@ export function free<T>(doc: Doc<T>): void;
 export function from<T>(initialState: T | Doc<T>, actor?: ActorId): Doc<T>;
 export function change<T>(doc: Doc<T>, options: string | ChangeOptions | ChangeFn<T>, callback?: ChangeFn<T>): Doc<T>;
 export function emptyChange<T>(doc: Doc<T>, options: ChangeOptions): unknown;
-export function load<T>(data: Uint8Array, actor: ActorId): Doc<T>;
+export function load<T>(data: Uint8Array, actor?: ActorId): Doc<T>;
 export function save<T>(doc: Doc<T>): Uint8Array;
 export function merge<T>(local: Doc<T>, remote: Doc<T>): Doc<T>;
 export function getActorId<T>(doc: Doc<T>): ActorId;

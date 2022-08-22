@@ -156,7 +156,7 @@ export function emptyChange<T>(doc: Doc<T>, options: ChangeOptions) {
   return rootProxy(state, true);
 }
 
-export function load<T>(data: Uint8Array, actor: ActorId) : Doc<T> {
+export function load<T>(data: Uint8Array, actor?: ActorId) : Doc<T> {
   const state = ApiHandler.load(data, actor)
   return rootProxy(state, true);
 }
