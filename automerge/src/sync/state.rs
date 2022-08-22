@@ -1,9 +1,26 @@
-use std::{borrow::Cow, collections::BTreeSet};
+use std::collections::BTreeSet;
 
-use super::{decode_hashes, encode_hashes, BloomFilter};
-use crate::{decoding, decoding::Decoder, ChangeHash};
+use super::{encode_hashes, BloomFilter};
+use crate::storage::parse;
+use crate::ChangeHash;
 
 const SYNC_STATE_TYPE: u8 = 0x43; // first byte of an encoded sync state, for identification
+
+#[derive(Debug, thiserror::Error)]
+pub enum DecodeError {
+    #[error("{0:?}")]
+    Parse(String),
+    #[error("wrong type: expected one of {expected_one_of:?} but found {found}")]
+    WrongType { expected_one_of: Vec<u8>, found: u8 },
+    #[error("not enough input")]
+    NotEnoughInput,
+}
+
+impl From<parse::leb128::Error> for DecodeError {
+    fn from(_: parse::leb128::Error) -> Self {
+        Self::Parse("bad leb128 encoding".to_string())
+    }
+}
 
 /// The state of synchronisation with a peer.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
@@ -39,25 +56,35 @@ impl State {
         buf
     }
 
-    pub fn decode(bytes: &[u8]) -> Result<Self, decoding::Error> {
-        let mut decoder = Decoder::new(Cow::Borrowed(bytes));
+    pub fn decode(input: &[u8]) -> Result<Self, DecodeError> {
+        let input = parse::Input::new(input);
+        match Self::parse(input) {
+            Ok((_, state)) => Ok(state),
+            Err(parse::ParseError::Incomplete(_)) => Err(DecodeError::NotEnoughInput),
+            Err(parse::ParseError::Error(e)) => Err(e),
+        }
+    }
 
-        let record_type = decoder.read::<u8>()?;
+    pub(crate) fn parse(input: parse::Input<'_>) -> parse::ParseResult<'_, Self, DecodeError> {
+        let (i, record_type) = parse::take1(input)?;
         if record_type != SYNC_STATE_TYPE {
-            return Err(decoding::Error::WrongType {
+            return Err(parse::ParseError::Error(DecodeError::WrongType {
                 expected_one_of: vec![SYNC_STATE_TYPE],
                 found: record_type,
-            });
+            }));
         }
 
-        let shared_heads = decode_hashes(&mut decoder)?;
-        Ok(Self {
-            shared_heads,
-            last_sent_heads: Vec::new(),
-            their_heads: None,
-            their_need: None,
-            their_have: Some(Vec::new()),
-            sent_hashes: BTreeSet::new(),
-        })
+        let (i, shared_heads) = parse::length_prefixed(parse::change_hash)(i)?;
+        Ok((
+            i,
+            Self {
+                shared_heads,
+                last_sent_heads: Vec::new(),
+                their_heads: None,
+                their_need: None,
+                their_have: Some(Vec::new()),
+                sent_hashes: BTreeSet::new(),
+            },
+        ))
     }
 }

@@ -147,11 +147,13 @@ impl TryFrom<JS> for Vec<Change> {
         let value = value.0.dyn_into::<Array>()?;
         let changes: Result<Vec<Uint8Array>, _> = value.iter().map(|j| j.dyn_into()).collect();
         let changes = changes?;
-        let changes: Result<Vec<Change>, _> = changes
-            .iter()
-            .map(|a| Change::try_from(a.to_vec()))
-            .collect();
-        let changes = changes.map_err(to_js_err)?;
+        let changes = changes.iter().try_fold(Vec::new(), |mut acc, arr| {
+            match automerge::Change::try_from(arr.to_vec().as_slice()) {
+                Ok(c) => acc.push(c),
+                Err(e) => return Err(to_js_err(e)),
+            }
+            Ok(acc)
+        })?;
         Ok(changes)
     }
 }

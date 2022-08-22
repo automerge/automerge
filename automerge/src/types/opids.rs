@@ -19,6 +19,10 @@ impl<'a> IntoIterator for &'a OpIds {
 }
 
 impl OpIds {
+    pub(crate) fn empty() -> Self {
+        Self(Vec::new())
+    }
+
     pub(crate) fn new<I: Iterator<Item = OpId>, F: Fn(&OpId, &OpId) -> std::cmp::Ordering>(
         opids: I,
         cmp: F,
@@ -26,6 +30,20 @@ impl OpIds {
         let mut inner = opids.collect::<Vec<_>>();
         inner.sort_by(cmp);
         Self(inner)
+    }
+
+    /// Create a new OpIds if `opids` are sorted with respect to `cmp` and contain no duplicates.
+    ///
+    /// Returns `Some(OpIds)` if `opids` is sorted and has no duplicates, otherwise returns `None`
+    pub(crate) fn new_if_sorted<F: Fn(&OpId, &OpId) -> std::cmp::Ordering>(
+        opids: Vec<OpId>,
+        cmp: F,
+    ) -> Option<Self> {
+        if are_sorted_and_unique(opids.iter(), cmp) {
+            Some(Self(opids))
+        } else {
+            None
+        }
     }
 
     /// Add an op to this set of OpIds. The `comparator` must provide a
@@ -74,6 +92,33 @@ impl OpIds {
     pub(crate) fn contains(&self, op: &OpId) -> bool {
         self.0.contains(op)
     }
+
+    pub(crate) fn get(&self, idx: usize) -> Option<&OpId> {
+        self.0.get(idx)
+    }
+}
+
+fn are_sorted_and_unique<
+    'a,
+    I: Iterator<Item = &'a OpId>,
+    F: FnMut(&OpId, &OpId) -> std::cmp::Ordering,
+>(
+    mut opids: I,
+    mut f: F,
+) -> bool {
+    use std::cmp::Ordering;
+    let mut last = match opids.next() {
+        Some(e) => e,
+        None => return true,
+    };
+
+    for next in opids {
+        if matches!(f(last, next), Ordering::Greater | Ordering::Equal) {
+            return false;
+        }
+        last = next;
+    }
+    true
 }
 
 #[cfg(test)]
@@ -88,19 +133,35 @@ mod tests {
         })
     }
 
-    fn scenario() -> impl Strategy<Value = (Vec<ActorId>, Vec<OpId>)> {
+    fn scenario(size: std::ops::Range<usize>) -> impl Strategy<Value = (Vec<ActorId>, Vec<OpId>)> {
         let actors = vec![
             "aaaa".try_into().unwrap(),
             "cccc".try_into().unwrap(),
             "bbbb".try_into().unwrap(),
         ];
-        proptest::collection::vec(gen_opid(actors.clone()), 0..100)
+        proptest::collection::vec(gen_opid(actors.clone()), size)
             .prop_map(move |opids| (actors.clone(), opids))
+    }
+
+    fn duplicate_unsorted_scenario() -> impl Strategy<Value = (Vec<ActorId>, Vec<OpId>)> {
+        scenario(1..100).prop_map(|(actors, mut opids)| {
+            let mut sorted_opids = opids.clone();
+            sorted_opids.sort_by(|left, right| cmp(&actors, left, right));
+            sorted_opids.dedup();
+            // Unwrap is okay due to the size we pass to `scenario()`
+            let last = *sorted_opids.last().unwrap();
+            if sorted_opids == opids {
+                // Opids are sorted and deduplicated, just copy the last opid and insert it at the
+                // front
+                opids.insert(0, last);
+            }
+            (actors, opids)
+        })
     }
 
     proptest! {
         #[test]
-        fn test_sorted_opids((actors, opids) in scenario()) {
+        fn test_sorted_opids((actors, opids) in scenario(0..100)) {
             let mut sorted_opids = OpIds::default();
             for opid in &opids {
                 sorted_opids.add(*opid, |left, right| cmp(&actors, left, right));
@@ -110,6 +171,16 @@ mod tests {
             expected.sort_by(|left, right| cmp(&actors, left, right));
             expected.dedup();
             assert_eq!(result, expected);
+        }
+
+        #[test]
+        fn test_new_if_sorted((actors, opids) in duplicate_unsorted_scenario()) {
+            let mut expected = opids.clone();
+            assert_eq!(OpIds::new_if_sorted(opids, |left, right| cmp(&actors, left, right)), None);
+            expected.sort_by(|left, right| cmp(&actors, left, right));
+            expected.dedup();
+            let result = OpIds::new_if_sorted(expected.clone(), |left, right| cmp(&actors, left, right)).unwrap().into_iter().cloned().collect::<Vec<_>>();
+            assert_eq!(result, expected)
         }
     }
 

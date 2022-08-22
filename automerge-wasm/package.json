@@ -27,10 +27,10 @@
   "main": "./nodejs/index.js",
   "scripts": {
     "lint": "eslint test/*.ts",
-    "build": "cross-env PROFILE=dev TARGET=nodejs yarn target",
+    "build": "cross-env PROFILE=dev TARGET=nodejs FEATURES='' yarn target",
     "release": "cross-env PROFILE=release yarn buildall",
     "buildall": "cross-env TARGET=nodejs yarn target && cross-env TARGET=web yarn target",
-    "target": "rimraf ./$TARGET && wasm-pack build --target $TARGET --$PROFILE --out-name bindgen -d $TARGET && cp $TARGET-index.js $TARGET/index.js",
+    "target": "rimraf ./$TARGET && wasm-pack build --target $TARGET --$PROFILE --out-name bindgen -d $TARGET -- $FEATURES  && cp $TARGET-index.js $TARGET/index.js",
     "test": "ts-mocha -p tsconfig.json --type-check --bail --full-trace test/*.ts"
   },
   "devDependencies": {

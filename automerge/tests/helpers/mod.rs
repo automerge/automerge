@@ -49,7 +49,7 @@ pub fn sorted_actors() -> (automerge::ActorId, automerge::ActorId) {
 ///     &doc,
 ///     map!{
 ///         "todos" => {
-///             todos => list![
+///             list![
 ///                 { map!{ title = "water plants" } }
 ///             ]
 ///         }
@@ -72,8 +72,8 @@ pub fn sorted_actors() -> (automerge::ActorId, automerge::ActorId) {
 ///     &doc1,
 ///     map!{
 ///         "field" => {
-///             op1 => "one",
-///             op2.translate(&doc2) => "two"
+///             "one",
+///             "two"
 ///         }
 ///     }
 /// );
@@ -188,10 +188,10 @@ macro_rules! list {
     ($($inner:tt,)+) => { list!($($inner),+) };
     ($($inner:tt),*) => {
         {
+            use std::collections::BTreeSet;
             let _cap = list!(@count $($inner),*);
             let mut _list: Vec<BTreeSet<RealizedObject>> = Vec::new();
             $(
-                //println!("{}", stringify!($inner));
                 let inner = list!(@inner $inner);
                 let _ = _list.push(inner);
             )*
@@ -236,6 +236,7 @@ pub enum OrdScalarValue {
     Timestamp(i64),
     Boolean(bool),
     Null,
+    Unknown { type_code: u8, bytes: Vec<u8> },
 }
 
 impl From<automerge::ScalarValue> for OrdScalarValue {
@@ -250,6 +251,9 @@ impl From<automerge::ScalarValue> for OrdScalarValue {
             automerge::ScalarValue::Timestamp(v) => OrdScalarValue::Timestamp(v),
             automerge::ScalarValue::Boolean(v) => OrdScalarValue::Boolean(v),
             automerge::ScalarValue::Null => OrdScalarValue::Null,
+            automerge::ScalarValue::Unknown { type_code, bytes } => {
+                OrdScalarValue::Unknown { type_code, bytes }
+            }
         }
     }
 }
@@ -266,6 +270,10 @@ impl From<&OrdScalarValue> for automerge::ScalarValue {
             OrdScalarValue::Timestamp(v) => automerge::ScalarValue::Timestamp(*v),
             OrdScalarValue::Boolean(v) => automerge::ScalarValue::Boolean(*v),
             OrdScalarValue::Null => automerge::ScalarValue::Null,
+            OrdScalarValue::Unknown { type_code, bytes } => automerge::ScalarValue::Unknown {
+                type_code: *type_code,
+                bytes: bytes.to_vec(),
+            },
         }
     }
 }
@@ -275,8 +283,23 @@ impl serde::Serialize for OrdScalarValue {
     where
         S: serde::Serializer,
     {
-        let s = automerge::ScalarValue::from(self);
-        s.serialize(serializer)
+        match self {
+            OrdScalarValue::Bytes(v) => serializer.serialize_bytes(v),
+            OrdScalarValue::Str(v) => serializer.serialize_str(v.as_str()),
+            OrdScalarValue::Int(v) => serializer.serialize_i64(*v),
+            OrdScalarValue::Uint(v) => serializer.serialize_u64(*v),
+            OrdScalarValue::F64(v) => serializer.serialize_f64(v.into_inner()),
+            OrdScalarValue::Counter(v) => {
+                serializer.serialize_str(format!("Counter({})", v).as_str())
+            }
+            OrdScalarValue::Timestamp(v) => {
+                serializer.serialize_str(format!("Timestamp({})", v).as_str())
+            }
+            OrdScalarValue::Boolean(v) => serializer.serialize_bool(*v),
+            OrdScalarValue::Null => serializer.serialize_none(),
+            OrdScalarValue::Unknown { type_code, .. } => serializer
+                .serialize_str(format!("An unknown type with code {}", type_code).as_str()),
+        }
     }
 }
 
@@ -399,6 +422,30 @@ impl From<usize> for RealizedObject {
     }
 }
 
+impl From<u64> for RealizedObject {
+    fn from(v: u64) -> Self {
+        RealizedObject::Value(OrdScalarValue::Uint(v))
+    }
+}
+
+impl From<u32> for RealizedObject {
+    fn from(v: u32) -> Self {
+        RealizedObject::Value(OrdScalarValue::Uint(v.into()))
+    }
+}
+
+impl From<i64> for RealizedObject {
+    fn from(v: i64) -> Self {
+        RealizedObject::Value(OrdScalarValue::Int(v))
+    }
+}
+
+impl From<i32> for RealizedObject {
+    fn from(v: i32) -> Self {
+        RealizedObject::Value(OrdScalarValue::Int(v.into()))
+    }
+}
+
 impl From<automerge::ScalarValue> for RealizedObject {
     fn from(s: automerge::ScalarValue) -> Self {
         RealizedObject::Value(OrdScalarValue::from(s))
@@ -408,6 +455,20 @@ impl From<automerge::ScalarValue> for RealizedObject {
 impl From<&str> for RealizedObject {
     fn from(s: &str) -> Self {
         RealizedObject::Value(OrdScalarValue::Str(smol_str::SmolStr::from(s)))
+    }
+}
+
+impl From<Vec<u64>> for RealizedObject {
+    fn from(vals: Vec<u64>) -> Self {
+        RealizedObject::Sequence(
+            vals.into_iter()
+                .map(|i| {
+                    let mut set = BTreeSet::new();
+                    set.insert(i.into());
+                    set
+                })
+                .collect(),
+        )
     }
 }
 

@@ -23,6 +23,8 @@ else()
     set(CARGO_FLAG "--release")
 endif()
 
+set(CARGO_FEATURES "")
+
 set(CARGO_CURRENT_BINARY_DIR "${CARGO_TARGET_DIR}/${CARGO_BUILD_TYPE}")
 
 set(
@@ -47,7 +49,7 @@ add_custom_command(
         #       updated.
         ${CMAKE_COMMAND} -DCONDITION=NOT_EXISTS -P ${CMAKE_SOURCE_DIR}/cmake/file_touch.cmake -- ${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h ${CMAKE_SOURCE_DIR}/cbindgen.toml
     COMMAND
-        ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${CARGO_TARGET_DIR} ${CARGO_CMD} build ${CARGO_FLAG}
+        ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${CARGO_TARGET_DIR} ${CARGO_CMD} build ${CARGO_FLAG} ${CARGO_FEATURES}
     MAIN_DEPENDENCY
         lib.rs
     DEPENDS

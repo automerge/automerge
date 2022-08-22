@@ -41,6 +41,10 @@ impl OpTree {
     pub(crate) fn iter(&self) -> OpTreeIter<'_> {
         self.internal.iter()
     }
+
+    pub(crate) fn len(&self) -> usize {
+        self.internal.len()
+    }
 }
 
 #[derive(Clone, Debug)]

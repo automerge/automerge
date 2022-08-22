@@ -151,4 +151,3 @@ jobs:
       - uses: Swatinem/rust-cache@v1
       - run: ./scripts/ci/build-test
         shell: bash
-

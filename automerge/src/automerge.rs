@@ -4,24 +4,24 @@ use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::ops::RangeBounds;
 
-use crate::change::encode_document;
 use crate::clock::ClockData;
+use crate::clocks::Clocks;
+use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
 use crate::keys::Keys;
 use crate::op_observer::OpObserver;
 use crate::op_set::OpSet;
 use crate::parents::Parents;
+use crate::storage::{self, load, CompressConfig};
 use crate::transaction::{self, CommitOptions, Failure, Success, Transaction, TransactionInner};
 use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType,
     ScalarValue, Value,
 };
-use crate::KeysAt;
 use crate::{
-    legacy, query, types, ApplyOptions, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType,
-    Values,
+    query, ApplyOptions, AutomergeError, Change, KeysAt, ListRange, ListRangeAt, MapRange,
+    MapRangeAt, ObjType, Prop, Values,
 };
-use crate::{AutomergeError, Change, Prop};
 use serde::Serialize;
 
 #[cfg(test)]
@@ -136,8 +136,6 @@ impl Automerge {
             start_op: NonZeroU64::new(self.max_op + 1).unwrap(),
             time: 0,
             message: None,
-            extra_bytes: Default::default(),
-            hash: None,
             operations: vec![],
             deps,
         }
@@ -200,7 +198,7 @@ impl Automerge {
         while let Some(hash) = heads.pop() {
             if let Some(idx) = self.history_index.get(&hash) {
                 let change = &self.history[*idx];
-                for dep in &change.deps {
+                for dep in change.deps() {
                     if !seen.contains(dep) {
                         heads.push(*dep);
                     }
@@ -526,7 +524,7 @@ impl Automerge {
         prop: P,
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let result = match prop.into() {
+        let mut result = match prop.into() {
             Prop::Map(p) => {
                 let prop = self.ops.m.props.lookup(&p);
                 if let Some(p) = prop {
@@ -548,6 +546,7 @@ impl Automerge {
                 .map(|o| (o.value(), self.id_to_exid(o.id)))
                 .collect(),
         };
+        result.sort_by(|a, b| b.1.cmp(&a.1));
         Ok(result)
     }
 
@@ -594,12 +593,82 @@ impl Automerge {
     /// Load a document.
     pub fn load_with<Obs: OpObserver>(
         data: &[u8],
-        options: ApplyOptions<'_, Obs>,
+        mut options: ApplyOptions<'_, Obs>,
     ) -> Result<Self, AutomergeError> {
-        let changes = Change::load_document(data)?;
-        let mut doc = Self::new();
-        doc.apply_changes_with(changes, options)?;
-        Ok(doc)
+        if data.is_empty() {
+            return Ok(Self::new());
+        }
+        let (remaining, first_chunk) = storage::Chunk::parse(storage::parse::Input::new(data))
+            .map_err(|e| load::Error::Parse(Box::new(e)))?;
+        if !first_chunk.checksum_valid() {
+            return Err(load::Error::BadChecksum.into());
+        }
+        let observer = &mut options.op_observer;
+
+        let mut am = match first_chunk {
+            storage::Chunk::Document(d) => {
+                let storage::load::Reconstructed {
+                    max_op,
+                    result: op_set,
+                    changes,
+                    heads,
+                } = match observer {
+                    Some(o) => storage::load::reconstruct_document(&d, OpSet::observed_builder(*o)),
+                    None => storage::load::reconstruct_document(&d, OpSet::builder()),
+                }
+                .map_err(|e| load::Error::InflateDocument(Box::new(e)))?;
+                let mut hashes_by_index = HashMap::new();
+                let mut actor_to_history: HashMap<usize, Vec<usize>> = HashMap::new();
+                let mut clocks = Clocks::new();
+                for (index, change) in changes.iter().enumerate() {
+                    // SAFETY: This should be fine because we just constructed an opset containing
+                    // all the changes
+                    let actor_index = op_set.m.actors.lookup(change.actor_id()).unwrap();
+                    actor_to_history.entry(actor_index).or_default().push(index);
+                    hashes_by_index.insert(index, change.hash());
+                    clocks.add_change(change, actor_index)?;
+                }
+                let history_index = hashes_by_index.into_iter().map(|(k, v)| (v, k)).collect();
+                Self {
+                    queue: vec![],
+                    history: changes,
+                    history_index,
+                    states: actor_to_history,
+                    clocks: clocks.into(),
+                    ops: op_set,
+                    deps: heads.into_iter().collect(),
+                    saved: Default::default(),
+                    actor: Actor::Unused(ActorId::random()),
+                    max_op,
+                }
+            }
+            storage::Chunk::Change(stored_change) => {
+                let change = Change::new_from_unverified(stored_change.into_owned(), None)
+                    .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?;
+                let mut am = Self::new();
+                am.apply_change(change, observer);
+                am
+            }
+            storage::Chunk::CompressedChange(stored_change, compressed) => {
+                let change = Change::new_from_unverified(
+                    stored_change.into_owned(),
+                    Some(compressed.into_owned()),
+                )
+                .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?;
+                let mut am = Self::new();
+                am.apply_change(change, observer);
+                am
+            }
+        };
+        match load::load_changes(remaining.reset()) {
+            load::LoadedChanges::Complete(c) => {
+                for change in c {
+                    am.apply_change(change, observer);
+                }
+            }
+            load::LoadedChanges::Partial { error, .. } => return Err(error.into()),
+        }
+        Ok(am)
     }
 
     /// Load an incremental save of a document.
@@ -613,7 +682,13 @@ impl Automerge {
         data: &[u8],
         options: ApplyOptions<'_, Obs>,
     ) -> Result<usize, AutomergeError> {
-        let changes = Change::load_document(data)?;
+        let changes = match load::load_changes(storage::parse::Input::new(data)) {
+            load::LoadedChanges::Complete(c) => c,
+            load::LoadedChanges::Partial { error, loaded, .. } => {
+                tracing::warn!(successful_chunks=loaded.len(), err=?error, "partial load");
+                loaded
+            }
+        };
         let start = self.ops.len();
         self.apply_changes_with(changes, options)?;
         let delta = self.ops.len() - start;
@@ -624,7 +699,7 @@ impl Automerge {
         let mut dup = false;
         if let Some(actor_index) = self.ops.m.actors.lookup(change.actor_id()) {
             if let Some(s) = self.states.get(&actor_index) {
-                dup = s.len() >= change.seq as usize;
+                dup = s.len() >= change.seq() as usize;
             }
         }
         dup
@@ -645,10 +720,10 @@ impl Automerge {
         mut options: ApplyOptions<'_, Obs>,
     ) -> Result<(), AutomergeError> {
         for c in changes {
-            if !self.history_index.contains_key(&c.hash) {
+            if !self.history_index.contains_key(&c.hash()) {
                 if self.duplicate_seq(&c) {
                     return Err(AutomergeError::DuplicateSeqNumber(
-                        c.seq,
+                        c.seq(),
                         c.actor_id().clone(),
                     ));
                 }
@@ -660,7 +735,7 @@ impl Automerge {
             }
         }
         while let Some(c) = self.pop_next_causally_ready_change() {
-            if !self.history_index.contains_key(&c.hash) {
+            if !self.history_index.contains_key(&c.hash()) {
                 self.apply_change(c, &mut options.op_observer);
             }
         }
@@ -683,7 +758,7 @@ impl Automerge {
 
     fn is_causally_ready(&self, change: &Change) -> bool {
         change
-            .deps
+            .deps()
             .iter()
             .all(|d| self.history_index.contains_key(d))
     }
@@ -700,29 +775,43 @@ impl Automerge {
     }
 
     fn import_ops(&mut self, change: &Change) -> Vec<(ObjId, Op)> {
+        let actor = self.ops.m.actors.cache(change.actor_id().clone());
+        let mut actors = Vec::with_capacity(change.other_actor_ids().len() + 1);
+        actors.push(actor);
+        actors.extend(
+            change
+                .other_actor_ids()
+                .iter()
+                .map(|a| self.ops.m.actors.cache(a.clone()))
+                .collect::<Vec<_>>(),
+        );
         change
             .iter_ops()
             .enumerate()
             .map(|(i, c)| {
-                let actor = self.ops.m.actors.cache(change.actor_id().clone());
-                let id = OpId(change.start_op.get() + i as u64, actor);
-                let obj = match c.obj {
-                    legacy::ObjectId::Root => ObjId::root(),
-                    legacy::ObjectId::Id(id) => ObjId(OpId(id.0, self.ops.m.actors.cache(id.1))),
-                };
-                let pred = self.ops.m.import_opids(c.pred);
+                let id = OpId(change.start_op().get() + i as u64, actor);
                 let key = match &c.key {
-                    legacy::Key::Map(n) => Key::Map(self.ops.m.props.cache(n.to_string())),
-                    legacy::Key::Seq(legacy::ElementId::Head) => Key::Seq(types::HEAD),
-                    legacy::Key::Seq(legacy::ElementId::Id(i)) => {
-                        Key::Seq(ElemId(OpId(i.0, self.ops.m.actors.cache(i.1.clone()))))
+                    EncodedKey::Prop(n) => Key::Map(self.ops.m.props.cache(n.to_string())),
+                    EncodedKey::Elem(e) if e.is_head() => Key::Seq(ElemId::head()),
+                    EncodedKey::Elem(ElemId(o)) => {
+                        Key::Seq(ElemId(OpId::new(actors[o.actor()], o.counter())))
                     }
                 };
+                let obj = if c.obj.is_root() {
+                    ObjId::root()
+                } else {
+                    ObjId(OpId(c.obj.opid().counter(), actors[c.obj.opid().actor()]))
+                };
+                let pred = c
+                    .pred
+                    .iter()
+                    .map(|p| OpId::new(actors[p.actor()], p.counter()));
+                let pred = self.ops.m.sorted_opids(pred);
                 (
                     obj,
                     Op {
                         id,
-                        action: c.action,
+                        action: OpType::from_index_and_value(c.action, c.val).unwrap(),
                         key,
                         succ: Default::default(),
                         pred,
@@ -750,6 +839,7 @@ impl Automerge {
             .into_iter()
             .cloned()
             .collect::<Vec<_>>();
+        tracing::trace!(changes=?changes.iter().map(|c| c.hash()).collect::<Vec<_>>(), "merging new changes");
         self.apply_changes_with(changes, options)?;
         Ok(self.get_heads())
     }
@@ -758,8 +848,29 @@ impl Automerge {
     pub fn save(&mut self) -> Vec<u8> {
         let heads = self.get_heads();
         let c = self.history.iter();
-        let ops = self.ops.iter();
-        let bytes = encode_document(heads, c, ops, &self.ops.m.actors, &self.ops.m.props.cache);
+        let bytes = crate::storage::save::save_document(
+            c,
+            self.ops.iter(),
+            &self.ops.m.actors,
+            &self.ops.m.props,
+            &heads,
+            None,
+        );
+        self.saved = self.get_heads();
+        bytes
+    }
+
+    pub fn save_nocompress(&mut self) -> Vec<u8> {
+        let heads = self.get_heads();
+        let c = self.history.iter();
+        let bytes = crate::storage::save::save_document(
+            c,
+            self.ops.iter(),
+            &self.ops.m.actors,
+            &self.ops.m.props,
+            &heads,
+            Some(CompressConfig::None),
+        );
         self.saved = self.get_heads();
         bytes
     }
@@ -809,10 +920,10 @@ impl Automerge {
     /// Get the hashes of the changes in this document that aren't transitive dependencies of the
     /// given `heads`.
     pub fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
-        let in_queue: HashSet<_> = self.queue.iter().map(|change| change.hash).collect();
+        let in_queue: HashSet<_> = self.queue.iter().map(|change| change.hash()).collect();
         let mut missing = HashSet::new();
 
-        for head in self.queue.iter().flat_map(|change| &change.deps) {
+        for head in self.queue.iter().flat_map(|change| change.deps()) {
             if !self.history_index.contains_key(head) {
                 missing.insert(head);
             }
@@ -904,10 +1015,12 @@ impl Automerge {
     }
 
     /// Get the changes that the other document added compared to this document.
+    #[tracing::instrument(skip(self, other))]
     pub fn get_changes_added<'a>(&self, other: &'a Self) -> Vec<&'a Change> {
         // Depth-first traversal from the heads through the dependency graph,
         // until we reach a change that is already present in other
         let mut stack: Vec<_> = other.get_heads();
+        tracing::trace!(their_heads=?stack, "finding changes to merge");
         let mut seen_hashes = HashSet::new();
         let mut added_change_hashes = Vec::new();
         while let Some(hash) = stack.pop() {
@@ -915,7 +1028,7 @@ impl Automerge {
                 seen_hashes.insert(hash);
                 added_change_hashes.push(hash);
                 if let Some(change) = other.get_change_by_hash(&hash) {
-                    stack.extend(&change.deps);
+                    stack.extend(change.deps());
                 }
             }
         }
@@ -940,12 +1053,12 @@ impl Automerge {
             .get(&actor)
             .and_then(|v| v.get(seq as usize - 1))
             .and_then(|&i| self.history.get(i))
-            .map(|c| c.hash)
+            .map(|c| c.hash())
             .ok_or(AutomergeError::InvalidSeq(seq))
     }
 
     pub(crate) fn update_history(&mut self, change: Change, num_ops: usize) -> usize {
-        self.max_op = std::cmp::max(self.max_op, change.start_op.get() + num_ops as u64 - 1);
+        self.max_op = std::cmp::max(self.max_op, change.start_op().get() + num_ops as u64 - 1);
 
         self.update_deps(&change);
 
@@ -957,8 +1070,9 @@ impl Automerge {
             .or_default()
             .push(history_index);
 
+        self.history_index.insert(change.hash(), history_index);
         let mut clock = Clock::new();
-        for hash in &change.deps {
+        for hash in change.deps() {
             let c = self
                 .clocks
                 .get(hash)
@@ -969,22 +1083,22 @@ impl Automerge {
             actor_index,
             ClockData {
                 max_op: change.max_op(),
-                seq: change.seq,
+                seq: change.seq(),
             },
         );
-        self.clocks.insert(change.hash, clock);
+        self.clocks.insert(change.hash(), clock);
 
-        self.history_index.insert(change.hash, history_index);
+        self.history_index.insert(change.hash(), history_index);
         self.history.push(change);
 
         history_index
     }
 
     fn update_deps(&mut self, change: &Change) {
-        for d in &change.deps {
+        for d in change.deps() {
             self.deps.remove(d);
         }
-        self.deps.insert(change.hash);
+        self.deps.insert(change.hash());
     }
 
     pub fn import(&self, s: &str) -> Result<ExId, AutomergeError> {

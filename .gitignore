@@ -3,3 +3,5 @@
 perf.*
 /Cargo.lock
 build/
+automerge/proptest-regressions/
+.vim/*

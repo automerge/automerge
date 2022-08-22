@@ -1,9 +1,10 @@
+use crate::storage::load::Error as LoadError;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
-use crate::{decoding, encoding, ChangeHash};
+use crate::ChangeHash;
 use thiserror::Error;
 
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug)]
 pub enum AutomergeError {
     #[error("id was not an object id")]
     NotAnObject,
@@ -11,10 +12,6 @@ pub enum AutomergeError {
     InvalidObjIdFormat(String),
     #[error("invalid obj id `{0}`")]
     InvalidObjId(String),
-    #[error("there was an encoding problem: {0}")]
-    Encoding(#[from] encoding::Error),
-    #[error("there was a decoding problem: {0}")]
-    Decoding(#[from] decoding::Error),
     #[error("key must not be an empty string")]
     EmptyStringKey,
     #[error("invalid seq {0}")]
@@ -36,6 +33,14 @@ pub enum AutomergeError {
     },
     #[error("general failure")]
     Fail,
+    #[error(transparent)]
+    Load(#[from] LoadError),
+    #[error("failed to load compressed data: {0}")]
+    Deflate(#[source] std::io::Error),
+    #[error("compressed chunk was not a change")]
+    NonChangeCompressed,
+    #[error(transparent)]
+    Clocks(#[from] crate::clocks::MissingDep),
 }
 
 #[cfg(feature = "wasm")]
@@ -73,3 +78,11 @@ pub struct InvalidElementId(pub String);
 #[derive(Error, Debug)]
 #[error("Invalid OpID: {0}")]
 pub struct InvalidOpId(pub String);
+
+#[derive(Error, Debug)]
+pub(crate) enum InvalidOpType {
+    #[error("unrecognized action index {0}")]
+    UnknownAction(u64),
+    #[error("non numeric argument for inc op")]
+    NonNumericInc,
+}

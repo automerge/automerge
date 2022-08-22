@@ -50,11 +50,13 @@ fn list_to_json(doc: &am::Automerge, obj: &am::ObjId) -> serde_json::Value {
 fn scalar_to_json(val: &am::ScalarValue) -> serde_json::Value {
     match val {
         am::ScalarValue::Str(s) => serde_json::Value::String(s.to_string()),
-        am::ScalarValue::Bytes(b) => serde_json::Value::Array(
-            b.iter()
-                .map(|byte| serde_json::Value::Number((*byte).into()))
-                .collect(),
-        ),
+        am::ScalarValue::Bytes(b) | am::ScalarValue::Unknown { bytes: b, .. } => {
+            serde_json::Value::Array(
+                b.iter()
+                    .map(|byte| serde_json::Value::Number((*byte).into()))
+                    .collect(),
+            )
+        }
         am::ScalarValue::Int(n) => serde_json::Value::Number((*n).into()),
         am::ScalarValue::Uint(n) => serde_json::Value::Number((*n).into()),
         am::ScalarValue::F64(n) => serde_json::Number::from_f64(*n)

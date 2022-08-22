@@ -157,6 +157,11 @@ impl AutoCommit {
         self.doc.save()
     }
 
+    pub fn save_nocompress(&mut self) -> Vec<u8> {
+        self.ensure_transaction_closed();
+        self.doc.save_nocompress()
+    }
+
     // should this return an empty vec instead of None?
     pub fn save_incremental(&mut self) -> Vec<u8> {
         self.ensure_transaction_closed();

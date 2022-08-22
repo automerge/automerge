@@ -1,8 +1,11 @@
 use automerge::transaction::Transactable;
 use automerge::{
     ActorId, ApplyOptions, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjType,
-    ScalarValue, Value, VecOpObserver, ROOT,
+    ScalarValue, VecOpObserver, ROOT,
 };
+
+// set up logging for all the tests
+use test_log::test;
 
 mod helpers;
 #[allow(unused_imports)]
@@ -850,6 +853,53 @@ fn handle_repeated_out_of_order_changes() -> Result<(), automerge::AutomergeErro
 }
 
 #[test]
+fn save_restore_complex_transactional() {
+    let mut doc1 = Automerge::new();
+    let first_todo = doc1
+        .transact::<_, _, automerge::AutomergeError>(|d| {
+            let todos = d.put_object(&automerge::ROOT, "todos", ObjType::List)?;
+            let first_todo = d.insert_object(&todos, 0, ObjType::Map)?;
+            d.put(&first_todo, "title", "water plants")?;
+            d.put(&first_todo, "done", false)?;
+            Ok(first_todo)
+        })
+        .unwrap()
+        .result;
+
+    let mut doc2 = Automerge::new();
+    doc2.merge(&mut doc1).unwrap();
+    doc2.transact::<_, _, automerge::AutomergeError>(|tx| {
+        tx.put(&first_todo, "title", "weed plants")?;
+        Ok(())
+    })
+    .unwrap();
+
+    doc1.transact::<_, _, automerge::AutomergeError>(|tx| {
+        tx.put(&first_todo, "title", "kill plants")?;
+        Ok(())
+    })
+    .unwrap();
+    doc1.merge(&mut doc2).unwrap();
+
+    let reloaded = Automerge::load(&doc1.save()).unwrap();
+
+    assert_doc!(
+        &reloaded,
+        map! {
+            "todos" => {list![
+                {map!{
+                    "title" => {
+                        "weed plants",
+                        "kill plants",
+                    },
+                    "done" => {false},
+                }}
+            ]}
+        }
+    );
+}
+
+#[test]
 fn list_counter_del() -> Result<(), automerge::AutomergeError> {
     let mut v = vec![ActorId::random(), ActorId::random(), ActorId::random()];
     v.sort();
@@ -884,33 +934,49 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
     doc1.merge(&mut doc2).unwrap();
     doc1.merge(&mut doc3).unwrap();
 
-    let values = doc1.get_all(&list, 1)?;
-    assert_eq!(values.len(), 3);
-    assert_eq!(&values[0].0, &Value::counter(1));
-    assert_eq!(&values[1].0, &Value::counter(10));
-    assert_eq!(&values[2].0, &Value::counter(100));
-
-    let values = doc1.get_all(&list, 2)?;
-    assert_eq!(values.len(), 3);
-    assert_eq!(&values[0].0, &Value::counter(1));
-    assert_eq!(&values[1].0, &Value::counter(10));
-    assert_eq!(&values[2].0, &Value::int(100));
+    assert_obj!(
+        doc1.document(),
+        &automerge::ROOT,
+        "list",
+        list![
+            {
+                "a",
+            },
+            {
+                ScalarValue::counter(1),
+                ScalarValue::counter(10),
+                ScalarValue::counter(100)
+            },
+            {
+                ScalarValue::Int(100),
+                ScalarValue::counter(1),
+                ScalarValue::counter(10),
+            }
+        ]
+    );
 
     doc1.increment(&list, 1, 1)?;
     doc1.increment(&list, 2, 1)?;
 
-    let values = doc1.get_all(&list, 1)?;
-    assert_eq!(values.len(), 3);
-    assert_eq!(&values[0].0, &Value::counter(2));
-    assert_eq!(&values[1].0, &Value::counter(11));
-    assert_eq!(&values[2].0, &Value::counter(101));
-
-    let values = doc1.get_all(&list, 2)?;
-    assert_eq!(values.len(), 2);
-    assert_eq!(&values[0].0, &Value::counter(2));
-    assert_eq!(&values[1].0, &Value::counter(11));
-
-    assert_eq!(doc1.length(&list), 3);
+    assert_obj!(
+        doc1.document(),
+        &automerge::ROOT,
+        "list",
+        list![
+            {
+                "a",
+            },
+            {
+                ScalarValue::counter(2),
+                ScalarValue::counter(11),
+                ScalarValue::counter(101)
+            },
+            {
+                ScalarValue::counter(2),
+                ScalarValue::counter(11),
+            }
+        ]
+    );
 
     doc1.delete(&list, 2)?;
 
@@ -952,21 +1018,21 @@ fn observe_counter_change_application() {
 fn increment_non_counter_map() {
     let mut doc = AutoCommit::new();
     // can't increment nothing
-    assert_eq!(
+    assert!(matches!(
         doc.increment(ROOT, "nothing", 2),
         Err(AutomergeError::MissingCounter)
-    );
+    ));
 
     // can't increment a non-counter
     doc.put(ROOT, "non-counter", "mystring").unwrap();
-    assert_eq!(
+    assert!(matches!(
         doc.increment(ROOT, "non-counter", 2),
         Err(AutomergeError::MissingCounter)
-    );
+    ));
 
     // can increment a counter still
     doc.put(ROOT, "counter", ScalarValue::counter(1)).unwrap();
-    assert_eq!(doc.increment(ROOT, "counter", 2), Ok(()));
+    assert!(matches!(doc.increment(ROOT, "counter", 2), Ok(())));
 
     // can increment a counter that is part of a conflict
     let mut doc1 = AutoCommit::new();
@@ -978,7 +1044,7 @@ fn increment_non_counter_map() {
     doc2.put(ROOT, "key", "mystring").unwrap();
     doc1.merge(&mut doc2).unwrap();
 
-    assert_eq!(doc1.increment(ROOT, "key", 2), Ok(()));
+    assert!(matches!(doc1.increment(ROOT, "key", 2), Ok(())));
 }
 
 #[test]
@@ -988,14 +1054,14 @@ fn increment_non_counter_list() {
 
     // can't increment a non-counter
     doc.insert(&list, 0, "mystring").unwrap();
-    assert_eq!(
+    assert!(matches!(
         doc.increment(&list, 0, 2),
         Err(AutomergeError::MissingCounter)
-    );
+    ));
 
     // can increment a counter
     doc.insert(&list, 0, ScalarValue::counter(1)).unwrap();
-    assert_eq!(doc.increment(&list, 0, 2), Ok(()));
+    assert!(matches!(doc.increment(&list, 0, 2), Ok(())));
 
     // can increment a counter that is part of a conflict
     let mut doc1 = AutoCommit::new();
@@ -1009,7 +1075,223 @@ fn increment_non_counter_list() {
     doc2.put(&list, 0, "mystring").unwrap();
     doc1.merge(&mut doc2).unwrap();
 
-    assert_eq!(doc1.increment(&list, 0, 2), Ok(()));
+    assert!(matches!(doc1.increment(&list, 0, 2), Ok(())));
+}
+
+#[test]
+fn test_local_inc_in_map() {
+    let mut v = vec![ActorId::random(), ActorId::random(), ActorId::random()];
+    v.sort();
+    let actor1 = v[0].clone();
+    let actor2 = v[1].clone();
+    let actor3 = v[2].clone();
+
+    let mut doc1 = new_doc_with_actor(actor1);
+    doc1.put(&automerge::ROOT, "hello", "world").unwrap();
+
+    let mut doc2 = AutoCommit::load(&doc1.save()).unwrap();
+    doc2.set_actor(actor2);
+
+    let mut doc3 = AutoCommit::load(&doc1.save()).unwrap();
+    doc3.set_actor(actor3);
+
+    doc1.put(ROOT, "cnt", 20_u64).unwrap();
+    doc2.put(ROOT, "cnt", ScalarValue::counter(0)).unwrap();
+    doc3.put(ROOT, "cnt", ScalarValue::counter(10)).unwrap();
+    doc1.merge(&mut doc2).unwrap();
+    doc1.merge(&mut doc3).unwrap();
+
+    assert_doc! {doc1.document(), map!{
+        "cnt" => {
+            20_u64,
+            ScalarValue::counter(0),
+            ScalarValue::counter(10),
+        },
+        "hello" => {"world"},
+    }};
+
+    doc1.increment(ROOT, "cnt", 5).unwrap();
+
+    assert_doc! {doc1.document(), map!{
+        "cnt" => {
+            ScalarValue::counter(5),
+            ScalarValue::counter(15),
+        },
+        "hello" => {"world"},
+    }};
+    let mut doc4 = AutoCommit::load(&doc1.save()).unwrap();
+    assert_eq!(doc4.save(), doc1.save());
+}
+
+#[test]
+fn test_merging_test_conflicts_then_saving_and_loading() {
+    let (actor1, actor2) = sorted_actors();
+
+    let mut doc1 = new_doc_with_actor(actor1);
+    let text = doc1.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc1.splice(&text, 0, 0, "hello".chars().map(|c| c.to_string().into()))
+        .unwrap();
+
+    let mut doc2 = AutoCommit::load(&doc1.save()).unwrap();
+    doc2.set_actor(actor2);
+
+    assert_doc! {doc2.document(), map!{
+        "text" => { list![{"h"}, {"e"}, {"l"}, {"l"}, {"o"}]},
+    }};
+
+    doc2.splice(&text, 4, 1, Vec::new()).unwrap();
+    doc2.splice(&text, 4, 0, vec!["!".into()]).unwrap();
+    doc2.splice(&text, 5, 0, vec![" ".into()]).unwrap();
+    doc2.splice(&text, 6, 0, "world".chars().map(|c| c.into()))
+        .unwrap();
+
+    assert_doc!(
+        doc2.document(),
+        map! {
+            "text" => { list![{"h"}, {"e"}, {"l"}, {"l"}, {"!"}, {" "}, {"w"} , {"o"}, {"r"}, {"l"}, {"d"}]}
+        }
+    );
+
+    let mut doc3 = AutoCommit::load(&doc2.save()).unwrap();
+
+    assert_doc!(
+        doc3.document(),
+        map! {
+            "text" => { list![{"h"}, {"e"}, {"l"}, {"l"}, {"!"}, {" "}, {"w"} , {"o"}, {"r"}, {"l"}, {"d"}]}
+        }
+    );
+}
+
+/// Surfaces an error which occurs when loading a document with a change which only contains a
+/// delete operation. In this case the delete operation doesn't appear in the encoded document
+/// operations except as a succ, so the max_op was calculated incorectly.
+#[test]
+fn delete_only_change() {
+    let actor = automerge::ActorId::random();
+    let mut doc1 = automerge::Automerge::new().with_actor(actor.clone());
+    let list = doc1
+        .transact::<_, _, automerge::AutomergeError>(|d| {
+            let l = d.put_object(&automerge::ROOT, "list", ObjType::List)?;
+            d.insert(&l, 0, 'a')?;
+            Ok(l)
+        })
+        .unwrap()
+        .result;
+
+    let mut doc2 = automerge::Automerge::load(&doc1.save())
+        .unwrap()
+        .with_actor(actor.clone());
+    doc2.transact::<_, _, automerge::AutomergeError>(|d| d.delete(&list, 0))
+        .unwrap();
+
+    let mut doc3 = automerge::Automerge::load(&doc2.save())
+        .unwrap()
+        .with_actor(actor.clone());
+    doc3.transact(|d| d.insert(&list, 0, "b")).unwrap();
+
+    let doc4 = automerge::Automerge::load(&doc3.save())
+        .unwrap()
+        .with_actor(actor);
+
+    let changes = doc4.get_changes(&[]).unwrap();
+    assert_eq!(changes.len(), 3);
+    let c = changes[2];
+    assert_eq!(c.start_op().get(), 4);
+}
+
+/// Expose an error where a document which contained a create operation without any subsequent
+/// operations targeting the created object did not load the object correctly.
+#[test]
+fn save_and_reload_create_object() {
+    let actor = automerge::ActorId::random();
+    let mut doc = automerge::Automerge::new().with_actor(actor);
+
+    // Create a change containing an object but no other operations
+    let list = doc
+        .transact::<_, _, automerge::AutomergeError>(|d| {
+            d.put_object(&automerge::ROOT, "foo", ObjType::List)
+        })
+        .unwrap()
+        .result;
+
+    // Save and load the change
+    let mut doc2 = automerge::Automerge::load(&doc.save()).unwrap();
+    doc2.transact::<_, _, automerge::AutomergeError>(|d| {
+        d.insert(&list, 0, 1_u64)?;
+        Ok(())
+    })
+    .unwrap();
+
+    assert_doc!(&doc2, map! {"foo" => { list! [{1_u64}]}});
+
+    let _doc3 = automerge::Automerge::load(&doc2.save()).unwrap();
+}
+
+#[test]
+fn test_compressed_changes() {
+    let mut doc = new_doc();
+    // crate::storage::DEFLATE_MIN_SIZE is 250, so this should trigger compression
+    doc.put(ROOT, "bytes", ScalarValue::Bytes(vec![10; 300]))
+        .unwrap();
+    let mut change = doc.get_last_local_change().unwrap().clone();
+    let uncompressed = change.raw_bytes().to_vec();
+    assert!(uncompressed.len() > 256);
+    let compressed = change.bytes().to_vec();
+    assert!(compressed.len() < uncompressed.len());
+
+    let reloaded = automerge::Change::try_from(&compressed[..]).unwrap();
+    assert_eq!(change.raw_bytes(), reloaded.raw_bytes());
+}
+
+#[test]
+fn test_compressed_doc_cols() {
+    // In this test, the keyCtr column is long enough for deflate compression to kick in, but the
+    // keyStr column is short. Thus, the deflate bit gets set for keyCtr but not for keyStr.
+    // When checking whether the columns appear in ascending order, we must ignore the deflate bit.
+    let mut doc = new_doc();
+    let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
+    let mut expected = Vec::new();
+    for i in 0..200 {
+        doc.insert(&list, i, i as u64).unwrap();
+        expected.push(i as u64);
+    }
+    let uncompressed = doc.save_nocompress();
+    let compressed = doc.save();
+    assert!(compressed.len() < uncompressed.len());
+    let loaded = automerge::Automerge::load(&compressed).unwrap();
+    assert_doc!(
+        &loaded,
+        map! {
+            "list" => { expected}
+        }
+    );
+}
+
+#[test]
+fn test_change_encoding_expanded_change_round_trip() {
+    let change_bytes: Vec<u8> = vec![
+        0x85, 0x6f, 0x4a, 0x83, // magic bytes
+        0xb2, 0x98, 0x9e, 0xa9, // checksum
+        1, 61, 0, 2, 0x12, 0x34, // chunkType: change, length, deps, actor '1234'
+        1, 1, 252, 250, 220, 255, 5, // seq, startOp, time
+        14, 73, 110, 105, 116, 105, 97, 108, 105, 122, 97, 116, 105, 111,
+        110, // message: 'Initialization'
+        0, 6, // actor list, column count
+        0x15, 3, 0x34, 1, 0x42, 2, // keyStr, insert, action
+        0x56, 2, 0x57, 1, 0x70, 2, // valLen, valRaw, predNum
+        0x7f, 1, 0x78, // keyStr: 'x'
+        1,    // insert: false
+        0x7f, 1, // action: set
+        0x7f, 19, // valLen: 1 byte of type uint
+        1,  // valRaw: 1
+        0x7f, 0, // predNum: 0
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, // 10 trailing bytes
+    ];
+    let change = automerge::Change::try_from(&change_bytes[..]).unwrap();
+    assert_eq!(change.raw_bytes(), change_bytes);
+    let expanded = automerge::ExpandedChange::from(&change);
+    let unexpanded: automerge::Change = expanded.try_into().unwrap();
+    assert_eq!(unexpanded.raw_bytes(), change_bytes);
 }
 
 #[test]
@@ -1030,4 +1312,23 @@ fn save_and_load_incremented_counter() {
         .collect();
 
     assert_eq!(changes1, changes2);
+}
+
+#[test]
+fn load_incremental_with_corrupted_tail() {
+    let mut doc = AutoCommit::new();
+    doc.put(ROOT, "key", ScalarValue::Str("value".into()))
+        .unwrap();
+    doc.commit();
+    let mut bytes = doc.save();
+    bytes.extend_from_slice(&[1, 2, 3, 4]);
+    let mut loaded = Automerge::new();
+    let loaded_len = loaded.load_incremental(&bytes).unwrap();
+    assert_eq!(loaded_len, 1);
+    assert_doc!(
+        &loaded,
+        map! {
+            "key" => { "value" },
+        }
+    );
 }

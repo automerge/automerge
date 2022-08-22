@@ -56,11 +56,12 @@ macro_rules! __log {
 
 mod autocommit;
 mod automerge;
+mod autoserde;
 mod change;
 mod clock;
+mod clocks;
 mod columnar;
-mod decoding;
-mod encoding;
+mod convert;
 mod error;
 mod exid;
 mod indexed_cache;
@@ -77,6 +78,7 @@ mod op_tree;
 mod options;
 mod parents;
 mod query;
+mod storage;
 pub mod sync;
 pub mod transaction;
 mod types;
@@ -87,10 +89,8 @@ mod visualisation;
 
 pub use crate::automerge::Automerge;
 pub use autocommit::AutoCommit;
-pub use change::Change;
-pub use decoding::Error as DecodingError;
-pub use decoding::InvalidChangeError;
-pub use encoding::Error as EncodingError;
+pub use autoserde::AutoSerde;
+pub use change::{Change, LoadError as LoadChangeError};
 pub use error::AutomergeError;
 pub use error::InvalidActorId;
 pub use error::InvalidChangeHashSlice;

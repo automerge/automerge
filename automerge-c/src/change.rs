@@ -23,13 +23,15 @@ macro_rules! to_change {
 pub struct AMchange {
     body: *mut am::Change,
     c_msg: RefCell<Option<CString>>,
+    c_changehash: RefCell<Option<am::ChangeHash>>,
 }
 
 impl AMchange {
-    pub fn new(body: &mut am::Change) -> Self {
+    pub fn new(change: &mut am::Change) -> Self {
         Self {
-            body,
-            c_msg: RefCell::<Option<CString>>::default(),
+            body: change,
+            c_msg: Default::default(),
+            c_changehash: Default::default(),
         }
     }
 
@@ -38,7 +40,9 @@ impl AMchange {
         match c_msg.as_mut() {
             None => {
                 if let Some(message) = unsafe { (*self.body).message() } {
-                    return c_msg.insert(CString::new(message).unwrap()).as_ptr();
+                    return c_msg
+                        .insert(CString::new(message.as_bytes()).unwrap())
+                        .as_ptr();
                 }
             }
             Some(message) => {
@@ -46,6 +50,20 @@ impl AMchange {
             }
         }
         std::ptr::null()
+    }
+
+    pub fn hash(&self) -> AMbyteSpan {
+        let mut c_changehash = self.c_changehash.borrow_mut();
+        if let Some(c_changehash) = c_changehash.as_ref() {
+            c_changehash.into()
+        } else {
+            let hash = unsafe { (*self.body).hash() };
+            let ptr = c_changehash.insert(hash);
+            AMbyteSpan {
+                src: ptr.0.as_ptr(),
+                count: hash.as_ref().len(),
+            }
+        }
     }
 }
 
@@ -93,7 +111,7 @@ pub unsafe extern "C" fn AMchangeActorId(change: *const AMchange) -> *mut AMresu
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeCompress(change: *mut AMchange) {
     if let Some(change) = change.as_mut() {
-        change.as_mut().compress();
+        let _ = change.as_mut().bytes();
     };
 }
 
@@ -110,7 +128,7 @@ pub unsafe extern "C" fn AMchangeCompress(change: *mut AMchange) {
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeDeps(change: *const AMchange) -> AMchangeHashes {
     match change.as_ref() {
-        Some(change) => AMchangeHashes::new(&change.as_ref().deps),
+        Some(change) => AMchangeHashes::new(change.as_ref().deps()),
         None => AMchangeHashes::default(),
     }
 }
@@ -167,10 +185,7 @@ pub unsafe extern "C" fn AMchangeFromBytes(src: *const u8, count: usize) -> *mut
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeHash(change: *const AMchange) -> AMbyteSpan {
     match change.as_ref() {
-        Some(change) => {
-            let hash: &am::ChangeHash = &change.as_ref().hash;
-            hash.into()
-        }
+        Some(change) => change.hash(),
         None => AMbyteSpan::default(),
     }
 }
@@ -244,7 +259,7 @@ pub unsafe extern "C" fn AMchangeMessage(change: *const AMchange) -> *const c_ch
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeSeq(change: *const AMchange) -> u64 {
     if let Some(change) = change.as_ref() {
-        change.as_ref().seq
+        change.as_ref().seq()
     } else {
         u64::MAX
     }
@@ -282,7 +297,7 @@ pub unsafe extern "C" fn AMchangeSize(change: *const AMchange) -> usize {
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeStartOp(change: *const AMchange) -> u64 {
     if let Some(change) = change.as_ref() {
-        u64::from(change.as_ref().start_op)
+        u64::from(change.as_ref().start_op())
     } else {
         u64::MAX
     }
@@ -301,7 +316,7 @@ pub unsafe extern "C" fn AMchangeStartOp(change: *const AMchange) -> u64 {
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeTime(change: *const AMchange) -> i64 {
     if let Some(change) = change.as_ref() {
-        change.as_ref().time
+        change.as_ref().timestamp()
     } else {
         i64::MAX
     }
@@ -344,5 +359,8 @@ pub unsafe extern "C" fn AMchangeRawBytes(change: *const AMchange) -> AMbyteSpan
 pub unsafe extern "C" fn AMchangeLoadDocument(src: *const u8, count: usize) -> *mut AMresult {
     let mut data = Vec::new();
     data.extend_from_slice(std::slice::from_raw_parts(src, count));
-    to_result(am::Change::load_document(&data))
+    to_result::<Result<Vec<am::Change>, _>>(
+        am::Automerge::load(&data)
+            .and_then(|d| d.get_changes(&[]).map(|c| c.into_iter().cloned().collect())),
+    )
 }
