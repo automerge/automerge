@@ -424,22 +424,15 @@ function listMethods(target) {
       return this
     },
 
-    indexOf(/*o, start = 0*/) {
-      // FIXME
-      /*
-      const id = o[OBJECT_ID]
-      if (id) {
-        const list = context.getObject(objectId)
-        for (let index = start; index < list.length; index++) {
-          if (list[index][OBJECT_ID] === id) {
-            return index
-          }
+    indexOf(o, start = 0) {
+      const length = context.length(objectId)
+      for (let i = start; i < length; i++) {
+        const value = context.getWithType(objectId, i, heads)
+        if (value && value[1] === o[OBJECT_ID] || value[1] === o) {
+          return i
         }
-        return -1
-      } else {
-        return context.indexOf(objectId, o, start)
       }
-      */
+      return -1
     },
 
     insertAt(index, ...values) {
@@ -629,6 +622,10 @@ function textMethods(target) {
     },
     toJSON () : string {
       return this.toString()
+    },
+    indexOf(o, start = 0) {
+      const text = context.text(objectId)
+      return text.indexOf(o,start)
     }
   }
   return methods

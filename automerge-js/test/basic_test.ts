@@ -168,5 +168,11 @@ describe('Automerge', () => {
           let doc = Automerge.init()
           assert.deepEqual(Object.keys(Automerge.getBackend(doc)), ["ptr"])
         })
+
+        it('lists and text have indexof', () => {
+          let doc = Automerge.from({ list: [0,1,2,3,4,5,6], text: new Automerge.Text("hello world") })
+          console.log(doc.list.indexOf(5))
+          console.log(doc.text.indexOf("world"))
+        })
     })
 })
