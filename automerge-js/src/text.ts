@@ -22,7 +22,7 @@ export class Text {
     return this.elems.length
   }
 
-  get (index: number) : Value {
+  get (index: number) : Value | undefined {
     return this.elems[index]
   }
 

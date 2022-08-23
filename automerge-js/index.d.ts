@@ -38,7 +38,8 @@ export class Text {
     elems: AutomergeValue[];
     constructor(text?: string | string[]);
     get length(): number;
-    get(index: number): AutomergeValue;
+    get(index: number): AutomergeValue | undefined;
+    [index: number]: AutomergeValue | undefined;
     [Symbol.iterator](): {
         next(): {
             done: boolean;
@@ -77,7 +78,7 @@ type Conflicts = {
 };
 
 export function use(api: LowLevelApi): void;
-export function getBackend<T>(doc: Doc<T>) : LowLevelApi;
+export function getBackend<T>(doc: Doc<T>) : Automerge;
 export function init<T>(actor?: ActorId): Doc<T>;
 export function clone<T>(doc: Doc<T>): Doc<T>;
 export function free<T>(doc: Doc<T>): void;
