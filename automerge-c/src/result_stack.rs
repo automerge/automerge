@@ -103,7 +103,7 @@ pub type AMpushCallback =
 /// \note Calling this function is purely optional because its only purpose is
 ///       to make memory management tolerable for direct usage of this API in
 ///       C, C++ and Objective-C.
-// \internal
+/// \internal
 ///
 /// # Safety
 /// stack must be a valid AMresultStack pointer pointer
