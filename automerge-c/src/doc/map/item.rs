@@ -24,7 +24,7 @@ impl AMmapItem {
         Self {
             key: CString::new(key).unwrap(),
             obj_id: AMobjId::new(obj_id),
-            value: (value, RefCell::<Option<CString>>::default()),
+            value: (value, Default::default()),
         }
     }
 }

@@ -18,10 +18,10 @@ pub struct AMactorId {
 }
 
 impl AMactorId {
-    pub fn new(body: &am::ActorId) -> Self {
+    pub fn new(actor_id: &am::ActorId) -> Self {
         Self {
-            body,
-            c_str: RefCell::<Option<CString>>::default(),
+            body: actor_id,
+            c_str: Default::default(),
         }
     }
 

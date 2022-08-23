@@ -17,10 +17,10 @@ pub struct AMobjId {
 }
 
 impl AMobjId {
-    pub fn new(body: am::ObjId) -> Self {
+    pub fn new(obj_id: am::ObjId) -> Self {
         Self {
-            body,
-            c_actor_id: RefCell::<Option<AMactorId>>::default(),
+            body: obj_id,
+            c_actor_id: Default::default(),
         }
     }
 

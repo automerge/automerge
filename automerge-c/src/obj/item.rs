@@ -20,7 +20,7 @@ impl AMobjItem {
     pub fn new(value: am::Value<'static>, obj_id: am::ObjId) -> Self {
         Self {
             obj_id: AMobjId::new(obj_id),
-            value: (value, RefCell::<Option<CString>>::default()),
+            value: (value, Default::default()),
         }
     }
 }

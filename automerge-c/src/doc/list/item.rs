@@ -23,7 +23,7 @@ impl AMlistItem {
         Self {
             index,
             obj_id: AMobjId::new(obj_id),
-            value: (value, RefCell::<Option<CString>>::default()),
+            value: (value, Default::default()),
         }
     }
 }

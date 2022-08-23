@@ -53,8 +53,8 @@ macro_rules! to_sync_state_mut {
 pub struct AMdoc(am::AutoCommit);
 
 impl AMdoc {
-    pub fn new(body: am::AutoCommit) -> Self {
-        Self(body)
+    pub fn new(auto_commit: am::AutoCommit) -> Self {
+        Self(auto_commit)
     }
 }
 
