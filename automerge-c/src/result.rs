@@ -658,6 +658,15 @@ impl From<Result<Vec<am::Change>, am::AutomergeError>> for AMresult {
     }
 }
 
+impl From<Result<Vec<am::Change>, am::LoadChangeError>> for AMresult {
+    fn from(maybe: Result<Vec<am::Change>, am::LoadChangeError>) -> Self {
+        match maybe {
+            Ok(changes) => AMresult::Changes(changes, None),
+            Err(e) => AMresult::err(&e.to_string()),
+        }
+    }
+}
+
 impl From<Result<Vec<&am::Change>, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<Vec<&am::Change>, am::AutomergeError>) -> Self {
         match maybe {

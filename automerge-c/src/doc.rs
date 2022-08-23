@@ -124,13 +124,21 @@ pub unsafe extern "C" fn AMclone(doc: *const AMdoc) -> *mut AMresult {
 /// \memberof AMdoc
 /// \brief Allocates a new document and initializes it with defaults.
 ///
+/// \param[in] actor_id A pointer to an `AMactorId` struct or `NULL` for a
+///                     random one.
 /// \return A pointer to an `AMresult` struct containing a pointer to an
 ///         `AMdoc` struct.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
+///
+/// # Safety
+/// actor_id must be a valid pointer to an AMactorId or std::ptr::null()
 #[no_mangle]
-pub extern "C" fn AMcreate() -> *mut AMresult {
-    to_result(am::AutoCommit::new())
+pub unsafe extern "C" fn AMcreate(actor_id: *const AMactorId) -> *mut AMresult {
+    to_result(match actor_id.as_ref() {
+        Some(actor_id) => am::AutoCommit::new().with_actor(actor_id.as_ref().clone()),
+        None => am::AutoCommit::new(),
+    })
 }
 
 /// \memberof AMdoc
@@ -282,7 +290,7 @@ pub unsafe extern "C" fn AMgetChangeByHash(
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let slice = std::slice::from_raw_parts(src, count);
-    match am::ChangeHash::try_from(slice) {
+    match slice.try_into() {
         Ok(change_hash) => to_result(doc.get_change_by_hash(&change_hash)),
         Err(e) => AMresult::err(&e.to_string()).into(),
     }

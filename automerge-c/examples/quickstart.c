@@ -11,7 +11,7 @@ static void abort_cb(AMresultStack**, uint8_t);
  */
 int main(int argc, char** argv) {
     AMresultStack* stack = NULL;
-    AMdoc* const doc1 = AMpush(&stack, AMcreate(), AM_VALUE_DOC, abort_cb).doc;
+    AMdoc* const doc1 = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, abort_cb).doc;
     AMobjId const* const cards = AMpush(&stack,
                                         AMmapPutObject(doc1, AM_ROOT, "cards", AM_OBJ_TYPE_LIST),
                                         AM_VALUE_OBJ_ID,
@@ -30,7 +30,7 @@ int main(int argc, char** argv) {
     AMfree(AMmapPutBool(doc1, card2, "done", false));
     AMfree(AMcommit(doc1, "Add card", NULL));
 
-    AMdoc* doc2 = AMpush(&stack, AMcreate(), AM_VALUE_DOC, abort_cb).doc;
+    AMdoc* doc2 = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, abort_cb).doc;
     AMfree(AMmerge(doc2, doc1));
 
     AMbyteSpan const binary = AMpush(&stack, AMsave(doc1), AM_VALUE_BYTES, abort_cb).bytes;

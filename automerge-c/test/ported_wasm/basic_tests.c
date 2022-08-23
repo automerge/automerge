@@ -24,7 +24,7 @@ static void test_default_import_init_should_return_a_promise(void** state);
 static void test_create_clone_and_free(void** state) {
     AMresultStack* stack = *state;
     /* const doc1 = create()                                                 */
-    AMdoc* const doc1 = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc1 = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     /* const doc2 = doc1.clone()                                             */
     AMdoc* const doc2 = AMpush(&stack, AMclone(doc1), AM_VALUE_DOC, cmocka_cb).doc;
 }
@@ -35,7 +35,7 @@ static void test_create_clone_and_free(void** state) {
 static void test_start_and_commit(void** state) {
     AMresultStack* stack = *state;
     /* const doc = create()                                                  */
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     /* doc.commit()                                                          */
     AMpush(&stack, AMcommit(doc, NULL, NULL), AM_VALUE_CHANGE_HASHES, cmocka_cb);
 }
@@ -46,7 +46,7 @@ static void test_start_and_commit(void** state) {
 static void test_getting_a_nonexistent_prop_does_not_throw_an_error(void** state) {
     AMresultStack* stack = *state;
     /* const doc = create()                                                  */
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     /* const root = "_root"                                                  */
     /* const result = doc.getWithType(root, "hello")                         */
     /* assert.deepEqual(result, undefined)                                   */
@@ -62,11 +62,13 @@ static void test_getting_a_nonexistent_prop_does_not_throw_an_error(void** state
 static void test_should_be_able_to_set_and_get_a_simple_value(void** state) {
     AMresultStack* stack = *state;
     /* const doc: Automerge = create("aabbcc")                               */
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
-    AMfree(AMsetActorId(doc, AMpush(&stack,
-                                    AMactorIdInitStr("aabbcc"),
-                                    AM_VALUE_ACTOR_ID,
-                                    cmocka_cb).actor_id));
+    AMdoc* const doc = AMpush(&stack,
+                              AMcreate(AMpush(&stack,
+                                              AMactorIdInitStr("aabbcc"),
+                                              AM_VALUE_ACTOR_ID,
+                                              cmocka_cb).actor_id),
+                              AM_VALUE_DOC,
+                              cmocka_cb).doc;
     /* const root = "_root"                                                  */
     /* let result                                                            */
     /*                                                                       */
@@ -192,7 +194,7 @@ static void test_should_be_able_to_set_and_get_a_simple_value(void** state) {
 static void test_should_be_able_to_use_bytes(void** state) {
     AMresultStack* stack = *state;
     /* const doc = create()                                                  */
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     /* doc.put("_root", "data1", new Uint8Array([10, 11, 12]));              */
     static uint8_t const DATA1[] = {10, 11, 12};
     AMfree(AMmapPutBytes(doc, AM_ROOT, "data1", DATA1, sizeof(DATA1)));
@@ -223,7 +225,7 @@ static void test_should_be_able_to_use_bytes(void** state) {
 static void test_should_be_able_to_make_subobjects(void** state) {
     AMresultStack* stack = *state;
     /* const doc = create()                                                  */
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     /* const root = "_root"                                                  */
     /* let result                                                            */
     /*                                                                       */
@@ -261,7 +263,7 @@ static void test_should_be_able_to_make_subobjects(void** state) {
 static void test_should_be_able_to_make_lists(void** state) {
     AMresultStack* stack = *state;
     /* const doc = create()                                                  */
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     /* const root = "_root"                                                  */
     /*                                                                       */
     /* const sublist = doc.putObject(root, "numbers", [])                    */
@@ -320,7 +322,7 @@ static void test_should_be_able_to_make_lists(void** state) {
 static void test_lists_have_insert_set_splice_and_push_ops(void** state) {
     AMresultStack* stack = *state;
     /* const doc = create()                                                  */
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     /* const root = "_root"                                                  */
     /*                                                                       */
     /* const sublist = doc.putObject(root, "letters", [])                    */
@@ -516,7 +518,7 @@ static void test_lists_have_insert_set_splice_and_push_ops(void** state) {
 static void test_should_be_able_to_delete_non_existent_props(void** state) {
     AMresultStack* stack = *state;
     /* const doc = create()                                                  */
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     /*                                                                       */
     /* doc.put("_root", "foo", "bar")                                        */
     AMfree(AMmapPutStr(doc, AM_ROOT, "foo", "bar"));
@@ -573,7 +575,7 @@ static void test_should_be_able_to_delete_non_existent_props(void** state) {
 static void test_should_be_able_to_del(void **state) {
     AMresultStack* stack = *state;
     /* const doc = create()                                                  */
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     /* const root = "_root"                                                  */
     /*                                                                       */
     /* doc.put(root, "xxx", "xxx");                                          */
@@ -598,7 +600,7 @@ static void test_should_be_able_to_del(void **state) {
 static void test_should_be_able_to_use_counters(void** state) {
     AMresultStack* stack = *state;
     /* const doc = create()                                                  */
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     /* const root = "_root"                                                  */
     /*                                                                       */
     /* doc.put(root, "counter", 10, "counter");                              */
@@ -630,7 +632,7 @@ static void test_should_be_able_to_use_counters(void** state) {
 static void test_should_be_able_to_splice_text(void** state) {
     AMresultStack* stack = *state;
     /* const doc = create()                                                  */
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     /* const root = "_root";                                                 */
     /*                                                                       */
     /* const text = doc.putObject(root, "text", "");                         */
@@ -690,7 +692,7 @@ static void test_should_be_able_to_splice_text(void** state) {
 static void test_should_be_able_to_insert_objects_into_text(void** state) {
     AMresultStack* stack = *state;
     /* const doc = create()                                                  */
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     /* const text = doc.putObject("/", "text", "Hello world");               */
     AMobjId const* const text = AMpush(
         &stack,
@@ -728,7 +730,7 @@ static void test_should_be_able_to_insert_objects_into_text(void** state) {
 static void test_should_be_able_to_save_all_or_incrementally(void** state) {
     AMresultStack* stack = *state;
     /* const doc = create()                                                  */
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     /*                                                                       */
     /* doc.put("_root", "foo", 1)                                            */
     AMfree(AMmapPutInt(doc, AM_ROOT, "foo", 1));
@@ -837,7 +839,7 @@ static void test_should_be_able_to_save_all_or_incrementally(void** state) {
 static void test_should_be_able_to_splice_text_2(void** state) {
     AMresultStack* stack = *state;
     /* const doc = create()                                                  */
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     /* const text = doc.putObject("_root", "text", "");                      */
     AMobjId const* const text = AMpush(
         &stack,
@@ -887,11 +889,13 @@ static void test_should_be_able_to_splice_text_2(void** state) {
 static void test_local_inc_increments_all_visible_counters_in_a_map(void** state) {
     AMresultStack* stack = *state;
     /* const doc1 = create("aaaa")                                           */
-    AMdoc* const doc1 = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
-    AMfree(AMsetActorId(doc1, AMpush(&stack,
-                                     AMactorIdInitStr("aaaa"),
-                                     AM_VALUE_ACTOR_ID,
-                                     cmocka_cb).actor_id));
+    AMdoc* const doc1 = AMpush(&stack,
+                               AMcreate(AMpush(&stack,
+                                               AMactorIdInitStr("aaaa"),
+                                               AM_VALUE_ACTOR_ID,
+                                               cmocka_cb).actor_id),
+                               AM_VALUE_DOC,
+                               cmocka_cb).doc;
     /* doc1.put("_root", "hello", "world")                                   */
     AMfree(AMmapPutStr(doc1, AM_ROOT, "hello", "world"));
     /* const doc2 = load(doc1.save(), "bbbb");                               */
@@ -1011,11 +1015,13 @@ static void test_local_inc_increments_all_visible_counters_in_a_map(void** state
 static void test_local_inc_increments_all_visible_counters_in_a_sequence(void** state) {
     AMresultStack* stack = *state;
     /* const doc1 = create("aaaa")                                           */
-    AMdoc* const doc1 = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
-    AMfree(AMsetActorId(doc1, AMpush(&stack,
-                                     AMactorIdInitStr("aaaa"),
-                                     AM_VALUE_ACTOR_ID,
-                                     cmocka_cb).actor_id));
+    AMdoc* const doc1 = AMpush(&stack,
+                               AMcreate(AMpush(&stack,
+                                               AMactorIdInitStr("aaaa"),
+                                               AM_VALUE_ACTOR_ID,
+                                               cmocka_cb).actor_id),
+                               AM_VALUE_DOC,
+                               cmocka_cb).doc;
     /* const seq = doc1.putObject("_root", "seq", [])                        */
     AMobjId const* const seq = AMpush(
         &stack,
@@ -1146,17 +1152,21 @@ static void test_paths_can_be_used_instead_of_objids(void** state);
 static void test_should_be_able_to_fetch_changes_by_hash(void** state) {
     AMresultStack* stack = *state;
     /* const doc1 = create("aaaa")                                           */
-    AMdoc* const doc1 = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
-    AMfree(AMsetActorId(doc1, AMpush(&stack,
-                                     AMactorIdInitStr("aaaa"),
-                                     AM_VALUE_ACTOR_ID,
-                                     cmocka_cb).actor_id));
+    AMdoc* const doc1 = AMpush(&stack,
+                               AMcreate(AMpush(&stack,
+                                               AMactorIdInitStr("aaaa"),
+                                               AM_VALUE_ACTOR_ID,
+                                               cmocka_cb).actor_id),
+                               AM_VALUE_DOC,
+                               cmocka_cb).doc;
     /* const doc2 = create("bbbb")                                           */
-    AMdoc* const doc2 = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
-    AMfree(AMsetActorId(doc2, AMpush(&stack,
-                                     AMactorIdInitStr("bbbb"),
-                                     AM_VALUE_ACTOR_ID,
-                                     cmocka_cb).actor_id));
+    AMdoc* const doc2 = AMpush(&stack,
+                               AMcreate(AMpush(&stack,
+                                               AMactorIdInitStr("bbbb"),
+                                               AM_VALUE_ACTOR_ID,
+                                               cmocka_cb).actor_id),
+                               AM_VALUE_DOC,
+                               cmocka_cb).doc;
     /* doc1.put("/", "a", "b")                                               */
     AMfree(AMmapPutStr(doc1, AM_ROOT, "a", "b"));
     /* doc2.put("/", "b", "c")                                               */
@@ -1198,11 +1208,13 @@ static void test_should_be_able_to_fetch_changes_by_hash(void** state) {
 static void test_recursive_sets_are_possible(void** state) {
     AMresultStack* stack = *state;
     /* const doc = create("aaaa")                                            */
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
-    AMfree(AMsetActorId(doc, AMpush(&stack,
-                                    AMactorIdInitStr("aaaa"),
-                                    AM_VALUE_ACTOR_ID,
-                                    cmocka_cb).actor_id));
+    AMdoc* const doc = AMpush(&stack,
+                              AMcreate(AMpush(&stack,
+                                              AMactorIdInitStr("aaaa"),
+                                              AM_VALUE_ACTOR_ID,
+                                              cmocka_cb).actor_id),
+                              AM_VALUE_DOC,
+                              cmocka_cb).doc;
     /* const l1 = doc.putObject("_root", "list", [{ foo: "bar" }, [1, 2, 3]])*/
     AMobjId const* const l1 = AMpush(
         &stack,
@@ -1427,11 +1439,13 @@ static void test_recursive_sets_are_possible(void** state) {
 static void test_only_returns_an_object_id_when_objects_are_created(void** state) {
     AMresultStack* stack = *state;
     /* const doc = create("aaaa")                                            */
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
-    AMfree(AMsetActorId(doc, AMpush(&stack,
-                                    AMactorIdInitStr("aaaa"),
-                                    AM_VALUE_ACTOR_ID,
-                                    cmocka_cb).actor_id));
+    AMdoc* const doc = AMpush(&stack,
+                              AMcreate(AMpush(&stack,
+                                              AMactorIdInitStr("aaaa"),
+                                              AM_VALUE_ACTOR_ID,
+                                              cmocka_cb).actor_id),
+                              AM_VALUE_DOC,
+                              cmocka_cb).doc;
     /* const r1 = doc.put("_root", "foo", "bar")
        assert.deepEqual(r1, null);                                           */
     AMpush(&stack,
@@ -1496,11 +1510,13 @@ static void test_only_returns_an_object_id_when_objects_are_created(void** state
 static void test_objects_without_properties_are_preserved(void** state) {
     AMresultStack* stack = *state;
     /* const doc1 = create("aaaa")                                           */
-    AMdoc* const doc1 = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
-    AMfree(AMsetActorId(doc1, AMpush(&stack,
-                                    AMactorIdInitStr("aaaa"),
-                                    AM_VALUE_ACTOR_ID,
-                                    cmocka_cb).actor_id));
+    AMdoc* const doc1 = AMpush(&stack,
+                               AMcreate(AMpush(&stack,
+                                               AMactorIdInitStr("aaaa"),
+                                               AM_VALUE_ACTOR_ID,
+                                               cmocka_cb).actor_id),
+                               AM_VALUE_DOC,
+                               cmocka_cb).doc;
     /* const a = doc1.putObject("_root", "a", {});                           */
     AMobjId const* const a = AMpush(
         &stack,
@@ -1567,11 +1583,13 @@ static void test_objects_without_properties_are_preserved(void** state) {
 static void test_should_allow_you_to_forkAt_a_heads(void** state) {
     AMresultStack* stack = *state;
     /* const A = create("aaaaaa")                                            */
-    AMdoc* const A = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
-    AMfree(AMsetActorId(A, AMpush(&stack,
-                                  AMactorIdInitStr("aaaaaa"),
-                                  AM_VALUE_ACTOR_ID,
-                                  cmocka_cb).actor_id));
+    AMdoc* const A = AMpush(&stack,
+                            AMcreate(AMpush(&stack,
+                                            AMactorIdInitStr("aaaaaa"),
+                                            AM_VALUE_ACTOR_ID,
+                                            cmocka_cb).actor_id),
+                            AM_VALUE_DOC,
+                            cmocka_cb).doc;
     /* A.put("/", "key1", "val1");                                           */
     AMfree(AMmapPutStr(A, AM_ROOT, "key1", "val1"));
     /* A.put("/", "key2", "val2");                                           */
@@ -1634,11 +1652,13 @@ static void test_should_allow_you_to_forkAt_a_heads(void** state) {
 static void test_should_handle_merging_text_conflicts_then_saving_and_loading(void** state) {
     AMresultStack* stack = *state;
     /* const A = create("aabbcc")                                            */
-    AMdoc* const A = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
-    AMfree(AMsetActorId(A, AMpush(&stack,
-                                  AMactorIdInitStr("aabbcc"),
-                                  AM_VALUE_ACTOR_ID,
-                                  cmocka_cb).actor_id));
+    AMdoc* const A = AMpush(&stack,
+                            AMcreate(AMpush(&stack,
+                                            AMactorIdInitStr("aabbcc"),
+                                            AM_VALUE_ACTOR_ID,
+                                            cmocka_cb).actor_id),
+                            AM_VALUE_DOC,
+                            cmocka_cb).doc;
     /* const At = A.putObject('_root', 'text', "")                           */
     AMobjId const* const At = AMpush(
         &stack,

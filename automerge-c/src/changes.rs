@@ -3,7 +3,9 @@ use std::collections::BTreeMap;
 use std::ffi::c_void;
 use std::mem::size_of;
 
+use crate::byte_span::AMbyteSpan;
 use crate::change::AMchange;
+use crate::result::{to_result, AMresult};
 
 #[repr(C)]
 struct Detail {
@@ -252,6 +254,38 @@ pub unsafe extern "C" fn AMchangesEqual(
         (Some(changes1), Some(changes2)) => changes1.as_ref() == changes2.as_ref(),
         (None, Some(_)) | (Some(_), None) | (None, None) => false,
     }
+}
+
+/// \memberof AMchanges
+/// \brief Allocates an iterator over a sequence of changes and initializes it
+///        from a sequence of byte spans.
+///
+/// \param[in] src A pointer to an array of `AMbyteSpan` structs.
+/// \param[in] count The number of `AMbyteSpan` structs to copy from \p src.
+/// \return A pointer to an `AMresult` struct containing an `AMchanges` struct.
+/// \pre \p src `!= NULL`.
+/// \pre `0 <` \p count `<= sizeof(`\p src`) / sizeof(AMbyteSpan)`.
+/// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
+///          in order to prevent a memory leak.
+/// \internal
+/// # Safety
+/// src must be an AMbyteSpan array of size `>= count`
+#[no_mangle]
+pub unsafe extern "C" fn AMchangesInit(src: *const AMbyteSpan, count: usize) -> *mut AMresult {
+    let mut changes = Vec::<am::Change>::new();
+    for n in 0..count {
+        let byte_span = &*src.add(n);
+        let slice = std::slice::from_raw_parts(byte_span.src, byte_span.count);
+        match slice.try_into() {
+            Ok(change) => {
+                changes.push(change);
+            }
+            Err(e) => {
+                return to_result(Err::<Vec<am::Change>, am::LoadChangeError>(e));
+            }
+        }
+    }
+    to_result(Ok::<Vec<am::Change>, am::LoadChangeError>(changes))
 }
 
 /// \memberof AMchanges
