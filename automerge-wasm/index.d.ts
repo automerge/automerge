@@ -19,5 +19,20 @@ export class Automerge extends VanillaAutomerge {
   forkAt(heads: Heads, actor?: string): Automerge;
 }
 
+export type ChangeSetDeletion = {
+  pos: number;
+  val: string;
+}
+
+export type ChangeSetAddition = {
+  start: number;
+  end: number;
+};
+
+export type ChangeSet = {
+  add: ChangeSetAddition[];
+  del: ChangeSetDeletion[];
+};
+
 export function create(actor?: Actor): Automerge;
 export function load(data: Uint8Array, actor?: Actor): Automerge;
