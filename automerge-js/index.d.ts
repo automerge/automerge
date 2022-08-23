@@ -59,7 +59,7 @@ export class Text {
 }
 
 export type Doc<T> = {
-    readonly [P in keyof T]: Doc<T[P]>;
+    readonly [P in keyof T]: T[P];
 };
 
 export type ChangeFn<T> = (doc: T) => void;
