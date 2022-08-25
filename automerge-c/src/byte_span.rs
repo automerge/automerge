@@ -2,13 +2,14 @@ use automerge as am;
 
 /// \struct AMbyteSpan
 /// \installed_headerfile
-/// \brief A contiguous sequence of bytes.
+/// \brief A view onto a contiguous sequence of bytes.
 #[repr(C)]
 #[derive(PartialEq)]
 pub struct AMbyteSpan {
     /// A pointer to an array of bytes.
-    /// \warning \p src is only valid until the `AMfree()` function is
-    ///          called on the `AMresult` struct hosting the array of bytes to
+    /// \attention <b>NEVER CALL `free()` ON \p src!</b>
+    /// \warning \p src is only valid until the `AMfree()` function is called
+    ///          on the `AMresult` struct that stores the array of bytes to
     ///          which it points.
     pub src: *const u8,
     /// The number of bytes in the array.
