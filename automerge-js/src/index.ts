@@ -2,7 +2,7 @@
 export { uuid } from './uuid'
 
 import { rootProxy, listProxy, textProxy, mapProxy } from "./proxies"
-import { STATE, HEADS, OBJECT_ID, READ_ONLY, FROZEN  } from "./constants"
+import { STATE, HEADS, TRACE, OBJECT_ID, READ_ONLY, FROZEN  } from "./constants"
 
 import { AutomergeValue, Counter } from "./types"
 export { AutomergeValue, Text, Counter, Int, Uint, Float64 } from "./types"
@@ -46,6 +46,20 @@ function _frozen<T>(doc: Doc<T>) : boolean {
 
 function _heads<T>(doc: Doc<T>) : Heads | undefined {
   return Reflect.get(doc,HEADS)
+}
+
+function _trace<T>(doc: Doc<T>) : string | undefined {
+  return Reflect.get(doc,TRACE)
+}
+
+function _set_heads<T>(doc: Doc<T>, heads: Heads) {
+  Reflect.set(doc,HEADS,heads)
+  Reflect.set(doc,TRACE,(new Error()).stack)
+}
+
+function _clear_heads<T>(doc: Doc<T>) {
+  Reflect.set(doc,HEADS,undefined)
+  Reflect.set(doc,TRACE,undefined)
 }
 
 function _obj<T>(doc: Doc<T>) : ObjID {
@@ -104,7 +118,7 @@ function _change<T>(doc: Doc<T>, options: ChangeOptions, callback: ChangeFn<T>):
     throw new RangeError("Attempting to use an outdated Automerge document")
   }
   if (!!_heads(doc) === true) {
-    throw new RangeError("Attempting to change an out of date document");
+    throw new RangeError("Attempting to change an out of date document - set at: " + _trace(doc));
   }
   if (_readonly(doc) === false) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
@@ -112,13 +126,13 @@ function _change<T>(doc: Doc<T>, options: ChangeOptions, callback: ChangeFn<T>):
   const state = _state(doc)
   const heads = state.getHeads()
   try {
-    Reflect.set(doc,HEADS,heads)
+    _set_heads(doc,heads)
     Reflect.set(doc,FROZEN,true)
     const root : T = rootProxy(state);
     callback(root)
     if (state.pendingOps() === 0) {
       Reflect.set(doc,FROZEN,false)
-      Reflect.set(doc,HEADS,undefined)
+      _clear_heads(doc)
       return doc
     } else {
       state.commit(options.message, options.time)
@@ -127,7 +141,7 @@ function _change<T>(doc: Doc<T>, options: ChangeOptions, callback: ChangeFn<T>):
   } catch (e) {
     //console.log("ERROR: ",e)
     Reflect.set(doc,FROZEN,false)
-    Reflect.set(doc,HEADS,undefined)
+    _clear_heads(doc)
     state.rollback()
     throw e
   }
@@ -168,14 +182,14 @@ export function save<T>(doc: Doc<T>) : Uint8Array  {
 
 export function merge<T>(local: Doc<T>, remote: Doc<T>) : Doc<T> {
   if (!!_heads(local) === true) {
-    throw new RangeError("Attempting to change an out of date document");
+    throw new RangeError("Attempting to change an out of date document - set at: " + _trace(doc));
   }
   const localState = _state(local)
   const heads = localState.getHeads()
   const remoteState = _state(remote)
   const changes = localState.getChangesAdded(remoteState)
   localState.applyChanges(changes)
-  Reflect.set(local,HEADS,heads)
+  _set_heads(local,heads)
   return rootProxy(localState, true)
 }
 
@@ -267,7 +281,7 @@ export function applyChanges<T>(doc: Doc<T>, changes: Change[]) : [Doc<T>] {
   const state = _state(doc)
   const heads = state.getHeads()
   state.applyChanges(changes)
-  Reflect.set(doc,HEADS,heads)
+  _set_heads(doc,heads)
   return [rootProxy(state, true)];
 }
 
@@ -322,7 +336,7 @@ export function receiveSyncMessage<T>(doc: Doc<T>, inState: SyncState, message: 
     throw new RangeError("Attempting to use an outdated Automerge document")
   }
   if (!!_heads(doc) === true) {
-    throw new RangeError("Attempting to change an out of date document");
+    throw new RangeError("Attempting to change an out of date document - set at: " + _trace(doc));
   }
   if (_readonly(doc) === false) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
@@ -330,7 +344,7 @@ export function receiveSyncMessage<T>(doc: Doc<T>, inState: SyncState, message: 
   const state = _state(doc)
   const heads = state.getHeads()
   state.receiveSyncMessage(syncState, message)
-  Reflect.set(doc,HEADS,heads)
+  _set_heads(doc,heads)
   const outState = ApiHandler.exportSyncState(syncState)
   return [rootProxy(state, true), outState, null];
 }
