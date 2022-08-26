@@ -182,7 +182,7 @@ export function save<T>(doc: Doc<T>) : Uint8Array  {
 
 export function merge<T>(local: Doc<T>, remote: Doc<T>) : Doc<T> {
   if (!!_heads(local) === true) {
-    throw new RangeError("Attempting to change an out of date document - set at: " + _trace(doc));
+    throw new RangeError("Attempting to change an out of date document - set at: " + _trace(local));
   }
   const localState = _state(local)
   const heads = localState.getHeads()
