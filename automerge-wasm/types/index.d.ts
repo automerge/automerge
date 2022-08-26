@@ -205,5 +205,5 @@ export class SyncState {
   readonly sharedHeads: Heads;
 }
 
-export default function init (): Promise<API>;
 export function init (): Promise<API>;
+

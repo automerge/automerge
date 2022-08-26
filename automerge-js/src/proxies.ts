@@ -5,7 +5,7 @@ import { AutomergeValue, ScalarValue, MapValue, ListValue, TextValue } from "./t
 import { Int, Uint, Float64 } from "./numbers"
 import { Counter, getWriteableCounter } from "./counter"
 import { Text } from "./text"
-import { STATE, HEADS, FROZEN, OBJECT_ID, READ_ONLY, COUNTER, INT, UINT, F64, TEXT } from "./constants"
+import { STATE, HEADS, TRACE, FROZEN, OBJECT_ID, READ_ONLY, COUNTER, INT, UINT, F64, TEXT } from "./constants"
 
 function parseListIndex(key) {
   if (typeof key === 'string' && /^[0-9]+$/.test(key)) key = parseInt(key, 10)
@@ -108,6 +108,7 @@ const MapHandler = {
     if (key === READ_ONLY) return readonly
     if (key === FROZEN) return frozen
     if (key === HEADS) return heads
+    if (key === TRACE) return target.trace
     if (key === STATE) return context;
     if (!cache[key]) {
       cache[key] = valueAt(target, key)
@@ -127,6 +128,10 @@ const MapHandler = {
     }
     if (key === HEADS) {
       target.heads = val
+      return true
+    }
+    if (key === TRACE) {
+      target.trace = val
       return true
     }
     const [ value, datatype ] = import_value(val)
@@ -211,6 +216,7 @@ const ListHandler = {
     if (index === READ_ONLY) return readonly
     if (index === FROZEN) return frozen
     if (index === HEADS) return heads
+    if (index === TRACE) return target.trace
     if (index === STATE) return context;
     if (index === 'length') return context.length(objectId, heads);
     if (index === Symbol.iterator) {
@@ -244,6 +250,10 @@ const ListHandler = {
     }
     if (index === HEADS) {
       target.heads = val
+      return true
+    }
+    if (index === TRACE) {
+      target.trace = val
       return true
     }
     if (typeof index == "string") {
@@ -356,6 +366,7 @@ const TextHandler = Object.assign({}, ListHandler, {
     if (index === READ_ONLY) return readonly
     if (index === FROZEN) return frozen
     if (index === HEADS) return heads
+    if (index === TRACE) return target.trace
     if (index === STATE) return context;
     if (index === 'length') return context.length(objectId, heads);
     if (index === Symbol.iterator) {

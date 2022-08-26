@@ -47,7 +47,3 @@ export function init() {
   }))
 }
 
-// depricating default export
-export default function() {
-  return init()
-}
