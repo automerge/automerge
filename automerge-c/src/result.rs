@@ -903,7 +903,8 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult) -> AMvalue<'a>
 /// \struct AMunknownValue
 /// \installed_headerfile
 /// \brief A value (typically for a `set` operation) whose type is unknown.
-#[derive(PartialEq)]
+///
+#[derive(Eq, PartialEq)]
 #[repr(C)]
 pub struct AMunknownValue {
     /// The value's raw bytes.

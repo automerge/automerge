@@ -117,7 +117,7 @@ impl From<Detail> for [u8; USIZE_USIZE_USIZE_] {
 /// \installed_headerfile
 /// \brief A random-access iterator over a sequence of object items.
 #[repr(C)]
-#[derive(PartialEq)]
+#[derive(Eq, PartialEq)]
 pub struct AMobjItems {
     /// An implementation detail that is intentionally opaque.
     /// \warning Modifying \p detail will cause undefined behavior.

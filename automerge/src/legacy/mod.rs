@@ -132,7 +132,7 @@ impl Key {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Serialize)]
+#[derive(Debug, Default, Clone, Eq, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct SortedVec<T>(Vec<T>);
 

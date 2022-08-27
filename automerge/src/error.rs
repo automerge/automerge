@@ -63,11 +63,11 @@ pub(crate) struct InvalidScalarValue {
     pub(crate) expected: String,
 }
 
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug, Eq, PartialEq)]
 #[error("Invalid change hash slice: {0:?}")]
 pub struct InvalidChangeHashSlice(pub Vec<u8>);
 
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug, Eq, PartialEq)]
 #[error("Invalid object ID: {0}")]
 pub struct InvalidObjectId(pub String);
 
