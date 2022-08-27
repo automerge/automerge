@@ -22,7 +22,7 @@ pub(crate) use to_sync_state;
 /// \struct AMsyncState
 /// \installed_headerfile
 /// \brief The state of synchronization with a peer.
-#[derive(PartialEq)]
+#[derive(Eq, PartialEq)]
 pub struct AMsyncState {
     body: am::sync::State,
     their_haves_storage: RefCell<BTreeMap<usize, AMsyncHave>>,

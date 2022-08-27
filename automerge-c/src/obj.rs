@@ -10,7 +10,7 @@ pub mod items;
 /// \struct AMobjId
 /// \installed_headerfile
 /// \brief An object's unique identifier.
-#[derive(PartialEq)]
+#[derive(Eq, PartialEq)]
 pub struct AMobjId {
     body: am::ObjId,
     c_actor_id: RefCell<Option<AMactorId>>,

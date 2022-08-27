@@ -298,7 +298,7 @@ impl<'a> ValueIter<'a> {
             }
             Ok(bytes) => bytes,
         };
-        let val = match f(&*raw) {
+        let val = match f(raw) {
             Ok(v) => v,
             Err(e) => return Some(Err(e)),
         };

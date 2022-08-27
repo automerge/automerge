@@ -6,7 +6,7 @@ use crate::change_hashes::AMchangeHashes;
 /// \installed_headerfile
 /// \brief A summary of the changes that the sender of a synchronization
 ///        message already has.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct AMsyncHave(*const am::sync::Have);
 
 impl AMsyncHave {

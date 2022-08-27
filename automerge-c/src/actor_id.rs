@@ -11,7 +11,7 @@ use crate::result::{to_result, AMresult};
 /// \struct AMactorId
 /// \installed_headerfile
 /// \brief An actor's unique identifier.
-#[derive(PartialEq)]
+#[derive(Eq, PartialEq)]
 pub struct AMactorId {
     body: *const am::ActorId,
     c_str: RefCell<Option<CString>>,

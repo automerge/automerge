@@ -4,7 +4,7 @@ use automerge as am;
 /// \installed_headerfile
 /// \brief A view onto a contiguous sequence of bytes.
 #[repr(C)]
-#[derive(PartialEq)]
+#[derive(Eq, PartialEq)]
 pub struct AMbyteSpan {
     /// A pointer to an array of bytes.
     /// \attention <b>NEVER CALL `free()` ON \p src!</b>
