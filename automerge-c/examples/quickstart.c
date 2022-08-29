@@ -2,51 +2,59 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <automerge.h>
+#include <automerge-c/automerge.h>
 
 static void abort_cb(AMresultStack**, uint8_t);
 
-/*
- *  Based on https://automerge.github.io/docs/quickstart
+/**
+ * \brief Based on https://automerge.github.io/docs/quickstart
  */
 int main(int argc, char** argv) {
-    AMresultStack* results = NULL;
-    AMdoc* const doc1 = AMpush(&results, AMcreate(), AM_VALUE_DOC, abort_cb).doc;
-    AMobjId const* const
-        cards = AMpush(&results, AMmapPutObject(doc1, AM_ROOT, "cards", AM_OBJ_TYPE_LIST), AM_VALUE_OBJ_ID, abort_cb).obj_id;
-    AMobjId const* const
-        card1 = AMpush(&results, AMlistPutObject(doc1, cards, 0, true, AM_OBJ_TYPE_MAP), AM_VALUE_OBJ_ID, abort_cb).obj_id;
-    AMpush(&results, AMmapPutStr(doc1, card1, "title", "Rewrite everything in Clojure"), AM_VALUE_VOID, abort_cb);
-    AMpush(&results, AMmapPutBool(doc1, card1, "done", false), AM_VALUE_VOID, abort_cb);
-    AMobjId const* const
-        card2 = AMpush(&results, AMlistPutObject(doc1, cards, 0, true, AM_OBJ_TYPE_MAP), AM_VALUE_OBJ_ID, abort_cb).obj_id;
-    AMpush(&results, AMmapPutStr(doc1, card2, "title", "Rewrite everything in Haskell"), AM_VALUE_VOID, abort_cb);
-    AMpush(&results, AMmapPutBool(doc1, card2, "done", false), AM_VALUE_VOID, abort_cb);
-    AMpush(&results, AMcommit(doc1, "Add card", NULL), AM_VALUE_CHANGE_HASHES, abort_cb);
+    AMresultStack* stack = NULL;
+    AMdoc* const doc1 = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, abort_cb).doc;
+    AMobjId const* const cards = AMpush(&stack,
+                                        AMmapPutObject(doc1, AM_ROOT, "cards", AM_OBJ_TYPE_LIST),
+                                        AM_VALUE_OBJ_ID,
+                                        abort_cb).obj_id;
+    AMobjId const* const card1 = AMpush(&stack,
+                                        AMlistPutObject(doc1, cards, SIZE_MAX, true, AM_OBJ_TYPE_MAP),
+                                        AM_VALUE_OBJ_ID,
+                                        abort_cb).obj_id;
+    AMfree(AMmapPutStr(doc1, card1, "title", "Rewrite everything in Clojure"));
+    AMfree(AMmapPutBool(doc1, card1, "done", false));
+    AMobjId const* const card2 = AMpush(&stack,
+                                        AMlistPutObject(doc1, cards, SIZE_MAX, true, AM_OBJ_TYPE_MAP),
+                                        AM_VALUE_OBJ_ID,
+                                        abort_cb).obj_id;
+    AMfree(AMmapPutStr(doc1, card2, "title", "Rewrite everything in Haskell"));
+    AMfree(AMmapPutBool(doc1, card2, "done", false));
+    AMfree(AMcommit(doc1, "Add card", NULL));
 
-    AMdoc* doc2 = AMpush(&results, AMcreate(), AM_VALUE_DOC, abort_cb).doc;
-    AMpush(&results, AMmerge(doc2, doc1), AM_VALUE_CHANGE_HASHES, abort_cb);
+    AMdoc* doc2 = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, abort_cb).doc;
+    AMfree(AMmerge(doc2, doc1));
 
-    AMbyteSpan const binary = AMpush(&results, AMsave(doc1), AM_VALUE_BYTES, abort_cb).bytes;
-    doc2 = AMpush(&results, AMload(binary.src, binary.count), AM_VALUE_DOC, abort_cb).doc;
+    AMbyteSpan const binary = AMpush(&stack, AMsave(doc1), AM_VALUE_BYTES, abort_cb).bytes;
+    doc2 = AMpush(&stack, AMload(binary.src, binary.count), AM_VALUE_DOC, abort_cb).doc;
 
-    AMpush(&results, AMmapPutBool(doc1, card1, "done", true), AM_VALUE_VOID, abort_cb);
-    AMpush(&results, AMcommit(doc1, "Mark card as done", NULL), AM_VALUE_CHANGE_HASHES, abort_cb);
+    AMfree(AMmapPutBool(doc1, card1, "done", true));
+    AMfree(AMcommit(doc1, "Mark card as done", NULL));
 
-    AMpush(&results, AMlistDelete(doc2, cards, 0), AM_VALUE_VOID, abort_cb);
-    AMpush(&results, AMcommit(doc2, "Delete card", NULL), AM_VALUE_CHANGE_HASHES, abort_cb);
+    AMfree(AMlistDelete(doc2, cards, 0));
+    AMfree(AMcommit(doc2, "Delete card", NULL));
 
-    AMpush(&results, AMmerge(doc1, doc2), AM_VALUE_CHANGE_HASHES, abort_cb);
+    AMfree(AMmerge(doc1, doc2));
 
-    AMchanges changes = AMpush(&results, AMgetChanges(doc1, NULL), AM_VALUE_CHANGES, abort_cb).changes;
+    AMchanges changes = AMpush(&stack, AMgetChanges(doc1, NULL), AM_VALUE_CHANGES, abort_cb).changes;
     AMchange const* change = NULL;
     while ((change = AMchangesNext(&changes, 1)) != NULL) {
         AMbyteSpan const change_hash = AMchangeHash(change);
-        AMchangeHashes const
-            heads = AMpush(&results, AMchangeHashesInit(&change_hash, 1), AM_VALUE_CHANGE_HASHES, abort_cb).change_hashes;
+        AMchangeHashes const heads = AMpush(&stack,
+                                            AMchangeHashesInit(&change_hash, 1),
+                                            AM_VALUE_CHANGE_HASHES,
+                                            abort_cb).change_hashes;
         printf("%s %ld\n", AMchangeMessage(change), AMobjSize(doc1, cards, &heads));
     }
-    AMfreeStack(&results);
+    AMfreeStack(&stack);
 }
 
 static char const* discriminant_suffix(AMvalueVariant const);

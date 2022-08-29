@@ -22,6 +22,7 @@ macro_rules! to_sync_message {
 pub(crate) use to_sync_message;
 
 /// \struct AMsyncMessage
+/// \installed_headerfile
 /// \brief A synchronization message for a peer.
 #[derive(PartialEq)]
 pub struct AMsyncMessage {

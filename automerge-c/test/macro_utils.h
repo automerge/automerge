@@ -2,7 +2,7 @@
 #define MACRO_UTILS_H
 
 /* local */
-#include "automerge.h"
+#include <automerge-c/automerge.h>
 
 /**
  * \brief Gets the result value discriminant corresponding to a function name

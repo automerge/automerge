@@ -10,7 +10,7 @@
 #include <cmocka.h>
 
 /* local */
-#include "automerge.h"
+#include <automerge-c/automerge.h>
 #include "group_state.h"
 #include "macro_utils.h"
 #include "stack_utils.h"
@@ -179,7 +179,7 @@ static_void_test_AMlistPut(Uint, update, uint, UINT64_MAX)
 
 static void test_insert_at_index(void** state) {
     AMresultStack* stack = *state;
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
 
     AMobjId const* const list = AMpush(
         &stack,
@@ -205,7 +205,7 @@ static void test_insert_at_index(void** state) {
 
 static void test_get_list_values(void** state) {
     AMresultStack* stack = *state;
-    AMdoc* const doc1 = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc1 = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     AMobjId const* const list = AMpush(
         &stack,
         AMmapPutObject(doc1, AM_ROOT, "list", AM_OBJ_TYPE_LIST),

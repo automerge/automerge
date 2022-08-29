@@ -8,7 +8,7 @@
 #include <cmocka.h>
 
 /* local */
-#include "automerge.h"
+#include <automerge-c/automerge.h>
 #include "group_state.h"
 #include "stack_utils.h"
 #include "str_utils.h"
@@ -41,7 +41,7 @@ static int teardown(void** state) {
 
 static void test_AMkeys_empty() {
     AMresultStack* stack = NULL;
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     AMstrs forward = AMpush(&stack,
                             AMkeys(doc, AM_ROOT, NULL),
                             AM_VALUE_STRS,
@@ -58,7 +58,7 @@ static void test_AMkeys_empty() {
 
 static void test_AMkeys_list() {
     AMresultStack* stack = NULL;
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     AMfree(AMlistPutInt(doc, AM_ROOT, 0, true, 1));
     AMfree(AMlistPutInt(doc, AM_ROOT, 1, true, 2));
     AMfree(AMlistPutInt(doc, AM_ROOT, 2, true, 3));
@@ -106,7 +106,7 @@ static void test_AMkeys_list() {
 
 static void test_AMkeys_map() {
     AMresultStack* stack = NULL;
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     AMfree(AMmapPutInt(doc, AM_ROOT, "one", 1));
     AMfree(AMmapPutInt(doc, AM_ROOT, "two", 2));
     AMfree(AMmapPutInt(doc, AM_ROOT, "three", 3));
@@ -158,7 +158,7 @@ static void test_AMputActor_bytes(void **state) {
     assert_memory_equal(bytes.src, test_state->actor_id_bytes, bytes.count);
 }
 
-static void test_AMputActor_hex(void **state) {
+static void test_AMputActor_str(void **state) {
     TestState* test_state = *state;
     AMactorId const* actor_id = AMpush(&test_state->group_state->stack,
                                        AMactorIdInitStr(test_state->actor_id_str),
@@ -176,7 +176,7 @@ static void test_AMputActor_hex(void **state) {
 
 static void test_AMspliceText() {
     AMresultStack* stack = NULL;
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     AMfree(AMspliceText(doc, AM_ROOT, 0, 0, "one + "));
     AMfree(AMspliceText(doc, AM_ROOT, 4, 2, "two = "));
     AMfree(AMspliceText(doc, AM_ROOT, 8, 2, "three"));
@@ -194,7 +194,7 @@ int run_doc_tests(void) {
         cmocka_unit_test(test_AMkeys_list),
         cmocka_unit_test(test_AMkeys_map),
         cmocka_unit_test_setup_teardown(test_AMputActor_bytes, setup, teardown),
-        cmocka_unit_test_setup_teardown(test_AMputActor_hex, setup, teardown),
+        cmocka_unit_test_setup_teardown(test_AMputActor_str, setup, teardown),
         cmocka_unit_test(test_AMspliceText),
     };
 

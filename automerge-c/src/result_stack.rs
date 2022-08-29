@@ -1,7 +1,12 @@
 use crate::result::{AMfree, AMresult, AMresultStatus, AMresultValue, AMstatus, AMvalue};
 
 /// \struct AMresultStack
+/// \installed_headerfile
 /// \brief A node in a singly-linked list of result pointers.
+///
+/// \note Using this data structure is purely optional because its only purpose
+///       is to make memory management tolerable for direct usage of this API
+///       in C, C++ and Objective-C.
 #[repr(C)]
 pub struct AMresultStack {
     /// A result to be deallocated.
@@ -23,6 +28,9 @@ impl AMresultStack {
 /// \return The number of `AMresult` structs freed.
 /// \pre \p stack `!= NULL`.
 /// \post `*stack == NULL`.
+/// \note Calling this function is purely optional because its only purpose is
+///       to make memory management tolerable for direct usage of this API in
+///       C, C++ and Objective-C.
 /// \internal
 ///
 /// # Safety
@@ -47,6 +55,9 @@ pub unsafe extern "C" fn AMfreeStack(stack: *mut *mut AMresultStack) -> usize {
 /// \return A pointer to an `AMresult` struct or `NULL`.
 /// \pre \p stack `!= NULL`.
 /// \post `*stack == NULL`.
+/// \note Calling this function is purely optional because its only purpose is
+///       to make memory management tolerable for direct usage of this API in
+///       C, C++ and Objective-C.
 /// \internal
 ///
 /// # Safety
@@ -67,6 +78,10 @@ pub unsafe extern "C" fn AMpop(stack: *mut *mut AMresultStack) -> *mut AMresult 
 /// \brief The prototype of a function to be called when a value matching the
 ///        given discriminant cannot be extracted from the result at the top of
 ///        the given stack.
+///
+/// \note Implementing this function is purely optional because its only purpose
+///       is to make memory management tolerable for direct usage of this API
+///       in C, C++ and Objective-C.
 pub type AMpushCallback =
     Option<extern "C" fn(stack: *mut *mut AMresultStack, discriminant: u8) -> ()>;
 
@@ -85,6 +100,9 @@ pub type AMpushCallback =
 /// \pre \p result `!= NULL`.
 /// \warning If \p stack `== NULL` then \p result is deallocated in order to
 ///          prevent a memory leak.
+/// \note Calling this function is purely optional because its only purpose is
+///       to make memory management tolerable for direct usage of this API in
+///       C, C++ and Objective-C.
 /// \internal
 ///
 /// # Safety

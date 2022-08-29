@@ -6,6 +6,7 @@ use crate::obj::AMobjId;
 use crate::result::AMvalue;
 
 /// \struct AMlistItem
+/// \installed_headerfile
 /// \brief An item in a list object.
 #[repr(C)]
 pub struct AMlistItem {
@@ -22,7 +23,7 @@ impl AMlistItem {
         Self {
             index,
             obj_id: AMobjId::new(obj_id),
-            value: (value, RefCell::<Option<CString>>::default()),
+            value: (value, Default::default()),
         }
     }
 }

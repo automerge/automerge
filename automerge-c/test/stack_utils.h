@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 /* local */
-#include "automerge.h"
+#include <automerge-c/automerge.h>
 
 /**
  * \brief Reports an error through a cmocka assertion.

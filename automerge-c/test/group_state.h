@@ -2,7 +2,7 @@
 #define GROUP_STATE_H
 
 /* local */
-#include "automerge.h"
+#include <automerge-c/automerge.h>
 
 typedef struct {
     AMresultStack* stack;

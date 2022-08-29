@@ -25,7 +25,7 @@ set_target_properties(test_${LIBRARY_NAME} PROPERTIES LINKER_LANGUAGE C)
 #       must be specified for all of its dependent targets instead.
 target_include_directories(
     test_${LIBRARY_NAME}
-    PRIVATE "$<BUILD_INTERFACE:${CARGO_TARGET_DIR}>"
+    PRIVATE "$<BUILD_INTERFACE:${CBINDGEN_INCLUDEDIR}>"
 )
 
 target_link_libraries(test_${LIBRARY_NAME} PRIVATE cmocka ${LIBRARY_NAME})

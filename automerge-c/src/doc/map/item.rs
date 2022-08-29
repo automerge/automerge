@@ -7,6 +7,7 @@ use crate::obj::AMobjId;
 use crate::result::AMvalue;
 
 /// \struct AMmapItem
+/// \installed_headerfile
 /// \brief An item in a map object.
 #[repr(C)]
 pub struct AMmapItem {
@@ -23,7 +24,7 @@ impl AMmapItem {
         Self {
             key: CString::new(key).unwrap(),
             obj_id: AMobjId::new(obj_id),
-            value: (value, RefCell::<Option<CString>>::default()),
+            value: (value, Default::default()),
         }
     }
 }

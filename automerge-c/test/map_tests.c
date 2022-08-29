@@ -9,7 +9,7 @@
 #include <cmocka.h>
 
 /* local */
-#include "automerge.h"
+#include <automerge-c/automerge.h>
 #include "group_state.h"
 #include "macro_utils.h"
 #include "stack_utils.h"
@@ -132,7 +132,7 @@ static_void_test_AMmapPut(Uint, uint, UINT64_MAX)
 
 static void test_range_iter_map(void** state) {
     AMresultStack* stack = *state;
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     AMfree(AMmapPutUint(doc, AM_ROOT, "a", 3));
     AMfree(AMmapPutUint(doc, AM_ROOT, "b", 4));
     AMfree(AMmapPutUint(doc, AM_ROOT, "c", 5));
@@ -320,7 +320,7 @@ static void test_range_iter_map(void** state) {
 
 static void test_map_range_back_and_forth_single(void** state) {
     AMresultStack* stack = *state;
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     AMactorId const* const actor_id = AMpush(&stack,
                                              AMgetActorId(doc),
                                              AM_VALUE_ACTOR_ID,
@@ -487,7 +487,7 @@ static void test_map_range_back_and_forth_single(void** state) {
 
 static void test_map_range_back_and_forth_double(void** state) {
     AMresultStack* stack = *state;
-    AMdoc* const doc1 = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc1 = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     AMactorId const* const actor_id1= AMpush(&stack,
                                              AMactorIdInitBytes("\0", 1),
                                              AM_VALUE_ACTOR_ID,
@@ -499,7 +499,7 @@ static void test_map_range_back_and_forth_double(void** state) {
     AMfree(AMmapPutStr(doc1, AM_ROOT, "3", "c"));
 
     /* The second actor should win all conflicts here. */
-    AMdoc* const doc2 = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc2 = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     AMactorId const* const actor_id2 = AMpush(&stack,
                                               AMactorIdInitBytes("\1", 1),
                                               AM_VALUE_ACTOR_ID,
@@ -668,7 +668,7 @@ static void test_map_range_back_and_forth_double(void** state) {
 
 static void test_map_range_at_back_and_forth_single(void** state) {
     AMresultStack* stack = *state;
-    AMdoc* const doc = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     AMactorId const* const actor_id = AMpush(&stack,
                                              AMgetActorId(doc),
                                              AM_VALUE_ACTOR_ID,
@@ -840,7 +840,7 @@ static void test_map_range_at_back_and_forth_single(void** state) {
 
 static void test_map_range_at_back_and_forth_double(void** state) {
     AMresultStack* stack = *state;
-    AMdoc* const doc1 = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc1 = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     AMactorId const* const actor_id1= AMpush(&stack,
                                              AMactorIdInitBytes("\0", 1),
                                              AM_VALUE_ACTOR_ID,
@@ -852,7 +852,7 @@ static void test_map_range_at_back_and_forth_double(void** state) {
     AMfree(AMmapPutStr(doc1, AM_ROOT, "3", "c"));
 
     /* The second actor should win all conflicts here. */
-    AMdoc* const doc2 = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc2 = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     AMactorId const* const actor_id2= AMpush(&stack,
                                              AMactorIdInitBytes("\1", 1),
                                              AM_VALUE_ACTOR_ID,
@@ -1025,7 +1025,7 @@ static void test_map_range_at_back_and_forth_double(void** state) {
 
 static void test_get_range_values(void** state) {
     AMresultStack* stack = *state;
-    AMdoc* const doc1 = AMpush(&stack, AMcreate(), AM_VALUE_DOC, cmocka_cb).doc;
+    AMdoc* const doc1 = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     AMfree(AMmapPutStr(doc1, AM_ROOT, "aa", "aaa"));
     AMfree(AMmapPutStr(doc1, AM_ROOT, "bb", "bbb"));
     AMfree(AMmapPutStr(doc1, AM_ROOT, "cc", "ccc"));

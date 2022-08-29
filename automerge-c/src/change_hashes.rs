@@ -117,6 +117,7 @@ impl From<Detail> for [u8; USIZE_USIZE_USIZE_] {
 }
 
 /// \struct AMchangeHashes
+/// \installed_headerfile
 /// \brief A random-access iterator over a sequence of change hashes.
 #[repr(C)]
 #[derive(PartialEq)]
@@ -261,7 +262,7 @@ pub unsafe extern "C" fn AMchangeHashesInit(src: *const AMbyteSpan, count: usize
     for n in 0..count {
         let byte_span = &*src.add(n);
         let slice = std::slice::from_raw_parts(byte_span.src, byte_span.count);
-        match am::ChangeHash::try_from(slice) {
+        match slice.try_into() {
             Ok(change_hash) => {
                 change_hashes.push(change_hash);
             }

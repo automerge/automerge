@@ -12,7 +12,7 @@ set_target_properties(example_quickstart PROPERTIES LINKER_LANGUAGE C)
 #       must be specified for all of its dependent targets instead.
 target_include_directories(
     example_quickstart
-    PRIVATE "$<BUILD_INTERFACE:${CARGO_TARGET_DIR}>"
+    PRIVATE "$<BUILD_INTERFACE:${CBINDGEN_INCLUDEDIR}>"
 )
 
 target_link_libraries(example_quickstart PRIVATE ${LIBRARY_NAME})

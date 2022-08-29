@@ -29,7 +29,7 @@ set(CARGO_CURRENT_BINARY_DIR "${CARGO_TARGET_DIR}/${CARGO_BUILD_TYPE}")
 
 set(
     CARGO_OUTPUT
-        ${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
+        ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h
         ${CARGO_CURRENT_BINARY_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}
         ${CARGO_CURRENT_BINARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}
 )
@@ -47,9 +47,9 @@ add_custom_command(
         # \note cbindgen won't regenerate its output header file after it's
         #       been removed but it will after its configuration file has been
         #       updated.
-        ${CMAKE_COMMAND} -DCONDITION=NOT_EXISTS -P ${CMAKE_SOURCE_DIR}/cmake/file_touch.cmake -- ${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h ${CMAKE_SOURCE_DIR}/cbindgen.toml
+        ${CMAKE_COMMAND} -DCONDITION=NOT_EXISTS -P ${CMAKE_SOURCE_DIR}/cmake/file_touch.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h ${CMAKE_SOURCE_DIR}/cbindgen.toml
     COMMAND
-        ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${CARGO_TARGET_DIR} ${CARGO_CMD} build ${CARGO_FLAG} ${CARGO_FEATURES}
+        ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${CARGO_TARGET_DIR} CBINDGEN_TARGET_DIR=${CBINDGEN_TARGET_DIR} ${CARGO_CMD} build ${CARGO_FLAG} ${CARGO_FEATURES}
     MAIN_DEPENDENCY
         lib.rs
     DEPENDS
@@ -99,16 +99,16 @@ add_custom_command(
     POST_BUILD
     COMMAND
         # Compensate for cbindgen's variant struct naming.
-        ${CMAKE_COMMAND} -DMATCH_REGEX=AM\([^_]+_[^_]+\)_Body -DREPLACE_EXPR=AM\\1 -P ${CMAKE_SOURCE_DIR}/cmake/file_regex_replace.cmake -- ${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
+        ${CMAKE_COMMAND} -DMATCH_REGEX=AM\([^_]+_[^_]+\)_Body -DREPLACE_EXPR=AM\\1 -P ${CMAKE_SOURCE_DIR}/cmake/file_regex_replace.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h
     COMMAND
         # Compensate for cbindgen's union tag enum type naming.
-        ${CMAKE_COMMAND} -DMATCH_REGEX=AM\([^_]+\)_Tag -DREPLACE_EXPR=AM\\1Variant -P ${CMAKE_SOURCE_DIR}/cmake/file_regex_replace.cmake -- ${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
+        ${CMAKE_COMMAND} -DMATCH_REGEX=AM\([^_]+\)_Tag -DREPLACE_EXPR=AM\\1Variant -P ${CMAKE_SOURCE_DIR}/cmake/file_regex_replace.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h
     COMMAND
         # Compensate for cbindgen's translation of consecutive uppercase letters to "ScreamingSnakeCase".
-        ${CMAKE_COMMAND} -DMATCH_REGEX=A_M\([^_]+\)_ -DREPLACE_EXPR=AM_\\1_ -P ${CMAKE_SOURCE_DIR}/cmake/file_regex_replace.cmake -- ${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
+        ${CMAKE_COMMAND} -DMATCH_REGEX=A_M\([^_]+\)_ -DREPLACE_EXPR=AM_\\1_ -P ${CMAKE_SOURCE_DIR}/cmake/file_regex_replace.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h
     COMMAND
         # Compensate for cbindgen ignoring `std:mem::size_of<usize>()` calls.
-        ${CMAKE_COMMAND} -DMATCH_REGEX=USIZE_ -DREPLACE_EXPR=\+${CMAKE_SIZEOF_VOID_P} -P ${CMAKE_SOURCE_DIR}/cmake/file_regex_replace.cmake -- ${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
+        ${CMAKE_COMMAND} -DMATCH_REGEX=USIZE_ -DREPLACE_EXPR=\+${CMAKE_SIZEOF_VOID_P} -P ${CMAKE_SOURCE_DIR}/cmake/file_regex_replace.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h
     WORKING_DIRECTORY
         ${CMAKE_SOURCE_DIR}
     COMMENT
@@ -166,7 +166,7 @@ set_target_properties(
         IMPORTED_NO_SONAME "${LIBRARY_NO_SONAME}"
         IMPORTED_SONAME "${LIBRARY_SONAME}"
         LINKER_LANGUAGE C
-        PUBLIC_HEADER "${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h"
+        PUBLIC_HEADER "${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h"
         SOVERSION "${PROJECT_VERSION_MAJOR}"
         VERSION "${PROJECT_VERSION}"
         # \note Cargo exports all of the symbols automatically.
@@ -222,6 +222,8 @@ install(
 find_package(Doxygen OPTIONAL_COMPONENTS dot)
 
 if(DOXYGEN_FOUND)
+    set(DOXYGEN_ALIASES "installed_headerfile=\\headerfile ${LIBRARY_NAME}.h <${PROJECT_NAME}/${LIBRARY_NAME}.h>")
+
     set(DOXYGEN_GENERATE_LATEX YES)
 
     set(DOXYGEN_PDF_HYPERLINKS YES)
@@ -234,7 +236,7 @@ if(DOXYGEN_FOUND)
 
     doxygen_add_docs(
         ${LIBRARY_NAME}_docs
-        "${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h"
+        "${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h"
         "${CMAKE_SOURCE_DIR}/README.md"
         USE_STAMP_FILE
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}

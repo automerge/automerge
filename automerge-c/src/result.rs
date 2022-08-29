@@ -24,6 +24,7 @@ use crate::strs::AMstrs;
 use crate::sync::{AMsyncMessage, AMsyncState};
 
 /// \struct AMvalue
+/// \installed_headerfile
 /// \brief A discriminated union of value type variants for a result.
 ///
 /// \enum AMvalueVariant
@@ -83,20 +84,14 @@ use crate::sync::{AMsyncMessage, AMsyncState};
 /// \var AMvalue::tag
 /// The variant discriminator.
 ///
-/// \var AMvalue::sync_message
-/// A synchronization message as a pointer to an `AMsyncMessage` struct.
-///
-/// \var AMvalue::sync_state
-/// A synchronization state as a pointer to an `AMsyncState` struct.
-///
-/// \var AMvalue::tag
-/// The variant discriminator.
-///
 /// \var AMvalue::timestamp
 /// A Lamport timestamp.
 ///
 /// \var AMvalue::uint
 /// A 64-bit unsigned integer.
+///
+/// \var AMvalue::unknown
+/// A value of unknown type as an `AMunknownValue` struct.
 #[repr(u8)]
 pub enum AMvalue<'a> {
     /// A void variant.
@@ -215,8 +210,8 @@ impl From<&AMvalue<'_>> for u8 {
     fn from(value: &AMvalue) -> Self {
         use AMvalue::*;
 
-        // Note that these numbers are the order of appearance of the respective variants in the
-        // source of AMValue.
+        // \warning These numbers must correspond to the order in which the
+        //          variants of an AMvalue are declared within it.
         match value {
             ActorId(_) => 1,
             Boolean(_) => 2,
@@ -349,6 +344,7 @@ pub unsafe extern "C" fn AMvalueEqual(value1: *const AMvalue, value2: *const AMv
 }
 
 /// \struct AMresult
+/// \installed_headerfile
 /// \brief A discriminated union of result variants.
 pub enum AMresult {
     ActorId(am::ActorId, Option<AMactorId>),
@@ -616,7 +612,7 @@ impl From<Result<am::sync::State, am::sync::DecodeStateError>> for AMresult {
 impl From<Result<am::Value<'static>, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<am::Value<'static>, am::AutomergeError>) -> Self {
         match maybe {
-            Ok(value) => AMresult::Value(value, RefCell::<Option<CString>>::default()),
+            Ok(value) => AMresult::Value(value, Default::default()),
             Err(e) => AMresult::err(&e.to_string()),
         }
     }
@@ -627,7 +623,7 @@ impl From<Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>> f
         match maybe {
             Ok(Some((value, obj_id))) => match value {
                 am::Value::Object(_) => AMresult::ObjId(AMobjId::new(obj_id)),
-                _ => AMresult::Value(value, RefCell::<Option<CString>>::default()),
+                _ => AMresult::Value(value, Default::default()),
             },
             Ok(None) => AMresult::Void,
             Err(e) => AMresult::err(&e.to_string()),
@@ -647,10 +643,7 @@ impl From<Result<String, am::AutomergeError>> for AMresult {
 impl From<Result<usize, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<usize, am::AutomergeError>) -> Self {
         match maybe {
-            Ok(size) => AMresult::Value(
-                am::Value::uint(size as u64),
-                RefCell::<Option<CString>>::default(),
-            ),
+            Ok(size) => AMresult::Value(am::Value::uint(size as u64), Default::default()),
             Err(e) => AMresult::err(&e.to_string()),
         }
     }
@@ -658,6 +651,15 @@ impl From<Result<usize, am::AutomergeError>> for AMresult {
 
 impl From<Result<Vec<am::Change>, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<Vec<am::Change>, am::AutomergeError>) -> Self {
+        match maybe {
+            Ok(changes) => AMresult::Changes(changes, None),
+            Err(e) => AMresult::err(&e.to_string()),
+        }
+    }
+}
+
+impl From<Result<Vec<am::Change>, am::LoadChangeError>> for AMresult {
+    fn from(maybe: Result<Vec<am::Change>, am::LoadChangeError>) -> Self {
         match maybe {
             Ok(changes) => AMresult::Changes(changes, None),
             Err(e) => AMresult::err(&e.to_string()),
@@ -699,10 +701,7 @@ impl From<Result<Vec<am::ChangeHash>, am::InvalidChangeHashSlice>> for AMresult 
 impl From<Result<Vec<u8>, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<Vec<u8>, am::AutomergeError>) -> Self {
         match maybe {
-            Ok(bytes) => AMresult::Value(
-                am::Value::bytes(bytes),
-                RefCell::<Option<CString>>::default(),
-            ),
+            Ok(bytes) => AMresult::Value(am::Value::bytes(bytes), Default::default()),
             Err(e) => AMresult::err(&e.to_string()),
         }
     }
@@ -723,10 +722,7 @@ impl From<Vec<am::ChangeHash>> for AMresult {
 
 impl From<Vec<u8>> for AMresult {
     fn from(bytes: Vec<u8>) -> Self {
-        AMresult::Value(
-            am::Value::bytes(bytes),
-            RefCell::<Option<CString>>::default(),
-        )
+        AMresult::Value(am::Value::bytes(bytes), Default::default())
     }
 }
 
@@ -905,11 +901,13 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult) -> AMvalue<'a>
 }
 
 /// \struct AMunknownValue
+/// \installed_headerfile
 /// \brief A value (typically for a `set` operation) whose type is unknown.
-///
 #[derive(PartialEq)]
 #[repr(C)]
 pub struct AMunknownValue {
+    /// The value's raw bytes.
     bytes: AMbyteSpan,
+    /// The value's encoded type identifier.
     type_code: u8,
 }

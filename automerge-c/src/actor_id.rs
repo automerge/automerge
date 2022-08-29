@@ -9,6 +9,7 @@ use crate::byte_span::AMbyteSpan;
 use crate::result::{to_result, AMresult};
 
 /// \struct AMactorId
+/// \installed_headerfile
 /// \brief An actor's unique identifier.
 #[derive(PartialEq)]
 pub struct AMactorId {
@@ -17,10 +18,10 @@ pub struct AMactorId {
 }
 
 impl AMactorId {
-    pub fn new(body: &am::ActorId) -> Self {
+    pub fn new(actor_id: &am::ActorId) -> Self {
         Self {
-            body,
-            c_str: RefCell::<Option<CString>>::default(),
+            body: actor_id,
+            c_str: Default::default(),
         }
     }
 

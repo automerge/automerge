@@ -8,7 +8,7 @@
 #include <cmocka.h>
 
 /* local */
-#include "automerge.h"
+#include <automerge-c/automerge.h>
 #include "../stack_utils.h"
 
 typedef struct {
@@ -22,11 +22,17 @@ typedef struct {
 static int setup(void** state) {
     TestState* test_state = test_calloc(1, sizeof(TestState));
     test_state->n1 = AMpush(&test_state->stack,
-                            AMcreate(),
+                            AMcreate(AMpush(&test_state->stack,
+                                            AMactorIdInitStr("01234567"),
+                                            AM_VALUE_ACTOR_ID,
+                                            cmocka_cb).actor_id),
                             AM_VALUE_DOC,
                             cmocka_cb).doc;
     test_state->n2 = AMpush(&test_state->stack,
-                            AMcreate(),
+                            AMcreate(AMpush(&test_state->stack,
+                                            AMactorIdInitStr("89abcdef"),
+                                            AM_VALUE_ACTOR_ID,
+                                            cmocka_cb).actor_id),
                             AM_VALUE_DOC,
                             cmocka_cb).doc;
     test_state->s1 = AMpush(&test_state->stack,
@@ -650,14 +656,6 @@ static void test_should_assume_sent_changes_were_received_until_we_hear_otherwis
     /* const n1 = create('01234567'), n2 = create('89abcdef')
        const s1 = initSyncState(), s2 = initSyncState()                      */
     TestState* test_state = *state;
-    AMfree(AMsetActorId(test_state->n1, AMpush(&test_state->stack,
-                                               AMactorIdInitStr("01234567"),
-                                               AM_VALUE_ACTOR_ID,
-                                               cmocka_cb).actor_id));
-    AMfree(AMsetActorId(test_state->n2, AMpush(&test_state->stack,
-                                               AMactorIdInitStr("89abcdef"),
-                                               AM_VALUE_ACTOR_ID,
-                                               cmocka_cb).actor_id));
     /* let message = null                                                    */
     /*                                                                       */
     /* const items = n1.putObject("_root", "items", [])                      */
@@ -771,14 +769,6 @@ static void test_should_work_without_prior_sync_state(void **state) {
     /* const n1 = create('01234567'), n2 = create('89abcdef')
        const s1 = initSyncState(), s2 = initSyncState()                      */
     TestState* test_state = *state;
-    AMfree(AMsetActorId(test_state->n1, AMpush(&test_state->stack,
-                                               AMactorIdInitStr("01234567"),
-                                               AM_VALUE_ACTOR_ID,
-                                               cmocka_cb).actor_id));
-    AMfree(AMsetActorId(test_state->n2, AMpush(&test_state->stack,
-                                               AMactorIdInitStr("89abcdef"),
-                                               AM_VALUE_ACTOR_ID,
-                                               cmocka_cb).actor_id));
     /*                                                                       */
     /* for (let i = 0; i < 10; i++) {                                        */
     for (size_t i = 0; i != 10; ++i) {
@@ -842,14 +832,6 @@ static void test_should_work_with_prior_sync_state_2(void **state) {
     /* const n1 = create('01234567'), n2 = create('89abcdef')
        let s1 = initSyncState(), s2 = initSyncState()                        */
     TestState* test_state = *state;
-    AMfree(AMsetActorId(test_state->n1, AMpush(&test_state->stack,
-                                               AMactorIdInitStr("01234567"),
-                                               AM_VALUE_ACTOR_ID,
-                                               cmocka_cb).actor_id));
-    AMfree(AMsetActorId(test_state->n2, AMpush(&test_state->stack,
-                                               AMactorIdInitStr("89abcdef"),
-                                               AM_VALUE_ACTOR_ID,
-                                               cmocka_cb).actor_id));
     /*                                                                       */
     /* for (let i = 0; i < 10; i++) {                                        */
     for (size_t i = 0; i != 10; ++i) {
@@ -925,14 +907,6 @@ static void test_should_ensure_non_empty_state_after_sync(void **state) {
     /* const n1 = create('01234567'), n2 = create('89abcdef')
        const s1 = initSyncState(), s2 = initSyncState()                      */
     TestState* test_state = *state;
-    AMfree(AMsetActorId(test_state->n1, AMpush(&test_state->stack,
-                                               AMactorIdInitStr("01234567"),
-                                               AM_VALUE_ACTOR_ID,
-                                               cmocka_cb).actor_id));
-    AMfree(AMsetActorId(test_state->n2, AMpush(&test_state->stack,
-                                               AMactorIdInitStr("89abcdef"),
-                                               AM_VALUE_ACTOR_ID,
-                                               cmocka_cb).actor_id));
     /*                                                                       */
     /* for (let i = 0; i < 3; i++) {                                         */
     for (size_t i = 0; i != 3; ++i) {
@@ -972,14 +946,6 @@ static void test_should_resync_after_one_node_crashed_with_data_loss(void **stat
        let s1 = initSyncState()
        const s2 = initSyncState()                                            */
     TestState* test_state = *state;
-    AMfree(AMsetActorId(test_state->n1, AMpush(&test_state->stack,
-                                               AMactorIdInitStr("01234567"),
-                                               AM_VALUE_ACTOR_ID,
-                                               cmocka_cb).actor_id));
-    AMfree(AMsetActorId(test_state->n2, AMpush(&test_state->stack,
-                                               AMactorIdInitStr("89abcdef"),
-                                               AM_VALUE_ACTOR_ID,
-                                               cmocka_cb).actor_id));
     /*                                                                       */
     /* n1 makes three changes, which we sync to n2 */
     /* for (let i = 0; i < 3; i++) {                                         */
@@ -1114,14 +1080,6 @@ static void test_should_resync_after_one_node_experiences_data_loss_without_disc
     /* const n1 = create('01234567'), n2 = create('89abcdef')
        const s1 = initSyncState(), s2 = initSyncState()                      */
     TestState* test_state = *state;
-    AMfree(AMsetActorId(test_state->n1, AMpush(&test_state->stack,
-                                               AMactorIdInitStr("01234567"),
-                                               AM_VALUE_ACTOR_ID,
-                                               cmocka_cb).actor_id));
-    AMfree(AMsetActorId(test_state->n2, AMpush(&test_state->stack,
-                                               AMactorIdInitStr("89abcdef"),
-                                               AM_VALUE_ACTOR_ID,
-                                               cmocka_cb).actor_id));
     /*                                                                       */
     /* n1 makes three changes which we sync to n2 */
     /* for (let i = 0; i < 3; i++) {                                         */
@@ -1151,13 +1109,12 @@ static void test_should_resync_after_one_node_experiences_data_loss_without_disc
     /*                                                                       */
     /* const n2AfterDataLoss = create('89abcdef')                            */
     AMdoc* n2_after_data_loss = AMpush(&test_state->stack,
-                                       AMcreate(),
+                                       AMcreate(AMpush(&test_state->stack,
+                                                       AMactorIdInitStr("89abcdef"),
+                                                       AM_VALUE_ACTOR_ID,
+                                                       cmocka_cb).actor_id),
                                        AM_VALUE_DOC,
                                        cmocka_cb).doc;
-    AMfree(AMsetActorId(n2_after_data_loss, AMpush(&test_state->stack,
-                                                   AMactorIdInitStr("89abcdef"),
-                                                   AM_VALUE_ACTOR_ID,
-                                                   cmocka_cb).actor_id));
     /*                                                                       */
     /* "n2" now has no data, but n1 still thinks it does. Note we don't do
      * decodeSyncState(encodeSyncState(s1)) in order to simulate data loss
@@ -1188,22 +1145,13 @@ static void test_should_resync_after_one_node_experiences_data_loss_without_disc
 static void test_should_handle_changes_concurrrent_to_the_last_sync_heads(void **state) {
     /* const n1 = create('01234567'), n2 = create('89abcdef'), n3 = create('fedcba98')*/
     TestState* test_state = *state;
-    AMfree(AMsetActorId(test_state->n1, AMpush(&test_state->stack,
-                                               AMactorIdInitStr("01234567"),
-                                               AM_VALUE_ACTOR_ID,
-                                               cmocka_cb).actor_id));
-    AMfree(AMsetActorId(test_state->n2, AMpush(&test_state->stack,
-                                               AMactorIdInitStr("89abcdef"),
-                                               AM_VALUE_ACTOR_ID,
-                                               cmocka_cb).actor_id));
     AMdoc* n3 = AMpush(&test_state->stack,
-                       AMcreate(),
+                       AMcreate(AMpush(&test_state->stack,
+                                       AMactorIdInitStr("fedcba98"),
+                                       AM_VALUE_ACTOR_ID,
+                                       cmocka_cb).actor_id),
                        AM_VALUE_DOC,
                        cmocka_cb).doc;
-    AMfree(AMsetActorId(n3, AMpush(&test_state->stack,
-                                   AMactorIdInitStr("fedcba98"),
-                                   AM_VALUE_ACTOR_ID,
-                                   cmocka_cb).actor_id));
     /* const s12 = initSyncState(), s21 = initSyncState(), s23 = initSyncState(), s32 = initSyncState()*/
     AMsyncState* s12 = test_state->s1;
     AMsyncState* s21 = test_state->s2;
@@ -1281,22 +1229,13 @@ static void test_should_handle_histories_with_lots_of_branching_and_merging(void
     /* const n1 = create('01234567'), n2 = create('89abcdef'), n3 = create('fedcba98')
        const s1 = initSyncState(), s2 = initSyncState()                      */
     TestState* test_state = *state;
-    AMfree(AMsetActorId(test_state->n1, AMpush(&test_state->stack,
-                                               AMactorIdInitStr("01234567"),
-                                               AM_VALUE_ACTOR_ID,
-                                               cmocka_cb).actor_id));
-    AMfree(AMsetActorId(test_state->n2, AMpush(&test_state->stack,
-                                               AMactorIdInitStr("89abcdef"),
-                                               AM_VALUE_ACTOR_ID,
-                                               cmocka_cb).actor_id));
     AMdoc* n3 = AMpush(&test_state->stack,
-                       AMcreate(),
+                       AMcreate(AMpush(&test_state->stack,
+                                       AMactorIdInitStr("fedcba98"),
+                                       AM_VALUE_ACTOR_ID,
+                                       cmocka_cb).actor_id),
                        AM_VALUE_DOC,
                        cmocka_cb).doc;
-    AMfree(AMsetActorId(n3, AMpush(&test_state->stack,
-                                   AMactorIdInitStr("fedcba98"),
-                                   AM_VALUE_ACTOR_ID,
-                                   cmocka_cb).actor_id));
     /* n1.put("_root", "x", 0); n1.commit("", 0)                             */
     AMfree(AMmapPutUint(test_state->n1, AM_ROOT, "x", 0));
     AMfree(AMcommit(test_state->n1, "", &TIME_0));

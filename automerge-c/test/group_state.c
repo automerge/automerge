@@ -12,7 +12,7 @@
 int group_setup(void** state) {
     GroupState* group_state = test_calloc(1, sizeof(GroupState));
     group_state->doc = AMpush(&group_state->stack,
-                              AMcreate(),
+                              AMcreate(NULL),
                               AM_VALUE_DOC,
                               cmocka_cb).doc;
     *state = group_state;
