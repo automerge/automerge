@@ -76,7 +76,7 @@ $(function() {
 <p>A random-access iterator over a sequence of changes.  
  <a href="structAMchanges.html#details">More...</a></p>
 
-<p><code>#include &lt;<a class="el" href="automerge_8h_source.html">automerge.h</a>&gt;</code></p>
+<p><code>#include &lt;<a class="el" href="automerge_8h_source.html">automerge-c/automerge.h</a>&gt;</code></p>
 <table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a name="pub-methods"></a>
 Public Member Functions</h2></td></tr>
@@ -86,6 +86,9 @@ Public Member Functions</h2></td></tr>
 <tr class="memitem:ab0647b73bc5607f0fe5e07da5b5f5c55"><td class="memItemLeft" align="right" valign="top">bool&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMchanges.html#ab0647b73bc5607f0fe5e07da5b5f5c55">AMchangesEqual</a> (const struct <a class="el" href="structAMchanges.html">AMchanges</a> *changes1, const struct <a class="el" href="structAMchanges.html">AMchanges</a> *changes2)</td></tr>
 <tr class="memdesc:ab0647b73bc5607f0fe5e07da5b5f5c55"><td class="mdescLeft">&#160;</td><td class="mdescRight">Tests the equality of two sequences of changes underlying a pair of iterators.  <a href="structAMchanges.html#ab0647b73bc5607f0fe5e07da5b5f5c55">More...</a><br /></td></tr>
 <tr class="separator:ab0647b73bc5607f0fe5e07da5b5f5c55"><td class="memSeparator" colspan="2">&#160;</td></tr>
+<tr class="memitem:a61594a033a9ab53fce38e4010115dbae"><td class="memItemLeft" align="right" valign="top">struct <a class="el" href="structAMresult.html">AMresult</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMchanges.html#a61594a033a9ab53fce38e4010115dbae">AMchangesInit</a> (const struct <a class="el" href="structAMbyteSpan.html">AMbyteSpan</a> *src, size_t count)</td></tr>
+<tr class="memdesc:a61594a033a9ab53fce38e4010115dbae"><td class="mdescLeft">&#160;</td><td class="mdescRight">Allocates an iterator over a sequence of changes and initializes it from a sequence of byte spans.  <a href="structAMchanges.html#a61594a033a9ab53fce38e4010115dbae">More...</a><br /></td></tr>
+<tr class="separator:a61594a033a9ab53fce38e4010115dbae"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:af20bd543c496e52d9beec60a5fa370e8"><td class="memItemLeft" align="right" valign="top">const struct <a class="el" href="structAMchange.html">AMchange</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMchanges.html#af20bd543c496e52d9beec60a5fa370e8">AMchangesNext</a> (struct <a class="el" href="structAMchanges.html">AMchanges</a> *changes, ptrdiff_t n)</td></tr>
 <tr class="memdesc:af20bd543c496e52d9beec60a5fa370e8"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gets the change at the current position of an iterator over a sequence of changes and then advances it by at most <code>|n|</code> positions where the sign of <code>n</code> is relative to the iterator's direction.  <a href="structAMchanges.html#af20bd543c496e52d9beec60a5fa370e8">More...</a><br /></td></tr>
 <tr class="separator:af20bd543c496e52d9beec60a5fa370e8"><td class="memSeparator" colspan="2">&#160;</td></tr>
@@ -186,6 +189,48 @@ Public Attributes</h2></td></tr>
 <dl class="section pre"><dt>Precondition</dt><dd><code>changes1</code> <code>!= NULL</code>. </dd>
 <dd>
 <code>changes2</code> <code>!= NULL</code>. </dd></dl>
+
+</div>
+</div>
+<a id="a61594a033a9ab53fce38e4010115dbae"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a61594a033a9ab53fce38e4010115dbae">&#9670;&nbsp;</a></span>AMchangesInit()</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">struct <a class="el" href="structAMresult.html">AMresult</a> * AMchangesInit </td>
+          <td>(</td>
+          <td class="paramtype">const struct <a class="el" href="structAMbyteSpan.html">AMbyteSpan</a> *&#160;</td>
+          <td class="paramname"><em>src</em>, </td>
+        </tr>
+        <tr>
+          <td class="paramkey"></td>
+          <td></td>
+          <td class="paramtype">size_t&#160;</td>
+          <td class="paramname"><em>count</em>&#160;</td>
+        </tr>
+        <tr>
+          <td></td>
+          <td>)</td>
+          <td></td><td></td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>Allocates an iterator over a sequence of changes and initializes it from a sequence of byte spans. </p>
+<dl class="params"><dt>Parameters</dt><dd>
+  <table class="params">
+    <tr><td class="paramdir">[in]</td><td class="paramname">src</td><td>A pointer to an array of <code><a class="el" href="structAMbyteSpan.html" title="A view onto a contiguous sequence of bytes.">AMbyteSpan</a></code> structs. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">count</td><td>The number of <code><a class="el" href="structAMbyteSpan.html" title="A view onto a contiguous sequence of bytes.">AMbyteSpan</a></code> structs to copy from <code>src</code>. </td></tr>
+  </table>
+  </dd>
+</dl>
+<dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct containing an <code><a class="el" href="structAMchanges.html" title="A random-access iterator over a sequence of changes.">AMchanges</a></code> struct. </dd></dl>
+<dl class="section pre"><dt>Precondition</dt><dd><code>src</code> <code>!= NULL</code>. </dd>
+<dd>
+<code>0 &lt;</code> <code>count</code> <code>&lt;= sizeof(</code><code>src<code></code>) / sizeof(AMbyteSpan)</code>. </dd></dl>
+<dl class="section warning"><dt>Warning</dt><dd>The returned <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct must be deallocated with <code><a class="el" href="structAMresult.html#ae7343baa00a4e002021d3a0942aa0432" title="Deallocates the storage for a result.">AMfree()</a></code> in order to prevent a memory leak. </dd></dl>
 
 </div>
 </div>
@@ -369,7 +414,7 @@ Public Attributes</h2></td></tr>
 </div>
 </div>
 <hr/>The documentation for this struct was generated from the following file:<ul>
-<li>build/Cargo/target/<a class="el" href="automerge_8h_source.html">automerge.h</a></li>
+<li>build/Cargo/target/include/automerge-c/<a class="el" href="automerge_8h_source.html">automerge.h</a></li>
 </ul>
 </div><!-- contents -->
 <!-- start footer part -->

@@ -77,13 +77,12 @@ $(function() {
 <p>A node in a singly-linked list of result pointers.  
  <a href="structAMresultStack.html#details">More...</a></p>
 
-<p><code>#include &lt;<a class="el" href="automerge_8h_source.html">automerge.h</a>&gt;</code></p>
+<p><code>#include &lt;<a class="el" href="automerge_8h_source.html">automerge-c/automerge.h</a>&gt;</code></p>
 <table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a name="pub-types"></a>
 Public Types</h2></td></tr>
-<tr class="memitem:a01fb7e0b941963086977a76821288c3b"><td class="memItemLeft" align="right" valign="top"><a id="a01fb7e0b941963086977a76821288c3b"></a>
-typedef void(*&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMresultStack.html#a01fb7e0b941963086977a76821288c3b">AMpushCallback</a>) (struct <a class="el" href="structAMresultStack.html">AMresultStack</a> **stack, uint8_t discriminant)</td></tr>
-<tr class="memdesc:a01fb7e0b941963086977a76821288c3b"><td class="mdescLeft">&#160;</td><td class="mdescRight">The prototype of a function to be called when a value matching the given discriminant cannot be extracted from the result at the top of the given stack. <br /></td></tr>
+<tr class="memitem:a01fb7e0b941963086977a76821288c3b"><td class="memItemLeft" align="right" valign="top">typedef void(*&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="structAMresultStack.html#a01fb7e0b941963086977a76821288c3b">AMpushCallback</a>) (struct <a class="el" href="structAMresultStack.html">AMresultStack</a> **stack, uint8_t discriminant)</td></tr>
+<tr class="memdesc:a01fb7e0b941963086977a76821288c3b"><td class="mdescLeft">&#160;</td><td class="mdescRight">The prototype of a function to be called when a value matching the given discriminant cannot be extracted from the result at the top of the given stack.  <a href="structAMresultStack.html#a01fb7e0b941963086977a76821288c3b">More...</a><br /></td></tr>
 <tr class="separator:a01fb7e0b941963086977a76821288c3b"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a name="pub-methods"></a>
@@ -107,7 +106,26 @@ Public Attributes</h2></td></tr>
 </table>
 <a name="details" id="details"></a><h2 class="groupheader">Detailed Description</h2>
 <div class="textblock"><p>A node in a singly-linked list of result pointers. </p>
-</div><h2 class="groupheader">Member Function Documentation</h2>
+<dl class="section note"><dt>Note</dt><dd>Using this data structure is purely optional because its only purpose is to make memory management tolerable for direct usage of this API in C, C++ and Objective-C. </dd></dl>
+</div><h2 class="groupheader">Member Typedef Documentation</h2>
+<a id="a01fb7e0b941963086977a76821288c3b"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a01fb7e0b941963086977a76821288c3b">&#9670;&nbsp;</a></span>AMpushCallback</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">typedef void(* AMpushCallback(struct <a class="el" href="structAMresultStack.html">AMresultStack</a> **stack, uint8_t discriminant)</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>The prototype of a function to be called when a value matching the given discriminant cannot be extracted from the result at the top of the given stack. </p>
+<dl class="section note"><dt>Note</dt><dd>Implementing this function is purely optional because its only purpose is to make memory management tolerable for direct usage of this API in C, C++ and Objective-C. </dd></dl>
+
+</div>
+</div>
+<h2 class="groupheader">Member Function Documentation</h2>
 <a id="a9b030fb828ea0c776d57b5e328e5dfeb"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#a9b030fb828ea0c776d57b5e328e5dfeb">&#9670;&nbsp;</a></span>AMfreeStack()</h2>
 
@@ -134,6 +152,7 @@ Public Attributes</h2></td></tr>
 <dl class="section return"><dt>Returns</dt><dd>The number of <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> structs freed. </dd></dl>
 <dl class="section pre"><dt>Precondition</dt><dd><code>stack</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section post"><dt>Postcondition</dt><dd><code>*stack == NULL</code>. </dd></dl>
+<dl class="section note"><dt>Note</dt><dd>Calling this function is purely optional because its only purpose is to make memory management tolerable for direct usage of this API in C, C++ and Objective-C. </dd></dl>
 
 </div>
 </div>
@@ -163,6 +182,7 @@ Public Attributes</h2></td></tr>
 <dl class="section return"><dt>Returns</dt><dd>A pointer to an <code><a class="el" href="structAMresult.html" title="A discriminated union of result variants.">AMresult</a></code> struct or <code>NULL</code>. </dd></dl>
 <dl class="section pre"><dt>Precondition</dt><dd><code>stack</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section post"><dt>Postcondition</dt><dd><code>*stack == NULL</code>. </dd></dl>
+<dl class="section note"><dt>Note</dt><dd>Calling this function is purely optional because its only purpose is to make memory management tolerable for direct usage of this API in C, C++ and Objective-C. </dd></dl>
 
 </div>
 </div>
@@ -219,6 +239,7 @@ Public Attributes</h2></td></tr>
 <dd>
 <code>result</code> <code>!= NULL</code>. </dd></dl>
 <dl class="section warning"><dt>Warning</dt><dd>If <code>stack</code> <code>== NULL</code> then <code>result</code> is deallocated in order to prevent a memory leak. </dd></dl>
+<dl class="section note"><dt>Note</dt><dd>Calling this function is purely optional because its only purpose is to make memory management tolerable for direct usage of this API in C, C++ and Objective-C. </dd></dl>
 
 </div>
 </div>
@@ -254,7 +275,7 @@ Public Attributes</h2></td></tr>
 </div>
 </div>
 <hr/>The documentation for this struct was generated from the following file:<ul>
-<li>build/Cargo/target/<a class="el" href="automerge_8h_source.html">automerge.h</a></li>
+<li>build/Cargo/target/include/automerge-c/<a class="el" href="automerge_8h_source.html">automerge.h</a></li>
 </ul>
 </div><!-- contents -->
 <!-- start footer part -->

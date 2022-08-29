@@ -76,7 +76,7 @@ $(function() {
 <p>A random-access iterator over a sequence of change hashes.  
  <a href="structAMchangeHashes.html#details">More...</a></p>
 
-<p><code>#include &lt;<a class="el" href="automerge_8h_source.html">automerge.h</a>&gt;</code></p>
+<p><code>#include &lt;<a class="el" href="automerge_8h_source.html">automerge-c/automerge.h</a>&gt;</code></p>
 <table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a name="pub-methods"></a>
 Public Member Functions</h2></td></tr>
@@ -221,8 +221,8 @@ Public Attributes</h2></td></tr>
 <p>Allocates an iterator over a sequence of change hashes and initializes it from a sequence of byte spans. </p>
 <dl class="params"><dt>Parameters</dt><dd>
   <table class="params">
-    <tr><td class="paramdir">[in]</td><td class="paramname">src</td><td>A pointer to an array of <code><a class="el" href="structAMbyteSpan.html" title="A contiguous sequence of bytes.">AMbyteSpan</a></code> structs. </td></tr>
-    <tr><td class="paramdir">[in]</td><td class="paramname">count</td><td>The number of <code><a class="el" href="structAMbyteSpan.html" title="A contiguous sequence of bytes.">AMbyteSpan</a></code> structs to copy from <code>src</code>. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">src</td><td>A pointer to an array of <code><a class="el" href="structAMbyteSpan.html" title="A view onto a contiguous sequence of bytes.">AMbyteSpan</a></code> structs. </td></tr>
+    <tr><td class="paramdir">[in]</td><td class="paramname">count</td><td>The number of <code><a class="el" href="structAMbyteSpan.html" title="A view onto a contiguous sequence of bytes.">AMbyteSpan</a></code> structs to copy from <code>src</code>. </td></tr>
   </table>
   </dd>
 </dl>
@@ -268,7 +268,7 @@ Public Attributes</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMbyteSpan.html" title="A contiguous sequence of bytes.">AMbyteSpan</a></code> struct with <code>.src == NULL</code> when <code>change_hashes</code> was previously advanced past its forward/reverse limit. </dd></dl>
+<dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMbyteSpan.html" title="A view onto a contiguous sequence of bytes.">AMbyteSpan</a></code> struct with <code>.src == NULL</code> when <code>change_hashes</code> was previously advanced past its forward/reverse limit. </dd></dl>
 <dl class="section pre"><dt>Precondition</dt><dd><code>change_hashes</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
@@ -307,7 +307,7 @@ Public Attributes</h2></td></tr>
   </table>
   </dd>
 </dl>
-<dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMbyteSpan.html" title="A contiguous sequence of bytes.">AMbyteSpan</a></code> struct with <code>.src == NULL</code> when <code>change_hashes</code> is presently advanced past its forward/reverse limit. </dd></dl>
+<dl class="section return"><dt>Returns</dt><dd>An <code><a class="el" href="structAMbyteSpan.html" title="A view onto a contiguous sequence of bytes.">AMbyteSpan</a></code> struct with <code>.src == NULL</code> when <code>change_hashes</code> is presently advanced past its forward/reverse limit. </dd></dl>
 <dl class="section pre"><dt>Precondition</dt><dd><code>change_hashes</code> <code>!= NULL</code>. </dd></dl>
 
 </div>
@@ -414,7 +414,7 @@ Public Attributes</h2></td></tr>
 </div>
 </div>
 <hr/>The documentation for this struct was generated from the following file:<ul>
-<li>build/Cargo/target/<a class="el" href="automerge_8h_source.html">automerge.h</a></li>
+<li>build/Cargo/target/include/automerge-c/<a class="el" href="automerge_8h_source.html">automerge.h</a></li>
 </ul>
 </div><!-- contents -->
 <!-- start footer part -->
