@@ -82,11 +82,6 @@ impl<'a> Transactable for Transaction<'a> {
 
     /// Set the value of property `P` to value `V` in object `obj`.
     ///
-    /// # Returns
-    ///
-    /// The opid of the operation which was created, or None if this operation doesn't change the
-    /// document
-    ///
     /// # Errors
     ///
     /// This will return an error if
