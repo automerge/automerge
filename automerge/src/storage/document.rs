@@ -135,17 +135,23 @@ impl<'a> Document<'a> {
         let (i, parse::RangeOf { range: ops, .. }) =
             parse::range_of(|i| parse::take_n(ops_meta.total_column_len(), i), i)?;
 
-        // parse the suffix
-        let (
-            i,
-            parse::RangeOf {
-                range: suffix,
-                value: head_indices,
-            },
-        ) = parse::range_of(
-            |i| parse::apply_n(heads.len(), parse::leb128_u64::<ParseError>)(i),
-            i,
-        )?;
+        // parse the suffix, which may be empty if this document was produced by an older version
+        // of the JS automerge implementation
+        let (i, suffix, head_indices) = if i.is_empty() {
+            (i, 0..0, Vec::new())
+        } else {
+            let (
+                i,
+                parse::RangeOf {
+                    range: suffix,
+                    value: head_indices,
+                },
+            ) = parse::range_of(
+                |i| parse::apply_n(heads.len(), parse::leb128_u64::<ParseError>)(i),
+                i,
+            )?;
+            (i, suffix, head_indices)
+        };
 
         let compression::Decompressed {
             change_bytes,

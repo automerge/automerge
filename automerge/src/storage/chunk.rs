@@ -56,6 +56,7 @@ impl<'a> Chunk<'a> {
             first: chunk_input,
             remaining,
         } = i.split(header.data_bytes().len());
+        tracing::trace!(?header, "parsed chunk header");
         let chunk = match header.chunk_type {
             ChunkType::Change => {
                 let (remaining, change) =

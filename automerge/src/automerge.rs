@@ -591,13 +591,16 @@ impl Automerge {
     }
 
     /// Load a document.
+    #[tracing::instrument(skip(data, options), err)]
     pub fn load_with<Obs: OpObserver>(
         data: &[u8],
         mut options: ApplyOptions<'_, Obs>,
     ) -> Result<Self, AutomergeError> {
         if data.is_empty() {
+            tracing::trace!("no data, initializing empty document");
             return Ok(Self::new());
         }
+        tracing::trace!("loading first chunk");
         let (remaining, first_chunk) = storage::Chunk::parse(storage::parse::Input::new(data))
             .map_err(|e| load::Error::Parse(Box::new(e)))?;
         if !first_chunk.checksum_valid() {
@@ -607,6 +610,7 @@ impl Automerge {
 
         let mut am = match first_chunk {
             storage::Chunk::Document(d) => {
+                tracing::trace!("first chunk is document chunk, inflating");
                 let storage::load::Reconstructed {
                     max_op,
                     result: op_set,
@@ -643,6 +647,7 @@ impl Automerge {
                 }
             }
             storage::Chunk::Change(stored_change) => {
+                tracing::trace!("first chunk is change chunk, applying");
                 let change = Change::new_from_unverified(stored_change.into_owned(), None)
                     .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?;
                 let mut am = Self::new();
@@ -650,6 +655,7 @@ impl Automerge {
                 am
             }
             storage::Chunk::CompressedChange(stored_change, compressed) => {
+                tracing::trace!("first chunk is compressed change, decompressing and applying");
                 let change = Change::new_from_unverified(
                     stored_change.into_owned(),
                     Some(compressed.into_owned()),
@@ -660,6 +666,7 @@ impl Automerge {
                 am
             }
         };
+        tracing::trace!("first chunk loaded, loading remaining chunks");
         match load::load_changes(remaining.reset()) {
             load::LoadedChanges::Complete(c) => {
                 for change in c {
