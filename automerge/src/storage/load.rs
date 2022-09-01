@@ -80,6 +80,7 @@ fn load_next_change<'a>(
     }
     match chunk {
         storage::Chunk::Document(d) => {
+            tracing::trace!("loading document chunk");
             let Reconstructed {
                 changes: new_changes,
                 ..
