@@ -185,6 +185,9 @@ export class Automerge {
 
   // dump internal state to console.log
   dump(): void;
+
+  // experimental api can go here
+  applyPatches<Doc>(obj: Doc, meta?: any, callback?: Function): Doc;
 }
 
 export class JsSyncState {
