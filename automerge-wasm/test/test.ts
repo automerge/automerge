@@ -548,8 +548,8 @@ describe('Automerge', () => {
       doc2.loadIncremental(doc1.saveIncremental())
       assert.deepEqual(doc2.popPatches(), [
         { action: 'put', path: [ 'birds' ], value: [], conflict: false },
-        { action: 'ins', path: [ 'birds', 0 ], value: 'Goldfinch' },
-        { action: 'ins', path: [ 'birds', 1 ], value: 'Chaffinch' }
+        { action: 'splice', path: [ 'birds', 0 ], values: ['Goldfinch'] },
+        { action: 'splice', path: [ 'birds', 1 ], values: ['Chaffinch'] }
       ])
       doc1.free()
       doc2.free()
@@ -563,7 +563,7 @@ describe('Automerge', () => {
       doc2.enablePatches(true)
       doc2.loadIncremental(doc1.saveIncremental())
       assert.deepEqual(doc2.popPatches(), [
-        { action: 'ins', path: [ 'birds', 0 ], value: {} },
+        { action: 'splice', path: [ 'birds', 0 ], values: [{}] },
         { action: 'put', path: [ 'birds', 0, 'species' ], value: 'Goldfinch', conflict: false },
         { action: 'put', path: [ 'birds', 0, 'count', ], value: 3, conflict: false }
       ])

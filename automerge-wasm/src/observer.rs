@@ -21,14 +21,31 @@ impl Observer {
         }
         self.enabled = enable;
     }
+
+    fn push(&mut self, patch: Patch) {
+        if let Some(tail) = self.patches.last_mut() {
+            if let Some(p) = tail.merge(patch) {
+                self.patches.push(p)
+            }
+        } else {
+            self.patches.push(patch);
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub(crate) enum Patch {
-    Put {
+    PutMap {
         obj: ObjId,
         path: Vec<Prop>,
-        prop: Prop,
+        key: String,
+        value: Value<'static>,
+        conflict: bool,
+    },
+    PutSeq {
+        obj: ObjId,
+        path: Vec<Prop>,
+        index: usize,
         value: Value<'static>,
         conflict: bool,
     },
@@ -36,7 +53,7 @@ pub(crate) enum Patch {
         obj: ObjId,
         path: Vec<Prop>,
         index: usize,
-        value: Value<'static>,
+        values: Vec<Value<'static>>,
     },
     Increment {
         obj: ObjId,
@@ -44,10 +61,16 @@ pub(crate) enum Patch {
         prop: Prop,
         value: i64,
     },
-    Delete {
+    DeleteMap {
         obj: ObjId,
         path: Vec<Prop>,
-        prop: Prop,
+        key: String,
+    },
+    DeleteSeq {
+        obj: ObjId,
+        path: Vec<Prop>,
+        index: usize,
+        length: usize,
     },
 }
 
@@ -66,7 +89,7 @@ impl OpObserver for Observer {
                 path,
                 obj,
                 index,
-                value,
+                values: vec![value],
             })
         }
     }
@@ -82,13 +105,23 @@ impl OpObserver for Observer {
         if self.enabled {
             let path = parents.path().into_iter().map(|p| p.1).collect();
             let value = tagged_value.0.to_owned();
-            self.patches.push(Patch::Put {
-                path,
-                obj,
-                prop,
-                value,
-                conflict,
-            })
+            let patch = match prop {
+                Prop::Map(key) => Patch::PutMap {
+                    path,
+                    obj,
+                    key,
+                    value,
+                    conflict,
+                },
+                Prop::Seq(index) => Patch::PutSeq {
+                    path,
+                    obj,
+                    index,
+                    value,
+                    conflict,
+                },
+            };
+            self.patches.push(patch);
         }
     }
 
@@ -114,7 +147,16 @@ impl OpObserver for Observer {
     fn delete(&mut self, mut parents: Parents<'_>, obj: ObjId, prop: Prop) {
         if self.enabled {
             let path = parents.path().into_iter().map(|p| p.1).collect();
-            self.patches.push(Patch::Delete { path, obj, prop })
+            let patch = match prop {
+                Prop::Map(key) => Patch::DeleteMap { path, obj, key },
+                Prop::Seq(index) => Patch::DeleteSeq {
+                    path,
+                    obj,
+                    index,
+                    length: 1,
+                },
+            };
+            self.patches.push(patch)
         }
     }
 
@@ -146,35 +188,97 @@ fn export_path(path: &[Prop], end: &Prop) -> Array {
     result
 }
 
+impl Patch {
+    pub(crate) fn path(&self) -> &[Prop] {
+        match &self {
+            Self::PutMap { path, .. } => path.as_slice(),
+            Self::PutSeq { path, .. } => path.as_slice(),
+            Self::Increment { path, .. } => path.as_slice(),
+            Self::Insert { path, .. } => path.as_slice(),
+            Self::DeleteMap { path, .. } => path.as_slice(),
+            Self::DeleteSeq { path, .. } => path.as_slice(),
+        }
+    }
+
+    fn merge(&mut self, other: Patch) -> Option<Patch> {
+        match (self, &other) {
+            (
+                Self::Insert {
+                    obj, index, values, ..
+                },
+                Self::Insert {
+                    obj: o2,
+                    values: v2,
+                    index: i2,
+                    ..
+                },
+            ) if obj == o2 && *index + values.len() == *i2 => {
+                // TODO - there's a way to do this without the clone im sure
+                values.extend_from_slice(v2.as_slice());
+                None
+            }
+            _ => Some(other),
+        }
+    }
+}
+
 impl TryFrom<Patch> for JsValue {
     type Error = JsValue;
 
     fn try_from(p: Patch) -> Result<Self, Self::Error> {
         let result = Object::new();
         match p {
-            Patch::Put {
+            Patch::PutMap {
                 path,
-                prop,
+                key,
                 value,
                 conflict,
                 ..
             } => {
                 js_set(&result, "action", "put")?;
-                js_set(&result, "path", export_path(path.as_slice(), &prop))?;
+                js_set(
+                    &result,
+                    "path",
+                    export_path(path.as_slice(), &Prop::Map(key)),
+                )?;
                 js_set(&result, "value", export_value(&value))?;
                 js_set(&result, "conflict", &JsValue::from_bool(conflict))?;
                 Ok(result.into())
             }
-            Patch::Insert {
-                path, index, value, ..
+            Patch::PutSeq {
+                path,
+                index,
+                value,
+                conflict,
+                ..
             } => {
-                js_set(&result, "action", "ins")?;
+                js_set(&result, "action", "put")?;
                 js_set(
                     &result,
                     "path",
                     export_path(path.as_slice(), &Prop::Seq(index)),
                 )?;
                 js_set(&result, "value", export_value(&value))?;
+                js_set(&result, "conflict", &JsValue::from_bool(conflict))?;
+                Ok(result.into())
+            }
+            Patch::Insert {
+                path,
+                index,
+                values,
+                ..
+            } => {
+                js_set(&result, "action", "splice")?;
+                js_set(
+                    &result,
+                    "path",
+                    export_path(path.as_slice(), &Prop::Seq(index)),
+                )?;
+                js_set(
+                    &result,
+                    "values",
+                    values.iter().map(export_value).collect::<Array>(),
+                )?;
                 Ok(result.into())
             }
             Patch::Increment {
@@ -185,9 +289,30 @@ impl TryFrom<Patch> for JsValue {
                 js_set(&result, "value", &JsValue::from_f64(value as f64))?;
                 Ok(result.into())
             }
-            Patch::Delete { path, prop, .. } => {
+            Patch::DeleteMap { path, key, .. } => {
                 js_set(&result, "action", "del")?;
-                js_set(&result, "path", export_path(path.as_slice(), &prop))?;
+                js_set(
+                    &result,
+                    "path",
+                    export_path(path.as_slice(), &Prop::Map(key)),
+                )?;
+                Ok(result.into())
+            }
+            Patch::DeleteSeq {
+                path,
+                index,
+                length,
+                ..
+            } => {
+                js_set(&result, "action", "del")?;
+                js_set(
+                    &result,
+                    "path",
+                    export_path(path.as_slice(), &Prop::Seq(index)),
+                )?;
+                if length > 1 {
+                    js_set(&result, "length", length)?;
+                }
                 Ok(result.into())
             }
         }
