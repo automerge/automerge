@@ -20,14 +20,15 @@ use super::{CommitOptions, Transactable, TransactionInner};
 /// intermediate state.
 /// This is consistent with `?` error handling.
 #[derive(Debug)]
-pub struct Transaction<'a> {
+pub struct Transaction<'a, Obs: OpObserver> {
     // this is an option so that we can take it during commit and rollback to prevent it being
     // rolled back during drop.
     pub(crate) inner: Option<TransactionInner>,
     pub(crate) doc: &'a mut Automerge,
+    pub op_observer: Obs,
 }
 
-impl<'a> Transaction<'a> {
+impl<'a, Obs: OpObserver> Transaction<'a, Obs> {
     /// Get the heads of the document before this transaction was started.
     pub fn get_heads(&self) -> Vec<ChangeHash> {
         self.doc.get_heads()
@@ -36,10 +37,7 @@ impl<'a> Transaction<'a> {
     /// Commit the operations performed in this transaction, returning the hashes corresponding to
     /// the new heads.
     pub fn commit(mut self) -> ChangeHash {
-        self.inner
-            .take()
-            .unwrap()
-            .commit::<()>(self.doc, None, None, None)
+        self.inner.take().unwrap().commit(self.doc, None, None)
     }
 
     /// Commit the operations in this transaction with some options.
@@ -56,15 +54,13 @@ impl<'a> Transaction<'a> {
     /// tx.put_object(ROOT, "todos", ObjType::List).unwrap();
     /// let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as
     /// i64;
-    /// tx.commit_with::<()>(CommitOptions::default().with_message("Create todos list").with_time(now));
+    /// tx.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
     /// ```
-    pub fn commit_with<Obs: OpObserver>(mut self, options: CommitOptions<'_, Obs>) -> ChangeHash {
-        self.inner.take().unwrap().commit(
-            self.doc,
-            options.message,
-            options.time,
-            options.op_observer,
-        )
+    pub fn commit_with(mut self, options: CommitOptions) -> ChangeHash {
+        self.inner
+            .take()
+            .unwrap()
+            .commit(self.doc, options.message, options.time)
     }
 
     /// Undo the operations added in this transaction, returning the number of cancelled
@@ -74,7 +70,7 @@ impl<'a> Transaction<'a> {
     }
 }
 
-impl<'a> Transactable for Transaction<'a> {
+impl<'a, Obs: OpObserver> Transactable for Transaction<'a, Obs> {
     /// Get the number of pending operations in this transaction.
     fn pending_ops(&self) -> usize {
         self.inner.as_ref().unwrap().pending_ops()
@@ -97,7 +93,7 @@ impl<'a> Transactable for Transaction<'a> {
         self.inner
             .as_mut()
             .unwrap()
-            .put(self.doc, obj.as_ref(), prop, value)
+            .put(self.doc, &mut self.op_observer, obj.as_ref(), prop, value)
     }
 
     fn put_object<O: AsRef<ExId>, P: Into<Prop>>(
@@ -106,10 +102,13 @@ impl<'a> Transactable for Transaction<'a> {
         prop: P,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
-        self.inner
-            .as_mut()
-            .unwrap()
-            .put_object(self.doc, obj.as_ref(), prop, value)
+        self.inner.as_mut().unwrap().put_object(
+            self.doc,
+            &mut self.op_observer,
+            obj.as_ref(),
+            prop,
+            value,
+        )
     }
 
     fn insert<O: AsRef<ExId>, V: Into<ScalarValue>>(
@@ -118,10 +117,13 @@ impl<'a> Transactable for Transaction<'a> {
         index: usize,
         value: V,
     ) -> Result<(), AutomergeError> {
-        self.inner
-            .as_mut()
-            .unwrap()
-            .insert(self.doc, obj.as_ref(), index, value)
+        self.inner.as_mut().unwrap().insert(
+            self.doc,
+            &mut self.op_observer,
+            obj.as_ref(),
+            index,
+            value,
+        )
     }
 
     fn insert_object<O: AsRef<ExId>>(
@@ -130,10 +132,13 @@ impl<'a> Transactable for Transaction<'a> {
         index: usize,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
-        self.inner
-            .as_mut()
-            .unwrap()
-            .insert_object(self.doc, obj.as_ref(), index, value)
+        self.inner.as_mut().unwrap().insert_object(
+            self.doc,
+            &mut self.op_observer,
+            obj.as_ref(),
+            index,
+            value,
+        )
     }
 
     fn increment<O: AsRef<ExId>, P: Into<Prop>>(
@@ -142,10 +147,13 @@ impl<'a> Transactable for Transaction<'a> {
         prop: P,
         value: i64,
     ) -> Result<(), AutomergeError> {
-        self.inner
-            .as_mut()
-            .unwrap()
-            .increment(self.doc, obj.as_ref(), prop, value)
+        self.inner.as_mut().unwrap().increment(
+            self.doc,
+            &mut self.op_observer,
+            obj.as_ref(),
+            prop,
+            value,
+        )
     }
 
     fn delete<O: AsRef<ExId>, P: Into<Prop>>(
@@ -156,7 +164,7 @@ impl<'a> Transactable for Transaction<'a> {
         self.inner
             .as_mut()
             .unwrap()
-            .delete(self.doc, obj.as_ref(), prop)
+            .delete(self.doc, &mut self.op_observer, obj.as_ref(), prop)
     }
 
     /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
@@ -168,10 +176,14 @@ impl<'a> Transactable for Transaction<'a> {
         del: usize,
         vals: V,
     ) -> Result<(), AutomergeError> {
-        self.inner
-            .as_mut()
-            .unwrap()
-            .splice(self.doc, obj.as_ref(), pos, del, vals)
+        self.inner.as_mut().unwrap().splice(
+            self.doc,
+            &mut self.op_observer,
+            obj.as_ref(),
+            pos,
+            del,
+            vals,
+        )
     }
 
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_, '_> {
@@ -291,7 +303,7 @@ impl<'a> Transactable for Transaction<'a> {
 // intermediate state.
 // This defaults to rolling back the transaction to be compatible with `?` error returning before
 // reaching a call to `commit`.
-impl<'a> Drop for Transaction<'a> {
+impl<'a, Obs: OpObserver> Drop for Transaction<'a, Obs> {
     fn drop(&mut self) {
         if let Some(txn) = self.inner.take() {
             txn.rollback(self.doc);
