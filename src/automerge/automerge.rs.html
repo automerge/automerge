@@ -1201,6 +1201,13 @@
 <span id="1193">1193</span>
 <span id="1194">1194</span>
 <span id="1195">1195</span>
+<span id="1196">1196</span>
+<span id="1197">1197</span>
+<span id="1198">1198</span>
+<span id="1199">1199</span>
+<span id="1200">1200</span>
+<span id="1201">1201</span>
+<span id="1202">1202</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::cmp::Ordering</span>;
 <span class="kw">use</span> <span class="ident">std::collections</span>::{<span class="ident">BTreeSet</span>, <span class="ident">HashMap</span>, <span class="ident">HashSet</span>};
 <span class="kw">use</span> <span class="ident">std::fmt::Debug</span>;
@@ -1794,13 +1801,16 @@
     }
 
     <span class="doccomment">/// Load a document.</span>
+    <span class="attribute">#[<span class="ident">tracing::instrument</span>(<span class="ident">skip</span>(<span class="ident">data</span>, <span class="ident">options</span>), <span class="ident">err</span>)]</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">load_with</span><span class="op">&lt;</span><span class="ident">Obs</span>: <span class="ident">OpObserver</span><span class="op">&gt;</span>(
         <span class="ident">data</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
         <span class="kw-2">mut</span> <span class="ident">options</span>: <span class="ident">ApplyOptions</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">Obs</span><span class="op">&gt;</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
         <span class="kw">if</span> <span class="ident">data</span>.<span class="ident">is_empty</span>() {
+            <span class="macro">tracing::trace!</span>(<span class="string">&quot;no data, initializing empty document&quot;</span>);
             <span class="kw">return</span> <span class="prelude-val">Ok</span>(<span class="ident"><span class="self">Self</span>::new</span>());
         }
+        <span class="macro">tracing::trace!</span>(<span class="string">&quot;loading first chunk&quot;</span>);
         <span class="kw">let</span> (<span class="ident">remaining</span>, <span class="ident">first_chunk</span>) <span class="op">=</span> <span class="ident">storage::Chunk::parse</span>(<span class="ident">storage::parse::Input::new</span>(<span class="ident">data</span>))
             .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">load::Error::Parse</span>(<span class="ident">Box::new</span>(<span class="ident">e</span>)))<span class="question-mark">?</span>;
         <span class="kw">if</span> <span class="op">!</span><span class="ident">first_chunk</span>.<span class="ident">checksum_valid</span>() {
@@ -1810,6 +1820,7 @@
 
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">am</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">first_chunk</span> {
             <span class="ident">storage::Chunk::Document</span>(<span class="ident">d</span>) =&gt; {
+                <span class="macro">tracing::trace!</span>(<span class="string">&quot;first chunk is document chunk, inflating&quot;</span>);
                 <span class="kw">let</span> <span class="ident">storage::load::Reconstructed</span> {
                     <span class="ident">max_op</span>,
                     <span class="ident">result</span>: <span class="ident">op_set</span>,
@@ -1846,6 +1857,7 @@
                 }
             }
             <span class="ident">storage::Chunk::Change</span>(<span class="ident">stored_change</span>) =&gt; {
+                <span class="macro">tracing::trace!</span>(<span class="string">&quot;first chunk is change chunk, applying&quot;</span>);
                 <span class="kw">let</span> <span class="ident">change</span> <span class="op">=</span> <span class="ident">Change::new_from_unverified</span>(<span class="ident">stored_change</span>.<span class="ident">into_owned</span>(), <span class="prelude-val">None</span>)
                     .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">load::Error::InvalidChangeColumns</span>(<span class="ident">Box::new</span>(<span class="ident">e</span>)))<span class="question-mark">?</span>;
                 <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">am</span> <span class="op">=</span> <span class="ident"><span class="self">Self</span>::new</span>();
@@ -1853,6 +1865,7 @@
                 <span class="ident">am</span>
             }
             <span class="ident">storage::Chunk::CompressedChange</span>(<span class="ident">stored_change</span>, <span class="ident">compressed</span>) =&gt; {
+                <span class="macro">tracing::trace!</span>(<span class="string">&quot;first chunk is compressed change, decompressing and applying&quot;</span>);
                 <span class="kw">let</span> <span class="ident">change</span> <span class="op">=</span> <span class="ident">Change::new_from_unverified</span>(
                     <span class="ident">stored_change</span>.<span class="ident">into_owned</span>(),
                     <span class="prelude-val">Some</span>(<span class="ident">compressed</span>.<span class="ident">into_owned</span>()),
@@ -1863,6 +1876,7 @@
                 <span class="ident">am</span>
             }
         };
+        <span class="macro">tracing::trace!</span>(<span class="string">&quot;first chunk loaded, loading remaining chunks&quot;</span>);
         <span class="kw">match</span> <span class="ident">load::load_changes</span>(<span class="ident">remaining</span>.<span class="ident">reset</span>()) {
             <span class="ident">load::LoadedChanges::Complete</span>(<span class="ident">c</span>) =&gt; {
                 <span class="kw">for</span> <span class="ident">change</span> <span class="kw">in</span> <span class="ident">c</span> {

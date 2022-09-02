@@ -342,6 +342,12 @@
 <span id="334">334</span>
 <span id="335">335</span>
 <span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std</span>::{<span class="ident">borrow::Cow</span>, <span class="ident">ops::Range</span>};
 
 <span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">parse</span>, <span class="ident">shift_range</span>, <span class="ident">ChunkType</span>, <span class="ident">Columns</span>, <span class="ident">Header</span>, <span class="ident">RawColumns</span>};
@@ -479,17 +485,23 @@
         <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">parse::RangeOf</span> { <span class="ident">range</span>: <span class="ident">ops</span>, .. }) <span class="op">=</span>
             <span class="ident">parse::range_of</span>(<span class="op">|</span><span class="ident">i</span><span class="op">|</span> <span class="ident">parse::take_n</span>(<span class="ident">ops_meta</span>.<span class="ident">total_column_len</span>(), <span class="ident">i</span>), <span class="ident">i</span>)<span class="question-mark">?</span>;
 
-        <span class="comment">// parse the suffix</span>
-        <span class="kw">let</span> (
-            <span class="ident">i</span>,
-            <span class="ident">parse::RangeOf</span> {
-                <span class="ident">range</span>: <span class="ident">suffix</span>,
-                <span class="ident">value</span>: <span class="ident">head_indices</span>,
-            },
-        ) <span class="op">=</span> <span class="ident">parse::range_of</span>(
-            <span class="op">|</span><span class="ident">i</span><span class="op">|</span> <span class="ident">parse::apply_n</span>(<span class="ident">heads</span>.<span class="ident">len</span>(), <span class="ident">parse::leb128_u64</span>::<span class="op">&lt;</span><span class="ident">ParseError</span><span class="op">&gt;</span>)(<span class="ident">i</span>),
-            <span class="ident">i</span>,
-        )<span class="question-mark">?</span>;
+        <span class="comment">// parse the suffix, which may be empty if this document was produced by an older version</span>
+        <span class="comment">// of the JS automerge implementation</span>
+        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">suffix</span>, <span class="ident">head_indices</span>) <span class="op">=</span> <span class="kw">if</span> <span class="ident">i</span>.<span class="ident">is_empty</span>() {
+            (<span class="ident">i</span>, <span class="number">0</span>..<span class="number">0</span>, <span class="ident">Vec::new</span>())
+        } <span class="kw">else</span> {
+            <span class="kw">let</span> (
+                <span class="ident">i</span>,
+                <span class="ident">parse::RangeOf</span> {
+                    <span class="ident">range</span>: <span class="ident">suffix</span>,
+                    <span class="ident">value</span>: <span class="ident">head_indices</span>,
+                },
+            ) <span class="op">=</span> <span class="ident">parse::range_of</span>(
+                <span class="op">|</span><span class="ident">i</span><span class="op">|</span> <span class="ident">parse::apply_n</span>(<span class="ident">heads</span>.<span class="ident">len</span>(), <span class="ident">parse::leb128_u64</span>::<span class="op">&lt;</span><span class="ident">ParseError</span><span class="op">&gt;</span>)(<span class="ident">i</span>),
+                <span class="ident">i</span>,
+            )<span class="question-mark">?</span>;
+            (<span class="ident">i</span>, <span class="ident">suffix</span>, <span class="ident">head_indices</span>)
+        };
 
         <span class="kw">let</span> <span class="ident">compression::Decompressed</span> {
             <span class="ident">change_bytes</span>,
