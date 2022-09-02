@@ -16,7 +16,7 @@ use crate::{
 pub struct AutoCommitWithObs<Obs: OpObserver> {
     doc: Automerge,
     transaction: Option<(Obs, TransactionInner)>,
-    pub op_observer: Obs,
+    op_observer: Obs,
 }
 
 pub type AutoCommit = AutoCommitWithObs<()>;
@@ -43,6 +43,11 @@ impl AutoCommit {
 }
 
 impl<Obs: OpObserver> AutoCommitWithObs<Obs> {
+    pub fn observer(&mut self) -> &mut Obs {
+      self.ensure_transaction_closed();
+      &mut self.op_observer
+    }
+
     pub fn with_observer<Obs2: OpObserver>(self, op_observer: Obs2) -> AutoCommitWithObs<Obs2> {
         AutoCommitWithObs {
             doc: self.doc,
@@ -98,7 +103,7 @@ impl<Obs: OpObserver> AutoCommitWithObs<Obs> {
         })
     }
 
-    pub fn ensure_transaction_closed(&mut self) {
+    fn ensure_transaction_closed(&mut self) {
         if let Some((current, tx)) = self.transaction.take() {
             self.op_observer.merge(&current);
             tx.commit(&mut self.doc, None, None);
