@@ -1437,19 +1437,15 @@ fn observe_counter_change_application_overwrite() {
     doc1.increment(ROOT, "counter", 5).unwrap();
     doc1.commit();
 
-    let mut observer = VecOpObserver::default();
-    let mut doc3 = doc1.clone();
-    doc3.merge_with(
-        &mut doc2,
-        ApplyOptions::default().with_op_observer(&mut observer),
-    )
-    .unwrap();
+    let mut doc3 = doc1.fork().with_observer(VecOpObserver::default());
+    doc3.merge(&mut doc2).unwrap();
 
     assert_eq!(
-        observer.take_patches(),
+        doc3.observer().take_patches(),
         vec![Patch::Put {
             obj: ExId::Root,
-            key: Prop::Map("counter".into()),
+            path: vec![],
+            prop: Prop::Map("counter".into()),
             value: (
                 ScalarValue::Str("mystring".into()).into(),
                 ExId::Id(2, doc2.get_actor().clone(), 1)
@@ -1458,16 +1454,11 @@ fn observe_counter_change_application_overwrite() {
         }]
     );
 
-    let mut observer = VecOpObserver::default();
-    let mut doc4 = doc2.clone();
-    doc4.merge_with(
-        &mut doc1,
-        ApplyOptions::default().with_op_observer(&mut observer),
-    )
-    .unwrap();
+    let mut doc4 = doc2.clone().with_observer(VecOpObserver::default());
+    doc4.merge(&mut doc1).unwrap();
 
     // no patches as the increments operate on an invisible counter
-    assert_eq!(observer.take_patches(), vec![]);
+    assert_eq!(doc4.observer().take_patches(), vec![]);
 }
 
 #[test]
@@ -1478,20 +1469,15 @@ fn observe_counter_change_application() {
     doc.increment(ROOT, "counter", 5).unwrap();
     let changes = doc.get_changes(&[]).unwrap().into_iter().cloned();
 
-    let mut new_doc = AutoCommit::new();
-    let mut observer = VecOpObserver::default();
-    new_doc
-        .apply_changes_with(
-            changes,
-            ApplyOptions::default().with_op_observer(&mut observer),
-        )
-        .unwrap();
+    let mut new_doc = AutoCommit::new().with_observer(VecOpObserver::default());
+    new_doc.apply_changes(changes).unwrap();
     assert_eq!(
-        observer.take_patches(),
+        new_doc.observer().take_patches(),
         vec![
             Patch::Put {
                 obj: ExId::Root,
-                key: Prop::Map("counter".into()),
+                path: vec![],
+                prop: Prop::Map("counter".into()),
                 value: (
                     ScalarValue::counter(1).into(),
                     ExId::Id(1, doc.get_actor().clone(), 0)
@@ -1500,12 +1486,14 @@ fn observe_counter_change_application() {
             },
             Patch::Increment {
                 obj: ExId::Root,
-                key: Prop::Map("counter".into()),
+                path: vec![],
+                prop: Prop::Map("counter".into()),
                 value: (2, ExId::Id(2, doc.get_actor().clone(), 0)),
             },
             Patch::Increment {
                 obj: ExId::Root,
-                key: Prop::Map("counter".into()),
+                path: vec![],
+                prop: Prop::Map("counter".into()),
                 value: (5, ExId::Id(3, doc.get_actor().clone(), 0)),
             }
         ]
@@ -1514,7 +1502,7 @@ fn observe_counter_change_application() {
 
 #[test]
 fn get_changes_heads_empty() {
-    let mut doc = AutoCommit::new();
+    let mut doc = AutoCommit::default();
     doc.put(ROOT, "key1", 1).unwrap();
     doc.commit();
     doc.put(ROOT, "key2", 1).unwrap();

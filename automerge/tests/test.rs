@@ -1,7 +1,7 @@
 use automerge::transaction::Transactable;
 use automerge::{
-    ActorId, ApplyOptions, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjType,
-    ScalarValue, VecOpObserver, ROOT,
+    ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjType, ScalarValue,
+    VecOpObserver, ROOT,
 };
 
 // set up logging for all the tests
@@ -1005,13 +1005,8 @@ fn observe_counter_change_application() {
     doc.increment(ROOT, "counter", 5).unwrap();
     let changes = doc.get_changes(&[]).unwrap().into_iter().cloned();
 
-    let mut doc = AutoCommit::new();
-    let mut observer = VecOpObserver::default();
-    doc.apply_changes_with(
-        changes,
-        ApplyOptions::default().with_op_observer(&mut observer),
-    )
-    .unwrap();
+    let mut doc = AutoCommit::new().with_observer(VecOpObserver::default());
+    doc.apply_changes(changes).unwrap();
 }
 
 #[test]

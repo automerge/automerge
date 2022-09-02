@@ -9,19 +9,19 @@ use automerge::ROOT;
 fn main() {
     let mut doc = Automerge::new();
 
-    let mut observer = VecOpObserver::default();
     // a simple scalar change in the root object
-    doc.transact_with::<_, _, AutomergeError, _, _>(
-        |_result| CommitOptions::default().with_op_observer(&mut observer),
-        |tx| {
-            tx.put(ROOT, "hello", "world").unwrap();
-            Ok(())
-        },
-    )
-    .unwrap();
-    get_changes(&doc, observer.take_patches());
+    let mut result = doc
+        .transact_with::<_, _, AutomergeError, _, VecOpObserver>(
+            |_result| CommitOptions::default(),
+            |tx| {
+                tx.put(ROOT, "hello", "world").unwrap();
+                Ok(())
+            },
+        )
+        .unwrap();
+    get_changes(&doc, result.op_observer.take_patches());
 
-    let mut tx = doc.transaction();
+    let mut tx = doc.transaction_with_observer(VecOpObserver::default());
     let map = tx
         .put_object(ROOT, "my new map", automerge::ObjType::Map)
         .unwrap();
@@ -36,28 +36,28 @@ fn main() {
     tx.insert(&list, 1, "woo").unwrap();
     let m = tx.insert_object(&list, 2, automerge::ObjType::Map).unwrap();
     tx.put(&m, "hi", 2).unwrap();
-    let _heads3 = tx.commit_with(CommitOptions::default().with_op_observer(&mut observer));
-    get_changes(&doc, observer.take_patches());
+    let patches = tx.op_observer.take_patches();
+    let _heads3 = tx.commit_with(CommitOptions::default());
+    get_changes(&doc, patches);
 }
 
 fn get_changes(doc: &Automerge, patches: Vec<Patch>) {
     for patch in patches {
         match patch {
             Patch::Put {
-                obj,
-                key,
-                value,
-                conflict: _,
+                obj, prop, value, ..
             } => {
                 println!(
                     "put {:?} at {:?} in obj {:?}, object path {:?}",
                     value,
-                    key,
+                    prop,
                     obj,
                     doc.path_to_object(&obj)
                 )
             }
-            Patch::Insert { obj, index, value } => {
+            Patch::Insert {
+                obj, index, value, ..
+            } => {
                 println!(
                     "insert {:?} at {:?} in obj {:?}, object path {:?}",
                     value,
@@ -66,18 +66,20 @@ fn get_changes(doc: &Automerge, patches: Vec<Patch>) {
                     doc.path_to_object(&obj)
                 )
             }
-            Patch::Increment { obj, key, value } => {
+            Patch::Increment {
+                obj, prop, value, ..
+            } => {
                 println!(
                     "increment {:?} in obj {:?} by {:?}, object path {:?}",
-                    key,
+                    prop,
                     obj,
                     value,
                     doc.path_to_object(&obj)
                 )
             }
-            Patch::Delete { obj, key } => println!(
+            Patch::Delete { obj, prop, .. } => println!(
                 "delete {:?} in obj {:?}, object path {:?}",
-                key,
+                prop,
                 obj,
                 doc.path_to_object(&obj)
             ),
