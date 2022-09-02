@@ -19,8 +19,8 @@ use crate::types::{
     ScalarValue, Value,
 };
 use crate::{
-    query, ApplyOptions, AutomergeError, Change, KeysAt, ListRange, ListRangeAt, MapRange,
-    MapRangeAt, ObjType, Prop, Values,
+    query, AutomergeError, Change, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType,
+    Prop, Values,
 };
 use serde::Serialize;
 
@@ -111,10 +111,22 @@ impl Automerge {
     }
 
     /// Start a transaction.
-    pub fn transaction(&mut self) -> Transaction<'_> {
+    pub fn transaction(&mut self) -> Transaction<'_, ()> {
         Transaction {
             inner: Some(self.transaction_inner()),
             doc: self,
+            op_observer: (),
+        }
+    }
+
+    pub fn transaction_with_observer<Obs: OpObserver>(
+        &mut self,
+        op_observer: Obs,
+    ) -> Transaction<'_, Obs> {
+        Transaction {
+            inner: Some(self.transaction_inner()),
+            doc: self,
+            op_observer,
         }
     }
 
@@ -143,15 +155,16 @@ impl Automerge {
 
     /// Run a transaction on this document in a closure, automatically handling commit or rollback
     /// afterwards.
-    pub fn transact<F, O, E>(&mut self, f: F) -> transaction::Result<O, E>
+    pub fn transact<F, O, E>(&mut self, f: F) -> transaction::Result<O, (), E>
     where
-        F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
+        F: FnOnce(&mut Transaction<'_, ()>) -> Result<O, E>,
     {
         let mut tx = self.transaction();
         let result = f(&mut tx);
         match result {
             Ok(result) => Ok(Success {
                 result,
+                op_observer: (),
                 hash: tx.commit(),
             }),
             Err(error) => Err(Failure {
@@ -162,19 +175,25 @@ impl Automerge {
     }
 
     /// Like [`Self::transact`] but with a function for generating the commit options.
-    pub fn transact_with<'a, F, O, E, C, Obs>(&mut self, c: C, f: F) -> transaction::Result<O, E>
+    pub fn transact_with<F, O, E, C, Obs>(&mut self, c: C, f: F) -> transaction::Result<O, Obs, E>
     where
-        F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
-        C: FnOnce(&O) -> CommitOptions<'a, Obs>,
-        Obs: 'a + OpObserver,
+        F: FnOnce(&mut Transaction<'_, Obs>) -> Result<O, E>,
+        C: FnOnce(&O) -> CommitOptions,
+        Obs: OpObserver,
     {
-        let mut tx = self.transaction();
+        let mut op_observer = Obs::default();
+        let mut tx = self.transaction_with_observer(Default::default());
         let result = f(&mut tx);
         match result {
             Ok(result) => {
                 let commit_options = c(&result);
+                std::mem::swap(&mut op_observer, &mut tx.op_observer);
                 let hash = tx.commit_with(commit_options);
-                Ok(Success { result, hash })
+                Ok(Success {
+                    result,
+                    hash,
+                    op_observer,
+                })
             }
             Err(error) => Err(Failure {
                 error,
@@ -220,17 +239,6 @@ impl Automerge {
     // PropAt::()
     // NthAt::()
 
-    /// Get the object id of the object that contains this object and the prop that this object is
-    /// at in that object.
-    pub(crate) fn parent_object(&self, obj: ObjId) -> Option<(ObjId, Key)> {
-        if obj == ObjId::root() {
-            // root has no parent
-            None
-        } else {
-            self.ops.parent_object(&obj)
-        }
-    }
-
     /// Get the parents of an object in the document tree.
     ///
     /// ### Errors
@@ -244,10 +252,7 @@ impl Automerge {
     /// value.
     pub fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
         let obj_id = self.exid_to_obj(obj.as_ref())?;
-        Ok(Parents {
-            obj: obj_id,
-            doc: self,
-        })
+        Ok(self.ops.parents(obj_id))
     }
 
     pub fn path_to_object<O: AsRef<ExId>>(
@@ -257,21 +262,6 @@ impl Automerge {
         let mut path = self.parents(obj.as_ref().clone())?.collect::<Vec<_>>();
         path.reverse();
         Ok(path)
-    }
-
-    /// Export a key to a prop.
-    pub(crate) fn export_key(&self, obj: ObjId, key: Key) -> Prop {
-        match key {
-            Key::Map(m) => Prop::Map(self.ops.m.props.get(m).into()),
-            Key::Seq(opid) => {
-                let i = self
-                    .ops
-                    .search(&obj, query::ElemIdPos::new(opid))
-                    .index()
-                    .unwrap();
-                Prop::Seq(i)
-            }
-        }
     }
 
     /// Get the keys of the object `obj`.
@@ -587,14 +577,14 @@ impl Automerge {
 
     /// Load a document.
     pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {
-        Self::load_with::<()>(data, ApplyOptions::default())
+        Self::load_with::<()>(data, None)
     }
 
     /// Load a document.
-    #[tracing::instrument(skip(data, options), err)]
+    #[tracing::instrument(skip(data, observer), err)]
     pub fn load_with<Obs: OpObserver>(
         data: &[u8],
-        mut options: ApplyOptions<'_, Obs>,
+        mut observer: Option<&mut Obs>,
     ) -> Result<Self, AutomergeError> {
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
@@ -606,7 +596,6 @@ impl Automerge {
         if !first_chunk.checksum_valid() {
             return Err(load::Error::BadChecksum.into());
         }
-        let observer = &mut options.op_observer;
 
         let mut am = match first_chunk {
             storage::Chunk::Document(d) => {
@@ -616,7 +605,7 @@ impl Automerge {
                     result: op_set,
                     changes,
                     heads,
-                } = match observer {
+                } = match &mut observer {
                     Some(o) => storage::load::reconstruct_document(&d, OpSet::observed_builder(*o)),
                     None => storage::load::reconstruct_document(&d, OpSet::builder()),
                 }
@@ -651,7 +640,7 @@ impl Automerge {
                 let change = Change::new_from_unverified(stored_change.into_owned(), None)
                     .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?;
                 let mut am = Self::new();
-                am.apply_change(change, observer);
+                am.apply_change(change, &mut observer);
                 am
             }
             storage::Chunk::CompressedChange(stored_change, compressed) => {
@@ -662,7 +651,7 @@ impl Automerge {
                 )
                 .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?;
                 let mut am = Self::new();
-                am.apply_change(change, observer);
+                am.apply_change(change, &mut observer);
                 am
             }
         };
@@ -670,7 +659,7 @@ impl Automerge {
         match load::load_changes(remaining.reset()) {
             load::LoadedChanges::Complete(c) => {
                 for change in c {
-                    am.apply_change(change, observer);
+                    am.apply_change(change, &mut observer);
                 }
             }
             load::LoadedChanges::Partial { error, .. } => return Err(error.into()),
@@ -680,14 +669,14 @@ impl Automerge {
 
     /// Load an incremental save of a document.
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
-        self.load_incremental_with::<()>(data, ApplyOptions::default())
+        self.load_incremental_with::<()>(data, None)
     }
 
     /// Load an incremental save of a document.
     pub fn load_incremental_with<Obs: OpObserver>(
         &mut self,
         data: &[u8],
-        options: ApplyOptions<'_, Obs>,
+        op_observer: Option<&mut Obs>,
     ) -> Result<usize, AutomergeError> {
         let changes = match load::load_changes(storage::parse::Input::new(data)) {
             load::LoadedChanges::Complete(c) => c,
@@ -697,7 +686,7 @@ impl Automerge {
             }
         };
         let start = self.ops.len();
-        self.apply_changes_with(changes, options)?;
+        self.apply_changes_with(changes, op_observer)?;
         let delta = self.ops.len() - start;
         Ok(delta)
     }
@@ -717,14 +706,14 @@ impl Automerge {
         &mut self,
         changes: impl IntoIterator<Item = Change>,
     ) -> Result<(), AutomergeError> {
-        self.apply_changes_with::<_, ()>(changes, ApplyOptions::default())
+        self.apply_changes_with::<_, ()>(changes, None)
     }
 
     /// Apply changes to this document.
     pub fn apply_changes_with<I: IntoIterator<Item = Change>, Obs: OpObserver>(
         &mut self,
         changes: I,
-        mut options: ApplyOptions<'_, Obs>,
+        mut op_observer: Option<&mut Obs>,
     ) -> Result<(), AutomergeError> {
         for c in changes {
             if !self.history_index.contains_key(&c.hash()) {
@@ -735,7 +724,7 @@ impl Automerge {
                     ));
                 }
                 if self.is_causally_ready(&c) {
-                    self.apply_change(c, &mut options.op_observer);
+                    self.apply_change(c, &mut op_observer);
                 } else {
                     self.queue.push(c);
                 }
@@ -743,7 +732,7 @@ impl Automerge {
         }
         while let Some(c) = self.pop_next_causally_ready_change() {
             if !self.history_index.contains_key(&c.hash()) {
-                self.apply_change(c, &mut options.op_observer);
+                self.apply_change(c, &mut op_observer);
             }
         }
         Ok(())
@@ -831,14 +820,14 @@ impl Automerge {
 
     /// Takes all the changes in `other` which are not in `self` and applies them
     pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
-        self.merge_with::<()>(other, ApplyOptions::default())
+        self.merge_with::<()>(other, None)
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
-    pub fn merge_with<'a, Obs: OpObserver>(
+    pub fn merge_with<Obs: OpObserver>(
         &mut self,
         other: &mut Self,
-        options: ApplyOptions<'a, Obs>,
+        op_observer: Option<&mut Obs>,
     ) -> Result<Vec<ChangeHash>, AutomergeError> {
         // TODO: Make this fallible and figure out how to do this transactionally
         let changes = self
@@ -847,7 +836,7 @@ impl Automerge {
             .cloned()
             .collect::<Vec<_>>();
         tracing::trace!(changes=?changes.iter().map(|c| c.hash()).collect::<Vec<_>>(), "merging new changes");
-        self.apply_changes_with(changes, options)?;
+        self.apply_changes_with(changes, op_observer)?;
         Ok(self.get_heads())
     }
 

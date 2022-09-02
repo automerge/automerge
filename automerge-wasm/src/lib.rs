@@ -28,10 +28,7 @@
 #![allow(clippy::unused_unit)]
 use am::transaction::CommitOptions;
 use am::transaction::Transactable;
-use am::ApplyOptions;
 use automerge as am;
-use automerge::Patch;
-use automerge::VecOpObserver;
 use automerge::{Change, ObjId, Prop, Value, ROOT};
 use js_sys::{Array, Object, Uint8Array};
 use std::convert::TryInto;
@@ -39,8 +36,11 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 mod interop;
+mod observer;
 mod sync;
 mod value;
+
+use observer::Observer;
 
 use interop::{
     get_heads, js_get, js_set, list_to_js, list_to_js_at, map_to_js, map_to_js_at, to_js_err,
@@ -56,6 +56,8 @@ macro_rules! log {
     };
 }
 
+type AutoCommit = am::AutoCommitWithObs<Observer>;
+
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
@@ -63,40 +65,24 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 #[wasm_bindgen]
 #[derive(Debug)]
 pub struct Automerge {
-    doc: automerge::AutoCommit,
-    observer: Option<VecOpObserver>,
+    doc: AutoCommit,
 }
 
 #[wasm_bindgen]
 impl Automerge {
     pub fn new(actor: Option<String>) -> Result<Automerge, JsValue> {
-        let mut automerge = automerge::AutoCommit::new();
+        let mut doc = AutoCommit::default();
         if let Some(a) = actor {
             let a = automerge::ActorId::from(hex::decode(a).map_err(to_js_err)?.to_vec());
-            automerge.set_actor(a);
+            doc.set_actor(a);
         }
-        Ok(Automerge {
-            doc: automerge,
-            observer: None,
-        })
-    }
-
-    fn ensure_transaction_closed(&mut self) {
-        if self.doc.pending_ops() > 0 {
-            let mut opts = CommitOptions::default();
-            if let Some(observer) = self.observer.as_mut() {
-                opts.set_op_observer(observer);
-            }
-            self.doc.commit_with(opts);
-        }
+        Ok(Automerge { doc })
     }
 
     #[allow(clippy::should_implement_trait)]
     pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, JsValue> {
-        self.ensure_transaction_closed();
         let mut automerge = Automerge {
             doc: self.doc.clone(),
-            observer: None,
         };
         if let Some(s) = actor {
             let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
@@ -106,10 +92,8 @@ impl Automerge {
     }
 
     pub fn fork(&mut self, actor: Option<String>) -> Result<Automerge, JsValue> {
-        self.ensure_transaction_closed();
         let mut automerge = Automerge {
             doc: self.doc.fork(),
-            observer: None,
         };
         if let Some(s) = actor {
             let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
@@ -123,7 +107,6 @@ impl Automerge {
         let deps: Vec<_> = JS(heads).try_into()?;
         let mut automerge = Automerge {
             doc: self.doc.fork_at(&deps)?,
-            observer: None,
         };
         if let Some(s) = actor {
             let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
@@ -147,21 +130,12 @@ impl Automerge {
         if let Some(time) = time {
             commit_opts.set_time(time as i64);
         }
-        if let Some(observer) = self.observer.as_mut() {
-            commit_opts.set_op_observer(observer);
-        }
         let hash = self.doc.commit_with(commit_opts);
         JsValue::from_str(&hex::encode(&hash.0))
     }
 
     pub fn merge(&mut self, other: &mut Automerge) -> Result<Array, JsValue> {
-        self.ensure_transaction_closed();
-        let options = if let Some(observer) = self.observer.as_mut() {
-            ApplyOptions::default().with_op_observer(observer)
-        } else {
-            ApplyOptions::default()
-        };
-        let heads = self.doc.merge_with(&mut other.doc, options)?;
+        let heads = self.doc.merge(&mut other.doc)?;
         let heads: Array = heads
             .iter()
             .map(|h| JsValue::from_str(&hex::encode(&h.0)))
@@ -451,16 +425,11 @@ impl Automerge {
 
     #[wasm_bindgen(js_name = enablePatches)]
     pub fn enable_patches(&mut self, enable: JsValue) -> Result<(), JsValue> {
+        self.doc.ensure_transaction_closed();
         let enable = enable
             .as_bool()
-            .ok_or_else(|| to_js_err("expected boolean"))?;
-        if enable {
-            if self.observer.is_none() {
-                self.observer = Some(VecOpObserver::default());
-            }
-        } else {
-            self.observer = None;
-        }
+            .ok_or_else(|| to_js_err("must pass a bool to enable_patches"))?;
+        self.doc.op_observer.enable(enable);
         Ok(())
     }
 
@@ -469,68 +438,12 @@ impl Automerge {
         // transactions send out observer updates as they occur, not waiting for them to be
         // committed.
         // If we pop the patches then we won't be able to revert them.
-        self.ensure_transaction_closed();
 
-        let patches = self
-            .observer
-            .as_mut()
-            .map_or_else(Vec::new, |o| o.take_patches());
+        self.doc.ensure_transaction_closed();
+        let patches = self.doc.op_observer.take_patches();
         let result = Array::new();
         for p in patches {
-            let patch = Object::new();
-            match p {
-                Patch::Put {
-                    obj,
-                    key,
-                    value,
-                    conflict,
-                } => {
-                    js_set(&patch, "action", "put")?;
-                    js_set(&patch, "obj", obj.to_string())?;
-                    js_set(&patch, "key", key)?;
-                    match value {
-                        (Value::Object(obj_type), obj_id) => {
-                            js_set(&patch, "datatype", obj_type.to_string())?;
-                            js_set(&patch, "value", obj_id.to_string())?;
-                        }
-                        (Value::Scalar(value), _) => {
-                            js_set(&patch, "datatype", datatype(&value))?;
-                            js_set(&patch, "value", ScalarValue(value))?;
-                        }
-                    };
-                    js_set(&patch, "conflict", conflict)?;
-                }
-
-                Patch::Insert { obj, index, value } => {
-                    js_set(&patch, "action", "insert")?;
-                    js_set(&patch, "obj", obj.to_string())?;
-                    js_set(&patch, "key", index as f64)?;
-                    match value {
-                        (Value::Object(obj_type), obj_id) => {
-                            js_set(&patch, "datatype", obj_type.to_string())?;
-                            js_set(&patch, "value", obj_id.to_string())?;
-                        }
-                        (Value::Scalar(value), _) => {
-                            js_set(&patch, "datatype", datatype(&value))?;
-                            js_set(&patch, "value", ScalarValue(value))?;
-                        }
-                    };
-                }
-
-                Patch::Increment { obj, key, value } => {
-                    js_set(&patch, "action", "increment")?;
-                    js_set(&patch, "obj", obj.to_string())?;
-                    js_set(&patch, "key", key)?;
-                    js_set(&patch, "value", value.0)?;
-                }
-
-                Patch::Delete { obj, key } => {
-                    js_set(&patch, "action", "delete")?;
-                    js_set(&patch, "obj", obj.to_string())?;
-                    js_set(&patch, "key", key)?;
-                }
-            }
-            result.push(&patch);
+            result.push(&p.try_into()?);
         }
         Ok(result)
     }
@@ -552,51 +465,31 @@ impl Automerge {
     }
 
     pub fn save(&mut self) -> Uint8Array {
-        self.ensure_transaction_closed();
         Uint8Array::from(self.doc.save().as_slice())
     }
 
     #[wasm_bindgen(js_name = saveIncremental)]
     pub fn save_incremental(&mut self) -> Uint8Array {
-        self.ensure_transaction_closed();
         let bytes = self.doc.save_incremental();
         Uint8Array::from(bytes.as_slice())
     }
 
     #[wasm_bindgen(js_name = loadIncremental)]
     pub fn load_incremental(&mut self, data: Uint8Array) -> Result<f64, JsValue> {
-        self.ensure_transaction_closed();
         let data = data.to_vec();
-        let options = if let Some(observer) = self.observer.as_mut() {
-            ApplyOptions::default().with_op_observer(observer)
-        } else {
-            ApplyOptions::default()
-        };
-        let len = self
-            .doc
-            .load_incremental_with(&data, options)
-            .map_err(to_js_err)?;
+        let len = self.doc.load_incremental(&data).map_err(to_js_err)?;
         Ok(len as f64)
     }
 
     #[wasm_bindgen(js_name = applyChanges)]
     pub fn apply_changes(&mut self, changes: JsValue) -> Result<(), JsValue> {
-        self.ensure_transaction_closed();
         let changes: Vec<_> = JS(changes).try_into()?;
-        let options = if let Some(observer) = self.observer.as_mut() {
-            ApplyOptions::default().with_op_observer(observer)
-        } else {
-            ApplyOptions::default()
-        };
-        self.doc
-            .apply_changes_with(changes, options)
-            .map_err(to_js_err)?;
+        self.doc.apply_changes(changes).map_err(to_js_err)?;
         Ok(())
     }
 
     #[wasm_bindgen(js_name = getChanges)]
     pub fn get_changes(&mut self, have_deps: JsValue) -> Result<Array, JsValue> {
-        self.ensure_transaction_closed();
         let deps: Vec<_> = JS(have_deps).try_into()?;
         let changes = self.doc.get_changes(&deps)?;
         let changes: Array = changes
@@ -608,7 +501,6 @@ impl Automerge {
 
     #[wasm_bindgen(js_name = getChangeByHash)]
     pub fn get_change_by_hash(&mut self, hash: JsValue) -> Result<JsValue, JsValue> {
-        self.ensure_transaction_closed();
         let hash = hash.into_serde().map_err(to_js_err)?;
         let change = self.doc.get_change_by_hash(&hash);
         if let Some(c) = change {
@@ -620,7 +512,6 @@ impl Automerge {
 
     #[wasm_bindgen(js_name = getChangesAdded)]
     pub fn get_changes_added(&mut self, other: &mut Automerge) -> Result<Array, JsValue> {
-        self.ensure_transaction_closed();
         let changes = self.doc.get_changes_added(&mut other.doc);
         let changes: Array = changes
             .iter()
@@ -631,7 +522,6 @@ impl Automerge {
 
     #[wasm_bindgen(js_name = getHeads)]
     pub fn get_heads(&mut self) -> Array {
-        self.ensure_transaction_closed();
         let heads = self.doc.get_heads();
         let heads: Array = heads
             .iter()
@@ -648,7 +538,6 @@ impl Automerge {
 
     #[wasm_bindgen(js_name = getLastLocalChange)]
     pub fn get_last_local_change(&mut self) -> Result<JsValue, JsValue> {
-        self.ensure_transaction_closed();
         if let Some(change) = self.doc.get_last_local_change() {
             Ok(Uint8Array::from(change.raw_bytes()).into())
         } else {
@@ -657,13 +546,11 @@ impl Automerge {
     }
 
     pub fn dump(&mut self) {
-        self.ensure_transaction_closed();
         self.doc.dump()
     }
 
     #[wasm_bindgen(js_name = getMissingDeps)]
     pub fn get_missing_deps(&mut self, heads: Option<Array>) -> Result<Array, JsValue> {
-        self.ensure_transaction_closed();
         let heads = get_heads(heads).unwrap_or_default();
         let deps = self.doc.get_missing_deps(&heads);
         let deps: Array = deps
@@ -679,23 +566,16 @@ impl Automerge {
         state: &mut SyncState,
         message: Uint8Array,
     ) -> Result<(), JsValue> {
-        self.ensure_transaction_closed();
         let message = message.to_vec();
         let message = am::sync::Message::decode(message.as_slice()).map_err(to_js_err)?;
-        let options = if let Some(observer) = self.observer.as_mut() {
-            ApplyOptions::default().with_op_observer(observer)
-        } else {
-            ApplyOptions::default()
-        };
         self.doc
-            .receive_sync_message_with(&mut state.0, message, options)
+            .receive_sync_message(&mut state.0, message)
             .map_err(to_js_err)?;
         Ok(())
     }
 
     #[wasm_bindgen(js_name = generateSyncMessage)]
     pub fn generate_sync_message(&mut self, state: &mut SyncState) -> Result<JsValue, JsValue> {
-        self.ensure_transaction_closed();
         if let Some(message) = self.doc.generate_sync_message(&mut state.0) {
             Ok(Uint8Array::from(message.encode().as_slice()).into())
         } else {
@@ -855,17 +735,12 @@ pub fn init(actor: Option<String>) -> Result<Automerge, JsValue> {
 #[wasm_bindgen(js_name = load)]
 pub fn load(data: Uint8Array, actor: Option<String>) -> Result<Automerge, JsValue> {
     let data = data.to_vec();
-    let observer = None;
-    let options = ApplyOptions::<()>::default();
-    let mut automerge = am::AutoCommit::load_with(&data, options).map_err(to_js_err)?;
+    let mut doc = AutoCommit::load(&data).map_err(to_js_err)?;
     if let Some(s) = actor {
         let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
-        automerge.set_actor(actor);
+        doc.set_actor(actor);
     }
-    Ok(Automerge {
-        doc: automerge,
-        observer,
-    })
+    Ok(Automerge { doc })
 }
 
 #[wasm_bindgen(js_name = encodeChange)]
