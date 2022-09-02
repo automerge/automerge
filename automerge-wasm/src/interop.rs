@@ -2,13 +2,13 @@ use crate::AutoCommit;
 use automerge as am;
 use automerge::transaction::Transactable;
 use automerge::{Change, ChangeHash, Prop};
-use js_sys::{Array, Object, Reflect, Uint8Array};
+use js_sys::{Array, Function, Object, Reflect, Uint8Array};
 use std::collections::{BTreeSet, HashSet};
 use std::fmt::Display;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use crate::{ObjId, ScalarValue, Value};
+use crate::{observer::Patch, ObjId, ScalarValue, Value};
 
 pub(crate) struct JS(pub(crate) JsValue);
 pub(crate) struct AR(pub(crate) Array);
@@ -459,6 +459,12 @@ pub(crate) fn list_to_js_at(doc: &AutoCommit, obj: &ObjId, heads: &[ChangeHash])
     array.into()
 }
 
+/*
+pub(crate) fn export_values<'a, V: Iterator<Item = Value<'a>>>(val: V) -> Array {
+  val.map(|v| export_value(&v)).collect()
+}
+*/
+
 pub(crate) fn export_value(val: &Value<'_>) -> JsValue {
     match val {
         Value::Object(o) if o == &am::ObjType::Map || o == &am::ObjType::Table => {
@@ -466,5 +472,101 @@ pub(crate) fn export_value(val: &Value<'_>) -> JsValue {
         }
         Value::Object(_) => Array::new().into(),
         Value::Scalar(v) => ScalarValue(v.clone()).into(),
+    }
+}
+
+pub(crate) fn apply_patch(obj: JsValue, patch: &Patch) -> Result<JsValue, JsValue> {
+    apply_patch2(obj, patch, 0)
+}
+
+pub(crate) fn apply_patch2(obj: JsValue, patch: &Patch, depth: usize) -> Result<JsValue, JsValue> {
+    match (js_to_map_seq(&obj)?, patch.path().get(depth)) {
+        (JsObj::Map(o), Some(Prop::Map(key))) => {
+            let sub_obj = Reflect::get(&obj, &key.into())?;
+            let new_value = apply_patch2(sub_obj, patch, depth + 1)?;
+            let result =
+                Reflect::construct(&o.constructor(), &Array::new())?.dyn_into::<Object>()?;
+            let result = Object::assign(&result, &o).into();
+            Reflect::set(&result, &key.into(), &new_value)?;
+            Ok(result)
+        }
+        (JsObj::Seq(a), Some(Prop::Seq(index))) => {
+            let index = JsValue::from_f64(*index as f64);
+            let sub_obj = Reflect::get(&obj, &index)?;
+            let new_value = apply_patch2(sub_obj, patch, depth + 1)?;
+            let result = Reflect::construct(&a.constructor(), &a)?;
+            //web_sys::console::log_2(&format!("NEW VAL {}: ", tmpi).into(), &new_value);
+            Reflect::set(&result, &index, &new_value)?;
+            Ok(result)
+        }
+        (JsObj::Map(o), None) => {
+            let result =
+                Reflect::construct(&o.constructor(), &Array::new())?.dyn_into::<Object>()?;
+            let result = Object::assign(&result, &o);
+            match patch {
+                Patch::PutMap { key, value, .. } => {
+                    let result = result.into();
+                    Reflect::set(&result, &key.into(), &export_value(value))?;
+                    Ok(result)
+                }
+                Patch::DeleteMap { key, .. } => {
+                    Reflect::delete_property(&result, &key.into())?;
+                    Ok(result.into())
+                }
+                Patch::Insert { .. } => Err(to_js_err("cannot insert into map")),
+                Patch::DeleteSeq { .. } => Err(to_js_err("cannot splice a map")),
+                Patch::PutSeq { .. } => Err(to_js_err("cannot array index a map")),
+                _ => unimplemented!(),
+            }
+        }
+        (JsObj::Seq(a), None) => {
+            match patch {
+                Patch::PutSeq { index, value, .. } => {
+                    let result = Reflect::construct(&a.constructor(), &a)?;
+                    Reflect::set(&result, &(*index as f64).into(), &export_value(value))?;
+                    Ok(result)
+                }
+                Patch::DeleteSeq { index, .. } => {
+                    let result = &a.dyn_into::<Array>()?;
+                    let mut f = |_, i, _| i != *index as u32;
+                    let result = result.filter(&mut f);
+
+                    Ok(result.into())
+                }
+                Patch::Insert { index, values, .. } => {
+                    let from = Reflect::get(&a.constructor().into(), &"from".into())?
+                        .dyn_into::<Function>()?;
+                    let result = from.call1(&JsValue::undefined(), &a)?.dyn_into::<Array>()?;
+                    // FIXME: should be one function call
+                    for v in values {
+                        result.splice(*index as u32, 0, &export_value(v));
+                    }
+                    Ok(result.into())
+                }
+                Patch::DeleteMap { .. } => Err(to_js_err("cannot delete from a seq")),
+                Patch::PutMap { .. } => Err(to_js_err("cannot set key in seq")),
+                _ => unimplemented!(),
+            }
+        }
+        (_, _) => Err(to_js_err(format!(
+            "object/patch missmatch {:?} depth={:?}",
+            patch, depth
+        ))),
+    }
+}
+
+#[derive(Debug)]
+enum JsObj {
+    Map(Object),
+    Seq(Array),
+}
+
+fn js_to_map_seq(value: &JsValue) -> Result<JsObj, JsValue> {
+    if let Ok(array) = value.clone().dyn_into::<Array>() {
+        Ok(JsObj::Seq(array))
+    } else if let Ok(obj) = value.clone().dyn_into::<Object>() {
+        Ok(JsObj::Map(obj))
+    } else {
+        Err(to_js_err("obj is not Object or Array"))
     }
 }

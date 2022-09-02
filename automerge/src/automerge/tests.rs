@@ -1441,7 +1441,7 @@ fn observe_counter_change_application_overwrite() {
     doc3.merge(&mut doc2).unwrap();
 
     assert_eq!(
-        doc3.op_observer.take_patches(),
+        doc3.observer().take_patches(),
         vec![Patch::Put {
             obj: ExId::Root,
             path: vec![],
@@ -1458,7 +1458,7 @@ fn observe_counter_change_application_overwrite() {
     doc4.merge(&mut doc1).unwrap();
 
     // no patches as the increments operate on an invisible counter
-    assert_eq!(doc4.op_observer.take_patches(), vec![]);
+    assert_eq!(doc4.observer().take_patches(), vec![]);
 }
 
 #[test]
@@ -1472,7 +1472,7 @@ fn observe_counter_change_application() {
     let mut new_doc = AutoCommit::new().with_observer(VecOpObserver::default());
     new_doc.apply_changes(changes).unwrap();
     assert_eq!(
-        new_doc.op_observer.take_patches(),
+        new_doc.observer().take_patches(),
         vec![
             Patch::Put {
                 obj: ExId::Root,

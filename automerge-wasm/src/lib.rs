@@ -43,8 +43,8 @@ mod value;
 use observer::Observer;
 
 use interop::{
-    get_heads, js_get, js_set, list_to_js, list_to_js_at, map_to_js, map_to_js_at, to_js_err,
-    to_objtype, to_prop, AR, JS,
+    apply_patch, get_heads, js_get, js_set, list_to_js, list_to_js_at, map_to_js, map_to_js_at,
+    to_js_err, to_objtype, to_prop, AR, JS,
 };
 use sync::SyncState;
 use value::{datatype, ScalarValue};
@@ -425,12 +425,20 @@ impl Automerge {
 
     #[wasm_bindgen(js_name = enablePatches)]
     pub fn enable_patches(&mut self, enable: JsValue) -> Result<(), JsValue> {
-        self.doc.ensure_transaction_closed();
         let enable = enable
             .as_bool()
             .ok_or_else(|| to_js_err("must pass a bool to enable_patches"))?;
-        self.doc.op_observer.enable(enable);
+        self.doc.observer().enable(enable);
         Ok(())
+    }
+
+    #[wasm_bindgen(js_name = applyPatches)]
+    pub fn apply_patches(&mut self, mut object: JsValue) -> Result<JsValue, JsValue> {
+        let patches = self.doc.observer().take_patches();
+        for p in patches {
+            object = apply_patch(object, &p)?;
+        }
+        Ok(object)
     }
 
     #[wasm_bindgen(js_name = popPatches)]
@@ -439,8 +447,7 @@ impl Automerge {
         // committed.
         // If we pop the patches then we won't be able to revert them.
 
-        self.doc.ensure_transaction_closed();
-        let patches = self.doc.op_observer.take_patches();
+        let patches = self.doc.observer().take_patches();
         let result = Array::new();
         for p in patches {
             result.push(&p.try_into()?);
