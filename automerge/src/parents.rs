@@ -1,18 +1,33 @@
-use crate::{exid::ExId, types::ObjId, Automerge, Prop};
+use crate::op_set::OpSet;
+use crate::types::ObjId;
+use crate::{exid::ExId, Prop};
 
 #[derive(Debug)]
 pub struct Parents<'a> {
     pub(crate) obj: ObjId,
-    pub(crate) doc: &'a Automerge,
+    pub(crate) ops: &'a OpSet,
+}
+
+impl<'a> Parents<'a> {
+    pub fn path(&mut self) -> Vec<(ExId, Prop)> {
+        let mut path = self.collect::<Vec<_>>();
+        path.reverse();
+        path
+    }
 }
 
 impl<'a> Iterator for Parents<'a> {
     type Item = (ExId, Prop);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some((obj, key)) = self.doc.parent_object(self.obj) {
+        if self.obj.is_root() {
+            None
+        } else if let Some((obj, key)) = self.ops.parent_object(&self.obj) {
             self.obj = obj;
-            Some((self.doc.id_to_exid(obj.0), self.doc.export_key(obj, key)))
+            Some((
+                self.ops.id_to_exid(self.obj.0),
+                self.ops.export_key(self.obj, key),
+            ))
         } else {
             None
         }

@@ -11,4 +11,4 @@ pub use manual_transaction::Transaction;
 pub use result::Failure;
 pub use result::Success;
 
-pub type Result<O, E> = std::result::Result<Success<O>, Failure<E>>;
+pub type Result<O, Obs, E> = std::result::Result<Success<O, Obs>, Failure<E>>;
