@@ -2,7 +2,7 @@ use serde::ser::{SerializeMap, SerializeSeq};
 
 use crate::{Automerge, ObjId, ObjType, Value};
 
-/// A wrapper type which implements `serde::Deserialize` for an `Automerge`
+/// A wrapper type which implements [`serde::Serialize`] for an [`Automerge`].
 #[derive(Debug)]
 pub struct AutoSerde<'a>(&'a Automerge);
 
