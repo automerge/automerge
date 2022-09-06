@@ -513,10 +513,24 @@ pub(crate) fn apply_patch2(obj: JsValue, patch: &Patch, depth: usize) -> Result<
                     Reflect::delete_property(&result, &key.into())?;
                     Ok(result.into())
                 }
+                Patch::Increment { prop, value, .. } => {
+                    let result = result.into();
+                    if let Prop::Map(key) = prop {
+                        let key = key.into();
+                        let old_val = Reflect::get(&o, &key)?;
+                        if let Some(old) = old_val.as_f64() {
+                            Reflect::set(&result, &key, &JsValue::from(old + *value as f64))?;
+                            Ok(result)
+                        } else {
+                          Err(to_js_err("cant increment a non number value"))
+                        }
+                    } else {
+                        Err(to_js_err("cant increment an index on a map"))
+                    }
+                }
                 Patch::Insert { .. } => Err(to_js_err("cannot insert into map")),
                 Patch::DeleteSeq { .. } => Err(to_js_err("cannot splice a map")),
                 Patch::PutSeq { .. } => Err(to_js_err("cannot array index a map")),
-                _ => unimplemented!(),
             }
         }
         (JsObj::Seq(a), None) => {
@@ -537,15 +551,29 @@ pub(crate) fn apply_patch2(obj: JsValue, patch: &Patch, depth: usize) -> Result<
                     let from = Reflect::get(&a.constructor().into(), &"from".into())?
                         .dyn_into::<Function>()?;
                     let result = from.call1(&JsValue::undefined(), &a)?.dyn_into::<Array>()?;
-                    // FIXME: should be one function call
-                    for v in values {
-                        result.splice(*index as u32, 0, &export_value(v));
+                    // TODO: should be one function call
+                    for (i, v) in values.iter().enumerate() {
+                        result.splice(*index as u32 + i as u32, 0, &export_value(v));
                     }
                     Ok(result.into())
                 }
+                Patch::Increment { prop, value, .. } => {
+                    let result = Reflect::construct(&a.constructor(), &a)?;
+                    if let Prop::Seq(index) = prop {
+                        let index = (*index as f64).into();
+                        let old_val = Reflect::get(&a, &index)?;
+                        if let Some(old) = old_val.as_f64() {
+                            Reflect::set(&result, &index, &JsValue::from(old + *value as f64))?;
+                            Ok(result)
+                        } else {
+                            Err(to_js_err("cant increment a non number value"))
+                        }
+                    } else {
+                        Err(to_js_err("cant increment a key on a seq"))
+                    }
+                }
                 Patch::DeleteMap { .. } => Err(to_js_err("cannot delete from a seq")),
                 Patch::PutMap { .. } => Err(to_js_err("cannot set key in seq")),
-                _ => unimplemented!(),
             }
         }
         (_, _) => Err(to_js_err(format!(
