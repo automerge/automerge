@@ -83,14 +83,16 @@ impl OpObserver for Observer {
         tagged_value: (Value<'_>, ObjId),
     ) {
         if self.enabled {
+            // probably want to inline the merge/push code here
             let path = parents.path().into_iter().map(|p| p.1).collect();
             let value = tagged_value.0.to_owned();
-            self.patches.push(Patch::Insert {
+            let patch = Patch::Insert {
                 path,
                 obj,
                 index,
                 values: vec![value],
-            })
+            };
+            self.push(patch);
         }
     }
 
@@ -215,9 +217,12 @@ impl Patch {
             ) if obj == o2 && *index + values.len() == *i2 => {
                 // TODO - there's a way to do this without the clone im sure
                 values.extend_from_slice(v2.as_slice());
+                //web_sys::console::log_2(&format!("NEW VAL {}: ", tmpi).into(), &new_value);
                 None
             }
-            _ => Some(other),
+            _ => {
+                Some(other)
+            }
         }
     }
 }
