@@ -170,7 +170,7 @@ pub unsafe extern "C" fn AMcommit(
     if let Some(time) = time.as_ref() {
         options.set_time(*time);
     }
-    to_result(doc.commit_with::<()>(options))
+    to_result(doc.commit_with(options))
 }
 
 /// \memberof AMdoc

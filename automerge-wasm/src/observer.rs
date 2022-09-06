@@ -220,9 +220,7 @@ impl Patch {
                 //web_sys::console::log_2(&format!("NEW VAL {}: ", tmpi).into(), &new_value);
                 None
             }
-            _ => {
-                Some(other)
-            }
+            _ => Some(other),
         }
     }
 }

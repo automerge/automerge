@@ -44,8 +44,8 @@ impl AutoCommit {
 
 impl<Obs: OpObserver> AutoCommitWithObs<Obs> {
     pub fn observer(&mut self) -> &mut Obs {
-      self.ensure_transaction_closed();
-      &mut self.op_observer
+        self.ensure_transaction_closed();
+        &mut self.op_observer
     }
 
     pub fn with_observer<Obs2: OpObserver>(self, op_observer: Obs2) -> AutoCommitWithObs<Obs2> {
