@@ -522,7 +522,7 @@ pub(crate) fn apply_patch2(obj: JsValue, patch: &Patch, depth: usize) -> Result<
                             Reflect::set(&result, &key, &JsValue::from(old + *value as f64))?;
                             Ok(result)
                         } else {
-                          Err(to_js_err("cant increment a non number value"))
+                            Err(to_js_err("cant increment a non number value"))
                         }
                     } else {
                         Err(to_js_err("cant increment an index on a map"))

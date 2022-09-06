@@ -581,7 +581,7 @@ impl Automerge {
     }
 
     /// Load a document.
-    #[tracing::instrument(skip(data, options), err)]
+    #[tracing::instrument(skip(data, observer), err)]
     pub fn load_with<Obs: OpObserver>(
         data: &[u8],
         mut observer: Option<&mut Obs>,
