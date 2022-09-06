@@ -81,5 +81,15 @@ describe('Automerge', () => {
       assert.deepEqual(mat, start)
       assert.deepEqual(base, start)
     })
+
+    it('large inserts should make one splice patch', () => {
+      let doc1 = create()
+      doc1.enablePatches(true)
+      doc1.putObject("/", "list", "abc");
+      let patches = doc1.popPatches()
+      assert.deepEqual( patches, [
+        { action: 'put', conflict: false, path: [ 'list' ], value: [] },
+        { action: 'splice', path: [ 'list', 0 ], values: [ 'a', 'b', 'c' ] }])
+    })
   })
 })

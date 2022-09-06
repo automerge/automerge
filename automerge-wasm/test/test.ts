@@ -548,8 +548,7 @@ describe('Automerge', () => {
       doc2.loadIncremental(doc1.saveIncremental())
       assert.deepEqual(doc2.popPatches(), [
         { action: 'put', path: [ 'birds' ], value: [], conflict: false },
-        { action: 'splice', path: [ 'birds', 0 ], values: ['Goldfinch'] },
-        { action: 'splice', path: [ 'birds', 1 ], values: ['Chaffinch'] }
+        { action: 'splice', path: [ 'birds', 0 ], values: ['Goldfinch', 'Chaffinch'] },
       ])
       doc1.free()
       doc2.free()
