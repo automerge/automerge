@@ -567,7 +567,7 @@ describe('Automerge', () => {
       doc2.free()
     })
 
-    it.skip('should calculate list indexes based on visible elements', () => {
+    it('should calculate list indexes based on visible elements', () => {
       const doc1 = create('aaaa'), doc2 = create('bbbb')
       doc1.putObject('_root', 'birds', ['Goldfinch', 'Chaffinch'])
       doc2.loadIncremental(doc1.saveIncremental())
@@ -578,14 +578,14 @@ describe('Automerge', () => {
       assert.deepEqual(doc1.getWithType('1@aaaa', 0), ['str', 'Chaffinch'])
       assert.deepEqual(doc1.getWithType('1@aaaa', 1), ['str', 'Greenfinch'])
       assert.deepEqual(doc2.popPatches(), [
-        { action: 'delete', obj: '1@aaaa', key: 0 },
-        { action: 'insert', obj: '1@aaaa', key: 1, value: 'Greenfinch', datatype: 'str' }
+        { action: 'del', path: ['birds', 0] },
+        { action: 'splice', path: ['birds', 1], values: ['Greenfinch'] }
       ])
       doc1.free()
       doc2.free()
     })
 
-    it.skip('should handle concurrent insertions at the head of a list', () => {
+    it('should handle concurrent insertions at the head of a list', () => {
       const doc1 = create('aaaa'), doc2 = create('bbbb'), doc3 = create('cccc'), doc4 = create('dddd')
       doc1.putObject('_root', 'values', [])
       const change1 = doc1.saveIncremental()
@@ -604,21 +604,16 @@ describe('Automerge', () => {
       assert.deepEqual([0, 1, 2, 3].map(i => (doc3.getWithType('1@aaaa', i) || [])[1]), ['a', 'b', 'c', 'd'])
       assert.deepEqual([0, 1, 2, 3].map(i => (doc4.getWithType('1@aaaa', i) || [])[1]), ['a', 'b', 'c', 'd'])
       assert.deepEqual(doc3.popPatches(), [
-        { action: 'insert', obj: '1@aaaa', key: 0, value: 'c', datatype: 'str' },
-        { action: 'insert', obj: '1@aaaa', key: 1, value: 'd', datatype: 'str' },
-        { action: 'insert', obj: '1@aaaa', key: 0, value: 'a', datatype: 'str' },
-        { action: 'insert', obj: '1@aaaa', key: 1, value: 'b', datatype: 'str' }
+        { action: 'splice', path: ['values', 0], values:['c','d'] },
+        { action: 'splice', path: ['values', 0], values:['a','b'] },
       ])
       assert.deepEqual(doc4.popPatches(), [
-        { action: 'insert', obj: '1@aaaa', key: 0, value: 'a', datatype: 'str' },
-        { action: 'insert', obj: '1@aaaa', key: 1, value: 'b', datatype: 'str' },
-        { action: 'insert', obj: '1@aaaa', key: 2, value: 'c', datatype: 'str' },
-        { action: 'insert', obj: '1@aaaa', key: 3, value: 'd', datatype: 'str' }
+        { action: 'splice', path: ['values',0], values:['a','b','c','d'] },
       ])
       doc1.free(); doc2.free(); doc3.free(); doc4.free()
     })
 
-    it.skip('should handle concurrent insertions beyond the head', () => {
+    it('should handle concurrent insertions beyond the head', () => {
       const doc1 = create('aaaa'), doc2 = create('bbbb'), doc3 = create('cccc'), doc4 = create('dddd')
       doc1.putObject('_root', 'values', ['a', 'b'])
       const change1 = doc1.saveIncremental()
@@ -637,21 +632,16 @@ describe('Automerge', () => {
       assert.deepEqual([0, 1, 2, 3, 4, 5].map(i => (doc3.getWithType('1@aaaa', i) || [])[1]), ['a', 'b', 'c', 'd', 'e', 'f'])
       assert.deepEqual([0, 1, 2, 3, 4, 5].map(i => (doc4.getWithType('1@aaaa', i) || [])[1]), ['a', 'b', 'c', 'd', 'e', 'f'])
       assert.deepEqual(doc3.popPatches(), [
-        { action: 'insert', obj: '1@aaaa', key: 2, value: 'e', datatype: 'str' },
-        { action: 'insert', obj: '1@aaaa', key: 3, value: 'f', datatype: 'str' },
-        { action: 'insert', obj: '1@aaaa', key: 2, value: 'c', datatype: 'str' },
-        { action: 'insert', obj: '1@aaaa', key: 3, value: 'd', datatype: 'str' }
+        { action: 'splice', path: ['values', 2], values: ['e','f'] },
+        { action: 'splice', path: ['values', 2], values: ['c','d'] },
       ])
       assert.deepEqual(doc4.popPatches(), [
-        { action: 'insert', obj: '1@aaaa', key: 2, value: 'c', datatype: 'str' },
-        { action: 'insert', obj: '1@aaaa', key: 3, value: 'd', datatype: 'str' },
-        { action: 'insert', obj: '1@aaaa', key: 4, value: 'e', datatype: 'str' },
-        { action: 'insert', obj: '1@aaaa', key: 5, value: 'f', datatype: 'str' }
+        { action: 'splice', path: ['values', 2], values: ['c','d','e','f'] },
       ])
       doc1.free(); doc2.free(); doc3.free(); doc4.free()
     })
 
-    it.skip('should handle conflicts on root object keys', () => {
+    it('should handle conflicts on root object keys', () => {
       const doc1 = create('aaaa'), doc2 = create('bbbb'), doc3 = create('cccc'), doc4 = create('dddd')
       doc1.put('_root', 'bird', 'Greenfinch')
       doc2.put('_root', 'bird', 'Goldfinch')
@@ -665,12 +655,12 @@ describe('Automerge', () => {
       assert.deepEqual(doc4.getWithType('_root', 'bird'), ['str', 'Goldfinch'])
       assert.deepEqual(doc4.getAll('_root', 'bird'), [['str', 'Greenfinch', '1@aaaa'], ['str', 'Goldfinch', '1@bbbb']])
       assert.deepEqual(doc3.popPatches(), [
-        { action: 'put', obj: '_root', key: 'bird', value: 'Greenfinch', datatype: 'str', conflict: false },
-        { action: 'put', obj: '_root', key: 'bird', value: 'Goldfinch', datatype: 'str', conflict: true }
+        { action: 'put', path: ['bird'], value: 'Greenfinch', conflict: false },
+        { action: 'put', path: ['bird'], value: 'Goldfinch', conflict: true },
       ])
       assert.deepEqual(doc4.popPatches(), [
-        { action: 'put', obj: '_root', key: 'bird', value: 'Goldfinch', datatype: 'str', conflict: false },
-        { action: 'put', obj: '_root', key: 'bird', value: 'Goldfinch', datatype: 'str', conflict: true }
+        { action: 'put', path: ['bird'], value: 'Goldfinch', conflict: false },
+        { action: 'put', path: ['bird'], value: 'Goldfinch', conflict: true },
       ])
       doc1.free(); doc2.free(); doc3.free(); doc4.free()
     })
@@ -714,7 +704,7 @@ describe('Automerge', () => {
       doc1.free(); doc2.free(); doc3.free()
     })
 
-    it.skip('should allow a conflict to be resolved', () => {
+    it('should allow a conflict to be resolved', () => {
       const doc1 = create('aaaa'), doc2 = create('bbbb'), doc3 = create('cccc')
       doc1.put('_root', 'bird', 'Greenfinch')
       doc2.put('_root', 'bird', 'Chaffinch')
@@ -726,14 +716,14 @@ describe('Automerge', () => {
       doc3.loadIncremental(doc1.saveIncremental())
       assert.deepEqual(doc3.getAll('_root', 'bird'), [['str', 'Goldfinch', '2@aaaa']])
       assert.deepEqual(doc3.popPatches(), [
-        { action: 'put', obj: '_root', key: 'bird', value: 'Greenfinch', datatype: 'str', conflict: false },
-        { action: 'put', obj: '_root', key: 'bird', value: 'Chaffinch', datatype: 'str', conflict: true },
-        { action: 'put', obj: '_root', key: 'bird', value: 'Goldfinch', datatype: 'str', conflict: false }
+        { action: 'put', path: ['bird'], value: 'Greenfinch', conflict: false },
+        { action: 'put', path: ['bird'], value: 'Chaffinch', conflict: true },
+        { action: 'put', path: ['bird'], value: 'Goldfinch', conflict: false }
       ])
       doc1.free(); doc2.free(); doc3.free()
     })
 
-    it.skip('should handle a concurrent map key overwrite and delete', () => {
+    it('should handle a concurrent map key overwrite and delete', () => {
       const doc1 = create('aaaa'), doc2 = create('bbbb')
       doc1.put('_root', 'bird', 'Greenfinch')
       doc2.loadIncremental(doc1.saveIncremental())
@@ -749,15 +739,15 @@ describe('Automerge', () => {
       assert.deepEqual(doc2.getWithType('_root', 'bird'), ['str', 'Goldfinch'])
       assert.deepEqual(doc2.getAll('_root', 'bird'), [['str', 'Goldfinch', '2@aaaa']])
       assert.deepEqual(doc1.popPatches(), [
-        { action: 'put', obj: '_root', key: 'bird', value: 'Goldfinch', datatype: 'str', conflict: false }
+        { action: 'put', path: ['bird'], value: 'Goldfinch', conflict: false }
       ])
       assert.deepEqual(doc2.popPatches(), [
-        { action: 'put', obj: '_root', key: 'bird', value: 'Goldfinch', datatype: 'str', conflict: false }
+        { action: 'put', path: ['bird'], value: 'Goldfinch', conflict: false }
       ])
       doc1.free(); doc2.free()
     })
 
-    it.skip('should handle a conflict on a list element', () => {
+    it('should handle a conflict on a list element', () => {
       const doc1 = create('aaaa'), doc2 = create('bbbb'), doc3 = create('cccc'), doc4 = create('dddd')
       doc1.putObject('_root', 'birds', ['Thrush', 'Magpie'])
       const change1 = doc1.saveIncremental()
@@ -776,17 +766,17 @@ describe('Automerge', () => {
       assert.deepEqual(doc4.getWithType('1@aaaa', 0), ['str', 'Redwing'])
       assert.deepEqual(doc4.getAll('1@aaaa', 0), [['str', 'Song Thrush', '4@aaaa'], ['str', 'Redwing', '4@bbbb']])
       assert.deepEqual(doc3.popPatches(), [
-        { action: 'put', obj: '1@aaaa', key: 0, value: 'Song Thrush', datatype: 'str', conflict: false },
-        { action: 'put', obj: '1@aaaa', key: 0, value: 'Redwing', datatype: 'str', conflict: true }
+        { action: 'put', path: ['birds',0], value: 'Song Thrush', conflict: false },
+        { action: 'put', path: ['birds',0], value: 'Redwing', conflict: true }
       ])
       assert.deepEqual(doc4.popPatches(), [
-        { action: 'put', obj: '1@aaaa', key: 0, value: 'Redwing', datatype: 'str', conflict: false },
-        { action: 'put', obj: '1@aaaa', key: 0, value: 'Redwing', datatype: 'str', conflict: true }
+        { action: 'put', path: ['birds',0], value: 'Redwing', conflict: false },
+        { action: 'put', path: ['birds',0], value: 'Redwing', conflict: true }
       ])
       doc1.free(); doc2.free(); doc3.free(); doc4.free()
     })
 
-    it.skip('should handle a concurrent list element overwrite and delete', () => {
+    it('should handle a concurrent list element overwrite and delete', () => {
       const doc1 = create('aaaa'), doc2 = create('bbbb'), doc3 = create('cccc'), doc4 = create('dddd')
       doc1.putObject('_root', 'birds', ['Parakeet', 'Magpie', 'Thrush'])
       const change1 = doc1.saveIncremental()
@@ -807,21 +797,21 @@ describe('Automerge', () => {
       assert.deepEqual(doc4.getAll('1@aaaa', 0), [['str', 'Ring-necked parakeet', '5@bbbb']])
       assert.deepEqual(doc4.getAll('1@aaaa', 2), [['str', 'Song Thrush', '6@aaaa'], ['str', 'Redwing', '6@bbbb']])
       assert.deepEqual(doc3.popPatches(), [
-        { action: 'delete', obj: '1@aaaa', key: 0 },
-        { action: 'put', obj: '1@aaaa', key: 1, value: 'Song Thrush', datatype: 'str', conflict: false },
-        { action: 'insert', obj: '1@aaaa', key: 0, value: 'Ring-necked parakeet', datatype: 'str' },
-        { action: 'put', obj: '1@aaaa', key: 2, value: 'Redwing', datatype: 'str', conflict: true }
+        { action: 'del', path: ['birds',0], },
+        { action: 'put', path: ['birds',1], value: 'Song Thrush', conflict: false },
+        { action: 'splice', path: ['birds',0], values: ['Ring-necked parakeet'] },
+        { action: 'put', path: ['birds',2], value: 'Redwing', conflict: true }
       ])
       assert.deepEqual(doc4.popPatches(), [
-        { action: 'put', obj: '1@aaaa', key: 0, value: 'Ring-necked parakeet', datatype: 'str', conflict: false },
-        { action: 'put', obj: '1@aaaa', key: 2, value: 'Redwing', datatype: 'str', conflict: false },
-        { action: 'put', obj: '1@aaaa', key: 0, value: 'Ring-necked parakeet', datatype: 'str', conflict: false },
-        { action: 'put', obj: '1@aaaa', key: 2, value: 'Redwing', datatype: 'str', conflict: true }
+        { action: 'put', path: ['birds',0], value: 'Ring-necked parakeet', conflict: false },
+        { action: 'put', path: ['birds',2], value: 'Redwing', conflict: false },
+        { action: 'put', path: ['birds',0], value: 'Ring-necked parakeet', conflict: false },
+        { action: 'put', path: ['birds',2], value: 'Redwing', conflict: true }
       ])
       doc1.free(); doc2.free(); doc3.free(); doc4.free()
     })
 
-    it.skip('should handle deletion of a conflict value', () => {
+    it('should handle deletion of a conflict value', () => {
       const doc1 = create('aaaa'), doc2 = create('bbbb'), doc3 = create('cccc')
       doc1.put('_root', 'bird', 'Robin')
       doc2.put('_root', 'bird', 'Wren')
@@ -833,19 +823,19 @@ describe('Automerge', () => {
       doc3.loadIncremental(change2)
       assert.deepEqual(doc3.getAll('_root', 'bird'), [['str', 'Robin', '1@aaaa'], ['str', 'Wren', '1@bbbb']])
       assert.deepEqual(doc3.popPatches(), [
-        { action: 'put', obj: '_root', key: 'bird', value: 'Robin', datatype: 'str', conflict: false },
-        { action: 'put', obj: '_root', key: 'bird', value: 'Wren', datatype: 'str', conflict: true }
+        { action: 'put', path: ['bird'], value: 'Robin', conflict: false },
+        { action: 'put', path: ['bird'], value: 'Wren', conflict: true }
       ])
       doc3.loadIncremental(change3)
       assert.deepEqual(doc3.getWithType('_root', 'bird'), ['str', 'Robin'])
       assert.deepEqual(doc3.getAll('_root', 'bird'), [['str', 'Robin', '1@aaaa']])
       assert.deepEqual(doc3.popPatches(), [
-        { action: 'put', obj: '_root', key: 'bird', value: 'Robin', datatype: 'str', conflict: false }
+        { action: 'put', path: ['bird'], value: 'Robin', conflict: false }
       ])
       doc1.free(); doc2.free(); doc3.free()
     })
 
-    it.skip('should handle conflicting nested objects', () => {
+    it('should handle conflicting nested objects', () => {
       const doc1 = create('aaaa'), doc2 = create('bbbb')
       doc1.putObject('_root', 'birds', ['Parakeet'])
       doc2.putObject('_root', 'birds', { 'Sparrowhawk': 1 })
@@ -856,31 +846,30 @@ describe('Automerge', () => {
       doc2.loadIncremental(change1)
       assert.deepEqual(doc1.getAll('_root', 'birds'), [['list', '1@aaaa'], ['map', '1@bbbb']])
       assert.deepEqual(doc1.popPatches(), [
-        { action: 'put', obj: '_root', key: 'birds', value: '1@bbbb', datatype: 'map', conflict: true },
-        { action: 'put', obj: '1@bbbb', key: 'Sparrowhawk', value: 1, datatype: 'int', conflict: false }
+        { action: 'put', path: ['birds'], value: {}, conflict: true },
+        { action: 'put', path: ['birds', 'Sparrowhawk'], value: 1, conflict: false }
       ])
       assert.deepEqual(doc2.getAll('_root', 'birds'), [['list', '1@aaaa'], ['map', '1@bbbb']])
       assert.deepEqual(doc2.popPatches(), [
-        { action: 'put', obj: '_root', key: 'birds', value: '1@bbbb', datatype: 'map', conflict: true },
-        { action: 'insert', obj: '1@aaaa', key: 0, value: 'Parakeet', datatype: 'str' }
+        { action: 'put', path: ['birds'], value: {}, conflict: true },
+        { action: 'splice', path: ['birds',0], values: ['Parakeet'] }
       ])
       doc1.free(); doc2.free()
     })
 
-    it.skip('should support date objects', () => {
-      // FIXME: either use Date objects or use numbers consistently
+    it('should support date objects', () => {
       const doc1 = create('aaaa'), doc2 = create('bbbb'), now = new Date()
-      doc1.put('_root', 'createdAt', now.getTime(), 'timestamp')
+      doc1.put('_root', 'createdAt', now)
       doc2.enablePatches(true)
       doc2.loadIncremental(doc1.saveIncremental())
       assert.deepEqual(doc2.getWithType('_root', 'createdAt'), ['timestamp', now])
       assert.deepEqual(doc2.popPatches(), [
-        { action: 'put', obj: '_root', key: 'createdAt', value: now, datatype: 'timestamp', conflict: false }
+        { action: 'put', path: ['createdAt'], value: now, conflict: false }
       ])
       doc1.free(); doc2.free()
     })
 
-    it.skip('should capture local put ops', () => {
+    it('should capture local put ops', () => {
       const doc1 = create('aaaa')
       doc1.enablePatches(true)
       doc1.put('_root', 'key1', 1)
@@ -890,16 +879,16 @@ describe('Automerge', () => {
       const list = doc1.putObject('_root', 'list', [])
 
       assert.deepEqual(doc1.popPatches(), [
-        { action: 'put', obj: '_root', key: 'key1', value: 1, datatype: 'int', conflict: false },
-        { action: 'put', obj: '_root', key: 'key1', value: 2, datatype: 'int', conflict: false },
-        { action: 'put', obj: '_root', key: 'key2', value: 3, datatype: 'int', conflict: false },
-        { action: 'put', obj: '_root', key: 'map', value: map, datatype: 'map', conflict: false },
-        { action: 'put', obj: '_root', key: 'list', value: list, datatype: 'list', conflict: false },
+        { action: 'put', path: ['key1'], value: 1, conflict: false },
+        { action: 'put', path: ['key1'], value: 2, conflict: false },
+        { action: 'put', path: ['key2'], value: 3, conflict: false },
+        { action: 'put', path: ['map'], value: {}, conflict: false },
+        { action: 'put', path: ['list'], value: [], conflict: false },
       ])
       doc1.free()
     })
 
-    it.skip('should capture local insert ops', () => {
+    it('should capture local insert ops', () => {
       const doc1 = create('aaaa')
       doc1.enablePatches(true)
       const list = doc1.putObject('_root', 'list', [])
@@ -910,17 +899,17 @@ describe('Automerge', () => {
       const list2 = doc1.insertObject(list, 2, [])
 
       assert.deepEqual(doc1.popPatches(), [
-        { action: 'put', obj: '_root', key: 'list', value: list, datatype: 'list', conflict: false },
-        { action: 'insert', obj: list, key: 0, value: 1, datatype: 'int' },
-        { action: 'insert', obj: list, key: 0, value: 2, datatype: 'int' },
-        { action: 'insert', obj: list, key: 2, value: 3, datatype: 'int' },
-        { action: 'insert', obj: list, key: 2, value: map, datatype: 'map' },
-        { action: 'insert', obj: list, key: 2, value: list2, datatype: 'list' },
+        { action: 'put', path: ['list'], value: [], conflict: false },
+        { action: 'splice', path: ['list', 0], values: [1]  },
+        { action: 'splice', path: ['list', 0], values: [2] },
+        { action: 'splice', path: ['list', 2], values: [3] },
+        { action: 'splice', path: ['list', 2], values: [{}] },
+        { action: 'splice', path: ['list', 2], values: [[]] },
       ])
       doc1.free()
     })
 
-    it.skip('should capture local push ops', () => {
+    it('should capture local push ops', () => {
       const doc1 = create('aaaa')
       doc1.enablePatches(true)
       const list = doc1.putObject('_root', 'list', [])
@@ -929,15 +918,13 @@ describe('Automerge', () => {
       const list2 = doc1.pushObject(list, [])
 
       assert.deepEqual(doc1.popPatches(), [
-        { action: 'put', obj: '_root', key: 'list', value: list, datatype: 'list', conflict: false },
-        { action: 'insert', obj: list, key: 0, value: 1, datatype: 'int' },
-        { action: 'insert', obj: list, key: 1, value: map, datatype: 'map' },
-        { action: 'insert', obj: list, key: 2, value: list2, datatype: 'list' },
+        { action: 'put', path: ['list'], value: [], conflict: false },
+        { action: 'splice', path: ['list',0], values: [1,{},[]] },
       ])
       doc1.free()
     })
 
-    it.skip('should capture local splice ops', () => {
+    it('should capture local splice ops', () => {
       const doc1 = create('aaaa')
       doc1.enablePatches(true)
       const list = doc1.putObject('_root', 'list', [])
@@ -945,13 +932,10 @@ describe('Automerge', () => {
       doc1.splice(list, 1, 2)
 
       assert.deepEqual(doc1.popPatches(), [
-        { action: 'put', obj: '_root', key: 'list', value: list, datatype: 'list', conflict: false },
-        { action: 'insert', obj: list, key: 0, value: 1, datatype: 'int' },
-        { action: 'insert', obj: list, key: 1, value: 2, datatype: 'int' },
-        { action: 'insert', obj: list, key: 2, value: 3, datatype: 'int' },
-        { action: 'insert', obj: list, key: 3, value: 4, datatype: 'int' },
-        { action: 'delete', obj: list, key: 1 },
-        { action: 'delete', obj: list, key: 1 },
+        { action: 'put', path: ['list'],  value: [], conflict: false },
+        { action: 'splice', path: ['list',0], values: [1,2,3,4] },
+        { action: 'del', path: ['list',1] },
+        { action: 'del', path: ['list',1] },
       ])
       doc1.free()
     })
@@ -970,7 +954,7 @@ describe('Automerge', () => {
     })
 
 
-    it.skip('should capture local delete ops', () => {
+    it('should capture local delete ops', () => {
       const doc1 = create('aaaa')
       doc1.enablePatches(true)
       doc1.put('_root', 'key1', 1)
@@ -978,15 +962,15 @@ describe('Automerge', () => {
       doc1.delete('_root', 'key1')
       doc1.delete('_root', 'key2')
       assert.deepEqual(doc1.popPatches(), [
-        { action: 'put', obj: '_root', key: 'key1', value: 1, datatype: 'int', conflict: false },
-        { action: 'put', obj: '_root', key: 'key2', value: 2, datatype: 'int', conflict: false },
-        { action: 'delete', obj: '_root', key: 'key1' },
-        { action: 'delete', obj: '_root', key: 'key2' },
+        { action: 'put', path: ['key1'], value: 1, conflict: false },
+        { action: 'put', path: ['key2'], value: 2, conflict: false },
+        { action: 'del', path: ['key1'], },
+        { action: 'del', path: ['key2'], },
       ])
       doc1.free()
     })
 
-    it.skip('should support counters in a map', () => {
+    it('should support counters in a map', () => {
       const doc1 = create('aaaa'), doc2 = create('bbbb')
       doc2.enablePatches(true)
       doc1.put('_root', 'starlings', 2, 'counter')
@@ -995,13 +979,13 @@ describe('Automerge', () => {
       doc2.loadIncremental(doc1.saveIncremental())
       assert.deepEqual(doc2.getWithType('_root', 'starlings'), ['counter', 3])
       assert.deepEqual(doc2.popPatches(), [
-        { action: 'put', obj: '_root', key: 'starlings', value: 2, datatype: 'counter', conflict: false },
-        { action: 'increment', obj: '_root', key: 'starlings', value: 1 }
+        { action: 'put', path: ['starlings'], value: 2, conflict: false },
+        { action: 'inc', path: ['starlings'], value: 1 }
       ])
       doc1.free(); doc2.free()
     })
 
-    it.skip('should support counters in a list', () => {
+    it('should support counters in a list', () => {
       const doc1 = create('aaaa'), doc2 = create('bbbb')
       doc2.enablePatches(true)
       const list = doc1.putObject('_root', 'list', [])
@@ -1014,10 +998,10 @@ describe('Automerge', () => {
       doc2.loadIncremental(doc1.saveIncremental())
 
       assert.deepEqual(doc2.popPatches(), [
-        { action: 'put', obj: '_root', key: 'list', value: list, datatype: 'list', conflict: false },
-        { action: 'insert', obj: list, key: 0, value: 1, datatype: 'counter' },
-        { action: 'increment', obj: list, key: 0, value: 2 },
-        { action: 'increment', obj: list, key: 0, value: -5 },
+        { action: 'put', path: ['list'], value: [], conflict: false },
+        { action: 'splice', path: ['list',0], values: [1] },
+        { action: 'inc', path: ['list',0], value: 2 },
+        { action: 'inc', path: ['list',0], value: -5 },
       ])
       doc1.free(); doc2.free()
     })
