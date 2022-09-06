@@ -93,3 +93,8 @@ describe('Automerge', () => {
     })
   })
 })
+
+// FIXME: handle conflicts correctly on apply
+// TODO: squash puts
+// TODO: merge deletes
+// TODO: elide `conflict: false`
