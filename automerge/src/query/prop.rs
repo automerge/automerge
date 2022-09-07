@@ -9,7 +9,15 @@ pub(crate) struct Prop<'a> {
     pub(crate) ops: Vec<&'a Op>,
     pub(crate) ops_pos: Vec<usize>,
     pub(crate) pos: usize,
-    start: Option<usize>,
+    start: Option<Start>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Start {
+    /// The index to start searching for in the optree
+    idx: usize,
+    /// The total length of the optree
+    optree_len: usize,
 }
 
 impl<'a> Prop<'a> {
@@ -30,12 +38,21 @@ impl<'a> TreeQuery<'a> for Prop<'a> {
         child: &'a OpTreeNode,
         m: &OpSetMetadata,
     ) -> QueryResult {
-        if let Some(start) = self.start {
+        if let Some(Start {
+            idx: start,
+            optree_len,
+        }) = self.start
+        {
             if self.pos + child.len() >= start {
                 // skip empty nodes
                 if child.index.visible_len() == 0 {
-                    self.pos += child.len();
-                    QueryResult::Next
+                    if self.pos + child.len() >= optree_len {
+                        self.pos = optree_len;
+                        QueryResult::Finish
+                    } else {
+                        self.pos += child.len();
+                        QueryResult::Next
+                    }
                 } else {
                     QueryResult::Descend
                 }
@@ -46,7 +63,10 @@ impl<'a> TreeQuery<'a> for Prop<'a> {
         } else {
             // in the root node find the first op position for the key
             let start = binary_search_by(child, |op| m.key_cmp(&op.key, &self.key));
-            self.start = Some(start);
+            self.start = Some(Start {
+                idx: start,
+                optree_len: child.len(),
+            });
             self.pos = start;
             QueryResult::Skip(start)
         }

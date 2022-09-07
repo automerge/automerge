@@ -1350,6 +1350,16 @@ fn load_doc_with_deleted_objects() {
 }
 
 #[test]
+fn insert_after_many_deletes() {
+    let mut doc = AutoCommit::new();
+    let obj = doc.put_object(&ROOT, "object", ObjType::Map).unwrap();
+    for i in 0..100 {
+        doc.put(&obj, i.to_string(), i).unwrap();
+        doc.delete(&obj, i.to_string()).unwrap();
+    }
+}
+
+#[test]
 fn simple_bad_saveload() {
     let mut doc = Automerge::new();
     doc.transact::<_, _, AutomergeError>(|d| {
