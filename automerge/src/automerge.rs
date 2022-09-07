@@ -1178,9 +1178,17 @@ impl Automerge {
         }
     }
 
+    /// Return a graphviz representation of the opset.
+    ///
+    /// # Arguments
+    ///
+    /// * objects: An optional list of object IDs to display, if not specified all objects are
+    ///            visualised
     #[cfg(feature = "optree-visualisation")]
-    pub fn visualise_optree(&self) -> String {
-        self.ops.visualise()
+    pub fn visualise_optree(&self, objects: Option<Vec<ExId>>) -> String {
+        let objects =
+            objects.map(|os| os.iter().filter_map(|o| self.exid_to_obj(o).ok()).collect());
+        self.ops.visualise(objects)
     }
 }
 
