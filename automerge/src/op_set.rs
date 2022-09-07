@@ -300,10 +300,24 @@ impl OpSetInternal {
         self.trees.get(id).map(|tree| tree.objtype)
     }
 
+    /// Return a graphviz representation of the opset.
+    ///
+    /// # Arguments
+    ///
+    /// * objects: An optional list of object IDs to display, if not specified all objects are
+    ///            visualised
     #[cfg(feature = "optree-visualisation")]
-    pub(crate) fn visualise(&self) -> String {
+    pub(crate) fn visualise(&self, objects: Option<Vec<ObjId>>) -> String {
+        use std::borrow::Cow;
         let mut out = Vec::new();
-        let graph = super::visualisation::GraphVisualisation::construct(&self.trees, &self.m);
+        let trees = if let Some(objects) = objects {
+            let mut filtered = self.trees.clone();
+            filtered.retain(|k, _| objects.contains(k));
+            Cow::Owned(filtered)
+        } else {
+            Cow::Borrowed(&self.trees)
+        };
+        let graph = super::visualisation::GraphVisualisation::construct(&trees, &self.m);
         dot::render(&graph, &mut out).unwrap();
         String::from_utf8_lossy(&out[..]).to_string()
     }
