@@ -516,6 +516,12 @@
 <span id="508">508</span>
 <span id="509">509</span>
 <span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::ops::RangeBounds</span>;
 
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::exid::ExId</span>;
@@ -749,9 +755,15 @@
             .<span class="ident">receive_sync_message_with</span>(<span class="ident">sync_state</span>, <span class="ident">message</span>, <span class="ident">options</span>)
     }
 
+    <span class="doccomment">/// Return a graphviz representation of the opset.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// # Arguments</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// * objects: An optional list of object IDs to display, if not specified all objects are</span>
+    <span class="doccomment">///            visualised</span>
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;optree-visualisation&quot;</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">visualise_optree</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">String</span> {
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">visualise_optree</span>()
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">visualise_optree</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">objects</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>) -&gt; <span class="ident">String</span> {
+        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">visualise_optree</span>(<span class="ident">objects</span>)
     }
 
     <span class="doccomment">/// Get the current heads of the document.</span>

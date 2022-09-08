@@ -422,6 +422,20 @@
 <span id="414">414</span>
 <span id="415">415</span>
 <span id="416">416</span>
+<span id="417">417</span>
+<span id="418">418</span>
+<span id="419">419</span>
+<span id="420">420</span>
+<span id="421">421</span>
+<span id="422">422</span>
+<span id="423">423</span>
+<span id="424">424</span>
+<span id="425">425</span>
+<span id="426">426</span>
+<span id="427">427</span>
+<span id="428">428</span>
+<span id="429">429</span>
+<span id="430">430</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::clock::Clock</span>;
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::exid::ExId</span>;
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::indexed_cache::IndexedCache</span>;
@@ -724,10 +738,24 @@
         <span class="self">self</span>.<span class="ident">trees</span>.<span class="ident">get</span>(<span class="ident">id</span>).<span class="ident">map</span>(<span class="op">|</span><span class="ident">tree</span><span class="op">|</span> <span class="ident">tree</span>.<span class="ident">objtype</span>)
     }
 
+    <span class="doccomment">/// Return a graphviz representation of the opset.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// # Arguments</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// * objects: An optional list of object IDs to display, if not specified all objects are</span>
+    <span class="doccomment">///            visualised</span>
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;optree-visualisation&quot;</span>)]</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">visualise</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">String</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">visualise</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">objects</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ObjId</span><span class="op">&gt;</span><span class="op">&gt;</span>) -&gt; <span class="ident">String</span> {
+        <span class="kw">use</span> <span class="ident">std::borrow::Cow</span>;
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">out</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
-        <span class="kw">let</span> <span class="ident">graph</span> <span class="op">=</span> <span class="ident"><span class="kw">super</span>::visualisation::GraphVisualisation::construct</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">trees</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">m</span>);
+        <span class="kw">let</span> <span class="ident">trees</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">objects</span>) <span class="op">=</span> <span class="ident">objects</span> {
+            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">filtered</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">trees</span>.<span class="ident">clone</span>();
+            <span class="ident">filtered</span>.<span class="ident">retain</span>(<span class="op">|</span><span class="ident">k</span>, <span class="kw">_</span><span class="op">|</span> <span class="ident">objects</span>.<span class="ident">contains</span>(<span class="ident">k</span>));
+            <span class="ident">Cow::Owned</span>(<span class="ident">filtered</span>)
+        } <span class="kw">else</span> {
+            <span class="ident">Cow::Borrowed</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">trees</span>)
+        };
+        <span class="kw">let</span> <span class="ident">graph</span> <span class="op">=</span> <span class="ident"><span class="kw">super</span>::visualisation::GraphVisualisation::construct</span>(<span class="kw-2">&amp;</span><span class="ident">trees</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">m</span>);
         <span class="ident">dot::render</span>(<span class="kw-2">&amp;</span><span class="ident">graph</span>, <span class="kw-2">&amp;mut</span> <span class="ident">out</span>).<span class="ident">unwrap</span>();
         <span class="ident">String::from_utf8_lossy</span>(<span class="kw-2">&amp;</span><span class="ident">out</span>[..]).<span class="ident">to_string</span>()
     }

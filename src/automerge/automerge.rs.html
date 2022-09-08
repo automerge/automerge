@@ -1208,6 +1208,14 @@
 <span id="1200">1200</span>
 <span id="1201">1201</span>
 <span id="1202">1202</span>
+<span id="1203">1203</span>
+<span id="1204">1204</span>
+<span id="1205">1205</span>
+<span id="1206">1206</span>
+<span id="1207">1207</span>
+<span id="1208">1208</span>
+<span id="1209">1209</span>
+<span id="1210">1210</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::cmp::Ordering</span>;
 <span class="kw">use</span> <span class="ident">std::collections</span>::{<span class="ident">BTreeSet</span>, <span class="ident">HashMap</span>, <span class="ident">HashSet</span>};
 <span class="kw">use</span> <span class="ident">std::fmt::Debug</span>;
@@ -2388,9 +2396,17 @@
         }
     }
 
+    <span class="doccomment">/// Return a graphviz representation of the opset.</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// # Arguments</span>
+    <span class="doccomment">///</span>
+    <span class="doccomment">/// * objects: An optional list of object IDs to display, if not specified all objects are</span>
+    <span class="doccomment">///            visualised</span>
     <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;optree-visualisation&quot;</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">visualise_optree</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">String</span> {
-        <span class="self">self</span>.<span class="ident">ops</span>.<span class="ident">visualise</span>()
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">visualise_optree</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">objects</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>) -&gt; <span class="ident">String</span> {
+        <span class="kw">let</span> <span class="ident">objects</span> <span class="op">=</span>
+            <span class="ident">objects</span>.<span class="ident">map</span>(<span class="op">|</span><span class="ident">os</span><span class="op">|</span> <span class="ident">os</span>.<span class="ident">iter</span>().<span class="ident">filter_map</span>(<span class="op">|</span><span class="ident">o</span><span class="op">|</span> <span class="self">self</span>.<span class="ident">exid_to_obj</span>(<span class="ident">o</span>).<span class="ident">ok</span>()).<span class="ident">collect</span>());
+        <span class="self">self</span>.<span class="ident">ops</span>.<span class="ident">visualise</span>(<span class="ident">objects</span>)
     }
 }
 
