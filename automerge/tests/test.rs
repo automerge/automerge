@@ -1332,3 +1332,19 @@ fn load_incremental_with_corrupted_tail() {
         }
     );
 }
+
+#[test]
+fn load_doc_with_deleted_objects() {
+    // Reproduces an issue where a document with deleted objects failed to load
+    let mut doc = AutoCommit::new();
+    doc.put_object(ROOT, "list", ObjType::List).unwrap();
+    doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.put_object(ROOT, "map", ObjType::Map).unwrap();
+    doc.put_object(ROOT, "table", ObjType::Table).unwrap();
+    doc.delete(&ROOT, "list").unwrap();
+    doc.delete(&ROOT, "text").unwrap();
+    doc.delete(&ROOT, "map").unwrap();
+    doc.delete(&ROOT, "table").unwrap();
+    let saved = doc.save();
+    Automerge::load(&saved).unwrap();
+}
