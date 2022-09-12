@@ -236,9 +236,9 @@ impl LoadingObject {
     }
 
     fn append_op(&mut self, op: Op) -> Result<(), Error> {
-        // Collect set operations so we can find the keys which delete operations refer to in
-        // `finish`
-        if matches!(op.action, OpType::Put(_)) {
+        // Collect set and make operations so we can find the keys which delete operations refer to
+        // in `finish`
+        if matches!(op.action, OpType::Put(_) | OpType::Make(_)) {
             match op.key {
                 Key::Map(_) => {
                     self.set_ops.insert(op.id, op.key);
