@@ -606,9 +606,9 @@
     }
 
     <span class="kw">fn</span> <span class="ident">append_op</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">op</span>: <span class="ident">Op</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
-        <span class="comment">// Collect set operations so we can find the keys which delete operations refer to in</span>
-        <span class="comment">// `finish`</span>
-        <span class="kw">if</span> <span class="macro">matches!</span>(<span class="ident">op</span>.<span class="ident">action</span>, <span class="ident">OpType::Put</span>(<span class="kw">_</span>)) {
+        <span class="comment">// Collect set and make operations so we can find the keys which delete operations refer to</span>
+        <span class="comment">// in `finish`</span>
+        <span class="kw">if</span> <span class="macro">matches!</span>(<span class="ident">op</span>.<span class="ident">action</span>, <span class="ident">OpType::Put</span>(<span class="kw">_</span>) <span class="op">|</span> <span class="ident">OpType::Make</span>(<span class="kw">_</span>)) {
             <span class="kw">match</span> <span class="ident">op</span>.<span class="ident">key</span> {
                 <span class="ident">Key::Map</span>(<span class="kw">_</span>) =&gt; {
                     <span class="self">self</span>.<span class="ident">set_ops</span>.<span class="ident">insert</span>(<span class="ident">op</span>.<span class="ident">id</span>, <span class="ident">op</span>.<span class="ident">key</span>);
