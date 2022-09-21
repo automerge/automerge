@@ -6,7 +6,7 @@
   "description": "typescript types for low level automerge api",
   "homepage": "https://github.com/automerge/automerge-rs/tree/main/automerge-wasm",
   "repository": "github:automerge/automerge-rs",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "license": "MIT",
   "files": [
     "LICENSE",

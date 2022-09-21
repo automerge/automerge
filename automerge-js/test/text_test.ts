@@ -1,9 +1,6 @@
 import * as assert from 'assert'
 import * as Automerge from '../src'
 import { assertEqualsOneOf } from './helpers'
-import * as AutomergeWASM from "automerge-wasm"
-
-Automerge.use(AutomergeWASM)
 
 function attributeStateToAttributes(accumulatedAttributes) {
   const attributes = {}

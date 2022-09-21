@@ -24,9 +24,13 @@ export interface State<T> {
   snapshot: T
 }
 
+
 export function use(api: API) {
   UseApi(api)
 }
+
+import * as wasm from "automerge-wasm"
+use(wasm)
 
 export function getBackend<T>(doc: Doc<T>) : Automerge {
   return _state(doc)
@@ -87,7 +91,7 @@ export function free<T>(doc: Doc<T>) {
   return _state(doc).free()
 }
 
-export function from<T>(initialState: T | Doc<T>, actor?: ActorId): Doc<T> {
+export function from<T extends {}>(initialState: T | Doc<T>, actor?: ActorId): Doc<T> {
     return change(init(actor), (d) => Object.assign(d, initialState))
 }
 

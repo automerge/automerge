@@ -8,29 +8,29 @@
   "description": "wasm-bindgen bindings to the automerge rust implementation",
   "homepage": "https://github.com/automerge/automerge-rs/tree/main/automerge-wasm",
   "repository": "github:automerge/automerge-rs",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "license": "MIT",
   "files": [
     "README.md",
     "LICENSE",
     "package.json",
     "index.d.ts",
-    "nodejs/index.js",
     "nodejs/bindgen.js",
     "nodejs/bindgen_bg.wasm",
-    "web/index.js",
-    "web/bindgen.js",
-    "web/bindgen_bg.wasm"
+    "bundler/bindgen.js",
+    "bundler/bindgen_bg.js",
+    "bundler/bindgen_bg.wasm"
   ],
   "types": "index.d.ts",
-  "module": "./web/index.js",
-  "main": "./nodejs/index.js",
+  "module": "./bundler/bindgen.js",
+  "main": "./nodejs/bindgen.js",
   "scripts": {
     "lint": "eslint test/*.ts",
     "build": "cross-env PROFILE=dev TARGET=nodejs FEATURES='' yarn target",
+    "debug": "cross-env PROFILE=dev yarn buildall",
     "release": "cross-env PROFILE=release yarn buildall",
-    "buildall": "cross-env TARGET=nodejs yarn target && cross-env TARGET=web yarn target",
-    "target": "rimraf ./$TARGET && wasm-pack build --target $TARGET --$PROFILE --out-name bindgen -d $TARGET -- $FEATURES  && cp $TARGET-index.js $TARGET/index.js",
+    "buildall": "cross-env TARGET=nodejs yarn target && cross-env TARGET=bundler yarn target",
+    "target": "rimraf ./$TARGET && wasm-pack build --target $TARGET --$PROFILE --out-name bindgen -d $TARGET -- $FEATURES",
     "test": "ts-mocha -p tsconfig.json --type-check --bail --full-trace test/*.ts"
   },
   "devDependencies": {
@@ -51,6 +51,10 @@
     "typescript": "^4.6.4"
   },
   "dependencies": {
-    "automerge-types": "0.1.5"
+    "automerge-types": "0.1.6"
+  },
+  "exports": {
+    "browser": "./bundler/bindgen.js",
+    "require": "./nodejs/bindgen.js"
   }
 }
