@@ -11,7 +11,11 @@ resolver = "2"
 [profile.release]
 debug = true
 lto = true
-opt-level = 3
+opt-level = 'z'
 
 [profile.bench]
 debug = true
+
+[profile.release.package.automerge-wasm]
+debug = false
+opt-level = 'z'
