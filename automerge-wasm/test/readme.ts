@@ -1,7 +1,7 @@
 import { describe, it } from 'mocha';
 import * as assert from 'assert'
 //@ts-ignore
-import { init, create, load } from '..'
+import { create, load } from '..'
 
 describe('Automerge', () => {
   describe('Readme Examples', () => {
@@ -10,11 +10,9 @@ describe('Automerge', () => {
       doc.free()
     })
     it('Using the Library and Creating a Document (2)', (done) => {
-      init().then((_:any) => {
-        const doc = create()
-        doc.free()
-        done()
-      })
+      const doc = create()
+      doc.free()
+      done()
     })
     it('Automerge Scalar Types (1)', () => {
       const doc = create()

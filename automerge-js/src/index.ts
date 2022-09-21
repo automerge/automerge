@@ -7,11 +7,11 @@ import { STATE, HEADS, TRACE, OBJECT_ID, READ_ONLY, FROZEN  } from "./constants"
 import { AutomergeValue, Counter } from "./types"
 export { AutomergeValue, Text, Counter, Int, Uint, Float64 } from "./types"
 
-import { API } from "automerge-types";
+import { API } from "automerge-wasm";
 import { ApiHandler, UseApi } from "./low_level"
 
-import { Actor as ActorId, Prop, ObjID, Change, DecodedChange, Heads, Automerge, MaterializeValue } from "automerge-types"
-import { JsSyncState as SyncState, SyncMessage, DecodedSyncMessage } from "automerge-types"
+import { Actor as ActorId, Prop, ObjID, Change, DecodedChange, Heads, Automerge, MaterializeValue } from "automerge-wasm"
+import { JsSyncState as SyncState, SyncMessage, DecodedSyncMessage } from "automerge-wasm"
 
 export type ChangeOptions = { message?: string, time?: number }
 
@@ -24,9 +24,13 @@ export interface State<T> {
   snapshot: T
 }
 
+
 export function use(api: API) {
   UseApi(api)
 }
+
+import * as wasm from "automerge-wasm"
+use(wasm)
 
 export function getBackend<T>(doc: Doc<T>) : Automerge {
   return _state(doc)
@@ -87,7 +91,7 @@ export function free<T>(doc: Doc<T>) {
   return _state(doc).free()
 }
 
-export function from<T>(initialState: T | Doc<T>, actor?: ActorId): Doc<T> {
+export function from<T extends {}>(initialState: T | Doc<T>, actor?: ActorId): Doc<T> {
     return change(init(actor), (d) => Object.assign(d, initialState))
 }
 
