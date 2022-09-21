@@ -2,9 +2,6 @@ import * as assert from 'assert'
 import { checkEncoded } from './helpers'
 import * as Automerge from '../src'
 import { encodeChange, decodeChange } from '../src'
-import * as AutomergeWASM from "automerge-wasm"
-
-Automerge.use(AutomergeWASM)
 
 describe('change encoding', () => {
   it('should encode text edits', () => {
