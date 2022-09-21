@@ -1,0 +1,23 @@
+{
+  "name": "e2e",
+  "version": "0.0.1",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "e2e": "ts-node index.ts"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/node": "^18.7.18",
+    "cmd-ts": "^0.11.0",
+    "node-fetch": "^2",
+    "ts-node": "^10.9.1",
+    "typed-emitter": "^2.1.0",
+    "typescript": "^4.8.3",
+    "verdaccio": "5"
+  },
+  "devDependencies": {
+    "@types/node-fetch": "2.x"
+  }
+}
