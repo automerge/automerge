@@ -1,0 +1,6 @@
+{
+    "compilerOptions": {
+        "types": ["node"]
+    },
+    "module": "nodenext"
+}
