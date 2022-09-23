@@ -1,0 +1,15 @@
+[package]
+authors = ["Julien Fraichard <julienfr112@gmail.com>"]
+edition = "2021"
+license = "MIT"
+name = "automerge-py"
+version = "0.1.0"
+
+[lib]
+crate-type = ["cdylib"]
+name = "automerge"
+
+[dependencies]
+automerge = {path = "../automerge"}
+pyo3 = {version = "0.17.1", features = ["extension-module"]}
+serde_json = "^1.0"

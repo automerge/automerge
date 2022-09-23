@@ -1,10 +1,11 @@
 [workspace]
 members = [
-    "automerge",
-    "automerge-c",
-    "automerge-cli",
-    "automerge-wasm",
-    "edit-trace",
+  "automerge",
+  "automerge-c",
+  "automerge-cli",
+  "automerge-wasm",
+  "edit-trace",
+  "automerge-py",
 ]
 resolver = "2"
 
