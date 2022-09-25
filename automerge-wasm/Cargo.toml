@@ -33,6 +33,7 @@ serde-wasm-bindgen = "0.4.3"
 serde_bytes = "0.11.5"
 hex = "^0.4.3"
 regex = "^1.5"
+itertools = "^0.10.3"
 
 [dependencies.wasm-bindgen]
 version = "^0.2"
