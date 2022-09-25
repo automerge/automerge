@@ -1,7 +1,8 @@
 // Properties of the document root object
 //const OPTIONS   = Symbol('_options')   // object containing options passed to init()
 //const CACHE     = Symbol('_cache')     // map from objectId to immutable object
-export const STATE      = Symbol.for('_am_state')     // object containing metadata about current state (e.g. sequence numbers)
+//export const STATE      = Symbol.for('_am_state')     // object containing metadata about current state (e.g. sequence numbers)
+export const STATE      = Symbol.for('_am_meta')     // object containing metadata about current state (e.g. sequence numbers)
 export const HEADS      = Symbol.for('_am_heads')     // object containing metadata about current state (e.g. sequence numbers)
 export const TRACE      = Symbol.for('_am_trace')     // object containing metadata about current state (e.g. sequence numbers)
 export const OBJECT_ID  = Symbol.for('_am_objectId')     // object containing metadata about current state (e.g. sequence numbers)

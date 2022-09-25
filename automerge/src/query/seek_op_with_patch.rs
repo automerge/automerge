@@ -8,8 +8,6 @@ use std::fmt::Debug;
 pub(crate) struct SeekOpWithPatch<'a> {
     op: Op,
     pub(crate) pos: usize,
-    /// A position counter for after we find the insert position to record conflicts.
-    later_pos: usize,
     pub(crate) succ: Vec<usize>,
     found: bool,
     pub(crate) seen: usize,
@@ -26,7 +24,6 @@ impl<'a> SeekOpWithPatch<'a> {
             op: op.clone(),
             succ: vec![],
             pos: 0,
-            later_pos: 0,
             found: false,
             seen: 0,
             last_seen: None,
@@ -176,6 +173,10 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                             self.values.push(e);
                         }
                         self.succ.push(self.pos);
+
+                        if e.visible() {
+                            self.had_value_before = true;
+                        }
                     } else if e.visible() {
                         self.values.push(e);
                     }
@@ -184,7 +185,6 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                     // we reach an op with an opId greater than that of the new operation
                     if m.lamport_cmp(e.id, self.op.id) == Ordering::Greater {
                         self.found = true;
-                        self.later_pos = self.pos + 1;
                         return QueryResult::Next;
                     }
 
@@ -202,7 +202,6 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                     if e.visible() {
                         self.values.push(e);
                     }
-                    self.later_pos += 1;
                 }
                 QueryResult::Next
             }

@@ -77,9 +77,14 @@ type Conflicts = {
     [key: string]: AutomergeValue;
 };
 
+type InitOptions = {
+    actor?: ActorId,
+    freeze?: boolean,
+};
+
 export function use(api: LowLevelApi): void;
 export function getBackend<T>(doc: Doc<T>) : Automerge;
-export function init<T>(actor?: ActorId): Doc<T>;
+export function init<T>(actor?: ActorId | InitOptions): Doc<T>;
 export function clone<T>(doc: Doc<T>): Doc<T>;
 export function free<T>(doc: Doc<T>): void;
 export function from<T>(initialState: T | Doc<T>, actor?: ActorId): Doc<T>;

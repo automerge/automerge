@@ -538,7 +538,7 @@ describe('Data sync protocol', () => {
         assert.deepStrictEqual(getHeads(n2), [n1hash2, n2hash2].sort())
       })
 
-      it('should sync three nodes', () => {
+      it.skip('should sync three nodes', () => {
         s1 = decodeSyncState(encodeSyncState(s1))
         s2 = decodeSyncState(encodeSyncState(s2))
 
