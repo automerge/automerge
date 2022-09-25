@@ -215,7 +215,8 @@ impl<Obs: OpObserver> AutoCommitWithObs<Obs> {
         message: sync::Message,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
-        self.doc.receive_sync_message(sync_state, message)
+        self.doc
+            .receive_sync_message_with(sync_state, message, Some(&mut self.op_observer))
     }
 
     /// Return a graphviz representation of the opset.
