@@ -4,7 +4,7 @@ export { uuid } from './uuid'
 import { rootProxy, listProxy, textProxy, mapProxy } from "./proxies"
 import { STATE, HEADS, TRACE, OBJECT_ID, READ_ONLY, FROZEN  } from "./constants"
 
-import { AutomergeValue, Counter } from "./types"
+import { AutomergeValue, Text, Counter } from "./types"
 export { AutomergeValue, Text, Counter, Int, Uint, Float64 } from "./types"
 
 import { API } from "automerge-types";
@@ -13,7 +13,8 @@ import { ApiHandler, UseApi } from "./low_level"
 import { Actor as ActorId, Prop, ObjID, Change, DecodedChange, Heads, Automerge, MaterializeValue } from "automerge-types"
 import { JsSyncState as SyncState, SyncMessage, DecodedSyncMessage } from "automerge-types"
 
-export type ChangeOptions = { message?: string, time?: number }
+export type ChangeOptions = { message?: string, time?: number, patchCallback?: Function }
+export type ApplyOptions = { patchCallback?: Function }
 
 export type Doc<T> = { readonly [P in keyof T]: Doc<T[P]> }
 
@@ -24,17 +25,30 @@ export interface State<T> {
   snapshot: T
 }
 
+export type InitOptions = {
+    actor?: ActorId,
+    freeze?: boolean,
+    patchCallback?: Function,
+};
+
 export function use(api: API) {
   UseApi(api)
 }
 
-export function getBackend<T>(doc: Doc<T>) : Automerge {
-  return _state(doc)
+interface InternalState {
+  handle: Automerge,
+  heads: Heads | undefined,
+  freeze: boolean,
+  patchCallback: Function | undefined,
 }
 
-function _state<T>(doc: Doc<T>) : Automerge {
+export function getBackend<T>(doc: Doc<T>) : Automerge {
+  return _state(doc).handle
+}
+
+function _state<T>(doc: Doc<T>, checkroot = true) : InternalState {
   const state = Reflect.get(doc,STATE)
-  if (state == undefined) {
+  if (state === undefined || (checkroot && _obj(doc) !== "_root")) {
     throw new RangeError("must be the document root")
   }
   return state
@@ -44,17 +58,12 @@ function _frozen<T>(doc: Doc<T>) : boolean {
   return Reflect.get(doc,FROZEN) === true
 }
 
-function _heads<T>(doc: Doc<T>) : Heads | undefined {
-  return Reflect.get(doc,HEADS)
-}
-
 function _trace<T>(doc: Doc<T>) : string | undefined {
   return Reflect.get(doc,TRACE)
 }
 
 function _set_heads<T>(doc: Doc<T>, heads: Heads) {
-  Reflect.set(doc,HEADS,heads)
-  Reflect.set(doc,TRACE,(new Error()).stack)
+  _state(doc).heads = heads
 }
 
 function _clear_heads<T>(doc: Doc<T>) {
@@ -63,28 +72,55 @@ function _clear_heads<T>(doc: Doc<T>) {
 }
 
 function _obj<T>(doc: Doc<T>) : ObjID {
-  return Reflect.get(doc,OBJECT_ID)
+  let proxy_objid = Reflect.get(doc,OBJECT_ID)
+  if (proxy_objid) {
+    return proxy_objid
+  }
+  if (Reflect.get(doc,STATE)) {
+    return "_root"
+  }
+  throw new RangeError("invalid document passed to _obj()")
 }
 
 function _readonly<T>(doc: Doc<T>) : boolean {
-  return Reflect.get(doc,READ_ONLY) === true
+  return Reflect.get(doc,READ_ONLY) !== false
 }
 
-export function init<T>(actor?: ActorId) : Doc<T>{
-  if (typeof actor !== "string") {
-    actor = undefined
+function importOpts(_actor?: ActorId | InitOptions) : InitOptions {
+  if (typeof _actor === 'object') {
+    return _actor
+  } else {
+    return { actor: _actor }
   }
-  const state = ApiHandler.create(actor)
-  return rootProxy(state, true);
+}
+
+export function init<T>(_opts?: ActorId | InitOptions) : Doc<T>{
+  let opts = importOpts(_opts)
+  let freeze = !!opts.freeze
+  let patchCallback = opts.patchCallback
+  const handle = ApiHandler.create(opts.actor)
+  handle.enablePatches(true)
+  //@ts-ignore
+  handle.registerDatatype("counter", (n) => new Counter(n))
+  //@ts-ignore
+  handle.registerDatatype("text", (n) => new Text(n))
+  //@ts-ignore
+  const doc = handle.materialize("/", undefined, { handle, heads: undefined, freeze, patchCallback })
+  //@ts-ignore
+  return doc
 }
 
 export function clone<T>(doc: Doc<T>) : Doc<T> {
-  const state = _state(doc).clone()
-  return rootProxy(state, true);
+  const state = _state(doc)
+  const handle = state.heads ? state.handle.forkAt(state.heads) : state.handle.fork()
+  //@ts-ignore
+  const clonedDoc : any = handle.materialize("/", undefined, { ... state, handle })
+
+  return clonedDoc
 }
 
 export function free<T>(doc: Doc<T>) {
-  return _state(doc).free()
+  return _state(doc).handle.free()
 }
 
 export function from<T>(initialState: T | Doc<T>, actor?: ActorId): Doc<T> {
@@ -104,6 +140,16 @@ export function change<T>(doc: Doc<T>, options: string | ChangeOptions | ChangeF
   }
 }
 
+function progressDocument<T>(doc: Doc<T>, heads: Heads, callback?: Function): Doc<T> {
+  let state = _state(doc)
+  let nextState = { ... state, heads: undefined };
+  // @ts-ignore
+  let nextDoc = state.handle.applyPatches(doc, nextState, callback)
+  state.heads = heads
+  if (nextState.freeze) { Object.freeze(nextDoc) }
+  return nextDoc
+}
+
 function _change<T>(doc: Doc<T>, options: ChangeOptions, callback: ChangeFn<T>): Doc<T> {
 
 
@@ -111,38 +157,33 @@ function _change<T>(doc: Doc<T>, options: ChangeOptions, callback: ChangeFn<T>):
     throw new RangeError("invalid change function");
   }
 
-  if (doc === undefined || _state(doc) === undefined || _obj(doc) !== "_root") {
+  const state = _state(doc)
+
+  if (doc === undefined || state === undefined) {
     throw new RangeError("must be the document root");
   }
-  if (_frozen(doc) === true) {
+  if (state.heads) {
     throw new RangeError("Attempting to use an outdated Automerge document")
-  }
-  if (!!_heads(doc) === true) {
-    throw new RangeError("Attempting to change an out of date document - set at: " + _trace(doc));
   }
   if (_readonly(doc) === false) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
-  const state = _state(doc)
-  const heads = state.getHeads()
+  const heads = state.handle.getHeads()
   try {
-    _set_heads(doc,heads)
-    Reflect.set(doc,FROZEN,true)
-    const root : T = rootProxy(state);
+    state.heads = heads
+    const root : T = rootProxy(state.handle);
     callback(root)
-    if (state.pendingOps() === 0) {
-      Reflect.set(doc,FROZEN,false)
-      _clear_heads(doc)
+    if (state.handle.pendingOps() === 0) {
+      state.heads = undefined
       return doc
     } else {
-      state.commit(options.message, options.time)
-      return rootProxy(state, true);
+      state.handle.commit(options.message, options.time)
+      return progressDocument(doc, heads, options.patchCallback || state.patchCallback);
     }
   } catch (e) {
     //console.log("ERROR: ",e)
-    Reflect.set(doc,FROZEN,false)
-    _clear_heads(doc)
-    state.rollback()
+    state.heads = undefined
+    state.handle.rollback()
     throw e
   }
 }
@@ -155,47 +196,55 @@ export function emptyChange<T>(doc: Doc<T>, options: ChangeOptions) {
     options = { message: options }
   }
 
-  if (doc === undefined || _state(doc) === undefined || _obj(doc) !== "_root") {
-    throw new RangeError("must be the document root");
-  }
-  if (_frozen(doc) === true) {
+  const state = _state(doc)
+
+  if (state.heads) {
     throw new RangeError("Attempting to use an outdated Automerge document")
   }
   if (_readonly(doc) === false) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
 
-  const state = _state(doc)
-  state.commit(options.message, options.time)
-  return rootProxy(state, true);
+  const heads = state.handle.getHeads()
+  state.handle.commit(options.message, options.time)
+  return progressDocument(doc, heads)
 }
 
-export function load<T>(data: Uint8Array, actor?: ActorId) : Doc<T> {
-  const state = ApiHandler.load(data, actor)
-  return rootProxy(state, true);
+export function load<T>(data: Uint8Array, _opts?: ActorId | InitOptions) : Doc<T> {
+  const opts = importOpts(_opts)
+  const actor = opts.actor
+  const patchCallback = opts.patchCallback
+  const handle = ApiHandler.load(data, actor)
+  handle.enablePatches(true)
+  //@ts-ignore
+  handle.registerDatatype("counter", (n) => new Counter(n))
+  //@ts-ignore
+  handle.registerDatatype("text", (n) => new Text(n))
+  //@ts-ignore
+  const doc : any = handle.materialize("/", undefined, { handle, heads: undefined, patchCallback })
+  return doc
 }
 
 export function save<T>(doc: Doc<T>) : Uint8Array  {
-  const state = _state(doc)
-  return state.save()
+  return _state(doc).handle.save()
 }
 
 export function merge<T>(local: Doc<T>, remote: Doc<T>) : Doc<T> {
-  if (!!_heads(local) === true) {
+  const localState = _state(local)
+
+  if (localState.heads) {
     throw new RangeError("Attempting to change an out of date document - set at: " + _trace(local));
   }
-  const localState = _state(local)
-  const heads = localState.getHeads()
+  const heads = localState.handle.getHeads()
   const remoteState = _state(remote)
-  const changes = localState.getChangesAdded(remoteState)
-  localState.applyChanges(changes)
-  _set_heads(local,heads)
-  return rootProxy(localState, true)
+  const changes = localState.handle.getChangesAdded(remoteState.handle)
+  localState.handle.applyChanges(changes)
+  return progressDocument(local, heads, localState.patchCallback)
 }
 
 export function getActorId<T>(doc: Doc<T>) : ActorId {
   const state = _state(doc)
-  return state.getActorId()
+  return state.handle.getActorId()
 }
 
 type Conflicts = { [key: string]: AutomergeValue }
@@ -242,14 +291,14 @@ function conflictAt(context : Automerge, objectId: ObjID, prop: Prop) : Conflict
 }
 
 export function getConflicts<T>(doc: Doc<T>, prop: Prop) : Conflicts | undefined {
-  const state = _state(doc)
+  const state = _state(doc, false)
   const objectId = _obj(doc)
-  return conflictAt(state, objectId, prop)
+  return conflictAt(state.handle, objectId, prop)
 }
 
 export function getLastLocalChange<T>(doc: Doc<T>) : Change | undefined {
   const state = _state(doc)
-  return state.getLastLocalChange() || undefined
+  return state.handle.getLastLocalChange() || undefined
 }
 
 export function getObjectId<T>(doc: Doc<T>) : ObjID {
@@ -259,30 +308,27 @@ export function getObjectId<T>(doc: Doc<T>) : ObjID {
 export function getChanges<T>(oldState: Doc<T>, newState: Doc<T>) : Change[] {
   const o = _state(oldState)
   const n = _state(newState)
-  const heads = _heads(oldState)
-  return n.getChanges(heads || o.getHeads())
+  return n.handle.getChanges(getHeads(oldState))
 }
 
 export function getAllChanges<T>(doc: Doc<T>) : Change[] {
   const state = _state(doc)
-  return state.getChanges([])
+  return state.handle.getChanges([])
 }
 
-export function applyChanges<T>(doc: Doc<T>, changes: Change[]) : [Doc<T>] {
-  if (doc === undefined || _obj(doc) !== "_root") {
-    throw new RangeError("must be the document root");
-  }
-  if (_frozen(doc) === true) {
+export function applyChanges<T>(doc: Doc<T>, changes: Change[], opts?: ApplyOptions) : [Doc<T>] {
+  const state = _state(doc)
+  if (!opts) { opts = {} }
+  if (state.heads) {
     throw new RangeError("Attempting to use an outdated Automerge document")
   }
   if (_readonly(doc) === false) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
-  const state = _state(doc)
-  const heads = state.getHeads()
-  state.applyChanges(changes)
-  _set_heads(doc,heads)
-  return [rootProxy(state, true)];
+  const heads = state.handle.getHeads();
+  state.handle.applyChanges(changes)
+  state.heads = heads;
+  return [progressDocument(doc, heads, opts.patchCallback || state.patchCallback )]
 }
 
 export function getHistory<T>(doc: Doc<T>) : State<T>[] {
@@ -300,6 +346,7 @@ export function getHistory<T>(doc: Doc<T>) : State<T>[] {
 }
 
 // FIXME : no tests
+// FIXME can we just use deep equals now?
 export function equals(val1: unknown, val2: unknown) : boolean {
   if (!isObject(val1) || !isObject(val2)) return val1 === val2
   const keys1 = Object.keys(val1).sort(), keys2 = Object.keys(val2).sort()
@@ -322,31 +369,25 @@ export function decodeSyncState(state: Uint8Array) : SyncState {
 export function generateSyncMessage<T>(doc: Doc<T>, inState: SyncState) : [ SyncState, SyncMessage | null ] {
   const state = _state(doc)
   const syncState = ApiHandler.importSyncState(inState)
-  const message = state.generateSyncMessage(syncState)
+  const message = state.handle.generateSyncMessage(syncState)
   const outState = ApiHandler.exportSyncState(syncState)
   return [ outState, message ]
 }
 
-export function receiveSyncMessage<T>(doc: Doc<T>, inState: SyncState, message: SyncMessage) : [ Doc<T>, SyncState, null ] {
+export function receiveSyncMessage<T>(doc: Doc<T>, inState: SyncState, message: SyncMessage, opts?: ApplyOptions) : [ Doc<T>, SyncState, null ] {
   const syncState = ApiHandler.importSyncState(inState)
-  if (doc === undefined || _obj(doc) !== "_root") {
-    throw new RangeError("must be the document root");
-  }
-  if (_frozen(doc) === true) {
-    throw new RangeError("Attempting to use an outdated Automerge document")
-  }
-  if (!!_heads(doc) === true) {
+  if (!opts) { opts = {} }
+  const state = _state(doc)
+  if (state.heads) {
     throw new RangeError("Attempting to change an out of date document - set at: " + _trace(doc));
   }
   if (_readonly(doc) === false) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
-  const state = _state(doc)
-  const heads = state.getHeads()
-  state.receiveSyncMessage(syncState, message)
-  _set_heads(doc,heads)
-  const outState = ApiHandler.exportSyncState(syncState)
-  return [rootProxy(state, true), outState, null];
+  const heads = state.handle.getHeads()
+  state.handle.receiveSyncMessage(syncState, message)
+  const outSyncState = ApiHandler.exportSyncState(syncState)
+  return [progressDocument(doc, heads, opts.patchCallback || state.patchCallback), outSyncState, null];
 }
 
 export function initSyncState() : SyncState {
@@ -371,24 +412,24 @@ export function decodeSyncMessage(message: SyncMessage) : DecodedSyncMessage {
 
 export function getMissingDeps<T>(doc: Doc<T>, heads: Heads) : Heads {
   const state = _state(doc)
-  return state.getMissingDeps(heads)
+  return state.handle.getMissingDeps(heads)
 }
 
 export function getHeads<T>(doc: Doc<T>) : Heads {
   const state = _state(doc)
-  return _heads(doc) || state.getHeads()
+  return state.heads || state.handle.getHeads()
 }
 
 export function dump<T>(doc: Doc<T>) {
   const state = _state(doc)
-  state.dump()
+  state.handle.dump()
 }
 
 // FIXME - return T?
 export function toJS<T>(doc: Doc<T>) : MaterializeValue {
   const state = _state(doc)
-  const heads = _heads(doc)
-  return state.materialize("_root", heads)
+  // @ts-ignore
+  return state.handle.materialize("_root", state.heads, state)
 }
 
 

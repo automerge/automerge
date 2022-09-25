@@ -219,18 +219,6 @@ const ListHandler = {
     if (index === TRACE) return target.trace
     if (index === STATE) return context;
     if (index === 'length') return context.length(objectId, heads);
-    if (index === Symbol.iterator) {
-      let i = 0;
-      return function *() {
-        // FIXME - ugly
-        let value = valueAt(target, i)
-        while (value !== undefined) {
-            yield value
-            i += 1
-            value = valueAt(target, i)
-        }
-      }
-    }
     if (typeof index === 'number') {
       return valueAt(target, index)
     } else {
@@ -369,17 +357,6 @@ const TextHandler = Object.assign({}, ListHandler, {
     if (index === TRACE) return target.trace
     if (index === STATE) return context;
     if (index === 'length') return context.length(objectId, heads);
-    if (index === Symbol.iterator) {
-      let i = 0;
-      return function *() {
-        let value = valueAt(target, i)
-        while (value !== undefined) {
-            yield value
-            i += 1
-            value = valueAt(target, i)
-        }
-      }
-    }
     if (typeof index === 'number') {
       return valueAt(target, index)
     } else {
@@ -425,11 +402,11 @@ function listMethods(target) {
     },
 
     fill(val: ScalarValue, start: number, end: number) {
-      // FIXME needs tests
       const [value, datatype] = import_value(val)
+      const length = context.length(objectId)
       start = parseListIndex(start || 0)
-      end = parseListIndex(end || context.length(objectId))
-      for (let i = start; i < end; i++) {
+      end = parseListIndex(end || length)
+      for (let i = start; i < Math.min(end, length); i++) {
         context.put(objectId, i, value, datatype)
       }
       return this
@@ -573,15 +550,9 @@ function listMethods(target) {
         }
       }
       return iterator
-    }
-  }
+    },
 
-  // Read-only methods that can delegate to the JavaScript built-in implementations
-  // FIXME - super slow
-  for (const method of ['concat', 'every', 'filter', 'find', 'findIndex', 'forEach', 'includes',
-                      'join', 'lastIndexOf', 'map', 'reduce', 'reduceRight',
-                      'slice', 'some', 'toLocaleString', 'toString']) {
-    methods[method] = (...args) => {
+    toArray() : AutomergeValue[] {
       const list : AutomergeValue = []
       let value
       do {
@@ -591,10 +562,107 @@ function listMethods(target) {
         }
       } while (value !== undefined)
 
-      return list[method](...args)
+      return list
+    },
+
+    map<T>(f: (AutomergeValue, number) => T) : T[] {
+      return this.toArray().map(f)
+    },
+
+    toString() : string {
+      return this.toArray().toString()
+    },
+
+    toLocaleString() : string {
+      return this.toArray().toLocaleString()
+    },
+
+    forEach(f: (AutomergeValue, number) => undefined ) {
+      return this.toArray().forEach(f)
+    },
+
+    // todo: real concat function is different
+    concat(other: AutomergeValue[]) : AutomergeValue[] {
+      return this.toArray().concat(other)
+    },
+
+    every(f: (AutomergeValue, number) => boolean) : boolean {
+      return this.toArray().every(f)
+    },
+
+    filter(f: (AutomergeValue, number) => boolean) : AutomergeValue[] {
+      return this.toArray().filter(f)
+    },
+
+    find(f: (AutomergeValue, number) => boolean) : AutomergeValue | undefined {
+      let index = 0
+      for (let v of this) {
+        if (f(v, index)) {
+          return v
+        }
+        index += 1
+      }
+    },
+
+    findIndex(f: (AutomergeValue, number) => boolean) : number {
+      let index = 0
+      for (let v of this) {
+        if (f(v, index)) {
+          return index
+        }
+        index += 1
+      }
+      return -1
+    },
+
+    includes(elem: AutomergeValue) : boolean {
+      return this.find((e) => e === elem) !== undefined
+    },
+
+    join(sep?: string) : string {
+      return this.toArray().join(sep)
+    },
+
+    // todo: remove the any
+    reduce<T>(f: (any, AutomergeValue) => T, initalValue?: T) : T | undefined {
+      return this.toArray().reduce(f,initalValue)
+    },
+
+    // todo: remove the any
+    reduceRight<T>(f: (any, AutomergeValue) => T, initalValue?: T) : T | undefined{
+      return this.toArray().reduceRight(f,initalValue)
+    },
+
+    lastIndexOf(search: AutomergeValue, fromIndex = +Infinity) : number {
+      // this can be faster
+      return this.toArray().lastIndexOf(search,fromIndex)
+    },
+
+    slice(index?: number, num?: number) : AutomergeValue[] {
+      return this.toArray().slice(index,num)
+    },
+
+    some(f: (AutomergeValue, number) => boolean) : boolean {
+      let index = 0;
+      for (let v of this) {
+        if (f(v,index)) {
+          return true
+        }
+        index += 1
+      }
+      return false
+    },
+
+    [Symbol.iterator]: function *() {
+      let i = 0;
+      let value = valueAt(target, i)
+      while (value !== undefined) {
+          yield value
+          i += 1
+          value = valueAt(target, i)
+      }
     }
   }
-
   return methods
 }
 

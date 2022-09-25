@@ -400,6 +400,8 @@ describe('Automerge', () => {
 
     it('recursive sets are possible', () => {
       const doc = create("aaaa")
+      //@ts-ignore
+      doc.registerDatatype("text", (n: any[]) => new String(n.join("")))
       const l1 = doc.putObject("_root", "list", [{ foo: "bar" }, [1, 2, 3]])
       const l2 = doc.insertObject(l1, 0, { zip: ["a", "b"] })
       const l3 = doc.putObject("_root", "info1", "hello world") // 'text' object
@@ -407,13 +409,13 @@ describe('Automerge', () => {
       const l4 = doc.putObject("_root", "info3", "hello world")
       assert.deepEqual(doc.materialize(), {
         "list": [{ zip: ["a", "b"] }, { foo: "bar" }, [1, 2, 3]],
-        "info1": "hello world",
+        "info1": new String("hello world"),
         "info2": "hello world",
-        "info3": "hello world",
+        "info3": new String("hello world"),
       })
       assert.deepEqual(doc.materialize(l2), { zip: ["a", "b"] })
       assert.deepEqual(doc.materialize(l1), [{ zip: ["a", "b"] }, { foo: "bar" }, [1, 2, 3]])
-      assert.deepEqual(doc.materialize(l4), "hello world")
+      assert.deepEqual(doc.materialize(l4), new String("hello world"))
       doc.free()
     })
 
