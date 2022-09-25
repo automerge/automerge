@@ -278,13 +278,18 @@ impl OpSetInternal {
                 let value = (winner.value(), self.id_to_exid(winner.id));
                 let conflict = values.len() > 1;
                 observer.put(parents, ex_obj, key, value, conflict);
-            } else {
+            } else if had_value_before {
                 observer.delete(parents, ex_obj, key);
             }
         } else if let Some(value) = op.get_increment_value() {
             // only observe this increment if the counter is visible, i.e. the counter's
             // create op is in the values
-            if values.iter().any(|value| op.pred.contains(&value.id)) {
+            //if values.iter().any(|value| op.pred.contains(&value.id)) {
+            if values
+                .last()
+                .map(|value| op.pred.contains(&value.id))
+                .unwrap_or_default()
+            {
                 // we have observed the value
                 observer.increment(parents, ex_obj, key, (value, self.id_to_exid(op.id)));
             }

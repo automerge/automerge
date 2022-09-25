@@ -1,40 +1,151 @@
-use std::borrow::Cow;
-
-use automerge as am;
-use js_sys::Uint8Array;
+use crate::to_js_err;
+use automerge::{ObjType, ScalarValue, Value};
 use wasm_bindgen::prelude::*;
 
-#[derive(Debug)]
-pub struct ScalarValue<'a>(pub(crate) Cow<'a, am::ScalarValue>);
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub(crate) enum Datatype {
+    Map,
+    Table,
+    List,
+    Text,
+    Bytes,
+    Str,
+    Int,
+    Uint,
+    F64,
+    Counter,
+    Timestamp,
+    Boolean,
+    Null,
+    Unknown(u8),
+}
 
-impl<'a> From<ScalarValue<'a>> for JsValue {
-    fn from(val: ScalarValue<'a>) -> Self {
-        match &*val.0 {
-            am::ScalarValue::Bytes(v) => Uint8Array::from(v.as_slice()).into(),
-            am::ScalarValue::Str(v) => v.to_string().into(),
-            am::ScalarValue::Int(v) => (*v as f64).into(),
-            am::ScalarValue::Uint(v) => (*v as f64).into(),
-            am::ScalarValue::F64(v) => (*v).into(),
-            am::ScalarValue::Counter(v) => (f64::from(v)).into(),
-            am::ScalarValue::Timestamp(v) => js_sys::Date::new(&(*v as f64).into()).into(),
-            am::ScalarValue::Boolean(v) => (*v).into(),
-            am::ScalarValue::Null => JsValue::null(),
-            am::ScalarValue::Unknown { bytes, .. } => Uint8Array::from(bytes.as_slice()).into(),
+impl Datatype {
+    pub(crate) fn is_sequence(&self) -> bool {
+        matches!(self, Self::List | Self::Text)
+    }
+
+    pub(crate) fn is_scalar(&self) -> bool {
+        !matches!(self, Self::Map | Self::Table | Self::List | Self::Text)
+    }
+}
+
+impl From<&ObjType> for Datatype {
+    fn from(o: &ObjType) -> Self {
+        (*o).into()
+    }
+}
+
+impl From<ObjType> for Datatype {
+    fn from(o: ObjType) -> Self {
+        match o {
+            ObjType::Map => Self::Map,
+            ObjType::List => Self::List,
+            ObjType::Table => Self::Table,
+            ObjType::Text => Self::Text,
         }
     }
 }
 
-pub(crate) fn datatype(s: &am::ScalarValue) -> String {
-    match s {
-        am::ScalarValue::Bytes(_) => "bytes".into(),
-        am::ScalarValue::Str(_) => "str".into(),
-        am::ScalarValue::Int(_) => "int".into(),
-        am::ScalarValue::Uint(_) => "uint".into(),
-        am::ScalarValue::F64(_) => "f64".into(),
-        am::ScalarValue::Counter(_) => "counter".into(),
-        am::ScalarValue::Timestamp(_) => "timestamp".into(),
-        am::ScalarValue::Boolean(_) => "boolean".into(),
-        am::ScalarValue::Null => "null".into(),
-        am::ScalarValue::Unknown { type_code, .. } => format!("unknown{}", type_code),
+impl std::fmt::Display for Datatype {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "{}", String::from(self.clone()))
+    }
+}
+
+impl From<&ScalarValue> for Datatype {
+    fn from(s: &ScalarValue) -> Self {
+        match s {
+            ScalarValue::Bytes(_) => Self::Bytes,
+            ScalarValue::Str(_) => Self::Str,
+            ScalarValue::Int(_) => Self::Int,
+            ScalarValue::Uint(_) => Self::Uint,
+            ScalarValue::F64(_) => Self::F64,
+            ScalarValue::Counter(_) => Self::Counter,
+            ScalarValue::Timestamp(_) => Self::Timestamp,
+            ScalarValue::Boolean(_) => Self::Boolean,
+            ScalarValue::Null => Self::Null,
+            ScalarValue::Unknown { type_code, .. } => Self::Unknown(*type_code),
+        }
+    }
+}
+
+impl From<&Value<'_>> for Datatype {
+    fn from(v: &Value<'_>) -> Self {
+        match v {
+            Value::Object(o) => o.into(),
+            Value::Scalar(s) => s.as_ref().into(),
+            /*
+                            ScalarValue::Bytes(_) => Self::Bytes,
+                            ScalarValue::Str(_) => Self::Str,
+                            ScalarValue::Int(_) => Self::Int,
+                            ScalarValue::Uint(_) => Self::Uint,
+                            ScalarValue::F64(_) => Self::F64,
+                            ScalarValue::Counter(_) => Self::Counter,
+                            ScalarValue::Timestamp(_) => Self::Timestamp,
+                            ScalarValue::Boolean(_) => Self::Boolean,
+                            ScalarValue::Null => Self::Null,
+                            ScalarValue::Unknown { type_code, .. } => Self::Unknown(*type_code),
+            */
+        }
+    }
+}
+
+impl From<Datatype> for String {
+    fn from(d: Datatype) -> Self {
+        match d {
+            Datatype::Map => "map".into(),
+            Datatype::Table => "table".into(),
+            Datatype::List => "list".into(),
+            Datatype::Text => "text".into(),
+            Datatype::Bytes => "bytes".into(),
+            Datatype::Str => "str".into(),
+            Datatype::Int => "int".into(),
+            Datatype::Uint => "uint".into(),
+            Datatype::F64 => "f64".into(),
+            Datatype::Counter => "counter".into(),
+            Datatype::Timestamp => "timestamp".into(),
+            Datatype::Boolean => "boolean".into(),
+            Datatype::Null => "null".into(),
+            Datatype::Unknown(type_code) => format!("unknown{}", type_code),
+        }
+    }
+}
+
+impl TryFrom<JsValue> for Datatype {
+    type Error = JsValue;
+
+    fn try_from(datatype: JsValue) -> Result<Self, Self::Error> {
+        let datatype = datatype
+            .as_string()
+            .ok_or_else(|| to_js_err("datatype is not a string"))?;
+        match datatype.as_str() {
+            "map" => Ok(Datatype::Map),
+            "table" => Ok(Datatype::Table),
+            "list" => Ok(Datatype::List),
+            "text" => Ok(Datatype::Text),
+            "bytes" => Ok(Datatype::Bytes),
+            "str" => Ok(Datatype::Str),
+            "int" => Ok(Datatype::Int),
+            "uint" => Ok(Datatype::Uint),
+            "f64" => Ok(Datatype::F64),
+            "counter" => Ok(Datatype::Counter),
+            "timestamp" => Ok(Datatype::Timestamp),
+            "boolean" => Ok(Datatype::Boolean),
+            "null" => Ok(Datatype::Null),
+            d => {
+                if d.starts_with("unknown") {
+                    todo!() // handle "unknown{}",
+                } else {
+                    Err(to_js_err(format!("unknown datatype {}", d)))
+                }
+            }
+        }
+    }
+}
+
+impl From<Datatype> for JsValue {
+    fn from(d: Datatype) -> Self {
+        String::from(d).into()
     }
 }
