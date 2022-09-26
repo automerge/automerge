@@ -175,7 +175,7 @@ async function withRegistry(action: WithRegistryAction, ...actions: Array<WithRe
                 return "verd-died"
             }
             const actionComplete: () => Promise<Step> = async () => {
-                await action("http://127.0.0.1:4873")
+                await action("http://localhost:4873")
                 return "action-completed"
             }
             const result = await Promise.race([verdDied(), actionComplete()])
@@ -287,7 +287,7 @@ class VerdaccioProcess {
         const healthCheck = async () => {
             while (true) {
                 try {
-                    const resp = await fetch("http://127.0.0.1:4873")
+                    const resp = await fetch("http://localhost:4873")
                     if (resp.status === 200) {
                         return
                     } else {
