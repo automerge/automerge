@@ -99,7 +99,7 @@ impl TryFrom<JS> for HashSet<ChangeHash> {
         let mut result = HashSet::new();
         for key in Reflect::own_keys(&value.0)?.iter() {
             if let Some(true) = Reflect::get(&value.0, &key)?.as_bool() {
-                result.insert(key.into_serde().map_err(to_js_err)?);
+                result.insert(serde_wasm_bindgen::from_value(key).map_err(to_js_err)?);
             }
         }
         Ok(result)
@@ -113,7 +113,7 @@ impl TryFrom<JS> for BTreeSet<ChangeHash> {
         let mut result = BTreeSet::new();
         for key in Reflect::own_keys(&value.0)?.iter() {
             if let Some(true) = Reflect::get(&value.0, &key)?.as_bool() {
-                result.insert(key.into_serde().map_err(to_js_err)?);
+                result.insert(serde_wasm_bindgen::from_value(key).map_err(to_js_err)?);
             }
         }
         Ok(result)
@@ -125,7 +125,8 @@ impl TryFrom<JS> for Vec<ChangeHash> {
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
         let value = value.0.dyn_into::<Array>()?;
-        let value: Result<Vec<ChangeHash>, _> = value.iter().map(|j| j.into_serde()).collect();
+        let value: Result<Vec<ChangeHash>, _> =
+            value.iter().map(serde_wasm_bindgen::from_value).collect();
         let value = value.map_err(to_js_err)?;
         Ok(value)
     }
@@ -134,7 +135,8 @@ impl TryFrom<JS> for Vec<ChangeHash> {
 impl From<JS> for Option<Vec<ChangeHash>> {
     fn from(value: JS) -> Self {
         let value = value.0.dyn_into::<Array>().ok()?;
-        let value: Result<Vec<ChangeHash>, _> = value.iter().map(|j| j.into_serde()).collect();
+        let value: Result<Vec<ChangeHash>, _> =
+            value.iter().map(serde_wasm_bindgen::from_value).collect();
         let value = value.ok()?;
         Some(value)
     }
@@ -350,7 +352,8 @@ pub(crate) fn to_objtype(
 
 pub(crate) fn get_heads(heads: Option<Array>) -> Option<Vec<ChangeHash>> {
     let heads = heads?;
-    let heads: Result<Vec<ChangeHash>, _> = heads.iter().map(|j| j.into_serde()).collect();
+    let heads: Result<Vec<ChangeHash>, _> =
+        heads.iter().map(serde_wasm_bindgen::from_value).collect();
     heads.ok()
 }
 
