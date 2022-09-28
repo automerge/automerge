@@ -41,28 +41,6 @@ impl TransactionInner {
             self.time = t;
         }
 
-        /*
-                if let Some(observer) = op_observer {
-                    for (obj, prop, op) in &self.operations {
-                        let ex_obj = doc.ops.id_to_exid(obj.0);
-                        if op.insert {
-                            let value = (op.value(), doc.id_to_exid(op.id));
-                            match prop {
-                                Prop::Map(_) => panic!("insert into a map"),
-                                Prop::Seq(index) => observer.insert(ex_obj, *index, value),
-                            }
-                        } else if op.is_delete() {
-                            observer.delete(ex_obj, prop.clone());
-                        } else if let Some(value) = op.get_increment_value() {
-                            observer.increment(ex_obj, prop.clone(), (value, doc.id_to_exid(op.id)));
-                        } else {
-                            let value = (op.value(), doc.ops.id_to_exid(op.id));
-                            observer.put(ex_obj, prop.clone(), value, false);
-                        }
-                    }
-                }
-        */
-
         let num_ops = self.pending_ops();
         let change = self.export(&doc.ops.m);
         let hash = change.hash();

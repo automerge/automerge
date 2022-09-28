@@ -7,6 +7,7 @@ use crate::Value;
 pub trait OpObserver: Default + Clone {
     /// A new value has been inserted into the given object.
     ///
+    /// - `parents`: A parents iterator that can be used to collect path information
     /// - `objid`: the object that has been inserted into.
     /// - `index`: the index the new value has been inserted at.
     /// - `tagged_value`: the value that has been inserted and the id of the operation that did the
@@ -21,6 +22,7 @@ pub trait OpObserver: Default + Clone {
 
     /// A new value has been put into the given object.
     ///
+    /// - `parents`: A parents iterator that can be used to collect path information
     /// - `objid`: the object that has been put into.
     /// - `prop`: the prop that the value as been put at.
     /// - `tagged_value`: the value that has been put into the object and the id of the operation
@@ -37,6 +39,7 @@ pub trait OpObserver: Default + Clone {
 
     /// A counter has been incremented.
     ///
+    /// - `parents`: A parents iterator that can be used to collect path information
     /// - `objid`: the object that contains the counter.
     /// - `prop`: they prop that the chounter is at.
     /// - `tagged_value`: the amount the counter has been incremented by, and the the id of the
@@ -51,21 +54,26 @@ pub trait OpObserver: Default + Clone {
 
     /// A value has beeen deleted.
     ///
+    /// - `parents`: A parents iterator that can be used to collect path information
     /// - `objid`: the object that has been deleted in.
     /// - `prop`: the prop of the value that has been deleted.
     fn delete(&mut self, parents: Parents<'_>, objid: ExId, prop: Prop);
 
-    /// Merge data with an other observer
+    /// Branch of a new op_observer later to be merged
     ///
-    /// - `other`: Another Op Observer of the same type
-    fn merge(&mut self, other: &Self);
-
-    /// Branch off to begin a transaction - allows state information to be coppied if needed
+    /// Called by AutoCommit when creating a new transaction.  Observer branch
+    /// will be merged on `commit()` or thrown away on `rollback()`
     ///
-    /// - `other`: Another Op Observer of the same type
     fn branch(&self) -> Self {
         Self::default()
     }
+
+    /// Merge observed information from a transaction.
+    ///
+    /// Called by AutoCommit on `commit()`
+    ///
+    /// - `other`: Another Op Observer of the same type
+    fn merge(&mut self, other: &Self);
 }
 
 impl OpObserver for () {

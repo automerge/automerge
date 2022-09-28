@@ -21,16 +21,6 @@ impl Observer {
         }
         self.enabled = enable;
     }
-
-    fn push(&mut self, patch: Patch) {
-        if let Some(tail) = self.patches.last_mut() {
-            if let Some(p) = tail.merge(patch) {
-                self.patches.push(p)
-            }
-        } else {
-            self.patches.push(patch);
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -83,7 +73,18 @@ impl OpObserver for Observer {
         tagged_value: (Value<'_>, ObjId),
     ) {
         if self.enabled {
-            // probably want to inline the merge/push code here
+            if let Some(Patch::Insert {
+                obj: tail_obj,
+                index: tail_index,
+                values,
+                ..
+            }) = self.patches.last_mut()
+            {
+                if tail_obj == &obj && *tail_index + values.len() == index {
+                    values.push(tagged_value.0.to_owned());
+                    return;
+                }
+            }
             let path = parents.path().into_iter().map(|p| p.1).collect();
             let value = tagged_value.0.to_owned();
             let patch = Patch::Insert {
@@ -92,7 +93,7 @@ impl OpObserver for Observer {
                 index,
                 values: vec![value],
             };
-            self.push(patch);
+            self.patches.push(patch);
         }
     }
 
@@ -199,28 +200,6 @@ impl Patch {
             Self::Insert { path, .. } => path.as_slice(),
             Self::DeleteMap { path, .. } => path.as_slice(),
             Self::DeleteSeq { path, .. } => path.as_slice(),
-        }
-    }
-
-    fn merge(&mut self, other: Patch) -> Option<Patch> {
-        match (self, &other) {
-            (
-                Self::Insert {
-                    obj, index, values, ..
-                },
-                Self::Insert {
-                    obj: o2,
-                    values: v2,
-                    index: i2,
-                    ..
-                },
-            ) if obj == o2 && *index + values.len() == *i2 => {
-                // TODO - there's a way to do this without the clone im sure
-                values.extend_from_slice(v2.as_slice());
-                //web_sys::console::log_2(&format!("NEW VAL {}: ", tmpi).into(), &new_value);
-                None
-            }
-            _ => Some(other),
         }
     }
 }
