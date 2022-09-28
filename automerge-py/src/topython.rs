@@ -1,6 +1,4 @@
 use automerge as am;
-use automerge::transaction::Transactable;
-use pyo3::exceptions::{PyRuntimeError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::*;
 

@@ -5,11 +5,7 @@ mod tojson;
 mod topython;
 use pyo3::exceptions::PyTypeError;
 use pyo3::types::PyDict;
-use automerge as am;
-use automerge::transaction::Transactable;
-use pyo3::exceptions::{PyRuntimeError};
-use pyo3::prelude::*;
-use pyo3::types::*;
+
 #[pyclass]
 struct Doc {
     inner: Vec<u8>,

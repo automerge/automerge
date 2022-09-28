@@ -1,0 +1,1 @@
+docker run -it --rm -v /home/julien/Projets/automerge-rs:/io -w "/io/automerge-py" --entrypoint /bin/bash  ghcr.io/pyo3/maturin
