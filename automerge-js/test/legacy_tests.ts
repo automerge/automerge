@@ -2,9 +2,6 @@ import * as assert from 'assert'
 import * as Automerge from '../src'
 import { assertEqualsOneOf } from './helpers'
 import { decodeChange } from './legacy/columnar'
-import * as AutomergeWASM from "automerge-wasm"
-
-Automerge.use(AutomergeWASM)
 
 const UUID_PATTERN = /^[0-9a-f]{32}$/
 const OPID_PATTERN = /^[0-9]+@[0-9a-f]{32}$/

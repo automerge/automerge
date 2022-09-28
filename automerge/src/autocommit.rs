@@ -219,9 +219,15 @@ impl<Obs: OpObserver> AutoCommitWithObs<Obs> {
             .receive_sync_message_with(sync_state, message, Some(&mut self.op_observer))
     }
 
+    /// Return a graphviz representation of the opset.
+    ///
+    /// # Arguments
+    ///
+    /// * objects: An optional list of object IDs to display, if not specified all objects are
+    ///            visualised
     #[cfg(feature = "optree-visualisation")]
-    pub fn visualise_optree(&self) -> String {
-        self.doc.visualise_optree()
+    pub fn visualise_optree(&self, objects: Option<Vec<ExId>>) -> String {
+        self.doc.visualise_optree(objects)
     }
 
     /// Get the current heads of the document.

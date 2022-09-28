@@ -1,10 +1,10 @@
 {
-  "name": "automerge-js",
+  "name": "automerge",
   "collaborators": [
     "Orion Henry <orion@inkandswitch.com>",
     "Martin Kleppmann"
   ],
-  "version": "0.1.12",
+  "version": "1.0.1-preview.8",
   "description": "Reimplementation of `automerge` on top of the automerge-wasm backend",
   "homepage": "https://github.com/automerge/automerge-rs/tree/main/automerge-js",
   "repository": "github:automerge/automerge-rs",
@@ -47,7 +47,6 @@
     "@types/uuid": "^8.3.4",
     "@typescript-eslint/eslint-plugin": "^5.25.0",
     "@typescript-eslint/parser": "^5.25.0",
-    "automerge-wasm": "^0.1.6",
     "eslint": "^8.15.0",
     "fast-sha256": "^1.3.0",
     "mocha": "^10.0.0",
@@ -57,7 +56,8 @@
     "typescript": "^4.6.4"
   },
   "dependencies": {
-    "automerge-types": "0.1.5",
+    "automerge-types": "0.1.6",
+    "automerge-wasm": "0.1.7",
     "uuid": "^8.3"
   }
 }

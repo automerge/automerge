@@ -1,6 +1,9 @@
 THIS_SCRIPT=$(dirname "$0");
+E2E_PROJECT=$THIS_SCRIPT/../../automerge-js/e2e;
 WASM_PROJECT=$THIS_SCRIPT/../../automerge-wasm;
 
-yarn --cwd $WASM_PROJECT install;
-yarn --cwd $WASM_PROJECT build;
+# This takes care of publishing the correct version of automerge-types in
+# a local NPM registry and calling yarn install with that registry available
+yarn --cwd $E2E_PROJECT install
+yarn --cwd $E2E_PROJECT e2e buildwasm
 yarn --cwd $WASM_PROJECT test;

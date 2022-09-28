@@ -777,7 +777,7 @@ pub fn init(actor: Option<String>) -> Result<Automerge, JsValue> {
     Automerge::new(actor)
 }
 
-#[wasm_bindgen(js_name = loadDoc)]
+#[wasm_bindgen(js_name = load)]
 pub fn load(data: Uint8Array, actor: Option<String>) -> Result<Automerge, JsValue> {
     let data = data.to_vec();
     let mut doc = AutoCommit::load(&data).map_err(to_js_err)?;

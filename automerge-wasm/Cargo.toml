@@ -36,7 +36,7 @@ regex = "^1.5"
 itertools = "^0.10.3"
 
 [dependencies.wasm-bindgen]
-version = "^0.2"
+version = "^0.2.83"
 #features = ["std"]
 features = ["serde-serialize", "std"]
 

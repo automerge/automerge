@@ -13,6 +13,8 @@ import { ApiHandler, UseApi } from "./low_level"
 import { Actor as ActorId, Prop, ObjID, Change, DecodedChange, Heads, Automerge, MaterializeValue } from "automerge-types"
 import { JsSyncState as SyncState, SyncMessage, DecodedSyncMessage } from "automerge-types"
 
+import * as wasm from "automerge-wasm"
+
 export type ChangeOptions = { message?: string, time?: number, patchCallback?: Function }
 export type ApplyOptions = { patchCallback?: Function }
 
@@ -31,9 +33,10 @@ export type InitOptions = {
     patchCallback?: Function,
 };
 
-export function use(api: API) {
+function use(api: API) {
   UseApi(api)
 }
+use(wasm)
 
 interface InternalState {
   handle: Automerge,
@@ -123,7 +126,7 @@ export function free<T>(doc: Doc<T>) {
   return _state(doc).handle.free()
 }
 
-export function from<T>(initialState: T | Doc<T>, actor?: ActorId): Doc<T> {
+export function from<T extends {}>(initialState: T | Doc<T>, actor?: ActorId): Doc<T> {
     return change(init(actor), (d) => Object.assign(d, initialState))
 }
 

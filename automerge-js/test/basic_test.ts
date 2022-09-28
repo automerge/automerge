@@ -2,9 +2,6 @@ import * as tt from "automerge-types"
 import * as assert from 'assert'
 import * as util from 'util'
 import * as Automerge from '../src'
-import * as AutomergeWASM from "automerge-wasm"
-
-Automerge.use(AutomergeWASM)
 
 describe('Automerge', () => {
     describe('basics', () => {
@@ -175,6 +172,7 @@ describe('Automerge', () => {
           console.log(doc.text.indexOf("world"))
         })
     })
+
     describe('proxy lists', () => {
         it('behave like arrays', () => {
           let doc = Automerge.from({
@@ -223,4 +221,15 @@ describe('Automerge', () => {
           assert.deepEqual(doc.chars, ["a","z","z"])
         })
     })
+    
+    it('should obtain the same conflicts, regardless of merge order', () => {
+      let s1 = Automerge.init()
+      let s2 = Automerge.init()
+      s1 = Automerge.change<any>(s1, doc => { doc.x = 1; doc.y = 2 })
+      s2 = Automerge.change<any>(s2, doc => { doc.x = 3; doc.y = 4 })
+      const m1 = Automerge.merge(Automerge.clone(s1), Automerge.clone(s2))
+      const m2 = Automerge.merge(Automerge.clone(s2), Automerge.clone(s1))
+      assert.deepStrictEqual(Automerge.getConflicts(m1, 'x'), Automerge.getConflicts(m2, 'x'))
+    })
 })
+
