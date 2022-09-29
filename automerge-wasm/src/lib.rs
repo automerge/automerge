@@ -34,6 +34,7 @@ use automerge::Patch;
 use automerge::VecOpObserver;
 use automerge::{Change, ObjId, Prop, Value, ROOT};
 use js_sys::{Array, Object, Uint8Array};
+use serde::Serialize;
 use std::convert::TryInto;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -870,7 +871,11 @@ pub fn load(data: Uint8Array, actor: Option<String>) -> Result<Automerge, JsValu
 
 #[wasm_bindgen(js_name = encodeChange)]
 pub fn encode_change(change: JsValue) -> Result<Uint8Array, JsValue> {
-    let change: am::ExpandedChange = serde_wasm_bindgen::from_value(change).map_err(to_js_err)?;
+    // Alex: Technically we should be using serde_wasm_bindgen::from_value instead of into_serde.
+    // Unfortunately serde_wasm_bindgen::from_value fails for some inscrutable reason, so instead
+    // we use into_serde (sorry to future me).
+    #[allow(deprecated)]
+    let change: am::ExpandedChange = change.into_serde().map_err(to_js_err)?;
     let change: Change = change.into();
     Ok(Uint8Array::from(change.raw_bytes()))
 }
@@ -879,7 +884,8 @@ pub fn encode_change(change: JsValue) -> Result<Uint8Array, JsValue> {
 pub fn decode_change(change: Uint8Array) -> Result<JsValue, JsValue> {
     let change = Change::from_bytes(change.to_vec()).map_err(to_js_err)?;
     let change: am::ExpandedChange = change.decode();
-    serde_wasm_bindgen::to_value(&change).map_err(to_js_err)
+    let serializer = serde_wasm_bindgen::Serializer::json_compatible();
+    change.serialize(&serializer).map_err(to_js_err)
 }
 
 #[wasm_bindgen(js_name = initSyncState)]
