@@ -1348,3 +1348,24 @@ fn load_doc_with_deleted_objects() {
     let saved = doc.save();
     Automerge::load(&saved).unwrap();
 }
+
+#[test]
+fn simple_bad_saveload() {
+    let mut doc = Automerge::new();
+    doc.transact::<_, _, AutomergeError>(|d| {
+        d.put(ROOT, "count", 0)?;
+        Ok(())
+    })
+    .unwrap();
+
+    doc.transact::<_, _, AutomergeError>(|_d| Ok(())).unwrap();
+
+    doc.transact::<_, _, AutomergeError>(|d| {
+        d.put(ROOT, "count", 0)?;
+        Ok(())
+    })
+    .unwrap();
+
+    let bytes = doc.save();
+    Automerge::load(&bytes).unwrap();
+}

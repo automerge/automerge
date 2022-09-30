@@ -52,7 +52,9 @@ impl<'a> ChangeCollector<'a> {
             let change = change.map_err(|e| Error::ReadChange(Box::new(e)))?;
             let actor_changes = changes_by_actor.entry(change.actor).or_default();
             if let Some(prev) = actor_changes.last() {
-                if prev.max_op >= change.max_op {
+                // Note that we allow max_op to be equal to the previous max_op in case the
+                // previous change had no ops (which is permitted)
+                if prev.max_op > change.max_op {
                     return Err(Error::ChangesOutOfOrder);
                 }
             }
