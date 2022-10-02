@@ -609,7 +609,7 @@ impl Automerge {
     #[wasm_bindgen(js_name = getChangeByHash)]
     pub fn get_change_by_hash(&mut self, hash: JsValue) -> Result<JsValue, JsValue> {
         self.ensure_transaction_closed();
-        let hash = hash.into_serde().map_err(to_js_err)?;
+        let hash = serde_wasm_bindgen::from_value(hash).map_err(to_js_err)?;
         let change = self.doc.get_change_by_hash(&hash);
         if let Some(c) = change {
             Ok(Uint8Array::from(c.raw_bytes()).into())
@@ -870,7 +870,7 @@ pub fn load(data: Uint8Array, actor: Option<String>) -> Result<Automerge, JsValu
 
 #[wasm_bindgen(js_name = encodeChange)]
 pub fn encode_change(change: JsValue) -> Result<Uint8Array, JsValue> {
-    let change: am::ExpandedChange = change.into_serde().map_err(to_js_err)?;
+    let change: am::ExpandedChange = serde_wasm_bindgen::from_value(change).map_err(to_js_err)?;
     let change: Change = change.into();
     Ok(Uint8Array::from(change.raw_bytes()))
 }
@@ -879,7 +879,7 @@ pub fn encode_change(change: JsValue) -> Result<Uint8Array, JsValue> {
 pub fn decode_change(change: Uint8Array) -> Result<JsValue, JsValue> {
     let change = Change::from_bytes(change.to_vec()).map_err(to_js_err)?;
     let change: am::ExpandedChange = change.decode();
-    JsValue::from_serde(&change).map_err(to_js_err)
+    serde_wasm_bindgen::to_value(&change).map_err(to_js_err)
 }
 
 #[wasm_bindgen(js_name = initSyncState)]

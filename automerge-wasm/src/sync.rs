@@ -32,7 +32,7 @@ impl SyncState {
 
     #[wasm_bindgen(setter, js_name = sentHashes)]
     pub fn set_sent_hashes(&mut self, hashes: JsValue) -> Result<(), JsValue> {
-        let hashes_map: HashMap<ChangeHash, bool> = hashes.into_serde().map_err(to_js_err)?;
+        let hashes_map: HashMap<ChangeHash, bool> = serde_wasm_bindgen::from_value(hashes).map_err(to_js_err)?;
         let hashes_set: BTreeSet<ChangeHash> = hashes_map.keys().cloned().collect();
         self.0.sent_hashes = hashes_set;
         Ok(())
