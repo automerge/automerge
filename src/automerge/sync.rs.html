@@ -438,7 +438,100 @@
 <span id="436">436</span>
 <span id="437">437</span>
 <span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
+<span id="443">443</span>
+<span id="444">444</span>
+<span id="445">445</span>
+<span id="446">446</span>
+<span id="447">447</span>
+<span id="448">448</span>
+<span id="449">449</span>
+<span id="450">450</span>
+<span id="451">451</span>
+<span id="452">452</span>
+<span id="453">453</span>
+<span id="454">454</span>
+<span id="455">455</span>
+<span id="456">456</span>
+<span id="457">457</span>
+<span id="458">458</span>
+<span id="459">459</span>
+<span id="460">460</span>
+<span id="461">461</span>
+<span id="462">462</span>
+<span id="463">463</span>
+<span id="464">464</span>
+<span id="465">465</span>
+<span id="466">466</span>
+<span id="467">467</span>
+<span id="468">468</span>
+<span id="469">469</span>
+<span id="470">470</span>
+<span id="471">471</span>
+<span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">itertools::Itertools</span>;
+<span class="kw">use</span> <span class="ident">serde::ser::SerializeMap</span>;
 <span class="kw">use</span> <span class="ident">std::collections</span>::{<span class="ident">HashMap</span>, <span class="ident">HashSet</span>};
 
 <span class="kw">use</span> <span class="kw">crate</span>::{
@@ -751,6 +844,27 @@
     <span class="kw">pub</span> <span class="ident">changes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Change</span><span class="op">&gt;</span>,
 }
 
+<span class="kw">impl</span> <span class="ident">serde::Serialize</span> <span class="kw">for</span> <span class="ident">Message</span> {
+    <span class="kw">fn</span> <span class="ident">serialize</span><span class="op">&lt;</span><span class="ident">S</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">serializer</span>: <span class="ident">S</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">S::Ok</span>, <span class="ident">S::Error</span><span class="op">&gt;</span>
+    <span class="kw">where</span>
+        <span class="ident">S</span>: <span class="ident">serde::Serializer</span>,
+    {
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">map</span> <span class="op">=</span> <span class="ident">serializer</span>.<span class="ident">serialize_map</span>(<span class="prelude-val">Some</span>(<span class="number">4</span>))<span class="question-mark">?</span>;
+        <span class="ident">map</span>.<span class="ident">serialize_entry</span>(<span class="string">&quot;heads&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">heads</span>)<span class="question-mark">?</span>;
+        <span class="ident">map</span>.<span class="ident">serialize_entry</span>(<span class="string">&quot;need&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">need</span>)<span class="question-mark">?</span>;
+        <span class="ident">map</span>.<span class="ident">serialize_entry</span>(<span class="string">&quot;have&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">have</span>)<span class="question-mark">?</span>;
+        <span class="ident">map</span>.<span class="ident">serialize_entry</span>(
+            <span class="string">&quot;changes&quot;</span>,
+            <span class="kw-2">&amp;</span><span class="self">self</span>
+                .<span class="ident">changes</span>
+                .<span class="ident">iter</span>()
+                .<span class="ident">map</span>(<span class="ident"><span class="kw">crate</span>::ExpandedChange::from</span>)
+                .<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>(),
+        )<span class="question-mark">?</span>;
+        <span class="ident">map</span>.<span class="ident">end</span>()
+    }
+}
+
 <span class="kw">fn</span> <span class="ident">parse_have</span>(<span class="ident">input</span>: <span class="ident">parse::Input</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">parse::ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">Have</span>, <span class="ident">ReadMessageError</span><span class="op">&gt;</span> {
     <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">last_sync</span>) <span class="op">=</span> <span class="ident">parse::length_prefixed</span>(<span class="ident">parse::change_hash</span>)(<span class="ident">input</span>)<span class="question-mark">?</span>;
     <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">bloom_bytes</span>) <span class="op">=</span> <span class="ident">parse::length_prefixed_bytes</span>(<span class="ident">i</span>)<span class="question-mark">?</span>;
@@ -825,7 +939,7 @@
 
         <span class="ident">encode_many</span>(<span class="kw-2">&amp;mut</span> <span class="ident">buf</span>, <span class="self">self</span>.<span class="ident">changes</span>.<span class="ident">iter_mut</span>(), <span class="op">|</span><span class="ident">buf</span>, <span class="ident">change</span><span class="op">|</span> {
             <span class="ident">leb128::write::unsigned</span>(<span class="ident">buf</span>, <span class="ident">change</span>.<span class="ident">raw_bytes</span>().<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>).<span class="ident">unwrap</span>();
-            <span class="ident">buf</span>.<span class="ident">extend</span>(<span class="ident">change</span>.<span class="ident">bytes</span>().<span class="ident">as_ref</span>())
+            <span class="ident">buf</span>.<span class="ident">extend</span>(<span class="ident">change</span>.<span class="ident">raw_bytes</span>().<span class="ident">as_ref</span>())
         });
 
         <span class="ident">buf</span>
@@ -875,6 +989,76 @@
     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">advanced_heads</span> <span class="op">=</span> <span class="ident">advanced_heads</span>.<span class="ident">into_iter</span>().<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
     <span class="ident">advanced_heads</span>.<span class="ident">sort</span>();
     <span class="ident">advanced_heads</span>
+}
+
+<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
+<span class="kw">mod</span> <span class="ident">tests</span> {
+    <span class="kw">use</span> <span class="kw">super</span>::<span class="kw-2">*</span>;
+    <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::change::gen::gen_change</span>;
+    <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::storage::parse::Input</span>;
+    <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::types::gen::gen_hash</span>;
+    <span class="kw">use</span> <span class="ident">proptest::prelude</span>::<span class="kw-2">*</span>;
+
+    <span class="macro">prop_compose!</span> {
+        <span class="kw">fn</span> <span class="ident">gen_bloom</span>()(<span class="ident">hashes</span> <span class="kw">in</span> <span class="ident">gen_sorted_hashes</span>(<span class="number">0</span>..<span class="number">10</span>)) -&gt; <span class="ident">BloomFilter</span> {
+            <span class="ident">BloomFilter::from_hashes</span>(<span class="ident">hashes</span>.<span class="ident">into_iter</span>())
+        }
+    }
+
+    <span class="macro">prop_compose!</span> {
+        <span class="kw">fn</span> <span class="ident">gen_have</span>()(<span class="ident">bloom</span> <span class="kw">in</span> <span class="ident">gen_bloom</span>(), <span class="ident">last_sync</span> <span class="kw">in</span> <span class="ident">gen_sorted_hashes</span>(<span class="number">0</span>..<span class="number">10</span>))  -&gt; <span class="ident">Have</span> {
+            <span class="ident">Have</span> {
+                <span class="ident">bloom</span>,
+                <span class="ident">last_sync</span>,
+            }
+        }
+    }
+
+    <span class="kw">fn</span> <span class="ident">gen_sorted_hashes</span>(<span class="ident">size</span>: <span class="ident">std::ops::Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>) -&gt; <span class="kw">impl</span> <span class="ident">Strategy</span><span class="op">&lt;</span><span class="ident">Value</span> <span class="op">=</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span><span class="op">&gt;</span> {
+        <span class="ident">proptest::collection::vec</span>(<span class="ident">gen_hash</span>(), <span class="ident">size</span>).<span class="ident">prop_map</span>(<span class="op">|</span><span class="kw-2">mut</span> <span class="ident">h</span><span class="op">|</span> {
+            <span class="ident">h</span>.<span class="ident">sort</span>();
+            <span class="ident">h</span>
+        })
+    }
+
+    <span class="macro">prop_compose!</span> {
+        <span class="kw">fn</span> <span class="ident">gen_sync_message</span>()(
+            <span class="ident">heads</span> <span class="kw">in</span> <span class="ident">gen_sorted_hashes</span>(<span class="number">0</span>..<span class="number">10</span>),
+            <span class="ident">need</span> <span class="kw">in</span> <span class="ident">gen_sorted_hashes</span>(<span class="number">0</span>..<span class="number">10</span>),
+            <span class="ident">have</span> <span class="kw">in</span> <span class="ident">proptest::collection::vec</span>(<span class="ident">gen_have</span>(), <span class="number">0</span>..<span class="number">10</span>),
+            <span class="ident">changes</span> <span class="kw">in</span> <span class="ident">proptest::collection::vec</span>(<span class="ident">gen_change</span>(), <span class="number">0</span>..<span class="number">10</span>),
+        ) -&gt; <span class="ident">Message</span> {
+            <span class="ident">Message</span> {
+                <span class="ident">heads</span>,
+                <span class="ident">need</span>,
+                <span class="ident">have</span>,
+                <span class="ident">changes</span>,
+            }
+        }
+
+    }
+
+    <span class="attribute">#[<span class="ident">test</span>]</span>
+    <span class="kw">fn</span> <span class="ident">encode_decode_empty_message</span>() {
+        <span class="kw">let</span> <span class="ident">msg</span> <span class="op">=</span> <span class="ident">Message</span> {
+            <span class="ident">heads</span>: <span class="macro">vec!</span>[],
+            <span class="ident">need</span>: <span class="macro">vec!</span>[],
+            <span class="ident">have</span>: <span class="macro">vec!</span>[],
+            <span class="ident">changes</span>: <span class="macro">vec!</span>[],
+        };
+        <span class="kw">let</span> <span class="ident">encoded</span> <span class="op">=</span> <span class="ident">msg</span>.<span class="ident">encode</span>();
+        <span class="ident">Message::parse</span>(<span class="ident">Input::new</span>(<span class="kw-2">&amp;</span><span class="ident">encoded</span>)).<span class="ident">unwrap</span>();
+    }
+
+    <span class="macro">proptest!</span> {
+        <span class="attribute">#[<span class="ident">test</span>]</span>
+        <span class="kw">fn</span> <span class="ident">encode_decode_message</span>(<span class="ident">msg</span> <span class="kw">in</span> <span class="ident">gen_sync_message</span>()) {
+            <span class="kw">let</span> <span class="ident">encoded</span> <span class="op">=</span> <span class="ident">msg</span>.<span class="ident">clone</span>().<span class="ident">encode</span>();
+            <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">decoded</span>) <span class="op">=</span> <span class="ident">Message::parse</span>(<span class="ident">Input::new</span>(<span class="kw-2">&amp;</span><span class="ident">encoded</span>)).<span class="ident">unwrap</span>();
+            <span class="macro">assert!</span>(<span class="ident">i</span>.<span class="ident">is_empty</span>());
+            <span class="macro">assert_eq!</span>(<span class="ident">msg</span>, <span class="ident">decoded</span>);
+        }
+    }
 }
 </code></pre></div>
 </section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>

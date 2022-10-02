@@ -149,6 +149,17 @@
 <span id="147">147</span>
 <span id="148">148</span>
 <span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::borrow::Borrow</span>;
 
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::storage::parse</span>;
@@ -160,12 +171,23 @@
 <span class="kw">const</span> <span class="ident">BITS_PER_ENTRY</span>: <span class="ident">u32</span> <span class="op">=</span> <span class="number">10</span>;
 <span class="kw">const</span> <span class="ident">NUM_PROBES</span>: <span class="ident">u32</span> <span class="op">=</span> <span class="number">7</span>;
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Default</span>, <span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>, <span class="ident">Hash</span>)]</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>, <span class="ident">Hash</span>, <span class="ident">serde::Serialize</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">BloomFilter</span> {
     <span class="ident">num_entries</span>: <span class="ident">u32</span>,
     <span class="ident">num_bits_per_entry</span>: <span class="ident">u32</span>,
     <span class="ident">num_probes</span>: <span class="ident">u32</span>,
     <span class="ident">bits</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
+}
+
+<span class="kw">impl</span> <span class="ident">Default</span> <span class="kw">for</span> <span class="ident">BloomFilter</span> {
+    <span class="kw">fn</span> <span class="ident">default</span>() -&gt; <span class="self">Self</span> {
+        <span class="ident">BloomFilter</span> {
+            <span class="ident">num_entries</span>: <span class="number">0</span>,
+            <span class="ident">num_bits_per_entry</span>: <span class="ident">BITS_PER_ENTRY</span>,
+            <span class="ident">num_probes</span>: <span class="ident">NUM_PROBES</span>,
+            <span class="ident">bits</span>: <span class="ident">Vec::new</span>(),
+        }
+    }
 }
 
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">thiserror::Error</span>)]</span>

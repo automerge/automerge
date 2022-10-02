@@ -128,7 +128,7 @@
 <span class="doccomment">/// A summary of the changes that the sender of the message already has.</span>
 <span class="doccomment">/// This is implicitly a request to the recipient to send all changes that the</span>
 <span class="doccomment">/// sender does not already have.</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">Default</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>, <span class="ident">Hash</span>)]</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">Default</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>, <span class="ident">Hash</span>, <span class="ident">serde::Serialize</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Have</span> {
     <span class="doccomment">/// The heads at the time of the last successful sync with this recipient.</span>
     <span class="kw">pub</span> <span class="ident">last_sync</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>,

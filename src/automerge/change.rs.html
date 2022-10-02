@@ -315,6 +315,93 @@
 <span id="313">313</span>
 <span id="314">314</span>
 <span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
+<span id="363">363</span>
+<span id="364">364</span>
+<span id="365">365</span>
+<span id="366">366</span>
+<span id="367">367</span>
+<span id="368">368</span>
+<span id="369">369</span>
+<span id="370">370</span>
+<span id="371">371</span>
+<span id="372">372</span>
+<span id="373">373</span>
+<span id="374">374</span>
+<span id="375">375</span>
+<span id="376">376</span>
+<span id="377">377</span>
+<span id="378">378</span>
+<span id="379">379</span>
+<span id="380">380</span>
+<span id="381">381</span>
+<span id="382">382</span>
+<span id="383">383</span>
+<span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
+<span id="387">387</span>
+<span id="388">388</span>
+<span id="389">389</span>
+<span id="390">390</span>
+<span id="391">391</span>
+<span id="392">392</span>
+<span id="393">393</span>
+<span id="394">394</span>
+<span id="395">395</span>
+<span id="396">396</span>
+<span id="397">397</span>
+<span id="398">398</span>
+<span id="399">399</span>
+<span id="400">400</span>
+<span id="401">401</span>
+<span id="402">402</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std</span>::{<span class="ident">borrow::Cow</span>, <span class="ident">num::NonZeroU64</span>};
 
 <span class="kw">use</span> <span class="kw">crate</span>::{
@@ -456,6 +543,12 @@
 <span class="kw">impl</span> <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">StoredChange</span><span class="op">&lt;</span><span class="lifetime">&#39;static</span>, <span class="ident">Verified</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Change</span> {
     <span class="kw">fn</span> <span class="ident">as_ref</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">StoredChange</span><span class="op">&lt;</span><span class="lifetime">&#39;static</span>, <span class="ident">Verified</span><span class="op">&gt;</span> {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">stored</span>
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">Change</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">StoredChange</span><span class="op">&lt;</span><span class="lifetime">&#39;static</span>, <span class="ident">Verified</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">c</span>: <span class="ident">Change</span>) -&gt; <span class="self">Self</span> {
+        <span class="ident">c</span>.<span class="ident">stored</span>
     }
 }
 
@@ -628,6 +721,87 @@
             <span class="ident">extra_bytes</span>: <span class="ident">c</span>.<span class="ident">extra_bytes</span>().<span class="ident">to_vec</span>(),
             <span class="ident">message</span>: <span class="ident">c</span>.<span class="ident">message</span>().<span class="ident">cloned</span>(),
         }
+    }
+}
+
+<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod</span> <span class="ident">gen</span> {
+    <span class="kw">use</span> <span class="ident"><span class="kw">super</span>::Change</span>;
+    <span class="kw">use</span> <span class="kw">crate</span>::{
+        <span class="ident">op_tree::OpSetMetadata</span>,
+        <span class="ident">storage</span>::{<span class="ident">change::ChangeBuilder</span>, <span class="ident">convert::op_as_actor_id</span>},
+        <span class="ident">types</span>::{
+            <span class="ident">gen</span>::{<span class="ident">gen_hash</span>, <span class="ident">gen_op</span>},
+            <span class="ident">ObjId</span>, <span class="ident">Op</span>, <span class="ident">OpId</span>,
+        },
+        <span class="ident">ActorId</span>,
+    };
+    <span class="kw">use</span> <span class="ident">proptest::prelude</span>::<span class="kw-2">*</span>;
+
+    <span class="kw">fn</span> <span class="ident">gen_actor</span>() -&gt; <span class="kw">impl</span> <span class="ident">Strategy</span><span class="op">&lt;</span><span class="ident">Value</span> <span class="op">=</span> <span class="ident">ActorId</span><span class="op">&gt;</span> {
+        <span class="ident">proptest::array::uniform32</span>(<span class="ident">proptest::bits::u8::ANY</span>).<span class="ident">prop_map</span>(<span class="ident">ActorId::from</span>)
+    }
+
+    <span class="macro">prop_compose!</span> {
+        <span class="kw">fn</span> <span class="ident">gen_actors</span>()(<span class="ident">this_actor</span> <span class="kw">in</span> <span class="ident">gen_actor</span>(), <span class="ident">other_actors</span> <span class="kw">in</span> <span class="ident">proptest::collection::vec</span>(<span class="ident">gen_actor</span>(), <span class="number">0</span>..<span class="number">10</span>)) -&gt; (<span class="ident">ActorId</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ActorId</span><span class="op">&gt;</span>) {
+            (<span class="ident">this_actor</span>, <span class="ident">other_actors</span>)
+        }
+    }
+
+    <span class="kw">fn</span> <span class="ident">gen_ops</span>(
+        <span class="ident">this_actor</span>: <span class="ident">ActorId</span>,
+        <span class="ident">other_actors</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ActorId</span><span class="op">&gt;</span>,
+    ) -&gt; <span class="kw">impl</span> <span class="ident">Strategy</span><span class="op">&lt;</span><span class="ident">Value</span> <span class="op">=</span> (<span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">ObjId</span>, <span class="ident">Op</span>)<span class="op">&gt;</span>, <span class="ident">OpSetMetadata</span>)<span class="op">&gt;</span> {
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">all_actors</span> <span class="op">=</span> <span class="macro">vec!</span>[<span class="ident">this_actor</span>];
+        <span class="ident">all_actors</span>.<span class="ident">extend</span>(<span class="ident">other_actors</span>);
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">m</span> <span class="op">=</span> <span class="ident">OpSetMetadata::from_actors</span>(<span class="ident">all_actors</span>);
+        <span class="ident">m</span>.<span class="ident">props</span>.<span class="ident">cache</span>(<span class="string">&quot;someprop&quot;</span>.<span class="ident">to_string</span>());
+        <span class="kw">let</span> <span class="ident">root_id</span> <span class="op">=</span> <span class="ident">ObjId::root</span>();
+        (<span class="number">0_u64</span>..<span class="number">10</span>)
+            .<span class="ident">prop_map</span>(<span class="op">|</span><span class="ident">num_ops</span><span class="op">|</span> {
+                (<span class="number">0</span>..<span class="ident">num_ops</span>)
+                    .<span class="ident">map</span>(<span class="op">|</span><span class="ident">counter</span><span class="op">|</span> <span class="ident">OpId::new</span>(<span class="number">0</span>, <span class="ident">counter</span>))
+                    .<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>()
+            })
+            .<span class="ident">prop_flat_map</span>(<span class="kw">move</span> <span class="op">|</span><span class="ident">opids</span><span class="op">|</span> {
+                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">strat</span> <span class="op">=</span> <span class="ident">Just</span>(<span class="ident">Vec::new</span>()).<span class="ident">boxed</span>();
+                <span class="kw">for</span> <span class="ident">opid</span> <span class="kw">in</span> <span class="ident">opids</span> {
+                    <span class="ident">strat</span> <span class="op">=</span> (<span class="ident">gen_op</span>(<span class="ident">opid</span>, <span class="macro">vec!</span>[<span class="number">0</span>]), <span class="ident">strat</span>)
+                        .<span class="ident">prop_map</span>(<span class="kw">move</span> <span class="op">|</span>(<span class="ident">op</span>, <span class="ident">ops</span>)<span class="op">|</span> {
+                            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">ops</span>.<span class="ident">len</span>() <span class="op">+</span> <span class="number">1</span>);
+                            <span class="ident">result</span>.<span class="ident">extend</span>(<span class="ident">ops</span>);
+                            <span class="ident">result</span>.<span class="ident">push</span>((<span class="ident">root_id</span>, <span class="ident">op</span>));
+                            <span class="ident">result</span>
+                        })
+                        .<span class="ident">boxed</span>();
+                }
+                <span class="ident">strat</span>
+            })
+            .<span class="ident">prop_map</span>(<span class="kw">move</span> <span class="op">|</span><span class="ident">ops</span><span class="op">|</span> (<span class="ident">ops</span>, <span class="ident">m</span>.<span class="ident">clone</span>()))
+    }
+
+    <span class="macro">prop_compose!</span> {
+        <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">gen_change</span>()((<span class="ident">this_actor</span>, <span class="ident">other_actors</span>) <span class="kw">in</span> <span class="ident">gen_actors</span>())(
+                (<span class="ident">ops</span>, <span class="ident">metadata</span>) <span class="kw">in</span> <span class="ident">gen_ops</span>(<span class="ident">this_actor</span>.<span class="ident">clone</span>(), <span class="ident">other_actors</span>),
+                <span class="ident">start_op</span> <span class="kw">in</span> <span class="number">1_u64</span>..<span class="number">200000</span>,
+                <span class="ident">seq</span> <span class="kw">in</span> <span class="number">0_u64</span>..<span class="number">200000</span>,
+                <span class="ident">timestamp</span> <span class="kw">in</span> <span class="number">0</span>..<span class="ident">i64::MAX</span>,
+                <span class="ident">deps</span> <span class="kw">in</span> <span class="ident">proptest::collection::vec</span>(<span class="ident">gen_hash</span>(), <span class="number">0</span>..<span class="number">100</span>),
+                <span class="ident">message</span> <span class="kw">in</span> <span class="ident">proptest::option::of</span>(<span class="string">&quot;[a-z]{200}&quot;</span>),
+                <span class="ident">this_actor</span> <span class="kw">in</span> <span class="ident">Just</span>(<span class="ident">this_actor</span>),
+            ) -&gt; <span class="ident">Change</span> {
+            <span class="kw">let</span> <span class="ident">ops</span> <span class="op">=</span> <span class="ident">ops</span>.<span class="ident">iter</span>().<span class="ident">map</span>(<span class="op">|</span>(<span class="ident">obj</span>, <span class="ident">op</span>)<span class="op">|</span> <span class="ident">op_as_actor_id</span>(<span class="ident">obj</span>, <span class="ident">op</span>, <span class="kw-2">&amp;</span><span class="ident">metadata</span>));
+            <span class="ident">Change::new</span>(<span class="ident">ChangeBuilder::new</span>()
+                .<span class="ident">with_dependencies</span>(<span class="ident">deps</span>)
+                .<span class="ident">with_start_op</span>(<span class="ident">start_op</span>.<span class="ident">try_into</span>().<span class="ident">unwrap</span>())
+                .<span class="ident">with_message</span>(<span class="ident">message</span>)
+                .<span class="ident">with_actor</span>(<span class="ident">this_actor</span>)
+                .<span class="ident">with_seq</span>(<span class="ident">seq</span>)
+                .<span class="ident">with_timestamp</span>(<span class="ident">timestamp</span>)
+                .<span class="ident">build</span>(<span class="ident">ops</span>.<span class="ident">into_iter</span>())
+                .<span class="ident">unwrap</span>())
+        }
+
     }
 }
 </code></pre></div>
