@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use serde::ser::SerializeMap;
 use std::collections::{HashMap, HashSet};
 
 use crate::{
@@ -311,6 +312,27 @@ pub struct Message {
     pub changes: Vec<Change>,
 }
 
+impl serde::Serialize for Message {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(4))?;
+        map.serialize_entry("heads", &self.heads)?;
+        map.serialize_entry("need", &self.need)?;
+        map.serialize_entry("have", &self.have)?;
+        map.serialize_entry(
+            "changes",
+            &self
+                .changes
+                .iter()
+                .map(crate::ExpandedChange::from)
+                .collect::<Vec<_>>(),
+        )?;
+        map.end()
+    }
+}
+
 fn parse_have(input: parse::Input<'_>) -> parse::ParseResult<'_, Have, ReadMessageError> {
     let (i, last_sync) = parse::length_prefixed(parse::change_hash)(input)?;
     let (i, bloom_bytes) = parse::length_prefixed_bytes(i)?;
@@ -385,7 +407,7 @@ impl Message {
 
         encode_many(&mut buf, self.changes.iter_mut(), |buf, change| {
             leb128::write::unsigned(buf, change.raw_bytes().len() as u64).unwrap();
-            buf.extend(change.bytes().as_ref())
+            buf.extend(change.raw_bytes().as_ref())
         });
 
         buf
@@ -435,4 +457,74 @@ fn advance_heads(
     let mut advanced_heads = advanced_heads.into_iter().collect::<Vec<_>>();
     advanced_heads.sort();
     advanced_heads
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::change::gen::gen_change;
+    use crate::storage::parse::Input;
+    use crate::types::gen::gen_hash;
+    use proptest::prelude::*;
+
+    prop_compose! {
+        fn gen_bloom()(hashes in gen_sorted_hashes(0..10)) -> BloomFilter {
+            BloomFilter::from_hashes(hashes.into_iter())
+        }
+    }
+
+    prop_compose! {
+        fn gen_have()(bloom in gen_bloom(), last_sync in gen_sorted_hashes(0..10))  -> Have {
+            Have {
+                bloom,
+                last_sync,
+            }
+        }
+    }
+
+    fn gen_sorted_hashes(size: std::ops::Range<usize>) -> impl Strategy<Value = Vec<ChangeHash>> {
+        proptest::collection::vec(gen_hash(), size).prop_map(|mut h| {
+            h.sort();
+            h
+        })
+    }
+
+    prop_compose! {
+        fn gen_sync_message()(
+            heads in gen_sorted_hashes(0..10),
+            need in gen_sorted_hashes(0..10),
+            have in proptest::collection::vec(gen_have(), 0..10),
+            changes in proptest::collection::vec(gen_change(), 0..10),
+        ) -> Message {
+            Message {
+                heads,
+                need,
+                have,
+                changes,
+            }
+        }
+
+    }
+
+    #[test]
+    fn encode_decode_empty_message() {
+        let msg = Message {
+            heads: vec![],
+            need: vec![],
+            have: vec![],
+            changes: vec![],
+        };
+        let encoded = msg.encode();
+        Message::parse(Input::new(&encoded)).unwrap();
+    }
+
+    proptest! {
+        #[test]
+        fn encode_decode_message(msg in gen_sync_message()) {
+            let encoded = msg.clone().encode();
+            let (i, decoded) = Message::parse(Input::new(&encoded)).unwrap();
+            assert!(i.is_empty());
+            assert_eq!(msg, decoded);
+        }
+    }
 }

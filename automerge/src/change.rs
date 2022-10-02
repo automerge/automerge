@@ -142,6 +142,12 @@ impl AsRef<StoredChange<'static, Verified>> for Change {
     }
 }
 
+impl From<Change> for StoredChange<'static, Verified> {
+    fn from(c: Change) -> Self {
+        c.stored
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum LoadError {
     #[error("unable to parse change: {0}")]
@@ -311,5 +317,86 @@ impl From<&Change> for crate::ExpandedChange {
             extra_bytes: c.extra_bytes().to_vec(),
             message: c.message().cloned(),
         }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod gen {
+    use super::Change;
+    use crate::{
+        op_tree::OpSetMetadata,
+        storage::{change::ChangeBuilder, convert::op_as_actor_id},
+        types::{
+            gen::{gen_hash, gen_op},
+            ObjId, Op, OpId,
+        },
+        ActorId,
+    };
+    use proptest::prelude::*;
+
+    fn gen_actor() -> impl Strategy<Value = ActorId> {
+        proptest::array::uniform32(proptest::bits::u8::ANY).prop_map(ActorId::from)
+    }
+
+    prop_compose! {
+        fn gen_actors()(this_actor in gen_actor(), other_actors in proptest::collection::vec(gen_actor(), 0..10)) -> (ActorId, Vec<ActorId>) {
+            (this_actor, other_actors)
+        }
+    }
+
+    fn gen_ops(
+        this_actor: ActorId,
+        other_actors: Vec<ActorId>,
+    ) -> impl Strategy<Value = (Vec<(ObjId, Op)>, OpSetMetadata)> {
+        let mut all_actors = vec![this_actor];
+        all_actors.extend(other_actors);
+        let mut m = OpSetMetadata::from_actors(all_actors);
+        m.props.cache("someprop".to_string());
+        let root_id = ObjId::root();
+        (0_u64..10)
+            .prop_map(|num_ops| {
+                (0..num_ops)
+                    .map(|counter| OpId::new(0, counter))
+                    .collect::<Vec<_>>()
+            })
+            .prop_flat_map(move |opids| {
+                let mut strat = Just(Vec::new()).boxed();
+                for opid in opids {
+                    strat = (gen_op(opid, vec![0]), strat)
+                        .prop_map(move |(op, ops)| {
+                            let mut result = Vec::with_capacity(ops.len() + 1);
+                            result.extend(ops);
+                            result.push((root_id, op));
+                            result
+                        })
+                        .boxed();
+                }
+                strat
+            })
+            .prop_map(move |ops| (ops, m.clone()))
+    }
+
+    prop_compose! {
+        pub(crate) fn gen_change()((this_actor, other_actors) in gen_actors())(
+                (ops, metadata) in gen_ops(this_actor.clone(), other_actors),
+                start_op in 1_u64..200000,
+                seq in 0_u64..200000,
+                timestamp in 0..i64::MAX,
+                deps in proptest::collection::vec(gen_hash(), 0..100),
+                message in proptest::option::of("[a-z]{200}"),
+                this_actor in Just(this_actor),
+            ) -> Change {
+            let ops = ops.iter().map(|(obj, op)| op_as_actor_id(obj, op, &metadata));
+            Change::new(ChangeBuilder::new()
+                .with_dependencies(deps)
+                .with_start_op(start_op.try_into().unwrap())
+                .with_message(message)
+                .with_actor(this_actor)
+                .with_seq(seq)
+                .with_timestamp(timestamp)
+                .build(ops.into_iter())
+                .unwrap())
+        }
+
     }
 }

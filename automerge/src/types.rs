@@ -670,3 +670,77 @@ impl From<Prop> for wasm_bindgen::JsValue {
         }
     }
 }
+
+#[cfg(test)]
+pub(crate) mod gen {
+    use super::{
+        ChangeHash, Counter, ElemId, Key, ObjType, Op, OpId, OpIds, OpType, ScalarValue, HASH_SIZE,
+    };
+    use proptest::prelude::*;
+
+    pub(crate) fn gen_hash() -> impl Strategy<Value = ChangeHash> {
+        proptest::collection::vec(proptest::bits::u8::ANY, HASH_SIZE)
+            .prop_map(|b| ChangeHash::try_from(&b[..]).unwrap())
+    }
+
+    pub(crate) fn gen_scalar_value() -> impl Strategy<Value = ScalarValue> {
+        prop_oneof![
+            proptest::collection::vec(proptest::bits::u8::ANY, 0..200).prop_map(ScalarValue::Bytes),
+            "[a-z]{10,500}".prop_map(|s| ScalarValue::Str(s.into())),
+            any::<i64>().prop_map(ScalarValue::Int),
+            any::<u64>().prop_map(ScalarValue::Uint),
+            any::<f64>().prop_map(ScalarValue::F64),
+            any::<i64>().prop_map(|c| ScalarValue::Counter(Counter::from(c))),
+            any::<i64>().prop_map(ScalarValue::Timestamp),
+            any::<bool>().prop_map(ScalarValue::Boolean),
+            Just(ScalarValue::Null),
+        ]
+    }
+
+    pub(crate) fn gen_objtype() -> impl Strategy<Value = ObjType> {
+        prop_oneof![
+            Just(ObjType::Map),
+            Just(ObjType::Table),
+            Just(ObjType::List),
+            Just(ObjType::Text),
+        ]
+    }
+
+    pub(crate) fn gen_action() -> impl Strategy<Value = OpType> {
+        prop_oneof![
+            Just(OpType::Delete),
+            any::<i64>().prop_map(OpType::Increment),
+            gen_scalar_value().prop_map(OpType::Put),
+            gen_objtype().prop_map(OpType::Make)
+        ]
+    }
+
+    pub(crate) fn gen_key(key_indices: Vec<usize>) -> impl Strategy<Value = Key> {
+        prop_oneof![
+            proptest::sample::select(key_indices).prop_map(Key::Map),
+            Just(Key::Seq(ElemId(OpId::new(0, 0)))),
+        ]
+    }
+
+    /// Generate an arbitrary op
+    ///
+    /// The generated op will have no preds or succs
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - the OpId this op will be given
+    /// * `key_prop_indices` - The indices of props which will be used to generate keys of type
+    ///    `Key::Map`. I.e. this is what would typically be in `OpSetMetadata::props
+    pub(crate) fn gen_op(id: OpId, key_prop_indices: Vec<usize>) -> impl Strategy<Value = Op> {
+        (gen_key(key_prop_indices), any::<bool>(), gen_action()).prop_map(
+            move |(key, insert, action)| Op {
+                id,
+                key,
+                insert,
+                action,
+                succ: OpIds::empty(),
+                pred: OpIds::empty(),
+            },
+        )
+    }
+}
