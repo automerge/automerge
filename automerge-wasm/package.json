@@ -26,8 +26,8 @@
   "main": "./nodejs/bindgen.js",
   "scripts": {
     "lint": "eslint test/*.ts",
-    "build": "cross-env PROFILE=dev TARGET=nodejs FEATURES='' yarn target",
     "debug": "cross-env PROFILE=dev yarn buildall",
+    "build": "cross-env PROFILE=dev FEATURES='' yarn buildall",
     "release": "cross-env PROFILE=release yarn buildall",
     "buildall": "cross-env TARGET=nodejs yarn target && cross-env TARGET=bundler yarn target",
     "target": "rimraf ./$TARGET && wasm-pack build --target $TARGET --$PROFILE --out-name bindgen -d $TARGET -- $FEATURES",
