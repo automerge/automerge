@@ -216,7 +216,7 @@ function buildAutomergeWasm(profile: Profile): WithRegistryAction {
 
 async function publishAutomergeWasm(registryUrl: string) {
     printHeader("Publishing automerge-wasm to verdaccio")
-    await fsPromises.rm(path.join(VERDACCIO_DB_PATH, "automerge-wasm"), { recursive: true, force: true} )
+    await fsPromises.rm(path.join(VERDACCIO_DB_PATH, "@automerge/automerge-wasm"), { recursive: true, force: true} )
     await yarnPublish(registryUrl, AUTOMERGE_WASM_PATH)
 }
 
@@ -224,7 +224,7 @@ async function buildAndPublishAutomergeJs(registryUrl: string) {
     // Build the js package
     printHeader("Building automerge")
     await removeExistingAutomerge(AUTOMERGE_JS_PATH)
-    await removeFromVerdaccio("automerge")
+    await removeFromVerdaccio("@automerge/automerge")
     await fsPromises.rm(path.join(AUTOMERGE_JS_PATH, "yarn.lock"), {force: true})
     await spawnAndWait("yarn", ["--cwd", AUTOMERGE_JS_PATH, "install", "--registry", registryUrl, "--check-files"], {stdio: "inherit"})
     await spawnAndWait("yarn", ["--cwd", AUTOMERGE_JS_PATH, "build"], {stdio: "inherit"})

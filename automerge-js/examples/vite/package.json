@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "automerge": "2.0.0-alpha.1"
+    "@automerge/automerge": "2.0.0-alpha.1"
   },
   "devDependencies": {
     "typescript": "^4.6.4",

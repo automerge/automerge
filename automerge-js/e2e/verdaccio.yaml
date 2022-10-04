@@ -6,10 +6,10 @@ publish:
   allow_offline: true
 logs: {type: stdout, format: pretty, level: info}
 packages: 
-  "automerge-wasm":
+  "@automerge/automerge-wasm":
       access: "$all"
       publish: "$all"
-  "automerge-js":
+  "@automerge/automerge":
       access: "$all"
       publish: "$all"
   "*":

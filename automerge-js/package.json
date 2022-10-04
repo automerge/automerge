@@ -1,5 +1,5 @@
 {
-  "name": "automerge",
+  "name": "@automerge/automerge",
   "collaborators": [
     "Orion Henry <orion@inkandswitch.com>",
     "Martin Kleppmann"
@@ -57,7 +57,7 @@
     "typescript": "^4.6.4"
   },
   "dependencies": {
-    "automerge-wasm": "0.1.7",
+    "@automerge/automerge-wasm": "0.1.7",
     "uuid": "^8.3"
   }
 }

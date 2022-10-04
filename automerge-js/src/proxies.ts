@@ -1,6 +1,6 @@
 
-import { Automerge, Heads, ObjID } from "automerge-wasm"
-import { Prop } from "automerge-wasm"
+import { Automerge, Heads, ObjID } from "@automerge/automerge-wasm"
+import { Prop } from "@automerge/automerge-wasm"
 import { AutomergeValue, ScalarValue, MapValue, ListValue, TextValue } from "./types"
 import { Counter, getWriteableCounter } from "./counter"
 import { Text } from "./text"

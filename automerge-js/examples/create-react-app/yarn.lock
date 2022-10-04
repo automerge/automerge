@@ -24,6 +24,19 @@
     jsonpointer "^5.0.0"
     leven "^3.1.0"
 
+"@automerge/automerge-wasm@0.1.7":
+  version "0.1.7"
+  resolved "http://localhost:4873/@automerge%2fautomerge-wasm/-/automerge-wasm-0.1.7.tgz#2b1bd55a05def29beec76828664ae1def1276e11"
+  integrity sha512-MIUUxqx9QM14DR8OzzS4sCC3cNIgzH2LMvTesFTO8NoH8RV/hm4jrQHQbGfx2SV3Q6tZjy8bCLOLgJK/yIxbKQ==
+
+"@automerge/automerge@2.0.0-alpha.1":
+  version "2.0.0-alpha.1"
+  resolved "http://localhost:4873/@automerge%2fautomerge/-/automerge-2.0.0-alpha.1.tgz#df52164448ab13e458bd5a8e32e47f6ddbdd56fc"
+  integrity sha512-9q5CHqKEmTKs5T7/UdVaugk+rz3mAuxphpfgKXPGgEvvOIZsHz4spkxSNahWscY9pF8EhLgcA/pCfdtd3b2goA==
+  dependencies:
+    "@automerge/automerge-wasm" "0.1.7"
+    uuid "^8.3"
+
 "@babel/code-frame@^7.0.0", "@babel/code-frame@^7.10.4", "@babel/code-frame@^7.12.13", "@babel/code-frame@^7.16.0", "@babel/code-frame@^7.18.6", "@babel/code-frame@^7.8.3":
   version "7.18.6"
   resolved "http://localhost:4873/@babel%2fcode-frame/-/code-frame-7.18.6.tgz#3b25d38c89600baa2dcc219edfa88a74eb2c427a"
@@ -2626,19 +2639,6 @@ at-least-node@^1.0.0:
   version "1.0.0"
   resolved "http://localhost:4873/at-least-node/-/at-least-node-1.0.0.tgz#602cd4b46e844ad4effc92a8011a3c46e0238dc2"
   integrity sha512-+q/t7Ekv1EDY2l6Gda6LLiX14rU9TV20Wa3ofeQmwPFZbOMo9DXrLbOjFaaclkXKWidIaopwAObQDqwWtGUjqg==
-
-automerge-wasm@0.1.7:
-  version "0.1.7"
-  resolved "http://localhost:4873/automerge-wasm/-/automerge-wasm-0.1.7.tgz#b5c02d6d00521d5ecb956226a187d668e7530c8f"
-  integrity sha512-BJ0/W1i7fCMTEWZ25DS31AL2vgZ3Yv5LrBibU0gG0pg6oj62T4iiXm/4bYXHykkry1+mTJIoNGeOwCwEpvhFAw==
-
-automerge@2.0.0-alpha.1:
-  version "2.0.0-alpha.1"
-  resolved "http://localhost:4873/automerge/-/automerge-2.0.0-alpha.1.tgz#554d0246116121609f97297f9f7d9048eb0447fa"
-  integrity sha512-EZ6A52btI2LLrgRk8BYwcrOikaKyPYq4LkdmBeV0ec/8XNW6QhPLtwb+NXP6ZM2ynHND3zFR8pDzbPeP+POeKA==
-  dependencies:
-    automerge-wasm "0.1.7"
-    uuid "^8.3"
 
 autoprefixer@^10.4.11, autoprefixer@^10.4.12:
   version "10.4.12"
@@ -7787,9 +7787,9 @@ semver@^6.0.0, semver@^6.1.1, semver@^6.1.2, semver@^6.3.0:
   integrity sha512-b39TBaTSfV6yBrapU89p5fKekE2m/NwnDocOVruQFS1/veMgdzuPcnOM34M6CwxW8jH/lxEa5rBoDeUwu5HHTw==
 
 semver@^7.3.2, semver@^7.3.5, semver@^7.3.7:
-  version "7.3.7"
-  resolved "http://localhost:4873/semver/-/semver-7.3.7.tgz#12c5b649afdbf9049707796e22a4028814ce523f"
-  integrity sha512-QlYTucUYOews+WeEujDoEGziz4K6c47V/Bd+LjSSYcA94p+DmINdf7ncaUinThfvZyu13lN9OY1XDxt8C0Tw0g==
+  version "7.3.8"
+  resolved "http://localhost:4873/semver/-/semver-7.3.8.tgz#07a78feafb3f7b32347d725e33de7e2a2df67798"
+  integrity sha512-NB1ctGL5rlHrPJtFDVIVzTyQylMLu9N9VICA6HSFJo8MCGVTMW6gfpicwKmmK/dAjTOrqu5l63JJOpDSrAis3A==
   dependencies:
     lru-cache "^6.0.0"
 

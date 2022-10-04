@@ -1,6 +1,6 @@
 
-import { Automerge, Change, DecodedChange, Actor, SyncState, SyncMessage, JsSyncState, DecodedSyncMessage }  from "automerge-wasm"
-import { API } from "automerge-wasm"
+import { Automerge, Change, DecodedChange, Actor, SyncState, SyncMessage, JsSyncState, DecodedSyncMessage }  from "@automerge/automerge-wasm"
+import { API } from "@automerge/automerge-wasm"
 
 export function UseApi(api: API) {
   for (const k in api) {

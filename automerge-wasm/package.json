@@ -4,7 +4,7 @@
     "Alex Good <alex@memoryandthought.me>",
     "Martin Kleppmann"
   ],
-  "name": "automerge-wasm",
+  "name": "@automerge/automerge-wasm",
   "description": "wasm-bindgen bindings to the automerge rust implementation",
   "homepage": "https://github.com/automerge/automerge-rs/tree/main/automerge-wasm",
   "repository": "github:automerge/automerge-rs",
@@ -21,6 +21,7 @@
     "bundler/bindgen_bg.js",
     "bundler/bindgen_bg.wasm"
   ],
+  "private": false,
   "types": "index.d.ts",
   "module": "./bundler/bindgen.js",
   "main": "./nodejs/bindgen.js",

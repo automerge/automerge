@@ -7,11 +7,11 @@ import { STATE, HEADS, TRACE, OBJECT_ID, READ_ONLY, FROZEN  } from "./constants"
 import { AutomergeValue, Counter } from "./types"
 export { AutomergeValue, Text, Counter, Int, Uint, Float64 } from "./types"
 
-import { API } from "automerge-wasm";
+import { API } from "@automerge/automerge-wasm";
 import { ApiHandler, UseApi } from "./low_level"
 
-import { Actor as ActorId, Prop, ObjID, Change, DecodedChange, Heads, Automerge, MaterializeValue } from "automerge-wasm"
-import { JsSyncState as SyncState, SyncMessage, DecodedSyncMessage } from "automerge-wasm"
+import { Actor as ActorId, Prop, ObjID, Change, DecodedChange, Heads, Automerge, MaterializeValue } from "@automerge/automerge-wasm"
+import { JsSyncState as SyncState, SyncMessage, DecodedSyncMessage } from "@automerge/automerge-wasm"
 
 export type ChangeOptions = { message?: string, time?: number }
 
@@ -29,7 +29,7 @@ export function use(api: API) {
   UseApi(api)
 }
 
-import * as wasm from "automerge-wasm"
+import * as wasm from "@automerge/automerge-wasm"
 use(wasm)
 
 export function getBackend<T>(doc: Doc<T>) : Automerge {
