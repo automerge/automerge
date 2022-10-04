@@ -1806,7 +1806,7 @@
     <span class="ident">Automerge::new</span>(<span class="ident">actor</span>)
 }
 
-<span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">loadDoc</span>)]</span>
+<span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">load</span>)]</span>
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">load</span>(<span class="ident">data</span>: <span class="ident">Uint8Array</span>, <span class="ident">actor</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Automerge</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">data</span> <span class="op">=</span> <span class="ident">data</span>.<span class="ident">to_vec</span>();
     <span class="kw">let</span> <span class="ident">observer</span> <span class="op">=</span> <span class="prelude-val">None</span>;
