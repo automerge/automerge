@@ -3,6 +3,9 @@ import * as Automerge from '../src'
 import { BloomFilter } from './legacy/sync'
 import { decodeChangeMeta } from './legacy/columnar'
 import { decodeSyncMessage, encodeSyncMessage, decodeSyncState, encodeSyncState, initSyncState } from "../src"
+import * as AutomergeWASM from "automerge-wasm"
+
+Automerge.use(AutomergeWASM)
 
 function inspect(a) {
   const util = require("util");
