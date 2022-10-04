@@ -91,13 +91,31 @@ export type Op = {
   pred: string[],
 }
 
-export type Patch = {
-  obj: ObjID
-  action: 'assign' | 'insert' | 'delete'
-  key: Prop
+export type Patch =  PutPatch | DelPatch | SplicePatch | IncPatch;
+
+export type PutPatch = {
+  action: 'put'
+  path: Prop[],
   value: Value
-  datatype: Datatype
   conflict: boolean
+}
+
+export type IncPatch = {
+  action: 'put'
+  path: Prop[],
+  value: number
+}
+
+export type DelPatch = {
+  action: 'del'
+  path: Prop[],
+  length?: number,
+}
+
+export type SplicePatch = {
+  action: 'splice'
+  path: Prop[],
+  values: Value[],
 }
 
 export function create(actor?: Actor): Automerge;
@@ -157,6 +175,7 @@ export class Automerge {
 
   // patches
   enablePatches(enable: boolean): void;
+  registerDatatype(datatype: string, callback: Function): void;
   popPatches(): Patch[];
 
   // save and load to local store
@@ -187,7 +206,7 @@ export class Automerge {
   dump(): void;
 
   // experimental api can go here
-  applyPatches<Doc>(obj: Doc, meta?: any, callback?: Function): Doc;
+  applyPatches<Doc>(obj: Doc, meta?: unknown, callback?: (values: Value[]) => undefined): Doc;
 }
 
 export class JsSyncState {
