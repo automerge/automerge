@@ -2,7 +2,6 @@
 import { Automerge, Heads, ObjID } from "automerge-wasm"
 import { Prop } from "automerge-wasm"
 import { AutomergeValue, ScalarValue, MapValue, ListValue, TextValue } from "./types"
-import { Int, Uint, Float64 } from "./numbers"
 import { Counter, getWriteableCounter } from "./counter"
 import { Text } from "./text"
 import { STATE, HEADS, TRACE, FROZEN, OBJECT_ID, READ_ONLY, COUNTER, INT, UINT, F64, TEXT } from "./constants"
@@ -200,7 +199,7 @@ const MapHandler = {
   ownKeys (target) {
     const { context, objectId, heads} = target
     // FIXME - this is a tmp workaround until fix the dupe key bug in keys()
-    let keys = context.keys(objectId, heads)
+    const keys = context.keys(objectId, heads)
     return [...new Set<string>(keys)]
   },
 }

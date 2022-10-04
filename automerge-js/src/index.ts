@@ -91,7 +91,7 @@ export function free<T>(doc: Doc<T>) {
   return _state(doc).free()
 }
 
-export function from<T extends {}>(initialState: T | Doc<T>, actor?: ActorId): Doc<T> {
+export function from<T extends Record<string, unknown>>(initialState: T | Doc<T>, actor?: ActorId): Doc<T> {
     return change(init(actor), (d) => Object.assign(d, initialState))
 }
 
