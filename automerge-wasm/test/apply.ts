@@ -1,11 +1,16 @@
 
 import { describe, it } from 'mocha';
-//@ts-ignore
 import assert from 'assert'
-//@ts-ignore
-import init, { create, load } from '..'
+import { create, Value } from '..'
 
 export const OBJECT_ID  = Symbol.for('_am_objectId')     // object containing metadata about current 
+
+// @ts-ignore
+function _obj(doc: any) : any {
+  if (typeof doc === 'object' && doc !== null) {
+    return doc[OBJECT_ID]
+  }
+}
 
 // sample classes for testing
 class Counter {
@@ -15,21 +20,14 @@ class Counter {
   }
 }
 
-class Wrapper {
-  value: any;
-  constructor(n: any) {
-    this.value = n
-  }
-}
-
 describe('Automerge', () => {
   describe('Patch Apply', () => {
     it('apply nested sets on maps', () => {
-      let start : any = { hello: { mellow: { yellow: "world", x: 1 }, y : 2 } }
-      let doc1 = create()
+      const start = { hello: { mellow: { yellow: "world", x: 1 }, y : 2 } }
+      const doc1 = create()
       doc1.putObject("/", "hello", start.hello);
       let mat = doc1.materialize("/")
-      let doc2 = create()
+      const doc2 = create()
       doc2.enablePatches(true)
       doc2.merge(doc1)
 
@@ -38,6 +36,7 @@ describe('Automerge', () => {
       assert.deepEqual(base, start)
 
       doc2.delete("/hello/mellow", "yellow");
+      // @ts-ignore
       delete start.hello.mellow.yellow;
       base = doc2.applyPatches(base)
       mat = doc2.materialize("/")
@@ -47,12 +46,11 @@ describe('Automerge', () => {
     })
 
     it('apply patches on lists', () => {
-      //let start = { list: [1,2,3,4,5,6] }
-      let start = { list: [1,2,3,4] }
-      let doc1 = create()
+      const start = { list: [1,2,3,4] }
+      const doc1 = create()
       doc1.putObject("/", "list", start.list);
       let mat = doc1.materialize("/")
-      let doc2 = create()
+      const doc2 = create()
       doc2.enablePatches(true)
       doc2.merge(doc1)
       mat = doc1.materialize("/")
@@ -68,7 +66,7 @@ describe('Automerge', () => {
     })
 
     it('apply patches on lists of lists of lists', () => {
-      let start = { list:
+      const start = { list:
         [
           [
             [ 1, 2, 3, 4, 5, 6],
@@ -80,7 +78,7 @@ describe('Automerge', () => {
           ]
         ]
       }
-      let doc1 = create()
+      const doc1 = create()
       doc1.enablePatches(true)
       doc1.putObject("/", "list", start.list);
       let base = doc1.applyPatches({})
@@ -101,21 +99,20 @@ describe('Automerge', () => {
     })
 
     it('large inserts should make one splice patch', () => {
-      let doc1 = create()
+      const doc1 = create()
       doc1.enablePatches(true)
       doc1.putObject("/", "list", "abc");
-      let patches = doc1.popPatches()
+      const patches = doc1.popPatches()
       assert.deepEqual( patches, [
         { action: 'put', conflict: false, path: [ 'list' ], value: [] },
         { action: 'splice', path: [ 'list', 0 ], values: [ 'a', 'b', 'c' ] }])
     })
 
     it('it should allow registering type wrappers', () => {
-      let doc1 = create()
+      const doc1 = create()
       doc1.enablePatches(true)
-      //@ts-ignore
-      doc1.registerDatatype("counter", (n: any) => new Counter(n))
-      let doc2 = doc1.fork()
+      doc1.registerDatatype("counter", (n: number) => new Counter(n))
+      const doc2 = doc1.fork()
       doc1.put("/", "n", 10, "counter")
       doc1.put("/", "m", 10, "int")
 
@@ -136,7 +133,7 @@ describe('Automerge', () => {
     })
 
     it('text can be managed as an array or a string', () => {
-      let doc1 = create("aaaa")
+      const doc1 = create("aaaa")
       doc1.enablePatches(true)
 
       doc1.putObject("/", "notes", "hello world")
@@ -145,16 +142,16 @@ describe('Automerge', () => {
 
       assert.deepEqual( mat, { notes: "hello world".split("") } )
 
-      let doc2 = create()
+      const doc2 = create()
+      let apply : any = doc2.materialize("/") 
       doc2.enablePatches(true)
-      //@ts-ignore
-      doc2.registerDatatype("text", (n: any[]) => new String(n.join("")))
-      let apply = doc2.applyPatches({} as any)
+      doc2.registerDatatype("text", (n: Value[]) => new String(n.join("")))
+      apply = doc2.applyPatches(apply)
 
       doc2.merge(doc1);
       apply = doc2.applyPatches(apply)
-      assert.deepEqual(apply[OBJECT_ID], "_root")
-      assert.deepEqual(apply.notes[OBJECT_ID], "1@aaaa")
+      assert.deepEqual(_obj(apply), "_root")
+      assert.deepEqual(_obj(apply['notes']), "1@aaaa")
       assert.deepEqual( apply, { notes: new String("hello world") } )
 
       doc2.splice("/notes", 6, 5, "everyone");
@@ -162,14 +159,14 @@ describe('Automerge', () => {
       assert.deepEqual( apply, { notes: new String("hello everyone") } )
 
       mat = doc2.materialize("/")
-      //@ts-ignore
-      assert.deepEqual(mat[OBJECT_ID], "_root")
-      //@ts-ignore
-      assert.deepEqual(mat.notes[OBJECT_ID], "1@aaaa")
+      assert.deepEqual(_obj(mat), "_root")
+      // @ts-ignore
+      assert.deepEqual(_obj(mat.notes), "1@aaaa")
       assert.deepEqual( mat, { notes: new String("hello everyone") } )
     })
 
     it.skip('it can patch quickly', () => {
+/*
       console.time("init")
       let doc1 = create()
       doc1.enablePatches(true)
@@ -187,6 +184,7 @@ describe('Automerge', () => {
       console.time("patch")
       mat = doc1.applyPatches(mat)
       console.timeEnd("patch")
+*/
     })
   })
 })

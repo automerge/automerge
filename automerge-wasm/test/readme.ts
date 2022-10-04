@@ -1,6 +1,6 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { describe, it } from 'mocha';
 import * as assert from 'assert'
-//@ts-ignore
 import { create, load } from '..'
 
 describe('Automerge', () => {
@@ -273,6 +273,6 @@ describe('Automerge', () => {
 
       doc1.free(); doc2.free(); doc3.free(); doc4.free()
     })
-    it.skip('Syncing (1)', () => { })
+    //it.skip('Syncing (1)', () => { })
   })
 })
