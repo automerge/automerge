@@ -3,11 +3,18 @@ set -e
 THIS_SCRIPT=$(dirname "$0");
 WASM_PROJECT=$THIS_SCRIPT/../../automerge-wasm;
 JS_PROJECT=$THIS_SCRIPT/../../automerge-js;
-E2E_PROJECT=$THIS_SCRIPT/../../automerge-js/e2e;
 
-yarn --cwd $E2E_PROJECT install;
-# This will build the automerge-wasm project, publish it to a local NPM
-# repository, then run `yarn build` in the `automerge-js` directory with
-# the local registry
-yarn --cwd $E2E_PROJECT e2e buildjs;
-yarn --cwd $JS_PROJECT test
+yarn --cwd $WASM_PROJECT install;
+# This will take care of running wasm-pack
+yarn --cwd $WASM_PROJECT build;
+# If the dependencies are already installed we delete automerge-wasm. This makes
+# this script usable for iterative development.
+if [ -d $JS_PROJECT/node_modules/automerge-wasm ]; then
+    rm -rf $JS_PROJECT/node_modules/automerge-wasm
+fi
+# --check-files forces yarn to check if the local dep has changed
+yarn --cwd $JS_PROJECT install --check-files;
+yarn --cwd $JS_PROJECT test;
+
+
+
