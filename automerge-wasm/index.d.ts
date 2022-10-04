@@ -112,7 +112,7 @@ export function decodeSyncState(data: Uint8Array): SyncState;
 export function exportSyncState(state: SyncState): JsSyncState;
 export function importSyncState(state: JsSyncState): SyncState;
 
-export class API {
+export interface API {
   create(actor?: Actor): Automerge;
   load(data: Uint8Array, actor?: Actor): Automerge;
   encodeChange(change: DecodedChange): Change;
@@ -187,7 +187,7 @@ export class Automerge {
   dump(): void;
 }
 
-export class JsSyncState {
+export interface JsSyncState {
     sharedHeads: Heads;
     lastSentHeads: Heads;
     theirHeads: Heads | undefined;

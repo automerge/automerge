@@ -7,7 +7,7 @@ import { STATE, HEADS, TRACE, OBJECT_ID, READ_ONLY, FROZEN  } from "./constants"
 import { AutomergeValue, Counter } from "./types"
 export { AutomergeValue, Text, Counter, Int, Uint, Float64 } from "./types"
 
-import { API } from "@automerge/automerge-wasm";
+import { type API } from "@automerge/automerge-wasm";
 import { ApiHandler, UseApi } from "./low_level"
 
 import { Actor as ActorId, Prop, ObjID, Change, DecodedChange, Heads, Automerge, MaterializeValue } from "@automerge/automerge-wasm"
@@ -15,7 +15,7 @@ import { JsSyncState as SyncState, SyncMessage, DecodedSyncMessage } from "@auto
 
 export type ChangeOptions = { message?: string, time?: number }
 
-export type Doc<T> = { readonly [P in keyof T]: Doc<T[P]> }
+export type Doc<T> = { readonly [P in keyof T]: T[P] }
 
 export type ChangeFn<T> = (doc: T) => void
 
@@ -23,7 +23,6 @@ export interface State<T> {
   change: DecodedChange
   snapshot: T
 }
-
 
 export function use(api: API) {
   UseApi(api)
@@ -400,4 +399,4 @@ function isObject(obj: unknown) : obj is Record<string,unknown> {
   return typeof obj === 'object' && obj !== null
 }
 
-export { API, SyncState, ActorId, Conflicts, Prop, Change, ObjID, DecodedChange, DecodedSyncMessage, Heads, MaterializeValue }
+export type { API, SyncState, ActorId, Conflicts, Prop, Change, ObjID, DecodedChange, DecodedSyncMessage, Heads, MaterializeValue }
