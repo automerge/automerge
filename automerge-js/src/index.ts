@@ -16,7 +16,7 @@ import { JsSyncState as SyncState, SyncMessage, DecodedSyncMessage } from "autom
 export type ChangeOptions = { message?: string, time?: number, patchCallback?: Function }
 export type ApplyOptions = { patchCallback?: Function }
 
-export type Doc<T> = { readonly [P in keyof T]: Doc<T[P]> }
+export type Doc<T> = { readonly [P in keyof T]: T[P] }
 
 export type ChangeFn<T> = (doc: T) => void
 
