@@ -1,10 +1,10 @@
 {
-  "name": "automerge",
+  "name": "automerge-js",
   "collaborators": [
     "Orion Henry <orion@inkandswitch.com>",
     "Martin Kleppmann"
   ],
-  "version": "2.0.0-alpha.1",
+  "version": "0.1.12",
   "description": "Reimplementation of `automerge` on top of the automerge-wasm backend",
   "homepage": "https://github.com/automerge/automerge-rs/tree/main/automerge-js",
   "repository": "github:automerge/automerge-rs",
