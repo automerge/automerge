@@ -1,4 +1,6 @@
+import * as tt from "automerge-types"
 import * as assert from 'assert'
+import * as util from 'util'
 import * as Automerge from '../src'
 
 describe('Automerge', () => {
