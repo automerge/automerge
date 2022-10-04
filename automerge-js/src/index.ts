@@ -399,3 +399,5 @@ export function toJS<T>(doc: Doc<T>) : MaterializeValue {
 function isObject(obj: unknown) : obj is Record<string,unknown> {
   return typeof obj === 'object' && obj !== null
 }
+
+export { API, SyncState, ActorId, Conflicts, Prop, Change, ObjID, DecodedChange, DecodedSyncMessage, Heads, MaterializeValue }
