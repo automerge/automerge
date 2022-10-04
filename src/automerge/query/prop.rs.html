@@ -67,6 +67,26 @@
 <span id="65">65</span>
 <span id="66">66</span>
 <span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::op_tree</span>::{<span class="ident">OpSetMetadata</span>, <span class="ident">OpTreeNode</span>};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::query</span>::{<span class="ident">binary_search_by</span>, <span class="ident">QueryResult</span>, <span class="ident">TreeQuery</span>};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::types</span>::{<span class="ident">Key</span>, <span class="ident">Op</span>};
@@ -78,7 +98,15 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">ops</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Op</span><span class="op">&gt;</span>,
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">ops_pos</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">pos</span>: <span class="ident">usize</span>,
-    <span class="ident">start</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
+    <span class="ident">start</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Start</span><span class="op">&gt;</span>,
+}
+
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>)]</span>
+<span class="kw">struct</span> <span class="ident">Start</span> {
+    <span class="doccomment">/// The index to start searching for in the optree</span>
+    <span class="ident">idx</span>: <span class="ident">usize</span>,
+    <span class="doccomment">/// The total length of the optree</span>
+    <span class="ident">optree_len</span>: <span class="ident">usize</span>,
 }
 
 <span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Prop</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
@@ -99,12 +127,21 @@
         <span class="ident">child</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">OpTreeNode</span>,
         <span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">OpSetMetadata</span>,
     ) -&gt; <span class="ident">QueryResult</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">start</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">start</span> {
+        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">Start</span> {
+            <span class="ident">idx</span>: <span class="ident">start</span>,
+            <span class="ident">optree_len</span>,
+        }) <span class="op">=</span> <span class="self">self</span>.<span class="ident">start</span>
+        {
             <span class="kw">if</span> <span class="self">self</span>.<span class="ident">pos</span> <span class="op">+</span> <span class="ident">child</span>.<span class="ident">len</span>() <span class="op">&gt;</span><span class="op">=</span> <span class="ident">start</span> {
                 <span class="comment">// skip empty nodes</span>
                 <span class="kw">if</span> <span class="ident">child</span>.<span class="ident">index</span>.<span class="ident">visible_len</span>() <span class="op">==</span> <span class="number">0</span> {
-                    <span class="self">self</span>.<span class="ident">pos</span> <span class="op">+</span><span class="op">=</span> <span class="ident">child</span>.<span class="ident">len</span>();
-                    <span class="ident">QueryResult::Next</span>
+                    <span class="kw">if</span> <span class="self">self</span>.<span class="ident">pos</span> <span class="op">+</span> <span class="ident">child</span>.<span class="ident">len</span>() <span class="op">&gt;</span><span class="op">=</span> <span class="ident">optree_len</span> {
+                        <span class="self">self</span>.<span class="ident">pos</span> <span class="op">=</span> <span class="ident">optree_len</span>;
+                        <span class="ident">QueryResult::Finish</span>
+                    } <span class="kw">else</span> {
+                        <span class="self">self</span>.<span class="ident">pos</span> <span class="op">+</span><span class="op">=</span> <span class="ident">child</span>.<span class="ident">len</span>();
+                        <span class="ident">QueryResult::Next</span>
+                    }
                 } <span class="kw">else</span> {
                     <span class="ident">QueryResult::Descend</span>
                 }
@@ -115,7 +152,10 @@
         } <span class="kw">else</span> {
             <span class="comment">// in the root node find the first op position for the key</span>
             <span class="kw">let</span> <span class="ident">start</span> <span class="op">=</span> <span class="ident">binary_search_by</span>(<span class="ident">child</span>, <span class="op">|</span><span class="ident">op</span><span class="op">|</span> <span class="ident">m</span>.<span class="ident">key_cmp</span>(<span class="kw-2">&amp;</span><span class="ident">op</span>.<span class="ident">key</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">key</span>));
-            <span class="self">self</span>.<span class="ident">start</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">start</span>);
+            <span class="self">self</span>.<span class="ident">start</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">Start</span> {
+                <span class="ident">idx</span>: <span class="ident">start</span>,
+                <span class="ident">optree_len</span>: <span class="ident">child</span>.<span class="ident">len</span>(),
+            });
             <span class="self">self</span>.<span class="ident">pos</span> <span class="op">=</span> <span class="ident">start</span>;
             <span class="ident">QueryResult::Skip</span>(<span class="ident">start</span>)
         }
