@@ -18,7 +18,6 @@ const serverConfig = {
 };
 
 const clientConfig = {
-  experiments: { asyncWebAssembly: true },
   target: 'web',
   entry: './src/index.js',
   output: {
