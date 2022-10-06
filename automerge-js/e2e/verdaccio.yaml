@@ -9,7 +9,7 @@ packages:
   "automerge-wasm":
       access: "$all"
       publish: "$all"
-  "automerge-js":
+  "automerge":
       access: "$all"
       publish: "$all"
   "*":

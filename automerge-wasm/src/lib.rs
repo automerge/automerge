@@ -27,7 +27,7 @@
 )]
 #![allow(clippy::unused_unit)]
 use am::transaction::CommitOptions;
-use am::transaction::Transactable;
+use am::transaction::{Observed, Transactable, UnObserved};
 use automerge as am;
 use automerge::{Change, ObjId, ObjType, Prop, Value, ROOT};
 use js_sys::{Array, Function, Object, Uint8Array};
@@ -55,7 +55,7 @@ macro_rules! log {
     };
 }
 
-type AutoCommit = am::AutoCommitWithObs<Observer>;
+type AutoCommit = am::AutoCommitWithObs<Observed<Observer>>;
 
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
@@ -781,7 +781,9 @@ pub fn init(actor: Option<String>) -> Result<Automerge, JsValue> {
 #[wasm_bindgen(js_name = load)]
 pub fn load(data: Uint8Array, actor: Option<String>) -> Result<Automerge, JsValue> {
     let data = data.to_vec();
-    let mut doc = AutoCommit::load(&data).map_err(to_js_err)?;
+    let mut doc = am::AutoCommitWithObs::<UnObserved>::load(&data)
+        .map_err(to_js_err)?
+        .with_observer(Observer::default());
     if let Some(s) = actor {
         let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
         doc.set_actor(actor);

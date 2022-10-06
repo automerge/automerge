@@ -1502,7 +1502,7 @@ fn observe_counter_change_application() {
 
 #[test]
 fn get_changes_heads_empty() {
-    let mut doc = AutoCommit::default();
+    let mut doc = AutoCommit::unobserved();
     doc.put(ROOT, "key1", 1).unwrap();
     doc.commit();
     doc.put(ROOT, "key2", 1).unwrap();

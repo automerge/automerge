@@ -132,7 +132,7 @@ impl TransactionInner {
     pub(crate) fn put<P: Into<Prop>, V: Into<ScalarValue>, Obs: OpObserver>(
         &mut self,
         doc: &mut Automerge,
-        op_observer: &mut Obs,
+        op_observer: Option<&mut Obs>,
         ex_obj: &ExId,
         prop: P,
         value: V,
@@ -160,7 +160,7 @@ impl TransactionInner {
     pub(crate) fn put_object<P: Into<Prop>, Obs: OpObserver>(
         &mut self,
         doc: &mut Automerge,
-        op_observer: &mut Obs,
+        op_observer: Option<&mut Obs>,
         ex_obj: &ExId,
         prop: P,
         value: ObjType,
@@ -182,7 +182,7 @@ impl TransactionInner {
     fn insert_local_op<Obs: OpObserver>(
         &mut self,
         doc: &mut Automerge,
-        op_observer: &mut Obs,
+        op_observer: Option<&mut Obs>,
         prop: Prop,
         op: Op,
         pos: usize,
@@ -201,7 +201,7 @@ impl TransactionInner {
     pub(crate) fn insert<V: Into<ScalarValue>, Obs: OpObserver>(
         &mut self,
         doc: &mut Automerge,
-        op_observer: &mut Obs,
+        op_observer: Option<&mut Obs>,
         ex_obj: &ExId,
         index: usize,
         value: V,
@@ -216,7 +216,7 @@ impl TransactionInner {
     pub(crate) fn insert_object<Obs: OpObserver>(
         &mut self,
         doc: &mut Automerge,
-        op_observer: &mut Obs,
+        op_observer: Option<&mut Obs>,
         ex_obj: &ExId,
         index: usize,
         value: ObjType,
@@ -230,7 +230,7 @@ impl TransactionInner {
     fn do_insert<Obs: OpObserver>(
         &mut self,
         doc: &mut Automerge,
-        op_observer: &mut Obs,
+        op_observer: Option<&mut Obs>,
         obj: ObjId,
         index: usize,
         action: OpType,
@@ -260,7 +260,7 @@ impl TransactionInner {
     pub(crate) fn local_op<Obs: OpObserver>(
         &mut self,
         doc: &mut Automerge,
-        op_observer: &mut Obs,
+        op_observer: Option<&mut Obs>,
         obj: ObjId,
         prop: Prop,
         action: OpType,
@@ -274,7 +274,7 @@ impl TransactionInner {
     fn local_map_op<Obs: OpObserver>(
         &mut self,
         doc: &mut Automerge,
-        op_observer: &mut Obs,
+        op_observer: Option<&mut Obs>,
         obj: ObjId,
         prop: String,
         action: OpType,
@@ -323,7 +323,7 @@ impl TransactionInner {
     fn local_list_op<Obs: OpObserver>(
         &mut self,
         doc: &mut Automerge,
-        op_observer: &mut Obs,
+        op_observer: Option<&mut Obs>,
         obj: ObjId,
         index: usize,
         action: OpType,
@@ -363,7 +363,7 @@ impl TransactionInner {
     pub(crate) fn increment<P: Into<Prop>, Obs: OpObserver>(
         &mut self,
         doc: &mut Automerge,
-        op_observer: &mut Obs,
+        op_observer: Option<&mut Obs>,
         obj: &ExId,
         prop: P,
         value: i64,
@@ -376,7 +376,7 @@ impl TransactionInner {
     pub(crate) fn delete<P: Into<Prop>, Obs: OpObserver>(
         &mut self,
         doc: &mut Automerge,
-        op_observer: &mut Obs,
+        op_observer: Option<&mut Obs>,
         ex_obj: &ExId,
         prop: P,
     ) -> Result<(), AutomergeError> {
@@ -391,7 +391,7 @@ impl TransactionInner {
     pub(crate) fn splice<Obs: OpObserver>(
         &mut self,
         doc: &mut Automerge,
-        op_observer: &mut Obs,
+        mut op_observer: Option<&mut Obs>,
         ex_obj: &ExId,
         mut pos: usize,
         del: usize,
@@ -399,12 +399,20 @@ impl TransactionInner {
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(ex_obj)?;
         for _ in 0..del {
-            // del()
-            self.local_op(doc, op_observer, obj, pos.into(), OpType::Delete)?;
+            // This unwrap and rewrap of the option is necessary to appeas the borrow checker :(
+            if let Some(obs) = op_observer.as_mut() {
+                self.local_op(doc, Some(*obs), obj, pos.into(), OpType::Delete)?;
+            } else {
+                self.local_op::<Obs>(doc, None, obj, pos.into(), OpType::Delete)?;
+            }
         }
         for v in vals {
-            // insert()
-            self.do_insert(doc, op_observer, obj, pos, v.clone().into())?;
+            // As above this unwrap and rewrap of the option is necessary to appeas the borrow checker :(
+            if let Some(obs) = op_observer.as_mut() {
+                self.do_insert(doc, Some(*obs), obj, pos, v.clone().into())?;
+            } else {
+                self.do_insert::<Obs>(doc, None, obj, pos, v.clone().into())?;
+            }
             pos += 1;
         }
         Ok(())
@@ -413,32 +421,34 @@ impl TransactionInner {
     fn finalize_op<Obs: OpObserver>(
         &mut self,
         doc: &mut Automerge,
-        op_observer: &mut Obs,
+        op_observer: Option<&mut Obs>,
         obj: ObjId,
         prop: Prop,
         op: Op,
     ) {
         // TODO - id_to_exid should be a noop if not used - change type to Into<ExId>?
-        let ex_obj = doc.ops.id_to_exid(obj.0);
-        let parents = doc.ops.parents(obj);
-        if op.insert {
-            let value = (op.value(), doc.ops.id_to_exid(op.id));
-            match prop {
-                Prop::Map(_) => panic!("insert into a map"),
-                Prop::Seq(index) => op_observer.insert(parents, ex_obj, index, value),
+        if let Some(op_observer) = op_observer {
+            let ex_obj = doc.ops.id_to_exid(obj.0);
+            let parents = doc.ops.parents(obj);
+            if op.insert {
+                let value = (op.value(), doc.ops.id_to_exid(op.id));
+                match prop {
+                    Prop::Map(_) => panic!("insert into a map"),
+                    Prop::Seq(index) => op_observer.insert(parents, ex_obj, index, value),
+                }
+            } else if op.is_delete() {
+                op_observer.delete(parents, ex_obj, prop.clone());
+            } else if let Some(value) = op.get_increment_value() {
+                op_observer.increment(
+                    parents,
+                    ex_obj,
+                    prop.clone(),
+                    (value, doc.ops.id_to_exid(op.id)),
+                );
+            } else {
+                let value = (op.value(), doc.ops.id_to_exid(op.id));
+                op_observer.put(parents, ex_obj, prop.clone(), value, false);
             }
-        } else if op.is_delete() {
-            op_observer.delete(parents, ex_obj, prop.clone());
-        } else if let Some(value) = op.get_increment_value() {
-            op_observer.increment(
-                parents,
-                ex_obj,
-                prop.clone(),
-                (value, doc.ops.id_to_exid(op.id)),
-            );
-        } else {
-            let value = (op.value(), doc.ops.id_to_exid(op.id));
-            op_observer.put(parents, ex_obj, prop.clone(), value, false);
         }
         self.operations.push((obj, prop, op));
     }
