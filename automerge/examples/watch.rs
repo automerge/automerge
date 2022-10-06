@@ -11,7 +11,7 @@ fn main() {
 
     // a simple scalar change in the root object
     let mut result = doc
-        .transact_with::<_, _, AutomergeError, _, VecOpObserver>(
+        .transact_observed_with::<_, _, AutomergeError, _, VecOpObserver>(
             |_result| CommitOptions::default(),
             |tx| {
                 tx.put(ROOT, "hello", "world").unwrap();
@@ -36,7 +36,7 @@ fn main() {
     tx.insert(&list, 1, "woo").unwrap();
     let m = tx.insert_object(&list, 2, automerge::ObjType::Map).unwrap();
     tx.put(&m, "hi", 2).unwrap();
-    let patches = tx.op_observer.take_patches();
+    let patches = tx.observer().take_patches();
     let _heads3 = tx.commit_with(CommitOptions::default());
     get_changes(&doc, patches);
 }
