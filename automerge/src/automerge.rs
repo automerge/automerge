@@ -13,7 +13,9 @@ use crate::op_observer::OpObserver;
 use crate::op_set::OpSet;
 use crate::parents::Parents;
 use crate::storage::{self, load, CompressConfig};
-use crate::transaction::{self, CommitOptions, Failure, Success, Transaction, TransactionInner};
+use crate::transaction::{
+    self, CommitOptions, Failure, Observed, Success, Transaction, TransactionInner, UnObserved,
+};
 use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType,
     ScalarValue, Value,
@@ -111,22 +113,22 @@ impl Automerge {
     }
 
     /// Start a transaction.
-    pub fn transaction(&mut self) -> Transaction<'_, ()> {
+    pub fn transaction(&mut self) -> Transaction<'_, UnObserved> {
         Transaction {
             inner: Some(self.transaction_inner()),
             doc: self,
-            op_observer: (),
+            observation: Some(UnObserved),
         }
     }
 
     pub fn transaction_with_observer<Obs: OpObserver>(
         &mut self,
         op_observer: Obs,
-    ) -> Transaction<'_, Obs> {
+    ) -> Transaction<'_, Observed<Obs>> {
         Transaction {
             inner: Some(self.transaction_inner()),
             doc: self,
-            op_observer,
+            observation: Some(Observed::new(op_observer)),
         }
     }
 
@@ -157,16 +159,46 @@ impl Automerge {
     /// afterwards.
     pub fn transact<F, O, E>(&mut self, f: F) -> transaction::Result<O, (), E>
     where
-        F: FnOnce(&mut Transaction<'_, ()>) -> Result<O, E>,
+        F: FnOnce(&mut Transaction<'_, UnObserved>) -> Result<O, E>,
+    {
+        self.transact_with_impl(None::<&dyn Fn(&O) -> CommitOptions>, f)
+    }
+
+    /// Like [`Self::transact`] but with a function for generating the commit options.
+    pub fn transact_with<F, O, E, C>(&mut self, c: C, f: F) -> transaction::Result<O, (), E>
+    where
+        F: FnOnce(&mut Transaction<'_, UnObserved>) -> Result<O, E>,
+        C: FnOnce(&O) -> CommitOptions,
+    {
+        self.transact_with_impl(Some(c), f)
+    }
+
+    /// Like [`Self::transact`] but with a function for generating the commit options.
+    fn transact_with_impl<F, O, E, C>(
+        &mut self,
+        c: Option<C>,
+        f: F,
+    ) -> transaction::Result<O, (), E>
+    where
+        F: FnOnce(&mut Transaction<'_, UnObserved>) -> Result<O, E>,
+        C: FnOnce(&O) -> CommitOptions,
     {
         let mut tx = self.transaction();
         let result = f(&mut tx);
         match result {
-            Ok(result) => Ok(Success {
-                result,
-                op_observer: (),
-                hash: tx.commit(),
-            }),
+            Ok(result) => {
+                let hash = if let Some(c) = c {
+                    let commit_options = c(&result);
+                    tx.commit_with(commit_options)
+                } else {
+                    tx.commit()
+                };
+                Ok(Success {
+                    result,
+                    hash,
+                    op_observer: (),
+                })
+            }
             Err(error) => Err(Failure {
                 error,
                 cancelled: tx.rollback(),
@@ -174,25 +206,55 @@ impl Automerge {
         }
     }
 
-    /// Like [`Self::transact`] but with a function for generating the commit options.
-    pub fn transact_with<F, O, E, C, Obs>(&mut self, c: C, f: F) -> transaction::Result<O, Obs, E>
+    /// Run a transaction on this document in a closure, observing ops with `Obs`, automatically handling commit or rollback
+    /// afterwards.
+    pub fn transact_observed<F, O, E, Obs>(&mut self, f: F) -> transaction::Result<O, Obs, E>
     where
-        F: FnOnce(&mut Transaction<'_, Obs>) -> Result<O, E>,
-        C: FnOnce(&O) -> CommitOptions,
-        Obs: OpObserver,
+        F: FnOnce(&mut Transaction<'_, Observed<Obs>>) -> Result<O, E>,
+        Obs: OpObserver + Default,
     {
-        let mut op_observer = Obs::default();
-        let mut tx = self.transaction_with_observer(Default::default());
+        self.transact_observed_with_impl(None::<&dyn Fn(&O) -> CommitOptions>, f)
+    }
+
+    /// Like [`Self::transact_observed`] but with a function for generating the commit options
+    pub fn transact_observed_with<F, O, E, C, Obs>(
+        &mut self,
+        c: C,
+        f: F,
+    ) -> transaction::Result<O, Obs, E>
+    where
+        F: FnOnce(&mut Transaction<'_, Observed<Obs>>) -> Result<O, E>,
+        C: FnOnce(&O) -> CommitOptions,
+        Obs: OpObserver + Default,
+    {
+        self.transact_observed_with_impl(Some(c), f)
+    }
+
+    fn transact_observed_with_impl<F, O, Obs, E, C>(
+        &mut self,
+        c: Option<C>,
+        f: F,
+    ) -> transaction::Result<O, Obs, E>
+    where
+        F: FnOnce(&mut Transaction<'_, Observed<Obs>>) -> Result<O, E>,
+        C: FnOnce(&O) -> CommitOptions,
+        Obs: OpObserver + Default,
+    {
+        let observer = Obs::default();
+        let mut tx = self.transaction_with_observer(observer);
         let result = f(&mut tx);
         match result {
             Ok(result) => {
-                let commit_options = c(&result);
-                std::mem::swap(&mut op_observer, &mut tx.op_observer);
-                let hash = tx.commit_with(commit_options);
+                let (obs, hash) = if let Some(c) = c {
+                    let commit_options = c(&result);
+                    tx.commit_with(commit_options)
+                } else {
+                    tx.commit()
+                };
                 Ok(Success {
                     result,
                     hash,
-                    op_observer,
+                    op_observer: obs,
                 })
             }
             Err(error) => Err(Failure {
