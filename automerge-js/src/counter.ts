@@ -1,4 +1,4 @@
-import { Automerge, ObjID, Prop } from "automerge-types"
+import { Automerge, ObjID, Prop } from "@automerge/automerge-wasm"
 import { COUNTER } from "./constants"
 /**
  * The most basic CRDT: an integer value that can be changed only by

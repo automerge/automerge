@@ -1,11 +1,12 @@
-import { Value } from "automerge-types"
-import { TEXT } from "./constants"
+import { Value } from "@automerge/automerge-wasm"
+import { TEXT, STATE } from "./constants"
 
 export class Text {
   elems: Value[]
+  str: string | undefined
+  spans: Value[] | undefined
 
-  constructor (text?: string | string[]) {
-    //const instance = Object.create(Text.prototype)
+  constructor (text?: string | string[] | Value[]) {
     if (typeof text === 'string') {
       this.elems = [...text]
     } else if (Array.isArray(text)) {
@@ -50,14 +51,17 @@ export class Text {
    * non-character elements.
    */
   toString() : string {
-    // Concatting to a string is faster than creating an array and then
-    // .join()ing for small (<100KB) arrays.
-    // https://jsperf.com/join-vs-loop-w-type-test
-    let str = ''
-    for (const elem of this.elems) {
-      if (typeof elem === 'string') str += elem
+    if (!this.str) {
+      // Concatting to a string is faster than creating an array and then
+      // .join()ing for small (<100KB) arrays.
+      // https://jsperf.com/join-vs-loop-w-type-test
+      this.str = ''
+      for (const elem of this.elems) {
+        if (typeof elem === 'string') this.str += elem
+        else this.str += '\uFFFC'
+      }
     }
-    return str
+    return this.str
   }
 
   /**
@@ -68,23 +72,25 @@ export class Text {
    * => ['ab', {x: 3}, 'cd']
    */
   toSpans() : Value[] {
-    const spans : Value[] = []
-    let chars = ''
-    for (const elem of this.elems) {
-      if (typeof elem === 'string') {
-        chars += elem
-      } else {
-        if (chars.length > 0) {
-          spans.push(chars)
-          chars = ''
+    if (!this.spans) {
+      this.spans = []
+      let chars = ''
+      for (const elem of this.elems) {
+        if (typeof elem === 'string') {
+          chars += elem
+        } else {
+          if (chars.length > 0) {
+            this.spans.push(chars)
+            chars = ''
+          }
+          this.spans.push(elem)
         }
-        spans.push(elem)
+      }
+      if (chars.length > 0) {
+        this.spans.push(chars)
       }
     }
-    if (chars.length > 0) {
-      spans.push(chars)
-    }
-    return spans
+    return this.spans
   }
 
   /**
@@ -99,6 +105,9 @@ export class Text {
    * Updates the list item at position `index` to a new value `value`.
    */
   set (index: number, value: Value) {
+    if (this[STATE]) {
+      throw new RangeError("object cannot be modified outside of a change block")
+    }
     this.elems[index] = value
   }
 
@@ -106,6 +115,9 @@ export class Text {
    * Inserts new list items `values` starting at position `index`.
    */
   insertAt(index: number, ...values: Value[]) {
+    if (this[STATE]) {
+      throw new RangeError("object cannot be modified outside of a change block")
+    }
     this.elems.splice(index, 0, ... values)
   }
 
@@ -114,6 +126,9 @@ export class Text {
    * if `numDelete` is not given, one item is deleted.
    */
   deleteAt(index: number, numDelete = 1) {
+    if (this[STATE]) {
+      throw new RangeError("object cannot be modified outside of a change block")
+    }
     this.elems.splice(index, numDelete)
   }
 
@@ -121,16 +136,64 @@ export class Text {
     this.elems.map(callback)
   }
 
+  lastIndexOf(searchElement: Value, fromIndex?: number) {
+    this.elems.lastIndexOf(searchElement, fromIndex)
+  }
 
-}
+  concat(other: Text) : Text {
+    return new Text(this.elems.concat(other.elems))
+  }
 
-// Read-only methods that can delegate to the JavaScript built-in array
-for (const method of ['concat', 'every', 'filter', 'find', 'findIndex', 'forEach', 'includes',
-                    'indexOf', 'join', 'lastIndexOf', 'reduce', 'reduceRight',
-                    'slice', 'some', 'toLocaleString']) {
-  Text.prototype[method] = function (...args) {
-    const array = [...this]
-    return array[method](...args)
+  every(test: (Value) => boolean) : boolean {
+    return this.elems.every(test)
+  }
+
+  filter(test: (Value) => boolean) : Text {
+    return new Text(this.elems.filter(test))
+  }
+
+  find(test: (Value) => boolean) : Value | undefined {
+    return this.elems.find(test)
+  }
+
+  findIndex(test: (Value) => boolean) : number | undefined {
+    return this.elems.findIndex(test)
+  }
+
+  forEach(f: (Value) => undefined) {
+    this.elems.forEach(f)
+  }
+
+  includes(elem: Value) : boolean {
+    return this.elems.includes(elem)
+  }
+
+  indexOf(elem: Value) {
+    return this.elems.indexOf(elem)
+  }
+
+  join(sep?: string) : string{
+    return this.elems.join(sep)
+  }
+
+  reduce(f: (previousValue: Value, currentValue: Value, currentIndex: number, array: Value[]) => Value)  {
+    this.elems.reduce(f)
+  }
+
+  reduceRight(f: (previousValue: Value, currentValue: Value, currentIndex: number, array: Value[]) => Value) {
+    this.elems.reduceRight(f)
+  }
+
+  slice(start?: number, end?: number) {
+    new Text(this.elems.slice(start,end))
+  }
+
+  some(test: (Value) => boolean) : boolean {
+    return this.elems.some(test)
+  }
+
+  toLocaleString() {
+    this.toString()
   }
 }
 

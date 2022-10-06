@@ -411,7 +411,7 @@ pub(crate) fn take4<E>(input: Input<'_>) -> ParseResult<'_, [u8; 4], E> {
 }
 
 /// Parse a slice of length `n` from `input`
-pub(crate) fn take_n<'a, E>(n: usize, input: Input<'a>) -> ParseResult<'_, &'a [u8], E> {
+pub(crate) fn take_n<E>(n: usize, input: Input<'_>) -> ParseResult<'_, &[u8], E> {
     input.take_n(n)
 }
 
@@ -449,7 +449,7 @@ where
 ///
 /// This first parses a LEB128 encoded `u64` from the input, then parses this many bytes from the
 /// underlying input.
-pub(crate) fn length_prefixed_bytes<'a, E>(input: Input<'a>) -> ParseResult<'_, &'a [u8], E>
+pub(crate) fn length_prefixed_bytes<E>(input: Input<'_>) -> ParseResult<'_, &[u8], E>
 where
     E: From<leb128::Error>,
 {

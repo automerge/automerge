@@ -1,11 +1,11 @@
 {
-  "name": "automerge-js",
+  "name": "@automerge/automerge",
   "collaborators": [
     "Orion Henry <orion@inkandswitch.com>",
     "Martin Kleppmann"
   ],
-  "version": "0.1.12",
-  "description": "Reimplementation of `automerge` on top of the automerge-wasm backend",
+  "version": "2.0.0-alpha.4",
+  "description": "Javascript implementation of automerge, backed by @automerge/automerge-wasm",
   "homepage": "https://github.com/automerge/automerge-rs/tree/main/automerge-js",
   "repository": "github:automerge/automerge-rs",
   "files": [
@@ -13,6 +13,7 @@
     "LICENSE",
     "package.json",
     "index.d.ts",
+    "dist/*.d.ts",
     "dist/cjs/constants.js",
     "dist/cjs/types.js",
     "dist/cjs/numbers.js",
@@ -32,13 +33,13 @@
     "dist/mjs/text.js",
     "dist/mjs/proxies.js"
   ],
-  "types": "index.d.ts",
+  "types": "./dist/index.d.ts",
   "module": "./dist/mjs/index.js",
   "main": "./dist/cjs/index.js",
   "license": "MIT",
   "scripts": {
     "lint": "eslint src",
-    "build": "tsc -p config/mjs.json && tsc -p config/cjs.json",
+    "build": "tsc -p config/mjs.json && tsc -p config/cjs.json && tsc --emitDeclarationOnly",
     "test": "ts-mocha test/*.ts"
   },
   "devDependencies": {
@@ -53,10 +54,11 @@
     "mocha": "^10.0.0",
     "pako": "^2.0.4",
     "ts-mocha": "^10.0.0",
+    "ts-node": "^10.9.1",
     "typescript": "^4.6.4"
   },
   "dependencies": {
-    "automerge-types": "0.1.5",
+    "@automerge/automerge-wasm": "0.1.9",
     "uuid": "^8.3"
   }
 }

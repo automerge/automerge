@@ -246,7 +246,7 @@ impl<T: compression::ColumnCompression> RawColumns<T> {
         self.0.iter().map(|c| c.data.len()).sum()
     }
 
-    pub(crate) fn iter<'a>(&'a self) -> impl Iterator<Item = &'a RawColumn<T>> + '_ {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &RawColumn<T>> + '_ {
         self.0.iter()
     }
 }

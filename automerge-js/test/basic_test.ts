@@ -1,10 +1,5 @@
-import * as tt from "automerge-types"
 import * as assert from 'assert'
-import * as util from 'util'
 import * as Automerge from '../src'
-import * as AutomergeWASM from "automerge-wasm"
-
-Automerge.use(AutomergeWASM)
 
 describe('Automerge', () => {
     describe('basics', () => {
@@ -175,4 +170,64 @@ describe('Automerge', () => {
           console.log(doc.text.indexOf("world"))
         })
     })
+
+    describe('proxy lists', () => {
+        it('behave like arrays', () => {
+          let doc = Automerge.from({
+            chars: ["a","b","c"],
+            numbers: [20,3,100],
+            repeats: [20,20,3,3,3,3,100,100]
+          })
+          let r1 = []
+          doc = Automerge.change(doc, (d) => {
+            assert.deepEqual(d.chars.concat([1,2]), ["a","b","c",1,2])
+            assert.deepEqual(d.chars.map((n) => n + "!"), ["a!", "b!", "c!"])
+            assert.deepEqual(d.numbers.map((n) => n + 10), [30, 13, 110])
+            assert.deepEqual(d.numbers.toString(), "20,3,100")
+            assert.deepEqual(d.numbers.toLocaleString(), "20,3,100")
+            assert.deepEqual(d.numbers.forEach((n) => r1.push(n)), undefined)
+            assert.deepEqual(d.numbers.every((n) => n > 1), true)
+            assert.deepEqual(d.numbers.every((n) => n > 10), false)
+            assert.deepEqual(d.numbers.filter((n) => n > 10), [20,100])
+            assert.deepEqual(d.repeats.find((n) => n < 10), 3)
+            assert.deepEqual(d.repeats.toArray().find((n) => n < 10), 3)
+            assert.deepEqual(d.repeats.find((n) => n < 0), undefined)
+            assert.deepEqual(d.repeats.findIndex((n) => n < 10), 2)
+            assert.deepEqual(d.repeats.findIndex((n) => n < 0), -1)
+            assert.deepEqual(d.repeats.toArray().findIndex((n) => n < 10), 2)
+            assert.deepEqual(d.repeats.toArray().findIndex((n) => n < 0), -1)
+            assert.deepEqual(d.numbers.includes(3), true)
+            assert.deepEqual(d.numbers.includes(-3), false)
+            assert.deepEqual(d.numbers.join("|"), "20|3|100")
+            assert.deepEqual(d.numbers.join(), "20,3,100")
+            assert.deepEqual(d.numbers.some((f) => f === 3), true)
+            assert.deepEqual(d.numbers.some((f) => f < 0), false)
+            assert.deepEqual(d.numbers.reduce((sum,n) => sum + n, 100), 223)
+            assert.deepEqual(d.repeats.reduce((sum,n) => sum + n, 100), 352)
+            assert.deepEqual(d.chars.reduce((sum,n) => sum + n, "="), "=abc")
+            assert.deepEqual(d.chars.reduceRight((sum,n) => sum + n, "="), "=cba")
+            assert.deepEqual(d.numbers.reduceRight((sum,n) => sum + n, 100), 223)
+            assert.deepEqual(d.repeats.lastIndexOf(3), 5)
+            assert.deepEqual(d.repeats.lastIndexOf(3,3), 3)
+          })
+          doc = Automerge.change(doc, (d) => {
+            assert.deepEqual(d.numbers.fill(-1,1,2), [20,-1,100])
+            assert.deepEqual(d.chars.fill("z",1,100), ["a","z","z"])
+          })
+          assert.deepEqual(r1, [20,3,100])
+          assert.deepEqual(doc.numbers, [20,-1,100])
+          assert.deepEqual(doc.chars, ["a","z","z"])
+        })
+    })
+    
+    it('should obtain the same conflicts, regardless of merge order', () => {
+      let s1 = Automerge.init()
+      let s2 = Automerge.init()
+      s1 = Automerge.change(s1, doc => { doc.x = 1; doc.y = 2 })
+      s2 = Automerge.change(s2, doc => { doc.x = 3; doc.y = 4 })
+      const m1 = Automerge.merge(Automerge.clone(s1), Automerge.clone(s2))
+      const m2 = Automerge.merge(Automerge.clone(s2), Automerge.clone(s1))
+      assert.deepStrictEqual(Automerge.getConflicts(m1, 'x'), Automerge.getConflicts(m2, 'x'))
+    })
 })
+

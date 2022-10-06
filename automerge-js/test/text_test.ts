@@ -1,9 +1,6 @@
 import * as assert from 'assert'
 import * as Automerge from '../src'
 import { assertEqualsOneOf } from './helpers'
-import * as AutomergeWASM from "automerge-wasm"
-
-Automerge.use(AutomergeWASM)
 
 function attributeStateToAttributes(accumulatedAttributes) {
   const attributes = {}
@@ -385,8 +382,8 @@ describe('Automerge.Text', () => {
       assert.strictEqual(s1.text.get(0), 'a')
     })
 
-    it('should exclude control characters from toString()', () => {
-      assert.strictEqual(s1.text.toString(), 'a')
+    it('should replace control characters from toString()', () => {
+      assert.strictEqual(s1.text.toString(), 'a\uFFFC')
     })
 
     it('should allow control characters to be updated', () => {
@@ -623,7 +620,7 @@ describe('Automerge.Text', () => {
           applyDeltaDocToAutomergeText(delta, doc)
         })
 
-        assert.strictEqual(s2.text.toString(), 'Hello reader!')
+        assert.strictEqual(s2.text.toString(), 'Hello \uFFFCreader\uFFFC!')
         assert.deepEqual(s2.text.toSpans(), [
           "Hello ",
           { attributes: { bold: true } },
@@ -651,7 +648,7 @@ describe('Automerge.Text', () => {
           applyDeltaDocToAutomergeText(delta, doc)
         })
 
-        assert.strictEqual(s2.text.toString(), 'Hello reader!')
+        assert.strictEqual(s2.text.toString(), 'Hell\uFFFCo \uFFFCreader\uFFFC\uFFFC!')
         assert.deepEqual(s2.text.toSpans(), [
           "Hell",
           { attributes: { color: '#ccc'} },

@@ -1,0 +1,192 @@
+
+import { describe, it } from 'mocha';
+import assert from 'assert'
+import { create, Value } from '..'
+
+export const OBJECT_ID  = Symbol.for('_am_objectId')     // object containing metadata about current 
+
+// @ts-ignore
+function _obj(doc: any) : any {
+  if (typeof doc === 'object' && doc !== null) {
+    return doc[OBJECT_ID]
+  }
+}
+
+// sample classes for testing
+class Counter {
+  value: number;
+  constructor(n: number) {
+    this.value = n
+  }
+}
+
+describe('Automerge', () => {
+  describe('Patch Apply', () => {
+    it('apply nested sets on maps', () => {
+      const start = { hello: { mellow: { yellow: "world", x: 1 }, y : 2 } }
+      const doc1 = create()
+      doc1.putObject("/", "hello", start.hello);
+      let mat = doc1.materialize("/")
+      const doc2 = create()
+      doc2.enablePatches(true)
+      doc2.merge(doc1)
+
+      let base = doc2.applyPatches({})
+      assert.deepEqual(mat, start)
+      assert.deepEqual(base, start)
+
+      doc2.delete("/hello/mellow", "yellow");
+      // @ts-ignore
+      delete start.hello.mellow.yellow;
+      base = doc2.applyPatches(base)
+      mat = doc2.materialize("/")
+
+      assert.deepEqual(mat, start)
+      assert.deepEqual(base, start)
+    })
+
+    it('apply patches on lists', () => {
+      const start = { list: [1,2,3,4] }
+      const doc1 = create()
+      doc1.putObject("/", "list", start.list);
+      let mat = doc1.materialize("/")
+      const doc2 = create()
+      doc2.enablePatches(true)
+      doc2.merge(doc1)
+      mat = doc1.materialize("/")
+      let base = doc2.applyPatches({})
+      assert.deepEqual(mat, start)
+      assert.deepEqual(base, start)
+
+      doc2.delete("/list", 3);
+      start.list.splice(3,1)
+      base = doc2.applyPatches(base)
+
+      assert.deepEqual(base, start)
+    })
+
+    it('apply patches on lists of lists of lists', () => {
+      const start = { list:
+        [
+          [
+            [ 1, 2, 3, 4, 5, 6],
+            [ 7, 8, 9,10,11,12],
+          ],
+          [
+            [ 7, 8, 9,10,11,12],
+            [ 1, 2, 3, 4, 5, 6],
+          ]
+        ]
+      }
+      const doc1 = create()
+      doc1.enablePatches(true)
+      doc1.putObject("/", "list", start.list);
+      let base = doc1.applyPatches({})
+      let mat = doc1.clone().materialize("/")
+      assert.deepEqual(mat, start)
+      assert.deepEqual(base, start)
+
+      doc1.delete("/list/0/1", 3)
+      start.list[0][1].splice(3,1)
+
+      doc1.delete("/list/0", 0)
+      start.list[0].splice(0,1)
+
+      mat = doc1.clone().materialize("/")
+      base = doc1.applyPatches(base)
+      assert.deepEqual(mat, start)
+      assert.deepEqual(base, start)
+    })
+
+    it('large inserts should make one splice patch', () => {
+      const doc1 = create()
+      doc1.enablePatches(true)
+      doc1.putObject("/", "list", "abc");
+      const patches = doc1.popPatches()
+      assert.deepEqual( patches, [
+        { action: 'put', conflict: false, path: [ 'list' ], value: [] },
+        { action: 'splice', path: [ 'list', 0 ], values: [ 'a', 'b', 'c' ] }])
+    })
+
+    it('it should allow registering type wrappers', () => {
+      const doc1 = create()
+      doc1.enablePatches(true)
+      doc1.registerDatatype("counter", (n: number) => new Counter(n))
+      const doc2 = doc1.fork()
+      doc1.put("/", "n", 10, "counter")
+      doc1.put("/", "m", 10, "int")
+
+      let mat = doc1.materialize("/")
+      assert.deepEqual( mat, { n: new Counter(10), m: 10 } )
+
+      doc2.merge(doc1)
+      let apply = doc2.applyPatches({})
+      assert.deepEqual( apply, { n: new Counter(10), m: 10 } )
+
+      doc1.increment("/","n", 5)
+      mat = doc1.materialize("/")
+      assert.deepEqual( mat, { n: new Counter(15), m: 10 } )
+
+      doc2.merge(doc1)
+      apply = doc2.applyPatches(apply)
+      assert.deepEqual( apply, { n: new Counter(15), m: 10 } )
+    })
+
+    it('text can be managed as an array or a string', () => {
+      const doc1 = create("aaaa")
+      doc1.enablePatches(true)
+
+      doc1.putObject("/", "notes", "hello world")
+
+      let mat = doc1.materialize("/")
+
+      assert.deepEqual( mat, { notes: "hello world".split("") } )
+
+      const doc2 = create()
+      let apply : any = doc2.materialize("/") 
+      doc2.enablePatches(true)
+      doc2.registerDatatype("text", (n: Value[]) => new String(n.join("")))
+      apply = doc2.applyPatches(apply)
+
+      doc2.merge(doc1);
+      apply = doc2.applyPatches(apply)
+      assert.deepEqual(_obj(apply), "_root")
+      assert.deepEqual(_obj(apply['notes']), "1@aaaa")
+      assert.deepEqual( apply, { notes: new String("hello world") } )
+
+      doc2.splice("/notes", 6, 5, "everyone");
+      apply = doc2.applyPatches(apply)
+      assert.deepEqual( apply, { notes: new String("hello everyone") } )
+
+      mat = doc2.materialize("/")
+      assert.deepEqual(_obj(mat), "_root")
+      // @ts-ignore
+      assert.deepEqual(_obj(mat.notes), "1@aaaa")
+      assert.deepEqual( mat, { notes: new String("hello everyone") } )
+    })
+
+    it.skip('it can patch quickly', () => {
+/*
+      console.time("init")
+      let doc1 = create()
+      doc1.enablePatches(true)
+      doc1.putObject("/", "notes", "");
+      let mat = doc1.materialize("/")
+      let doc2 = doc1.fork()
+      let testData = new Array( 100000 ).join("x")
+      console.timeEnd("init")
+      console.time("splice")
+      doc2.splice("/notes", 0, 0, testData);
+      console.timeEnd("splice")
+      console.time("merge")
+      doc1.merge(doc2)
+      console.timeEnd("merge")
+      console.time("patch")
+      mat = doc1.applyPatches(mat)
+      console.timeEnd("patch")
+*/
+    })
+  })
+})
+
+// TODO: squash puts & deletes

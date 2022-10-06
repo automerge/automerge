@@ -40,7 +40,7 @@ impl OpReadState for Unverified {}
 /// ReadChangeOpError>`.
 ///
 /// [1]: https://alexjg.github.io/automerge-storage-docs/#change-chunks
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub(crate) struct Change<'a, O: OpReadState> {
     /// The raw bytes of the entire chunk containing this change, including the header.
     bytes: Cow<'a, [u8]>,
@@ -57,6 +57,12 @@ pub(crate) struct Change<'a, O: OpReadState> {
     ops_data: Range<usize>,
     extra_bytes: Range<usize>,
     _phantom: PhantomData<O>,
+}
+
+impl<'a, O: OpReadState> PartialEq for Change<'a, O> {
+    fn eq(&self, other: &Self) -> bool {
+        self.bytes == other.bytes
+    }
 }
 
 #[derive(thiserror::Error, Debug)]

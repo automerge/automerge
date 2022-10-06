@@ -9,12 +9,23 @@ use crate::ChangeHash;
 const BITS_PER_ENTRY: u32 = 10;
 const NUM_PROBES: u32 = 7;
 
-#[derive(Default, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct BloomFilter {
     num_entries: u32,
     num_bits_per_entry: u32,
     num_probes: u32,
     bits: Vec<u8>,
+}
+
+impl Default for BloomFilter {
+    fn default() -> Self {
+        BloomFilter {
+            num_entries: 0,
+            num_bits_per_entry: BITS_PER_ENTRY,
+            num_probes: NUM_PROBES,
+            bits: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

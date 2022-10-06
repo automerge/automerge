@@ -1,7 +1,7 @@
 use automerge::transaction::Transactable;
 use automerge::{
-    ActorId, ApplyOptions, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjType,
-    ScalarValue, VecOpObserver, ROOT,
+    ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjType, ScalarValue,
+    VecOpObserver, ROOT,
 };
 
 // set up logging for all the tests
@@ -1005,13 +1005,8 @@ fn observe_counter_change_application() {
     doc.increment(ROOT, "counter", 5).unwrap();
     let changes = doc.get_changes(&[]).unwrap().into_iter().cloned();
 
-    let mut doc = AutoCommit::new();
-    let mut observer = VecOpObserver::default();
-    doc.apply_changes_with(
-        changes,
-        ApplyOptions::default().with_op_observer(&mut observer),
-    )
-    .unwrap();
+    let mut doc = AutoCommit::new().with_observer(VecOpObserver::default());
+    doc.apply_changes(changes).unwrap();
 }
 
 #[test]
@@ -1331,4 +1326,51 @@ fn load_incremental_with_corrupted_tail() {
             "key" => { "value" },
         }
     );
+}
+
+#[test]
+fn load_doc_with_deleted_objects() {
+    // Reproduces an issue where a document with deleted objects failed to load
+    let mut doc = AutoCommit::new();
+    doc.put_object(ROOT, "list", ObjType::List).unwrap();
+    doc.put_object(ROOT, "text", ObjType::Text).unwrap();
+    doc.put_object(ROOT, "map", ObjType::Map).unwrap();
+    doc.put_object(ROOT, "table", ObjType::Table).unwrap();
+    doc.delete(&ROOT, "list").unwrap();
+    doc.delete(&ROOT, "text").unwrap();
+    doc.delete(&ROOT, "map").unwrap();
+    doc.delete(&ROOT, "table").unwrap();
+    let saved = doc.save();
+    Automerge::load(&saved).unwrap();
+}
+
+#[test]
+fn insert_after_many_deletes() {
+    let mut doc = AutoCommit::new();
+    let obj = doc.put_object(&ROOT, "object", ObjType::Map).unwrap();
+    for i in 0..100 {
+        doc.put(&obj, i.to_string(), i).unwrap();
+        doc.delete(&obj, i.to_string()).unwrap();
+    }
+}
+
+#[test]
+fn simple_bad_saveload() {
+    let mut doc = Automerge::new();
+    doc.transact::<_, _, AutomergeError>(|d| {
+        d.put(ROOT, "count", 0)?;
+        Ok(())
+    })
+    .unwrap();
+
+    doc.transact::<_, _, AutomergeError>(|_d| Ok(())).unwrap();
+
+    doc.transact::<_, _, AutomergeError>(|d| {
+        d.put(ROOT, "count", 0)?;
+        Ok(())
+    })
+    .unwrap();
+
+    let bytes = doc.save();
+    Automerge::load(&bytes).unwrap();
 }

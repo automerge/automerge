@@ -1,13 +1,20 @@
+use crate::value::Datatype;
+use crate::Automerge;
 use automerge as am;
 use automerge::transaction::Transactable;
-use automerge::{Change, ChangeHash, Prop};
-use js_sys::{Array, Object, Reflect, Uint8Array};
+use automerge::{Change, ChangeHash, ObjType, Prop};
+use js_sys::{Array, Function, Object, Reflect, Symbol, Uint8Array};
 use std::collections::{BTreeSet, HashSet};
 use std::fmt::Display;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use crate::{ObjId, ScalarValue, Value};
+use crate::{observer::Patch, ObjId, Value};
+
+const RAW_DATA_SYMBOL: &str = "_am_raw_value_";
+const DATATYPE_SYMBOL: &str = "_am_datatype_";
+const RAW_OBJECT_SYMBOL: &str = "_am_objectId";
+const META_SYMBOL: &str = "_am_meta";
 
 pub(crate) struct JS(pub(crate) JsValue);
 pub(crate) struct AR(pub(crate) Array);
@@ -50,11 +57,11 @@ impl From<am::sync::State> for JS {
 
 impl From<Vec<ChangeHash>> for JS {
     fn from(heads: Vec<ChangeHash>) -> Self {
-        let heads: Array = heads
+        JS(heads
             .iter()
             .map(|h| JsValue::from_str(&h.to_string()))
-            .collect();
-        JS(heads.into())
+            .collect::<Array>()
+            .into())
     }
 }
 
@@ -99,7 +106,7 @@ impl TryFrom<JS> for HashSet<ChangeHash> {
         let mut result = HashSet::new();
         for key in Reflect::own_keys(&value.0)?.iter() {
             if let Some(true) = Reflect::get(&value.0, &key)?.as_bool() {
-                result.insert(key.into_serde().map_err(to_js_err)?);
+                result.insert(serde_wasm_bindgen::from_value(key).map_err(to_js_err)?);
             }
         }
         Ok(result)
@@ -113,7 +120,7 @@ impl TryFrom<JS> for BTreeSet<ChangeHash> {
         let mut result = BTreeSet::new();
         for key in Reflect::own_keys(&value.0)?.iter() {
             if let Some(true) = Reflect::get(&value.0, &key)?.as_bool() {
-                result.insert(key.into_serde().map_err(to_js_err)?);
+                result.insert(serde_wasm_bindgen::from_value(key).map_err(to_js_err)?);
             }
         }
         Ok(result)
@@ -125,7 +132,8 @@ impl TryFrom<JS> for Vec<ChangeHash> {
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
         let value = value.0.dyn_into::<Array>()?;
-        let value: Result<Vec<ChangeHash>, _> = value.iter().map(|j| j.into_serde()).collect();
+        let value: Result<Vec<ChangeHash>, _> =
+            value.iter().map(serde_wasm_bindgen::from_value).collect();
         let value = value.map_err(to_js_err)?;
         Ok(value)
     }
@@ -134,7 +142,8 @@ impl TryFrom<JS> for Vec<ChangeHash> {
 impl From<JS> for Option<Vec<ChangeHash>> {
     fn from(value: JS) -> Self {
         let value = value.0.dyn_into::<Array>().ok()?;
-        let value: Result<Vec<ChangeHash>, _> = value.iter().map(|j| j.into_serde()).collect();
+        let value: Result<Vec<ChangeHash>, _> =
+            value.iter().map(serde_wasm_bindgen::from_value).collect();
         let value = value.ok()?;
         Some(value)
     }
@@ -287,17 +296,16 @@ pub(crate) fn to_prop(p: JsValue) -> Result<Prop, JsValue> {
 pub(crate) fn to_objtype(
     value: &JsValue,
     datatype: &Option<String>,
-) -> Option<(am::ObjType, Vec<(Prop, JsValue)>)> {
+) -> Option<(ObjType, Vec<(Prop, JsValue)>)> {
     match datatype.as_deref() {
         Some("map") => {
             let map = value.clone().dyn_into::<js_sys::Object>().ok()?;
-            // FIXME unwrap
             let map = js_sys::Object::keys(&map)
                 .iter()
                 .zip(js_sys::Object::values(&map).iter())
                 .map(|(key, val)| (key.as_string().unwrap().into(), val))
                 .collect();
-            Some((am::ObjType::Map, map))
+            Some((ObjType::Map, map))
         }
         Some("list") => {
             let list = value.clone().dyn_into::<js_sys::Array>().ok()?;
@@ -306,7 +314,7 @@ pub(crate) fn to_objtype(
                 .enumerate()
                 .map(|(i, e)| (i.into(), e))
                 .collect();
-            Some((am::ObjType::List, list))
+            Some((ObjType::List, list))
         }
         Some("text") => {
             let text = value.as_string()?;
@@ -315,7 +323,7 @@ pub(crate) fn to_objtype(
                 .enumerate()
                 .map(|(i, ch)| (i.into(), ch.to_string().into()))
                 .collect();
-            Some((am::ObjType::Text, text))
+            Some((ObjType::Text, text))
         }
         Some(_) => None,
         None => {
@@ -325,7 +333,7 @@ pub(crate) fn to_objtype(
                     .enumerate()
                     .map(|(i, e)| (i.into(), e))
                     .collect();
-                Some((am::ObjType::List, list))
+                Some((ObjType::List, list))
             } else if let Ok(map) = value.clone().dyn_into::<js_sys::Object>() {
                 // FIXME unwrap
                 let map = js_sys::Object::keys(&map)
@@ -333,14 +341,14 @@ pub(crate) fn to_objtype(
                     .zip(js_sys::Object::values(&map).iter())
                     .map(|(key, val)| (key.as_string().unwrap().into(), val))
                     .collect();
-                Some((am::ObjType::Map, map))
+                Some((ObjType::Map, map))
             } else if let Some(text) = value.as_string() {
                 let text = text
                     .chars()
                     .enumerate()
                     .map(|(i, ch)| (i.into(), ch.to_string().into()))
                     .collect();
-                Some((am::ObjType::Text, text))
+                Some((ObjType::Text, text))
             } else {
                 None
             }
@@ -350,110 +358,363 @@ pub(crate) fn to_objtype(
 
 pub(crate) fn get_heads(heads: Option<Array>) -> Option<Vec<ChangeHash>> {
     let heads = heads?;
-    let heads: Result<Vec<ChangeHash>, _> = heads.iter().map(|j| j.into_serde()).collect();
+    let heads: Result<Vec<ChangeHash>, _> =
+        heads.iter().map(serde_wasm_bindgen::from_value).collect();
     heads.ok()
 }
 
-pub(crate) fn map_to_js(doc: &am::AutoCommit, obj: &ObjId) -> JsValue {
-    let keys = doc.keys(obj);
-    let map = Object::new();
-    for k in keys {
-        let val = doc.get(obj, &k);
-        match val {
-            Ok(Some((Value::Object(o), exid)))
-                if o == am::ObjType::Map || o == am::ObjType::Table =>
-            {
-                Reflect::set(&map, &k.into(), &map_to_js(doc, &exid)).unwrap();
-            }
-            Ok(Some((Value::Object(o), exid))) if o == am::ObjType::List => {
-                Reflect::set(&map, &k.into(), &list_to_js(doc, &exid)).unwrap();
-            }
-            Ok(Some((Value::Object(o), exid))) if o == am::ObjType::Text => {
-                Reflect::set(&map, &k.into(), &doc.text(&exid).unwrap().into()).unwrap();
-            }
-            Ok(Some((Value::Scalar(v), _))) => {
-                Reflect::set(&map, &k.into(), &ScalarValue(v).into()).unwrap();
-            }
-            _ => (),
+impl Automerge {
+    pub(crate) fn export_object(
+        &self,
+        obj: &ObjId,
+        datatype: Datatype,
+        heads: Option<&Vec<ChangeHash>>,
+        meta: &JsValue,
+    ) -> Result<JsValue, JsValue> {
+        let result = if datatype.is_sequence() {
+            self.wrap_object(
+                self.export_list(obj, heads, meta)?,
+                datatype,
+                &obj.to_string().into(),
+                meta,
+            )?
+        } else {
+            self.wrap_object(
+                self.export_map(obj, heads, meta)?,
+                datatype,
+                &obj.to_string().into(),
+                meta,
+            )?
         };
+        Ok(result.into())
     }
-    map.into()
+
+    pub(crate) fn export_map(
+        &self,
+        obj: &ObjId,
+        heads: Option<&Vec<ChangeHash>>,
+        meta: &JsValue,
+    ) -> Result<Object, JsValue> {
+        let keys = self.doc.keys(obj);
+        let map = Object::new();
+        for k in keys {
+            let val_and_id = if let Some(heads) = heads {
+                self.doc.get_at(obj, &k, heads)
+            } else {
+                self.doc.get(obj, &k)
+            };
+            if let Ok(Some((val, id))) = val_and_id {
+                let subval = match val {
+                    Value::Object(o) => self.export_object(&id, o.into(), heads, meta)?,
+                    Value::Scalar(_) => self.export_value(alloc(&val))?,
+                };
+                Reflect::set(&map, &k.into(), &subval)?;
+            };
+        }
+
+        Ok(map)
+    }
+
+    pub(crate) fn export_list(
+        &self,
+        obj: &ObjId,
+        heads: Option<&Vec<ChangeHash>>,
+        meta: &JsValue,
+    ) -> Result<Object, JsValue> {
+        let len = self.doc.length(obj);
+        let array = Array::new();
+        for i in 0..len {
+            let val_and_id = if let Some(heads) = heads {
+                self.doc.get_at(obj, i as usize, heads)
+            } else {
+                self.doc.get(obj, i as usize)
+            };
+            if let Ok(Some((val, id))) = val_and_id {
+                let subval = match val {
+                    Value::Object(o) => self.export_object(&id, o.into(), heads, meta)?,
+                    Value::Scalar(_) => self.export_value(alloc(&val))?,
+                };
+                array.push(&subval);
+            };
+        }
+
+        Ok(array.into())
+    }
+
+    pub(crate) fn export_value(
+        &self,
+        (datatype, raw_value): (Datatype, JsValue),
+    ) -> Result<JsValue, JsValue> {
+        if let Some(function) = self.external_types.get(&datatype) {
+            let wrapped_value = function.call1(&JsValue::undefined(), &raw_value)?;
+            if let Ok(o) = wrapped_value.dyn_into::<Object>() {
+                let key = Symbol::for_(RAW_DATA_SYMBOL);
+                set_hidden_value(&o, &key, &raw_value)?;
+                let key = Symbol::for_(DATATYPE_SYMBOL);
+                set_hidden_value(&o, &key, datatype)?;
+                Ok(o.into())
+            } else {
+                Err(to_js_err(format!(
+                    "data handler for type {} did not return a valid object",
+                    datatype
+                )))
+            }
+        } else {
+            Ok(raw_value)
+        }
+    }
+
+    pub(crate) fn unwrap_object(
+        &self,
+        ext_val: &Object,
+    ) -> Result<(Object, Datatype, JsValue), JsValue> {
+        let inner = Reflect::get(ext_val, &Symbol::for_(RAW_DATA_SYMBOL))?;
+
+        let datatype = Reflect::get(ext_val, &Symbol::for_(DATATYPE_SYMBOL))?.try_into();
+
+        let mut id = Reflect::get(ext_val, &Symbol::for_(RAW_OBJECT_SYMBOL))?;
+        if id.is_undefined() {
+            id = "_root".into();
+        }
+
+        let inner = inner
+            .dyn_into::<Object>()
+            .unwrap_or_else(|_| ext_val.clone());
+        let datatype = datatype.unwrap_or_else(|_| {
+            if Array::is_array(&inner) {
+                Datatype::List
+            } else {
+                Datatype::Map
+            }
+        });
+        Ok((inner, datatype, id))
+    }
+
+    pub(crate) fn unwrap_scalar(&self, ext_val: JsValue) -> Result<JsValue, JsValue> {
+        let inner = Reflect::get(&ext_val, &Symbol::for_(RAW_DATA_SYMBOL))?;
+        if !inner.is_undefined() {
+            Ok(inner)
+        } else {
+            Ok(ext_val)
+        }
+    }
+
+    fn maybe_wrap_object(
+        &self,
+        (datatype, raw_value): (Datatype, JsValue),
+        id: &ObjId,
+        meta: &JsValue,
+    ) -> Result<JsValue, JsValue> {
+        if let Ok(obj) = raw_value.clone().dyn_into::<Object>() {
+            let result = self.wrap_object(obj, datatype, &id.to_string().into(), meta)?;
+            Ok(result.into())
+        } else {
+            self.export_value((datatype, raw_value))
+        }
+    }
+
+    pub(crate) fn wrap_object(
+        &self,
+        value: Object,
+        datatype: Datatype,
+        id: &JsValue,
+        meta: &JsValue,
+    ) -> Result<Object, JsValue> {
+        let value = if let Some(function) = self.external_types.get(&datatype) {
+            let wrapped_value = function.call1(&JsValue::undefined(), &value)?;
+            let wrapped_object = wrapped_value.dyn_into::<Object>().map_err(|_| {
+                to_js_err(format!(
+                    "data handler for type {} did not return a valid object",
+                    datatype
+                ))
+            })?;
+            set_hidden_value(&wrapped_object, &Symbol::for_(RAW_DATA_SYMBOL), value)?;
+            wrapped_object
+        } else {
+            value
+        };
+        set_hidden_value(&value, &Symbol::for_(DATATYPE_SYMBOL), datatype)?;
+        set_hidden_value(&value, &Symbol::for_(RAW_OBJECT_SYMBOL), id)?;
+        set_hidden_value(&value, &Symbol::for_(META_SYMBOL), meta)?;
+        Ok(value)
+    }
+
+    pub(crate) fn apply_patch_to_array(
+        &self,
+        array: &Object,
+        patch: &Patch,
+        meta: &JsValue,
+    ) -> Result<Object, JsValue> {
+        let result = Array::from(array); // shallow copy
+        match patch {
+            Patch::PutSeq { index, value, .. } => {
+                let sub_val = self.maybe_wrap_object(alloc(&value.0), &value.1, meta)?;
+                Reflect::set(&result, &(*index as f64).into(), &sub_val)?;
+                Ok(result.into())
+            }
+            Patch::DeleteSeq { index, .. } => self.sub_splice(result, *index, 1, &[], meta),
+            Patch::Insert { index, values, .. } => self.sub_splice(result, *index, 0, values, meta),
+            Patch::Increment { prop, value, .. } => {
+                if let Prop::Seq(index) = prop {
+                    let index = (*index as f64).into();
+                    let old_val = Reflect::get(&result, &index)?;
+                    let old_val = self.unwrap_scalar(old_val)?;
+                    if let Some(old) = old_val.as_f64() {
+                        let new_value: Value<'_> =
+                            am::ScalarValue::counter(old as i64 + *value).into();
+                        Reflect::set(&result, &index, &self.export_value(alloc(&new_value))?)?;
+                        Ok(result.into())
+                    } else {
+                        Err(to_js_err("cant increment a non number value"))
+                    }
+                } else {
+                    Err(to_js_err("cant increment a key on a seq"))
+                }
+            }
+            Patch::DeleteMap { .. } => Err(to_js_err("cannot delete from a seq")),
+            Patch::PutMap { .. } => Err(to_js_err("cannot set key in seq")),
+        }
+    }
+
+    pub(crate) fn apply_patch_to_map(
+        &self,
+        map: &Object,
+        patch: &Patch,
+        meta: &JsValue,
+    ) -> Result<Object, JsValue> {
+        let result = Object::assign(&Object::new(), map); // shallow copy
+        match patch {
+            Patch::PutMap { key, value, .. } => {
+                let sub_val = self.maybe_wrap_object(alloc(&value.0), &value.1, meta)?;
+                Reflect::set(&result, &key.into(), &sub_val)?;
+                Ok(result)
+            }
+            Patch::DeleteMap { key, .. } => {
+                Reflect::delete_property(&result, &key.into())?;
+                Ok(result)
+            }
+            Patch::Increment { prop, value, .. } => {
+                if let Prop::Map(key) = prop {
+                    let key = key.into();
+                    let old_val = Reflect::get(&result, &key)?;
+                    let old_val = self.unwrap_scalar(old_val)?;
+                    if let Some(old) = old_val.as_f64() {
+                        let new_value: Value<'_> =
+                            am::ScalarValue::counter(old as i64 + *value).into();
+                        Reflect::set(&result, &key, &self.export_value(alloc(&new_value))?)?;
+                        Ok(result)
+                    } else {
+                        Err(to_js_err("cant increment a non number value"))
+                    }
+                } else {
+                    Err(to_js_err("cant increment an index on a map"))
+                }
+            }
+            Patch::Insert { .. } => Err(to_js_err("cannot insert into map")),
+            Patch::DeleteSeq { .. } => Err(to_js_err("cannot splice a map")),
+            Patch::PutSeq { .. } => Err(to_js_err("cannot array index a map")),
+        }
+    }
+
+    pub(crate) fn apply_patch(
+        &self,
+        obj: Object,
+        patch: &Patch,
+        depth: usize,
+        meta: &JsValue,
+    ) -> Result<Object, JsValue> {
+        let (inner, datatype, id) = self.unwrap_object(&obj)?;
+        let prop = patch.path().get(depth).map(|p| prop_to_js(&p.1));
+        let result = if let Some(prop) = prop {
+            if let Ok(sub_obj) = Reflect::get(&inner, &prop)?.dyn_into::<Object>() {
+                let new_value = self.apply_patch(sub_obj, patch, depth + 1, meta)?;
+                let result = shallow_copy(&inner);
+                Reflect::set(&result, &prop, &new_value)?;
+                Ok(result)
+            } else {
+                // if a patch is trying to access a deleted object make no change
+                // short circuit the wrap process
+                return Ok(obj);
+            }
+        } else if Array::is_array(&inner) {
+            self.apply_patch_to_array(&inner, patch, meta)
+        } else {
+            self.apply_patch_to_map(&inner, patch, meta)
+        }?;
+
+        self.wrap_object(result, datatype, &id, meta)
+    }
+
+    fn sub_splice(
+        &self,
+        o: Array,
+        index: usize,
+        num_del: usize,
+        values: &[(Value<'_>, ObjId)],
+        meta: &JsValue,
+    ) -> Result<Object, JsValue> {
+        let args: Array = values
+            .iter()
+            .map(|v| self.maybe_wrap_object(alloc(&v.0), &v.1, meta))
+            .collect::<Result<_, _>>()?;
+        args.unshift(&(num_del as u32).into());
+        args.unshift(&(index as u32).into());
+        let method = Reflect::get(&o, &"splice".into())?.dyn_into::<Function>()?;
+        Reflect::apply(&method, &o, &args)?;
+        Ok(o.into())
+    }
 }
 
-pub(crate) fn map_to_js_at(doc: &am::AutoCommit, obj: &ObjId, heads: &[ChangeHash]) -> JsValue {
-    let keys = doc.keys(obj);
-    let map = Object::new();
-    for k in keys {
-        let val = doc.get_at(obj, &k, heads);
-        match val {
-            Ok(Some((Value::Object(o), exid)))
-                if o == am::ObjType::Map || o == am::ObjType::Table =>
-            {
-                Reflect::set(&map, &k.into(), &map_to_js_at(doc, &exid, heads)).unwrap();
-            }
-            Ok(Some((Value::Object(o), exid))) if o == am::ObjType::List => {
-                Reflect::set(&map, &k.into(), &list_to_js_at(doc, &exid, heads)).unwrap();
-            }
-            Ok(Some((Value::Object(o), exid))) if o == am::ObjType::Text => {
-                Reflect::set(&map, &k.into(), &doc.text_at(&exid, heads).unwrap().into()).unwrap();
-            }
-            Ok(Some((Value::Scalar(v), _))) => {
-                Reflect::set(&map, &k.into(), &ScalarValue(v).into()).unwrap();
-            }
-            _ => (),
-        };
+pub(crate) fn alloc(value: &Value<'_>) -> (Datatype, JsValue) {
+    match value {
+        am::Value::Object(o) => match o {
+            ObjType::Map => (Datatype::Map, Object::new().into()),
+            ObjType::Table => (Datatype::Table, Object::new().into()),
+            ObjType::List => (Datatype::List, Array::new().into()),
+            ObjType::Text => (Datatype::Text, Array::new().into()),
+        },
+        am::Value::Scalar(s) => match s.as_ref() {
+            am::ScalarValue::Bytes(v) => (Datatype::Bytes, Uint8Array::from(v.as_slice()).into()),
+            am::ScalarValue::Str(v) => (Datatype::Str, v.to_string().into()),
+            am::ScalarValue::Int(v) => (Datatype::Int, (*v as f64).into()),
+            am::ScalarValue::Uint(v) => (Datatype::Uint, (*v as f64).into()),
+            am::ScalarValue::F64(v) => (Datatype::F64, (*v).into()),
+            am::ScalarValue::Counter(v) => (Datatype::Counter, (f64::from(v)).into()),
+            am::ScalarValue::Timestamp(v) => (
+                Datatype::Timestamp,
+                js_sys::Date::new(&(*v as f64).into()).into(),
+            ),
+            am::ScalarValue::Boolean(v) => (Datatype::Boolean, (*v).into()),
+            am::ScalarValue::Null => (Datatype::Null, JsValue::null()),
+            am::ScalarValue::Unknown { bytes, type_code } => (
+                Datatype::Unknown(*type_code),
+                Uint8Array::from(bytes.as_slice()).into(),
+            ),
+        },
     }
-    map.into()
 }
 
-pub(crate) fn list_to_js(doc: &am::AutoCommit, obj: &ObjId) -> JsValue {
-    let len = doc.length(obj);
-    let array = Array::new();
-    for i in 0..len {
-        let val = doc.get(obj, i as usize);
-        match val {
-            Ok(Some((Value::Object(o), exid)))
-                if o == am::ObjType::Map || o == am::ObjType::Table =>
-            {
-                array.push(&map_to_js(doc, &exid));
-            }
-            Ok(Some((Value::Object(o), exid))) if o == am::ObjType::List => {
-                array.push(&list_to_js(doc, &exid));
-            }
-            Ok(Some((Value::Object(o), exid))) if o == am::ObjType::Text => {
-                array.push(&doc.text(&exid).unwrap().into());
-            }
-            Ok(Some((Value::Scalar(v), _))) => {
-                array.push(&ScalarValue(v).into());
-            }
-            _ => (),
-        };
-    }
-    array.into()
+fn set_hidden_value<V: Into<JsValue>>(o: &Object, key: &Symbol, value: V) -> Result<(), JsValue> {
+    let definition = Object::new();
+    js_set(&definition, "value", &value.into())?;
+    js_set(&definition, "writable", false)?;
+    js_set(&definition, "enumerable", false)?;
+    js_set(&definition, "configurable", false)?;
+    Object::define_property(o, &key.into(), &definition);
+    Ok(())
 }
 
-pub(crate) fn list_to_js_at(doc: &am::AutoCommit, obj: &ObjId, heads: &[ChangeHash]) -> JsValue {
-    let len = doc.length(obj);
-    let array = Array::new();
-    for i in 0..len {
-        let val = doc.get_at(obj, i as usize, heads);
-        match val {
-            Ok(Some((Value::Object(o), exid)))
-                if o == am::ObjType::Map || o == am::ObjType::Table =>
-            {
-                array.push(&map_to_js_at(doc, &exid, heads));
-            }
-            Ok(Some((Value::Object(o), exid))) if o == am::ObjType::List => {
-                array.push(&list_to_js_at(doc, &exid, heads));
-            }
-            Ok(Some((Value::Object(o), exid))) if o == am::ObjType::Text => {
-                array.push(&doc.text_at(exid, heads).unwrap().into());
-            }
-            Ok(Some((Value::Scalar(v), _))) => {
-                array.push(&ScalarValue(v).into());
-            }
-            _ => (),
-        };
+fn shallow_copy(obj: &Object) -> Object {
+    if Array::is_array(obj) {
+        Array::from(obj).into()
+    } else {
+        Object::assign(&Object::new(), obj)
     }
-    array.into()
+}
+
+fn prop_to_js(prop: &Prop) -> JsValue {
+    match prop {
+        Prop::Map(key) => key.into(),
+        Prop::Seq(index) => (*index as f64).into(),
+    }
 }

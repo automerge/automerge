@@ -36,7 +36,7 @@ pub struct State {
 /// A summary of the changes that the sender of the message already has.
 /// This is implicitly a request to the recipient to send all changes that the
 /// sender does not already have.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct Have {
     /// The heads at the time of the last successful sync with this recipient.
     pub last_sync: Vec<ChangeHash>,

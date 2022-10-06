@@ -3,9 +3,6 @@ import * as Automerge from '../src'
 import { BloomFilter } from './legacy/sync'
 import { decodeChangeMeta } from './legacy/columnar'
 import { decodeSyncMessage, encodeSyncMessage, decodeSyncState, encodeSyncState, initSyncState } from "../src"
-import * as AutomergeWASM from "automerge-wasm"
-
-Automerge.use(AutomergeWASM)
 
 function inspect(a) {
   const util = require("util");
@@ -538,7 +535,7 @@ describe('Data sync protocol', () => {
         assert.deepStrictEqual(getHeads(n2), [n1hash2, n2hash2].sort())
       })
 
-      it('should sync three nodes', () => {
+      it.skip('should sync three nodes', () => {
         s1 = decodeSyncState(encodeSyncState(s1))
         s2 = decodeSyncState(encodeSyncState(s2))
 
