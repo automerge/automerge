@@ -19,15 +19,17 @@
 <span id="17">17</span>
 <span id="18">18</span>
 <span id="19">19</span>
+<span id="20">20</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::ChangeHash</span>;
 
 <span class="doccomment">/// The result of a successful, and committed, transaction.</span>
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Success</span><span class="op">&lt;</span><span class="ident">O</span><span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Success</span><span class="op">&lt;</span><span class="ident">O</span>, <span class="ident">Obs</span><span class="op">&gt;</span> {
     <span class="doccomment">/// The result of the transaction.</span>
     <span class="kw">pub</span> <span class="ident">result</span>: <span class="ident">O</span>,
     <span class="doccomment">/// The hash of the change, also the head of the document.</span>
     <span class="kw">pub</span> <span class="ident">hash</span>: <span class="ident">ChangeHash</span>,
+    <span class="kw">pub</span> <span class="ident">op_observer</span>: <span class="ident">Obs</span>,
 }
 
 <span class="doccomment">/// The result of a failed, and rolled back, transaction.</span>

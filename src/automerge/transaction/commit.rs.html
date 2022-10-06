@@ -32,26 +32,14 @@
 <span id="30">30</span>
 <span id="31">31</span>
 <span id="32">32</span>
-<span id="33">33</span>
-<span id="34">34</span>
-<span id="35">35</span>
-<span id="36">36</span>
-<span id="37">37</span>
-<span id="38">38</span>
-<span id="39">39</span>
-<span id="40">40</span>
-<span id="41">41</span>
-<span id="42">42</span>
-<span id="43">43</span>
 </pre><pre class="rust"><code><span class="doccomment">/// Optional metadata for a commit.</span>
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Default</span>)]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">CommitOptions</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Obs</span><span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">CommitOptions</span> {
     <span class="kw">pub</span> <span class="ident">message</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>,
     <span class="kw">pub</span> <span class="ident">time</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">i64</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span> <span class="ident">op_observer</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="kw-2">mut</span> <span class="ident">Obs</span><span class="op">&gt;</span>,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Obs</span><span class="op">&gt;</span> <span class="ident">CommitOptions</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Obs</span><span class="op">&gt;</span> {
+<span class="kw">impl</span> <span class="ident">CommitOptions</span> {
     <span class="doccomment">/// Add a message to the commit.</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">with_message</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Into</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">message</span>: <span class="ident">S</span>) -&gt; <span class="self">Self</span> {
         <span class="self">self</span>.<span class="ident">message</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">message</span>.<span class="ident">into</span>());
@@ -73,16 +61,6 @@
     <span class="doccomment">/// Add a timestamp to the commit.</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_time</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">time</span>: <span class="ident">i64</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="self">Self</span> {
         <span class="self">self</span>.<span class="ident">time</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">time</span>);
-        <span class="self">self</span>
-    }
-
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">with_op_observer</span>(<span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">op_observer</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="kw-2">mut</span> <span class="ident">Obs</span>) -&gt; <span class="self">Self</span> {
-        <span class="self">self</span>.<span class="ident">op_observer</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">op_observer</span>);
-        <span class="self">self</span>
-    }
-
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_op_observer</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">op_observer</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="kw-2">mut</span> <span class="ident">Obs</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="self">Self</span> {
-        <span class="self">self</span>.<span class="ident">op_observer</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">op_observer</span>);
         <span class="self">self</span>
     }
 }

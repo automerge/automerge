@@ -874,83 +874,6 @@
 <span id="872">872</span>
 <span id="873">873</span>
 <span id="874">874</span>
-<span id="875">875</span>
-<span id="876">876</span>
-<span id="877">877</span>
-<span id="878">878</span>
-<span id="879">879</span>
-<span id="880">880</span>
-<span id="881">881</span>
-<span id="882">882</span>
-<span id="883">883</span>
-<span id="884">884</span>
-<span id="885">885</span>
-<span id="886">886</span>
-<span id="887">887</span>
-<span id="888">888</span>
-<span id="889">889</span>
-<span id="890">890</span>
-<span id="891">891</span>
-<span id="892">892</span>
-<span id="893">893</span>
-<span id="894">894</span>
-<span id="895">895</span>
-<span id="896">896</span>
-<span id="897">897</span>
-<span id="898">898</span>
-<span id="899">899</span>
-<span id="900">900</span>
-<span id="901">901</span>
-<span id="902">902</span>
-<span id="903">903</span>
-<span id="904">904</span>
-<span id="905">905</span>
-<span id="906">906</span>
-<span id="907">907</span>
-<span id="908">908</span>
-<span id="909">909</span>
-<span id="910">910</span>
-<span id="911">911</span>
-<span id="912">912</span>
-<span id="913">913</span>
-<span id="914">914</span>
-<span id="915">915</span>
-<span id="916">916</span>
-<span id="917">917</span>
-<span id="918">918</span>
-<span id="919">919</span>
-<span id="920">920</span>
-<span id="921">921</span>
-<span id="922">922</span>
-<span id="923">923</span>
-<span id="924">924</span>
-<span id="925">925</span>
-<span id="926">926</span>
-<span id="927">927</span>
-<span id="928">928</span>
-<span id="929">929</span>
-<span id="930">930</span>
-<span id="931">931</span>
-<span id="932">932</span>
-<span id="933">933</span>
-<span id="934">934</span>
-<span id="935">935</span>
-<span id="936">936</span>
-<span id="937">937</span>
-<span id="938">938</span>
-<span id="939">939</span>
-<span id="940">940</span>
-<span id="941">941</span>
-<span id="942">942</span>
-<span id="943">943</span>
-<span id="944">944</span>
-<span id="945">945</span>
-<span id="946">946</span>
-<span id="947">947</span>
-<span id="948">948</span>
-<span id="949">949</span>
-<span id="950">950</span>
-<span id="951">951</span>
 </pre><pre class="rust"><code><span class="attribute">#![<span class="ident">doc</span>(
     <span class="ident">html_logo_url</span> <span class="op">=</span> <span class="string">&quot;https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg&quot;</span>,
     <span class="ident">html_favicon_url</span> <span class="op">=</span> <span class="string">&quot;https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico&quot;</span>
@@ -981,27 +904,25 @@
 <span class="attribute">#![<span class="ident">allow</span>(<span class="ident">clippy::unused_unit</span>)]</span>
 <span class="kw">use</span> <span class="ident">am::transaction::CommitOptions</span>;
 <span class="kw">use</span> <span class="ident">am::transaction::Transactable</span>;
-<span class="kw">use</span> <span class="ident">am::ApplyOptions</span>;
 <span class="kw">use</span> <span class="ident">automerge</span> <span class="kw">as</span> <span class="ident">am</span>;
-<span class="kw">use</span> <span class="ident">automerge::Patch</span>;
-<span class="kw">use</span> <span class="ident">automerge::VecOpObserver</span>;
-<span class="kw">use</span> <span class="ident">automerge</span>::{<span class="ident">Change</span>, <span class="ident">ObjId</span>, <span class="ident">Prop</span>, <span class="ident">Value</span>, <span class="ident">ROOT</span>};
-<span class="kw">use</span> <span class="ident">js_sys</span>::{<span class="ident">Array</span>, <span class="ident">Object</span>, <span class="ident">Uint8Array</span>};
-<span class="kw">use</span> <span class="ident">serde::Serialize</span>;
+<span class="kw">use</span> <span class="ident">automerge</span>::{<span class="ident">Change</span>, <span class="ident">ObjId</span>, <span class="ident">ObjType</span>, <span class="ident">Prop</span>, <span class="ident">Value</span>, <span class="ident">ROOT</span>};
+<span class="kw">use</span> <span class="ident">js_sys</span>::{<span class="ident">Array</span>, <span class="ident">Function</span>, <span class="ident">Object</span>, <span class="ident">Uint8Array</span>};
+<span class="kw">use</span> <span class="ident">serde::ser::Serialize</span>;
+<span class="kw">use</span> <span class="ident">std::collections::HashMap</span>;
 <span class="kw">use</span> <span class="ident">std::convert::TryInto</span>;
 <span class="kw">use</span> <span class="ident">wasm_bindgen::prelude</span>::<span class="kw-2">*</span>;
 <span class="kw">use</span> <span class="ident">wasm_bindgen::JsCast</span>;
 
 <span class="kw">mod</span> <span class="ident">interop</span>;
+<span class="kw">mod</span> <span class="ident">observer</span>;
 <span class="kw">mod</span> <span class="ident">sync</span>;
 <span class="kw">mod</span> <span class="ident">value</span>;
 
-<span class="kw">use</span> <span class="ident">interop</span>::{
-    <span class="ident">get_heads</span>, <span class="ident">js_get</span>, <span class="ident">js_set</span>, <span class="ident">list_to_js</span>, <span class="ident">list_to_js_at</span>, <span class="ident">map_to_js</span>, <span class="ident">map_to_js_at</span>, <span class="ident">to_js_err</span>,
-    <span class="ident">to_objtype</span>, <span class="ident">to_prop</span>, <span class="ident">AR</span>, <span class="ident">JS</span>,
-};
+<span class="kw">use</span> <span class="ident">observer::Observer</span>;
+
+<span class="kw">use</span> <span class="ident">interop</span>::{<span class="ident">alloc</span>, <span class="ident">get_heads</span>, <span class="ident">js_get</span>, <span class="ident">js_set</span>, <span class="ident">to_js_err</span>, <span class="ident">to_objtype</span>, <span class="ident">to_prop</span>, <span class="ident">AR</span>, <span class="ident">JS</span>};
 <span class="kw">use</span> <span class="ident">sync::SyncState</span>;
-<span class="kw">use</span> <span class="ident">value</span>::{<span class="ident">datatype</span>, <span class="ident">ScalarValue</span>};
+<span class="kw">use</span> <span class="ident">value::Datatype</span>;
 
 <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">unused_macros</span>)]</span>
 <span class="macro">macro_rules!</span> <span class="ident">log</span> {
@@ -1010,6 +931,8 @@
     };
 }
 
+<span class="kw">type</span> <span class="ident">AutoCommit</span> <span class="op">=</span> <span class="ident">am::AutoCommitWithObs</span><span class="op">&lt;</span><span class="ident">Observer</span><span class="op">&gt;</span>;
+
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;wee_alloc&quot;</span>)]</span>
 <span class="attribute">#[<span class="ident">global_allocator</span>]</span>
 <span class="kw">static</span> <span class="ident">ALLOC</span>: <span class="ident">wee_alloc::WeeAlloc</span> <span class="op">=</span> <span class="ident">wee_alloc::WeeAlloc::INIT</span>;
@@ -1017,40 +940,29 @@
 <span class="attribute">#[<span class="ident">wasm_bindgen</span>]</span>
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Automerge</span> {
-    <span class="ident">doc</span>: <span class="ident">automerge::AutoCommit</span>,
-    <span class="ident">observer</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">VecOpObserver</span><span class="op">&gt;</span>,
+    <span class="ident">doc</span>: <span class="ident">AutoCommit</span>,
+    <span class="ident">external_types</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Datatype</span>, <span class="ident">Function</span><span class="op">&gt;</span>,
 }
 
 <span class="attribute">#[<span class="ident">wasm_bindgen</span>]</span>
 <span class="kw">impl</span> <span class="ident">Automerge</span> {
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">actor</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Automerge</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">automerge</span> <span class="op">=</span> <span class="ident">automerge::AutoCommit::new</span>();
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">doc</span> <span class="op">=</span> <span class="ident">AutoCommit::default</span>();
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">a</span>) <span class="op">=</span> <span class="ident">actor</span> {
             <span class="kw">let</span> <span class="ident">a</span> <span class="op">=</span> <span class="ident">automerge::ActorId::from</span>(<span class="ident">hex::decode</span>(<span class="ident">a</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>.<span class="ident">to_vec</span>());
-            <span class="ident">automerge</span>.<span class="ident">set_actor</span>(<span class="ident">a</span>);
+            <span class="ident">doc</span>.<span class="ident">set_actor</span>(<span class="ident">a</span>);
         }
         <span class="prelude-val">Ok</span>(<span class="ident">Automerge</span> {
-            <span class="ident">doc</span>: <span class="ident">automerge</span>,
-            <span class="ident">observer</span>: <span class="prelude-val">None</span>,
+            <span class="ident">doc</span>,
+            <span class="ident">external_types</span>: <span class="ident">HashMap::default</span>(),
         })
-    }
-
-    <span class="kw">fn</span> <span class="ident">ensure_transaction_closed</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">pending_ops</span>() <span class="op">&gt;</span> <span class="number">0</span> {
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">opts</span> <span class="op">=</span> <span class="ident">CommitOptions::default</span>();
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">observer</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">observer</span>.<span class="ident">as_mut</span>() {
-                <span class="ident">opts</span>.<span class="ident">set_op_observer</span>(<span class="ident">observer</span>);
-            }
-            <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">commit_with</span>(<span class="ident">opts</span>);
-        }
     }
 
     <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::should_implement_trait</span>)]</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clone</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">actor</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Automerge</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">ensure_transaction_closed</span>();
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">automerge</span> <span class="op">=</span> <span class="ident">Automerge</span> {
             <span class="ident">doc</span>: <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">clone</span>(),
-            <span class="ident">observer</span>: <span class="prelude-val">None</span>,
+            <span class="ident">external_types</span>: <span class="self">self</span>.<span class="ident">external_types</span>.<span class="ident">clone</span>(),
         };
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="ident">actor</span> {
             <span class="kw">let</span> <span class="ident">actor</span> <span class="op">=</span> <span class="ident">automerge::ActorId::from</span>(<span class="ident">hex::decode</span>(<span class="ident">s</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>.<span class="ident">to_vec</span>());
@@ -1060,10 +972,9 @@
     }
 
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">fork</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">actor</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Automerge</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">ensure_transaction_closed</span>();
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">automerge</span> <span class="op">=</span> <span class="ident">Automerge</span> {
             <span class="ident">doc</span>: <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">fork</span>(),
-            <span class="ident">observer</span>: <span class="prelude-val">None</span>,
+            <span class="ident">external_types</span>: <span class="self">self</span>.<span class="ident">external_types</span>.<span class="ident">clone</span>(),
         };
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="ident">actor</span> {
             <span class="kw">let</span> <span class="ident">actor</span> <span class="op">=</span> <span class="ident">automerge::ActorId::from</span>(<span class="ident">hex::decode</span>(<span class="ident">s</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>.<span class="ident">to_vec</span>());
@@ -1077,7 +988,7 @@
         <span class="kw">let</span> <span class="ident">deps</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">JS</span>(<span class="ident">heads</span>).<span class="ident">try_into</span>()<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">automerge</span> <span class="op">=</span> <span class="ident">Automerge</span> {
             <span class="ident">doc</span>: <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">fork_at</span>(<span class="kw-2">&amp;</span><span class="ident">deps</span>)<span class="question-mark">?</span>,
-            <span class="ident">observer</span>: <span class="prelude-val">None</span>,
+            <span class="ident">external_types</span>: <span class="self">self</span>.<span class="ident">external_types</span>.<span class="ident">clone</span>(),
         };
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="ident">actor</span> {
             <span class="kw">let</span> <span class="ident">actor</span> <span class="op">=</span> <span class="ident">automerge::ActorId::from</span>(<span class="ident">hex::decode</span>(<span class="ident">s</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>.<span class="ident">to_vec</span>());
@@ -1101,21 +1012,12 @@
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">time</span>) <span class="op">=</span> <span class="ident">time</span> {
             <span class="ident">commit_opts</span>.<span class="ident">set_time</span>(<span class="ident">time</span> <span class="kw">as</span> <span class="ident">i64</span>);
         }
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">observer</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">observer</span>.<span class="ident">as_mut</span>() {
-            <span class="ident">commit_opts</span>.<span class="ident">set_op_observer</span>(<span class="ident">observer</span>);
-        }
         <span class="kw">let</span> <span class="ident">hash</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">commit_with</span>(<span class="ident">commit_opts</span>);
         <span class="ident">JsValue::from_str</span>(<span class="kw-2">&amp;</span><span class="ident">hex::encode</span>(<span class="kw-2">&amp;</span><span class="ident">hash</span>.<span class="number">0</span>))
     }
 
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">merge</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Automerge</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Array</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">ensure_transaction_closed</span>();
-        <span class="kw">let</span> <span class="ident">options</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">observer</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">observer</span>.<span class="ident">as_mut</span>() {
-            <span class="ident">ApplyOptions::default</span>().<span class="ident">with_op_observer</span>(<span class="ident">observer</span>)
-        } <span class="kw">else</span> {
-            <span class="ident">ApplyOptions::default</span>()
-        };
-        <span class="kw">let</span> <span class="ident">heads</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">merge_with</span>(<span class="kw-2">&amp;mut</span> <span class="ident">other</span>.<span class="ident">doc</span>, <span class="ident">options</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">heads</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">merge</span>(<span class="kw-2">&amp;mut</span> <span class="ident">other</span>.<span class="ident">doc</span>)<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="ident">heads</span>: <span class="ident">Array</span> <span class="op">=</span> <span class="ident">heads</span>
             .<span class="ident">iter</span>()
             .<span class="ident">map</span>(<span class="op">|</span><span class="ident">h</span><span class="op">|</span> <span class="ident">JsValue::from_str</span>(<span class="kw-2">&amp;</span><span class="ident">hex::encode</span>(<span class="kw-2">&amp;</span><span class="ident">h</span>.<span class="number">0</span>)))
@@ -1320,10 +1222,13 @@
             } <span class="kw">else</span> {
                 <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">prop</span>)<span class="question-mark">?</span>
             };
-            <span class="kw">match</span> <span class="ident">value</span> {
-                <span class="prelude-val">Some</span>((<span class="ident">Value::Object</span>(<span class="kw">_</span>), <span class="ident">obj_id</span>)) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">obj_id</span>.<span class="ident">to_string</span>().<span class="ident">into</span>()),
-                <span class="prelude-val">Some</span>((<span class="ident">Value::Scalar</span>(<span class="ident">value</span>), <span class="kw">_</span>)) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">ScalarValue</span>(<span class="ident">value</span>).<span class="ident">into</span>()),
-                <span class="prelude-val">None</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">JsValue::undefined</span>()),
+            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>((<span class="ident">value</span>, <span class="ident">id</span>)) <span class="op">=</span> <span class="ident">value</span> {
+                <span class="kw">match</span> <span class="ident">alloc</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>) {
+                    (<span class="ident">datatype</span>, <span class="ident">js_value</span>) <span class="kw">if</span> <span class="ident">datatype</span>.<span class="ident">is_scalar</span>() =&gt; <span class="prelude-val">Ok</span>(<span class="ident">js_value</span>),
+                    <span class="kw">_</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">id</span>.<span class="ident">to_string</span>().<span class="ident">into</span>()),
+                }
+            } <span class="kw">else</span> {
+                <span class="prelude-val">Ok</span>(<span class="ident">JsValue::undefined</span>())
             }
         } <span class="kw">else</span> {
             <span class="prelude-val">Ok</span>(<span class="ident">JsValue::undefined</span>())
@@ -1338,7 +1243,6 @@
         <span class="ident">heads</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Array</span><span class="op">&gt;</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">import</span>(<span class="ident">obj</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Array::new</span>();
         <span class="kw">let</span> <span class="ident">prop</span> <span class="op">=</span> <span class="ident">to_prop</span>(<span class="ident">prop</span>);
         <span class="kw">let</span> <span class="ident">heads</span> <span class="op">=</span> <span class="ident">get_heads</span>(<span class="ident">heads</span>);
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="ident">prop</span>) <span class="op">=</span> <span class="ident">prop</span> {
@@ -1347,18 +1251,24 @@
             } <span class="kw">else</span> {
                 <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">prop</span>)<span class="question-mark">?</span>
             };
-            <span class="kw">match</span> <span class="ident">value</span> {
-                <span class="prelude-val">Some</span>((<span class="ident">Value::Object</span>(<span class="ident">obj_type</span>), <span class="ident">obj_id</span>)) =&gt; {
-                    <span class="ident">result</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">obj_type</span>.<span class="ident">to_string</span>().<span class="ident">into</span>());
-                    <span class="ident">result</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">obj_id</span>.<span class="ident">to_string</span>().<span class="ident">into</span>());
-                    <span class="prelude-val">Ok</span>(<span class="ident">result</span>.<span class="ident">into</span>())
+            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">value</span>) <span class="op">=</span> <span class="ident">value</span> {
+                <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="ident">value</span> {
+                    (<span class="ident">Value::Object</span>(<span class="ident">obj_type</span>), <span class="ident">obj_id</span>) =&gt; {
+                        <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Array::new</span>();
+                        <span class="ident">result</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">obj_type</span>.<span class="ident">to_string</span>().<span class="ident">into</span>());
+                        <span class="ident">result</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">obj_id</span>.<span class="ident">to_string</span>().<span class="ident">into</span>());
+                        <span class="prelude-val">Ok</span>(<span class="ident">result</span>.<span class="ident">into</span>())
+                    }
+                    (<span class="ident">Value::Scalar</span>(<span class="kw">_</span>), <span class="kw">_</span>) =&gt; {
+                        <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Array::new</span>();
+                        <span class="kw">let</span> (<span class="ident">datatype</span>, <span class="ident">value</span>) <span class="op">=</span> <span class="ident">alloc</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>.<span class="number">0</span>);
+                        <span class="ident">result</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">datatype</span>.<span class="ident">into</span>());
+                        <span class="ident">result</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>);
+                        <span class="prelude-val">Ok</span>(<span class="ident">result</span>.<span class="ident">into</span>())
+                    }
                 }
-                <span class="prelude-val">Some</span>((<span class="ident">Value::Scalar</span>(<span class="ident">value</span>), <span class="kw">_</span>)) =&gt; {
-                    <span class="ident">result</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">datatype</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>).<span class="ident">into</span>());
-                    <span class="ident">result</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">ScalarValue</span>(<span class="ident">value</span>).<span class="ident">into</span>());
-                    <span class="prelude-val">Ok</span>(<span class="ident">result</span>.<span class="ident">into</span>())
-                }
-                <span class="prelude-val">None</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">JsValue::null</span>()),
+            } <span class="kw">else</span> {
+                <span class="prelude-val">Ok</span>(<span class="ident">JsValue::null</span>())
             }
         } <span class="kw">else</span> {
             <span class="prelude-val">Ok</span>(<span class="ident">JsValue::null</span>())
@@ -1382,22 +1292,15 @@
                 <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_all</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">prop</span>)
             }
             .<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
-            <span class="kw">for</span> <span class="ident">value</span> <span class="kw">in</span> <span class="ident">values</span> {
-                <span class="kw">match</span> <span class="ident">value</span> {
-                    (<span class="ident">Value::Object</span>(<span class="ident">obj_type</span>), <span class="ident">obj_id</span>) =&gt; {
-                        <span class="kw">let</span> <span class="ident">sub</span> <span class="op">=</span> <span class="ident">Array::new</span>();
-                        <span class="ident">sub</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">obj_type</span>.<span class="ident">to_string</span>().<span class="ident">into</span>());
-                        <span class="ident">sub</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">obj_id</span>.<span class="ident">to_string</span>().<span class="ident">into</span>());
-                        <span class="ident">result</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">sub</span>.<span class="ident">into</span>());
-                    }
-                    (<span class="ident">Value::Scalar</span>(<span class="ident">value</span>), <span class="ident">id</span>) =&gt; {
-                        <span class="kw">let</span> <span class="ident">sub</span> <span class="op">=</span> <span class="ident">Array::new</span>();
-                        <span class="ident">sub</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">datatype</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>).<span class="ident">into</span>());
-                        <span class="ident">sub</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">ScalarValue</span>(<span class="ident">value</span>).<span class="ident">into</span>());
-                        <span class="ident">sub</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">id</span>.<span class="ident">to_string</span>().<span class="ident">into</span>());
-                        <span class="ident">result</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">sub</span>.<span class="ident">into</span>());
-                    }
+            <span class="kw">for</span> (<span class="ident">value</span>, <span class="ident">id</span>) <span class="kw">in</span> <span class="ident">values</span> {
+                <span class="kw">let</span> <span class="ident">sub</span> <span class="op">=</span> <span class="ident">Array::new</span>();
+                <span class="kw">let</span> (<span class="ident">datatype</span>, <span class="ident">js_value</span>) <span class="op">=</span> <span class="ident">alloc</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>);
+                <span class="ident">sub</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">datatype</span>.<span class="ident">into</span>());
+                <span class="kw">if</span> <span class="ident">value</span>.<span class="ident">is_scalar</span>() {
+                    <span class="ident">sub</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">js_value</span>);
                 }
+                <span class="ident">sub</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">id</span>.<span class="ident">to_string</span>().<span class="ident">into</span>());
+                <span class="ident">result</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">JsValue::from</span>(<span class="kw-2">&amp;</span><span class="ident">sub</span>));
             }
         }
         <span class="prelude-val">Ok</span>(<span class="ident">result</span>)
@@ -1407,15 +1310,56 @@
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">enable_patches</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">enable</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">JsValue</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">enable</span> <span class="op">=</span> <span class="ident">enable</span>
             .<span class="ident">as_bool</span>()
-            .<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">to_js_err</span>(<span class="string">&quot;expected boolean&quot;</span>))<span class="question-mark">?</span>;
-        <span class="kw">if</span> <span class="ident">enable</span> {
-            <span class="kw">if</span> <span class="self">self</span>.<span class="ident">observer</span>.<span class="ident">is_none</span>() {
-                <span class="self">self</span>.<span class="ident">observer</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">VecOpObserver::default</span>());
-            }
+            .<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">to_js_err</span>(<span class="string">&quot;must pass a bool to enable_patches&quot;</span>))<span class="question-mark">?</span>;
+        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">observer</span>().<span class="ident">enable</span>(<span class="ident">enable</span>);
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">registerDatatype</span>)]</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">register_datatype</span>(
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
+        <span class="ident">datatype</span>: <span class="ident">JsValue</span>,
+        <span class="ident">function</span>: <span class="ident">JsValue</span>,
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">JsValue</span><span class="op">&gt;</span> {
+        <span class="kw">let</span> <span class="ident">datatype</span> <span class="op">=</span> <span class="ident">Datatype::try_from</span>(<span class="ident">datatype</span>)<span class="question-mark">?</span>;
+        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="ident">function</span>) <span class="op">=</span> <span class="ident">function</span>.<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">Function</span><span class="op">&gt;</span>() {
+            <span class="self">self</span>.<span class="ident">external_types</span>.<span class="ident">insert</span>(<span class="ident">datatype</span>, <span class="ident">function</span>);
         } <span class="kw">else</span> {
-            <span class="self">self</span>.<span class="ident">observer</span> <span class="op">=</span> <span class="prelude-val">None</span>;
+            <span class="self">self</span>.<span class="ident">external_types</span>.<span class="ident">remove</span>(<span class="kw-2">&amp;</span><span class="ident">datatype</span>);
         }
         <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">applyPatches</span>)]</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">apply_patches</span>(
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
+        <span class="ident">object</span>: <span class="ident">JsValue</span>,
+        <span class="ident">meta</span>: <span class="ident">JsValue</span>,
+        <span class="ident">callback</span>: <span class="ident">JsValue</span>,
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">object</span> <span class="op">=</span> <span class="ident">object</span>.<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">Object</span><span class="op">&gt;</span>()<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">patches</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">observer</span>().<span class="ident">take_patches</span>();
+        <span class="kw">let</span> <span class="ident">callback</span> <span class="op">=</span> <span class="ident">callback</span>.<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">Function</span><span class="op">&gt;</span>().<span class="ident">ok</span>();
+
+        <span class="comment">// even if there are no patches we may need to update the meta object</span>
+        <span class="comment">// which requires that we update the object too</span>
+        <span class="kw">if</span> <span class="ident">patches</span>.<span class="ident">is_empty</span>() <span class="op">&amp;&amp;</span> <span class="op">!</span><span class="ident">meta</span>.<span class="ident">is_undefined</span>() {
+            <span class="kw">let</span> (<span class="ident">obj</span>, <span class="ident">datatype</span>, <span class="ident">id</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">unwrap_object</span>(<span class="kw-2">&amp;</span><span class="ident">object</span>)<span class="question-mark">?</span>;
+            <span class="ident">object</span> <span class="op">=</span> <span class="ident">Object::assign</span>(<span class="kw-2">&amp;</span><span class="ident">Object::new</span>(), <span class="kw-2">&amp;</span><span class="ident">obj</span>);
+            <span class="ident">object</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">wrap_object</span>(<span class="ident">object</span>, <span class="ident">datatype</span>, <span class="kw-2">&amp;</span><span class="ident">id</span>, <span class="kw-2">&amp;</span><span class="ident">meta</span>)<span class="question-mark">?</span>;
+        }
+
+        <span class="kw">for</span> <span class="ident">p</span> <span class="kw">in</span> <span class="ident">patches</span> {
+            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">c</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">callback</span> {
+                <span class="kw">let</span> <span class="ident">before</span> <span class="op">=</span> <span class="ident">object</span>.<span class="ident">clone</span>();
+                <span class="ident">object</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">apply_patch</span>(<span class="ident">object</span>, <span class="kw-2">&amp;</span><span class="ident">p</span>, <span class="number">0</span>, <span class="kw-2">&amp;</span><span class="ident">meta</span>)<span class="question-mark">?</span>;
+                <span class="ident">c</span>.<span class="ident">call3</span>(<span class="kw-2">&amp;</span><span class="ident">JsValue::undefined</span>(), <span class="kw-2">&amp;</span><span class="ident">p</span>.<span class="ident">try_into</span>()<span class="question-mark">?</span>, <span class="kw-2">&amp;</span><span class="ident">before</span>, <span class="kw-2">&amp;</span><span class="ident">object</span>)<span class="question-mark">?</span>;
+            } <span class="kw">else</span> {
+                <span class="ident">object</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">apply_patch</span>(<span class="ident">object</span>, <span class="kw-2">&amp;</span><span class="ident">p</span>, <span class="number">0</span>, <span class="kw-2">&amp;</span><span class="ident">meta</span>)<span class="question-mark">?</span>;
+            }
+        }
+
+        <span class="prelude-val">Ok</span>(<span class="ident">object</span>.<span class="ident">into</span>())
     }
 
     <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">popPatches</span>)]</span>
@@ -1423,68 +1367,11 @@
         <span class="comment">// transactions send out observer updates as they occur, not waiting for them to be</span>
         <span class="comment">// committed.</span>
         <span class="comment">// If we pop the patches then we won&#39;t be able to revert them.</span>
-        <span class="self">self</span>.<span class="ident">ensure_transaction_closed</span>();
 
-        <span class="kw">let</span> <span class="ident">patches</span> <span class="op">=</span> <span class="self">self</span>
-            .<span class="ident">observer</span>
-            .<span class="ident">as_mut</span>()
-            .<span class="ident">map_or_else</span>(<span class="ident">Vec::new</span>, <span class="op">|</span><span class="ident">o</span><span class="op">|</span> <span class="ident">o</span>.<span class="ident">take_patches</span>());
+        <span class="kw">let</span> <span class="ident">patches</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">observer</span>().<span class="ident">take_patches</span>();
         <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Array::new</span>();
         <span class="kw">for</span> <span class="ident">p</span> <span class="kw">in</span> <span class="ident">patches</span> {
-            <span class="kw">let</span> <span class="ident">patch</span> <span class="op">=</span> <span class="ident">Object::new</span>();
-            <span class="kw">match</span> <span class="ident">p</span> {
-                <span class="ident">Patch::Put</span> {
-                    <span class="ident">obj</span>,
-                    <span class="ident">key</span>,
-                    <span class="ident">value</span>,
-                    <span class="ident">conflict</span>,
-                } =&gt; {
-                    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>, <span class="string">&quot;action&quot;</span>, <span class="string">&quot;put&quot;</span>)<span class="question-mark">?</span>;
-                    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>, <span class="string">&quot;obj&quot;</span>, <span class="ident">obj</span>.<span class="ident">to_string</span>())<span class="question-mark">?</span>;
-                    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>, <span class="string">&quot;key&quot;</span>, <span class="ident">key</span>)<span class="question-mark">?</span>;
-                    <span class="kw">match</span> <span class="ident">value</span> {
-                        (<span class="ident">Value::Object</span>(<span class="ident">obj_type</span>), <span class="ident">obj_id</span>) =&gt; {
-                            <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>, <span class="string">&quot;datatype&quot;</span>, <span class="ident">obj_type</span>.<span class="ident">to_string</span>())<span class="question-mark">?</span>;
-                            <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>, <span class="string">&quot;value&quot;</span>, <span class="ident">obj_id</span>.<span class="ident">to_string</span>())<span class="question-mark">?</span>;
-                        }
-                        (<span class="ident">Value::Scalar</span>(<span class="ident">value</span>), <span class="kw">_</span>) =&gt; {
-                            <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>, <span class="string">&quot;datatype&quot;</span>, <span class="ident">datatype</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>))<span class="question-mark">?</span>;
-                            <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>, <span class="string">&quot;value&quot;</span>, <span class="ident">ScalarValue</span>(<span class="ident">value</span>))<span class="question-mark">?</span>;
-                        }
-                    };
-                    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>, <span class="string">&quot;conflict&quot;</span>, <span class="ident">conflict</span>)<span class="question-mark">?</span>;
-                }
-
-                <span class="ident">Patch::Insert</span> { <span class="ident">obj</span>, <span class="ident">index</span>, <span class="ident">value</span> } =&gt; {
-                    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>, <span class="string">&quot;action&quot;</span>, <span class="string">&quot;insert&quot;</span>)<span class="question-mark">?</span>;
-                    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>, <span class="string">&quot;obj&quot;</span>, <span class="ident">obj</span>.<span class="ident">to_string</span>())<span class="question-mark">?</span>;
-                    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>, <span class="string">&quot;key&quot;</span>, <span class="ident">index</span> <span class="kw">as</span> <span class="ident">f64</span>)<span class="question-mark">?</span>;
-                    <span class="kw">match</span> <span class="ident">value</span> {
-                        (<span class="ident">Value::Object</span>(<span class="ident">obj_type</span>), <span class="ident">obj_id</span>) =&gt; {
-                            <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>, <span class="string">&quot;datatype&quot;</span>, <span class="ident">obj_type</span>.<span class="ident">to_string</span>())<span class="question-mark">?</span>;
-                            <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>, <span class="string">&quot;value&quot;</span>, <span class="ident">obj_id</span>.<span class="ident">to_string</span>())<span class="question-mark">?</span>;
-                        }
-                        (<span class="ident">Value::Scalar</span>(<span class="ident">value</span>), <span class="kw">_</span>) =&gt; {
-                            <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>, <span class="string">&quot;datatype&quot;</span>, <span class="ident">datatype</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>))<span class="question-mark">?</span>;
-                            <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>, <span class="string">&quot;value&quot;</span>, <span class="ident">ScalarValue</span>(<span class="ident">value</span>))<span class="question-mark">?</span>;
-                        }
-                    };
-                }
-
-                <span class="ident">Patch::Increment</span> { <span class="ident">obj</span>, <span class="ident">key</span>, <span class="ident">value</span> } =&gt; {
-                    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>, <span class="string">&quot;action&quot;</span>, <span class="string">&quot;increment&quot;</span>)<span class="question-mark">?</span>;
-                    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>, <span class="string">&quot;obj&quot;</span>, <span class="ident">obj</span>.<span class="ident">to_string</span>())<span class="question-mark">?</span>;
-                    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>, <span class="string">&quot;key&quot;</span>, <span class="ident">key</span>)<span class="question-mark">?</span>;
-                    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>, <span class="string">&quot;value&quot;</span>, <span class="ident">value</span>.<span class="number">0</span>)<span class="question-mark">?</span>;
-                }
-
-                <span class="ident">Patch::Delete</span> { <span class="ident">obj</span>, <span class="ident">key</span> } =&gt; {
-                    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>, <span class="string">&quot;action&quot;</span>, <span class="string">&quot;delete&quot;</span>)<span class="question-mark">?</span>;
-                    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>, <span class="string">&quot;obj&quot;</span>, <span class="ident">obj</span>.<span class="ident">to_string</span>())<span class="question-mark">?</span>;
-                    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>, <span class="string">&quot;key&quot;</span>, <span class="ident">key</span>)<span class="question-mark">?</span>;
-                }
-            }
-            <span class="ident">result</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">patch</span>);
+            <span class="ident">result</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">p</span>.<span class="ident">try_into</span>()<span class="question-mark">?</span>);
         }
         <span class="prelude-val">Ok</span>(<span class="ident">result</span>)
     }
@@ -1506,51 +1393,31 @@
     }
 
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">save</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">Uint8Array</span> {
-        <span class="self">self</span>.<span class="ident">ensure_transaction_closed</span>();
         <span class="ident">Uint8Array::from</span>(<span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">save</span>().<span class="ident">as_slice</span>())
     }
 
     <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">saveIncremental</span>)]</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">save_incremental</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">Uint8Array</span> {
-        <span class="self">self</span>.<span class="ident">ensure_transaction_closed</span>();
         <span class="kw">let</span> <span class="ident">bytes</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">save_incremental</span>();
         <span class="ident">Uint8Array::from</span>(<span class="ident">bytes</span>.<span class="ident">as_slice</span>())
     }
 
     <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">loadIncremental</span>)]</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">load_incremental</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">data</span>: <span class="ident">Uint8Array</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">f64</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">ensure_transaction_closed</span>();
         <span class="kw">let</span> <span class="ident">data</span> <span class="op">=</span> <span class="ident">data</span>.<span class="ident">to_vec</span>();
-        <span class="kw">let</span> <span class="ident">options</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">observer</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">observer</span>.<span class="ident">as_mut</span>() {
-            <span class="ident">ApplyOptions::default</span>().<span class="ident">with_op_observer</span>(<span class="ident">observer</span>)
-        } <span class="kw">else</span> {
-            <span class="ident">ApplyOptions::default</span>()
-        };
-        <span class="kw">let</span> <span class="ident">len</span> <span class="op">=</span> <span class="self">self</span>
-            .<span class="ident">doc</span>
-            .<span class="ident">load_incremental_with</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>, <span class="ident">options</span>)
-            .<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">len</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">load_incremental</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(<span class="ident">len</span> <span class="kw">as</span> <span class="ident">f64</span>)
     }
 
     <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">applyChanges</span>)]</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">apply_changes</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">changes</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">ensure_transaction_closed</span>();
         <span class="kw">let</span> <span class="ident">changes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">JS</span>(<span class="ident">changes</span>).<span class="ident">try_into</span>()<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">options</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">observer</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">observer</span>.<span class="ident">as_mut</span>() {
-            <span class="ident">ApplyOptions::default</span>().<span class="ident">with_op_observer</span>(<span class="ident">observer</span>)
-        } <span class="kw">else</span> {
-            <span class="ident">ApplyOptions::default</span>()
-        };
-        <span class="self">self</span>.<span class="ident">doc</span>
-            .<span class="ident">apply_changes_with</span>(<span class="ident">changes</span>, <span class="ident">options</span>)
-            .<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
+        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">apply_changes</span>(<span class="ident">changes</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(())
     }
 
     <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">getChanges</span>)]</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_changes</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">have_deps</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Array</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">ensure_transaction_closed</span>();
         <span class="kw">let</span> <span class="ident">deps</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">JS</span>(<span class="ident">have_deps</span>).<span class="ident">try_into</span>()<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="ident">changes</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_changes</span>(<span class="kw-2">&amp;</span><span class="ident">deps</span>)<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="ident">changes</span>: <span class="ident">Array</span> <span class="op">=</span> <span class="ident">changes</span>
@@ -1562,7 +1429,6 @@
 
     <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">getChangeByHash</span>)]</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_change_by_hash</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">hash</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">ensure_transaction_closed</span>();
         <span class="kw">let</span> <span class="ident">hash</span> <span class="op">=</span> <span class="ident">serde_wasm_bindgen::from_value</span>(<span class="ident">hash</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="ident">change</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_change_by_hash</span>(<span class="kw-2">&amp;</span><span class="ident">hash</span>);
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">c</span>) <span class="op">=</span> <span class="ident">change</span> {
@@ -1574,7 +1440,6 @@
 
     <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">getChangesAdded</span>)]</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_changes_added</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Automerge</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Array</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">ensure_transaction_closed</span>();
         <span class="kw">let</span> <span class="ident">changes</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_changes_added</span>(<span class="kw-2">&amp;mut</span> <span class="ident">other</span>.<span class="ident">doc</span>);
         <span class="kw">let</span> <span class="ident">changes</span>: <span class="ident">Array</span> <span class="op">=</span> <span class="ident">changes</span>
             .<span class="ident">iter</span>()
@@ -1585,7 +1450,6 @@
 
     <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">getHeads</span>)]</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_heads</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">Array</span> {
-        <span class="self">self</span>.<span class="ident">ensure_transaction_closed</span>();
         <span class="kw">let</span> <span class="ident">heads</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_heads</span>();
         <span class="kw">let</span> <span class="ident">heads</span>: <span class="ident">Array</span> <span class="op">=</span> <span class="ident">heads</span>
             .<span class="ident">iter</span>()
@@ -1602,7 +1466,6 @@
 
     <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">getLastLocalChange</span>)]</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_last_local_change</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">ensure_transaction_closed</span>();
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">change</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_last_local_change</span>() {
             <span class="prelude-val">Ok</span>(<span class="ident">Uint8Array::from</span>(<span class="ident">change</span>.<span class="ident">raw_bytes</span>()).<span class="ident">into</span>())
         } <span class="kw">else</span> {
@@ -1611,13 +1474,11 @@
     }
 
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">dump</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
-        <span class="self">self</span>.<span class="ident">ensure_transaction_closed</span>();
         <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">dump</span>()
     }
 
     <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">getMissingDeps</span>)]</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_missing_deps</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">heads</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Array</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Array</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">ensure_transaction_closed</span>();
         <span class="kw">let</span> <span class="ident">heads</span> <span class="op">=</span> <span class="ident">get_heads</span>(<span class="ident">heads</span>).<span class="ident">unwrap_or_default</span>();
         <span class="kw">let</span> <span class="ident">deps</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_missing_deps</span>(<span class="kw-2">&amp;</span><span class="ident">heads</span>);
         <span class="kw">let</span> <span class="ident">deps</span>: <span class="ident">Array</span> <span class="op">=</span> <span class="ident">deps</span>
@@ -1633,23 +1494,16 @@
         <span class="ident">state</span>: <span class="kw-2">&amp;mut</span> <span class="ident">SyncState</span>,
         <span class="ident">message</span>: <span class="ident">Uint8Array</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">ensure_transaction_closed</span>();
         <span class="kw">let</span> <span class="ident">message</span> <span class="op">=</span> <span class="ident">message</span>.<span class="ident">to_vec</span>();
         <span class="kw">let</span> <span class="ident">message</span> <span class="op">=</span> <span class="ident">am::sync::Message::decode</span>(<span class="ident">message</span>.<span class="ident">as_slice</span>()).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">options</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">observer</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">observer</span>.<span class="ident">as_mut</span>() {
-            <span class="ident">ApplyOptions::default</span>().<span class="ident">with_op_observer</span>(<span class="ident">observer</span>)
-        } <span class="kw">else</span> {
-            <span class="ident">ApplyOptions::default</span>()
-        };
         <span class="self">self</span>.<span class="ident">doc</span>
-            .<span class="ident">receive_sync_message_with</span>(<span class="kw-2">&amp;mut</span> <span class="ident">state</span>.<span class="number">0</span>, <span class="ident">message</span>, <span class="ident">options</span>)
+            .<span class="ident">receive_sync_message</span>(<span class="kw-2">&amp;mut</span> <span class="ident">state</span>.<span class="number">0</span>, <span class="ident">message</span>)
             .<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(())
     }
 
     <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">generateSyncMessage</span>)]</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">generate_sync_message</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">state</span>: <span class="kw-2">&amp;mut</span> <span class="ident">SyncState</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">ensure_transaction_closed</span>();
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">message</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">generate_sync_message</span>(<span class="kw-2">&amp;mut</span> <span class="ident">state</span>.<span class="number">0</span>) {
             <span class="prelude-val">Ok</span>(<span class="ident">Uint8Array::from</span>(<span class="ident">message</span>.<span class="ident">encode</span>().<span class="ident">as_slice</span>()).<span class="ident">into</span>())
         } <span class="kw">else</span> {
@@ -1658,30 +1512,24 @@
     }
 
     <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">toJS</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_js</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">JsValue</span> {
-        <span class="ident">map_to_js</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">doc</span>, <span class="kw-2">&amp;</span><span class="ident">ROOT</span>)
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_js</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">meta</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
+        <span class="self">self</span>.<span class="ident">export_object</span>(<span class="kw-2">&amp;</span><span class="ident">ROOT</span>, <span class="ident">Datatype::Map</span>, <span class="prelude-val">None</span>, <span class="kw-2">&amp;</span><span class="ident">meta</span>)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">materialize</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">JsValue</span>, <span class="ident">heads</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Array</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">materialize</span>(
+        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
+        <span class="ident">obj</span>: <span class="ident">JsValue</span>,
+        <span class="ident">heads</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Array</span><span class="op">&gt;</span>,
+        <span class="ident">meta</span>: <span class="ident">JsValue</span>,
+    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">import</span>(<span class="ident">obj</span>).<span class="ident">unwrap_or</span>(<span class="ident">ROOT</span>);
         <span class="kw">let</span> <span class="ident">heads</span> <span class="op">=</span> <span class="ident">get_heads</span>(<span class="ident">heads</span>);
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">heads</span>) <span class="op">=</span> <span class="ident">heads</span> {
-            <span class="kw">match</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">object_type</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>) {
-                <span class="prelude-val">Some</span>(<span class="ident">am::ObjType::Map</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">map_to_js_at</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">doc</span>, <span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">heads</span>.<span class="ident">as_slice</span>())),
-                <span class="prelude-val">Some</span>(<span class="ident">am::ObjType::List</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">list_to_js_at</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">doc</span>, <span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">heads</span>.<span class="ident">as_slice</span>())),
-                <span class="prelude-val">Some</span>(<span class="ident">am::ObjType::Text</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">text_at</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">heads</span>.<span class="ident">as_slice</span>())<span class="question-mark">?</span>.<span class="ident">into</span>()),
-                <span class="prelude-val">Some</span>(<span class="ident">am::ObjType::Table</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">map_to_js_at</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">doc</span>, <span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">heads</span>.<span class="ident">as_slice</span>())),
-                <span class="prelude-val">None</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">to_js_err</span>(<span class="macro">format!</span>(<span class="string">&quot;invalid obj {}&quot;</span>, <span class="ident">obj</span>))),
-            }
-        } <span class="kw">else</span> {
-            <span class="kw">match</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">object_type</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>) {
-                <span class="prelude-val">Some</span>(<span class="ident">am::ObjType::Map</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">map_to_js</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">doc</span>, <span class="kw-2">&amp;</span><span class="ident">obj</span>)),
-                <span class="prelude-val">Some</span>(<span class="ident">am::ObjType::List</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">list_to_js</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">doc</span>, <span class="kw-2">&amp;</span><span class="ident">obj</span>)),
-                <span class="prelude-val">Some</span>(<span class="ident">am::ObjType::Text</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">text</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>)<span class="question-mark">?</span>.<span class="ident">into</span>()),
-                <span class="prelude-val">Some</span>(<span class="ident">am::ObjType::Table</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">map_to_js</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">doc</span>, <span class="kw-2">&amp;</span><span class="ident">obj</span>)),
-                <span class="prelude-val">None</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">to_js_err</span>(<span class="macro">format!</span>(<span class="string">&quot;invalid obj {}&quot;</span>, <span class="ident">obj</span>))),
-            }
-        }
+        <span class="kw">let</span> <span class="ident">obj_type</span> <span class="op">=</span> <span class="self">self</span>
+            .<span class="ident">doc</span>
+            .<span class="ident">object_type</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>)
+            .<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">to_js_err</span>(<span class="macro">format!</span>(<span class="string">&quot;invalid obj {}&quot;</span>, <span class="ident">obj</span>)))<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">_patches</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">observer</span>().<span class="ident">take_patches</span>(); <span class="comment">// throw away patches</span>
+        <span class="self">self</span>.<span class="ident">export_object</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">obj_type</span>.<span class="ident">into</span>(), <span class="ident">heads</span>.<span class="ident">as_ref</span>(), <span class="kw-2">&amp;</span><span class="ident">meta</span>)
     }
 
     <span class="kw">fn</span> <span class="ident">import</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">id</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">ObjId</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
@@ -1700,11 +1548,11 @@
                         <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get</span>(<span class="ident">obj</span>, <span class="ident">am::Prop::Seq</span>(<span class="ident">prop</span>.<span class="ident">parse</span>().<span class="ident">unwrap</span>()))<span class="question-mark">?</span>
                     };
                     <span class="kw">match</span> <span class="ident">val</span> {
-                        <span class="prelude-val">Some</span>((<span class="ident">am::Value::Object</span>(<span class="ident">am::ObjType::Map</span>), <span class="ident">id</span>)) =&gt; {
+                        <span class="prelude-val">Some</span>((<span class="ident">am::Value::Object</span>(<span class="ident">ObjType::Map</span>), <span class="ident">id</span>)) =&gt; {
                             <span class="ident">is_map</span> <span class="op">=</span> <span class="bool-val">true</span>;
                             <span class="ident">obj</span> <span class="op">=</span> <span class="ident">id</span>;
                         }
-                        <span class="prelude-val">Some</span>((<span class="ident">am::Value::Object</span>(<span class="ident">am::ObjType::Table</span>), <span class="ident">id</span>)) =&gt; {
+                        <span class="prelude-val">Some</span>((<span class="ident">am::Value::Object</span>(<span class="ident">ObjType::Table</span>), <span class="ident">id</span>)) =&gt; {
                             <span class="ident">is_map</span> <span class="op">=</span> <span class="bool-val">true</span>;
                             <span class="ident">obj</span> <span class="op">=</span> <span class="ident">id</span>;
                         }
@@ -1809,16 +1657,14 @@
 <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">load</span>)]</span>
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">load</span>(<span class="ident">data</span>: <span class="ident">Uint8Array</span>, <span class="ident">actor</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Automerge</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">data</span> <span class="op">=</span> <span class="ident">data</span>.<span class="ident">to_vec</span>();
-    <span class="kw">let</span> <span class="ident">observer</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-    <span class="kw">let</span> <span class="ident">options</span> <span class="op">=</span> <span class="ident">ApplyOptions</span>::<span class="op">&lt;</span>()<span class="op">&gt;</span><span class="ident">::default</span>();
-    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">automerge</span> <span class="op">=</span> <span class="ident">am::AutoCommit::load_with</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>, <span class="ident">options</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
+    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">doc</span> <span class="op">=</span> <span class="ident">AutoCommit::load</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
     <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="ident">actor</span> {
         <span class="kw">let</span> <span class="ident">actor</span> <span class="op">=</span> <span class="ident">automerge::ActorId::from</span>(<span class="ident">hex::decode</span>(<span class="ident">s</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>.<span class="ident">to_vec</span>());
-        <span class="ident">automerge</span>.<span class="ident">set_actor</span>(<span class="ident">actor</span>);
+        <span class="ident">doc</span>.<span class="ident">set_actor</span>(<span class="ident">actor</span>);
     }
     <span class="prelude-val">Ok</span>(<span class="ident">Automerge</span> {
-        <span class="ident">doc</span>: <span class="ident">automerge</span>,
-        <span class="ident">observer</span>,
+        <span class="ident">doc</span>,
+        <span class="ident">external_types</span>: <span class="ident">HashMap::default</span>(),
     })
 }
 

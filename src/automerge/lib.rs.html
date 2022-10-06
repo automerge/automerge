@@ -112,8 +112,6 @@
 <span id="110">110</span>
 <span id="111">111</span>
 <span id="112">112</span>
-<span id="113">113</span>
-<span id="114">114</span>
 </pre><pre class="rust"><code><span class="attribute">#![<span class="ident">doc</span>(
     <span class="ident">html_logo_url</span> <span class="op">=</span> <span class="string">&quot;https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg&quot;</span>,
     <span class="ident">html_favicon_url</span> <span class="op">=</span> <span class="string">&quot;https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico&quot;</span>
@@ -191,7 +189,6 @@
 <span class="kw">mod</span> <span class="ident">op_observer</span>;
 <span class="kw">mod</span> <span class="ident">op_set</span>;
 <span class="kw">mod</span> <span class="ident">op_tree</span>;
-<span class="kw">mod</span> <span class="ident">options</span>;
 <span class="kw">mod</span> <span class="ident">parents</span>;
 <span class="kw">mod</span> <span class="ident">query</span>;
 <span class="kw">mod</span> <span class="ident">storage</span>;
@@ -204,7 +201,7 @@
 <span class="kw">mod</span> <span class="ident">visualisation</span>;
 
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::automerge::Automerge</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">autocommit::AutoCommit</span>;
+<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">autocommit</span>::{<span class="ident">AutoCommit</span>, <span class="ident">AutoCommitWithObs</span>};
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">autoserde::AutoSerde</span>;
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">change</span>::{<span class="ident">Change</span>, <span class="ident">LoadError</span> <span class="kw">as</span> <span class="ident">LoadChangeError</span>};
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">error::AutomergeError</span>;
@@ -221,7 +218,6 @@
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">op_observer::OpObserver</span>;
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">op_observer::Patch</span>;
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">op_observer::VecOpObserver</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">options::ApplyOptions</span>;
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">parents::Parents</span>;
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">types</span>::{<span class="ident">ActorId</span>, <span class="ident">ChangeHash</span>, <span class="ident">ObjType</span>, <span class="ident">OpType</span>, <span class="ident">Prop</span>};
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">value</span>::{<span class="ident">ScalarValue</span>, <span class="ident">Value</span>};

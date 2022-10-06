@@ -285,7 +285,6 @@
 <span id="283">283</span>
 <span id="284">284</span>
 <span id="285">285</span>
-<span id="286">286</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::op_tree</span>::{<span class="ident">OpSetMetadata</span>, <span class="ident">OpTreeNode</span>};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::query</span>::{<span class="ident">binary_search_by</span>, <span class="ident">QueryResult</span>, <span class="ident">TreeQuery</span>};
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::types</span>::{<span class="ident">Key</span>, <span class="ident">Op</span>, <span class="ident">HEAD</span>};
@@ -296,8 +295,6 @@
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">SeekOpWithPatch</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
     <span class="ident">op</span>: <span class="ident">Op</span>,
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">pos</span>: <span class="ident">usize</span>,
-    <span class="doccomment">/// A position counter for after we find the insert position to record conflicts.</span>
-    <span class="ident">later_pos</span>: <span class="ident">usize</span>,
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">succ</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
     <span class="ident">found</span>: <span class="ident">bool</span>,
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">seen</span>: <span class="ident">usize</span>,
@@ -314,7 +311,6 @@
             <span class="ident">op</span>: <span class="ident">op</span>.<span class="ident">clone</span>(),
             <span class="ident">succ</span>: <span class="macro">vec!</span>[],
             <span class="ident">pos</span>: <span class="number">0</span>,
-            <span class="ident">later_pos</span>: <span class="number">0</span>,
             <span class="ident">found</span>: <span class="bool-val">false</span>,
             <span class="ident">seen</span>: <span class="number">0</span>,
             <span class="ident">last_seen</span>: <span class="prelude-val">None</span>,
@@ -464,6 +460,10 @@
                             <span class="self">self</span>.<span class="ident">values</span>.<span class="ident">push</span>(<span class="ident">e</span>);
                         }
                         <span class="self">self</span>.<span class="ident">succ</span>.<span class="ident">push</span>(<span class="self">self</span>.<span class="ident">pos</span>);
+
+                        <span class="kw">if</span> <span class="ident">e</span>.<span class="ident">visible</span>() {
+                            <span class="self">self</span>.<span class="ident">had_value_before</span> <span class="op">=</span> <span class="bool-val">true</span>;
+                        }
                     } <span class="kw">else</span> <span class="kw">if</span> <span class="ident">e</span>.<span class="ident">visible</span>() {
                         <span class="self">self</span>.<span class="ident">values</span>.<span class="ident">push</span>(<span class="ident">e</span>);
                     }
@@ -472,7 +472,6 @@
                     <span class="comment">// we reach an op with an opId greater than that of the new operation</span>
                     <span class="kw">if</span> <span class="ident">m</span>.<span class="ident">lamport_cmp</span>(<span class="ident">e</span>.<span class="ident">id</span>, <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">id</span>) <span class="op">==</span> <span class="ident">Ordering::Greater</span> {
                         <span class="self">self</span>.<span class="ident">found</span> <span class="op">=</span> <span class="bool-val">true</span>;
-                        <span class="self">self</span>.<span class="ident">later_pos</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">pos</span> <span class="op">+</span> <span class="number">1</span>;
                         <span class="kw">return</span> <span class="ident">QueryResult::Next</span>;
                     }
 
@@ -490,7 +489,6 @@
                     <span class="kw">if</span> <span class="ident">e</span>.<span class="ident">visible</span>() {
                         <span class="self">self</span>.<span class="ident">values</span>.<span class="ident">push</span>(<span class="ident">e</span>);
                     }
-                    <span class="self">self</span>.<span class="ident">later_pos</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
                 }
                 <span class="ident">QueryResult::Next</span>
             }

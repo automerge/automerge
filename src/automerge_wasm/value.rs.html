@@ -40,44 +40,266 @@
 <span id="38">38</span>
 <span id="39">39</span>
 <span id="40">40</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::borrow::Cow</span>;
-
-<span class="kw">use</span> <span class="ident">automerge</span> <span class="kw">as</span> <span class="ident">am</span>;
-<span class="kw">use</span> <span class="ident">js_sys::Uint8Array</span>;
+<span id="41">41</span>
+<span id="42">42</span>
+<span id="43">43</span>
+<span id="44">44</span>
+<span id="45">45</span>
+<span id="46">46</span>
+<span id="47">47</span>
+<span id="48">48</span>
+<span id="49">49</span>
+<span id="50">50</span>
+<span id="51">51</span>
+<span id="52">52</span>
+<span id="53">53</span>
+<span id="54">54</span>
+<span id="55">55</span>
+<span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
+<span id="60">60</span>
+<span id="61">61</span>
+<span id="62">62</span>
+<span id="63">63</span>
+<span id="64">64</span>
+<span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
+<span id="68">68</span>
+<span id="69">69</span>
+<span id="70">70</span>
+<span id="71">71</span>
+<span id="72">72</span>
+<span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::to_js_err</span>;
+<span class="kw">use</span> <span class="ident">automerge</span>::{<span class="ident">ObjType</span>, <span class="ident">ScalarValue</span>, <span class="ident">Value</span>};
 <span class="kw">use</span> <span class="ident">wasm_bindgen::prelude</span>::<span class="kw-2">*</span>;
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">ScalarValue</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">am::ScalarValue</span><span class="op">&gt;</span>);
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">Hash</span>, <span class="ident">Eq</span>, <span class="ident">PartialEq</span>)]</span>
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">Datatype</span> {
+    <span class="ident">Map</span>,
+    <span class="ident">Table</span>,
+    <span class="ident">List</span>,
+    <span class="ident">Text</span>,
+    <span class="ident">Bytes</span>,
+    <span class="ident">Str</span>,
+    <span class="ident">Int</span>,
+    <span class="ident">Uint</span>,
+    <span class="ident">F64</span>,
+    <span class="ident">Counter</span>,
+    <span class="ident">Timestamp</span>,
+    <span class="ident">Boolean</span>,
+    <span class="ident">Null</span>,
+    <span class="ident">Unknown</span>(<span class="ident">u8</span>),
+}
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">ScalarValue</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">JsValue</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">val</span>: <span class="ident">ScalarValue</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
-        <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="kw-2">*</span><span class="ident">val</span>.<span class="number">0</span> {
-            <span class="ident">am::ScalarValue::Bytes</span>(<span class="ident">v</span>) =&gt; <span class="ident">Uint8Array::from</span>(<span class="ident">v</span>.<span class="ident">as_slice</span>()).<span class="ident">into</span>(),
-            <span class="ident">am::ScalarValue::Str</span>(<span class="ident">v</span>) =&gt; <span class="ident">v</span>.<span class="ident">to_string</span>().<span class="ident">into</span>(),
-            <span class="ident">am::ScalarValue::Int</span>(<span class="ident">v</span>) =&gt; (<span class="kw-2">*</span><span class="ident">v</span> <span class="kw">as</span> <span class="ident">f64</span>).<span class="ident">into</span>(),
-            <span class="ident">am::ScalarValue::Uint</span>(<span class="ident">v</span>) =&gt; (<span class="kw-2">*</span><span class="ident">v</span> <span class="kw">as</span> <span class="ident">f64</span>).<span class="ident">into</span>(),
-            <span class="ident">am::ScalarValue::F64</span>(<span class="ident">v</span>) =&gt; (<span class="kw-2">*</span><span class="ident">v</span>).<span class="ident">into</span>(),
-            <span class="ident">am::ScalarValue::Counter</span>(<span class="ident">v</span>) =&gt; (<span class="ident">f64::from</span>(<span class="ident">v</span>)).<span class="ident">into</span>(),
-            <span class="ident">am::ScalarValue::Timestamp</span>(<span class="ident">v</span>) =&gt; <span class="ident">js_sys::Date::new</span>(<span class="kw-2">&amp;</span>(<span class="kw-2">*</span><span class="ident">v</span> <span class="kw">as</span> <span class="ident">f64</span>).<span class="ident">into</span>()).<span class="ident">into</span>(),
-            <span class="ident">am::ScalarValue::Boolean</span>(<span class="ident">v</span>) =&gt; (<span class="kw-2">*</span><span class="ident">v</span>).<span class="ident">into</span>(),
-            <span class="ident">am::ScalarValue::Null</span> =&gt; <span class="ident">JsValue::null</span>(),
-            <span class="ident">am::ScalarValue::Unknown</span> { <span class="ident">bytes</span>, .. } =&gt; <span class="ident">Uint8Array::from</span>(<span class="ident">bytes</span>.<span class="ident">as_slice</span>()).<span class="ident">into</span>(),
+<span class="kw">impl</span> <span class="ident">Datatype</span> {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">is_sequence</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
+        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="ident"><span class="self">Self</span>::List</span> <span class="op">|</span> <span class="ident"><span class="self">Self</span>::Text</span>)
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">is_scalar</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
+        <span class="op">!</span><span class="macro">matches!</span>(<span class="self">self</span>, <span class="ident"><span class="self">Self</span>::Map</span> <span class="op">|</span> <span class="ident"><span class="self">Self</span>::Table</span> <span class="op">|</span> <span class="ident"><span class="self">Self</span>::List</span> <span class="op">|</span> <span class="ident"><span class="self">Self</span>::Text</span>)
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">ObjType</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Datatype</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">o</span>: <span class="kw-2">&amp;</span><span class="ident">ObjType</span>) -&gt; <span class="self">Self</span> {
+        (<span class="kw-2">*</span><span class="ident">o</span>).<span class="ident">into</span>()
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">ObjType</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Datatype</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">o</span>: <span class="ident">ObjType</span>) -&gt; <span class="self">Self</span> {
+        <span class="kw">match</span> <span class="ident">o</span> {
+            <span class="ident">ObjType::Map</span> =&gt; <span class="ident"><span class="self">Self</span>::Map</span>,
+            <span class="ident">ObjType::List</span> =&gt; <span class="ident"><span class="self">Self</span>::List</span>,
+            <span class="ident">ObjType::Table</span> =&gt; <span class="ident"><span class="self">Self</span>::Table</span>,
+            <span class="ident">ObjType::Text</span> =&gt; <span class="ident"><span class="self">Self</span>::Text</span>,
         }
     }
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">datatype</span>(<span class="ident">s</span>: <span class="kw-2">&amp;</span><span class="ident">am::ScalarValue</span>) -&gt; <span class="ident">String</span> {
-    <span class="kw">match</span> <span class="ident">s</span> {
-        <span class="ident">am::ScalarValue::Bytes</span>(<span class="kw">_</span>) =&gt; <span class="string">&quot;bytes&quot;</span>.<span class="ident">into</span>(),
-        <span class="ident">am::ScalarValue::Str</span>(<span class="kw">_</span>) =&gt; <span class="string">&quot;str&quot;</span>.<span class="ident">into</span>(),
-        <span class="ident">am::ScalarValue::Int</span>(<span class="kw">_</span>) =&gt; <span class="string">&quot;int&quot;</span>.<span class="ident">into</span>(),
-        <span class="ident">am::ScalarValue::Uint</span>(<span class="kw">_</span>) =&gt; <span class="string">&quot;uint&quot;</span>.<span class="ident">into</span>(),
-        <span class="ident">am::ScalarValue::F64</span>(<span class="kw">_</span>) =&gt; <span class="string">&quot;f64&quot;</span>.<span class="ident">into</span>(),
-        <span class="ident">am::ScalarValue::Counter</span>(<span class="kw">_</span>) =&gt; <span class="string">&quot;counter&quot;</span>.<span class="ident">into</span>(),
-        <span class="ident">am::ScalarValue::Timestamp</span>(<span class="kw">_</span>) =&gt; <span class="string">&quot;timestamp&quot;</span>.<span class="ident">into</span>(),
-        <span class="ident">am::ScalarValue::Boolean</span>(<span class="kw">_</span>) =&gt; <span class="string">&quot;boolean&quot;</span>.<span class="ident">into</span>(),
-        <span class="ident">am::ScalarValue::Null</span> =&gt; <span class="string">&quot;null&quot;</span>.<span class="ident">into</span>(),
-        <span class="ident">am::ScalarValue::Unknown</span> { <span class="ident">type_code</span>, .. } =&gt; <span class="macro">format!</span>(<span class="string">&quot;unknown{}&quot;</span>, <span class="ident">type_code</span>),
+<span class="kw">impl</span> <span class="ident">std::fmt::Display</span> <span class="kw">for</span> <span class="ident">Datatype</span> {
+    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">std::fmt::Error</span><span class="op">&gt;</span> {
+        <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="ident">String::from</span>(<span class="self">self</span>.<span class="ident">clone</span>()))
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">ScalarValue</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Datatype</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">s</span>: <span class="kw-2">&amp;</span><span class="ident">ScalarValue</span>) -&gt; <span class="self">Self</span> {
+        <span class="kw">match</span> <span class="ident">s</span> {
+            <span class="ident">ScalarValue::Bytes</span>(<span class="kw">_</span>) =&gt; <span class="ident"><span class="self">Self</span>::Bytes</span>,
+            <span class="ident">ScalarValue::Str</span>(<span class="kw">_</span>) =&gt; <span class="ident"><span class="self">Self</span>::Str</span>,
+            <span class="ident">ScalarValue::Int</span>(<span class="kw">_</span>) =&gt; <span class="ident"><span class="self">Self</span>::Int</span>,
+            <span class="ident">ScalarValue::Uint</span>(<span class="kw">_</span>) =&gt; <span class="ident"><span class="self">Self</span>::Uint</span>,
+            <span class="ident">ScalarValue::F64</span>(<span class="kw">_</span>) =&gt; <span class="ident"><span class="self">Self</span>::F64</span>,
+            <span class="ident">ScalarValue::Counter</span>(<span class="kw">_</span>) =&gt; <span class="ident"><span class="self">Self</span>::Counter</span>,
+            <span class="ident">ScalarValue::Timestamp</span>(<span class="kw">_</span>) =&gt; <span class="ident"><span class="self">Self</span>::Timestamp</span>,
+            <span class="ident">ScalarValue::Boolean</span>(<span class="kw">_</span>) =&gt; <span class="ident"><span class="self">Self</span>::Boolean</span>,
+            <span class="ident">ScalarValue::Null</span> =&gt; <span class="ident"><span class="self">Self</span>::Null</span>,
+            <span class="ident">ScalarValue::Unknown</span> { <span class="ident">type_code</span>, .. } =&gt; <span class="ident"><span class="self">Self</span>::Unknown</span>(<span class="kw-2">*</span><span class="ident">type_code</span>),
+        }
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Datatype</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">v</span>: <span class="kw-2">&amp;</span><span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
+        <span class="kw">match</span> <span class="ident">v</span> {
+            <span class="ident">Value::Object</span>(<span class="ident">o</span>) =&gt; <span class="ident">o</span>.<span class="ident">into</span>(),
+            <span class="ident">Value::Scalar</span>(<span class="ident">s</span>) =&gt; <span class="ident">s</span>.<span class="ident">as_ref</span>().<span class="ident">into</span>(),
+            <span class="comment">/*
+                            ScalarValue::Bytes(_) =&gt; Self::Bytes,
+                            ScalarValue::Str(_) =&gt; Self::Str,
+                            ScalarValue::Int(_) =&gt; Self::Int,
+                            ScalarValue::Uint(_) =&gt; Self::Uint,
+                            ScalarValue::F64(_) =&gt; Self::F64,
+                            ScalarValue::Counter(_) =&gt; Self::Counter,
+                            ScalarValue::Timestamp(_) =&gt; Self::Timestamp,
+                            ScalarValue::Boolean(_) =&gt; Self::Boolean,
+                            ScalarValue::Null =&gt; Self::Null,
+                            ScalarValue::Unknown { type_code, .. } =&gt; Self::Unknown(*type_code),
+            */</span>
+        }
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">Datatype</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">String</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">d</span>: <span class="ident">Datatype</span>) -&gt; <span class="self">Self</span> {
+        <span class="kw">match</span> <span class="ident">d</span> {
+            <span class="ident">Datatype::Map</span> =&gt; <span class="string">&quot;map&quot;</span>.<span class="ident">into</span>(),
+            <span class="ident">Datatype::Table</span> =&gt; <span class="string">&quot;table&quot;</span>.<span class="ident">into</span>(),
+            <span class="ident">Datatype::List</span> =&gt; <span class="string">&quot;list&quot;</span>.<span class="ident">into</span>(),
+            <span class="ident">Datatype::Text</span> =&gt; <span class="string">&quot;text&quot;</span>.<span class="ident">into</span>(),
+            <span class="ident">Datatype::Bytes</span> =&gt; <span class="string">&quot;bytes&quot;</span>.<span class="ident">into</span>(),
+            <span class="ident">Datatype::Str</span> =&gt; <span class="string">&quot;str&quot;</span>.<span class="ident">into</span>(),
+            <span class="ident">Datatype::Int</span> =&gt; <span class="string">&quot;int&quot;</span>.<span class="ident">into</span>(),
+            <span class="ident">Datatype::Uint</span> =&gt; <span class="string">&quot;uint&quot;</span>.<span class="ident">into</span>(),
+            <span class="ident">Datatype::F64</span> =&gt; <span class="string">&quot;f64&quot;</span>.<span class="ident">into</span>(),
+            <span class="ident">Datatype::Counter</span> =&gt; <span class="string">&quot;counter&quot;</span>.<span class="ident">into</span>(),
+            <span class="ident">Datatype::Timestamp</span> =&gt; <span class="string">&quot;timestamp&quot;</span>.<span class="ident">into</span>(),
+            <span class="ident">Datatype::Boolean</span> =&gt; <span class="string">&quot;boolean&quot;</span>.<span class="ident">into</span>(),
+            <span class="ident">Datatype::Null</span> =&gt; <span class="string">&quot;null&quot;</span>.<span class="ident">into</span>(),
+            <span class="ident">Datatype::Unknown</span>(<span class="ident">type_code</span>) =&gt; <span class="macro">format!</span>(<span class="string">&quot;unknown{}&quot;</span>, <span class="ident">type_code</span>),
+        }
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span><span class="ident">JsValue</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Datatype</span> {
+    <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">JsValue</span>;
+
+    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">datatype</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
+        <span class="kw">let</span> <span class="ident">datatype</span> <span class="op">=</span> <span class="ident">datatype</span>
+            .<span class="ident">as_string</span>()
+            .<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">to_js_err</span>(<span class="string">&quot;datatype is not a string&quot;</span>))<span class="question-mark">?</span>;
+        <span class="kw">match</span> <span class="ident">datatype</span>.<span class="ident">as_str</span>() {
+            <span class="string">&quot;map&quot;</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Datatype::Map</span>),
+            <span class="string">&quot;table&quot;</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Datatype::Table</span>),
+            <span class="string">&quot;list&quot;</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Datatype::List</span>),
+            <span class="string">&quot;text&quot;</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Datatype::Text</span>),
+            <span class="string">&quot;bytes&quot;</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Datatype::Bytes</span>),
+            <span class="string">&quot;str&quot;</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Datatype::Str</span>),
+            <span class="string">&quot;int&quot;</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Datatype::Int</span>),
+            <span class="string">&quot;uint&quot;</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Datatype::Uint</span>),
+            <span class="string">&quot;f64&quot;</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Datatype::F64</span>),
+            <span class="string">&quot;counter&quot;</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Datatype::Counter</span>),
+            <span class="string">&quot;timestamp&quot;</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Datatype::Timestamp</span>),
+            <span class="string">&quot;boolean&quot;</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Datatype::Boolean</span>),
+            <span class="string">&quot;null&quot;</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">Datatype::Null</span>),
+            <span class="ident">d</span> =&gt; {
+                <span class="kw">if</span> <span class="ident">d</span>.<span class="ident">starts_with</span>(<span class="string">&quot;unknown&quot;</span>) {
+                    <span class="macro">todo!</span>() <span class="comment">// handle &quot;unknown{}&quot;,</span>
+                } <span class="kw">else</span> {
+                    <span class="prelude-val">Err</span>(<span class="ident">to_js_err</span>(<span class="macro">format!</span>(<span class="string">&quot;unknown datatype {}&quot;</span>, <span class="ident">d</span>)))
+                }
+            }
+        }
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">Datatype</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">JsValue</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">d</span>: <span class="ident">Datatype</span>) -&gt; <span class="self">Self</span> {
+        <span class="ident">String::from</span>(<span class="ident">d</span>).<span class="ident">into</span>()
     }
 }
 </code></pre></div>

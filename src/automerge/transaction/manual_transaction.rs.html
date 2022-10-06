@@ -300,6 +300,18 @@
 <span id="298">298</span>
 <span id="299">299</span>
 <span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::ops::RangeBounds</span>;
 
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::exid::ExId</span>;
@@ -322,14 +334,15 @@
 <span class="doccomment">/// intermediate state.</span>
 <span class="doccomment">/// This is consistent with `?` error handling.</span>
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Transaction</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
+<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Transaction</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Obs</span>: <span class="ident">OpObserver</span><span class="op">&gt;</span> {
     <span class="comment">// this is an option so that we can take it during commit and rollback to prevent it being</span>
     <span class="comment">// rolled back during drop.</span>
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">inner</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">TransactionInner</span><span class="op">&gt;</span>,
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">doc</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="kw-2">mut</span> <span class="ident">Automerge</span>,
+    <span class="kw">pub</span> <span class="ident">op_observer</span>: <span class="ident">Obs</span>,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Transaction</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
+<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Obs</span>: <span class="ident">OpObserver</span><span class="op">&gt;</span> <span class="ident">Transaction</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Obs</span><span class="op">&gt;</span> {
     <span class="doccomment">/// Get the heads of the document before this transaction was started.</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_heads</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_heads</span>()
@@ -338,10 +351,7 @@
     <span class="doccomment">/// Commit the operations performed in this transaction, returning the hashes corresponding to</span>
     <span class="doccomment">/// the new heads.</span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">commit</span>(<span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="ident">ChangeHash</span> {
-        <span class="self">self</span>.<span class="ident">inner</span>
-            .<span class="ident">take</span>()
-            .<span class="ident">unwrap</span>()
-            .<span class="ident">commit</span>::<span class="op">&lt;</span>()<span class="op">&gt;</span>(<span class="self">self</span>.<span class="ident">doc</span>, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>)
+        <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">take</span>().<span class="ident">unwrap</span>().<span class="ident">commit</span>(<span class="self">self</span>.<span class="ident">doc</span>, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>)
     }
 
     <span class="doccomment">/// Commit the operations in this transaction with some options.</span>
@@ -358,15 +368,13 @@
     <span class="doccomment">/// tx.put_object(ROOT, &quot;todos&quot;, ObjType::List).unwrap();</span>
     <span class="doccomment">/// let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as</span>
     <span class="doccomment">/// i64;</span>
-    <span class="doccomment">/// tx.commit_with::&lt;()&gt;(CommitOptions::default().with_message(&quot;Create todos list&quot;).with_time(now));</span>
+    <span class="doccomment">/// tx.commit_with(CommitOptions::default().with_message(&quot;Create todos list&quot;).with_time(now));</span>
     <span class="doccomment">/// ```</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">commit_with</span><span class="op">&lt;</span><span class="ident">Obs</span>: <span class="ident">OpObserver</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">options</span>: <span class="ident">CommitOptions</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">Obs</span><span class="op">&gt;</span>) -&gt; <span class="ident">ChangeHash</span> {
-        <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">take</span>().<span class="ident">unwrap</span>().<span class="ident">commit</span>(
-            <span class="self">self</span>.<span class="ident">doc</span>,
-            <span class="ident">options</span>.<span class="ident">message</span>,
-            <span class="ident">options</span>.<span class="ident">time</span>,
-            <span class="ident">options</span>.<span class="ident">op_observer</span>,
-        )
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">commit_with</span>(<span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">options</span>: <span class="ident">CommitOptions</span>) -&gt; <span class="ident">ChangeHash</span> {
+        <span class="self">self</span>.<span class="ident">inner</span>
+            .<span class="ident">take</span>()
+            .<span class="ident">unwrap</span>()
+            .<span class="ident">commit</span>(<span class="self">self</span>.<span class="ident">doc</span>, <span class="ident">options</span>.<span class="ident">message</span>, <span class="ident">options</span>.<span class="ident">time</span>)
     }
 
     <span class="doccomment">/// Undo the operations added in this transaction, returning the number of cancelled</span>
@@ -376,7 +384,7 @@
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Transactable</span> <span class="kw">for</span> <span class="ident">Transaction</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
+<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Obs</span>: <span class="ident">OpObserver</span><span class="op">&gt;</span> <span class="ident">Transactable</span> <span class="kw">for</span> <span class="ident">Transaction</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Obs</span><span class="op">&gt;</span> {
     <span class="doccomment">/// Get the number of pending operations in this transaction.</span>
     <span class="kw">fn</span> <span class="ident">pending_ops</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
         <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">as_ref</span>().<span class="ident">unwrap</span>().<span class="ident">pending_ops</span>()
@@ -399,7 +407,7 @@
         <span class="self">self</span>.<span class="ident">inner</span>
             .<span class="ident">as_mut</span>()
             .<span class="ident">unwrap</span>()
-            .<span class="ident">put</span>(<span class="self">self</span>.<span class="ident">doc</span>, <span class="ident">obj</span>.<span class="ident">as_ref</span>(), <span class="ident">prop</span>, <span class="ident">value</span>)
+            .<span class="ident">put</span>(<span class="self">self</span>.<span class="ident">doc</span>, <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">op_observer</span>, <span class="ident">obj</span>.<span class="ident">as_ref</span>(), <span class="ident">prop</span>, <span class="ident">value</span>)
     }
 
     <span class="kw">fn</span> <span class="ident">put_object</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">P</span>: <span class="ident">Into</span><span class="op">&lt;</span><span class="ident">Prop</span><span class="op">&gt;</span><span class="op">&gt;</span>(
@@ -408,10 +416,13 @@
         <span class="ident">prop</span>: <span class="ident">P</span>,
         <span class="ident">value</span>: <span class="ident">ObjType</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">ExId</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">inner</span>
-            .<span class="ident">as_mut</span>()
-            .<span class="ident">unwrap</span>()
-            .<span class="ident">put_object</span>(<span class="self">self</span>.<span class="ident">doc</span>, <span class="ident">obj</span>.<span class="ident">as_ref</span>(), <span class="ident">prop</span>, <span class="ident">value</span>)
+        <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">as_mut</span>().<span class="ident">unwrap</span>().<span class="ident">put_object</span>(
+            <span class="self">self</span>.<span class="ident">doc</span>,
+            <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">op_observer</span>,
+            <span class="ident">obj</span>.<span class="ident">as_ref</span>(),
+            <span class="ident">prop</span>,
+            <span class="ident">value</span>,
+        )
     }
 
     <span class="kw">fn</span> <span class="ident">insert</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">V</span>: <span class="ident">Into</span><span class="op">&lt;</span><span class="ident">ScalarValue</span><span class="op">&gt;</span><span class="op">&gt;</span>(
@@ -420,10 +431,13 @@
         <span class="ident">index</span>: <span class="ident">usize</span>,
         <span class="ident">value</span>: <span class="ident">V</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">inner</span>
-            .<span class="ident">as_mut</span>()
-            .<span class="ident">unwrap</span>()
-            .<span class="ident">insert</span>(<span class="self">self</span>.<span class="ident">doc</span>, <span class="ident">obj</span>.<span class="ident">as_ref</span>(), <span class="ident">index</span>, <span class="ident">value</span>)
+        <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">as_mut</span>().<span class="ident">unwrap</span>().<span class="ident">insert</span>(
+            <span class="self">self</span>.<span class="ident">doc</span>,
+            <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">op_observer</span>,
+            <span class="ident">obj</span>.<span class="ident">as_ref</span>(),
+            <span class="ident">index</span>,
+            <span class="ident">value</span>,
+        )
     }
 
     <span class="kw">fn</span> <span class="ident">insert_object</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(
@@ -432,10 +446,13 @@
         <span class="ident">index</span>: <span class="ident">usize</span>,
         <span class="ident">value</span>: <span class="ident">ObjType</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">ExId</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">inner</span>
-            .<span class="ident">as_mut</span>()
-            .<span class="ident">unwrap</span>()
-            .<span class="ident">insert_object</span>(<span class="self">self</span>.<span class="ident">doc</span>, <span class="ident">obj</span>.<span class="ident">as_ref</span>(), <span class="ident">index</span>, <span class="ident">value</span>)
+        <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">as_mut</span>().<span class="ident">unwrap</span>().<span class="ident">insert_object</span>(
+            <span class="self">self</span>.<span class="ident">doc</span>,
+            <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">op_observer</span>,
+            <span class="ident">obj</span>.<span class="ident">as_ref</span>(),
+            <span class="ident">index</span>,
+            <span class="ident">value</span>,
+        )
     }
 
     <span class="kw">fn</span> <span class="ident">increment</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">P</span>: <span class="ident">Into</span><span class="op">&lt;</span><span class="ident">Prop</span><span class="op">&gt;</span><span class="op">&gt;</span>(
@@ -444,10 +461,13 @@
         <span class="ident">prop</span>: <span class="ident">P</span>,
         <span class="ident">value</span>: <span class="ident">i64</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">inner</span>
-            .<span class="ident">as_mut</span>()
-            .<span class="ident">unwrap</span>()
-            .<span class="ident">increment</span>(<span class="self">self</span>.<span class="ident">doc</span>, <span class="ident">obj</span>.<span class="ident">as_ref</span>(), <span class="ident">prop</span>, <span class="ident">value</span>)
+        <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">as_mut</span>().<span class="ident">unwrap</span>().<span class="ident">increment</span>(
+            <span class="self">self</span>.<span class="ident">doc</span>,
+            <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">op_observer</span>,
+            <span class="ident">obj</span>.<span class="ident">as_ref</span>(),
+            <span class="ident">prop</span>,
+            <span class="ident">value</span>,
+        )
     }
 
     <span class="kw">fn</span> <span class="ident">delete</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">P</span>: <span class="ident">Into</span><span class="op">&lt;</span><span class="ident">Prop</span><span class="op">&gt;</span><span class="op">&gt;</span>(
@@ -458,7 +478,7 @@
         <span class="self">self</span>.<span class="ident">inner</span>
             .<span class="ident">as_mut</span>()
             .<span class="ident">unwrap</span>()
-            .<span class="ident">delete</span>(<span class="self">self</span>.<span class="ident">doc</span>, <span class="ident">obj</span>.<span class="ident">as_ref</span>(), <span class="ident">prop</span>)
+            .<span class="ident">delete</span>(<span class="self">self</span>.<span class="ident">doc</span>, <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">op_observer</span>, <span class="ident">obj</span>.<span class="ident">as_ref</span>(), <span class="ident">prop</span>)
     }
 
     <span class="doccomment">/// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert</span>
@@ -470,10 +490,14 @@
         <span class="ident">del</span>: <span class="ident">usize</span>,
         <span class="ident">vals</span>: <span class="ident">V</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">inner</span>
-            .<span class="ident">as_mut</span>()
-            .<span class="ident">unwrap</span>()
-            .<span class="ident">splice</span>(<span class="self">self</span>.<span class="ident">doc</span>, <span class="ident">obj</span>.<span class="ident">as_ref</span>(), <span class="ident">pos</span>, <span class="ident">del</span>, <span class="ident">vals</span>)
+        <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">as_mut</span>().<span class="ident">unwrap</span>().<span class="ident">splice</span>(
+            <span class="self">self</span>.<span class="ident">doc</span>,
+            <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">op_observer</span>,
+            <span class="ident">obj</span>.<span class="ident">as_ref</span>(),
+            <span class="ident">pos</span>,
+            <span class="ident">del</span>,
+            <span class="ident">vals</span>,
+        )
     }
 
     <span class="kw">fn</span> <span class="ident">keys</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>) -&gt; <span class="ident">Keys</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span><span class="op">&gt;</span> {
@@ -593,7 +617,7 @@
 <span class="comment">// intermediate state.</span>
 <span class="comment">// This defaults to rolling back the transaction to be compatible with `?` error returning before</span>
 <span class="comment">// reaching a call to `commit`.</span>
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Drop</span> <span class="kw">for</span> <span class="ident">Transaction</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
+<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Obs</span>: <span class="ident">OpObserver</span><span class="op">&gt;</span> <span class="ident">Drop</span> <span class="kw">for</span> <span class="ident">Transaction</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Obs</span><span class="op">&gt;</span> {
     <span class="kw">fn</span> <span class="ident">drop</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">txn</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">take</span>() {
             <span class="ident">txn</span>.<span class="ident">rollback</span>(<span class="self">self</span>.<span class="ident">doc</span>);

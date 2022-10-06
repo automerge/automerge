@@ -536,7 +536,7 @@
 
 <span class="kw">use</span> <span class="kw">crate</span>::{
     <span class="ident">storage</span>::{<span class="ident">parse</span>, <span class="ident">Change</span> <span class="kw">as</span> <span class="ident">StoredChange</span>, <span class="ident">ReadChangeOpError</span>},
-    <span class="ident">ApplyOptions</span>, <span class="ident">Automerge</span>, <span class="ident">AutomergeError</span>, <span class="ident">Change</span>, <span class="ident">ChangeHash</span>, <span class="ident">OpObserver</span>,
+    <span class="ident">Automerge</span>, <span class="ident">AutomergeError</span>, <span class="ident">Change</span>, <span class="ident">ChangeHash</span>, <span class="ident">OpObserver</span>,
 };
 
 <span class="kw">mod</span> <span class="ident">bloom</span>;
@@ -637,14 +637,14 @@
         <span class="ident">sync_state</span>: <span class="kw-2">&amp;mut</span> <span class="ident">State</span>,
         <span class="ident">message</span>: <span class="ident">Message</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">receive_sync_message_with</span>::<span class="op">&lt;</span>()<span class="op">&gt;</span>(<span class="ident">sync_state</span>, <span class="ident">message</span>, <span class="ident">ApplyOptions::default</span>())
+        <span class="self">self</span>.<span class="ident">receive_sync_message_with</span>::<span class="op">&lt;</span>()<span class="op">&gt;</span>(<span class="ident">sync_state</span>, <span class="ident">message</span>, <span class="prelude-val">None</span>)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">receive_sync_message_with</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Obs</span>: <span class="ident">OpObserver</span><span class="op">&gt;</span>(
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">receive_sync_message_with</span><span class="op">&lt;</span><span class="ident">Obs</span>: <span class="ident">OpObserver</span><span class="op">&gt;</span>(
         <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
         <span class="ident">sync_state</span>: <span class="kw-2">&amp;mut</span> <span class="ident">State</span>,
         <span class="ident">message</span>: <span class="ident">Message</span>,
-        <span class="ident">options</span>: <span class="ident">ApplyOptions</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Obs</span><span class="op">&gt;</span>,
+        <span class="ident">op_observer</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;mut</span> <span class="ident">Obs</span><span class="op">&gt;</span>,
     ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="ident">before_heads</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">get_heads</span>();
 
@@ -657,7 +657,7 @@
 
         <span class="kw">let</span> <span class="ident">changes_is_empty</span> <span class="op">=</span> <span class="ident">message_changes</span>.<span class="ident">is_empty</span>();
         <span class="kw">if</span> <span class="op">!</span><span class="ident">changes_is_empty</span> {
-            <span class="self">self</span>.<span class="ident">apply_changes_with</span>(<span class="ident">message_changes</span>, <span class="ident">options</span>)<span class="question-mark">?</span>;
+            <span class="self">self</span>.<span class="ident">apply_changes_with</span>(<span class="ident">message_changes</span>, <span class="ident">op_observer</span>)<span class="question-mark">?</span>;
             <span class="ident">sync_state</span>.<span class="ident">shared_heads</span> <span class="op">=</span> <span class="ident">advance_heads</span>(
                 <span class="kw-2">&amp;</span><span class="ident">before_heads</span>.<span class="ident">iter</span>().<span class="ident">collect</span>(),
                 <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">get_heads</span>().<span class="ident">into_iter</span>().<span class="ident">collect</span>(),
