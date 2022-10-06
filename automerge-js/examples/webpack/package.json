@@ -10,7 +10,7 @@
   },
   "author": "",
   "dependencies": {
-    "@automerge/automerge": "2.0.0-alpha.3"
+    "@automerge/automerge": "2.0.0-alpha.4"
   },
   "devDependencies": {
     "serve": "^13.0.2",
