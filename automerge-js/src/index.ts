@@ -7,18 +7,20 @@ import { STATE, HEADS, TRACE, OBJECT_ID, READ_ONLY, FROZEN  } from "./constants"
 import { AutomergeValue, Text, Counter } from "./types"
 export { AutomergeValue, Text, Counter, Int, Uint, Float64 } from "./types"
 
-import { type API } from "@automerge/automerge-wasm";
+import { type API, type Patch } from "@automerge/automerge-wasm";
 import { ApiHandler, UseApi } from "./low_level"
 
 import { Actor as ActorId, Prop, ObjID, Change, DecodedChange, Heads, Automerge, MaterializeValue } from "@automerge/automerge-wasm"
 import { JsSyncState as SyncState, SyncMessage, DecodedSyncMessage } from "@automerge/automerge-wasm"
 
-export type ChangeOptions = { message?: string, time?: number, patchCallback?: Function }
-export type ApplyOptions = { patchCallback?: Function }
+export type ChangeOptions<T> = { message?: string, time?: number, patchCallback?: PatchCallback<T> }
+export type ApplyOptions<T> = { patchCallback?: PatchCallback<T> }
 
 export type Doc<T> = { readonly [P in keyof T]: T[P] }
 
 export type ChangeFn<T> = (doc: T) => void
+
+export type PatchCallback<T> = (patch: Patch, before: Doc<T>, after: Doc<T>) => void
 
 export interface State<T> {
   change: DecodedChange
@@ -32,25 +34,25 @@ export function use(api: API) {
 import * as wasm from "@automerge/automerge-wasm"
 use(wasm)
 
-export type InitOptions = {
+export type InitOptions<T> = {
     actor?: ActorId,
     freeze?: boolean,
-    patchCallback?: Function,
+    patchCallback?: PatchCallback<T>,
 };
 
 
-interface InternalState {
+interface InternalState<T> {
   handle: Automerge,
   heads: Heads | undefined,
   freeze: boolean,
-  patchCallback: Function | undefined,
+  patchCallback?: PatchCallback<T>
 }
 
 export function getBackend<T>(doc: Doc<T>) : Automerge {
   return _state(doc).handle
 }
 
-function _state<T>(doc: Doc<T>, checkroot = true) : InternalState {
+function _state<T>(doc: Doc<T>, checkroot = true) : InternalState<T> {
   const state = Reflect.get(doc,STATE)
   if (state === undefined || (checkroot && _obj(doc) !== "_root")) {
     throw new RangeError("must be the document root")
@@ -90,7 +92,7 @@ function _readonly<T>(doc: Doc<T>) : boolean {
   return Reflect.get(doc,READ_ONLY) !== false
 }
 
-function importOpts(_actor?: ActorId | InitOptions) : InitOptions {
+function importOpts<T>(_actor?: ActorId | InitOptions<T>) : InitOptions<T> {
   if (typeof _actor === 'object') {
     return _actor
   } else {
@@ -98,7 +100,7 @@ function importOpts(_actor?: ActorId | InitOptions) : InitOptions {
   }
 }
 
-export function init<T>(_opts?: ActorId | InitOptions) : Doc<T>{
+export function init<T>(_opts?: ActorId | InitOptions<T>) : Doc<T>{
   let opts = importOpts(_opts)
   let freeze = !!opts.freeze
   let patchCallback = opts.patchCallback
@@ -131,7 +133,7 @@ export function from<T extends Record<string, unknown>>(initialState: T | Doc<T>
     return change(init(actor), (d) => Object.assign(d, initialState))
 }
 
-export function change<T>(doc: Doc<T>, options: string | ChangeOptions | ChangeFn<T>, callback?: ChangeFn<T>): Doc<T> {
+export function change<T>(doc: Doc<T>, options: string | ChangeOptions<T> | ChangeFn<T>, callback?: ChangeFn<T>): Doc<T> {
   if (typeof options === 'function') {
     return _change(doc, {}, options)
   } else if (typeof callback === 'function') {
@@ -144,7 +146,7 @@ export function change<T>(doc: Doc<T>, options: string | ChangeOptions | ChangeF
   }
 }
 
-function progressDocument<T>(doc: Doc<T>, heads: Heads, callback?: Function): Doc<T> {
+function progressDocument<T>(doc: Doc<T>, heads: Heads, callback?: PatchCallback<T>): Doc<T> {
   let state = _state(doc)
   let nextState = { ... state, heads: undefined };
   // @ts-ignore
@@ -154,7 +156,7 @@ function progressDocument<T>(doc: Doc<T>, heads: Heads, callback?: Function): Do
   return nextDoc
 }
 
-function _change<T>(doc: Doc<T>, options: ChangeOptions, callback: ChangeFn<T>): Doc<T> {
+function _change<T>(doc: Doc<T>, options: ChangeOptions<T>, callback: ChangeFn<T>): Doc<T> {
 
 
   if (typeof callback !== "function") {
@@ -192,7 +194,7 @@ function _change<T>(doc: Doc<T>, options: ChangeOptions, callback: ChangeFn<T>):
   }
 }
 
-export function emptyChange<T>(doc: Doc<T>, options: ChangeOptions) {
+export function emptyChange<T>(doc: Doc<T>, options: ChangeOptions<T>) {
   if (options === undefined) {
     options = {}
   }
@@ -214,7 +216,7 @@ export function emptyChange<T>(doc: Doc<T>, options: ChangeOptions) {
   return progressDocument(doc, heads)
 }
 
-export function load<T>(data: Uint8Array, _opts?: ActorId | InitOptions) : Doc<T> {
+export function load<T>(data: Uint8Array, _opts?: ActorId | InitOptions<T>) : Doc<T> {
   const opts = importOpts(_opts)
   const actor = opts.actor
   const patchCallback = opts.patchCallback
@@ -320,7 +322,7 @@ export function getAllChanges<T>(doc: Doc<T>) : Change[] {
   return state.handle.getChanges([])
 }
 
-export function applyChanges<T>(doc: Doc<T>, changes: Change[], opts?: ApplyOptions) : [Doc<T>] {
+export function applyChanges<T>(doc: Doc<T>, changes: Change[], opts?: ApplyOptions<T>) : [Doc<T>] {
   const state = _state(doc)
   if (!opts) { opts = {} }
   if (state.heads) {
@@ -378,7 +380,7 @@ export function generateSyncMessage<T>(doc: Doc<T>, inState: SyncState) : [ Sync
   return [ outState, message ]
 }
 
-export function receiveSyncMessage<T>(doc: Doc<T>, inState: SyncState, message: SyncMessage, opts?: ApplyOptions) : [ Doc<T>, SyncState, null ] {
+export function receiveSyncMessage<T>(doc: Doc<T>, inState: SyncState, message: SyncMessage, opts?: ApplyOptions<T>) : [ Doc<T>, SyncState, null ] {
   const syncState = ApiHandler.importSyncState(inState)
   if (!opts) { opts = {} }
   const state = _state(doc)
