@@ -227,6 +227,20 @@ export function load<T>(data: Uint8Array, _opts?: ActorId | InitOptions<T>) : Do
   return doc
 }
 
+export function loadIncremental<T>(doc: Doc<T>, data: Uint8Array, opts?: ApplyOptions<T>) : Doc<T> {
+  if (!opts) { opts = {} }
+  const state = _state(doc)
+  if (state.heads) {
+    throw new RangeError("Attempting to change an out of date document - set at: " + _trace(doc));
+  }
+  if (_readonly(doc) === false) {
+    throw new RangeError("Calls to Automerge.change cannot be nested")
+  }
+  const heads = state.handle.getHeads()
+  state.handle.loadIncremental(data)
+  return progressDocument(doc, heads, opts.patchCallback || state.patchCallback)
+}
+
 export function save<T>(doc: Doc<T>) : Uint8Array  {
   return _state(doc).handle.save()
 }
