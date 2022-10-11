@@ -2,9 +2,9 @@
 
 set -eoux pipefail
 
-mkdir -p automerge-c/build
-cd automerge-c/build
+mkdir -p crates/automerge-c/build
+cd crates/automerge-c/build
 cmake -B . -S .. -DBUILD_TESTING=OFF
 cmake --build . --target automerge_docs
 
-echo "Try opening automerge-c/build/src/html/index.html"
+echo "Try opening crates/automerge-c/build/src/html/index.html"
