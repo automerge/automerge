@@ -3,7 +3,7 @@ import * as Automerge from "@automerge/automerge"
 // hello world code that will run correctly on web or node
 
 let doc = Automerge.init()
-doc = Automerge.change(doc, (d) => d.hello = "from automerge-js")
+doc = Automerge.change(doc, (d) => d.hello = "from automerge")
 const result = JSON.stringify(doc)
 
 if (typeof document !== 'undefined') {
