@@ -874,6 +874,8 @@
 <span id="872">872</span>
 <span id="873">873</span>
 <span id="874">874</span>
+<span id="875">875</span>
+<span id="876">876</span>
 </pre><pre class="rust"><code><span class="attribute">#![<span class="ident">doc</span>(
     <span class="ident">html_logo_url</span> <span class="op">=</span> <span class="string">&quot;https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg&quot;</span>,
     <span class="ident">html_favicon_url</span> <span class="op">=</span> <span class="string">&quot;https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico&quot;</span>
@@ -903,7 +905,7 @@
 )]</span>
 <span class="attribute">#![<span class="ident">allow</span>(<span class="ident">clippy::unused_unit</span>)]</span>
 <span class="kw">use</span> <span class="ident">am::transaction::CommitOptions</span>;
-<span class="kw">use</span> <span class="ident">am::transaction::Transactable</span>;
+<span class="kw">use</span> <span class="ident">am::transaction</span>::{<span class="ident">Observed</span>, <span class="ident">Transactable</span>, <span class="ident">UnObserved</span>};
 <span class="kw">use</span> <span class="ident">automerge</span> <span class="kw">as</span> <span class="ident">am</span>;
 <span class="kw">use</span> <span class="ident">automerge</span>::{<span class="ident">Change</span>, <span class="ident">ObjId</span>, <span class="ident">ObjType</span>, <span class="ident">Prop</span>, <span class="ident">Value</span>, <span class="ident">ROOT</span>};
 <span class="kw">use</span> <span class="ident">js_sys</span>::{<span class="ident">Array</span>, <span class="ident">Function</span>, <span class="ident">Object</span>, <span class="ident">Uint8Array</span>};
@@ -931,7 +933,7 @@
     };
 }
 
-<span class="kw">type</span> <span class="ident">AutoCommit</span> <span class="op">=</span> <span class="ident">am::AutoCommitWithObs</span><span class="op">&lt;</span><span class="ident">Observer</span><span class="op">&gt;</span>;
+<span class="kw">type</span> <span class="ident">AutoCommit</span> <span class="op">=</span> <span class="ident">am::AutoCommitWithObs</span><span class="op">&lt;</span><span class="ident">Observed</span><span class="op">&lt;</span><span class="ident">Observer</span><span class="op">&gt;</span><span class="op">&gt;</span>;
 
 <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;wee_alloc&quot;</span>)]</span>
 <span class="attribute">#[<span class="ident">global_allocator</span>]</span>
@@ -1657,7 +1659,9 @@
 <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">load</span>)]</span>
 <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">load</span>(<span class="ident">data</span>: <span class="ident">Uint8Array</span>, <span class="ident">actor</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Automerge</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
     <span class="kw">let</span> <span class="ident">data</span> <span class="op">=</span> <span class="ident">data</span>.<span class="ident">to_vec</span>();
-    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">doc</span> <span class="op">=</span> <span class="ident">AutoCommit::load</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
+    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">doc</span> <span class="op">=</span> <span class="ident">am::AutoCommitWithObs</span>::<span class="op">&lt;</span><span class="ident">UnObserved</span><span class="op">&gt;</span><span class="ident">::load</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>)
+        .<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>
+        .<span class="ident">with_observer</span>(<span class="ident">Observer::default</span>());
     <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="ident">actor</span> {
         <span class="kw">let</span> <span class="ident">actor</span> <span class="op">=</span> <span class="ident">automerge::ActorId::from</span>(<span class="ident">hex::decode</span>(<span class="ident">s</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>.<span class="ident">to_vec</span>());
         <span class="ident">doc</span>.<span class="ident">set_actor</span>(<span class="ident">actor</span>);

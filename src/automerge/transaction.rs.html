@@ -14,9 +14,12 @@
 <span id="12">12</span>
 <span id="13">13</span>
 <span id="14">14</span>
+<span id="15">15</span>
+<span id="16">16</span>
 </pre><pre class="rust"><code><span class="kw">mod</span> <span class="ident">commit</span>;
 <span class="kw">mod</span> <span class="ident">inner</span>;
 <span class="kw">mod</span> <span class="ident">manual_transaction</span>;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod</span> <span class="ident">observation</span>;
 <span class="kw">mod</span> <span class="ident">result</span>;
 <span class="kw">mod</span> <span class="ident">transactable</span>;
 
@@ -24,6 +27,7 @@
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident"><span class="self">self</span>::transactable::Transactable</span>;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">inner::TransactionInner</span>;
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">manual_transaction::Transaction</span>;
+<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">observation</span>::{<span class="ident">Observation</span>, <span class="ident">Observed</span>, <span class="ident">UnObserved</span>};
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">result::Failure</span>;
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">result::Success</span>;
 
