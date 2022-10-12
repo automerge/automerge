@@ -9,7 +9,7 @@ import fetch from "node-fetch"
 
 const VERDACCIO_DB_PATH = path.normalize(`${__dirname}/verdacciodb`)
 const VERDACCIO_CONFIG_PATH = path.normalize(`${__dirname}/verdaccio.yaml`)
-const AUTOMERGE_WASM_PATH = path.normalize(`${__dirname}/../../automerge-wasm`)
+const AUTOMERGE_WASM_PATH = path.normalize(`${__dirname}/../../../crates/automerge-wasm`)
 const AUTOMERGE_JS_PATH = path.normalize(`${__dirname}/..`)
 const EXAMPLES_DIR = path.normalize(path.join(__dirname, "../", "examples"))
 
@@ -337,7 +337,7 @@ function printHeader(header: string) {
 }
 
 /**
- * Removes the automerge, automerge-wasm, and automerge-js packages from
+ * Removes the automerge, @automerge/automerge-wasm, and @automerge/automerge packages from
  * `$packageDir/node_modules`
  *
  * This is useful to force refreshing a package by use in combination with
@@ -347,7 +347,7 @@ function printHeader(header: string) {
  * @param packageDir - The directory containing the package.json of the target project
  */
 async function removeExistingAutomerge(packageDir: string) {
-    await fsPromises.rm(path.join(packageDir, "node_modules", "automerge-wasm"), {recursive: true, force: true})
+    await fsPromises.rm(path.join(packageDir, "node_modules", "@automerge"), {recursive: true, force: true})
     await fsPromises.rm(path.join(packageDir, "node_modules", "automerge"), {recursive: true, force: true})
 }
 

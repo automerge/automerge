@@ -6,7 +6,7 @@
   ],
   "version": "2.0.0-alpha.4",
   "description": "Javascript implementation of automerge, backed by @automerge/automerge-wasm",
-  "homepage": "https://github.com/automerge/automerge-rs/tree/main/automerge-js",
+  "homepage": "https://github.com/automerge/automerge-rs/tree/main/wrappers/javascript",
   "repository": "github:automerge/automerge-rs",
   "files": [
     "README.md",

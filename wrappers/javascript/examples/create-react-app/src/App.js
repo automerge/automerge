@@ -3,7 +3,7 @@ import logo from './logo.svg';
 import './App.css';
 
 let doc = Automerge.init()
-doc = Automerge.change(doc, (d) => d.hello = "from automerge-js")
+doc = Automerge.change(doc, (d) => d.hello = "from automerge")
 const result = JSON.stringify(doc)
 
 
