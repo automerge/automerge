@@ -533,8 +533,10 @@ impl Automerge {
         } else {
             value
         };
+        if matches!(datatype, Datatype::Map | Datatype::List | Datatype::Text) {
+            set_hidden_value(&value, &Symbol::for_(RAW_OBJECT_SYMBOL), id)?;
+        }
         set_hidden_value(&value, &Symbol::for_(DATATYPE_SYMBOL), datatype)?;
-        set_hidden_value(&value, &Symbol::for_(RAW_OBJECT_SYMBOL), id)?;
         set_hidden_value(&value, &Symbol::for_(META_SYMBOL), meta)?;
         Ok(value)
     }

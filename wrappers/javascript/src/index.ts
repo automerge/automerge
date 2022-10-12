@@ -77,15 +77,11 @@ function _clear_heads<T>(doc: Doc<T>) {
   Reflect.set(doc,TRACE,undefined)
 }
 
-function _obj<T>(doc: Doc<T>) : ObjID {
-  let proxy_objid = Reflect.get(doc,OBJECT_ID)
-  if (proxy_objid) {
-    return proxy_objid
+function _obj<T>(doc: Doc<T>) : ObjID | null{
+  if (!(typeof doc === 'object') || doc === null) {
+    return null
   }
-  if (Reflect.get(doc,STATE)) {
-    return "_root"
-  }
-  throw new RangeError("invalid document passed to _obj()")
+  return Reflect.get(doc,OBJECT_ID)
 }
 
 function _readonly<T>(doc: Doc<T>) : boolean {
@@ -299,7 +295,11 @@ function conflictAt(context : Automerge, objectId: ObjID, prop: Prop) : Conflict
 export function getConflicts<T>(doc: Doc<T>, prop: Prop) : Conflicts | undefined {
   const state = _state(doc, false)
   const objectId = _obj(doc)
-  return conflictAt(state.handle, objectId, prop)
+  if (objectId != null) {
+    return conflictAt(state.handle, objectId, prop)
+  } else {
+    return undefined
+  }
 }
 
 export function getLastLocalChange<T>(doc: Doc<T>) : Change | undefined {
@@ -307,7 +307,7 @@ export function getLastLocalChange<T>(doc: Doc<T>) : Change | undefined {
   return state.handle.getLastLocalChange() || undefined
 }
 
-export function getObjectId<T>(doc: Doc<T>) : ObjID {
+export function getObjectId(doc: any) : ObjID | null{
   return _obj(doc)
 }
 

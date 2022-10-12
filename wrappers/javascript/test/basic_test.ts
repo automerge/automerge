@@ -1,4 +1,5 @@
 import * as assert from 'assert'
+import {Counter} from 'automerge'
 import * as Automerge from '../src'
 
 describe('Automerge', () => {
@@ -228,6 +229,39 @@ describe('Automerge', () => {
       const m1 = Automerge.merge(Automerge.clone(s1), Automerge.clone(s2))
       const m2 = Automerge.merge(Automerge.clone(s2), Automerge.clone(s1))
       assert.deepStrictEqual(Automerge.getConflicts(m1, 'x'), Automerge.getConflicts(m2, 'x'))
+    })
+
+    describe("getObjectId", () => {
+        let s1 = Automerge.from({
+            "string": "string",
+            "number": 1,
+            "null": null,
+            "date": new Date(),
+            "counter": new Automerge.Counter(),
+            "bytes": new Uint8Array(10),
+            "text": new Automerge.Text(),
+            "list": [],
+            "map": {}
+        })
+
+        it("should return null for scalar values", () => {
+            assert.equal(Automerge.getObjectId(s1.string), null)
+            assert.equal(Automerge.getObjectId(s1.number), null)
+            assert.equal(Automerge.getObjectId(s1.null), null)
+            assert.equal(Automerge.getObjectId(s1.date), null)
+            assert.equal(Automerge.getObjectId(s1.counter), null)
+            assert.equal(Automerge.getObjectId(s1.bytes), null)
+        })
+
+        it("should return _root for the root object", () => {
+            assert.equal(Automerge.getObjectId(s1), "_root")
+        })
+
+        it("should return non-null for map, list, text, and objects", () => {
+            assert.notEqual(Automerge.getObjectId(s1.text), null)
+            assert.notEqual(Automerge.getObjectId(s1.list), null)
+            assert.notEqual(Automerge.getObjectId(s1.map), null)
+        })
     })
 })
 
