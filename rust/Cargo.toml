@@ -1,10 +1,10 @@
 [workspace]
 members = [
-    "crates/automerge",
-    "crates/automerge-c",
-    "crates/automerge-cli",
-    "crates/automerge-wasm",
-    "crates/edit-trace",
+    "automerge",
+    "automerge-c",
+    "automerge-cli",
+    "automerge-wasm",
+    "edit-trace",
 ]
 resolver = "2"
 

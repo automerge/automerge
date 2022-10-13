@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -eoux pipefail
 
+cd rust
 cargo build --workspace --all-features
 
 RUST_LOG=error cargo test --workspace --all-features

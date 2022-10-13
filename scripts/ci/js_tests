@@ -1,7 +1,7 @@
 set -e
 
 THIS_SCRIPT=$(dirname "$0");
-WASM_PROJECT=$THIS_SCRIPT/../../crates/automerge-wasm;
+WASM_PROJECT=$THIS_SCRIPT/../../rust/automerge-wasm;
 JS_PROJECT=$THIS_SCRIPT/../../wrappers/javascript;
 E2E_PROJECT=$THIS_SCRIPT/../../wrappers/javascript/e2e;
 

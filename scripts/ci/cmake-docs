@@ -3,7 +3,7 @@
 set -eoux pipefail
 
 mkdir -p crates/automerge-c/build
-cd crates/automerge-c/build
+cd rust/automerge-c/build
 cmake -B . -S .. -DBUILD_TESTING=OFF
 cmake --build . --target automerge_docs
 

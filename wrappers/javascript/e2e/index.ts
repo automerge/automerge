@@ -9,7 +9,7 @@ import fetch from "node-fetch"
 
 const VERDACCIO_DB_PATH = path.normalize(`${__dirname}/verdacciodb`)
 const VERDACCIO_CONFIG_PATH = path.normalize(`${__dirname}/verdaccio.yaml`)
-const AUTOMERGE_WASM_PATH = path.normalize(`${__dirname}/../../../crates/automerge-wasm`)
+const AUTOMERGE_WASM_PATH = path.normalize(`${__dirname}/../../../rust/automerge-wasm`)
 const AUTOMERGE_JS_PATH = path.normalize(`${__dirname}/..`)
 const EXAMPLES_DIR = path.normalize(path.join(__dirname, "../", "examples"))
 

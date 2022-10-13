@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -eoux pipefail
 
+cd rust
 RUSTDOCFLAGS="-D rustdoc::broken-intra-doc-links -D warnings" \
 cargo doc --no-deps --workspace --document-private-items

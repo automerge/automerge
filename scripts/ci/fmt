@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
 set -eoux pipefail
 
+cd rust
 cargo fmt -- --check
