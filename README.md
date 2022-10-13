@@ -18,7 +18,7 @@ computing problems. Automerge aims to be PostgreSQL for your local-first app.
 If you're looking for documentation on the JavaScript implementation take a look
 at https://automerge.org/docs/hello/. There are other implementations in both
 Rust and C, but they are earlier and don't have documentation yet. You can find
-them in `crates/automerge` and `crates/automerge-c` if you are comfortable
+them in `rust/automerge` and `rust/automerge-c` if you are comfortable
 reading the code and tests to figure out how to use them.
 
 If you're familiar with CRDTs and interested in the design of Automerge in
@@ -57,18 +57,14 @@ to figure out how to use it.
 
 ## Repository Organisation
 
-* `./crates` - the crates which make up the rust implementation and also the
-  Rust components of platform specific wrappers (e.g. `automerge-wasm` for the
-  WASM API or `automerge-c` for the C FFI bindings)
-* `./wrappers` - code for specific languages which wraps the FFI interface in a
-  more idiomatic API (e.g. `wrappers/javascript`)
+* `./rust` - the rust  rust implementation and also the Rust components of
+  platform specific wrappers (e.g. `automerge-wasm` for the WASM API or
+  `automerge-c` for the C FFI bindings)
+* `./javascript` - The javascript library which uses `automerge-wasm`
+  internally but presents a more idiomatic javascript interface
 * `./scripts` - scripts which are useful to maintenance of the repository.
   This includes the scripts which are run in CI.
 * `./img` - static assets for use in `.md` files
-
-This repository contains the primary implementation of automerge - which is
-written in rust in `./crates` - as well as wrappers which expose the Rust
-implementation via FFI in other languages in `./wrappers`. Because this is
 
 ## Building
 
