@@ -2,12 +2,12 @@ set -e
 
 THIS_SCRIPT=$(dirname "$0");
 WASM_PROJECT=$THIS_SCRIPT/../../rust/automerge-wasm;
-JS_PROJECT=$THIS_SCRIPT/../../wrappers/javascript;
-E2E_PROJECT=$THIS_SCRIPT/../../wrappers/javascript/e2e;
+JS_PROJECT=$THIS_SCRIPT/../../javascript;
+E2E_PROJECT=$THIS_SCRIPT/../../javascript/e2e;
 
 yarn --cwd $E2E_PROJECT install;
 # This will build the automerge-wasm project, publish it to a local NPM
-# repository, then run `yarn build` in the `wrappers/javascript` directory with
+# repository, then run `yarn build` in the `javascript` directory with
 # the local registry
 yarn --cwd $E2E_PROJECT e2e buildjs;
 yarn --cwd $JS_PROJECT test
