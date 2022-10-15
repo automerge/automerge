@@ -102,21 +102,16 @@ export function init<T>(_opts?: ActorId | InitOptions<T>) : Doc<T>{
   let patchCallback = opts.patchCallback
   const handle = ApiHandler.create(opts.actor)
   handle.enablePatches(true)
-  //@ts-ignore
   handle.registerDatatype("counter", (n) => new Counter(n))
-  //@ts-ignore
   handle.registerDatatype("text", (n) => new Text(n))
-  //@ts-ignore
-  const doc = handle.materialize("/", undefined, { handle, heads: undefined, freeze, patchCallback })
-  //@ts-ignore
+  const doc = handle.materialize("/", undefined, { handle, heads: undefined, freeze, patchCallback }, freeze) as Doc<T>
   return doc
 }
 
 export function clone<T>(doc: Doc<T>) : Doc<T> {
   const state = _state(doc)
   const handle = state.heads ? state.handle.forkAt(state.heads) : state.handle.fork()
-  //@ts-ignore
-  const clonedDoc : any = handle.materialize("/", undefined, { ... state, handle })
+  const clonedDoc : any = handle.materialize("/", undefined, { ... state, handle }, state.freeze)
 
   return clonedDoc
 }
@@ -142,10 +137,13 @@ export function change<T>(doc: Doc<T>, options: string | ChangeOptions<T> | Chan
   }
 }
 
+export function isAutomerge(doc: unknown): boolean {
+  return getObjectId(doc) === "_root"
+}
+
 function progressDocument<T>(doc: Doc<T>, heads: Heads, callback?: PatchCallback<T>): Doc<T> {
   let state = _state(doc)
   let nextState = { ... state, heads: undefined };
-  // @ts-ignore
   let nextDoc = state.handle.applyPatches(doc, nextState, callback)
   state.heads = heads
   if (nextState.freeze) { Object.freeze(nextDoc) }
@@ -215,15 +213,13 @@ export function emptyChange<T>(doc: Doc<T>, options: ChangeOptions<T>) {
 export function load<T>(data: Uint8Array, _opts?: ActorId | InitOptions<T>) : Doc<T> {
   const opts = importOpts(_opts)
   const actor = opts.actor
+  const freeze = !!opts.freeze
   const patchCallback = opts.patchCallback
   const handle = ApiHandler.load(data, actor)
   handle.enablePatches(true)
-  //@ts-ignore
   handle.registerDatatype("counter", (n) => new Counter(n))
-  //@ts-ignore
   handle.registerDatatype("text", (n) => new Text(n))
-  //@ts-ignore
-  const doc : any = handle.materialize("/", undefined, { handle, heads: undefined, patchCallback })
+  const doc : any = handle.materialize("/", undefined, { handle, freeze, heads: undefined, patchCallback }, freeze)
   return doc
 }
 
@@ -445,11 +441,9 @@ export function dump<T>(doc: Doc<T>) {
   state.handle.dump()
 }
 
-// FIXME - return T?
-export function toJS<T>(doc: Doc<T>) : MaterializeValue {
+export function toJS<T>(doc: Doc<T>) : T {
   const state = _state(doc)
-  // @ts-ignore
-  return state.handle.materialize("_root", state.heads, state)
+  return state.handle.materialize("_root", state.heads, undefined, false) as T
 }
 
 

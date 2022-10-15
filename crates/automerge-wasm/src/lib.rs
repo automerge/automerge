@@ -464,22 +464,23 @@ impl Automerge {
         let mut object = object.dyn_into::<Object>()?;
         let patches = self.doc.observer().take_patches();
         let callback = callback.dyn_into::<Function>().ok();
+        let freeze = Object::is_frozen(&object);
 
         // even if there are no patches we may need to update the meta object
         // which requires that we update the object too
         if patches.is_empty() && !meta.is_undefined() {
             let (obj, datatype, id) = self.unwrap_object(&object)?;
             object = Object::assign(&Object::new(), &obj);
-            object = self.wrap_object(object, datatype, &id, &meta)?;
+            object = self.wrap_object(object, datatype, &id, &meta, freeze)?;
         }
 
         for p in patches {
             if let Some(c) = &callback {
                 let before = object.clone();
-                object = self.apply_patch(object, &p, 0, &meta)?;
+                object = self.apply_patch(object, &p, 0, &meta, freeze)?;
                 c.call3(&JsValue::undefined(), &p.try_into()?, &before, &object)?;
             } else {
-                object = self.apply_patch(object, &p, 0, &meta)?;
+                object = self.apply_patch(object, &p, 0, &meta, freeze)?;
             }
         }
 
@@ -637,7 +638,7 @@ impl Automerge {
 
     #[wasm_bindgen(js_name = toJS)]
     pub fn to_js(&self, meta: JsValue) -> Result<JsValue, JsValue> {
-        self.export_object(&ROOT, Datatype::Map, None, &meta)
+        self.export_object(&ROOT, Datatype::Map, None, &meta, false)
     }
 
     pub fn materialize(
@@ -645,15 +646,17 @@ impl Automerge {
         obj: JsValue,
         heads: Option<Array>,
         meta: JsValue,
+        freeze: JsValue,
     ) -> Result<JsValue, JsValue> {
         let obj = self.import(obj).unwrap_or(ROOT);
         let heads = get_heads(heads);
+        let freeze = freeze.as_bool().unwrap_or(false);
         let obj_type = self
             .doc
             .object_type(&obj)
             .ok_or_else(|| to_js_err(format!("invalid obj {}", obj)))?;
         let _patches = self.doc.observer().take_patches(); // throw away patches
-        self.export_object(&obj, obj_type.into(), heads.as_ref(), &meta)
+        self.export_object(&obj, obj_type.into(), heads.as_ref(), &meta, freeze)
     }
 
     fn import(&self, id: JsValue) -> Result<ObjId, JsValue> {

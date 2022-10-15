@@ -21,6 +21,50 @@ describe('Automerge', () => {
             assert.deepEqual(doc2, {  hello: "world", big: "little", zip: "zop", app: "dap" })
         })
 
+        it('can detect an automerge doc with isAutomerge()', () => {
+            let doc1 = Automerge.from({ sub: { object: true } })
+            assert(Automerge.isAutomerge(doc1))
+            assert(!Automerge.isAutomerge(doc1.sub))
+            assert(!Automerge.isAutomerge("String"))
+            assert(!Automerge.isAutomerge({ sub: { object: true }}))
+            assert(!Automerge.isAutomerge(undefined))
+        })
+
+        it('it should recursively freeze the document if requested', () => {
+            let doc1 = Automerge.init({ freeze: true } )
+            let doc2 = Automerge.init()
+
+            assert(Object.isFrozen(doc1))
+            assert(!Object.isFrozen(doc2))
+
+            // will also freeze sub objects
+            doc1 = Automerge.change(doc1, (doc) => doc.book = { title: "how to win friends" })
+            doc2 = Automerge.merge(doc2,doc1)
+            assert(Object.isFrozen(doc1))
+            assert(Object.isFrozen(doc1.book))
+            assert(!Object.isFrozen(doc2))
+            assert(!Object.isFrozen(doc2.book))
+
+            // works on from
+            let doc3 = Automerge.from({ sub: { obj: "inner" } }, { freeze: true })
+            assert(Object.isFrozen(doc3))
+            assert(Object.isFrozen(doc3.sub))
+
+            // works on load
+            let doc4 = Automerge.load(Automerge.save(doc3), { freeze: true })
+            assert(Object.isFrozen(doc4))
+            assert(Object.isFrozen(doc4.sub))
+
+            // follows clone
+            let doc5 = Automerge.clone(doc4)
+            assert(Object.isFrozen(doc5))
+            assert(Object.isFrozen(doc5.sub))
+
+            // toJS does not freeze
+            let exported = Automerge.toJS(doc5)
+            assert(!Object.isFrozen(exported))
+        })
+
         it('handle basic sets over many changes', () => {
             let doc1 = Automerge.init()
             let timestamp = new Date();
