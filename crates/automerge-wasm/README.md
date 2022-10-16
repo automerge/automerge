@@ -18,34 +18,6 @@ An Object id uniquely identifies a Map, List or Text object within a document.  
 
 Heads refers to a set of hashes that uniquely identifies a point in time in a document's history.  Heads are useful for comparing documents state or retrieving past states from the document.
 
-### Using the Library and Creating a Document
-
-This is a rust/wasm package and will work in a node or web environment.  Node is able to load wasm synchronously but a web environment is not.  The 'init' export of the package is a function that returns a promise that resolves once the wasm is loaded.
-
-This creates a document in node.  The memory allocated is handled by wasm and isn't managed by the javascript garbage collector and thus needs to be manually freed.
-
-```javascript
-  import { create } from "automerge-wasm"
-
-  let doc = create()
-
-  doc.free()
-```
-
-While this will work in both node and in a web context
-
-```javascript
-  import { init, create } from "automerge-wasm"
-
-  init().then(_ => {
-    let doc = create()
-    doc.free()
-  })
-
-```
-
-The examples below will assume a node context for brevity.
-
 ### Automerge Scalar Types
 
 Automerge has many scalar types.  Methods like `put()` and `insert()` take an optional data type parameter.  Normally the type can be inferred but in some cases, such as telling the difference between int, uint and a counter, it cannot.
@@ -53,7 +25,7 @@ Automerge has many scalar types.  Methods like `put()` and `insert()` take an op
 These are puts without a data type
 
 ```javascript
-  import { create } from "automerge-wasm"
+  import { create } from "@automerge/automerge-wasm"
 
   let doc = create()
   doc.put("/", "prop1", 100)  // int
@@ -63,7 +35,6 @@ These are puts without a data type
   doc.put("/", "prop5", new Uint8Array([1,2,3]))
   doc.put("/", "prop6", true)
   doc.put("/", "prop7", null)
-  doc.free()
 ```
 
 Put's with a data type and examples of all the supported data types.
@@ -71,7 +42,7 @@ Put's with a data type and examples of all the supported data types.
 While int vs uint vs f64 matters little in javascript, Automerge is a cross platform library where these distinctions matter.
 
 ```javascript
-  import { create } from "automerge-wasm"
+  import { create } from "@automerge/automerge-wasm"
 
   let doc = create()
   doc.put("/", "prop1", 100, "int")
@@ -84,7 +55,6 @@ While int vs uint vs f64 matters little in javascript, Automerge is a cross plat
   doc.put("/", "prop8", new Uint8Array([1,2,3]), "bytes")
   doc.put("/", "prop9", true, "boolean")
   doc.put("/", "prop10", null, "null")
-  doc.free()
 ```
 
 ### Automerge Object Types
@@ -92,7 +62,7 @@ While int vs uint vs f64 matters little in javascript, Automerge is a cross plat
 Automerge WASM supports 3 object types.  Maps, lists, and text.  Maps are key value stores where the values can be any scalar type or any object type.  Lists are numerically indexed sets of data that can hold any scalar or any object type.
 
 ```javascript
-  import { create } from "automerge-wasm"
+  import { create } from "@automerge/automerge-wasm"
 
   let doc = create()
 
@@ -111,14 +81,12 @@ Automerge WASM supports 3 object types.  Maps, lists, and text.  Maps are key va
   // text is initialized with a string
 
   let notes = doc.putObject("/", "notes", "Hello world!")
-
-  doc.free()
 ```
 
 You can access objects by passing the object id as the first parameter for a call.
 
 ```javascript
-  import { create } from "automerge-wasm"
+  import { create } from "@automerge/automerge-wasm"
 
   let doc = create()
 
@@ -142,8 +110,6 @@ You can access objects by passing the object id as the first parameter for a cal
   // use a path instead
 
   doc.put("/config", "align", "right")
-
-  doc.free()
 ```
 
 Using the id directly is always faster (as it prevents the path to id conversion internally) so it is preferred for performance critical code.
@@ -165,7 +131,6 @@ Maps are key/value stores.  The root object is always a map.  The keys are alway
 
     doc.keys(mymap)           // returns ["bytes","foo","sub"]
     doc.materialize("_root")  // returns { mymap: { bytes: new Uint8Array([1,2,3]), foo: "bar", sub: {}}}
-    doc.free()
 ```
 
 ### Lists
@@ -185,7 +150,6 @@ Lists are index addressable sets of values.  These values can be any scalar or o
 
     doc.materialize(items)                        // returns [ "bat", [1,2], { hello : "world" }, true, "bag", "brick"]
     doc.length(items)                             // returns 6
-    doc.free()
 ```
 
 ### Text
@@ -204,7 +168,6 @@ Text is a specialized list type intended for modifying a text document.  The pri
     doc.text(notes)       // returns "Hello \ufffceveryone"
     doc.getWithType(notes, 6)   // returns ["map", obj]
     doc.get(obj, "hi") // returns "there"
-    doc.free()
 ```
 
 ### Tables
@@ -234,7 +197,6 @@ When querying maps use the `get()` method with the object in question and the pr
 
     doc1.get("_root","key3")   // returns "doc2val"
     doc1.getAll("_root","key3")  // returns [[ "str", "doc1val"], ["str", "doc2val"]]
-    doc1.free(); doc2.free()
 ```
 
 ### Counters
@@ -256,8 +218,6 @@ Counters are 64 bit ints that support the increment operation.  Frequently diffe
     doc1.merge(doc2)
 
     doc1.materialize("_root")  // returns { number: 10, total: 33 }
-
-    doc1.free(); doc2.free()
 ```
 
 ### Transactions
@@ -285,8 +245,6 @@ Generally speaking you don't need to think about transactions when using Automer
 
     doc.get("_root", "key")        // returns "val2"
     doc.pendingOps()                 // returns 0
-
-    doc.free()
 ```
 
 ### Viewing Old Versions of the Document
@@ -308,8 +266,6 @@ All query functions can take an optional argument of `heads` which allow you to 
     doc.get("_root","key",heads2)   // returns "val2"
     doc.get("_root","key",heads1)   // returns "val1"
     doc.get("_root","key",[])       // returns undefined
-
-    doc.free()
 ```
 
 This works for `get()`, `getAll()`, `keys()`, `length()`, `text()`, and `materialize()`
@@ -335,8 +291,6 @@ The `merge()` command applies all changes in the argument doc into the calling d
 
     doc1.materialize("_root")       // returns { key1: "val1", key2: "val2", key3: "val3" }
     doc2.materialize("_root")       // returns { key1: "val1", key3: "val3" }
-
-    doc1.free(); doc2.free()
 ```
 
 Note that calling `a.merge(a)` will produce an unrecoverable error from the wasm-bindgen layer which (as of this writing) there is no workaround for.
@@ -350,7 +304,7 @@ If you wish to incrementally update a saved Automerge doc you can call `saveIncr
 The `load()` function takes a `Uint8Array()` of bytes produced in this way and constitutes a new document.  The `loadIncremental()` method is available if you wish to consume the result of a `saveIncremental()` with an already instanciated document.
 
 ```javascript
-  import { create, load } from "automerge-wasm"
+  import { create, load } from "@automerge/automerge-wasm"
 
   let doc1 = create()
 
@@ -382,14 +336,12 @@ The `load()` function takes a `Uint8Array()` of bytes produced in this way and c
   doc2.materialize("_root")  // returns { key1: "value1", key2: "value2" }
   doc3.materialize("_root")  // returns { key1: "value1", key2: "value2" }
   doc4.materialize("_root")  // returns { key1: "value1", key2: "value2" }
-
-  doc1.free(); doc2.free(); doc3.free(); doc4.free()
 ```
 
 One interesting feature of automerge binary saves is that they can be concatenated together in any order and can still be loaded into a coherent merged document.
 
 ```javascript
-import { load } from "automerge-wasm"
+import { load } from "@automerge/automerge-wasm"
 import * as fs from "fs"
 
 let file1 = fs.readFileSync("automerge_save_1");
@@ -409,7 +361,7 @@ When syncing a document the `generateSyncMessage()` and `receiveSyncMessage()` m
 A very simple sync implementation might look like this.
 
 ```javascript
-  import { encodeSyncState, decodeSyncState, initSyncState } from "automerge-wasm"
+  import { encodeSyncState, decodeSyncState, initSyncState } from "@automerge/automerge-wasm"
 
   let states = {}
 
@@ -457,7 +409,7 @@ Actors are ids that need to be unique to each process writing to a document.  Th
 Methods that create new documents will generate random actors automatically - if you wish to supply your own it is always taken as an optional argument.  This is true for the following functions.
 
 ```javascript
-  import { create, load } from "automerge-wasm"
+  import { create, load } from "@automerge/automerge-wasm"
 
   let doc1 = create()  // random actorid
   let doc2 = create("aabbccdd")
@@ -467,8 +419,6 @@ Methods that create new documents will generate random actors automatically - if
   let doc6 = load(doc4.save(), "00aabb11")
 
   let actor = doc1.getActor()
-
-  doc1.free(); doc2.free(); doc3.free(); doc4.free(); doc5.free(); doc6.free()
 ```
 
 ### Glossary: Object Id's
@@ -491,7 +441,35 @@ Object Ids uniquely identify an object within a document.  They are represented 
   doc.put(o1v2, "x", "y")  // modifying the new "o1" object
 
   assert.deepEqual(doc.materialize("_root"), { "o1": { x: "y" }, "o2": {} })
-
-  doc.free()
 ```
 
+### Appendix: Building
+
+  The following steps should allow you to build the package
+
+  ```
+   $ rustup target add wasm32-unknown-unknown
+   $ cargo install wasm-bindgen-cli
+   $ cargo install wasm-opt
+   $ yarn
+   $ yarn release
+   $ yarn pack
+  ```
+
+### Appendix: WASM and Memory Allocation
+
+Allocated memory in rust will be freed automatically on platforms that support `FinalizationRegistry`.
+
+This is currently supported in [all major browsers and nodejs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/FinalizationRegistry).
+
+On unsupported platforms you can free memory explicitly.
+
+```javascript
+  import { create, initSyncState } from "@automerge/automerge-wasm"
+
+  let doc = create()
+  let sync = initSyncState()
+
+  doc.free()
+  sync.free()
+```

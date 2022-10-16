@@ -31,14 +31,12 @@ describe('Automerge', () => {
     it('should create, clone and free', () => {
       const doc1 = create()
       const doc2 = doc1.clone()
-      doc1.free()
       doc2.free()
     })
 
     it('should be able to start and commit', () => {
       const doc = create()
       doc.commit()
-      doc.free()
     })
 
     it('getting a nonexistent prop does not throw an error', () => {
@@ -46,7 +44,6 @@ describe('Automerge', () => {
       const root = "_root"
       const result = doc.getWithType(root, "hello")
       assert.deepEqual(result, undefined)
-      doc.free()
     })
 
     it('should be able to set and get a simple value', () => {
@@ -105,8 +102,6 @@ describe('Automerge', () => {
 
       result = doc.getWithType(root, "null")
       assert.deepEqual(result, ["null", null]);
-
-      doc.free()
     })
 
     it('should be able to use bytes', () => {
@@ -117,7 +112,6 @@ describe('Automerge', () => {
       assert.deepEqual(value1, ["bytes", new Uint8Array([10, 11, 12])]);
       const value2 = doc.getWithType("_root", "data2")
       assert.deepEqual(value2, ["bytes", new Uint8Array([13, 14, 15])]);
-      doc.free()
     })
 
     it('should be able to make subobjects', () => {
@@ -134,7 +128,6 @@ describe('Automerge', () => {
 
       result = doc.getWithType(submap, "number")
       assert.deepEqual(result, ["uint", 6])
-      doc.free()
     })
 
     it('should be able to make lists', () => {
@@ -157,7 +150,6 @@ describe('Automerge', () => {
 
       assert.deepEqual(doc.getWithType(sublist, 2), ["str", "b v2"])
       assert.deepEqual(doc.length(sublist), 4)
-      doc.free()
     })
 
     it('lists have insert, set, splice, and push ops', () => {
@@ -180,8 +172,6 @@ describe('Automerge', () => {
       assert.deepEqual(doc.materialize(sublist), ["z", "d", "e", "f", "c", new Date(3)])
       assert.deepEqual(doc.length(sublist), 6)
       assert.deepEqual(doc.materialize("/", heads), { letters: ["b", "a", "c"] })
-
-      doc.free()
     })
 
     it('should be able delete non-existent props', () => {
@@ -200,7 +190,6 @@ describe('Automerge', () => {
       assert.deepEqual(doc.keys("_root"), ["bip"])
       assert.deepEqual(doc.keys("_root", [hash1]), ["bip", "foo"])
       assert.deepEqual(doc.keys("_root", [hash2]), ["bip"])
-      doc.free()
     })
 
     it('should be able to del', () => {
@@ -211,7 +200,6 @@ describe('Automerge', () => {
       assert.deepEqual(doc.getWithType(root, "xxx"), ["str", "xxx"])
       doc.delete(root, "xxx");
       assert.deepEqual(doc.getWithType(root, "xxx"), undefined)
-      doc.free()
     })
 
     it('should be able to use counters', () => {
@@ -224,7 +212,6 @@ describe('Automerge', () => {
       assert.deepEqual(doc.getWithType(root, "counter"), ["counter", 20])
       doc.increment(root, "counter", -5);
       assert.deepEqual(doc.getWithType(root, "counter"), ["counter", 15])
-      doc.free()
     })
 
     it('should be able to splice text', () => {
@@ -241,7 +228,6 @@ describe('Automerge', () => {
       assert.deepEqual(doc.getWithType(text, 10), ["str", "d"])
       assert.deepEqual(doc.getWithType(text, 11), ["str", "!"])
       assert.deepEqual(doc.getWithType(text, 12), ["str", "?"])
-      doc.free()
     })
 
     it('should be able to insert objects into text', () => {
@@ -283,10 +269,6 @@ describe('Automerge', () => {
       assert.deepEqual(docA.keys("_root"), docB.keys("_root"));
       assert.deepEqual(docA.save(), docB.save());
       assert.deepEqual(docA.save(), docC.save());
-      doc.free()
-      docA.free()
-      docB.free()
-      docC.free()
     })
 
     it('should be able to splice text', () => {
@@ -302,7 +284,6 @@ describe('Automerge', () => {
       assert.strictEqual(doc.length(text, [hash1]), 11)
       assert.strictEqual(doc.text(text, [hash2]), "hello big bad world")
       assert.strictEqual(doc.length(text, [hash2]), 19)
-      doc.free()
     })
 
     it('local inc increments all visible counters in a map', () => {
@@ -332,10 +313,6 @@ describe('Automerge', () => {
       const save1 = doc1.save()
       const doc4 = load(save1)
       assert.deepEqual(doc4.save(), save1);
-      doc1.free()
-      doc2.free()
-      doc3.free()
-      doc4.free()
     })
 
     it('local inc increments all visible counters in a sequence', () => {
@@ -366,10 +343,6 @@ describe('Automerge', () => {
       const save = doc1.save()
       const doc4 = load(save)
       assert.deepEqual(doc4.save(), save);
-      doc1.free()
-      doc2.free()
-      doc3.free()
-      doc4.free()
     })
 
     it('paths can be used instead of objids', () => {
@@ -411,7 +384,6 @@ describe('Automerge', () => {
       assert.deepEqual(doc.materialize(l2), { zip: ["a", "b"] })
       assert.deepEqual(doc.materialize(l1), [{ zip: ["a", "b"] }, { foo: "bar" }, [1, 2, 3]])
       assert.deepEqual(doc.materialize(l4), new String("hello world"))
-      doc.free()
     })
 
     it('only returns an object id when objects are created', () => {
@@ -434,7 +406,6 @@ describe('Automerge', () => {
       assert.deepEqual(r7, "7@aaaa");
       assert.deepEqual(r8, null);
       //assert.deepEqual(r9,["12@aaaa","13@aaaa"]);
-      doc.free()
     })
 
     it('objects without properties are preserved', () => {
@@ -452,8 +423,6 @@ describe('Automerge', () => {
       assert.deepEqual(doc2.getWithType("_root", "c"), ["map", c])
       assert.deepEqual(doc2.keys(c), ["d"])
       assert.deepEqual(doc2.getWithType(c, "d"), ["str", "dd"])
-      doc1.free()
-      doc2.free()
     })
 
     it('should allow you to forkAt a heads', () => {
@@ -505,8 +474,6 @@ describe('Automerge', () => {
       assert.deepEqual(doc2.popPatches(), [
         { action: 'put', path: ['hello'], value: 'world', conflict: false }
       ])
-      doc1.free()
-      doc2.free()
     })
 
     it('should include nested object creation', () => {
@@ -519,8 +486,6 @@ describe('Automerge', () => {
         { action: 'put', path: [ 'birds', 'friday' ], value: {}, conflict: false },
         { action: 'put', path: [ 'birds', 'friday', 'robins' ], value: 3, conflict: false},
       ])
-      doc1.free()
-      doc2.free()
     })
 
     it('should delete map keys', () => {
@@ -534,8 +499,6 @@ describe('Automerge', () => {
         { action: 'put', path: [ 'favouriteBird' ], value: 'Robin', conflict: false },
         { action: 'del', path: [ 'favouriteBird' ] }
       ])
-      doc1.free()
-      doc2.free()
     })
 
     it('should include list element insertion', () => {
@@ -547,8 +510,6 @@ describe('Automerge', () => {
         { action: 'put', path: [ 'birds' ], value: [], conflict: false },
         { action: 'splice', path: [ 'birds', 0 ], values: ['Goldfinch', 'Chaffinch'] },
       ])
-      doc1.free()
-      doc2.free()
     })
 
     it('should insert nested maps into a list', () => {
@@ -563,8 +524,6 @@ describe('Automerge', () => {
         { action: 'put', path: [ 'birds', 0, 'species' ], value: 'Goldfinch', conflict: false },
         { action: 'put', path: [ 'birds', 0, 'count', ], value: 3, conflict: false }
       ])
-      doc1.free()
-      doc2.free()
     })
 
     it('should calculate list indexes based on visible elements', () => {
@@ -581,8 +540,6 @@ describe('Automerge', () => {
         { action: 'del', path: ['birds', 0] },
         { action: 'splice', path: ['birds', 1], values: ['Greenfinch'] }
       ])
-      doc1.free()
-      doc2.free()
     })
 
     it('should handle concurrent insertions at the head of a list', () => {
@@ -610,7 +567,6 @@ describe('Automerge', () => {
       assert.deepEqual(doc4.popPatches(), [
         { action: 'splice', path: ['values',0], values:['a','b','c','d'] },
       ])
-      doc1.free(); doc2.free(); doc3.free(); doc4.free()
     })
 
     it('should handle concurrent insertions beyond the head', () => {
@@ -638,7 +594,6 @@ describe('Automerge', () => {
       assert.deepEqual(doc4.popPatches(), [
         { action: 'splice', path: ['values', 2], values: ['c','d','e','f'] },
       ])
-      doc1.free(); doc2.free(); doc3.free(); doc4.free()
     })
 
     it('should handle conflicts on root object keys', () => {
@@ -662,7 +617,6 @@ describe('Automerge', () => {
         { action: 'put', path: ['bird'], value: 'Goldfinch', conflict: false },
         { action: 'put', path: ['bird'], value: 'Goldfinch', conflict: true },
       ])
-      doc1.free(); doc2.free(); doc3.free(); doc4.free()
     })
 
     it('should handle three-way conflicts', () => {
@@ -701,7 +655,6 @@ describe('Automerge', () => {
         { action: 'put', path: ['bird'], value: 'Goldfinch', conflict: true },
         { action: 'put', path: ['bird'], value: 'Goldfinch', conflict: true }
       ])
-      doc1.free(); doc2.free(); doc3.free()
     })
 
     it('should allow a conflict to be resolved', () => {
@@ -720,7 +673,6 @@ describe('Automerge', () => {
         { action: 'put', path: ['bird'], value: 'Chaffinch', conflict: true },
         { action: 'put', path: ['bird'], value: 'Goldfinch', conflict: false }
       ])
-      doc1.free(); doc2.free(); doc3.free()
     })
 
     it('should handle a concurrent map key overwrite and delete', () => {
@@ -744,7 +696,6 @@ describe('Automerge', () => {
       assert.deepEqual(doc2.popPatches(), [
         { action: 'put', path: ['bird'], value: 'Goldfinch', conflict: false }
       ])
-      doc1.free(); doc2.free()
     })
 
     it('should handle a conflict on a list element', () => {
@@ -773,7 +724,6 @@ describe('Automerge', () => {
         { action: 'put', path: ['birds',0], value: 'Redwing', conflict: false },
         { action: 'put', path: ['birds',0], value: 'Redwing', conflict: true }
       ])
-      doc1.free(); doc2.free(); doc3.free(); doc4.free()
     })
 
     it('should handle a concurrent list element overwrite and delete', () => {
@@ -808,7 +758,6 @@ describe('Automerge', () => {
         { action: 'put', path: ['birds',0], value: 'Ring-necked parakeet', conflict: false },
         { action: 'put', path: ['birds',2], value: 'Redwing', conflict: true }
       ])
-      doc1.free(); doc2.free(); doc3.free(); doc4.free()
     })
 
     it('should handle deletion of a conflict value', () => {
@@ -832,7 +781,6 @@ describe('Automerge', () => {
       assert.deepEqual(doc3.popPatches(), [
         { action: 'put', path: ['bird'], value: 'Robin', conflict: false }
       ])
-      doc1.free(); doc2.free(); doc3.free()
     })
 
     it('should handle conflicting nested objects', () => {
@@ -854,7 +802,6 @@ describe('Automerge', () => {
         { action: 'put', path: ['birds'], value: {}, conflict: true },
         { action: 'splice', path: ['birds',0], values: ['Parakeet'] }
       ])
-      doc1.free(); doc2.free()
     })
 
     it('should support date objects', () => {
@@ -866,7 +813,6 @@ describe('Automerge', () => {
       assert.deepEqual(doc2.popPatches(), [
         { action: 'put', path: ['createdAt'], value: now, conflict: false }
       ])
-      doc1.free(); doc2.free()
     })
 
     it('should capture local put ops', () => {
@@ -885,7 +831,6 @@ describe('Automerge', () => {
         { action: 'put', path: ['map'], value: {}, conflict: false },
         { action: 'put', path: ['list'], value: [], conflict: false },
       ])
-      doc1.free()
     })
 
     it('should capture local insert ops', () => {
@@ -906,7 +851,6 @@ describe('Automerge', () => {
         { action: 'splice', path: ['list', 2], values: [{}] },
         { action: 'splice', path: ['list', 2], values: [[]] },
       ])
-      doc1.free()
     })
 
     it('should capture local push ops', () => {
@@ -921,7 +865,6 @@ describe('Automerge', () => {
         { action: 'put', path: ['list'], value: [], conflict: false },
         { action: 'splice', path: ['list',0], values: [1,{},[]] },
       ])
-      doc1.free()
     })
 
     it('should capture local splice ops', () => {
@@ -937,7 +880,6 @@ describe('Automerge', () => {
         { action: 'del', path: ['list',1] },
         { action: 'del', path: ['list',1] },
       ])
-      doc1.free()
     })
 
     it('should capture local increment ops', () => {
@@ -950,7 +892,6 @@ describe('Automerge', () => {
         { action: 'put', path: ['counter'], value: 2, conflict: false },
         { action: 'inc', path: ['counter'], value: 4 },
       ])
-      doc1.free()
     })
 
 
@@ -967,7 +908,6 @@ describe('Automerge', () => {
         { action: 'del', path: ['key1'], },
         { action: 'del', path: ['key2'], },
       ])
-      doc1.free()
     })
 
     it('should support counters in a map', () => {
@@ -982,7 +922,6 @@ describe('Automerge', () => {
         { action: 'put', path: ['starlings'], value: 2, conflict: false },
         { action: 'inc', path: ['starlings'], value: 1 }
       ])
-      doc1.free(); doc2.free()
     })
 
     it('should support counters in a list', () => {
@@ -1003,7 +942,6 @@ describe('Automerge', () => {
         { action: 'inc', path: ['list',0], value: 2 },
         { action: 'inc', path: ['list',0], value: -5 },
       ])
-      doc1.free(); doc2.free()
     })
 
     it('should delete a counter from a map') // TODO
@@ -1554,7 +1492,6 @@ describe('Automerge', () => {
         const n2up = n2.clone('89abcdef');
         n2up.put("_root", "x", `${i} @ n2`); n2up.commit("", 0)
         if (new BloomFilter(n1up.getHeads()).containsHash(n2up.getHeads()[0])) {
-          n1.free(); n2.free()
           n1 = n1up; n2 = n2up; break
         }
       }
@@ -1603,7 +1540,6 @@ describe('Automerge', () => {
 
           n1hash2 = n1us2.getHeads()[0]; n2hash2 = n2us2.getHeads()[0]
           if (new BloomFilter([n1hash1, n1hash2]).containsHash(n2hash1)) {
-            n1.free(); n2.free()
             n1 = n1us2; n2 = n2us2; break
           }
         }
@@ -1696,7 +1632,6 @@ describe('Automerge', () => {
         n1hash3 = n1us3.getHeads()[0]; n2hash3 = n2us3.getHeads()[0]
 
         if (new BloomFilter([n1hash1, n1hash2, n1hash3]).containsHash(n2hash2)) {
-          n1.free(); n2.free();
           n1 = n1us3; n2 = n2us3; break
         }
       }

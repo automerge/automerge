@@ -75,7 +75,8 @@ implementation via FFI in other languages in `./wrappers`. Because this is
 To build this codebase you will need:
 
 - `rust`
-- `wasm-pack`
+- `wasm-bindgen-cli`
+- `wasm-opt`
 - `node`
 - `yarn`
 - `cmake`

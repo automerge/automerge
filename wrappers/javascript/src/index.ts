@@ -379,11 +379,17 @@ export function equals(val1: unknown, val2: unknown) : boolean {
 }
 
 export function encodeSyncState(state: SyncState) : Uint8Array {
-  return ApiHandler.encodeSyncState(ApiHandler.importSyncState(state))
+  const sync = ApiHandler.importSyncState(state)
+  const result = ApiHandler.encodeSyncState(sync)
+  sync.free()
+  return result
 }
 
 export function decodeSyncState(state: Uint8Array) : SyncState {
-  return ApiHandler.exportSyncState(ApiHandler.decodeSyncState(state))
+  let sync = ApiHandler.decodeSyncState(state)
+  let result = ApiHandler.exportSyncState(sync)
+  sync.free()
+  return result
 }
 
 export function generateSyncMessage<T>(doc: Doc<T>, inState: SyncState) : [ SyncState, SyncMessage | null ] {

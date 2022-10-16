@@ -1,18 +1,15 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { describe, it } from 'mocha';
 import * as assert from 'assert'
-import { create, load } from '..'
+import { create, load, initSyncState } from '..'
 
 describe('Automerge', () => {
   describe('Readme Examples', () => {
-    it('Using the Library and Creating a Document (1)', () => {
+    it('Using the Library and Creating a Document', () => {
       const doc = create()
+      const sync = initSyncState()
       doc.free()
-    })
-    it('Using the Library and Creating a Document (2)', (done) => {
-      const doc = create()
-      doc.free()
-      done()
+      sync.free()
     })
     it('Automerge Scalar Types (1)', () => {
       const doc = create()
@@ -33,8 +30,6 @@ describe('Automerge', () => {
         prop6: true,
         prop7: null
       })
-
-      doc.free()
     })
     it('Automerge Scalar Types (2)', () => {
       const doc = create()
@@ -48,7 +43,6 @@ describe('Automerge', () => {
       doc.put("/", "prop8", new Uint8Array([1,2,3]), "bytes")
       doc.put("/", "prop9", true, "boolean")
       doc.put("/", "prop10", null, "null")
-      doc.free()
     })
     it('Automerge Object Types (1)', () => {
       const doc = create()
@@ -68,8 +62,6 @@ describe('Automerge', () => {
       // text is initialized with a string
 
       const notes = doc.putObject("/", "notes", "Hello world!")
-
-      doc.free()
     })
     it('Automerge Object Types (2)', () => {
       const doc = create()
@@ -91,8 +83,6 @@ describe('Automerge', () => {
       assert.deepEqual(doc.materialize("/"), {
          config: { align: "right", archived: false, cycles: [ 10, 19, 21 ] }
       })
-
-      doc.free()
     })
     it('Maps (1)', () => {
       const doc = create()
@@ -107,8 +97,6 @@ describe('Automerge', () => {
 
       assert.deepEqual(doc.keys(mymap),["bytes","foo","sub"])
       assert.deepEqual(doc.materialize("_root"), { mymap: { bytes: new Uint8Array([1,2,3]), foo: "bar", sub: {} }})
-
-      doc.free()
     })
     it('Lists (1)', () => {
       const doc = create()
@@ -123,8 +111,6 @@ describe('Automerge', () => {
 
       assert.deepEqual(doc.materialize(items),[ "bat", [ 1 ,2 ], { hello : "world" }, true, "bag", "brick" ])
       assert.deepEqual(doc.length(items),6)
-
-      doc.free()
     })
     it('Text (1)', () => {
       const doc = create("aaaaaa")
@@ -138,8 +124,6 @@ describe('Automerge', () => {
       assert.deepEqual(doc.text(notes), "Hello \ufffceveryone")
       assert.deepEqual(doc.get(notes, 6), obj)
       assert.deepEqual(doc.get(obj, "hi"), "there")
-
-      doc.free()
     })
     it('Querying Data (1)', () => {
       const doc1 = create("aabbcc")
@@ -160,8 +144,6 @@ describe('Automerge', () => {
 
       assert.deepEqual(doc1.get("_root","key3"), "doc2val")
       assert.deepEqual(doc1.getAll("_root","key3"),[[ "str", "doc1val", "3@aabbcc"], ["str", "doc2val", "3@ffaaff"]])
-
-      doc1.free(); doc2.free()
     })
     it('Counters (1)', () => {
       const doc1 = create("aaaaaa")
@@ -178,8 +160,6 @@ describe('Automerge', () => {
       doc1.merge(doc2)
 
       assert.deepEqual(doc1.materialize("_root"), { number: 10, total: 33 })
-
-      doc1.free(); doc2.free()
     })
     it('Transactions (1)', () => {
       const doc = create()
@@ -202,8 +182,6 @@ describe('Automerge', () => {
 
       assert.deepEqual(doc.get("_root", "key"),"val2")
       assert.deepEqual(doc.pendingOps(),0)
-
-      doc.free()
     })
     it('Viewing Old Versions of the Document (1)', () => {
       const doc = create()
@@ -220,8 +198,6 @@ describe('Automerge', () => {
       assert.deepEqual(doc.get("_root","key",heads2), "val2")
       assert.deepEqual(doc.get("_root","key",heads1), "val1")
       assert.deepEqual(doc.get("_root","key",[]), undefined)
-
-      doc.free()
     })
     it('Forking And Merging (1)', () => {
       const doc1 = create()
@@ -236,8 +212,6 @@ describe('Automerge', () => {
 
       assert.deepEqual(doc1.materialize("_root"), { key1: "val1", key2: "val2", key3: "val3" })
       assert.deepEqual(doc2.materialize("_root"), { key1: "val1", key3: "val3" })
-
-      doc1.free(); doc2.free()
     })
     it('Saving And Loading (1)', () => {
       const doc1 = create()
@@ -270,8 +244,6 @@ describe('Automerge', () => {
       assert.deepEqual(doc2.materialize("_root"), { key1: "value1", key2: "value2" })
       assert.deepEqual(doc3.materialize("_root"), { key1: "value1", key2: "value2" })
       assert.deepEqual(doc4.materialize("_root"), { key1: "value1", key2: "value2" })
-
-      doc1.free(); doc2.free(); doc3.free(); doc4.free()
     })
     //it.skip('Syncing (1)', () => { })
   })

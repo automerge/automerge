@@ -1,5 +1,5 @@
 /node_modules
-/dev
-/target
+/bundler
+/nodejs
 Cargo.lock
 yarn.lock

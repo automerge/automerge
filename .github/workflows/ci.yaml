@@ -73,8 +73,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli wasm-opt
+      - name: Install wasm32 target
+        run: rustup target add wasm32-unknown-unknown
       - name: run tests
         run: ./scripts/ci/wasm_tests
 
@@ -82,8 +84,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli wasm-opt
+      - name: Install wasm32 target
+        run: rustup target add wasm32-unknown-unknown
       - name: run tests
         run: ./scripts/ci/js_tests
 

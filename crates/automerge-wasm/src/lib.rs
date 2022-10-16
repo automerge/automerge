@@ -121,8 +121,6 @@ impl Automerge {
         Ok(automerge)
     }
 
-    pub fn free(self) {}
-
     #[wasm_bindgen(js_name = pendingOps)]
     pub fn pending_ops(&self) -> JsValue {
         (self.doc.pending_ops() as u32).into()
@@ -826,8 +824,8 @@ pub fn import_sync_state(state: JsValue) -> Result<SyncState, JsValue> {
 
 // this is needed to be compatible with the automerge-js api
 #[wasm_bindgen(js_name = exportSyncState)]
-pub fn export_sync_state(state: SyncState) -> JsValue {
-    JS::from(state.0).into()
+pub fn export_sync_state(state: &SyncState) -> JsValue {
+    JS::from(state.0.clone()).into()
 }
 
 #[wasm_bindgen(js_name = encodeSyncMessage)]
@@ -865,9 +863,9 @@ pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, JsValue> {
 }
 
 #[wasm_bindgen(js_name = encodeSyncState)]
-pub fn encode_sync_state(state: SyncState) -> Result<Uint8Array, JsValue> {
-    let state = state.0;
-    Ok(Uint8Array::from(state.encode().as_slice()))
+pub fn encode_sync_state(state: &SyncState) -> Result<Uint8Array, JsValue> {
+    //let state = state.0.clone();
+    Ok(Uint8Array::from(state.0.encode().as_slice()))
 }
 
 #[wasm_bindgen(js_name = decodeSyncState)]
