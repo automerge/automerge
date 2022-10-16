@@ -15,23 +15,26 @@
     "LICENSE",
     "package.json",
     "index.d.ts",
-    "nodejs/bindgen.js",
-    "nodejs/bindgen_bg.wasm",
-    "bundler/bindgen.js",
-    "bundler/bindgen_bg.js",
-    "bundler/bindgen_bg.wasm"
+    "nodejs/automerge_wasm.js",
+    "nodejs/automerge_wasm_bg.wasm",
+    "bundler/automerge_wasm.js",
+    "bundler/automerge_wasm_bg.js",
+    "bundler/automerge_wasm_bg.wasm"
   ],
   "private": false,
   "types": "index.d.ts",
-  "module": "./bundler/bindgen.js",
-  "main": "./nodejs/bindgen.js",
+  "module": "./bundler/automerge_wasm.js",
+  "main": "./nodejs/automerge_wasm.js",
   "scripts": {
     "lint": "eslint test/*.ts index.d.ts",
-    "debug": "cross-env PROFILE=dev yarn buildall",
-    "build": "cross-env PROFILE=dev FEATURES='' yarn buildall",
-    "release": "cross-env PROFILE=release yarn buildall",
+    "debug": "cross-env PROFILE=dev TARGET_DIR=debug yarn buildall",
+    "build": "cross-env PROFILE=dev TARGET_DIR=debug FEATURES='' yarn buildall",
+    "release": "cross-env PROFILE=release TARGET_DIR=release yarn buildall",
     "buildall": "cross-env TARGET=nodejs yarn target && cross-env TARGET=bundler yarn target",
-    "target": "rimraf ./$TARGET && wasm-pack build --target $TARGET --$PROFILE --out-name bindgen -d $TARGET -- $FEATURES",
+    "target": "rimraf ./$TARGET && yarn compile && yarn bindgen && yarn opt",
+    "compile": "cargo build --target wasm32-unknown-unknown --profile $PROFILE",
+    "bindgen": "wasm-bindgen --no-typescript --weak-refs --target $TARGET --out-dir $TARGET ../../target/wasm32-unknown-unknown/$TARGET_DIR/automerge_wasm.wasm",
+    "opt": "wasm-opt -Oz $TARGET/automerge_wasm_bg.wasm -o $TARGET/automerge_wasm_bg.wasm",
     "test": "ts-mocha -p tsconfig.json --type-check --bail --full-trace test/*.ts"
   },
   "devDependencies": {
@@ -52,7 +55,7 @@
     "typescript": "^4.6.4"
   },
   "exports": {
-    "browser": "./bundler/bindgen.js",
-    "require": "./nodejs/bindgen.js"
+    "browser": "./bundler/automerge_wasm.js",
+    "require": "./nodejs/automerge_wasm.js"
   }
 }
