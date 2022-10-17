@@ -538,6 +538,9 @@ impl Automerge {
         }
         set_hidden_value(&value, &Symbol::for_(DATATYPE_SYMBOL), datatype)?;
         set_hidden_value(&value, &Symbol::for_(META_SYMBOL), meta)?;
+        if self.freeze {
+            Object::freeze(&value);
+        }
         Ok(value)
     }
 

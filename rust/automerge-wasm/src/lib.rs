@@ -65,6 +65,7 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 #[derive(Debug)]
 pub struct Automerge {
     doc: AutoCommit,
+    freeze: bool,
     external_types: HashMap<Datatype, Function>,
 }
 
@@ -78,6 +79,7 @@ impl Automerge {
         }
         Ok(Automerge {
             doc,
+            freeze: false,
             external_types: HashMap::default(),
         })
     }
@@ -86,6 +88,7 @@ impl Automerge {
     pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, JsValue> {
         let mut automerge = Automerge {
             doc: self.doc.clone(),
+            freeze: self.freeze,
             external_types: self.external_types.clone(),
         };
         if let Some(s) = actor {
@@ -98,6 +101,7 @@ impl Automerge {
     pub fn fork(&mut self, actor: Option<String>) -> Result<Automerge, JsValue> {
         let mut automerge = Automerge {
             doc: self.doc.fork(),
+            freeze: self.freeze,
             external_types: self.external_types.clone(),
         };
         if let Some(s) = actor {
@@ -112,6 +116,7 @@ impl Automerge {
         let deps: Vec<_> = JS(heads).try_into()?;
         let mut automerge = Automerge {
             doc: self.doc.fork_at(&deps)?,
+            freeze: self.freeze,
             external_types: self.external_types.clone(),
         };
         if let Some(s) = actor {
@@ -428,13 +433,23 @@ impl Automerge {
         Ok(result)
     }
 
-    #[wasm_bindgen(js_name = enablePatches)]
-    pub fn enable_patches(&mut self, enable: JsValue) -> Result<(), JsValue> {
+    #[wasm_bindgen(js_name = enableFreeze)]
+    pub fn enable_freeze(&mut self, enable: JsValue) -> Result<JsValue, JsValue> {
         let enable = enable
             .as_bool()
-            .ok_or_else(|| to_js_err("must pass a bool to enable_patches"))?;
-        self.doc.observer().enable(enable);
-        Ok(())
+            .ok_or_else(|| to_js_err("must pass a bool to enableFreeze"))?;
+        let old_freeze = self.freeze;
+        self.freeze = enable;
+        Ok(old_freeze.into())
+    }
+
+    #[wasm_bindgen(js_name = enablePatches)]
+    pub fn enable_patches(&mut self, enable: JsValue) -> Result<JsValue, JsValue> {
+        let enable = enable
+            .as_bool()
+            .ok_or_else(|| to_js_err("must pass a bool to enablePatches"))?;
+        let old_enabled = self.doc.observer().enable(enable);
+        Ok(old_enabled.into())
     }
 
     #[wasm_bindgen(js_name = registerDatatype)]
@@ -634,7 +649,7 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = toJS)]
-    pub fn to_js(&self, meta: JsValue) -> Result<JsValue, JsValue> {
+    pub fn to_js(&mut self, meta: JsValue) -> Result<JsValue, JsValue> {
         self.export_object(&ROOT, Datatype::Map, None, &meta)
     }
 
@@ -788,6 +803,7 @@ pub fn load(data: Uint8Array, actor: Option<String>) -> Result<Automerge, JsValu
     }
     Ok(Automerge {
         doc,
+        freeze: false,
         external_types: HashMap::default(),
     })
 }

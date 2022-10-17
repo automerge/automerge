@@ -156,13 +156,10 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
     let patchCallback = opts.patchCallback
     const handle = ApiHandler.create(opts.actor)
     handle.enablePatches(true)
-    //@ts-ignore
+    handle.enableFreeze(!!opts.freeze)
     handle.registerDatatype("counter", (n) => new Counter(n))
-    //@ts-ignore
     handle.registerDatatype("text", (n) => new Text(n))
-    //@ts-ignore
-    const doc = handle.materialize("/", undefined, {handle, heads: undefined, freeze, patchCallback})
-    //@ts-ignore
+    const doc = handle.materialize("/", undefined, {handle, heads: undefined, freeze, patchCallback}) as Doc<T>
     return doc
 }
 
@@ -172,7 +169,6 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
 export function clone<T>(doc: Doc<T>): Doc<T> {
     const state = _state(doc)
     const handle = state.heads ? state.handle.forkAt(state.heads) : state.handle.fork()
-    //@ts-ignore
     const clonedDoc: any = handle.materialize("/", undefined, {...state, handle})
 
     return clonedDoc
@@ -367,12 +363,10 @@ export function load<T>(data: Uint8Array, _opts?: ActorId | InitOptions<T>): Doc
     const patchCallback = opts.patchCallback
     const handle = ApiHandler.load(data, actor)
     handle.enablePatches(true)
-    //@ts-ignore
+    handle.enableFreeze(!!opts.freeze)
     handle.registerDatatype("counter", (n) => new Counter(n))
-    //@ts-ignore
     handle.registerDatatype("text", (n) => new Text(n))
-    //@ts-ignore
-    const doc: any = handle.materialize("/", undefined, {handle, heads: undefined, patchCallback})
+    const doc: any = handle.materialize("/", undefined, {handle, heads: undefined, patchCallback}) as Doc<T>
     return doc
 }
 
@@ -793,13 +787,17 @@ export function dump<T>(doc: Doc<T>) {
 }
 
 /** @hidden */
-// FIXME - return T?
-export function toJS<T>(doc: Doc<T>): MaterializeValue {
+export function toJS<T>(doc: Doc<T>): T {
     const state = _state(doc)
-    // @ts-ignore
-    return state.handle.materialize("_root", state.heads, state)
+    const enabled = state.handle.enableFreeze(false)
+    const result = state.handle.materialize()
+    state.handle.enableFreeze(enabled)
+    return result as T
 }
 
+export function isAutomerge(doc: unknown): boolean {
+  return getObjectId(doc) === "_root" && !!Reflect.get(doc as Object, STATE)
+}
 
 function isObject(obj: unknown): obj is Record<string, unknown> {
     return typeof obj === 'object' && obj !== null
