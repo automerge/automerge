@@ -65,6 +65,7 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 #[derive(Debug)]
 pub struct Automerge {
     doc: AutoCommit,
+    freeze: bool,
     external_types: HashMap<Datatype, Function>,
 }
 
@@ -78,6 +79,7 @@ impl Automerge {
         }
         Ok(Automerge {
             doc,
+            freeze: false,
             external_types: HashMap::default(),
         })
     }
@@ -86,6 +88,7 @@ impl Automerge {
     pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, JsValue> {
         let mut automerge = Automerge {
             doc: self.doc.clone(),
+            freeze: self.freeze,
             external_types: self.external_types.clone(),
         };
         if let Some(s) = actor {
@@ -98,6 +101,7 @@ impl Automerge {
     pub fn fork(&mut self, actor: Option<String>) -> Result<Automerge, JsValue> {
         let mut automerge = Automerge {
             doc: self.doc.fork(),
+            freeze: self.freeze,
             external_types: self.external_types.clone(),
         };
         if let Some(s) = actor {
@@ -112,6 +116,7 @@ impl Automerge {
         let deps: Vec<_> = JS(heads).try_into()?;
         let mut automerge = Automerge {
             doc: self.doc.fork_at(&deps)?,
+            freeze: self.freeze,
             external_types: self.external_types.clone(),
         };
         if let Some(s) = actor {
@@ -428,13 +433,23 @@ impl Automerge {
         Ok(result)
     }
 
-    #[wasm_bindgen(js_name = enablePatches)]
-    pub fn enable_patches(&mut self, enable: JsValue) -> Result<(), JsValue> {
+    #[wasm_bindgen(js_name = enableFreeze)]
+    pub fn enable_freeze(&mut self, enable: JsValue) -> Result<JsValue, JsValue> {
         let enable = enable
             .as_bool()
-            .ok_or_else(|| to_js_err("must pass a bool to enable_patches"))?;
-        self.doc.observer().enable(enable);
-        Ok(())
+            .ok_or_else(|| to_js_err("must pass a bool to enableFreeze"))?;
+        let old_freeze = self.freeze;
+        self.freeze = enable;
+        Ok(old_freeze.into())
+    }
+
+    #[wasm_bindgen(js_name = enablePatches)]
+    pub fn enable_patches(&mut self, enable: JsValue) -> Result<JsValue, JsValue> {
+        let enable = enable
+            .as_bool()
+            .ok_or_else(|| to_js_err("must pass a bool to enablePatches"))?;
+        let old_enabled = self.doc.observer().enable(enable);
+        Ok(old_enabled.into())
     }
 
     #[wasm_bindgen(js_name = registerDatatype)]
@@ -462,23 +477,22 @@ impl Automerge {
         let mut object = object.dyn_into::<Object>()?;
         let patches = self.doc.observer().take_patches();
         let callback = callback.dyn_into::<Function>().ok();
-        let freeze = Object::is_frozen(&object);
 
         // even if there are no patches we may need to update the meta object
         // which requires that we update the object too
         if patches.is_empty() && !meta.is_undefined() {
             let (obj, datatype, id) = self.unwrap_object(&object)?;
             object = Object::assign(&Object::new(), &obj);
-            object = self.wrap_object(object, datatype, &id, &meta, freeze)?;
+            object = self.wrap_object(object, datatype, &id, &meta)?;
         }
 
         for p in patches {
             if let Some(c) = &callback {
                 let before = object.clone();
-                object = self.apply_patch(object, &p, 0, &meta, freeze)?;
+                object = self.apply_patch(object, &p, 0, &meta)?;
                 c.call3(&JsValue::undefined(), &p.try_into()?, &before, &object)?;
             } else {
-                object = self.apply_patch(object, &p, 0, &meta, freeze)?;
+                object = self.apply_patch(object, &p, 0, &meta)?;
             }
         }
 
@@ -635,8 +649,8 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = toJS)]
-    pub fn to_js(&self, meta: JsValue) -> Result<JsValue, JsValue> {
-        self.export_object(&ROOT, Datatype::Map, None, &meta, false)
+    pub fn to_js(&mut self, meta: JsValue) -> Result<JsValue, JsValue> {
+        self.export_object(&ROOT, Datatype::Map, None, &meta)
     }
 
     pub fn materialize(
@@ -644,17 +658,15 @@ impl Automerge {
         obj: JsValue,
         heads: Option<Array>,
         meta: JsValue,
-        freeze: JsValue,
     ) -> Result<JsValue, JsValue> {
         let obj = self.import(obj).unwrap_or(ROOT);
         let heads = get_heads(heads);
-        let freeze = freeze.as_bool().unwrap_or(false);
         let obj_type = self
             .doc
             .object_type(&obj)
             .ok_or_else(|| to_js_err(format!("invalid obj {}", obj)))?;
         let _patches = self.doc.observer().take_patches(); // throw away patches
-        self.export_object(&obj, obj_type.into(), heads.as_ref(), &meta, freeze)
+        self.export_object(&obj, obj_type.into(), heads.as_ref(), &meta)
     }
 
     fn import(&self, id: JsValue) -> Result<ObjId, JsValue> {
@@ -791,6 +803,7 @@ pub fn load(data: Uint8Array, actor: Option<String>) -> Result<Automerge, JsValu
     }
     Ok(Automerge {
         doc,
+        freeze: false,
         external_types: HashMap::default(),
     })
 }

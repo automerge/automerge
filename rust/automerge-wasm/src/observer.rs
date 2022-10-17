@@ -15,11 +15,13 @@ impl Observer {
     pub(crate) fn take_patches(&mut self) -> Vec<Patch> {
         std::mem::take(&mut self.patches)
     }
-    pub(crate) fn enable(&mut self, enable: bool) {
+    pub(crate) fn enable(&mut self, enable: bool) -> bool {
         if self.enabled && !enable {
             self.patches.truncate(0)
         }
+        let old_enabled = self.enabled;
         self.enabled = enable;
+        old_enabled
     }
 }
 

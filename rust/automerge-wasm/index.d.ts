@@ -164,7 +164,8 @@ export class Automerge {
   keys(obj: ObjID, heads?: Heads): string[];
   text(obj: ObjID, heads?: Heads): string;
   length(obj: ObjID, heads?: Heads): number;
-  materialize(obj?: ObjID, heads?: Heads, metadata?: unknown, freeze?: bool): MaterializeValue;
+  materialize(obj?: ObjID, heads?: Heads, metadata?: unknown): MaterializeValue;
+  toJS(): MaterializeValue;
 
   // transactions
   commit(message?: string, time?: number): Hash;
@@ -174,7 +175,8 @@ export class Automerge {
   rollback(): number;
 
   // patches
-  enablePatches(enable: boolean): void;
+  enablePatches(enable: boolean): boolean;
+  enableFreeze(enable: boolean): boolean;
   registerDatatype(datatype: string, callback: Function): void;
   popPatches(): Patch[];
 

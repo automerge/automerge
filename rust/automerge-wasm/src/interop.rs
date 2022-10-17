@@ -370,23 +370,20 @@ impl Automerge {
         datatype: Datatype,
         heads: Option<&Vec<ChangeHash>>,
         meta: &JsValue,
-        freeze: bool,
     ) -> Result<JsValue, JsValue> {
         let result = if datatype.is_sequence() {
             self.wrap_object(
-                self.export_list(obj, heads, meta, freeze)?,
+                self.export_list(obj, heads, meta)?,
                 datatype,
                 &obj.to_string().into(),
                 meta,
-                freeze,
             )?
         } else {
             self.wrap_object(
-                self.export_map(obj, heads, meta, freeze)?,
+                self.export_map(obj, heads, meta)?,
                 datatype,
                 &obj.to_string().into(),
                 meta,
-                freeze,
             )?
         };
         Ok(result.into())
@@ -397,7 +394,6 @@ impl Automerge {
         obj: &ObjId,
         heads: Option<&Vec<ChangeHash>>,
         meta: &JsValue,
-        freeze: bool,
     ) -> Result<Object, JsValue> {
         let keys = self.doc.keys(obj);
         let map = Object::new();
@@ -409,7 +405,7 @@ impl Automerge {
             };
             if let Ok(Some((val, id))) = val_and_id {
                 let subval = match val {
-                    Value::Object(o) => self.export_object(&id, o.into(), heads, meta, freeze)?,
+                    Value::Object(o) => self.export_object(&id, o.into(), heads, meta)?,
                     Value::Scalar(_) => self.export_value(alloc(&val))?,
                 };
                 Reflect::set(&map, &k.into(), &subval)?;
@@ -424,7 +420,6 @@ impl Automerge {
         obj: &ObjId,
         heads: Option<&Vec<ChangeHash>>,
         meta: &JsValue,
-        freeze: bool,
     ) -> Result<Object, JsValue> {
         let len = self.doc.length(obj);
         let array = Array::new();
@@ -436,7 +431,7 @@ impl Automerge {
             };
             if let Ok(Some((val, id))) = val_and_id {
                 let subval = match val {
-                    Value::Object(o) => self.export_object(&id, o.into(), heads, meta, freeze)?,
+                    Value::Object(o) => self.export_object(&id, o.into(), heads, meta)?,
                     Value::Scalar(_) => self.export_value(alloc(&val))?,
                 };
                 array.push(&subval);
@@ -509,10 +504,9 @@ impl Automerge {
         (datatype, raw_value): (Datatype, JsValue),
         id: &ObjId,
         meta: &JsValue,
-        freeze: bool,
     ) -> Result<JsValue, JsValue> {
         if let Ok(obj) = raw_value.clone().dyn_into::<Object>() {
-            let result = self.wrap_object(obj, datatype, &id.to_string().into(), meta, freeze)?;
+            let result = self.wrap_object(obj, datatype, &id.to_string().into(), meta)?;
             Ok(result.into())
         } else {
             self.export_value((datatype, raw_value))
@@ -525,7 +519,6 @@ impl Automerge {
         datatype: Datatype,
         id: &JsValue,
         meta: &JsValue,
-        freeze: bool,
     ) -> Result<Object, JsValue> {
         let value = if let Some(function) = self.external_types.get(&datatype) {
             let wrapped_value = function.call1(&JsValue::undefined(), &value)?;
@@ -545,7 +538,7 @@ impl Automerge {
         }
         set_hidden_value(&value, &Symbol::for_(DATATYPE_SYMBOL), datatype)?;
         set_hidden_value(&value, &Symbol::for_(META_SYMBOL), meta)?;
-        if freeze {
+        if self.freeze {
             Object::freeze(&value);
         }
         Ok(value)
@@ -556,19 +549,16 @@ impl Automerge {
         array: &Object,
         patch: &Patch,
         meta: &JsValue,
-        freeze: bool,
     ) -> Result<Object, JsValue> {
         let result = Array::from(array); // shallow copy
         match patch {
             Patch::PutSeq { index, value, .. } => {
-                let sub_val = self.maybe_wrap_object(alloc(&value.0), &value.1, meta, freeze)?;
+                let sub_val = self.maybe_wrap_object(alloc(&value.0), &value.1, meta)?;
                 Reflect::set(&result, &(*index as f64).into(), &sub_val)?;
                 Ok(result.into())
             }
-            Patch::DeleteSeq { index, .. } => self.sub_splice(result, *index, 1, &[], meta, freeze),
-            Patch::Insert { index, values, .. } => {
-                self.sub_splice(result, *index, 0, values, meta, freeze)
-            }
+            Patch::DeleteSeq { index, .. } => self.sub_splice(result, *index, 1, &[], meta),
+            Patch::Insert { index, values, .. } => self.sub_splice(result, *index, 0, values, meta),
             Patch::Increment { prop, value, .. } => {
                 if let Prop::Seq(index) = prop {
                     let index = (*index as f64).into();
@@ -596,12 +586,11 @@ impl Automerge {
         map: &Object,
         patch: &Patch,
         meta: &JsValue,
-        freeze: bool,
     ) -> Result<Object, JsValue> {
         let result = Object::assign(&Object::new(), map); // shallow copy
         match patch {
             Patch::PutMap { key, value, .. } => {
-                let sub_val = self.maybe_wrap_object(alloc(&value.0), &value.1, meta, freeze)?;
+                let sub_val = self.maybe_wrap_object(alloc(&value.0), &value.1, meta)?;
                 Reflect::set(&result, &key.into(), &sub_val)?;
                 Ok(result)
             }
@@ -638,13 +627,12 @@ impl Automerge {
         patch: &Patch,
         depth: usize,
         meta: &JsValue,
-        freeze: bool,
     ) -> Result<Object, JsValue> {
         let (inner, datatype, id) = self.unwrap_object(&obj)?;
         let prop = patch.path().get(depth).map(|p| prop_to_js(&p.1));
         let result = if let Some(prop) = prop {
             if let Ok(sub_obj) = Reflect::get(&inner, &prop)?.dyn_into::<Object>() {
-                let new_value = self.apply_patch(sub_obj, patch, depth + 1, meta, freeze)?;
+                let new_value = self.apply_patch(sub_obj, patch, depth + 1, meta)?;
                 let result = shallow_copy(&inner);
                 Reflect::set(&result, &prop, &new_value)?;
                 Ok(result)
@@ -654,12 +642,12 @@ impl Automerge {
                 return Ok(obj);
             }
         } else if Array::is_array(&inner) {
-            self.apply_patch_to_array(&inner, patch, meta, freeze)
+            self.apply_patch_to_array(&inner, patch, meta)
         } else {
-            self.apply_patch_to_map(&inner, patch, meta, freeze)
+            self.apply_patch_to_map(&inner, patch, meta)
         }?;
 
-        self.wrap_object(result, datatype, &id, meta, freeze)
+        self.wrap_object(result, datatype, &id, meta)
     }
 
     fn sub_splice(
@@ -669,11 +657,10 @@ impl Automerge {
         num_del: usize,
         values: &[(Value<'_>, ObjId)],
         meta: &JsValue,
-        freeze: bool,
     ) -> Result<Object, JsValue> {
         let args: Array = values
             .iter()
-            .map(|v| self.maybe_wrap_object(alloc(&v.0), &v.1, meta, freeze))
+            .map(|v| self.maybe_wrap_object(alloc(&v.0), &v.1, meta))
             .collect::<Result<_, _>>()?;
         args.unshift(&(num_del as u32).into());
         args.unshift(&(index as u32).into());

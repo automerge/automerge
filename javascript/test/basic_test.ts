@@ -22,12 +22,15 @@ describe('Automerge', () => {
         })
 
         it('can detect an automerge doc with isAutomerge()', () => {
-            let doc1 = Automerge.from({ sub: { object: true } })
+            const doc1 = Automerge.from({ sub: { object: true } })
             assert(Automerge.isAutomerge(doc1))
             assert(!Automerge.isAutomerge(doc1.sub))
             assert(!Automerge.isAutomerge("String"))
             assert(!Automerge.isAutomerge({ sub: { object: true }}))
             assert(!Automerge.isAutomerge(undefined))
+            const jsObj = Automerge.toJS(doc1)
+            assert(!Automerge.isAutomerge(jsObj))
+            assert.deepEqual(jsObj, doc1)
         })
 
         it('it should recursively freeze the document if requested', () => {
