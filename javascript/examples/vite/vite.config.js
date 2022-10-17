@@ -5,6 +5,13 @@ import topLevelAwait from "vite-plugin-top-level-await"
 export default defineConfig({
     plugins: [topLevelAwait(), wasm()],
 
+    // This is only necessary if you are using `SharedWorker` or `WebWorker`, as 
+    // documented in https://vitejs.dev/guide/features.html#import-with-constructors
+    worker: { 
+        format: "es",
+        plugins: [topLevelAwait(), wasm()] 
+    },
+
     optimizeDeps: {
         // This is necessary because otherwise `vite dev` includes two separate
         // versions of the JS wrapper. This causes problems because the JS
