@@ -164,7 +164,7 @@ export class Automerge {
   keys(obj: ObjID, heads?: Heads): string[];
   text(obj: ObjID, heads?: Heads): string;
   length(obj: ObjID, heads?: Heads): number;
-  materialize(obj?: ObjID, heads?: Heads): MaterializeValue;
+  materialize(obj?: ObjID, heads?: Heads, metadata?: unknown, freeze?: bool): MaterializeValue;
 
   // transactions
   commit(message?: string, time?: number): Hash;
@@ -206,7 +206,7 @@ export class Automerge {
   dump(): void;
 
   // experimental api can go here
-  applyPatches<Doc>(obj: Doc, meta?: unknown, callback?: (values: Value[]) => undefined): Doc;
+  applyPatches<Doc>(obj: Doc, meta?: unknown, callback?: (patch: Patch, before: Doc, after: Doc) => void): Doc;
 }
 
 export interface JsSyncState {
