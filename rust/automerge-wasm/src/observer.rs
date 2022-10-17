@@ -83,8 +83,10 @@ impl OpObserver for Observer {
                 ..
             }) = self.patches.last_mut()
             {
-                if tail_obj == &obj && *tail_index + values.len() == index {
-                    values.push(value);
+                let range = *tail_index..=*tail_index + values.len();
+                //if tail_obj == &obj && *tail_index + values.len() == index {
+                if tail_obj == &obj && range.contains(&index) {
+                    values.insert(index - *tail_index, value);
                     return;
                 }
             }
@@ -96,6 +98,37 @@ impl OpObserver for Observer {
                 values: vec![value],
             };
             self.patches.push(patch);
+        }
+    }
+
+    fn delete(&mut self, mut parents: Parents<'_>, obj: ObjId, prop: Prop) {
+        if self.enabled {
+            if let Some(Patch::Insert {
+                obj: tail_obj,
+                index: tail_index,
+                values,
+                ..
+            }) = self.patches.last_mut()
+            {
+                if let Prop::Seq(index) = prop {
+                    let range = *tail_index..*tail_index + values.len();
+                    if tail_obj == &obj && range.contains(&index) {
+                        values.remove(index - *tail_index);
+                        return;
+                    }
+                }
+            }
+            let path = parents.path();
+            let patch = match prop {
+                Prop::Map(key) => Patch::DeleteMap { path, obj, key },
+                Prop::Seq(index) => Patch::DeleteSeq {
+                    path,
+                    obj,
+                    index,
+                    length: 1,
+                },
+            };
+            self.patches.push(patch)
         }
     }
 
@@ -146,22 +179,6 @@ impl OpObserver for Observer {
                 prop,
                 value,
             })
-        }
-    }
-
-    fn delete(&mut self, mut parents: Parents<'_>, obj: ObjId, prop: Prop) {
-        if self.enabled {
-            let path = parents.path();
-            let patch = match prop {
-                Prop::Map(key) => Patch::DeleteMap { path, obj, key },
-                Prop::Seq(index) => Patch::DeleteSeq {
-                    path,
-                    obj,
-                    index,
-                    length: 1,
-                },
-            };
-            self.patches.push(patch)
         }
     }
 
