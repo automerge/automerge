@@ -561,8 +561,7 @@ describe('Automerge', () => {
       assert.deepEqual([0, 1, 2, 3].map(i => (doc3.getWithType('1@aaaa', i) || [])[1]), ['a', 'b', 'c', 'd'])
       assert.deepEqual([0, 1, 2, 3].map(i => (doc4.getWithType('1@aaaa', i) || [])[1]), ['a', 'b', 'c', 'd'])
       assert.deepEqual(doc3.popPatches(), [
-        { action: 'splice', path: ['values', 0], values:['c','d'] },
-        { action: 'splice', path: ['values', 0], values:['a','b'] },
+        { action: 'splice', path: ['values', 0], values:['a','b','c','d'] },
       ])
       assert.deepEqual(doc4.popPatches(), [
         { action: 'splice', path: ['values',0], values:['a','b','c','d'] },
@@ -588,8 +587,7 @@ describe('Automerge', () => {
       assert.deepEqual([0, 1, 2, 3, 4, 5].map(i => (doc3.getWithType('1@aaaa', i) || [])[1]), ['a', 'b', 'c', 'd', 'e', 'f'])
       assert.deepEqual([0, 1, 2, 3, 4, 5].map(i => (doc4.getWithType('1@aaaa', i) || [])[1]), ['a', 'b', 'c', 'd', 'e', 'f'])
       assert.deepEqual(doc3.popPatches(), [
-        { action: 'splice', path: ['values', 2], values: ['e','f'] },
-        { action: 'splice', path: ['values', 2], values: ['c','d'] },
+        { action: 'splice', path: ['values', 2], values: ['c','d','e','f'] },
       ])
       assert.deepEqual(doc4.popPatches(), [
         { action: 'splice', path: ['values', 2], values: ['c','d','e','f'] },
@@ -845,11 +843,7 @@ describe('Automerge', () => {
 
       assert.deepEqual(doc1.popPatches(), [
         { action: 'put', path: ['list'], value: [], conflict: false },
-        { action: 'splice', path: ['list', 0], values: [1]  },
-        { action: 'splice', path: ['list', 0], values: [2] },
-        { action: 'splice', path: ['list', 2], values: [3] },
-        { action: 'splice', path: ['list', 2], values: [{}] },
-        { action: 'splice', path: ['list', 2], values: [[]] },
+        { action: 'splice', path: ['list', 0], values: [2,1,[],{},3]  },
       ])
     })
 
@@ -876,9 +870,7 @@ describe('Automerge', () => {
 
       assert.deepEqual(doc1.popPatches(), [
         { action: 'put', path: ['list'],  value: [], conflict: false },
-        { action: 'splice', path: ['list',0], values: [1,2,3,4] },
-        { action: 'del', path: ['list',1] },
-        { action: 'del', path: ['list',1] },
+        { action: 'splice', path: ['list',0], values: [1,4] },
       ])
     })
 
