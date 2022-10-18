@@ -9,4 +9,3 @@ set -eou pipefail
 ./scripts/ci/wasm_tests
 ./scripts/ci/js_tests
 ./scripts/ci/cmake-build Release static
-./scripts/ci/cmake-docs

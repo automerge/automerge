@@ -51,9 +51,6 @@ jobs:
       - name: Install doxygen
         run: sudo apt-get install -y doxygen
         shell: bash
-      - name: Build C docs
-        run: ./scripts/ci/cmake-docs
-        shell: bash
 
   cargo-deny:
     runs-on: ubuntu-latest
