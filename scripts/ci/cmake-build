@@ -15,4 +15,4 @@ C_PROJECT=$THIS_SCRIPT/../../rust/automerge-c;
 mkdir -p $C_PROJECT/build;
 cd $C_PROJECT/build;
 cmake --log-level=ERROR -B . -S .. -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DBUILD_SHARED_LIBS=$SHARED_TOGGLE;
-./test/test_automerge
+cmake --build . --target test_automerge;
