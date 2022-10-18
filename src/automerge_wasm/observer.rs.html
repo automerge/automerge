@@ -313,6 +313,8 @@
 <span id="311">311</span>
 <span id="312">312</span>
 <span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
 </pre><pre class="rust"><code><span class="attribute">#![<span class="ident">allow</span>(<span class="ident">dead_code</span>)]</span>
 
 <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::interop</span>::{<span class="ident">alloc</span>, <span class="ident">js_set</span>};
@@ -330,11 +332,13 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">take_patches</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Patch</span><span class="op">&gt;</span> {
         <span class="ident">std::mem::take</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">patches</span>)
     }
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">enable</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">enable</span>: <span class="ident">bool</span>) {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">enable</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">enable</span>: <span class="ident">bool</span>) -&gt; <span class="ident">bool</span> {
         <span class="kw">if</span> <span class="self">self</span>.<span class="ident">enabled</span> <span class="op">&amp;&amp;</span> <span class="op">!</span><span class="ident">enable</span> {
             <span class="self">self</span>.<span class="ident">patches</span>.<span class="ident">truncate</span>(<span class="number">0</span>)
         }
+        <span class="kw">let</span> <span class="ident">old_enabled</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">enabled</span>;
         <span class="self">self</span>.<span class="ident">enabled</span> <span class="op">=</span> <span class="ident">enable</span>;
+        <span class="ident">old_enabled</span>
     }
 }
 
