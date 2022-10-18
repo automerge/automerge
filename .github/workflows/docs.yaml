@@ -30,28 +30,16 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: clean
-          args: --doc
+          args: --manifest-path ./rust/Cargo.toml --doc
 
       - name: Build Rust docs
         uses: actions-rs/cargo@v1
         with:
           command: doc
-          args: --workspace --all-features --no-deps
+          args: --manifest-path ./rust/Cargo.toml --workspace --all-features --no-deps
 
       - name: Move Rust docs
-        run: mkdir -p docs && mv target/doc/* docs/.
-        shell: bash
-
-      - name: Install doxygen
-        run: sudo apt-get install -y doxygen
-        shell: bash
-
-      - name: Build C docs
-        run: ./scripts/ci/cmake-docs
-        shell: bash
-
-      - name: Move C docs
-        run: mkdir -p docs/automerge-c && mv automerge-c/build/src/html/* docs/automerge-c/.
+        run: mkdir -p docs && mv rust/target/doc/* docs/.
         shell: bash
 
       - name: Configure root page
