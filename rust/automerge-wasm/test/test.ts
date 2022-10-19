@@ -425,7 +425,7 @@ describe('Automerge', () => {
       assert.deepEqual(doc2.getWithType(c, "d"), ["str", "dd"])
     })
 
-    it('should allow you to forkAt a heads', () => {
+    it('should allow you to fork at a heads', () => {
       const A = create("aaaaaa")
       A.put("/", "key1", "val1");
       A.put("/", "key2", "val2");
@@ -436,8 +436,8 @@ describe('Automerge', () => {
       A.merge(B)
       const heads2 = A.getHeads();
       A.put("/", "key5", "val5");
-      assert.deepEqual(A.forkAt(heads1).materialize("/"), A.materialize("/", heads1))
-      assert.deepEqual(A.forkAt(heads2).materialize("/"), A.materialize("/", heads2))
+      assert.deepEqual(A.fork(undefined, heads1).materialize("/"), A.materialize("/", heads1))
+      assert.deepEqual(A.fork(undefined, heads2).materialize("/"), A.materialize("/", heads2))
     })
 
     it('should handle merging text conflicts then saving & loading', () => {

@@ -98,24 +98,15 @@ impl Automerge {
         Ok(automerge)
     }
 
-    pub fn fork(&mut self, actor: Option<String>) -> Result<Automerge, JsValue> {
-        let mut automerge = Automerge {
-            doc: self.doc.fork(),
-            freeze: self.freeze,
-            external_types: self.external_types.clone(),
+    pub fn fork(&mut self, actor: Option<String>, heads: JsValue) -> Result<Automerge, JsValue> {
+        let heads: Result<Vec<am::ChangeHash>, _> = JS(heads).try_into();
+        let doc = if let Ok(heads) = heads {
+            self.doc.fork_at(&heads)?
+        } else {
+            self.doc.fork()
         };
-        if let Some(s) = actor {
-            let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
-            automerge.doc.set_actor(actor);
-        }
-        Ok(automerge)
-    }
-
-    #[wasm_bindgen(js_name = forkAt)]
-    pub fn fork_at(&mut self, heads: JsValue, actor: Option<String>) -> Result<Automerge, JsValue> {
-        let deps: Vec<_> = JS(heads).try_into()?;
         let mut automerge = Automerge {
-            doc: self.doc.fork_at(&deps)?,
+            doc,
             freeze: self.freeze,
             external_types: self.external_types.clone(),
         };

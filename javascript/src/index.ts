@@ -98,6 +98,9 @@ export function getBackend<T>(doc: Doc<T>): Automerge {
 }
 
 function _state<T>(doc: Doc<T>, checkroot = true): InternalState<T> {
+    if (typeof doc !== 'object') {
+        throw new RangeError("must be the document root")
+    }
     const state = Reflect.get(doc, STATE)
     if (state === undefined || (checkroot && _obj(doc) !== "_root")) {
         throw new RangeError("must be the document root")
@@ -164,11 +167,13 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
 }
 
 /**
- * Make a copy of an automerge document.
+ * Make a copy of an automerge document. By default it allocates a new actorId so the copy can be later merged.
  */
-export function clone<T>(doc: Doc<T>): Doc<T> {
+export function clone<T>(doc: Doc<T>, _opts?: ActorId | InitOptions<T>, _heads?: Heads): Doc<T> {
     const state = _state(doc)
-    const handle = state.heads ? state.handle.forkAt(state.heads) : state.handle.fork()
+    const opts = importOpts(_opts)
+    const heads = _heads || state.heads
+    const handle = state.handle.fork(opts.actor, heads)
     const clonedDoc: any = handle.materialize("/", undefined, {...state, handle})
 
     return clonedDoc
