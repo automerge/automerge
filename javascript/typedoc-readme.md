@@ -62,6 +62,61 @@ saveIncremental}, this will generate all the changes since you last called
 `saveIncremental`, the changes generated can be applied to another document with
 {@link loadIncremental}.
 
+## Viewing different versions of a document
+
+Occasionally you may wish to explicitly step to a different point in a document
+history. One common reason to do this is if you need to obtain a set of changes
+which take the document from one state to another in order to send those changes
+to another peer (or to save them somewhere). You can use {@link view} to do this.
+
+```javascript
+import * as automerge from "@automerge/automerge"
+import * as assert from "assert"
+
+let doc = automerge.from({
+    "key1": "value1"
+})
+
+// Make a clone of the document at this point, maybe this is actually on another
+// peer.
+let doc2 = automerge.clone<any>(doc)
+
+let heads = automerge.getHeads(doc)
+
+doc = automerge.change<any>(doc, d => {
+    d.key2 = "value2"
+})
+
+doc = automerge.change<any>(doc, d => {
+    d.key3 = "value3"
+})
+
+// At this point we've generated two separate changes, now we want to send 
+// just those changes to someone else
+
+// view is a cheap reference based copy of a document at a given set of heads
+let before = automerge.view(doc, heads)
+
+// This view doesn't show the last two changes in the document state
+assert.deepEqual(before, {
+    key1: "value1"
+})
+
+// Get the changes to send to doc2
+let changes = automerge.getChanges(before, doc)
+
+// Apply the changes at doc2
+doc2 = automerge.applyChanges<any>(doc2, changes)[0]
+assert.deepEqual(doc2, {
+    key1: "value1",
+    key2: "value2",
+    key3: "value3"
+})
+```
+
+If you have a {@link view} of a document which you want to make changes to you
+can {@link clone} the viewed document.
+
 ## Syncing
 
 The sync protocol is stateful. This means that we start by creating a {@link

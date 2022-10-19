@@ -199,12 +199,11 @@ export class Automerge {
   getMissingDeps(heads?: Heads): Heads;
 
   // memory management
-  free(): void;
-  clone(actor?: string): Automerge;
-  fork(actor?: string): Automerge;
-  forkAt(heads: Heads, actor?: string): Automerge;
+  free(): void; // only needed if weak-refs are unsupported
+  clone(actor?: string): Automerge; // TODO - remove, this is dangerous
+  fork(actor?: string, heads?: Heads): Automerge;
 
-  // dump internal state to console.log
+  // dump internal state to console.log - for debugging
   dump(): void;
 
   // experimental api can go here

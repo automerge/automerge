@@ -98,6 +98,9 @@ export function getBackend<T>(doc: Doc<T>): Automerge {
 }
 
 function _state<T>(doc: Doc<T>, checkroot = true): InternalState<T> {
+    if (typeof doc !== 'object') {
+        throw new RangeError("must be the document root")
+    }
     const state = Reflect.get(doc, STATE)
     if (state === undefined || (checkroot && _obj(doc) !== "_root")) {
         throw new RangeError("must be the document root")
@@ -164,14 +167,47 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
 }
 
 /**
- * Make a copy of an automerge document.
+ * Make an immutable view of an automerge document as at `heads`
+ *
+ * @remarks
+ * The document returned from this function cannot be passed to {@link change}. 
+ * This is because it shares the same underlying memory as `doc`, but it is
+ * consequently a very cheap copy.
+ *
+ * Note that this function will throw an error if any of the hashes in `heads`
+ * are not in the document.
+ *
+ * @typeParam T - The type of the value contained in the document
+ * @param doc - The document to create a view of
+ * @param heads - The hashes of the heads to create a view at
  */
-export function clone<T>(doc: Doc<T>): Doc<T> {
+export function view<T>(doc: Doc<T>, heads: Heads): Doc<T> {
     const state = _state(doc)
-    const handle = state.heads ? state.handle.forkAt(state.heads) : state.handle.fork()
-    const clonedDoc: any = handle.materialize("/", undefined, {...state, handle})
+    const handle = state.handle
+    return state.handle.materialize("/", heads, { ...state, handle, heads }) as any
+}
 
-    return clonedDoc
+/**
+ * Make a full writable copy of an automerge document
+ *
+ * @remarks
+ * Unlike {@link view} this function makes a full copy of the memory backing
+ * the document and can thus be passed to {@link change}. It also generates a
+ * new actor ID so that changes made in the new document do not create duplicate
+ * sequence numbers with respect to the old document. If you need control over
+ * the actor ID which is generated you can pass the actor ID as the second
+ * argument
+ *
+ * @typeParam T - The type of the value contained in the document
+ * @param doc - The document to clone
+ * @param _opts - Either an actor ID to use for the new doc or an {@link InitOptions}
+ */
+export function clone<T>(doc: Doc<T>, _opts?: ActorId | InitOptions<T>): Doc<T> {
+    const state = _state(doc)
+    const heads = state.heads
+    const opts = importOpts(_opts)
+    const handle = state.handle.fork(opts.actor, heads)
+    return handle.applyPatches(doc, { ... state, heads, handle })
 }
 
 /** Explicity free the memory backing a document. Note that this is note
@@ -264,10 +300,8 @@ export function change<T>(doc: Doc<T>, options: string | ChangeOptions<T> | Chan
 function progressDocument<T>(doc: Doc<T>, heads: Heads, callback?: PatchCallback<T>): Doc<T> {
     let state = _state(doc)
     let nextState = {...state, heads: undefined};
-    // @ts-ignore
     let nextDoc = state.handle.applyPatches(doc, nextState, callback)
     state.heads = heads
-    if (nextState.freeze) {Object.freeze(nextDoc)}
     return nextDoc
 }
 
@@ -284,7 +318,7 @@ function _change<T>(doc: Doc<T>, options: ChangeOptions<T>, callback: ChangeFn<T
         throw new RangeError("must be the document root");
     }
     if (state.heads) {
-        throw new RangeError("Attempting to use an outdated Automerge document")
+        throw new RangeError("Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.")
     }
     if (_readonly(doc) === false) {
         throw new RangeError("Calls to Automerge.change cannot be nested")
@@ -331,7 +365,7 @@ export function emptyChange<T>(doc: Doc<T>, options: string | ChangeOptions<T>) 
     const state = _state(doc)
 
     if (state.heads) {
-        throw new RangeError("Attempting to use an outdated Automerge document")
+        throw new RangeError("Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.")
     }
     if (_readonly(doc) === false) {
         throw new RangeError("Calls to Automerge.change cannot be nested")
@@ -616,7 +650,7 @@ export function applyChanges<T>(doc: Doc<T>, changes: Change[], opts?: ApplyOpti
     const state = _state(doc)
     if (!opts) {opts = {}}
     if (state.heads) {
-        throw new RangeError("Attempting to use an outdated Automerge document")
+        throw new RangeError("Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.")
     }
     if (_readonly(doc) === false) {
         throw new RangeError("Calls to Automerge.change cannot be nested")
@@ -721,7 +755,7 @@ export function receiveSyncMessage<T>(doc: Doc<T>, inState: SyncState, message: 
     if (!opts) {opts = {}}
     const state = _state(doc)
     if (state.heads) {
-        throw new RangeError("Attempting to change an out of date document - set at: " + _trace(doc));
+        throw new RangeError("Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.")
     }
     if (_readonly(doc) === false) {
         throw new RangeError("Calls to Automerge.change cannot be nested")

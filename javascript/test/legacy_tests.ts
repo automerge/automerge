@@ -231,14 +231,14 @@ describe('Automerge', () => {
             s2 = Automerge.change(s1, doc2 => doc2.two = 2)
             doc1.one = 1
           })
-        }, /Attempting to use an outdated Automerge document/)
+        }, /Attempting to change an outdated document/)
       })
 
       it('should not allow the same base document to be used for multiple changes', () => {
         assert.throws(() => {
           Automerge.change(s1, doc => doc.one = 1)
           Automerge.change(s1, doc => doc.two = 2)
-        }, /Attempting to use an outdated Automerge document/)
+        }, /Attempting to change an outdated document/)
       })
 
       it('should allow a document to be cloned', () => {
