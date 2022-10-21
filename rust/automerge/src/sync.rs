@@ -235,10 +235,8 @@ impl Automerge {
 
             let mut changes_to_send = Vec::new();
             for hash in need {
-                hashes_to_send.insert(*hash);
-                if !change_hashes.contains(hash) {
-                    let change = self.get_change_by_hash(hash);
-                    if let Some(change) = change {
+                if !hashes_to_send.contains(hash) {
+                    if let Some(change) = self.get_change_by_hash(hash) {
                         changes_to_send.push(change);
                     }
                 }
