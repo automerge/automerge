@@ -528,8 +528,6 @@
 <span id="526">526</span>
 <span id="527">527</span>
 <span id="528">528</span>
-<span id="529">529</span>
-<span id="530">530</span>
 </pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">itertools::Itertools</span>;
 <span class="kw">use</span> <span class="ident">serde::ser::SerializeMap</span>;
 <span class="kw">use</span> <span class="ident">std::collections</span>::{<span class="ident">HashMap</span>, <span class="ident">HashSet</span>};
@@ -767,10 +765,8 @@
 
             <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">changes_to_send</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
             <span class="kw">for</span> <span class="ident">hash</span> <span class="kw">in</span> <span class="ident">need</span> {
-                <span class="ident">hashes_to_send</span>.<span class="ident">insert</span>(<span class="kw-2">*</span><span class="ident">hash</span>);
-                <span class="kw">if</span> <span class="op">!</span><span class="ident">change_hashes</span>.<span class="ident">contains</span>(<span class="ident">hash</span>) {
-                    <span class="kw">let</span> <span class="ident">change</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">get_change_by_hash</span>(<span class="ident">hash</span>);
-                    <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">change</span>) <span class="op">=</span> <span class="ident">change</span> {
+                <span class="kw">if</span> <span class="op">!</span><span class="ident">hashes_to_send</span>.<span class="ident">contains</span>(<span class="ident">hash</span>) {
+                    <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">change</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">get_change_by_hash</span>(<span class="ident">hash</span>) {
                         <span class="ident">changes_to_send</span>.<span class="ident">push</span>(<span class="ident">change</span>);
                     }
                 }
