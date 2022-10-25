@@ -169,14 +169,21 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
 /**
  * Make a copy of an automerge document. By default it allocates a new actorId so the copy can be later merged.
  */
-export function clone<T>(doc: Doc<T>, _opts?: ActorId | InitOptions<T>, _heads?: Heads): Doc<T> {
+export function view<T>(doc: Doc<T>, heads: Heads): Doc<T> {
     const state = _state(doc)
-    const opts = importOpts(_opts)
-    const heads = _heads || state.heads
-    const handle = state.handle.fork(opts.actor, heads)
-    const clonedDoc: any = handle.materialize("/", undefined, {...state, handle})
+    const handle = state.handle
+    return state.handle.materialize("/", heads, { ...state, handle, heads }) as any
+}
 
-    return clonedDoc
+/**
+ * Make a copy of an automerge document. By default it allocates a new actorId so the copy can be later merged.
+ */
+export function clone<T>(doc: Doc<T>, _opts?: ActorId | InitOptions<T>): Doc<T> {
+    const state = _state(doc)
+    const heads = state.heads
+    const opts = importOpts(_opts)
+    const handle = state.handle.fork(opts.actor, heads)
+    return handle.applyPatches(doc, { ... state, heads, handle })
 }
 
 /** Explicity free the memory backing a document. Note that this is note
@@ -269,10 +276,8 @@ export function change<T>(doc: Doc<T>, options: string | ChangeOptions<T> | Chan
 function progressDocument<T>(doc: Doc<T>, heads: Heads, callback?: PatchCallback<T>): Doc<T> {
     let state = _state(doc)
     let nextState = {...state, heads: undefined};
-    // @ts-ignore
     let nextDoc = state.handle.applyPatches(doc, nextState, callback)
     state.heads = heads
-    if (nextState.freeze) {Object.freeze(nextDoc)}
     return nextDoc
 }
 
@@ -289,7 +294,7 @@ function _change<T>(doc: Doc<T>, options: ChangeOptions<T>, callback: ChangeFn<T
         throw new RangeError("must be the document root");
     }
     if (state.heads) {
-        throw new RangeError("Attempting to use an outdated Automerge document")
+        throw new RangeError("Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.")
     }
     if (_readonly(doc) === false) {
         throw new RangeError("Calls to Automerge.change cannot be nested")
@@ -336,7 +341,7 @@ export function emptyChange<T>(doc: Doc<T>, options: string | ChangeOptions<T>) 
     const state = _state(doc)
 
     if (state.heads) {
-        throw new RangeError("Attempting to use an outdated Automerge document")
+        throw new RangeError("Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.")
     }
     if (_readonly(doc) === false) {
         throw new RangeError("Calls to Automerge.change cannot be nested")
@@ -621,7 +626,7 @@ export function applyChanges<T>(doc: Doc<T>, changes: Change[], opts?: ApplyOpti
     const state = _state(doc)
     if (!opts) {opts = {}}
     if (state.heads) {
-        throw new RangeError("Attempting to use an outdated Automerge document")
+        throw new RangeError("Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.")
     }
     if (_readonly(doc) === false) {
         throw new RangeError("Calls to Automerge.change cannot be nested")
@@ -726,7 +731,7 @@ export function receiveSyncMessage<T>(doc: Doc<T>, inState: SyncState, message: 
     if (!opts) {opts = {}}
     const state = _state(doc)
     if (state.heads) {
-        throw new RangeError("Attempting to change an out of date document - set at: " + _trace(doc));
+        throw new RangeError("Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.")
     }
     if (_readonly(doc) === false) {
         throw new RangeError("Calls to Automerge.change cannot be nested")

@@ -13,14 +13,16 @@ describe('Automerge', () => {
             Automerge.free(doc2)
         })
 
-        it('should be able to clone with an actorId and at a specifc heads', () => {
+        it('should be able to make a view with specifc heads', () => {
             let doc1 = Automerge.init()
             let doc2 = Automerge.change(doc1, (d) => d.value = 1)
             let heads2 = Automerge.getHeads(doc2)
             let doc3 = Automerge.change(doc2, (d) => d.value = 2)
-            let doc2_v2 = Automerge.clone(doc3, "aabbcc", heads2)
+            let doc2_v2 = Automerge.view(doc3, heads2)
             assert.deepEqual(doc2, doc2_v2)
-            assert.equal(Automerge.getActorId(doc2_v2), "aabbcc")
+            let doc2_v2_clone = Automerge.clone(doc2, "aabbcc")
+            assert.deepEqual(doc2, doc2_v2_clone)
+            assert.equal(Automerge.getActorId(doc2_v2_clone), "aabbcc")
         })
 
         it('handle basic set and read on root object', () => {
