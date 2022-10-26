@@ -40,7 +40,8 @@
   "scripts": {
     "lint": "eslint src",
     "build": "tsc -p config/mjs.json && tsc -p config/cjs.json && tsc --emitDeclarationOnly",
-    "test": "ts-mocha test/*.ts"
+    "test": "ts-mocha test/*.ts",
+    "watch-docs": "typedoc src/index.ts --watch --readme typedoc-readme.md"
   },
   "devDependencies": {
     "@types/expect": "^24.3.0",
@@ -58,7 +59,7 @@
     "typescript": "^4.6.4"
   },
   "dependencies": {
-    "@automerge/automerge-wasm": "0.1.14",
+    "@automerge/automerge-wasm": "0.1.15",
     "uuid": "^8.3"
   }
 }
