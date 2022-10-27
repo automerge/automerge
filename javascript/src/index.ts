@@ -207,7 +207,11 @@ export function clone<T>(doc: Doc<T>, _opts?: ActorId | InitOptions<T>): Doc<T> 
     const heads = state.heads
     const opts = importOpts(_opts)
     const handle = state.handle.fork(opts.actor, heads)
-    return handle.applyPatches(doc, { ... state, heads, handle })
+
+    // `change` uses the presence of state.heads to determine if we are in a view
+    // set it to undefined to indicate that this is a full fat document
+    const {heads: oldHeads, ...stateSansHeads} = state
+    return handle.applyPatches(doc, { ... stateSansHeads, handle })
 }
 
 /** Explicity free the memory backing a document. Note that this is note

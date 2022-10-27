@@ -25,6 +25,17 @@ describe('Automerge', () => {
             assert.equal(Automerge.getActorId(doc2_v2_clone), "aabbcc")
         })
 
+        it("should allow you to change a clone of a view", () => {
+            let doc1 = Automerge.init<any>()
+            doc1 = Automerge.change(doc1, d => d.key = "value")
+            let heads = Automerge.getHeads(doc1)
+            doc1 = Automerge.change(doc1, d => d.key = "value2")
+            let fork = Automerge.clone(Automerge.view(doc1, heads))
+            assert.deepEqual(fork, {key: "value"})
+            fork = Automerge.change(fork, d => d.key = "value3")
+            assert.deepEqual(fork, {key: "value3"})
+        })
+
         it('handle basic set and read on root object', () => {
             let doc1 = Automerge.init()
             let doc2 = Automerge.change(doc1, (d) => {
