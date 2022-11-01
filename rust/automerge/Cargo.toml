@@ -11,7 +11,7 @@ readme = "../README.md"
 
 [features]
 optree-visualisation = ["dot", "rand"]
-wasm = ["js-sys", "wasm-bindgen", "web-sys", "uuid/wasm-bindgen"]
+wasm = ["js-sys", "wasm-bindgen", "web-sys", "uuid/js"]
 
 [dependencies]
 hex = "^0.4.3"
@@ -20,7 +20,7 @@ sha2 = "^0.10.0"
 thiserror = "^1.0.16"
 itertools = "^0.10.3"
 flate2 = "^1.0.22"
-uuid = { version = "^0.8.2", features=["v4", "serde"] }
+uuid = { version = "^1.2.1", features=["v4", "serde"] }
 smol_str = { version = "^0.1.21", features=["serde"] }
 tracing = { version = "^0.1.29" }
 fxhash = "^0.2.1"
