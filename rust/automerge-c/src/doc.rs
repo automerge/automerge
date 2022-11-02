@@ -5,7 +5,7 @@ use std::os::raw::c_char;
 
 use crate::actor_id::AMactorId;
 use crate::change_hashes::AMchangeHashes;
-use crate::obj::AMobjId;
+use crate::obj::{AMobjId, AMobjType};
 use crate::result::{to_result, AMresult, AMvalue};
 use crate::sync::{to_sync_message, AMsyncMessage, AMsyncState};
 
@@ -543,6 +543,30 @@ pub unsafe extern "C" fn AMobjSize(
         }
     } else {
         0
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn AMobjIdObjType(
+    doc: *const AMdoc,
+    obj_id: *const AMobjId,
+    heads: *const AMchangeHashes,
+) -> AMobjType {
+    if let Some(doc) = doc.as_ref() {
+        let obj_id = to_obj_id!(obj_id);
+        let obj_type = match heads.as_ref() {
+            None => doc.object_type(obj_id),
+            Some(_) => todo!(),
+        };
+        match obj_type {
+            Some(am::ObjType::Map) => AMobjType::Map,
+            Some(am::ObjType::List) => AMobjType::List,
+            Some(am::ObjType::Text) => AMobjType::Text,
+            Some(am::ObjType::Table) => AMobjType::Table,
+            None => AMobjType::Invalid,
+        }
+    } else {
+        AMobjType::Invalid
     }
 }
 

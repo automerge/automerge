@@ -142,20 +142,26 @@ pub unsafe extern "C" fn AMobjIdIndex(obj_id: *const AMobjId) -> usize {
 /// \brief The type of an object value.
 #[repr(u8)]
 pub enum AMobjType {
+    /// Not an object type
+    Invalid = 0,
     /// A list.
     List = 1,
     /// A key-value map.
     Map,
     /// A list of Unicode graphemes.
     Text,
+    /// An automerge table.
+    Table,
 }
 
 impl From<AMobjType> for am::ObjType {
     fn from(o: AMobjType) -> Self {
         match o {
+            AMobjType::Invalid => todo!(),
             AMobjType::Map => am::ObjType::Map,
             AMobjType::List => am::ObjType::List,
             AMobjType::Text => am::ObjType::Text,
+            AMobjType::Table => am::ObjType::Table,
         }
     }
 }
