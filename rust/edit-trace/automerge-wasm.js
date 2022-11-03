@@ -1,5 +1,5 @@
 const { edits, finalText } = require('./editing-trace')
-const Automerge = require('../automerge-wasm')
+const Automerge = require('@automerge/automerge-wasm')
 
 const start = new Date()
 

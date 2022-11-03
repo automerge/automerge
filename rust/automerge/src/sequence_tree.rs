@@ -4,21 +4,22 @@ use std::{
     mem,
 };
 
-pub type SequenceTree<T> = SequenceTreeInternal<T, 25>;
+pub(crate) const B: usize = 500;
+pub type SequenceTree<T> = SequenceTreeInternal<T>;
 
 #[derive(Clone, Debug)]
 pub struct SequenceTreeInternal<T> {
-    root_node: Option<SequenceTreeNode<T, B>>,
+    root_node: Option<SequenceTreeNode<T>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 struct SequenceTreeNode<T> {
     elements: Vec<T>,
-    children: Vec<SequenceTreeNode<T, B>>,
+    children: Vec<SequenceTreeNode<T>>,
     length: usize,
 }
 
-impl<T> SequenceTreeInternal<T, B>
+impl<T> SequenceTreeInternal<T>
 where
     T: Clone + Debug,
 {
@@ -38,7 +39,7 @@ where
     }
 
     /// Create an iterator through the sequence.
-    pub fn iter(&self) -> Iter<'_, T, B> {
+    pub fn iter(&self) -> Iter<'_, T> {
         Iter {
             inner: self,
             index: 0,
@@ -145,7 +146,7 @@ where
     }
 }
 
-impl<T> SequenceTreeNode<T, B>
+impl<T> SequenceTreeNode<T>
 where
     T: Clone + Debug,
 {
@@ -157,7 +158,7 @@ where
         }
     }
 
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.length
     }
 
@@ -380,7 +381,7 @@ where
         l
     }
 
-    pub fn remove(&mut self, index: usize) -> T {
+    pub(crate) fn remove(&mut self, index: usize) -> T {
         let original_len = self.len();
         if self.is_leaf() {
             let v = self.remove_from_leaf(index);
@@ -423,7 +424,7 @@ where
         }
     }
 
-    fn merge(&mut self, middle: T, successor_sibling: SequenceTreeNode<T, B>) {
+    fn merge(&mut self, middle: T, successor_sibling: SequenceTreeNode<T>) {
         self.elements.push(middle);
         self.elements.extend(successor_sibling.elements);
         self.children.extend(successor_sibling.children);
@@ -431,7 +432,7 @@ where
         assert!(self.is_full());
     }
 
-    pub fn set(&mut self, index: usize, element: T) -> T {
+    pub(crate) fn set(&mut self, index: usize, element: T) -> T {
         if self.is_leaf() {
             let old_element = self.elements.get_mut(index).unwrap();
             mem::replace(old_element, element)
@@ -455,7 +456,7 @@ where
         }
     }
 
-    pub fn get(&self, index: usize) -> Option<&T> {
+    pub(crate) fn get(&self, index: usize) -> Option<&T> {
         if self.is_leaf() {
             return self.elements.get(index);
         } else {
@@ -475,7 +476,7 @@ where
         None
     }
 
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+    pub(crate) fn get_mut(&mut self, index: usize) -> Option<&mut T> {
         if self.is_leaf() {
             return self.elements.get_mut(index);
         } else {
@@ -496,7 +497,7 @@ where
     }
 }
 
-impl<T> Default for SequenceTreeInternal<T, B>
+impl<T> Default for SequenceTreeInternal<T>
 where
     T: Clone + Debug,
 {
@@ -505,7 +506,7 @@ where
     }
 }
 
-impl<T> PartialEq for SequenceTreeInternal<T, B>
+impl<T> PartialEq for SequenceTreeInternal<T>
 where
     T: Clone + Debug + PartialEq,
 {
@@ -514,13 +515,13 @@ where
     }
 }
 
-impl<'a, T> IntoIterator for &'a SequenceTreeInternal<T, B>
+impl<'a, T> IntoIterator for &'a SequenceTreeInternal<T>
 where
     T: Clone + Debug,
 {
     type Item = &'a T;
 
-    type IntoIter = Iter<'a, T, B>;
+    type IntoIter = Iter<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {
         Iter {
@@ -530,12 +531,13 @@ where
     }
 }
 
+#[derive(Debug)]
 pub struct Iter<'a, T> {
-    inner: &'a SequenceTreeInternal<T, B>,
+    inner: &'a SequenceTreeInternal<T>,
     index: usize,
 }
 
-impl<'a, T> Iterator for Iter<'a, T, B>
+impl<'a, T> Iterator for Iter<'a, T>
 where
     T: Clone + Debug,
 {
