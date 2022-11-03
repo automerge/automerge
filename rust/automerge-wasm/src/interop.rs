@@ -557,7 +557,7 @@ impl Automerge {
                 Reflect::set(&result, &(*index as f64).into(), &sub_val)?;
                 Ok(result.into())
             }
-            Patch::DeleteSeq { index, .. } => self.sub_splice(result, *index, 1, &[], meta),
+            Patch::DeleteSeq { index, .. } => self.sub_splice(result, *index, 1, vec![], meta),
             Patch::Insert { index, values, .. } => self.sub_splice(result, *index, 0, values, meta),
             Patch::Increment { prop, value, .. } => {
                 if let Prop::Seq(index) = prop {
@@ -650,16 +650,16 @@ impl Automerge {
         self.wrap_object(result, datatype, &id, meta)
     }
 
-    fn sub_splice(
+    fn sub_splice<'a, I: IntoIterator<Item = &'a (Value<'a>, ObjId)>>(
         &self,
         o: Array,
         index: usize,
         num_del: usize,
-        values: &[(Value<'_>, ObjId)],
+        values: I,
         meta: &JsValue,
     ) -> Result<Object, JsValue> {
         let args: Array = values
-            .iter()
+            .into_iter()
             .map(|v| self.maybe_wrap_object(alloc(&v.0), &v.1, meta))
             .collect::<Result<_, _>>()?;
         args.unshift(&(num_del as u32).into());
