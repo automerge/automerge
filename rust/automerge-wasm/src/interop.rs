@@ -2,8 +2,9 @@ use crate::value::Datatype;
 use crate::Automerge;
 use automerge as am;
 use automerge::transaction::Transactable;
+use automerge::ROOT;
 use automerge::{Change, ChangeHash, ObjType, Prop};
-use js_sys::{Array, Function, Object, Reflect, Symbol, Uint8Array};
+use js_sys::{Array, Function, JsString, Object, Reflect, Symbol, Uint8Array};
 use std::collections::{BTreeSet, HashSet};
 use std::fmt::Display;
 use wasm_bindgen::prelude::*;
@@ -377,22 +378,32 @@ impl Automerge {
         heads: Option<&Vec<ChangeHash>>,
         meta: &JsValue,
     ) -> Result<JsValue, JsValue> {
-        let result = if datatype.is_sequence() {
-            self.wrap_object(
-                self.export_list(obj, heads, meta)?,
-                datatype,
-                &obj.to_string().into(),
-                meta,
-            )?
-        } else {
-            self.wrap_object(
-                self.export_map(obj, heads, meta)?,
-                datatype,
-                &obj.to_string().into(),
-                meta,
-            )?
+        let result = match datatype {
+            Datatype::Text => {
+                if let Some(heads) = heads {
+                    self.doc.text_at(obj, heads)?.into()
+                } else {
+                    self.doc.text(obj)?.into()
+                }
+            }
+            Datatype::List => self
+                .wrap_object(
+                    self.export_list(obj, heads, meta)?,
+                    datatype,
+                    &obj.to_string().into(),
+                    meta,
+                )?
+                .into(),
+            _ => self
+                .wrap_object(
+                    self.export_map(obj, heads, meta)?,
+                    datatype,
+                    &obj.to_string().into(),
+                    meta,
+                )?
+                .into(),
         };
-        Ok(result.into())
+        Ok(result)
     }
 
     pub(crate) fn export_map(
@@ -539,7 +550,7 @@ impl Automerge {
         } else {
             value
         };
-        if matches!(datatype, Datatype::Map | Datatype::List | Datatype::Text) {
+        if matches!(datatype, Datatype::Map | Datatype::List) {
             set_hidden_value(&value, &Symbol::for_(RAW_OBJECT_SYMBOL), id)?;
         }
         set_hidden_value(&value, &Symbol::for_(DATATYPE_SYMBOL), datatype)?;
@@ -555,12 +566,23 @@ impl Automerge {
         array: &Object,
         patch: &Patch,
         meta: &JsValue,
+        exposed: &mut HashSet<ObjId>,
     ) -> Result<Object, JsValue> {
         let result = Array::from(array); // shallow copy
         match patch {
-            Patch::PutSeq { index, value, .. } => {
-                let sub_val = self.maybe_wrap_object(alloc(&value.0), &value.1, meta)?;
-                Reflect::set(&result, &(*index as f64).into(), &sub_val)?;
+            Patch::PutSeq {
+                index,
+                value,
+                expose,
+                ..
+            } => {
+                if *expose && value.0.is_object() {
+                    exposed.insert(value.1.clone());
+                    Reflect::set(&result, &(*index as f64).into(), &JsValue::null())?;
+                } else {
+                    let sub_val = self.maybe_wrap_object(alloc(&value.0), &value.1, meta)?;
+                    Reflect::set(&result, &(*index as f64).into(), &sub_val)?;
+                }
                 Ok(result.into())
             }
             Patch::DeleteSeq { index, .. } => self.sub_splice(result, *index, 1, vec![], meta),
@@ -584,6 +606,7 @@ impl Automerge {
             }
             Patch::DeleteMap { .. } => Err(to_js_err("cannot delete from a seq")),
             Patch::PutMap { .. } => Err(to_js_err("cannot set key in seq")),
+            Patch::SpliceText { .. } => Err(to_js_err("cannot splice text in seq")),
         }
     }
 
@@ -592,12 +615,20 @@ impl Automerge {
         map: &Object,
         patch: &Patch,
         meta: &JsValue,
+        exposed: &mut HashSet<ObjId>,
     ) -> Result<Object, JsValue> {
         let result = Object::assign(&Object::new(), map); // shallow copy
         match patch {
-            Patch::PutMap { key, value, .. } => {
-                let sub_val = self.maybe_wrap_object(alloc(&value.0), &value.1, meta)?;
-                Reflect::set(&result, &key.into(), &sub_val)?;
+            Patch::PutMap {
+                key, value, expose, ..
+            } => {
+                if *expose && value.0.is_object() {
+                    exposed.insert(value.1.clone());
+                    Reflect::set(&result, &key.into(), &JsValue::null())?;
+                } else {
+                    let sub_val = self.maybe_wrap_object(alloc(&value.0), &value.1, meta)?;
+                    Reflect::set(&result, &key.into(), &sub_val)?;
+                }
                 Ok(result)
             }
             Patch::DeleteMap { key, .. } => {
@@ -622,6 +653,7 @@ impl Automerge {
                 }
             }
             Patch::Insert { .. } => Err(to_js_err("cannot insert into map")),
+            Patch::SpliceText { .. } => Err(to_js_err("cannot Splice into map")),
             Patch::DeleteSeq { .. } => Err(to_js_err("cannot splice a map")),
             Patch::PutSeq { .. } => Err(to_js_err("cannot array index a map")),
         }
@@ -633,12 +665,23 @@ impl Automerge {
         patch: &Patch,
         depth: usize,
         meta: &JsValue,
+        exposed: &mut HashSet<ObjId>,
     ) -> Result<Object, JsValue> {
         let (inner, datatype, id) = self.unwrap_object(&obj)?;
         let prop = patch.path().get(depth).map(|p| prop_to_js(&p.1));
         let result = if let Some(prop) = prop {
-            if let Ok(sub_obj) = Reflect::get(&inner, &prop)?.dyn_into::<Object>() {
-                let new_value = self.apply_patch(sub_obj, patch, depth + 1, meta)?;
+            let subval = Reflect::get(&inner, &prop)?;
+            if subval.is_string() && patch.path().len() - 1 == depth {
+                if let Ok(s) = subval.dyn_into::<JsString>() {
+                    let new_value = self.apply_patch_to_text(&s, patch)?;
+                    let result = shallow_copy(&inner);
+                    Reflect::set(&result, &prop, &new_value)?;
+                    Ok(result)
+                } else {
+                    panic!("string is not JsString")
+                }
+            } else if let Ok(sub_obj) = Reflect::get(&inner, &prop)?.dyn_into::<Object>() {
+                let new_value = self.apply_patch(sub_obj, patch, depth + 1, meta, exposed)?;
                 let result = shallow_copy(&inner);
                 Reflect::set(&result, &prop, &new_value)?;
                 Ok(result)
@@ -648,12 +691,52 @@ impl Automerge {
                 return Ok(obj);
             }
         } else if Array::is_array(&inner) {
-            self.apply_patch_to_array(&inner, patch, meta)
+            if id.as_string() == Some(patch.obj().to_string()) {
+                self.apply_patch_to_array(&inner, patch, meta, exposed)
+            } else {
+                Ok(Array::from(&inner).into())
+            }
+        } else if id.as_string() == Some(patch.obj().to_string()) {
+            self.apply_patch_to_map(&inner, patch, meta, exposed)
         } else {
-            self.apply_patch_to_map(&inner, patch, meta)
+            Ok(Object::assign(&Object::new(), &inner))
         }?;
 
         self.wrap_object(result, datatype, &id, meta)
+    }
+
+    fn apply_patch_to_text(&self, string: &JsString, patch: &Patch) -> Result<JsValue, JsValue> {
+        match patch {
+            Patch::DeleteSeq { index, .. } => {
+                let index = *index as u32;
+                let length = string.length();
+                let before = string.slice(0, index);
+                let after = string.slice(index + 1, length);
+                Ok(before.concat(&after).into())
+            }
+            Patch::Insert { index, values, .. } => {
+                let index = *index as u32;
+                let length = string.length();
+                let before = string.slice(0, index);
+                let after = string.slice(index, length);
+                let to_insert: String = values
+                    .iter()
+                    .map(|v| v.0.to_str().unwrap_or("\u{fffc}"))
+                    .collect();
+                Ok(before.concat(&to_insert.into()).concat(&after).into())
+            }
+            Patch::SpliceText { index, value, .. } => {
+                let index = *index as u32;
+                let length = string.length();
+                let before = string.slice(0, index);
+                let after = string.slice(index, length);
+                Ok(before
+                    .concat(&value.to_string().into())
+                    .concat(&after)
+                    .into())
+            }
+            _ => Ok(string.into()),
+        }
     }
 
     fn sub_splice<'a, I: IntoIterator<Item = &'a (Value<'a>, ObjId)>>(
@@ -674,6 +757,153 @@ impl Automerge {
         Reflect::apply(&method, &o, &args)?;
         Ok(o.into())
     }
+
+    pub(crate) fn import(&self, id: JsValue) -> Result<ObjId, JsValue> {
+        if let Some(s) = id.as_string() {
+            if let Some(post) = s.strip_prefix('/') {
+                let mut obj = ROOT;
+                let mut is_map = true;
+                let parts = post.split('/');
+                for prop in parts {
+                    if prop.is_empty() {
+                        break;
+                    }
+                    let val = if is_map {
+                        self.doc.get(obj, prop)?
+                    } else {
+                        self.doc.get(obj, am::Prop::Seq(prop.parse().unwrap()))?
+                    };
+                    match val {
+                        Some((am::Value::Object(ObjType::Map), id)) => {
+                            is_map = true;
+                            obj = id;
+                        }
+                        Some((am::Value::Object(ObjType::Table), id)) => {
+                            is_map = true;
+                            obj = id;
+                        }
+                        Some((am::Value::Object(_), id)) => {
+                            is_map = false;
+                            obj = id;
+                        }
+                        None => return Err(to_js_err(format!("invalid path '{}'", s))),
+                        _ => return Err(to_js_err(format!("path '{}' is not an object", s))),
+                    };
+                }
+                Ok(obj)
+            } else {
+                Ok(self.doc.import(&s)?)
+            }
+        } else {
+            Err(to_js_err("invalid objid"))
+        }
+    }
+
+    pub(crate) fn import_prop(&self, prop: JsValue) -> Result<Prop, JsValue> {
+        if let Some(s) = prop.as_string() {
+            Ok(s.into())
+        } else if let Some(n) = prop.as_f64() {
+            Ok((n as usize).into())
+        } else {
+            Err(to_js_err(format!("invalid prop {:?}", prop)))
+        }
+    }
+
+    pub(crate) fn import_scalar(
+        &self,
+        value: &JsValue,
+        datatype: &Option<String>,
+    ) -> Option<am::ScalarValue> {
+        match datatype.as_deref() {
+            Some("boolean") => value.as_bool().map(am::ScalarValue::Boolean),
+            Some("int") => value.as_f64().map(|v| am::ScalarValue::Int(v as i64)),
+            Some("uint") => value.as_f64().map(|v| am::ScalarValue::Uint(v as u64)),
+            // TODO: sym?
+            Some("str") => value.as_string().map(|v| am::ScalarValue::Str(v.into())),
+            Some("f64") => value.as_f64().map(am::ScalarValue::F64),
+            Some("bytes") => Some(am::ScalarValue::Bytes(
+                value.clone().dyn_into::<Uint8Array>().unwrap().to_vec(),
+            )),
+            Some("counter") => value.as_f64().map(|v| am::ScalarValue::counter(v as i64)),
+            Some("timestamp") => {
+                if let Some(v) = value.as_f64() {
+                    Some(am::ScalarValue::Timestamp(v as i64))
+                } else if let Ok(d) = value.clone().dyn_into::<js_sys::Date>() {
+                    Some(am::ScalarValue::Timestamp(d.get_time() as i64))
+                } else {
+                    None
+                }
+            }
+            Some("null") => Some(am::ScalarValue::Null),
+            Some(_) => None,
+            None => {
+                if value.is_null() {
+                    Some(am::ScalarValue::Null)
+                } else if let Some(b) = value.as_bool() {
+                    Some(am::ScalarValue::Boolean(b))
+                } else if let Some(s) = value.as_string() {
+                    Some(am::ScalarValue::Str(s.into()))
+                } else if let Some(n) = value.as_f64() {
+                    if (n.round() - n).abs() < f64::EPSILON {
+                        Some(am::ScalarValue::Int(n as i64))
+                    } else {
+                        Some(am::ScalarValue::F64(n))
+                    }
+                } else if let Ok(d) = value.clone().dyn_into::<js_sys::Date>() {
+                    Some(am::ScalarValue::Timestamp(d.get_time() as i64))
+                } else if let Ok(o) = &value.clone().dyn_into::<Uint8Array>() {
+                    Some(am::ScalarValue::Bytes(o.to_vec()))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    pub(crate) fn import_value(
+        &self,
+        value: &JsValue,
+        datatype: Option<String>,
+    ) -> Result<(Value<'static>, Vec<(Prop, JsValue)>), JsValue> {
+        match self.import_scalar(value, &datatype) {
+            Some(val) => Ok((val.into(), vec![])),
+            None => {
+                if let Some((o, subvals)) = to_objtype(value, &None) {
+                    Ok((o.into(), subvals))
+                } else {
+                    web_sys::console::log_2(&"Invalid value".into(), value);
+                    Err(to_js_err("invalid value"))
+                }
+            }
+        }
+    }
+
+    pub(crate) fn finalize_exposed(
+        &self,
+        object: &JsValue,
+        exposed: HashSet<ObjId>,
+        meta: &JsValue,
+    ) -> Result<(), JsValue> {
+        for obj in exposed {
+            let mut pointer = object.clone();
+            let obj_type = self.doc.object_type(&obj).unwrap();
+            let path: Vec<_> = self
+                .doc
+                .path_to_object(&obj)?
+                .iter()
+                .map(|p| prop_to_js(&p.1))
+                .collect();
+            let value = self.export_object(&obj, obj_type.into(), None, meta)?;
+            for (i, prop) in path.iter().enumerate() {
+                if i + 1 < path.len() {
+                    pointer = Reflect::get(&pointer, prop)?;
+                } else {
+                    Reflect::set(&pointer, prop, &value)?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 pub(crate) fn alloc(value: &Value<'_>) -> (Datatype, JsValue) {
@@ -682,7 +912,7 @@ pub(crate) fn alloc(value: &Value<'_>) -> (Datatype, JsValue) {
             ObjType::Map => (Datatype::Map, Object::new().into()),
             ObjType::Table => (Datatype::Table, Object::new().into()),
             ObjType::List => (Datatype::List, Array::new().into()),
-            ObjType::Text => (Datatype::Text, Array::new().into()),
+            ObjType::Text => (Datatype::Text, "".into()),
         },
         am::Value::Scalar(s) => match s.as_ref() {
             am::ScalarValue::Bytes(v) => (Datatype::Bytes, Uint8Array::from(v.as_slice()).into()),

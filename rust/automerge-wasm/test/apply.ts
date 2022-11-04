@@ -104,8 +104,8 @@ describe('Automerge', () => {
       doc1.putObject("/", "list", "abc");
       const patches = doc1.popPatches()
       assert.deepEqual( patches, [
-        { action: 'put', conflict: false, path: [ 'list' ], value: [] },
-        { action: 'splice', path: [ 'list', 0 ], values: [ 'a', 'b', 'c' ] }])
+        { action: 'put', path: [ 'list' ], value: "" },
+        { action: 'splice', path: [ 'list', 0 ], value: 'abc' }])
     })
 
     it('it should allow registering type wrappers', () => {
@@ -140,29 +140,26 @@ describe('Automerge', () => {
 
       let mat = doc1.materialize("/")
 
-      assert.deepEqual( mat, { notes: "hello world".split("") } )
+      assert.deepEqual( mat, { notes: "hello world" } )
 
       const doc2 = create()
       let apply : any = doc2.materialize("/") 
       doc2.enablePatches(true)
-      doc2.registerDatatype("text", (n: Value[]) => new String(n.join("")))
       apply = doc2.applyPatches(apply)
 
       doc2.merge(doc1);
       apply = doc2.applyPatches(apply)
       assert.deepEqual(_obj(apply), "_root")
-      assert.deepEqual(_obj(apply['notes']), "1@aaaa")
-      assert.deepEqual( apply, { notes: new String("hello world") } )
+      assert.deepEqual( apply, { notes: "hello world" } )
 
       doc2.splice("/notes", 6, 5, "everyone");
       apply = doc2.applyPatches(apply)
-      assert.deepEqual( apply, { notes: new String("hello everyone") } )
+      assert.deepEqual( apply, { notes: "hello everyone" } )
 
       mat = doc2.materialize("/")
       assert.deepEqual(_obj(mat), "_root")
       // @ts-ignore
-      assert.deepEqual(_obj(mat.notes), "1@aaaa")
-      assert.deepEqual( mat, { notes: new String("hello everyone") } )
+      assert.deepEqual( mat, { notes: "hello everyone" } )
     })
 
     it('should set the OBJECT_ID property on lists, maps, and text objects and not on scalars', () => {
@@ -189,8 +186,8 @@ describe('Automerge', () => {
         assert.equal(_obj(applied.bytes), null)
         assert.equal(_obj(applied.counter), null)
         assert.equal(_obj(applied.date), null)
+        assert.equal(_obj(applied.text), null)
 
-        assert.notEqual(_obj(applied.text), null)
         assert.notEqual(_obj(applied.list), null)
         assert.notEqual(_obj(applied.map), null)
     })

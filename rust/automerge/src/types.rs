@@ -491,6 +491,14 @@ impl Op {
         }
     }
 
+    pub(crate) fn to_str(&self) -> &str {
+        if let OpType::Put(ScalarValue::Str(s)) = &self.action {
+            s
+        } else {
+            "\u{fffc}"
+        }
+    }
+
     pub(crate) fn visible(&self) -> bool {
         if self.is_inc() {
             false

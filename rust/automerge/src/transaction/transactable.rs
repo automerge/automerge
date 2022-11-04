@@ -193,9 +193,7 @@ pub trait Transactable {
     fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError>;
 
     fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<(ExId, Prop)>, AutomergeError> {
-        let mut path = self.parents(obj.as_ref().clone())?.collect::<Vec<_>>();
-        path.reverse();
-        Ok(path)
+        Ok(self.parents(obj.as_ref().clone())?.path())
     }
 
     /// The heads this transaction will be based on

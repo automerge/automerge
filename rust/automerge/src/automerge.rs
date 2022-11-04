@@ -321,9 +321,7 @@ impl Automerge {
         &self,
         obj: O,
     ) -> Result<Vec<(ExId, Prop)>, AutomergeError> {
-        let mut path = self.parents(obj.as_ref().clone())?.collect::<Vec<_>>();
-        path.reverse();
-        Ok(path)
+        Ok(self.parents(obj.as_ref().clone())?.path())
     }
 
     /// Get the keys of the object `obj`.
@@ -512,11 +510,7 @@ impl Automerge {
         let query = self.ops.search(&obj, query::ListVals::new());
         let mut buffer = String::new();
         for q in &query.ops {
-            if let OpType::Put(ScalarValue::Str(s)) = &q.action {
-                buffer.push_str(s);
-            } else {
-                buffer.push('\u{fffc}');
-            }
+            buffer.push_str(q.to_str());
         }
         Ok(buffer)
     }

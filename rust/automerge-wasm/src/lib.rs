@@ -29,10 +29,11 @@
 use am::transaction::CommitOptions;
 use am::transaction::{Observed, Transactable, UnObserved};
 use automerge as am;
-use automerge::{Change, ObjId, ObjType, Prop, Value, ROOT};
+use automerge::{Change, ObjId, Prop, Value, ROOT};
 use js_sys::{Array, Function, Object, Uint8Array};
 use serde::ser::Serialize;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::convert::TryInto;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -477,15 +478,19 @@ impl Automerge {
             object = self.wrap_object(object, datatype, &id, &meta)?;
         }
 
+        let mut exposed = HashSet::default();
+
         for p in patches {
             if let Some(c) = &callback {
                 let before = object.clone();
-                object = self.apply_patch(object, &p, 0, &meta)?;
+                object = self.apply_patch(object, &p, 0, &meta, &mut exposed)?;
                 c.call3(&JsValue::undefined(), &p.try_into()?, &before, &object)?;
             } else {
-                object = self.apply_patch(object, &p, 0, &meta)?;
+                object = self.apply_patch(object, &p, 0, &meta, &mut exposed)?;
             }
         }
+
+        self.finalize_exposed(&object, exposed, &meta)?;
 
         Ok(object.into())
     }
@@ -658,121 +663,6 @@ impl Automerge {
             .ok_or_else(|| to_js_err(format!("invalid obj {}", obj)))?;
         let _patches = self.doc.observer().take_patches(); // throw away patches
         self.export_object(&obj, obj_type.into(), heads.as_ref(), &meta)
-    }
-
-    fn import(&self, id: JsValue) -> Result<ObjId, JsValue> {
-        if let Some(s) = id.as_string() {
-            if let Some(post) = s.strip_prefix('/') {
-                let mut obj = ROOT;
-                let mut is_map = true;
-                let parts = post.split('/');
-                for prop in parts {
-                    if prop.is_empty() {
-                        break;
-                    }
-                    let val = if is_map {
-                        self.doc.get(obj, prop)?
-                    } else {
-                        self.doc.get(obj, am::Prop::Seq(prop.parse().unwrap()))?
-                    };
-                    match val {
-                        Some((am::Value::Object(ObjType::Map), id)) => {
-                            is_map = true;
-                            obj = id;
-                        }
-                        Some((am::Value::Object(ObjType::Table), id)) => {
-                            is_map = true;
-                            obj = id;
-                        }
-                        Some((am::Value::Object(_), id)) => {
-                            is_map = false;
-                            obj = id;
-                        }
-                        None => return Err(to_js_err(format!("invalid path '{}'", s))),
-                        _ => return Err(to_js_err(format!("path '{}' is not an object", s))),
-                    };
-                }
-                Ok(obj)
-            } else {
-                Ok(self.doc.import(&s)?)
-            }
-        } else {
-            Err(to_js_err("invalid objid"))
-        }
-    }
-
-    fn import_prop(&self, prop: JsValue) -> Result<Prop, JsValue> {
-        if let Some(s) = prop.as_string() {
-            Ok(s.into())
-        } else if let Some(n) = prop.as_f64() {
-            Ok((n as usize).into())
-        } else {
-            Err(to_js_err(format!("invalid prop {:?}", prop)))
-        }
-    }
-
-    fn import_scalar(&self, value: &JsValue, datatype: &Option<String>) -> Option<am::ScalarValue> {
-        match datatype.as_deref() {
-            Some("boolean") => value.as_bool().map(am::ScalarValue::Boolean),
-            Some("int") => value.as_f64().map(|v| am::ScalarValue::Int(v as i64)),
-            Some("uint") => value.as_f64().map(|v| am::ScalarValue::Uint(v as u64)),
-            Some("str") => value.as_string().map(|v| am::ScalarValue::Str(v.into())),
-            Some("f64") => value.as_f64().map(am::ScalarValue::F64),
-            Some("bytes") => Some(am::ScalarValue::Bytes(
-                value.clone().dyn_into::<Uint8Array>().unwrap().to_vec(),
-            )),
-            Some("counter") => value.as_f64().map(|v| am::ScalarValue::counter(v as i64)),
-            Some("timestamp") => {
-                if let Some(v) = value.as_f64() {
-                    Some(am::ScalarValue::Timestamp(v as i64))
-                } else if let Ok(d) = value.clone().dyn_into::<js_sys::Date>() {
-                    Some(am::ScalarValue::Timestamp(d.get_time() as i64))
-                } else {
-                    None
-                }
-            }
-            Some("null") => Some(am::ScalarValue::Null),
-            Some(_) => None,
-            None => {
-                if value.is_null() {
-                    Some(am::ScalarValue::Null)
-                } else if let Some(b) = value.as_bool() {
-                    Some(am::ScalarValue::Boolean(b))
-                } else if let Some(s) = value.as_string() {
-                    Some(am::ScalarValue::Str(s.into()))
-                } else if let Some(n) = value.as_f64() {
-                    if (n.round() - n).abs() < f64::EPSILON {
-                        Some(am::ScalarValue::Int(n as i64))
-                    } else {
-                        Some(am::ScalarValue::F64(n))
-                    }
-                } else if let Ok(d) = value.clone().dyn_into::<js_sys::Date>() {
-                    Some(am::ScalarValue::Timestamp(d.get_time() as i64))
-                } else if let Ok(o) = &value.clone().dyn_into::<Uint8Array>() {
-                    Some(am::ScalarValue::Bytes(o.to_vec()))
-                } else {
-                    None
-                }
-            }
-        }
-    }
-
-    fn import_value(
-        &self,
-        value: &JsValue,
-        datatype: Option<String>,
-    ) -> Result<(Value<'static>, Vec<(Prop, JsValue)>), JsValue> {
-        match self.import_scalar(value, &datatype) {
-            Some(val) => Ok((val.into(), vec![])),
-            None => {
-                if let Some((o, subvals)) = to_objtype(value, &datatype) {
-                    Ok((o.into(), subvals))
-                } else {
-                    web_sys::console::log_2(&"Invalid value".into(), value);
-                    Err(to_js_err("invalid value"))
-                }
-            }
-        }
     }
 }
 

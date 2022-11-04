@@ -3,7 +3,7 @@ use crate::exid::ExId;
 use crate::indexed_cache::IndexedCache;
 use crate::op_tree::{self, OpTree};
 use crate::parents::Parents;
-use crate::query::{self, OpIdSearch, TreeQuery};
+use crate::query::{self, OpIdVisSearch, TreeQuery};
 use crate::types::{self, ActorId, Key, ObjId, Op, OpId, OpIds, OpType, Prop};
 use crate::{ObjType, OpObserver};
 use fxhash::FxBuildHasher;
@@ -73,10 +73,12 @@ impl OpSetInternal {
         Parents { obj, ops: self }
     }
 
-    pub(crate) fn parent_object(&self, obj: &ObjId) -> Option<(ObjId, Key)> {
+    pub(crate) fn parent_object(&self, obj: &ObjId) -> Option<(ObjId, Key, bool)> {
         let parent = self.trees.get(obj)?.parent?;
-        let key = self.search(&parent, OpIdSearch::new(obj.0)).key().unwrap();
-        Some((parent, key))
+        let query = self.search(&parent, OpIdVisSearch::new(obj.0));
+        let key = query.key().unwrap();
+        let visible = query.visible;
+        Some((parent, key, visible))
     }
 
     pub(crate) fn export_key(&self, obj: ObjId, key: Key) -> Prop {
@@ -252,6 +254,7 @@ impl OpSetInternal {
         observer: &mut Obs,
     ) -> Op {
         let q = self.search(obj, query::SeekOpWithPatch::new(&op));
+        let obj_type = self.object_type(obj);
 
         let query::SeekOpWithPatch {
             pos,
@@ -271,13 +274,17 @@ impl OpSetInternal {
         };
 
         if op.insert {
-            let value = (op.value(), self.id_to_exid(op.id));
-            observer.insert(parents, ex_obj, seen, value);
+            if obj_type == Some(ObjType::Text) {
+                observer.splice_text(parents, ex_obj, seen, op.to_str());
+            } else {
+                let value = (op.value(), self.id_to_exid(op.id));
+                observer.insert(parents, ex_obj, seen, value);
+            }
         } else if op.is_delete() {
             if let Some(winner) = &values.last() {
                 let value = (winner.value(), self.id_to_exid(winner.id));
                 let conflict = values.len() > 1;
-                observer.put(parents, ex_obj, key, value, conflict);
+                observer.expose(parents, ex_obj, key, value, conflict);
             } else if had_value_before {
                 observer.delete(parents, ex_obj, key);
             }
@@ -294,18 +301,15 @@ impl OpSetInternal {
                 observer.increment(parents, ex_obj, key, (value, self.id_to_exid(op.id)));
             }
         } else {
-            let winner = if let Some(last_value) = values.last() {
-                if self.m.lamport_cmp(op.id, last_value.id) == Ordering::Greater {
-                    &op
-                } else {
-                    last_value
-                }
-            } else {
-                &op
-            };
-            let value = (winner.value(), self.id_to_exid(winner.id));
+            let just_conflict = values
+                .last()
+                .map(|value| self.m.lamport_cmp(op.id, value.id) != Ordering::Greater)
+                .unwrap_or(false);
+            let value = (op.value(), self.id_to_exid(op.id));
             if op.is_list_op() && !had_value_before {
                 observer.insert(parents, ex_obj, seen, value);
+            } else if just_conflict {
+                observer.flag_conflict(parents, ex_obj, key);
             } else {
                 let conflict = !values.is_empty();
                 observer.put(parents, ex_obj, key, value, conflict);
