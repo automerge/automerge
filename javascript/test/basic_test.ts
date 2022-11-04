@@ -43,7 +43,7 @@ describe('Automerge', () => {
               d.big = "little"
               d.zip = "zop"
               d.app = "dap"
-            assert.deepEqual(d, {  hello: "world", big: "little", zip: "zop", app: "dap" })
+              assert.deepEqual(d, {  hello: "world", big: "little", zip: "zop", app: "dap" })
             })
             assert.deepEqual(doc2, {  hello: "world", big: "little", zip: "zop", app: "dap" })
         })
@@ -198,10 +198,9 @@ describe('Automerge', () => {
         })
         it('handle text', () => {
             let doc1 = Automerge.init()
-            let tmp = new Automerge.Text("hello")
             let doc2 = Automerge.change(doc1, (d) => {
-              d.list = new Automerge.Text("hello")
-              d.list.insertAt(2,"Z")
+              d.list = "hello"
+              Automerge.splice(d, "list", 2, 0, "Z")
             })
             let changes = Automerge.getChanges(doc1, doc2)
             let docB1 = Automerge.init()
@@ -240,7 +239,7 @@ describe('Automerge', () => {
         })
 
         it('lists and text have indexof', () => {
-          let doc = Automerge.from({ list: [0,1,2,3,4,5,6], text: new Automerge.Text("hello world") })
+          let doc = Automerge.from({ list: [0,1,2,3,4,5,6], text: "hello world" })
           console.log(doc.list.indexOf(5))
           console.log(doc.text.indexOf("world"))
         })
@@ -329,7 +328,7 @@ describe('Automerge', () => {
             "date": new Date(),
             "counter": new Automerge.Counter(),
             "bytes": new Uint8Array(10),
-            "text": new Automerge.Text(),
+            "text": "",
             "list": [],
             "map": {}
         })
@@ -348,7 +347,7 @@ describe('Automerge', () => {
         })
 
         it("should return non-null for map, list, text, and objects", () => {
-            assert.notEqual(Automerge.getObjectId(s1.text), null)
+            assert.equal(Automerge.getObjectId(s1.text), null)
             assert.notEqual(Automerge.getObjectId(s1.list), null)
             assert.notEqual(Automerge.getObjectId(s1.map), null)
         })

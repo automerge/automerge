@@ -66,6 +66,17 @@ fn get_changes(doc: &Automerge, patches: Vec<Patch>) {
                     doc.path_to_object(&obj)
                 )
             }
+            Patch::Splice {
+                obj, index, value, ..
+            } => {
+                println!(
+                    "splice '{:?}' at {:?} in obj {:?}, object path {:?}",
+                    value,
+                    index,
+                    obj,
+                    doc.path_to_object(&obj)
+                )
+            }
             Patch::Increment {
                 obj, prop, value, ..
             } => {
@@ -79,6 +90,12 @@ fn get_changes(doc: &Automerge, patches: Vec<Patch>) {
             }
             Patch::Delete { obj, prop, .. } => println!(
                 "delete {:?} in obj {:?}, object path {:?}",
+                prop,
+                obj,
+                doc.path_to_object(&obj)
+            ),
+            Patch::Expose { obj, prop, .. } => println!(
+                "expose {:?} in obj {:?}, object path {:?}",
                 prop,
                 obj,
                 doc.path_to_object(&obj)

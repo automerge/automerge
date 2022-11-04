@@ -20,10 +20,6 @@ pub(crate) enum Datatype {
 }
 
 impl Datatype {
-    pub(crate) fn is_sequence(&self) -> bool {
-        matches!(self, Self::List | Self::Text)
-    }
-
     pub(crate) fn is_scalar(&self) -> bool {
         !matches!(self, Self::Map | Self::Table | Self::List | Self::Text)
     }

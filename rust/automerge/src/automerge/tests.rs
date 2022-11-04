@@ -1324,15 +1324,15 @@ fn get_parent_objects() {
 
     assert_eq!(
         doc.parents(&map).unwrap().next(),
-        Some((ROOT, Prop::Map("a".into())))
+        Some((ROOT, Prop::Map("a".into()), true))
     );
     assert_eq!(
         doc.parents(&list).unwrap().next(),
-        Some((map, Prop::Seq(0)))
+        Some((map, Prop::Seq(0), true))
     );
     assert_eq!(
         doc.parents(&text).unwrap().next(),
-        Some((list, Prop::Seq(0)))
+        Some((list, Prop::Seq(0), true))
     );
 }
 
@@ -1371,9 +1371,9 @@ fn parents_iterator() {
     let text = doc.put_object(&list, 0, ObjType::Text).unwrap();
 
     let mut parents = doc.parents(text).unwrap();
-    assert_eq!(parents.next(), Some((list, Prop::Seq(0))));
-    assert_eq!(parents.next(), Some((map, Prop::Seq(0))));
-    assert_eq!(parents.next(), Some((ROOT, Prop::Map("a".into()))));
+    assert_eq!(parents.next(), Some((list, Prop::Seq(0), true)));
+    assert_eq!(parents.next(), Some((map, Prop::Seq(0), true)));
+    assert_eq!(parents.next(), Some((ROOT, Prop::Map("a".into()), true)));
     assert_eq!(parents.next(), None);
 }
 

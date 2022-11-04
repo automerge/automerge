@@ -20,6 +20,8 @@ pub trait OpObserver {
         tagged_value: (Value<'_>, ExId),
     );
 
+    fn splice_text(&mut self, parents: Parents<'_>, objid: ExId, index: usize, value: &str);
+
     /// A new value has been put into the given object.
     ///
     /// - `parents`: A parents iterator that can be used to collect path information
@@ -36,6 +38,32 @@ pub trait OpObserver {
         tagged_value: (Value<'_>, ExId),
         conflict: bool,
     );
+
+    /// When a delete op exposes a previously conflicted value
+    /// Similar to a put op - except for maps, lists and text, edits
+    /// may already exist and need to be queried
+    ///
+    /// - `parents`: A parents iterator that can be used to collect path information
+    /// - `objid`: the object that has been put into.
+    /// - `prop`: the prop that the value as been put at.
+    /// - `tagged_value`: the value that has been put into the object and the id of the operation
+    /// that did the put.
+    /// - `conflict`: whether this put conflicts with other operations.
+    fn expose(
+        &mut self,
+        parents: Parents<'_>,
+        objid: ExId,
+        prop: Prop,
+        tagged_value: (Value<'_>, ExId),
+        conflict: bool,
+    );
+
+    /// Flag a new conflict on a value without changing it
+    ///
+    /// - `parents`: A parents iterator that can be used to collect path information
+    /// - `objid`: the object that has been put into.
+    /// - `prop`: the prop that the value as been put at.
+    fn flag_conflict(&mut self, parents: Parents<'_>, objid: ExId, prop: Prop);
 
     /// A counter has been incremented.
     ///
@@ -84,6 +112,8 @@ impl OpObserver for () {
     ) {
     }
 
+    fn splice_text(&mut self, _parents: Parents<'_>, _objid: ExId, _index: usize, _value: &str) {}
+
     fn put(
         &mut self,
         _parents: Parents<'_>,
@@ -93,6 +123,18 @@ impl OpObserver for () {
         _conflict: bool,
     ) {
     }
+
+    fn expose(
+        &mut self,
+        _parents: Parents<'_>,
+        _objid: ExId,
+        _prop: Prop,
+        _tagged_value: (Value<'_>, ExId),
+        _conflict: bool,
+    ) {
+    }
+
+    fn flag_conflict(&mut self, _parents: Parents<'_>, _objid: ExId, _prop: Prop) {}
 
     fn increment(
         &mut self,
@@ -141,6 +183,16 @@ impl OpObserver for VecOpObserver {
         });
     }
 
+    fn splice_text(&mut self, mut parents: Parents<'_>, obj: ExId, index: usize, value: &str) {
+        let path = parents.path();
+        self.patches.push(Patch::Splice {
+            obj,
+            path,
+            index,
+            value: value.to_string(),
+        });
+    }
+
     fn put(
         &mut self,
         mut parents: Parents<'_>,
@@ -158,6 +210,26 @@ impl OpObserver for VecOpObserver {
             conflict,
         });
     }
+
+    fn expose(
+        &mut self,
+        mut parents: Parents<'_>,
+        obj: ExId,
+        prop: Prop,
+        (value, id): (Value<'_>, ExId),
+        conflict: bool,
+    ) {
+        let path = parents.path();
+        self.patches.push(Patch::Expose {
+            obj,
+            path,
+            prop,
+            value: (value.into_owned(), id),
+            conflict,
+        });
+    }
+
+    fn flag_conflict(&mut self, mut _parents: Parents<'_>, _obj: ExId, _prop: Prop) {}
 
     fn increment(
         &mut self,
@@ -205,7 +277,20 @@ pub enum Patch {
         /// Whether this put conflicts with another.
         conflict: bool,
     },
-    /// Inserting a new element into a list/text
+    /// Exposing (via delete) an old but conflicted value with a prop in a map, or a list element
+    Expose {
+        /// path to the object
+        path: Vec<(ExId, Prop)>,
+        /// The object that was put into.
+        obj: ExId,
+        /// The prop that the new value was put at.
+        prop: Prop,
+        /// The value that was put, and the id of the operation that put it there.
+        value: (Value<'static>, ExId),
+        /// Whether this put conflicts with another.
+        conflict: bool,
+    },
+    /// Inserting a new element into a list
     Insert {
         /// path to the object
         path: Vec<(ExId, Prop)>,
@@ -215,6 +300,17 @@ pub enum Patch {
         index: usize,
         /// The value that was inserted, and the id of the operation that inserted it there.
         value: (Value<'static>, ExId),
+    },
+    /// Splicing a text object
+    Splice {
+        /// path to the object
+        path: Vec<(ExId, Prop)>,
+        /// The object that was inserted into.
+        obj: ExId,
+        /// The index that the new value was inserted at.
+        index: usize,
+        /// The value that was spliced
+        value: String,
     },
     /// Incrementing a counter.
     Increment {

@@ -35,6 +35,7 @@ hex = "^0.4.3"
 regex = "^1.5"
 itertools = "^0.10.3"
 thiserror = "^1.0.16"
+ropey = "1.5.0"
 
 [dependencies.wasm-bindgen]
 version = "^0.2.83"
