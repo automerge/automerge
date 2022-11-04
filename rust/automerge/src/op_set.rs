@@ -3,8 +3,8 @@ use crate::exid::ExId;
 use crate::indexed_cache::IndexedCache;
 use crate::op_tree::{self, OpTree};
 use crate::parents::Parents;
-use crate::query::{self, OpIdSearch, TreeQuery};
-use crate::types::{self, ActorId, Key, ObjId, Op, OpId, OpIds, OpType, Prop};
+use crate::query::{self, OpIdVisSearch, TreeQuery};
+use crate::types::{self, ActorId, Key, ListEncoding, ObjId, Op, OpId, OpIds, OpType, Prop};
 use crate::{ObjType, OpObserver};
 use fxhash::FxBuildHasher;
 use std::borrow::Borrow;
@@ -73,18 +73,24 @@ impl OpSetInternal {
         Parents { obj, ops: self }
     }
 
-    pub(crate) fn parent_object(&self, obj: &ObjId) -> Option<(ObjId, Key)> {
+    pub(crate) fn parent_object(&self, obj: &ObjId) -> Option<Parent> {
         let parent = self.trees.get(obj)?.parent?;
-        let key = self.search(&parent, OpIdSearch::new(obj.0)).key().unwrap();
-        Some((parent, key))
+        let query = self.search(&parent, OpIdVisSearch::new(obj.0));
+        let key = query.key().unwrap();
+        let visible = query.visible;
+        Some(Parent {
+            obj: parent,
+            key,
+            visible,
+        })
     }
 
-    pub(crate) fn export_key(&self, obj: ObjId, key: Key) -> Prop {
+    pub(crate) fn export_key(&self, obj: ObjId, key: Key, encoding: ListEncoding) -> Prop {
         match key {
             Key::Map(m) => Prop::Map(self.m.props.get(m).into()),
             Key::Seq(opid) => {
                 let i = self
-                    .search(&obj, query::ElemIdPos::new(opid))
+                    .search(&obj, query::ElemIdPos::new(opid, encoding))
                     .index()
                     .unwrap();
                 Prop::Seq(i)
@@ -158,36 +164,37 @@ impl OpSetInternal {
         }
     }
 
-    pub(crate) fn search<'a, 'b: 'a, Q>(&'b self, obj: &ObjId, query: Q) -> Q
+    pub(crate) fn search<'a, 'b: 'a, Q>(&'b self, obj: &ObjId, mut query: Q) -> Q
     where
         Q: TreeQuery<'a>,
     {
         if let Some(tree) = self.trees.get(obj) {
-            tree.internal.search(query, &self.m)
+            if query.can_shortcut_search(tree) {
+                query
+            } else {
+                tree.internal.search(query, &self.m)
+            }
         } else {
             query
         }
     }
 
-    pub(crate) fn replace<F>(&mut self, obj: &ObjId, index: usize, f: F)
+    pub(crate) fn change_vis<F>(&mut self, obj: &ObjId, index: usize, f: F)
     where
         F: Fn(&mut Op),
     {
         if let Some(tree) = self.trees.get_mut(obj) {
+            tree.last_insert = None;
             tree.internal.update(index, f)
         }
     }
 
     /// Add `op` as a successor to each op at `op_indices` in `obj`
-    pub(crate) fn add_succ<I: Iterator<Item = usize>>(
-        &mut self,
-        obj: &ObjId,
-        op_indices: I,
-        op: &Op,
-    ) {
+    pub(crate) fn add_succ(&mut self, obj: &ObjId, op_indices: &[usize], op: &Op) {
         if let Some(tree) = self.trees.get_mut(obj) {
+            tree.last_insert = None;
             for i in op_indices {
-                tree.internal.update(i, |old_op| {
+                tree.internal.update(*i, |old_op| {
                     old_op.add_succ(op, |left, right| self.m.lamport_cmp(*left, *right))
                 });
             }
@@ -198,6 +205,7 @@ impl OpSetInternal {
         // this happens on rollback - be sure to go back to the old state
         let tree = self.trees.get_mut(obj).unwrap();
         self.length -= 1;
+        tree.last_insert = None;
         let op = tree.internal.remove(index);
         if let OpType::Make(_) = &op.action {
             self.trees.remove(&op.id.into());
@@ -209,6 +217,12 @@ impl OpSetInternal {
         self.length
     }
 
+    pub(crate) fn hint(&mut self, obj: &ObjId, index: usize, pos: usize) {
+        if let Some(tree) = self.trees.get_mut(obj) {
+            tree.last_insert = Some((index, pos))
+        }
+    }
+
     #[tracing::instrument(skip(self, index))]
     pub(crate) fn insert(&mut self, index: usize, obj: &ObjId, element: Op) {
         if let OpType::Make(typ) = element.action {
@@ -217,108 +231,19 @@ impl OpSetInternal {
                 OpTree {
                     internal: Default::default(),
                     objtype: typ,
+                    last_insert: None,
                     parent: Some(*obj),
                 },
             );
         }
 
         if let Some(tree) = self.trees.get_mut(obj) {
-            //let tree = self.trees.get_mut(&element.obj).unwrap();
+            tree.last_insert = None;
             tree.internal.insert(index, element);
             self.length += 1;
         } else {
             tracing::warn!("attempting to insert op for unknown object");
         }
-    }
-
-    pub(crate) fn insert_op(&mut self, obj: &ObjId, op: Op) -> Op {
-        let q = self.search(obj, query::SeekOp::new(&op));
-
-        let succ = q.succ;
-        let pos = q.pos;
-
-        self.add_succ(obj, succ.iter().copied(), &op);
-
-        if !op.is_delete() {
-            self.insert(pos, obj, op.clone());
-        }
-        op
-    }
-
-    pub(crate) fn insert_op_with_observer<Obs: OpObserver>(
-        &mut self,
-        obj: &ObjId,
-        op: Op,
-        observer: &mut Obs,
-    ) -> Op {
-        let q = self.search(obj, query::SeekOpWithPatch::new(&op));
-
-        let query::SeekOpWithPatch {
-            pos,
-            succ,
-            seen,
-            values,
-            had_value_before,
-            ..
-        } = q;
-
-        let ex_obj = self.id_to_exid(obj.0);
-        let parents = self.parents(*obj);
-
-        let key = match op.key {
-            Key::Map(index) => self.m.props[index].clone().into(),
-            Key::Seq(_) => seen.into(),
-        };
-
-        if op.insert {
-            let value = (op.value(), self.id_to_exid(op.id));
-            observer.insert(parents, ex_obj, seen, value);
-        } else if op.is_delete() {
-            if let Some(winner) = &values.last() {
-                let value = (winner.value(), self.id_to_exid(winner.id));
-                let conflict = values.len() > 1;
-                observer.put(parents, ex_obj, key, value, conflict);
-            } else if had_value_before {
-                observer.delete(parents, ex_obj, key);
-            }
-        } else if let Some(value) = op.get_increment_value() {
-            // only observe this increment if the counter is visible, i.e. the counter's
-            // create op is in the values
-            //if values.iter().any(|value| op.pred.contains(&value.id)) {
-            if values
-                .last()
-                .map(|value| op.pred.contains(&value.id))
-                .unwrap_or_default()
-            {
-                // we have observed the value
-                observer.increment(parents, ex_obj, key, (value, self.id_to_exid(op.id)));
-            }
-        } else {
-            let winner = if let Some(last_value) = values.last() {
-                if self.m.lamport_cmp(op.id, last_value.id) == Ordering::Greater {
-                    &op
-                } else {
-                    last_value
-                }
-            } else {
-                &op
-            };
-            let value = (winner.value(), self.id_to_exid(winner.id));
-            if op.is_list_op() && !had_value_before {
-                observer.insert(parents, ex_obj, seen, value);
-            } else {
-                let conflict = !values.is_empty();
-                observer.put(parents, ex_obj, key, value, conflict);
-            }
-        }
-
-        self.add_succ(obj, succ.iter().copied(), &op);
-
-        if !op.is_delete() {
-            self.insert(pos, obj, op.clone());
-        }
-
-        op
     }
 
     pub(crate) fn object_type(&self, id: &ObjId) -> Option<ObjType> {
@@ -452,4 +377,10 @@ impl OpSetMetadata {
     pub(crate) fn import_prop<S: Borrow<str>>(&mut self, key: S) -> usize {
         self.props.cache(key.borrow().to_string())
     }
+}
+
+pub(crate) struct Parent {
+    pub(crate) obj: ObjId,
+    pub(crate) key: Key,
+    pub(crate) visible: bool,
 }

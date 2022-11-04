@@ -3,3 +3,4 @@ perf.*
 /Cargo.lock
 build/
 .vim/*
+/target

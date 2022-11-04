@@ -118,12 +118,6 @@ describe('Automerge', () => {
       doc.splice(notes, 6, 5, "everyone")
 
       assert.deepEqual(doc.text(notes), "Hello everyone")
-
-      const obj = doc.insertObject(notes, 6, { hi: "there" })
-
-      assert.deepEqual(doc.text(notes), "Hello \ufffceveryone")
-      assert.deepEqual(doc.get(notes, 6), obj)
-      assert.deepEqual(doc.get(obj, "hi"), "there")
     })
     it('Querying Data (1)', () => {
       const doc1 = create("aabbcc")

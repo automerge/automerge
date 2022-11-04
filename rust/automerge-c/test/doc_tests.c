@@ -60,11 +60,16 @@ static void test_AMkeys_empty() {
 static void test_AMkeys_list() {
     AMresultStack* stack = NULL;
     AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
-    AMfree(AMlistPutInt(doc, AM_ROOT, 0, true, 1));
-    AMfree(AMlistPutInt(doc, AM_ROOT, 1, true, 2));
-    AMfree(AMlistPutInt(doc, AM_ROOT, 2, true, 3));
+    AMobjId const* const list = AMpush(
+        &stack,
+        AMmapPutObject(doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST),
+        AM_VALUE_OBJ_ID,
+        cmocka_cb).obj_id;
+    AMfree(AMlistPutInt(doc, list, 0, true, 0));
+    AMfree(AMlistPutInt(doc, list, 1, true, 0));
+    AMfree(AMlistPutInt(doc, list, 2, true, 0));
     AMstrs forward = AMpush(&stack,
-                            AMkeys(doc, AM_ROOT, NULL),
+                            AMkeys(doc, list, NULL),
                             AM_VALUE_STRS,
                             cmocka_cb).strs;
     assert_int_equal(AMstrsSize(&forward), 3);
@@ -72,35 +77,35 @@ static void test_AMkeys_list() {
     assert_int_equal(AMstrsSize(&reverse), 3);
     /* Forward iterator forward. */
     AMbyteSpan str = AMstrsNext(&forward, 1);
-    assert_ptr_equal(strstr(str.src, "1@"), str.src);
-    str = AMstrsNext(&forward, 1);
     assert_ptr_equal(strstr(str.src, "2@"), str.src);
     str = AMstrsNext(&forward, 1);
     assert_ptr_equal(strstr(str.src, "3@"), str.src);
+    str = AMstrsNext(&forward, 1);
+    assert_ptr_equal(strstr(str.src, "4@"), str.src);
     assert_null(AMstrsNext(&forward, 1).src);
-    /* Forward iterator reverse. */
+    // /* Forward iterator reverse. */
+    str = AMstrsPrev(&forward, 1);
+    assert_ptr_equal(strstr(str.src, "4@"), str.src);
     str = AMstrsPrev(&forward, 1);
     assert_ptr_equal(strstr(str.src, "3@"), str.src);
     str = AMstrsPrev(&forward, 1);
     assert_ptr_equal(strstr(str.src, "2@"), str.src);
-    str = AMstrsPrev(&forward, 1);
-    assert_ptr_equal(strstr(str.src, "1@"), str.src);
     assert_null(AMstrsPrev(&forward, 1).src);
     /* Reverse iterator forward. */
     str = AMstrsNext(&reverse, 1);
+    assert_ptr_equal(strstr(str.src, "4@"), str.src);
+    str = AMstrsNext(&reverse, 1);
     assert_ptr_equal(strstr(str.src, "3@"), str.src);
     str = AMstrsNext(&reverse, 1);
     assert_ptr_equal(strstr(str.src, "2@"), str.src);
-    str = AMstrsNext(&reverse, 1);
-    assert_ptr_equal(strstr(str.src, "1@"), str.src);
-    /* Reverse iterator reverse. */
     assert_null(AMstrsNext(&reverse, 1).src);
-    str = AMstrsPrev(&reverse, 1);
-    assert_ptr_equal(strstr(str.src, "1@"), str.src);
+    /* Reverse iterator reverse. */
     str = AMstrsPrev(&reverse, 1);
     assert_ptr_equal(strstr(str.src, "2@"), str.src);
     str = AMstrsPrev(&reverse, 1);
     assert_ptr_equal(strstr(str.src, "3@"), str.src);
+    str = AMstrsPrev(&reverse, 1);
+    assert_ptr_equal(strstr(str.src, "4@"), str.src);
     assert_null(AMstrsPrev(&reverse, 1).src);
     AMfreeStack(&stack);
 }
@@ -202,16 +207,20 @@ static void test_AMputActor_str(void **state) {
 static void test_AMspliceText() {
     AMresultStack* stack = NULL;
     AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
-    AMfree(AMspliceText(doc, AM_ROOT, 0, 0, AMstr("one + ")));
-    AMfree(AMspliceText(doc, AM_ROOT, 4, 2, AMstr("two = ")));
-    AMfree(AMspliceText(doc, AM_ROOT, 8, 2, AMstr("three")));
-    AMbyteSpan const text = AMpush(&stack,
-                                    AMtext(doc, AM_ROOT, NULL),
-                                    AM_VALUE_STR,
-                                    cmocka_cb).str;
-    static char const* const TEXT_VALUE = "one two three";
-    assert_int_equal(text.count, strlen(TEXT_VALUE));
-    assert_memory_equal(text.src, TEXT_VALUE, text.count);
+    AMobjId const* const text = AMpush(&stack,
+                                       AMmapPutObject(doc, AM_ROOT, AMstr("text"), AM_OBJ_TYPE_TEXT),
+                                       AM_VALUE_OBJ_ID,
+                                       cmocka_cb).obj_id;    
+    AMfree(AMspliceText(doc, text, 0, 0, AMstr("one + ")));
+    AMfree(AMspliceText(doc, text, 4, 2, AMstr("two = ")));
+    AMfree(AMspliceText(doc, text, 8, 2, AMstr("three")));
+    AMbyteSpan const str = AMpush(&stack,
+                                  AMtext(doc, text, NULL),
+                                  AM_VALUE_STR,
+                                  cmocka_cb).str;
+    static char const* const STR_VALUE = "one two three";
+    assert_int_equal(str.count, strlen(STR_VALUE));
+    assert_memory_equal(str.src, STR_VALUE, str.count);
     AMfreeStack(&stack);
 }
 

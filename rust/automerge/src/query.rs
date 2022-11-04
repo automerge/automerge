@@ -1,5 +1,7 @@
-use crate::op_tree::{OpSetMetadata, OpTreeNode};
-use crate::types::{Clock, Counter, Key, Op, OpId, OpType, ScalarValue};
+use crate::op_tree::{OpSetMetadata, OpTree, OpTreeNode};
+use crate::types::{
+    Clock, Counter, Key, ListEncoding, Op, OpId, OpType, ScalarValue, TextEncoding,
+};
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -20,6 +22,7 @@ mod map_range_at;
 mod nth;
 mod nth_at;
 mod opid;
+mod opid_vis;
 mod prop;
 mod prop_at;
 mod seek_op;
@@ -40,6 +43,7 @@ pub(crate) use map_range_at::MapRangeAt;
 pub(crate) use nth::Nth;
 pub(crate) use nth_at::NthAt;
 pub(crate) use opid::OpIdSearch;
+pub(crate) use opid_vis::OpIdVisSearch;
 pub(crate) use prop::Prop;
 pub(crate) use prop_at::PropAt;
 pub(crate) use seek_op::SeekOp;
@@ -47,12 +51,10 @@ pub(crate) use seek_op_with_patch::SeekOpWithPatch;
 
 // use a struct for the args for clarity as they are passed up the update chain in the optree
 #[derive(Debug, Clone)]
-pub(crate) struct ReplaceArgs {
-    pub(crate) old_id: OpId,
-    pub(crate) new_id: OpId,
-    pub(crate) old_visible: bool,
-    pub(crate) new_visible: bool,
-    pub(crate) new_key: Key,
+pub(crate) struct ChangeVisibility<'a> {
+    pub(crate) old_vis: bool,
+    pub(crate) new_vis: bool,
+    pub(crate) op: &'a Op,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -63,7 +65,15 @@ pub(crate) struct CounterData {
     op: Op,
 }
 
-pub(crate) trait TreeQuery<'a> {
+pub(crate) trait TreeQuery<'a>: Clone + Debug {
+    fn equiv(&mut self, _other: &Self) -> bool {
+        false
+    }
+
+    fn can_shortcut_search(&mut self, _tree: &'a OpTree) -> bool {
+        false
+    }
+
     #[inline(always)]
     fn query_node_with_metadata(
         &mut self,
@@ -100,6 +110,8 @@ pub(crate) enum QueryResult {
 pub(crate) struct Index {
     /// The map of visible keys to the number of visible operations for that key.
     pub(crate) visible: HashMap<Key, usize, FxBuildHasher>,
+    pub(crate) visible16: usize,
+    pub(crate) visible8: usize,
     /// Set of opids found in this node and below.
     pub(crate) ops: HashSet<OpId, FxBuildHasher>,
 }
@@ -108,53 +120,72 @@ impl Index {
     pub(crate) fn new() -> Self {
         Index {
             visible: Default::default(),
+            visible16: 0,
+            visible8: 0,
             ops: Default::default(),
         }
     }
 
     /// Get the number of visible elements in this index.
-    pub(crate) fn visible_len(&self) -> usize {
-        self.visible.len()
+    pub(crate) fn visible_len(&self, encoding: ListEncoding) -> usize {
+        match encoding {
+            ListEncoding::List => self.visible.len(),
+            ListEncoding::Text(TextEncoding::Utf8) => self.visible8,
+            ListEncoding::Text(TextEncoding::Utf16) => self.visible16,
+        }
     }
 
     pub(crate) fn has_visible(&self, seen: &Key) -> bool {
         self.visible.contains_key(seen)
     }
 
-    pub(crate) fn replace(
+    pub(crate) fn change_vis<'a>(
         &mut self,
-        ReplaceArgs {
-            old_id,
-            new_id,
-            old_visible,
-            new_visible,
-            new_key,
-        }: &ReplaceArgs,
-    ) {
-        if old_id != new_id {
-            self.ops.remove(old_id);
-            self.ops.insert(*new_id);
-        }
-
-        match (new_visible, old_visible, new_key) {
-            (false, true, key) => match self.visible.get(key).copied() {
+        change_vis: ChangeVisibility<'a>,
+    ) -> ChangeVisibility<'a> {
+        let ChangeVisibility {
+            old_vis,
+            new_vis,
+            op,
+        } = &change_vis;
+        let key = op.elemid_or_key();
+        match (old_vis, new_vis) {
+            (true, false) => match self.visible.get(&key).copied() {
                 Some(n) if n == 1 => {
-                    self.visible.remove(key);
+                    self.visible.remove(&key);
+                    self.visible8 -= op.width(ListEncoding::Text(TextEncoding::Utf8));
+                    self.visible16 -= op.width(ListEncoding::Text(TextEncoding::Utf16));
                 }
                 Some(n) => {
-                    self.visible.insert(*key, n - 1);
+                    self.visible.insert(key, n - 1);
                 }
                 None => panic!("remove overun in index"),
             },
-            (true, false, key) => *self.visible.entry(*key).or_default() += 1,
+            (false, true) => {
+                if let Some(n) = self.visible.get(&key) {
+                    self.visible.insert(key, n + 1);
+                } else {
+                    self.visible.insert(key, 1);
+                    self.visible8 += op.width(ListEncoding::Text(TextEncoding::Utf8));
+                    self.visible16 += op.width(ListEncoding::Text(TextEncoding::Utf16));
+                }
+            }
             _ => {}
         }
+        change_vis
     }
 
     pub(crate) fn insert(&mut self, op: &Op) {
         self.ops.insert(op.id);
         if op.visible() {
-            *self.visible.entry(op.elemid_or_key()).or_default() += 1;
+            let key = op.elemid_or_key();
+            if let Some(n) = self.visible.get(&key) {
+                self.visible.insert(key, n + 1);
+            } else {
+                self.visible.insert(key, 1);
+                self.visible8 += op.width(ListEncoding::Text(TextEncoding::Utf8));
+                self.visible16 += op.width(ListEncoding::Text(TextEncoding::Utf16));
+            }
         }
     }
 
@@ -165,6 +196,8 @@ impl Index {
             match self.visible.get(&key).copied() {
                 Some(n) if n == 1 => {
                     self.visible.remove(&key);
+                    self.visible8 -= op.width(ListEncoding::Text(TextEncoding::Utf8));
+                    self.visible16 -= op.width(ListEncoding::Text(TextEncoding::Utf16));
                 }
                 Some(n) => {
                     self.visible.insert(key, n - 1);
@@ -178,9 +211,14 @@ impl Index {
         for id in &other.ops {
             self.ops.insert(*id);
         }
-        for (elem, n) in other.visible.iter() {
-            *self.visible.entry(*elem).or_default() += n;
+        for (elem, other_len) in other.visible.iter() {
+            self.visible
+                .entry(*elem)
+                .and_modify(|len| *len += *other_len)
+                .or_insert(*other_len);
         }
+        self.visible16 += other.visible16;
+        self.visible8 += other.visible8;
     }
 }
 

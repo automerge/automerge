@@ -393,6 +393,15 @@ pub enum Prop {
     Seq(usize),
 }
 
+impl Prop {
+    pub(crate) fn to_index(&self) -> Option<usize> {
+        match self {
+            Prop::Map(_) => None,
+            Prop::Seq(n) => Some(*n),
+        }
+    }
+}
+
 impl Display for Prop {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -434,6 +443,40 @@ impl ObjId {
 
     pub(crate) fn opid(&self) -> &OpId {
         &self.0
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum TextEncoding {
+    Utf8,
+    Utf16,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub(crate) enum ListEncoding {
+    List,
+    Text(TextEncoding),
+}
+
+impl Default for ListEncoding {
+    fn default() -> Self {
+        ListEncoding::List
+    }
+}
+
+impl Default for TextEncoding {
+    fn default() -> Self {
+        TextEncoding::Utf8
+    }
+}
+
+impl ListEncoding {
+    pub(crate) fn new(obj: ObjType, text_encoding: TextEncoding) -> Self {
+        if obj == ObjType::Text {
+            ListEncoding::Text(text_encoding)
+        } else {
+            ListEncoding::List
+        }
     }
 }
 
@@ -488,6 +531,22 @@ impl Op {
                 *current -= *n;
                 *increments -= 1;
             }
+        }
+    }
+
+    pub(crate) fn width(&self, encoding: ListEncoding) -> usize {
+        match encoding {
+            ListEncoding::List => 1,
+            ListEncoding::Text(TextEncoding::Utf8) => self.to_str().chars().count(),
+            ListEncoding::Text(TextEncoding::Utf16) => self.to_str().encode_utf16().count(),
+        }
+    }
+
+    pub(crate) fn to_str(&self) -> &str {
+        if let OpType::Put(ScalarValue::Str(s)) = &self.action {
+            s
+        } else {
+            "\u{fffc}"
         }
     }
 

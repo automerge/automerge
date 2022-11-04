@@ -8,7 +8,7 @@ use std::{
 pub(crate) use crate::op_set::OpSetMetadata;
 use crate::{
     clock::Clock,
-    query::{self, Index, QueryResult, ReplaceArgs, TreeQuery},
+    query::{self, ChangeVisibility, Index, QueryResult, TreeQuery},
 };
 use crate::{
     types::{ObjId, Op, OpId},
@@ -27,6 +27,11 @@ pub(crate) struct OpTree {
     pub(crate) objtype: ObjType,
     /// The id of the parent object, root has no parent.
     pub(crate) parent: Option<ObjId>,
+    /// record the last list index and tree position
+    /// inserted into the op_set - this allows us to
+    /// short circuit the query if the follow op is another
+    /// insert or delete at the same spot
+    pub(crate) last_insert: Option<(usize, usize)>,
 }
 
 impl OpTree {
@@ -35,6 +40,7 @@ impl OpTree {
             internal: Default::default(),
             objtype: ObjType::Map,
             parent: None,
+            last_insert: None,
         }
     }
 
@@ -618,24 +624,19 @@ impl OpTreeNode {
     /// Update the operation at the given index using the provided function.
     ///
     /// This handles updating the indices after the update.
-    pub(crate) fn update<F>(&mut self, index: usize, f: F) -> ReplaceArgs
+    pub(crate) fn update<F>(&mut self, index: usize, f: F) -> ChangeVisibility<'_>
     where
         F: FnOnce(&mut Op),
     {
         if self.is_leaf() {
             let new_element = self.elements.get_mut(index).unwrap();
-            let old_id = new_element.id;
-            let old_visible = new_element.visible();
+            let old_vis = new_element.visible();
             f(new_element);
-            let replace_args = ReplaceArgs {
-                old_id,
-                new_id: new_element.id,
-                old_visible,
-                new_visible: new_element.visible(),
-                new_key: new_element.elemid_or_key(),
-            };
-            self.index.replace(&replace_args);
-            replace_args
+            self.index.change_vis(ChangeVisibility {
+                old_vis,
+                new_vis: new_element.visible(),
+                op: new_element,
+            })
         } else {
             let mut cumulative_len = 0;
             let len = self.len();
@@ -646,23 +647,17 @@ impl OpTreeNode {
                     }
                     Ordering::Equal => {
                         let new_element = self.elements.get_mut(child_index).unwrap();
-                        let old_id = new_element.id;
-                        let old_visible = new_element.visible();
+                        let old_vis = new_element.visible();
                         f(new_element);
-                        let replace_args = ReplaceArgs {
-                            old_id,
-                            new_id: new_element.id,
-                            old_visible,
-                            new_visible: new_element.visible(),
-                            new_key: new_element.elemid_or_key(),
-                        };
-                        self.index.replace(&replace_args);
-                        return replace_args;
+                        return self.index.change_vis(ChangeVisibility {
+                            old_vis,
+                            new_vis: new_element.visible(),
+                            op: new_element,
+                        });
                     }
                     Ordering::Greater => {
-                        let replace_args = child.update(index - cumulative_len, f);
-                        self.index.replace(&replace_args);
-                        return replace_args;
+                        let vis_args = child.update(index - cumulative_len, f);
+                        return self.index.change_vis(vis_args);
                     }
                 }
             }

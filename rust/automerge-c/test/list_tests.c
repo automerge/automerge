@@ -18,15 +18,20 @@
 
 static void test_AMlistIncrement(void** state) {
     GroupState* group_state = *state;
-    AMfree(AMlistPutCounter(group_state->doc, AM_ROOT, 0, true, 0));
+    AMobjId const* const list = AMpush(
+        &group_state->stack,
+        AMmapPutObject(group_state->doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST),
+        AM_VALUE_OBJ_ID,
+        cmocka_cb).obj_id;
+    AMfree(AMlistPutCounter(group_state->doc, list, 0, true, 0));
     assert_int_equal(AMpush(&group_state->stack,
-                            AMlistGet(group_state->doc, AM_ROOT, 0, NULL),
+                            AMlistGet(group_state->doc, list, 0, NULL),
                             AM_VALUE_COUNTER,
                             cmocka_cb).counter, 0);
     AMfree(AMpop(&group_state->stack));
-    AMfree(AMlistIncrement(group_state->doc, AM_ROOT, 0, 3));
+    AMfree(AMlistIncrement(group_state->doc, list, 0, 3));
     assert_int_equal(AMpush(&group_state->stack,
-                            AMlistGet(group_state->doc, AM_ROOT, 0, NULL),
+                            AMlistGet(group_state->doc, list, 0, NULL),
                             AM_VALUE_COUNTER,
                             cmocka_cb).counter, 3);
     AMfree(AMpop(&group_state->stack));
@@ -34,119 +39,140 @@ static void test_AMlistIncrement(void** state) {
 
 #define test_AMlistPut(suffix, mode) test_AMlistPut ## suffix ## _ ## mode
 
-#define static_void_test_AMlistPut(suffix, mode, member, scalar_value)        \
-static void test_AMlistPut ## suffix ## _ ## mode(void **state) {             \
-    GroupState* group_state = *state;                                         \
-    AMfree(AMlistPut ## suffix(group_state->doc,                              \
-                               AM_ROOT,                                       \
-                               0,                                             \
-                               !strcmp(#mode, "insert"),                      \
-                               scalar_value));                                \
-    assert_true(AMpush(                                                       \
-        &group_state->stack,                                                  \
-        AMlistGet(group_state->doc, AM_ROOT, 0, NULL),                        \
-        AMvalue_discriminant(#suffix),                                        \
-        cmocka_cb).member == scalar_value);                                   \
-    AMfree(AMpop(&group_state->stack));                                       \
+#define static_void_test_AMlistPut(suffix, mode, member, scalar_value)             \
+static void test_AMlistPut ## suffix ## _ ## mode(void **state) {                  \
+    GroupState* group_state = *state;                                              \
+    AMobjId const* const list = AMpush(                                            \
+        &group_state->stack,                                                       \
+        AMmapPutObject(group_state->doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST),\
+        AM_VALUE_OBJ_ID,                                                           \
+        cmocka_cb).obj_id;                                                         \
+    AMfree(AMlistPut ## suffix(group_state->doc,                                   \
+                               list,                                               \
+                               0,                                                  \
+                               !strcmp(#mode, "insert"),                           \
+                               scalar_value));                                     \
+    assert_true(AMpush(                                                            \
+        &group_state->stack,                                                       \
+        AMlistGet(group_state->doc, list, 0, NULL),                                \
+        AMvalue_discriminant(#suffix),                                             \
+        cmocka_cb).member == scalar_value);                                        \
+    AMfree(AMpop(&group_state->stack));                                            \
 }
 
 #define test_AMlistPutBytes(mode) test_AMlistPutBytes ## _ ## mode
 
-#define static_void_test_AMlistPutBytes(mode, bytes_value)                    \
-static void test_AMlistPutBytes_ ## mode(void **state) {                      \
-    static size_t const BYTES_SIZE = sizeof(bytes_value) / sizeof(uint8_t);   \
-                                                                              \
-    GroupState* group_state = *state;                                         \
-    AMfree(AMlistPutBytes(group_state->doc,                                   \
-                          AM_ROOT,                                            \
-                          0,                                                  \
-                          !strcmp(#mode, "insert"),                           \
-                          AMbytes(bytes_value, BYTES_SIZE)));                 \
-    AMbyteSpan const bytes = AMpush(                                          \
-        &group_state->stack,                                                  \
-        AMlistGet(group_state->doc, AM_ROOT, 0, NULL),                        \
-        AM_VALUE_BYTES,                                                       \
-        cmocka_cb).bytes;                                                     \
-    assert_int_equal(bytes.count, BYTES_SIZE);                                \
-    assert_memory_equal(bytes.src, bytes_value, BYTES_SIZE);                  \
-    AMfree(AMpop(&group_state->stack));                                       \
+#define static_void_test_AMlistPutBytes(mode, bytes_value)                         \
+static void test_AMlistPutBytes_ ## mode(void **state) {                           \
+    static size_t const BYTES_SIZE = sizeof(bytes_value) / sizeof(uint8_t);        \
+                                                                                   \
+    GroupState* group_state = *state;                                              \
+    AMobjId const* const list = AMpush(                                            \
+        &group_state->stack,                                                       \
+        AMmapPutObject(group_state->doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST),\
+        AM_VALUE_OBJ_ID,                                                           \
+        cmocka_cb).obj_id;                                                         \
+    AMfree(AMlistPutBytes(group_state->doc,                                        \
+                          list,                                                    \
+                          0,                                                       \
+                          !strcmp(#mode, "insert"),                                \
+                          AMbytes(bytes_value, BYTES_SIZE)));                      \
+    AMbyteSpan const bytes = AMpush(                                               \
+        &group_state->stack,                                                       \
+        AMlistGet(group_state->doc, list, 0, NULL),                                \
+        AM_VALUE_BYTES,                                                            \
+        cmocka_cb).bytes;                                                          \
+    assert_int_equal(bytes.count, BYTES_SIZE);                                     \
+    assert_memory_equal(bytes.src, bytes_value, BYTES_SIZE);                       \
+    AMfree(AMpop(&group_state->stack));                                            \
 }
 
 #define test_AMlistPutNull(mode) test_AMlistPutNull_ ## mode
 
-#define static_void_test_AMlistPutNull(mode)                                  \
-static void test_AMlistPutNull_ ## mode(void **state) {                       \
-    GroupState* group_state = *state;                                         \
-    AMfree(AMlistPutNull(group_state->doc,                                    \
-                         AM_ROOT,                                             \
-                         0,                                                   \
-                         !strcmp(#mode, "insert")));                          \
-    AMresult* const result = AMlistGet(group_state->doc, AM_ROOT, 0, NULL);   \
-    if (AMresultStatus(result) != AM_STATUS_OK) {                             \
+#define static_void_test_AMlistPutNull(mode)                                       \
+static void test_AMlistPutNull_ ## mode(void **state) {                            \
+    GroupState* group_state = *state;                                              \
+    AMobjId const* const list = AMpush(                                            \
+        &group_state->stack,                                                       \
+        AMmapPutObject(group_state->doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST),\
+        AM_VALUE_OBJ_ID,                                                           \
+        cmocka_cb).obj_id;                                                         \
+    AMfree(AMlistPutNull(group_state->doc,                                         \
+                         list,                                                     \
+                         0,                                                        \
+                         !strcmp(#mode, "insert")));                               \
+    AMresult* const result = AMlistGet(group_state->doc, list, 0, NULL);           \
+    if (AMresultStatus(result) != AM_STATUS_OK) {                                  \
         fail_msg_view("%s", AMerrorMessage(result));                               \
-    }                                                                         \
-    assert_int_equal(AMresultSize(result), 1);                                \
-    assert_int_equal(AMresultValue(result).tag, AM_VALUE_NULL);               \
-    AMfree(result);                                                           \
+    }                                                                              \
+    assert_int_equal(AMresultSize(result), 1);                                     \
+    assert_int_equal(AMresultValue(result).tag, AM_VALUE_NULL);                    \
+    AMfree(result);                                                                \
 }
 
 #define test_AMlistPutObject(label, mode) test_AMlistPutObject_ ## label ## _ ## mode
 
-#define static_void_test_AMlistPutObject(label, mode)                         \
-static void test_AMlistPutObject_ ## label ## _ ## mode(void **state) {       \
-    GroupState* group_state = *state;                                         \
-    AMobjType const obj_type = AMobjType_tag(#label);                         \
-    if (obj_type != AM_OBJ_TYPE_VOID) {                                       \
-        AMobjId const* const obj_id = AMpush(                                 \
-            &group_state->stack,                                              \
-            AMlistPutObject(group_state->doc,                                 \
-                            AM_ROOT,                                          \
-                            0,                                                \
-                            !strcmp(#mode, "insert"),                         \
-                            obj_type),                                        \
-            AM_VALUE_OBJ_ID,                                                  \
-            cmocka_cb).obj_id;                                                \
-        assert_non_null(obj_id);                                              \
-        assert_int_equal(AMobjObjType(group_state->doc, obj_id), obj_type);   \
-        assert_int_equal(AMobjSize(group_state->doc, obj_id, NULL), 0);       \
-    }                                                                         \
-    else {                                                                    \
-        AMpush(&group_state->stack,                                           \
-               AMlistPutObject(group_state->doc,                              \
-                               AM_ROOT,                                       \
-                               0,                                             \
-                               !strcmp(#mode, "insert"),                      \
-                               obj_type),                                     \
-               AM_VALUE_VOID,                                                 \
-               NULL);                                                         \
-        assert_int_not_equal(AMresultStatus(group_state->stack->result),      \
-                                            AM_STATUS_OK);                    \
-    }                                                                         \
-    AMfree(AMpop(&group_state->stack));                                       \
+#define static_void_test_AMlistPutObject(label, mode)                              \
+static void test_AMlistPutObject_ ## label ## _ ## mode(void **state) {            \
+    GroupState* group_state = *state;                                              \
+    AMobjId const* const list = AMpush(                                            \
+        &group_state->stack,                                                       \
+        AMmapPutObject(group_state->doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST),\
+        AM_VALUE_OBJ_ID,                                                           \
+        cmocka_cb).obj_id;                                                         \
+    AMobjType const obj_type = AMobjType_tag(#label);                              \
+    if (obj_type != AM_OBJ_TYPE_VOID) {                                            \
+        AMobjId const* const obj_id = AMpush(                                      \
+            &group_state->stack,                                                   \
+            AMlistPutObject(group_state->doc,                                      \
+                            list,                                                  \
+                            0,                                                     \
+                            !strcmp(#mode, "insert"),                              \
+                            obj_type),                                             \
+            AM_VALUE_OBJ_ID,                                                       \
+            cmocka_cb).obj_id;                                                     \
+        assert_non_null(obj_id);                                                   \
+        assert_int_equal(AMobjObjType(group_state->doc, obj_id), obj_type);        \
+        assert_int_equal(AMobjSize(group_state->doc, obj_id, NULL), 0);            \
+    }                                                                              \
+    else {                                                                         \
+        AMpush(&group_state->stack,                                                \
+               AMlistPutObject(group_state->doc,                                   \
+                               list,                                               \
+                               0,                                                  \
+                               !strcmp(#mode, "insert"),                           \
+                               obj_type),                                          \
+               AM_VALUE_VOID,                                                      \
+               NULL);                                                              \
+        assert_int_not_equal(AMresultStatus(group_state->stack->result),           \
+                                            AM_STATUS_OK);                         \
+    }                                                                              \
+    AMfree(AMpop(&group_state->stack));                                            \
 }
 
 #define test_AMlistPutStr(mode) test_AMlistPutStr ## _ ## mode
 
-#define static_void_test_AMlistPutStr(mode, str_value)                        \
-static void test_AMlistPutStr_ ## mode(void **state) {                        \
-    GroupState* group_state = *state;                                         \
-    AMfree(AMlistPutStr(group_state->doc,                                     \
-                        AM_ROOT,                                              \
-                        0,                                                    \
-                        !strcmp(#mode, "insert"),                             \
-                        AMstr(str_value)));                                   \
-    AMbyteSpan const str = AMpush(                                            \
-        &group_state->stack,                                                  \
-        AMlistGet(group_state->doc, AM_ROOT, 0, NULL),                        \
-        AM_VALUE_STR,                                                         \
-        cmocka_cb).str;                                                       \
-    char* const c_str = test_calloc(1, str.count + 1);                        \
-    strncpy(c_str, str.src, str.count);                                       \
-    print_message("str -> \"%s\"\n", c_str);                                  \
-    test_free(c_str);                                                         \
-    assert_int_equal(str.count, strlen(str_value));                           \
-    assert_memory_equal(str.src, str_value, str.count);                       \
-    AMfree(AMpop(&group_state->stack));                                       \
+#define static_void_test_AMlistPutStr(mode, str_value)                             \
+static void test_AMlistPutStr_ ## mode(void **state) {                             \
+    GroupState* group_state = *state;                                              \
+    AMobjId const* const list = AMpush(                                            \
+        &group_state->stack,                                                       \
+        AMmapPutObject(group_state->doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST),\
+        AM_VALUE_OBJ_ID,                                                           \
+        cmocka_cb).obj_id;                                                         \
+    AMfree(AMlistPutStr(group_state->doc,                                          \
+                        list,                                                      \
+                        0,                                                         \
+                        !strcmp(#mode, "insert"),                                  \
+                        AMstr(str_value)));                                        \
+    AMbyteSpan const str = AMpush(                                                 \
+        &group_state->stack,                                                       \
+        AMlistGet(group_state->doc, list, 0, NULL),                                \
+        AM_VALUE_STR,                                                              \
+        cmocka_cb).str;                                                            \
+    assert_int_equal(str.count, strlen(str_value));                                \
+    assert_memory_equal(str.src, str_value, str.count);                            \
+    AMfree(AMpop(&group_state->stack));                                            \
 }
 
 static_void_test_AMlistPut(Bool, insert, boolean, true)
@@ -391,7 +417,7 @@ static void test_insert_at_index(void** state) {
 
     AMobjId const* const list = AMpush(
         &stack,
-        AMlistPutObject(doc, AM_ROOT, 0, true, AM_OBJ_TYPE_LIST),
+        AMmapPutObject(doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST),
         AM_VALUE_OBJ_ID,
         cmocka_cb).obj_id;
     /* Insert both at the same index. */

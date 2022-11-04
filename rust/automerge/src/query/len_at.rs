@@ -1,5 +1,5 @@
 use crate::query::{QueryResult, TreeQuery, VisWindow};
-use crate::types::{Clock, ElemId, Op};
+use crate::types::{Clock, ElemId, ListEncoding, Op};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -7,16 +7,18 @@ pub(crate) struct LenAt {
     pub(crate) len: usize,
     clock: Clock,
     pos: usize,
+    encoding: ListEncoding,
     last: Option<ElemId>,
     window: VisWindow,
 }
 
 impl LenAt {
-    pub(crate) fn new(clock: Clock) -> Self {
+    pub(crate) fn new(clock: Clock, encoding: ListEncoding) -> Self {
         LenAt {
             clock,
             pos: 0,
             len: 0,
+            encoding,
             last: None,
             window: Default::default(),
         }
@@ -31,7 +33,7 @@ impl<'a> TreeQuery<'a> for LenAt {
         let elem = op.elemid();
         let visible = self.window.visible_at(op, self.pos, &self.clock);
         if elem != self.last && visible {
-            self.len += 1;
+            self.len += op.width(self.encoding);
             self.last = elem;
         }
         self.pos += 1;

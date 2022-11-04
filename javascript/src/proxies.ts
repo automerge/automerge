@@ -1,15 +1,13 @@
 
 import { Automerge, Heads, ObjID } from "@automerge/automerge-wasm"
 import { Prop } from "@automerge/automerge-wasm"
-import { AutomergeValue, ScalarValue, MapValue, ListValue, TextValue } from "./types"
+import { AutomergeValue, ScalarValue, MapValue, ListValue } from "./types"
 import { Counter, getWriteableCounter } from "./counter"
-import { Text } from "./text"
-import { STATE, HEADS, TRACE, FROZEN, OBJECT_ID, READ_ONLY, COUNTER, INT, UINT, F64, TEXT } from "./constants"
+import { STATE, TRACE, IS_PROXY, OBJECT_ID, COUNTER, INT, UINT, F64, TEXT } from "./constants"
 
 function parseListIndex(key) {
   if (typeof key === 'string' && /^[0-9]+$/.test(key)) key = parseInt(key, 10)
   if (typeof key !== 'number') {
-    // throw new TypeError('A list index must be a number, but you passed ' + JSON.stringify(key))
     return key
   }
   if (key < 0 || isNaN(key) || key === Infinity || key === -Infinity) {
@@ -30,9 +28,7 @@ function valueAt(target, prop: Prop) : AutomergeValue | undefined {
         case undefined: return;
         case "map": return mapProxy(context, val, [ ... path, prop ], readonly, heads);
         case "list": return listProxy(context, val, [ ... path, prop ], readonly, heads);
-        case "text": return textProxy(context, val, [ ... path, prop ], readonly, heads);
-        //case "table":
-        //case "cursor":
+        case "text": return context.text(val, heads);
         case "str": return val;
         case "uint": return val;
         case "int": return val;
@@ -66,8 +62,6 @@ function import_value(value) {
           return [ value.value, "f64" ]
         } else if (value[COUNTER]) {
           return [ value.value, "counter" ]
-        } else if (value[TEXT]) {
-          return [ value, "text" ]
         } else if (value instanceof Date) {
           return [ value.getTime(), "timestamp" ]
         } else if (value instanceof Uint8Array) {
@@ -92,7 +86,7 @@ function import_value(value) {
         }
         break;
       case 'string':
-        return [ value ]
+        return [ value, "text" ]
         break;
       default:
         throw new RangeError(`Unsupported type of value: ${typeof value}`)
@@ -104,11 +98,9 @@ const MapHandler = {
     const { context, objectId, readonly, frozen, heads, cache } = target
     if (key === Symbol.toStringTag) { return target[Symbol.toStringTag] }
     if (key === OBJECT_ID) return objectId
-    if (key === READ_ONLY) return readonly
-    if (key === FROZEN) return frozen
-    if (key === HEADS) return heads
+    if (key === IS_PROXY) return true
     if (key === TRACE) return target.trace
-    if (key === STATE) return context;
+    if (key === STATE) return { handle: context };
     if (!cache[key]) {
       cache[key] = valueAt(target, key)
     }
@@ -120,14 +112,6 @@ const MapHandler = {
     target.cache = {} // reset cache on set
     if (val && val[OBJECT_ID]) {
           throw new RangeError('Cannot create a reference to an existing document object')
-    }
-    if (key === FROZEN) {
-      target.frozen = val
-      return true
-    }
-    if (key === HEADS) {
-      target.heads = val
-      return true
     }
     if (key === TRACE) {
       target.trace = val
@@ -150,11 +134,7 @@ const MapHandler = {
         break
       }
       case "text": {
-        const text = context.putObject(objectId, key, "", "text")
-        const proxyText = textProxy(context, text, [ ... path, key ], readonly );
-        for (let i = 0; i < value.length; i++) {
-          proxyText[i] = value.get(i)
-        }
+        context.putObject(objectId, key, value, "text")
         break
       }
       case "map": {
@@ -212,11 +192,9 @@ const ListHandler = {
     if (index === Symbol.hasInstance) { return (instance) => { return Array.isArray(instance) } }
     if (index === Symbol.toStringTag) { return target[Symbol.toStringTag] }
     if (index === OBJECT_ID) return objectId
-    if (index === READ_ONLY) return readonly
-    if (index === FROZEN) return frozen
-    if (index === HEADS) return heads
+    if (index === IS_PROXY) return true
     if (index === TRACE) return target.trace
-    if (index === STATE) return context;
+    if (index === STATE) return { handle: context };
     if (index === 'length') return context.length(objectId, heads);
     if (typeof index === 'number') {
       return valueAt(target, index)
@@ -230,14 +208,6 @@ const ListHandler = {
     index = parseListIndex(index)
     if (val && val[OBJECT_ID]) {
       throw new RangeError('Cannot create a reference to an existing document object')
-    }
-    if (index === FROZEN) {
-      target.frozen = val
-      return true
-    }
-    if (index === HEADS) {
-      target.heads = val
-      return true
     }
     if (index === TRACE) {
       target.trace = val
@@ -268,12 +238,10 @@ const ListHandler = {
       case "text": {
         let text
         if (index >= context.length(objectId)) {
-          text = context.insertObject(objectId, index, "", "text")
+          text = context.insertObject(objectId, index, value, "text")
         } else {
-          text = context.putObject(objectId, index, "", "text")
+          text = context.putObject(objectId, index, value, "text")
         }
-        const proxyText = textProxy(context, text, [ ... path, index ], readonly);
-        proxyText.splice(0,0,...value)
         break;
       }
       case "map": {
@@ -342,31 +310,6 @@ const ListHandler = {
   }
 }
 
-const TextHandler = Object.assign({}, ListHandler, {
-  get (target, index) {
-    // FIXME this is a one line change from ListHandler.get()
-    const {context, objectId, readonly, frozen, heads } = target
-    index = parseListIndex(index)
-    if (index === Symbol.toStringTag) { return target[Symbol.toStringTag] }
-    if (index === Symbol.hasInstance) { return (instance) => { return Array.isArray(instance) } }
-    if (index === OBJECT_ID) return objectId
-    if (index === READ_ONLY) return readonly
-    if (index === FROZEN) return frozen
-    if (index === HEADS) return heads
-    if (index === TRACE) return target.trace
-    if (index === STATE) return context;
-    if (index === 'length') return context.length(objectId, heads);
-    if (typeof index === 'number') {
-      return valueAt(target, index)
-    } else {
-      return textMethods(target)[index] || listMethods(target)[index]
-    }
-  },
-  getPrototypeOf(/*target*/) {
-    return Object.getPrototypeOf(new Text())
-  },
-})
-
 export function mapProxy(context: Automerge, objectId: ObjID, path?: Prop[], readonly?: boolean, heads?: Heads) : MapValue {
   return new Proxy({context, objectId, path, readonly: !!readonly, frozen: false, heads, cache: {}}, MapHandler)
 }
@@ -375,12 +318,6 @@ export function listProxy(context: Automerge, objectId: ObjID, path?: Prop[], re
   const target = []
   Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false, heads, cache: {}})
   return new Proxy(target, ListHandler)
-}
-
-export function textProxy(context: Automerge, objectId: ObjID, path?: Prop[], readonly?: boolean, heads?: Heads) : TextValue {
-  const target = []
-  Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false, heads, cache: {}})
-  return new Proxy(target, TextHandler)
 }
 
 export function rootProxy<T>(context: Automerge, readonly?: boolean) : T {
@@ -406,7 +343,11 @@ function listMethods(target) {
       start = parseListIndex(start || 0)
       end = parseListIndex(end || length)
       for (let i = start; i < Math.min(end, length); i++) {
-        context.put(objectId, i, value, datatype)
+        if (datatype === "text" || datatype === "list" || datatype === "map") {
+          context.putObject(objectId, i, value, datatype)
+        } else {
+          context.put(objectId, i, value, datatype)
+        }
       }
       return this
     },
@@ -482,9 +423,7 @@ function listMethods(target) {
             break;
           }
           case "text": {
-            const text = context.insertObject(objectId, index, "", "text")
-            const proxyText = textProxy(context, text, [ ... path, index ], readonly);
-            proxyText.splice(0,0,...value)
+            context.insertObject(objectId, index, value)
             break;
           }
           case "map": {

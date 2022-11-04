@@ -91,10 +91,7 @@ pub trait Transactable {
         pos: usize,
         del: usize,
         text: &str,
-    ) -> Result<(), AutomergeError> {
-        let vals = text.chars().map(|c| c.into());
-        self.splice(obj, pos, del, vals)
-    }
+    ) -> Result<(), AutomergeError>;
 
     /// Get the keys of the given object, it should be a map.
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_, '_>;
@@ -139,7 +136,7 @@ pub trait Transactable {
     fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize;
 
     /// Get type for object
-    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Option<ObjType>;
+    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError>;
 
     /// Get the string that this text object represents.
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError>;
@@ -193,9 +190,7 @@ pub trait Transactable {
     fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError>;
 
     fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<(ExId, Prop)>, AutomergeError> {
-        let mut path = self.parents(obj.as_ref().clone())?.collect::<Vec<_>>();
-        path.reverse();
-        Ok(path)
+        Ok(self.parents(obj.as_ref().clone())?.path())
     }
 
     /// The heads this transaction will be based on

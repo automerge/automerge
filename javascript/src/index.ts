@@ -2,11 +2,11 @@
 /** @hidden **/
 export {/** @hidden */ uuid} from './uuid'
 
-import {rootProxy, listProxy, textProxy, mapProxy} from "./proxies"
-import {STATE, HEADS, TRACE, OBJECT_ID, READ_ONLY, FROZEN} from "./constants"
+import {rootProxy, listProxy, mapProxy} from "./proxies"
+import {STATE, TRACE, IS_PROXY, OBJECT_ID } from "./constants"
 
-import {AutomergeValue, Text, Counter} from "./types"
-export {AutomergeValue, Text, Counter, Int, Uint, Float64, ScalarValue} from "./types"
+import {AutomergeValue, Counter} from "./types"
+export {AutomergeValue, Counter, Int, Uint, Float64, ScalarValue} from "./types"
 
 import {type API, type Patch} from "@automerge/automerge-wasm";
 export { type Patch, PutPatch, DelPatch, SplicePatch, IncPatch, SyncMessage, } from "@automerge/automerge-wasm"
@@ -108,21 +108,8 @@ function _state<T>(doc: Doc<T>, checkroot = true): InternalState<T> {
     return state
 }
 
-function _frozen<T>(doc: Doc<T>): boolean {
-    return Reflect.get(doc, FROZEN) === true
-}
-
 function _trace<T>(doc: Doc<T>): string | undefined {
     return Reflect.get(doc, TRACE) as string
-}
-
-function _set_heads<T>(doc: Doc<T>, heads: Heads) {
-    _state(doc).heads = heads
-}
-
-function _clear_heads<T>(doc: Doc<T>) {
-    Reflect.set(doc, HEADS, undefined)
-    Reflect.set(doc, TRACE, undefined)
 }
 
 function _obj<T>(doc: Doc<T>): ObjID | null {
@@ -132,8 +119,8 @@ function _obj<T>(doc: Doc<T>): ObjID | null {
     return Reflect.get(doc, OBJECT_ID) as ObjID
 }
 
-function _readonly<T>(doc: Doc<T>): boolean {
-    return Reflect.get(doc, READ_ONLY) !== false
+function _is_proxy<T>(doc: Doc<T>): boolean {
+    return !!Reflect.get(doc, IS_PROXY)
 }
 
 function importOpts<T>(_actor?: ActorId | InitOptions<T>): InitOptions<T> {
@@ -161,7 +148,6 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
     handle.enablePatches(true)
     handle.enableFreeze(!!opts.freeze)
     handle.registerDatatype("counter", (n) => new Counter(n))
-    handle.registerDatatype("text", (n) => new Text(n))
     const doc = handle.materialize("/", undefined, {handle, heads: undefined, freeze, patchCallback}) as Doc<T>
     return doc
 }
@@ -327,7 +313,7 @@ function _change<T>(doc: Doc<T>, options: ChangeOptions<T>, callback: ChangeFn<T
     if (state.heads) {
         throw new RangeError("Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.")
     }
-    if (_readonly(doc) === false) {
+    if (_is_proxy(doc)) {
         throw new RangeError("Calls to Automerge.change cannot be nested")
     }
     const heads = state.handle.getHeads()
@@ -374,7 +360,7 @@ export function emptyChange<T>(doc: Doc<T>, options: string | ChangeOptions<T> |
     if (state.heads) {
         throw new RangeError("Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.")
     }
-    if (_readonly(doc) === false) {
+    if (_is_proxy(doc)) {
         throw new RangeError("Calls to Automerge.change cannot be nested")
     }
 
@@ -406,7 +392,6 @@ export function load<T>(data: Uint8Array, _opts?: ActorId | InitOptions<T>): Doc
     handle.enablePatches(true)
     handle.enableFreeze(!!opts.freeze)
     handle.registerDatatype("counter", (n) => new Counter(n))
-    handle.registerDatatype("text", (n) => new Text(n))
     const doc: any = handle.materialize("/", undefined, {handle, heads: undefined, patchCallback}) as Doc<T>
     return doc
 }
@@ -434,7 +419,7 @@ export function loadIncremental<T>(doc: Doc<T>, data: Uint8Array, opts?: ApplyOp
     if (state.heads) {
         throw new RangeError("Attempting to change an out of date document - set at: " + _trace(doc));
     }
-    if (_readonly(doc) === false) {
+    if (_is_proxy(doc)) {
         throw new RangeError("Calls to Automerge.change cannot be nested")
     }
     const heads = state.handle.getHeads()
@@ -516,7 +501,7 @@ function conflictAt(context: Automerge, objectId: ObjID, prop: Prop): Conflicts 
                 result[fullVal[1]] = listProxy(context, fullVal[1], [prop], true)
                 break;
             case "text":
-                result[fullVal[1]] = textProxy(context, fullVal[1], [prop], true)
+                result[fullVal[1]] = context.text(fullVal[1])
                 break;
             //case "table":
             //case "cursor":
@@ -614,8 +599,17 @@ export function getLastLocalChange<T>(doc: Doc<T>): Change | undefined {
  * This is useful to determine if something is actually an automerge document,
  * if `doc` is not an automerge document this will return null.
  */
-export function getObjectId(doc: any): ObjID | null {
-    return _obj(doc)
+export function getObjectId(doc: any, prop?: Prop): ObjID | null {
+    if (prop) {
+      const state = _state(doc, false)
+      const objectId = _obj(doc)
+      if (!state || !objectId) {
+        return null
+      }
+      return state.handle.get(objectId, prop) as ObjID
+    } else {
+      return _obj(doc)
+    }
 }
 
 /**
@@ -659,7 +653,7 @@ export function applyChanges<T>(doc: Doc<T>, changes: Change[], opts?: ApplyOpti
     if (state.heads) {
         throw new RangeError("Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.")
     }
-    if (_readonly(doc) === false) {
+    if (_is_proxy(doc)) {
         throw new RangeError("Calls to Automerge.change cannot be nested")
     }
     const heads = state.handle.getHeads();
@@ -764,7 +758,7 @@ export function receiveSyncMessage<T>(doc: Doc<T>, inState: SyncState, message: 
     if (state.heads) {
         throw new RangeError("Attempting to change an outdated document.  Use Automerge.clone() if you wish to make a writable copy.")
     }
-    if (_readonly(doc) === false) {
+    if (_is_proxy(doc)) {
         throw new RangeError("Calls to Automerge.change cannot be nested")
     }
     const heads = state.handle.getHeads()
@@ -811,6 +805,23 @@ export function decodeSyncMessage(message: SyncMessage): DecodedSyncMessage {
 export function getMissingDeps<T>(doc: Doc<T>, heads: Heads): Heads {
     const state = _state(doc)
     return state.handle.getMissingDeps(heads)
+}
+
+export function splice<T>(doc: Doc<T>, prop: Prop, index: number, del: number, newText?: string) {
+    if (!_is_proxy(doc)) {
+      throw new RangeError("object cannot be modified outside of a change block")
+    }
+    const state = _state(doc, false)
+    const objectId = _obj(doc)
+    if (!objectId) {
+      throw new RangeError("invalid object for splice")
+    }
+    const value = `${objectId}/${prop}`
+    try {
+      return state.handle.splice(value, index, del, newText)
+    } catch (e) {
+      throw new RangeError(`Cannot splice: ${e}`)
+    }
 }
 
 /**

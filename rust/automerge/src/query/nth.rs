@@ -1,13 +1,16 @@
 use crate::error::AutomergeError;
-use crate::op_tree::OpTreeNode;
+use crate::op_set::OpSet;
+use crate::op_tree::{OpTree, OpTreeNode};
 use crate::query::{QueryResult, TreeQuery};
-use crate::types::{Key, Op};
+use crate::types::{Key, ListEncoding, Op, OpIds};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Nth<'a> {
     target: usize,
     seen: usize,
+    encoding: ListEncoding,
+    last_width: usize,
     /// last_seen is the target elemid of the last `seen` operation.
     /// It is used to avoid double counting visible elements (which arise through conflicts) that are split across nodes.
     last_seen: Option<Key>,
@@ -17,15 +20,21 @@ pub(crate) struct Nth<'a> {
 }
 
 impl<'a> Nth<'a> {
-    pub(crate) fn new(target: usize) -> Self {
+    pub(crate) fn new(target: usize, encoding: ListEncoding) -> Self {
         Nth {
             target,
             seen: 0,
+            last_width: 1,
+            encoding,
             last_seen: None,
             ops: vec![],
             ops_pos: vec![],
             pos: 0,
         }
+    }
+
+    pub(crate) fn pred(&self, ops: &OpSet) -> OpIds {
+        ops.m.sorted_opids(self.ops.iter().map(|o| o.id))
     }
 
     /// Get the key
@@ -37,11 +46,35 @@ impl<'a> Nth<'a> {
             Err(AutomergeError::InvalidIndex(self.target))
         }
     }
+
+    pub(crate) fn index(&self) -> usize {
+        self.seen - self.last_width
+    }
 }
 
 impl<'a> TreeQuery<'a> for Nth<'a> {
+    fn equiv(&mut self, other: &Self) -> bool {
+        self.index() == other.index() && self.key() == other.key()
+    }
+
+    fn can_shortcut_search(&mut self, tree: &'a OpTree) -> bool {
+        if let Some((index, pos)) = &tree.last_insert {
+            if *index == self.target {
+                if let Some(op) = tree.internal.get(*pos) {
+                    self.last_width = op.width(self.encoding);
+                    self.seen = *index + self.last_width;
+                    self.ops.push(op);
+                    self.ops_pos.push(*pos);
+                    self.pos = *pos + 1;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
-        let mut num_vis = child.index.visible_len();
+        let mut num_vis = child.index.visible_len(self.encoding);
         if let Some(last_seen) = self.last_seen {
             if child.index.has_visible(&last_seen) {
                 num_vis -= 1;
@@ -79,11 +112,12 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
         }
         let visible = element.visible();
         if visible && self.last_seen.is_none() {
-            self.seen += 1;
+            self.last_width = element.width(self.encoding);
+            self.seen += self.last_width;
             // we have a new visible element
             self.last_seen = Some(element.elemid_or_key())
         }
-        if self.seen == self.target + 1 && visible {
+        if self.seen > self.target && visible {
             self.ops.push(element);
             self.ops_pos.push(self.pos);
         }
