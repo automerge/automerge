@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/query/nth.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>nth.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/query/nth.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>nth.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -93,98 +93,98 @@
 <span id="91">91</span>
 <span id="92">92</span>
 <span id="93">93</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::error::AutomergeError</span>;
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::op_tree::OpTreeNode</span>;
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::query</span>::{<span class="ident">QueryResult</span>, <span class="ident">TreeQuery</span>};
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::types</span>::{<span class="ident">Key</span>, <span class="ident">Op</span>};
-<span class="kw">use</span> <span class="ident">std::fmt::Debug</span>;
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error::AutomergeError;
+<span class="kw">use </span><span class="kw">crate</span>::op_tree::OpTreeNode;
+<span class="kw">use </span><span class="kw">crate</span>::query::{QueryResult, TreeQuery};
+<span class="kw">use </span><span class="kw">crate</span>::types::{Key, Op};
+<span class="kw">use </span>std::fmt::Debug;
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">Nth</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">target</span>: <span class="ident">usize</span>,
-    <span class="ident">seen</span>: <span class="ident">usize</span>,
-    <span class="doccomment">/// last_seen is the target elemid of the last `seen` operation.</span>
-    <span class="doccomment">/// It is used to avoid double counting visible elements (which arise through conflicts) that are split across nodes.</span>
-    <span class="ident">last_seen</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Key</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">ops</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Op</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">ops_pos</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">pos</span>: <span class="ident">usize</span>,
+<span class="attribute">#[derive(Debug, Clone, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Nth&lt;<span class="lifetime">&#39;a</span>&gt; {
+    target: usize,
+    seen: usize,
+    <span class="doccomment">/// last_seen is the target elemid of the last `seen` operation.
+    /// It is used to avoid double counting visible elements (which arise through conflicts) that are split across nodes.
+    </span>last_seen: <span class="prelude-ty">Option</span>&lt;Key&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) ops: Vec&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) ops_pos: Vec&lt;usize&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) pos: usize,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Nth</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">target</span>: <span class="ident">usize</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">Nth</span> {
-            <span class="ident">target</span>,
-            <span class="ident">seen</span>: <span class="number">0</span>,
-            <span class="ident">last_seen</span>: <span class="prelude-val">None</span>,
-            <span class="ident">ops</span>: <span class="macro">vec!</span>[],
-            <span class="ident">ops_pos</span>: <span class="macro">vec!</span>[],
-            <span class="ident">pos</span>: <span class="number">0</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Nth&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(target: usize) -&gt; <span class="self">Self </span>{
+        Nth {
+            target,
+            seen: <span class="number">0</span>,
+            last_seen: <span class="prelude-val">None</span>,
+            ops: <span class="macro">vec!</span>[],
+            ops_pos: <span class="macro">vec!</span>[],
+            pos: <span class="number">0</span>,
         }
     }
 
-    <span class="doccomment">/// Get the key</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Key</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="comment">// the query collects the ops so we can use that to get the key they all use</span>
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">e</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">ops</span>.<span class="ident">first</span>().<span class="ident">and_then</span>(<span class="op">|</span><span class="ident">op</span><span class="op">|</span> <span class="ident">op</span>.<span class="ident">elemid</span>()) {
-            <span class="prelude-val">Ok</span>(<span class="ident">Key::Seq</span>(<span class="ident">e</span>))
-        } <span class="kw">else</span> {
-            <span class="prelude-val">Err</span>(<span class="ident">AutomergeError::InvalidIndex</span>(<span class="self">self</span>.<span class="ident">target</span>))
+    <span class="doccomment">/// Get the key
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>key(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Key, AutomergeError&gt; {
+        <span class="comment">// the query collects the ops so we can use that to get the key they all use
+        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(e) = <span class="self">self</span>.ops.first().and_then(|op| op.elemid()) {
+            <span class="prelude-val">Ok</span>(Key::Seq(e))
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Err</span>(AutomergeError::InvalidIndex(<span class="self">self</span>.target))
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">TreeQuery</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Nth</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">query_node</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">child</span>: <span class="kw-2">&amp;</span><span class="ident">OpTreeNode</span>) -&gt; <span class="ident">QueryResult</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">num_vis</span> <span class="op">=</span> <span class="ident">child</span>.<span class="ident">index</span>.<span class="ident">visible_len</span>();
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">last_seen</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">last_seen</span> {
-            <span class="kw">if</span> <span class="ident">child</span>.<span class="ident">index</span>.<span class="ident">has_visible</span>(<span class="kw-2">&amp;</span><span class="ident">last_seen</span>) {
-                <span class="ident">num_vis</span> <span class="op">-</span><span class="op">=</span> <span class="number">1</span>;
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; TreeQuery&lt;<span class="lifetime">&#39;a</span>&gt; <span class="kw">for </span>Nth&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, child: <span class="kw-2">&amp;</span>OpTreeNode) -&gt; QueryResult {
+        <span class="kw">let </span><span class="kw-2">mut </span>num_vis = child.index.visible_len();
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(last_seen) = <span class="self">self</span>.last_seen {
+            <span class="kw">if </span>child.index.has_visible(<span class="kw-2">&amp;</span>last_seen) {
+                num_vis -= <span class="number">1</span>;
             }
         }
 
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">seen</span> <span class="op">+</span> <span class="ident">num_vis</span> <span class="op">&gt;</span> <span class="self">self</span>.<span class="ident">target</span> {
-            <span class="ident">QueryResult::Descend</span>
-        } <span class="kw">else</span> {
-            <span class="comment">// skip this node as no useful ops in it</span>
-            <span class="self">self</span>.<span class="ident">pos</span> <span class="op">+</span><span class="op">=</span> <span class="ident">child</span>.<span class="ident">len</span>();
-            <span class="self">self</span>.<span class="ident">seen</span> <span class="op">+</span><span class="op">=</span> <span class="ident">num_vis</span>;
+        <span class="kw">if </span><span class="self">self</span>.seen + num_vis &gt; <span class="self">self</span>.target {
+            QueryResult::Descend
+        } <span class="kw">else </span>{
+            <span class="comment">// skip this node as no useful ops in it
+            </span><span class="self">self</span>.pos += child.len();
+            <span class="self">self</span>.seen += num_vis;
 
-            <span class="comment">// We have updated seen by the number of visible elements in this index, before we skip it.</span>
-            <span class="comment">// We also need to keep track of the last elemid that we have seen (and counted as seen).</span>
-            <span class="comment">// We can just use the elemid of the last op in this node as either:</span>
-            <span class="comment">// - the insert was at a previous node and this is a long run of overwrites so last_seen should already be set correctly</span>
-            <span class="comment">// - the visible op is in this node and the elemid references it so it can be set here</span>
-            <span class="comment">// - the visible op is in a future node and so it will be counted as seen there</span>
-            <span class="kw">let</span> <span class="ident">last_elemid</span> <span class="op">=</span> <span class="ident">child</span>.<span class="ident">last</span>().<span class="ident">elemid_or_key</span>();
-            <span class="kw">if</span> <span class="ident">child</span>.<span class="ident">index</span>.<span class="ident">has_visible</span>(<span class="kw-2">&amp;</span><span class="ident">last_elemid</span>) {
-                <span class="self">self</span>.<span class="ident">last_seen</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">last_elemid</span>);
+            <span class="comment">// We have updated seen by the number of visible elements in this index, before we skip it.
+            // We also need to keep track of the last elemid that we have seen (and counted as seen).
+            // We can just use the elemid of the last op in this node as either:
+            // - the insert was at a previous node and this is a long run of overwrites so last_seen should already be set correctly
+            // - the visible op is in this node and the elemid references it so it can be set here
+            // - the visible op is in a future node and so it will be counted as seen there
+            </span><span class="kw">let </span>last_elemid = child.last().elemid_or_key();
+            <span class="kw">if </span>child.index.has_visible(<span class="kw-2">&amp;</span>last_elemid) {
+                <span class="self">self</span>.last_seen = <span class="prelude-val">Some</span>(last_elemid);
             }
-            <span class="ident">QueryResult::Next</span>
+            QueryResult::Next
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">query_element</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">element</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Op</span>) -&gt; <span class="ident">QueryResult</span> {
-        <span class="kw">if</span> <span class="ident">element</span>.<span class="ident">insert</span> {
-            <span class="kw">if</span> <span class="self">self</span>.<span class="ident">seen</span> <span class="op">&gt;</span> <span class="self">self</span>.<span class="ident">target</span> {
-                <span class="kw">return</span> <span class="ident">QueryResult::Finish</span>;
+    <span class="kw">fn </span>query_element(<span class="kw-2">&amp;mut </span><span class="self">self</span>, element: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op) -&gt; QueryResult {
+        <span class="kw">if </span>element.insert {
+            <span class="kw">if </span><span class="self">self</span>.seen &gt; <span class="self">self</span>.target {
+                <span class="kw">return </span>QueryResult::Finish;
             }
-            <span class="comment">// we have a new potentially visible element so reset last_seen</span>
-            <span class="self">self</span>.<span class="ident">last_seen</span> <span class="op">=</span> <span class="prelude-val">None</span>
+            <span class="comment">// we have a new potentially visible element so reset last_seen
+            </span><span class="self">self</span>.last_seen = <span class="prelude-val">None
+        </span>}
+        <span class="kw">let </span>visible = element.visible();
+        <span class="kw">if </span>visible &amp;&amp; <span class="self">self</span>.last_seen.is_none() {
+            <span class="self">self</span>.seen += <span class="number">1</span>;
+            <span class="comment">// we have a new visible element
+            </span><span class="self">self</span>.last_seen = <span class="prelude-val">Some</span>(element.elemid_or_key())
         }
-        <span class="kw">let</span> <span class="ident">visible</span> <span class="op">=</span> <span class="ident">element</span>.<span class="ident">visible</span>();
-        <span class="kw">if</span> <span class="ident">visible</span> <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">last_seen</span>.<span class="ident">is_none</span>() {
-            <span class="self">self</span>.<span class="ident">seen</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
-            <span class="comment">// we have a new visible element</span>
-            <span class="self">self</span>.<span class="ident">last_seen</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">element</span>.<span class="ident">elemid_or_key</span>())
+        <span class="kw">if </span><span class="self">self</span>.seen == <span class="self">self</span>.target + <span class="number">1 </span>&amp;&amp; visible {
+            <span class="self">self</span>.ops.push(element);
+            <span class="self">self</span>.ops_pos.push(<span class="self">self</span>.pos);
         }
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">seen</span> <span class="op">==</span> <span class="self">self</span>.<span class="ident">target</span> <span class="op">+</span> <span class="number">1</span> <span class="op">&amp;&amp;</span> <span class="ident">visible</span> {
-            <span class="self">self</span>.<span class="ident">ops</span>.<span class="ident">push</span>(<span class="ident">element</span>);
-            <span class="self">self</span>.<span class="ident">ops_pos</span>.<span class="ident">push</span>(<span class="self">self</span>.<span class="ident">pos</span>);
-        }
-        <span class="self">self</span>.<span class="ident">pos</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
-        <span class="ident">QueryResult::Next</span>
+        <span class="self">self</span>.pos += <span class="number">1</span>;
+        QueryResult::Next
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/columns.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>columns.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/columns.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>columns.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -355,310 +355,310 @@
 <span id="353">353</span>
 <span id="354">354</span>
 <span id="355">355</span>
-</pre><pre class="rust"><code><span class="doccomment">/// This module contains types which represent the column metadata which is encoded in the columnar</span>
-<span class="doccomment">/// storage format specified in [1]. In this format metadata about each column is packed into a 32</span>
-<span class="doccomment">/// bit integer, which is represented by the types in `column_specification`. The column data in</span>
-<span class="doccomment">/// the format is a sequence of (`ColumnSpecification`, `usize`) pairs where each pair represents</span>
-<span class="doccomment">/// the type of the column and the length of the column in the data which follows, these pairs are</span>
-<span class="doccomment">/// represented by `RawColumn` and `RawColumns`. Some columns are actually composites of several</span>
-<span class="doccomment">/// underlying columns and so not every `RawColumns` is valid. The types in `column` and</span>
-<span class="doccomment">/// `column_builder` take a `RawColumns` and produce a `Columns` - which is a valid set of possibly</span>
-<span class="doccomment">/// composite column metadata.</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// There are two typical workflows:</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// ## Reading</span>
-<span class="doccomment">/// * First parse a `RawColumns` from the underlying data using `RawColumns::parse`</span>
-<span class="doccomment">/// * Ensure that the columns are decompressed using `RawColumns::decompress` (checking first if</span>
-<span class="doccomment">///   you can avoid this using `RawColumns::uncompressed`)</span>
-<span class="doccomment">/// * Parse the `RawColumns` into a `Columns` using `Columns::parse`</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// ## Writing</span>
-<span class="doccomment">/// * Construct a `RawColumns`</span>
-<span class="doccomment">/// * Compress using `RawColumns::compress`</span>
-<span class="doccomment">/// * Write to output using `RawColumns::write`</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// [1]: https://alexjg.github.io/automerge-storage-docs/#_columnar_storage_format</span>
-<span class="kw">use</span> <span class="ident">std::ops::Range</span>;
+</pre><pre class="rust"><code><span class="doccomment">/// This module contains types which represent the column metadata which is encoded in the columnar
+/// storage format specified in [1]. In this format metadata about each column is packed into a 32
+/// bit integer, which is represented by the types in `column_specification`. The column data in
+/// the format is a sequence of (`ColumnSpecification`, `usize`) pairs where each pair represents
+/// the type of the column and the length of the column in the data which follows, these pairs are
+/// represented by `RawColumn` and `RawColumns`. Some columns are actually composites of several
+/// underlying columns and so not every `RawColumns` is valid. The types in `column` and
+/// `column_builder` take a `RawColumns` and produce a `Columns` - which is a valid set of possibly
+/// composite column metadata.
+///
+/// There are two typical workflows:
+///
+/// ## Reading
+/// * First parse a `RawColumns` from the underlying data using `RawColumns::parse`
+/// * Ensure that the columns are decompressed using `RawColumns::decompress` (checking first if
+///   you can avoid this using `RawColumns::uncompressed`)
+/// * Parse the `RawColumns` into a `Columns` using `Columns::parse`
+///
+/// ## Writing
+/// * Construct a `RawColumns`
+/// * Compress using `RawColumns::compress`
+/// * Write to output using `RawColumns::write`
+///
+/// [1]: https://alexjg.github.io/automerge-storage-docs/#_columnar_storage_format
+</span><span class="kw">use </span>std::ops::Range;
 
-<span class="kw">mod</span> <span class="ident">column_specification</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">column_specification</span>::{<span class="ident">ColumnId</span>, <span class="ident">ColumnSpec</span>, <span class="ident">ColumnType</span>};
-<span class="kw">mod</span> <span class="ident">column</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">column::Column</span>;
-<span class="kw">mod</span> <span class="ident">column_builder</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">column_builder</span>::{
-    <span class="ident">AwaitingRawColumnValueBuilder</span>, <span class="ident">ColumnBuilder</span>, <span class="ident">GroupAwaitingValue</span>, <span class="ident">GroupBuilder</span>,
+<span class="kw">mod </span>column_specification;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>column_specification::{ColumnId, ColumnSpec, ColumnType};
+<span class="kw">mod </span>column;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>column::Column;
+<span class="kw">mod </span>column_builder;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>column_builder::{
+    AwaitingRawColumnValueBuilder, ColumnBuilder, GroupAwaitingValue, GroupBuilder,
 };
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod</span> <span class="ident">raw_column</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">raw_column</span>::{<span class="ident">RawColumn</span>, <span class="ident">RawColumns</span>};
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>raw_column;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>raw_column::{RawColumn, RawColumns};
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">thiserror::Error</span>)]</span>
-<span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;mismatching column at {index}.&quot;</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">MismatchingColumn</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">index</span>: <span class="ident">usize</span>,
+<span class="attribute">#[derive(Debug, thiserror::Error)]
+#[error(<span class="string">&quot;mismatching column at {index}.&quot;</span>)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>MismatchingColumn {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) index: usize,
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod</span> <span class="ident">compression</span> {
-    <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>)]</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">Unknown</span>;
-    <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>)]</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">Uncompressed</span>;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>compression {
+    <span class="attribute">#[derive(Clone, Debug)]
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Unknown;
+    <span class="attribute">#[derive(Clone, Debug)]
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Uncompressed;
 
-    <span class="doccomment">/// A witness for what we know about whether or not a column is compressed</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">trait</span> <span class="ident">ColumnCompression</span> {}
-    <span class="kw">impl</span> <span class="ident">ColumnCompression</span> <span class="kw">for</span> <span class="ident">Unknown</span> {}
-    <span class="kw">impl</span> <span class="ident">ColumnCompression</span> <span class="kw">for</span> <span class="ident">Uncompressed</span> {}
+    <span class="doccomment">/// A witness for what we know about whether or not a column is compressed
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">trait </span>ColumnCompression {}
+    <span class="kw">impl </span>ColumnCompression <span class="kw">for </span>Unknown {}
+    <span class="kw">impl </span>ColumnCompression <span class="kw">for </span>Uncompressed {}
 }
 
-<span class="doccomment">/// `Columns` represents a sequence of &quot;logical&quot; columns. &quot;Logical&quot; in this sense means that</span>
-<span class="doccomment">/// each column produces one value, but may be composed of multiple [`RawColumn`]s. For example, in a</span>
-<span class="doccomment">/// logical column containing values there are two `RawColumn`s, one for the metadata about the</span>
-<span class="doccomment">/// values, and one for the values themselves.</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">Columns</span> {
-    <span class="ident">columns</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Column</span><span class="op">&gt;</span>,
+<span class="doccomment">/// `Columns` represents a sequence of &quot;logical&quot; columns. &quot;Logical&quot; in this sense means that
+/// each column produces one value, but may be composed of multiple [`RawColumn`]s. For example, in a
+/// logical column containing values there are two `RawColumn`s, one for the metadata about the
+/// values, and one for the values themselves.
+</span><span class="attribute">#[derive(Clone, Debug)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Columns {
+    columns: Vec&lt;Column&gt;,
 }
 
-<span class="kw">impl</span> <span class="ident">Columns</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">empty</span>() -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span> {
-            <span class="ident">columns</span>: <span class="ident">Vec::new</span>(),
+<span class="kw">impl </span>Columns {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>empty() -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            columns: Vec::new(),
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">append</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">col</span>: <span class="ident">Column</span>) {
-        <span class="self">self</span>.<span class="ident">columns</span>.<span class="ident">push</span>(<span class="ident">col</span>)
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>append(<span class="kw-2">&amp;mut </span><span class="self">self</span>, col: Column) {
+        <span class="self">self</span>.columns.push(col)
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">parse</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">RawColumn</span><span class="op">&lt;</span><span class="ident">compression::Uncompressed</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>(
-        <span class="ident">data_size</span>: <span class="ident">usize</span>,
-        <span class="ident">cols</span>: <span class="ident">I</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Columns</span>, <span class="ident">BadColumnLayout</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">parser</span> <span class="op">=</span> <span class="ident">ColumnLayoutParser::new</span>(<span class="ident">data_size</span>, <span class="prelude-val">None</span>);
-        <span class="kw">for</span> <span class="ident">raw_col</span> <span class="kw">in</span> <span class="ident">cols</span> {
-            <span class="ident">parser</span>.<span class="ident">add_column</span>(<span class="ident">raw_col</span>.<span class="ident">spec</span>(), <span class="ident">raw_col</span>.<span class="ident">data</span>())<span class="question-mark">?</span>;
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>parse&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>RawColumn&lt;compression::Uncompressed&gt;&gt;&gt;(
+        data_size: usize,
+        cols: I,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Columns, BadColumnLayout&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>parser = ColumnLayoutParser::new(data_size, <span class="prelude-val">None</span>);
+        <span class="kw">for </span>raw_col <span class="kw">in </span>cols {
+            parser.add_column(raw_col.spec(), raw_col.data())<span class="question-mark">?</span>;
         }
-        <span class="ident">parser</span>.<span class="ident">build</span>()
+        parser.build()
     }
 }
 
-<span class="kw">impl</span> <span class="ident">FromIterator</span><span class="op">&lt;</span><span class="ident">Column</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Columns</span>, <span class="ident">BadColumnLayout</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from_iter</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">IntoIterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">Column</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="ident">iter</span>: <span class="ident">T</span>) -&gt; <span class="self">Self</span> {
-        <span class="kw">let</span> <span class="ident">iter</span> <span class="op">=</span> <span class="ident">iter</span>.<span class="ident">into_iter</span>();
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">iter</span>.<span class="ident">size_hint</span>().<span class="number">1</span>.<span class="ident">unwrap_or</span>(<span class="number">0</span>));
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">last_column</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ColumnSpec</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-        <span class="kw">for</span> <span class="ident">col</span> <span class="kw">in</span> <span class="ident">iter</span> {
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">last_col</span>) <span class="op">=</span> <span class="ident">last_column</span> {
-                <span class="kw">if</span> <span class="ident">col</span>.<span class="ident">spec</span>().<span class="ident">normalize</span>() <span class="op">&lt;</span> <span class="ident">last_col</span>.<span class="ident">normalize</span>() {
-                    <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">BadColumnLayout::OutOfOrder</span>);
+<span class="kw">impl </span>FromIterator&lt;Column&gt; <span class="kw">for </span><span class="prelude-ty">Result</span>&lt;Columns, BadColumnLayout&gt; {
+    <span class="kw">fn </span>from_iter&lt;T: IntoIterator&lt;Item = Column&gt;&gt;(iter: T) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>iter = iter.into_iter();
+        <span class="kw">let </span><span class="kw-2">mut </span>result = Vec::with_capacity(iter.size_hint().<span class="number">1</span>.unwrap_or(<span class="number">0</span>));
+        <span class="kw">let </span><span class="kw-2">mut </span>last_column: <span class="prelude-ty">Option</span>&lt;ColumnSpec&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">for </span>col <span class="kw">in </span>iter {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(last_col) = last_column {
+                <span class="kw">if </span>col.spec().normalize() &lt; last_col.normalize() {
+                    <span class="kw">return </span><span class="prelude-val">Err</span>(BadColumnLayout::OutOfOrder);
                 }
             }
-            <span class="ident">last_column</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">col</span>.<span class="ident">spec</span>());
-            <span class="ident">result</span>.<span class="ident">push</span>(<span class="ident">col</span>);
+            last_column = <span class="prelude-val">Some</span>(col.spec());
+            result.push(col);
         }
-        <span class="prelude-val">Ok</span>(<span class="ident">Columns</span> { <span class="ident">columns</span>: <span class="ident">result</span> })
+        <span class="prelude-val">Ok</span>(Columns { columns: result })
     }
 }
 
-<span class="kw">impl</span> <span class="ident">IntoIterator</span> <span class="kw">for</span> <span class="ident">Columns</span> {
-    <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="ident">Column</span>;
-    <span class="kw">type</span> <span class="ident">IntoIter</span> <span class="op">=</span> <span class="ident">std::vec::IntoIter</span><span class="op">&lt;</span><span class="ident">Column</span><span class="op">&gt;</span>;
+<span class="kw">impl </span>IntoIterator <span class="kw">for </span>Columns {
+    <span class="kw">type </span>Item = Column;
+    <span class="kw">type </span>IntoIter = std::vec::IntoIter&lt;Column&gt;;
 
-    <span class="kw">fn</span> <span class="ident">into_iter</span>(<span class="self">self</span>) -&gt; <span class="ident"><span class="self">Self</span>::IntoIter</span> {
-        <span class="self">self</span>.<span class="ident">columns</span>.<span class="ident">into_iter</span>()
+    <span class="kw">fn </span>into_iter(<span class="self">self</span>) -&gt; <span class="self">Self</span>::IntoIter {
+        <span class="self">self</span>.columns.into_iter()
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">thiserror::Error</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">BadColumnLayout</span> {
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;duplicate column specifications: {0}&quot;</span>)]</span>
-    <span class="ident">DuplicateColumnSpecs</span>(<span class="ident">u32</span>),
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;out of order columns&quot;</span>)]</span>
-    <span class="ident">OutOfOrder</span>,
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;nested group&quot;</span>)]</span>
-    <span class="ident">NestedGroup</span>,
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;raw value column without metadata column&quot;</span>)]</span>
-    <span class="ident">LoneRawValueColumn</span>,
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;value metadata followed by value column with different column ID&quot;</span>)]</span>
-    <span class="ident">MismatchingValueMetadataId</span>,
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;non contiguous columns&quot;</span>)]</span>
-    <span class="ident">NonContiguousColumns</span>,
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;data out of range&quot;</span>)]</span>
-    <span class="ident">DataOutOfRange</span>,
+<span class="attribute">#[derive(Debug, thiserror::Error)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>BadColumnLayout {
+    <span class="attribute">#[error(<span class="string">&quot;duplicate column specifications: {0}&quot;</span>)]
+    </span>DuplicateColumnSpecs(u32),
+    <span class="attribute">#[error(<span class="string">&quot;out of order columns&quot;</span>)]
+    </span>OutOfOrder,
+    <span class="attribute">#[error(<span class="string">&quot;nested group&quot;</span>)]
+    </span>NestedGroup,
+    <span class="attribute">#[error(<span class="string">&quot;raw value column without metadata column&quot;</span>)]
+    </span>LoneRawValueColumn,
+    <span class="attribute">#[error(<span class="string">&quot;value metadata followed by value column with different column ID&quot;</span>)]
+    </span>MismatchingValueMetadataId,
+    <span class="attribute">#[error(<span class="string">&quot;non contiguous columns&quot;</span>)]
+    </span>NonContiguousColumns,
+    <span class="attribute">#[error(<span class="string">&quot;data out of range&quot;</span>)]
+    </span>DataOutOfRange,
 }
 
-<span class="kw">struct</span> <span class="ident">ColumnLayoutParser</span> {
-    <span class="ident">columns</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Column</span><span class="op">&gt;</span>,
-    <span class="ident">last_spec</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ColumnSpec</span><span class="op">&gt;</span>,
-    <span class="ident">state</span>: <span class="ident">LayoutParserState</span>,
-    <span class="ident">total_data_size</span>: <span class="ident">usize</span>,
+<span class="kw">struct </span>ColumnLayoutParser {
+    columns: Vec&lt;Column&gt;,
+    last_spec: <span class="prelude-ty">Option</span>&lt;ColumnSpec&gt;,
+    state: LayoutParserState,
+    total_data_size: usize,
 }
 
-<span class="kw">enum</span> <span class="ident">LayoutParserState</span> {
-    <span class="ident">Ready</span>,
-    <span class="ident">InValue</span>(<span class="ident">AwaitingRawColumnValueBuilder</span>),
-    <span class="ident">InGroup</span>(<span class="ident">ColumnId</span>, <span class="ident">GroupParseState</span>),
+<span class="kw">enum </span>LayoutParserState {
+    Ready,
+    InValue(AwaitingRawColumnValueBuilder),
+    InGroup(ColumnId, GroupParseState),
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
-<span class="kw">enum</span> <span class="ident">GroupParseState</span> {
-    <span class="ident">Ready</span>(<span class="ident">GroupBuilder</span>),
-    <span class="ident">InValue</span>(<span class="ident">GroupAwaitingValue</span>),
+<span class="attribute">#[derive(Debug)]
+</span><span class="kw">enum </span>GroupParseState {
+    Ready(GroupBuilder),
+    InValue(GroupAwaitingValue),
 }
 
-<span class="kw">impl</span> <span class="ident">ColumnLayoutParser</span> {
-    <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">data_size</span>: <span class="ident">usize</span>, <span class="ident">size_hint</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">ColumnLayoutParser</span> {
-            <span class="ident">columns</span>: <span class="ident">Vec::with_capacity</span>(<span class="ident">size_hint</span>.<span class="ident">unwrap_or</span>(<span class="number">0</span>)),
-            <span class="ident">last_spec</span>: <span class="prelude-val">None</span>,
-            <span class="ident">state</span>: <span class="ident">LayoutParserState::Ready</span>,
-            <span class="ident">total_data_size</span>: <span class="ident">data_size</span>,
+<span class="kw">impl </span>ColumnLayoutParser {
+    <span class="kw">fn </span>new(data_size: usize, size_hint: <span class="prelude-ty">Option</span>&lt;usize&gt;) -&gt; <span class="self">Self </span>{
+        ColumnLayoutParser {
+            columns: Vec::with_capacity(size_hint.unwrap_or(<span class="number">0</span>)),
+            last_spec: <span class="prelude-val">None</span>,
+            state: LayoutParserState::Ready,
+            total_data_size: data_size,
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">build</span>(<span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Columns</span>, <span class="ident">BadColumnLayout</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">columns</span> <span class="op">=</span> <span class="kw">match</span> <span class="self">self</span>.<span class="ident">state</span> {
-            <span class="ident">LayoutParserState::Ready</span> =&gt; <span class="self">self</span>.<span class="ident">columns</span>,
-            <span class="ident">LayoutParserState::InValue</span>(<span class="kw-2">mut</span> <span class="ident">builder</span>) =&gt; {
-                <span class="self">self</span>.<span class="ident">columns</span>.<span class="ident">push</span>(<span class="ident">builder</span>.<span class="ident">build</span>((<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>()));
-                <span class="self">self</span>.<span class="ident">columns</span>
+    <span class="kw">fn </span>build(<span class="kw-2">mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Columns, BadColumnLayout&gt; {
+        <span class="kw">let </span>columns = <span class="kw">match </span><span class="self">self</span>.state {
+            LayoutParserState::Ready =&gt; <span class="self">self</span>.columns,
+            LayoutParserState::InValue(<span class="kw-2">mut </span>builder) =&gt; {
+                <span class="self">self</span>.columns.push(builder.build((<span class="number">0</span>..<span class="number">0</span>).into()));
+                <span class="self">self</span>.columns
             }
-            <span class="ident">LayoutParserState::InGroup</span>(<span class="kw">_</span>, <span class="ident">groupstate</span>) =&gt; {
-                <span class="kw">match</span> <span class="ident">groupstate</span> {
-                    <span class="ident">GroupParseState::InValue</span>(<span class="kw-2">mut</span> <span class="ident">builder</span>) =&gt; {
-                        <span class="self">self</span>.<span class="ident">columns</span>.<span class="ident">push</span>(<span class="ident">builder</span>.<span class="ident">finish_empty</span>().<span class="ident">finish</span>());
+            LayoutParserState::InGroup(<span class="kw">_</span>, groupstate) =&gt; {
+                <span class="kw">match </span>groupstate {
+                    GroupParseState::InValue(<span class="kw-2">mut </span>builder) =&gt; {
+                        <span class="self">self</span>.columns.push(builder.finish_empty().finish());
                     }
-                    <span class="ident">GroupParseState::Ready</span>(<span class="kw-2">mut</span> <span class="ident">builder</span>) =&gt; {
-                        <span class="self">self</span>.<span class="ident">columns</span>.<span class="ident">push</span>(<span class="ident">builder</span>.<span class="ident">finish</span>());
+                    GroupParseState::Ready(<span class="kw-2">mut </span>builder) =&gt; {
+                        <span class="self">self</span>.columns.push(builder.finish());
                     }
                 };
-                <span class="self">self</span>.<span class="ident">columns</span>
+                <span class="self">self</span>.columns
             }
         };
-        <span class="prelude-val">Ok</span>(<span class="ident">Columns</span> { <span class="ident">columns</span> })
+        <span class="prelude-val">Ok</span>(Columns { columns })
     }
 
-    <span class="attribute">#[<span class="ident">tracing::instrument</span>(<span class="ident">skip</span>(<span class="self">self</span>), <span class="ident">err</span>)]</span>
-    <span class="kw">fn</span> <span class="ident">add_column</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">column</span>: <span class="ident">ColumnSpec</span>,
-        <span class="ident">range</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">BadColumnLayout</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">check_contiguous</span>(<span class="kw-2">&amp;</span><span class="ident">range</span>)<span class="question-mark">?</span>;
-        <span class="self">self</span>.<span class="ident">check_bounds</span>(<span class="kw-2">&amp;</span><span class="ident">range</span>)<span class="question-mark">?</span>;
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">last_spec</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">last_spec</span> {
-            <span class="kw">if</span> <span class="ident">last_spec</span>.<span class="ident">normalize</span>() <span class="op">&gt;</span> <span class="ident">column</span>.<span class="ident">normalize</span>() {
-                <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">BadColumnLayout::OutOfOrder</span>);
-            } <span class="kw">else</span> <span class="kw">if</span> <span class="ident">last_spec</span> <span class="op">==</span> <span class="ident">column</span> {
-                <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">BadColumnLayout::DuplicateColumnSpecs</span>(<span class="ident">column</span>.<span class="ident">into</span>()));
+    <span class="attribute">#[tracing::instrument(skip(<span class="self">self</span>), err)]
+    </span><span class="kw">fn </span>add_column(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        column: ColumnSpec,
+        range: Range&lt;usize&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), BadColumnLayout&gt; {
+        <span class="self">self</span>.check_contiguous(<span class="kw-2">&amp;</span>range)<span class="question-mark">?</span>;
+        <span class="self">self</span>.check_bounds(<span class="kw-2">&amp;</span>range)<span class="question-mark">?</span>;
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(last_spec) = <span class="self">self</span>.last_spec {
+            <span class="kw">if </span>last_spec.normalize() &gt; column.normalize() {
+                <span class="kw">return </span><span class="prelude-val">Err</span>(BadColumnLayout::OutOfOrder);
+            } <span class="kw">else if </span>last_spec == column {
+                <span class="kw">return </span><span class="prelude-val">Err</span>(BadColumnLayout::DuplicateColumnSpecs(column.into()));
             }
         }
-        <span class="kw">match</span> <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">state</span> {
-            <span class="ident">LayoutParserState::Ready</span> =&gt; <span class="kw">match</span> <span class="ident">column</span>.<span class="ident">col_type</span>() {
-                <span class="ident">ColumnType::Group</span> =&gt; {
-                    <span class="self">self</span>.<span class="ident">state</span> <span class="op">=</span> <span class="ident">LayoutParserState::InGroup</span>(
-                        <span class="ident">column</span>.<span class="ident">id</span>(),
-                        <span class="ident">GroupParseState::Ready</span>(<span class="ident">ColumnBuilder::start_group</span>(<span class="ident">column</span>, <span class="ident">range</span>.<span class="ident">into</span>())),
+        <span class="kw">match </span><span class="kw-2">&amp;mut </span><span class="self">self</span>.state {
+            LayoutParserState::Ready =&gt; <span class="kw">match </span>column.col_type() {
+                ColumnType::Group =&gt; {
+                    <span class="self">self</span>.state = LayoutParserState::InGroup(
+                        column.id(),
+                        GroupParseState::Ready(ColumnBuilder::start_group(column, range.into())),
                     );
                     <span class="prelude-val">Ok</span>(())
                 }
-                <span class="ident">ColumnType::ValueMetadata</span> =&gt; {
-                    <span class="self">self</span>.<span class="ident">state</span> <span class="op">=</span> <span class="ident">LayoutParserState::InValue</span>(<span class="ident">ColumnBuilder::start_value</span>(
-                        <span class="ident">column</span>,
-                        <span class="ident">range</span>.<span class="ident">into</span>(),
+                ColumnType::ValueMetadata =&gt; {
+                    <span class="self">self</span>.state = LayoutParserState::InValue(ColumnBuilder::start_value(
+                        column,
+                        range.into(),
                     ));
                     <span class="prelude-val">Ok</span>(())
                 }
-                <span class="ident">ColumnType::Value</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">BadColumnLayout::LoneRawValueColumn</span>),
-                <span class="ident">ColumnType::Actor</span> =&gt; {
-                    <span class="self">self</span>.<span class="ident">columns</span>
-                        .<span class="ident">push</span>(<span class="ident">ColumnBuilder::build_actor</span>(<span class="ident">column</span>, <span class="ident">range</span>.<span class="ident">into</span>()));
+                ColumnType::Value =&gt; <span class="prelude-val">Err</span>(BadColumnLayout::LoneRawValueColumn),
+                ColumnType::Actor =&gt; {
+                    <span class="self">self</span>.columns
+                        .push(ColumnBuilder::build_actor(column, range.into()));
                     <span class="prelude-val">Ok</span>(())
                 }
-                <span class="ident">ColumnType::String</span> =&gt; {
-                    <span class="self">self</span>.<span class="ident">columns</span>
-                        .<span class="ident">push</span>(<span class="ident">ColumnBuilder::build_string</span>(<span class="ident">column</span>, <span class="ident">range</span>.<span class="ident">into</span>()));
+                ColumnType::String =&gt; {
+                    <span class="self">self</span>.columns
+                        .push(ColumnBuilder::build_string(column, range.into()));
                     <span class="prelude-val">Ok</span>(())
                 }
-                <span class="ident">ColumnType::Integer</span> =&gt; {
-                    <span class="self">self</span>.<span class="ident">columns</span>
-                        .<span class="ident">push</span>(<span class="ident">ColumnBuilder::build_integer</span>(<span class="ident">column</span>, <span class="ident">range</span>.<span class="ident">into</span>()));
+                ColumnType::Integer =&gt; {
+                    <span class="self">self</span>.columns
+                        .push(ColumnBuilder::build_integer(column, range.into()));
                     <span class="prelude-val">Ok</span>(())
                 }
-                <span class="ident">ColumnType::DeltaInteger</span> =&gt; {
-                    <span class="self">self</span>.<span class="ident">columns</span>
-                        .<span class="ident">push</span>(<span class="ident">ColumnBuilder::build_delta_integer</span>(<span class="ident">column</span>, <span class="ident">range</span>.<span class="ident">into</span>()));
+                ColumnType::DeltaInteger =&gt; {
+                    <span class="self">self</span>.columns
+                        .push(ColumnBuilder::build_delta_integer(column, range.into()));
                     <span class="prelude-val">Ok</span>(())
                 }
-                <span class="ident">ColumnType::Boolean</span> =&gt; {
-                    <span class="self">self</span>.<span class="ident">columns</span>
-                        .<span class="ident">push</span>(<span class="ident">ColumnBuilder::build_boolean</span>(<span class="ident">column</span>, <span class="ident">range</span>.<span class="ident">into</span>()));
+                ColumnType::Boolean =&gt; {
+                    <span class="self">self</span>.columns
+                        .push(ColumnBuilder::build_boolean(column, range.into()));
                     <span class="prelude-val">Ok</span>(())
                 }
             },
-            <span class="ident">LayoutParserState::InValue</span>(<span class="ident">builder</span>) =&gt; <span class="kw">match</span> <span class="ident">column</span>.<span class="ident">col_type</span>() {
-                <span class="ident">ColumnType::Value</span> =&gt; {
-                    <span class="kw">if</span> <span class="ident">builder</span>.<span class="ident">id</span>() <span class="op">!</span><span class="op">=</span> <span class="ident">column</span>.<span class="ident">id</span>() {
-                        <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">BadColumnLayout::MismatchingValueMetadataId</span>);
+            LayoutParserState::InValue(builder) =&gt; <span class="kw">match </span>column.col_type() {
+                ColumnType::Value =&gt; {
+                    <span class="kw">if </span>builder.id() != column.id() {
+                        <span class="kw">return </span><span class="prelude-val">Err</span>(BadColumnLayout::MismatchingValueMetadataId);
                     }
-                    <span class="self">self</span>.<span class="ident">columns</span>.<span class="ident">push</span>(<span class="ident">builder</span>.<span class="ident">build</span>(<span class="ident">range</span>.<span class="ident">into</span>()));
-                    <span class="self">self</span>.<span class="ident">state</span> <span class="op">=</span> <span class="ident">LayoutParserState::Ready</span>;
+                    <span class="self">self</span>.columns.push(builder.build(range.into()));
+                    <span class="self">self</span>.state = LayoutParserState::Ready;
                     <span class="prelude-val">Ok</span>(())
                 }
-                <span class="kw">_</span> =&gt; {
-                    <span class="self">self</span>.<span class="ident">columns</span>.<span class="ident">push</span>(<span class="ident">builder</span>.<span class="ident">build</span>((<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>()));
-                    <span class="self">self</span>.<span class="ident">state</span> <span class="op">=</span> <span class="ident">LayoutParserState::Ready</span>;
-                    <span class="self">self</span>.<span class="ident">add_column</span>(<span class="ident">column</span>, <span class="ident">range</span>)
+                <span class="kw">_ </span>=&gt; {
+                    <span class="self">self</span>.columns.push(builder.build((<span class="number">0</span>..<span class="number">0</span>).into()));
+                    <span class="self">self</span>.state = LayoutParserState::Ready;
+                    <span class="self">self</span>.add_column(column, range)
                 }
             },
-            <span class="ident">LayoutParserState::InGroup</span>(<span class="ident">id</span>, <span class="ident">group_state</span>) =&gt; {
-                <span class="kw">if</span> <span class="kw-2">*</span><span class="ident">id</span> <span class="op">!</span><span class="op">=</span> <span class="ident">column</span>.<span class="ident">id</span>() {
-                    <span class="kw">match</span> <span class="ident">group_state</span> {
-                        <span class="ident">GroupParseState::Ready</span>(<span class="ident">b</span>) =&gt; <span class="self">self</span>.<span class="ident">columns</span>.<span class="ident">push</span>(<span class="ident">b</span>.<span class="ident">finish</span>()),
-                        <span class="ident">GroupParseState::InValue</span>(<span class="ident">b</span>) =&gt; <span class="self">self</span>.<span class="ident">columns</span>.<span class="ident">push</span>(<span class="ident">b</span>.<span class="ident">finish_empty</span>().<span class="ident">finish</span>()),
+            LayoutParserState::InGroup(id, group_state) =&gt; {
+                <span class="kw">if </span><span class="kw-2">*</span>id != column.id() {
+                    <span class="kw">match </span>group_state {
+                        GroupParseState::Ready(b) =&gt; <span class="self">self</span>.columns.push(b.finish()),
+                        GroupParseState::InValue(b) =&gt; <span class="self">self</span>.columns.push(b.finish_empty().finish()),
                     };
-                    <span class="ident">std::mem::swap</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">state</span>, <span class="kw-2">&amp;mut</span> <span class="ident">LayoutParserState::Ready</span>);
-                    <span class="self">self</span>.<span class="ident">add_column</span>(<span class="ident">column</span>, <span class="ident">range</span>)
-                } <span class="kw">else</span> {
-                    <span class="kw">match</span> <span class="ident">group_state</span> {
-                        <span class="ident">GroupParseState::Ready</span>(<span class="ident">builder</span>) =&gt; <span class="kw">match</span> <span class="ident">column</span>.<span class="ident">col_type</span>() {
-                            <span class="ident">ColumnType::Group</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">BadColumnLayout::NestedGroup</span>),
-                            <span class="ident">ColumnType::Value</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">BadColumnLayout::LoneRawValueColumn</span>),
-                            <span class="ident">ColumnType::ValueMetadata</span> =&gt; {
-                                <span class="kw-2">*</span><span class="ident">group_state</span> <span class="op">=</span>
-                                    <span class="ident">GroupParseState::InValue</span>(<span class="ident">builder</span>.<span class="ident">start_value</span>(<span class="ident">column</span>, <span class="ident">range</span>));
+                    std::mem::swap(<span class="kw-2">&amp;mut </span><span class="self">self</span>.state, <span class="kw-2">&amp;mut </span>LayoutParserState::Ready);
+                    <span class="self">self</span>.add_column(column, range)
+                } <span class="kw">else </span>{
+                    <span class="kw">match </span>group_state {
+                        GroupParseState::Ready(builder) =&gt; <span class="kw">match </span>column.col_type() {
+                            ColumnType::Group =&gt; <span class="prelude-val">Err</span>(BadColumnLayout::NestedGroup),
+                            ColumnType::Value =&gt; <span class="prelude-val">Err</span>(BadColumnLayout::LoneRawValueColumn),
+                            ColumnType::ValueMetadata =&gt; {
+                                <span class="kw-2">*</span>group_state =
+                                    GroupParseState::InValue(builder.start_value(column, range));
                                 <span class="prelude-val">Ok</span>(())
                             }
-                            <span class="ident">ColumnType::Actor</span> =&gt; {
-                                <span class="ident">builder</span>.<span class="ident">add_actor</span>(<span class="ident">column</span>, <span class="ident">range</span>);
+                            ColumnType::Actor =&gt; {
+                                builder.add_actor(column, range);
                                 <span class="prelude-val">Ok</span>(())
                             }
-                            <span class="ident">ColumnType::Boolean</span> =&gt; {
-                                <span class="ident">builder</span>.<span class="ident">add_boolean</span>(<span class="ident">column</span>, <span class="ident">range</span>);
+                            ColumnType::Boolean =&gt; {
+                                builder.add_boolean(column, range);
                                 <span class="prelude-val">Ok</span>(())
                             }
-                            <span class="ident">ColumnType::DeltaInteger</span> =&gt; {
-                                <span class="ident">builder</span>.<span class="ident">add_delta_integer</span>(<span class="ident">column</span>, <span class="ident">range</span>);
+                            ColumnType::DeltaInteger =&gt; {
+                                builder.add_delta_integer(column, range);
                                 <span class="prelude-val">Ok</span>(())
                             }
-                            <span class="ident">ColumnType::Integer</span> =&gt; {
-                                <span class="ident">builder</span>.<span class="ident">add_integer</span>(<span class="ident">column</span>, <span class="ident">range</span>);
+                            ColumnType::Integer =&gt; {
+                                builder.add_integer(column, range);
                                 <span class="prelude-val">Ok</span>(())
                             }
-                            <span class="ident">ColumnType::String</span> =&gt; {
-                                <span class="ident">builder</span>.<span class="ident">add_string</span>(<span class="ident">column</span>, <span class="ident">range</span>);
+                            ColumnType::String =&gt; {
+                                builder.add_string(column, range);
                                 <span class="prelude-val">Ok</span>(())
                             }
                         },
-                        <span class="ident">GroupParseState::InValue</span>(<span class="ident">builder</span>) =&gt; <span class="kw">match</span> <span class="ident">column</span>.<span class="ident">col_type</span>() {
-                            <span class="ident">ColumnType::Value</span> =&gt; {
-                                <span class="kw-2">*</span><span class="ident">group_state</span> <span class="op">=</span> <span class="ident">GroupParseState::Ready</span>(<span class="ident">builder</span>.<span class="ident">finish_value</span>(<span class="ident">range</span>));
+                        GroupParseState::InValue(builder) =&gt; <span class="kw">match </span>column.col_type() {
+                            ColumnType::Value =&gt; {
+                                <span class="kw-2">*</span>group_state = GroupParseState::Ready(builder.finish_value(range));
                                 <span class="prelude-val">Ok</span>(())
                             }
-                            <span class="kw">_</span> =&gt; {
-                                <span class="kw-2">*</span><span class="ident">group_state</span> <span class="op">=</span> <span class="ident">GroupParseState::Ready</span>(<span class="ident">builder</span>.<span class="ident">finish_empty</span>());
-                                <span class="self">self</span>.<span class="ident">add_column</span>(<span class="ident">column</span>, <span class="ident">range</span>)
+                            <span class="kw">_ </span>=&gt; {
+                                <span class="kw-2">*</span>group_state = GroupParseState::Ready(builder.finish_empty());
+                                <span class="self">self</span>.add_column(column, range)
                             }
                         },
                     }
@@ -667,48 +667,48 @@
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">check_contiguous</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">next_range</span>: <span class="kw-2">&amp;</span><span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">BadColumnLayout</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">state</span> {
-            <span class="ident">LayoutParserState::Ready</span> =&gt; {
-                <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">prev</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">columns</span>.<span class="ident">last</span>() {
-                    <span class="kw">if</span> <span class="ident">prev</span>.<span class="ident">range</span>().<span class="ident">end</span> <span class="op">!</span><span class="op">=</span> <span class="ident">next_range</span>.<span class="ident">start</span> {
-                        <span class="macro">tracing::error!</span>(<span class="ident">prev</span><span class="op">=</span><span class="question-mark">?</span><span class="ident">prev</span>.<span class="ident">range</span>(), <span class="ident">next</span><span class="op">=</span><span class="question-mark">?</span><span class="ident">next_range</span>, <span class="string">&quot;it&#39;s here&quot;</span>);
-                        <span class="prelude-val">Err</span>(<span class="ident">BadColumnLayout::NonContiguousColumns</span>)
-                    } <span class="kw">else</span> {
+    <span class="kw">fn </span>check_contiguous(<span class="kw-2">&amp;</span><span class="self">self</span>, next_range: <span class="kw-2">&amp;</span>Range&lt;usize&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;(), BadColumnLayout&gt; {
+        <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.state {
+            LayoutParserState::Ready =&gt; {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(prev) = <span class="self">self</span>.columns.last() {
+                    <span class="kw">if </span>prev.range().end != next_range.start {
+                        <span class="macro">tracing::error!</span>(prev=<span class="question-mark">?</span>prev.range(), next=<span class="question-mark">?</span>next_range, <span class="string">&quot;it&#39;s here&quot;</span>);
+                        <span class="prelude-val">Err</span>(BadColumnLayout::NonContiguousColumns)
+                    } <span class="kw">else </span>{
                         <span class="prelude-val">Ok</span>(())
                     }
-                } <span class="kw">else</span> {
+                } <span class="kw">else </span>{
                     <span class="prelude-val">Ok</span>(())
                 }
             }
-            <span class="ident">LayoutParserState::InValue</span>(<span class="ident">builder</span>) =&gt; {
-                <span class="kw">if</span> <span class="ident">builder</span>.<span class="ident">meta_range</span>().<span class="ident">end</span>() <span class="op">!</span><span class="op">=</span> <span class="ident">next_range</span>.<span class="ident">start</span> {
-                    <span class="prelude-val">Err</span>(<span class="ident">BadColumnLayout::NonContiguousColumns</span>)
-                } <span class="kw">else</span> {
+            LayoutParserState::InValue(builder) =&gt; {
+                <span class="kw">if </span>builder.meta_range().end() != next_range.start {
+                    <span class="prelude-val">Err</span>(BadColumnLayout::NonContiguousColumns)
+                } <span class="kw">else </span>{
                     <span class="prelude-val">Ok</span>(())
                 }
             }
-            <span class="ident">LayoutParserState::InGroup</span>(<span class="kw">_</span>, <span class="ident">group_state</span>) =&gt; {
-                <span class="kw">let</span> <span class="ident">end</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">group_state</span> {
-                    <span class="ident">GroupParseState::InValue</span>(<span class="ident">b</span>) =&gt; <span class="ident">b</span>.<span class="ident">range</span>().<span class="ident">end</span>,
-                    <span class="ident">GroupParseState::Ready</span>(<span class="ident">b</span>) =&gt; <span class="ident">b</span>.<span class="ident">range</span>().<span class="ident">end</span>,
+            LayoutParserState::InGroup(<span class="kw">_</span>, group_state) =&gt; {
+                <span class="kw">let </span>end = <span class="kw">match </span>group_state {
+                    GroupParseState::InValue(b) =&gt; b.range().end,
+                    GroupParseState::Ready(b) =&gt; b.range().end,
                 };
-                <span class="kw">if</span> <span class="ident">end</span> <span class="op">!</span><span class="op">=</span> <span class="ident">next_range</span>.<span class="ident">start</span> {
-                    <span class="prelude-val">Err</span>(<span class="ident">BadColumnLayout::NonContiguousColumns</span>)
-                } <span class="kw">else</span> {
+                <span class="kw">if </span>end != next_range.start {
+                    <span class="prelude-val">Err</span>(BadColumnLayout::NonContiguousColumns)
+                } <span class="kw">else </span>{
                     <span class="prelude-val">Ok</span>(())
                 }
             }
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">check_bounds</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">next_range</span>: <span class="kw-2">&amp;</span><span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">BadColumnLayout</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="ident">next_range</span>.<span class="ident">end</span> <span class="op">&gt;</span> <span class="self">self</span>.<span class="ident">total_data_size</span> {
-            <span class="prelude-val">Err</span>(<span class="ident">BadColumnLayout::DataOutOfRange</span>)
-        } <span class="kw">else</span> {
+    <span class="kw">fn </span>check_bounds(<span class="kw-2">&amp;</span><span class="self">self</span>, next_range: <span class="kw-2">&amp;</span>Range&lt;usize&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;(), BadColumnLayout&gt; {
+        <span class="kw">if </span>next_range.end &gt; <span class="self">self</span>.total_data_size {
+            <span class="prelude-val">Err</span>(BadColumnLayout::DataOutOfRange)
+        } <span class="kw">else </span>{
             <span class="prelude-val">Ok</span>(())
         }
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

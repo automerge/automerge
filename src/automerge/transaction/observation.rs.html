@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/transaction/observation.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>observation.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/transaction/observation.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>observation.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -78,83 +78,83 @@
 <span id="76">76</span>
 <span id="77">77</span>
 <span id="78">78</span>
-</pre><pre class="rust"><code><span class="doccomment">//! This module is essentially a type level Option. It is used in sitations where we know at</span>
-<span class="doccomment">//! compile time whether an `OpObserver` is available to track changes in a transaction.</span>
-<span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">ChangeHash</span>, <span class="ident">OpObserver</span>};
+</pre><pre class="rust"><code><span class="doccomment">//! This module is essentially a type level Option. It is used in sitations where we know at
+//! compile time whether an `OpObserver` is available to track changes in a transaction.
+</span><span class="kw">use crate</span>::{ChangeHash, OpObserver};
 
-<span class="kw">mod</span> <span class="ident">private</span> {
-    <span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">Sealed</span> {}
-    <span class="kw">impl</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident"><span class="kw">super</span>::OpObserver</span><span class="op">&gt;</span> <span class="ident">Sealed</span> <span class="kw">for</span> <span class="ident"><span class="kw">super</span>::Observed</span><span class="op">&lt;</span><span class="ident">O</span><span class="op">&gt;</span> {}
-    <span class="kw">impl</span> <span class="ident">Sealed</span> <span class="kw">for</span> <span class="ident"><span class="kw">super</span>::UnObserved</span> {}
+<span class="kw">mod </span>private {
+    <span class="kw">pub trait </span>Sealed {}
+    <span class="kw">impl</span>&lt;O: <span class="kw">super</span>::OpObserver&gt; Sealed <span class="kw">for </span><span class="kw">super</span>::Observed&lt;O&gt; {}
+    <span class="kw">impl </span>Sealed <span class="kw">for </span><span class="kw">super</span>::UnObserved {}
 }
 
-<span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">Observation</span>: <span class="ident">private::Sealed</span> {
-    <span class="kw">type</span> <span class="ident">Obs</span>: <span class="ident">OpObserver</span>;
-    <span class="kw">type</span> <span class="ident">CommitResult</span>;
+<span class="kw">pub trait </span>Observation: private::Sealed {
+    <span class="kw">type </span>Obs: OpObserver;
+    <span class="kw">type </span>CommitResult;
 
-    <span class="kw">fn</span> <span class="ident">observer</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;mut</span> <span class="ident"><span class="self">Self</span>::Obs</span><span class="op">&gt;</span>;
-    <span class="kw">fn</span> <span class="ident">make_result</span>(<span class="self">self</span>, <span class="ident">hash</span>: <span class="ident">ChangeHash</span>) -&gt; <span class="ident"><span class="self">Self</span>::CommitResult</span>;
-    <span class="kw">fn</span> <span class="ident">branch</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>;
-    <span class="kw">fn</span> <span class="ident">merge</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>);
+    <span class="kw">fn </span>observer(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span><span class="self">Self</span>::Obs&gt;;
+    <span class="kw">fn </span>make_result(<span class="self">self</span>, hash: ChangeHash) -&gt; <span class="self">Self</span>::CommitResult;
+    <span class="kw">fn </span>branch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>;
+    <span class="kw">fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>);
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Observed</span><span class="op">&lt;</span><span class="ident">Obs</span>: <span class="ident">OpObserver</span><span class="op">&gt;</span>(<span class="ident">Obs</span>);
+<span class="attribute">#[derive(Clone, Debug)]
+</span><span class="kw">pub struct </span>Observed&lt;Obs: OpObserver&gt;(Obs);
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">OpObserver</span><span class="op">&gt;</span> <span class="ident">Observed</span><span class="op">&lt;</span><span class="ident">O</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">o</span>: <span class="ident">O</span>) -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span>(<span class="ident">o</span>)
+<span class="kw">impl</span>&lt;O: OpObserver&gt; Observed&lt;O&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(o: O) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>(o)
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">observer</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="ident">O</span> {
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="number">0</span>
-    }
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>observer(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut </span>O {
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>.<span class="number">0
+    </span>}
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">Obs</span>: <span class="ident">OpObserver</span><span class="op">&gt;</span> <span class="ident">Observation</span> <span class="kw">for</span> <span class="ident">Observed</span><span class="op">&lt;</span><span class="ident">Obs</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">Obs</span> <span class="op">=</span> <span class="ident">Obs</span>;
-    <span class="kw">type</span> <span class="ident">CommitResult</span> <span class="op">=</span> (<span class="ident">Obs</span>, <span class="ident">ChangeHash</span>);
-    <span class="kw">fn</span> <span class="ident">observer</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;mut</span> <span class="ident"><span class="self">Self</span>::Obs</span><span class="op">&gt;</span> {
-        <span class="prelude-val">Some</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="number">0</span>)
+<span class="kw">impl</span>&lt;Obs: OpObserver&gt; Observation <span class="kw">for </span>Observed&lt;Obs&gt; {
+    <span class="kw">type </span>Obs = Obs;
+    <span class="kw">type </span>CommitResult = (Obs, ChangeHash);
+    <span class="kw">fn </span>observer(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span><span class="self">Self</span>::Obs&gt; {
+        <span class="prelude-val">Some</span>(<span class="kw-2">&amp;mut </span><span class="self">self</span>.<span class="number">0</span>)
     }
 
-    <span class="kw">fn</span> <span class="ident">make_result</span>(<span class="self">self</span>, <span class="ident">hash</span>: <span class="ident">ChangeHash</span>) -&gt; <span class="ident"><span class="self">Self</span>::CommitResult</span> {
-        (<span class="self">self</span>.<span class="number">0</span>, <span class="ident">hash</span>)
+    <span class="kw">fn </span>make_result(<span class="self">self</span>, hash: ChangeHash) -&gt; <span class="self">Self</span>::CommitResult {
+        (<span class="self">self</span>.<span class="number">0</span>, hash)
     }
 
-    <span class="kw">fn</span> <span class="ident">branch</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span>(<span class="self">self</span>.<span class="number">0</span>.<span class="ident">branch</span>())
+    <span class="kw">fn </span>branch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>(<span class="self">self</span>.<span class="number">0</span>.branch())
     }
 
-    <span class="kw">fn</span> <span class="ident">merge</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) {
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">merge</span>(<span class="kw-2">&amp;</span><span class="ident">other</span>.<span class="number">0</span>)
-    }
-}
-
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Default</span>, <span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">UnObserved</span>;
-<span class="kw">impl</span> <span class="ident">UnObserved</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>() -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span>
+    <span class="kw">fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>) {
+        <span class="self">self</span>.<span class="number">0</span>.merge(<span class="kw-2">&amp;</span>other.<span class="number">0</span>)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Observation</span> <span class="kw">for</span> <span class="ident">UnObserved</span> {
-    <span class="kw">type</span> <span class="ident">Obs</span> <span class="op">=</span> ();
-    <span class="kw">type</span> <span class="ident">CommitResult</span> <span class="op">=</span> <span class="ident">ChangeHash</span>;
-    <span class="kw">fn</span> <span class="ident">observer</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;mut</span> <span class="ident"><span class="self">Self</span>::Obs</span><span class="op">&gt;</span> {
-        <span class="prelude-val">None</span>
+<span class="attribute">#[derive(Clone, Default, Debug)]
+</span><span class="kw">pub struct </span>UnObserved;
+<span class="kw">impl </span>UnObserved {
+    <span class="kw">pub fn </span>new() -&gt; <span class="self">Self </span>{
+        <span class="self">Self
+    </span>}
+}
+
+<span class="kw">impl </span>Observation <span class="kw">for </span>UnObserved {
+    <span class="kw">type </span>Obs = ();
+    <span class="kw">type </span>CommitResult = ChangeHash;
+    <span class="kw">fn </span>observer(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span><span class="self">Self</span>::Obs&gt; {
+        <span class="prelude-val">None
+    </span>}
+
+    <span class="kw">fn </span>make_result(<span class="self">self</span>, hash: ChangeHash) -&gt; <span class="self">Self</span>::CommitResult {
+        hash
     }
 
-    <span class="kw">fn</span> <span class="ident">make_result</span>(<span class="self">self</span>, <span class="ident">hash</span>: <span class="ident">ChangeHash</span>) -&gt; <span class="ident"><span class="self">Self</span>::CommitResult</span> {
-        <span class="ident">hash</span>
-    }
+    <span class="kw">fn </span>branch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
+        <span class="self">Self
+    </span>}
 
-    <span class="kw">fn</span> <span class="ident">branch</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span>
-    }
-
-    <span class="kw">fn</span> <span class="ident">merge</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">_other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) {}
+    <span class="kw">fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _other: <span class="kw-2">&amp;</span><span class="self">Self</span>) {}
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

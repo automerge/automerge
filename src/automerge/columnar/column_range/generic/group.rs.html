@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/columnar/column_range/generic/group.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>group.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../../storage.js"></script><script defer src="../../../../../source-script.js"></script><script defer src="../../../../../source-files.js"></script><script defer src="../../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/columnar/column_range/generic/group.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>group.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../../normalize.css"><link rel="stylesheet" href="../../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../../dark.css" disabled><link rel="stylesheet" href="../../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../../storage.js"></script><script defer src="../../../../../source-script.js"></script><script defer src="../../../../../source-files.js"></script><script defer src="../../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -138,143 +138,143 @@
 <span id="136">136</span>
 <span id="137">137</span>
 <span id="138">138</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::ops::Range</span>;
+</pre><pre class="rust"><code><span class="kw">use </span>std::ops::Range;
 
-<span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">CellValue</span>, <span class="ident">SimpleColIter</span>, <span class="ident">SimpleColRange</span>, <span class="ident">SimpleValue</span>};
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::columnar</span>::{
-    <span class="ident">column_range</span>::{<span class="ident">RleRange</span>, <span class="ident">ValueIter</span>, <span class="ident">ValueRange</span>},
-    <span class="ident">encoding</span>::{<span class="ident">col_error::DecodeColumnError</span>, <span class="ident">RleDecoder</span>},
+<span class="kw">use super</span>::{CellValue, SimpleColIter, SimpleColRange, SimpleValue};
+<span class="kw">use </span><span class="kw">crate</span>::columnar::{
+    column_range::{RleRange, ValueIter, ValueRange},
+    encoding::{col_error::DecodeColumnError, RleDecoder},
 };
 
-<span class="doccomment">/// A group column range is one with a &quot;num&quot; column and zero or more &quot;grouped&quot; columns. The &quot;num&quot;</span>
-<span class="doccomment">/// column contains RLE encoded u64s, each `u64` represents the number of values to read from each</span>
-<span class="doccomment">/// of the grouped columns in order to produce a `CellValue::Group` for the current row.</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">GroupRange</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">num</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">values</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">GroupedColumnRange</span><span class="op">&gt;</span>,
+<span class="doccomment">/// A group column range is one with a &quot;num&quot; column and zero or more &quot;grouped&quot; columns. The &quot;num&quot;
+/// column contains RLE encoded u64s, each `u64` represents the number of values to read from each
+/// of the grouped columns in order to produce a `CellValue::Group` for the current row.
+</span><span class="attribute">#[derive(Debug, Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>GroupRange {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) num: RleRange&lt;u64&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) values: Vec&lt;GroupedColumnRange&gt;,
 }
 
-<span class="kw">impl</span> <span class="ident">GroupRange</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">num</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>, <span class="ident">values</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">GroupedColumnRange</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span> { <span class="ident">num</span>, <span class="ident">values</span> }
+<span class="kw">impl </span>GroupRange {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(num: RleRange&lt;u64&gt;, values: Vec&lt;GroupedColumnRange&gt;) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{ num, values }
     }
 
-    <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">dead_code</span>)]</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">iter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>]) -&gt; <span class="ident">GroupIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="ident">GroupIter</span> {
-            <span class="ident">num</span>: <span class="self">self</span>.<span class="ident">num</span>.<span class="ident">decoder</span>(<span class="ident">data</span>),
-            <span class="ident">values</span>: <span class="self">self</span>.<span class="ident">values</span>.<span class="ident">iter</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">v</span><span class="op">|</span> <span class="ident">v</span>.<span class="ident">iter</span>(<span class="ident">data</span>)).<span class="ident">collect</span>(),
+    <span class="attribute">#[allow(dead_code)]
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>iter&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, data: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8]) -&gt; GroupIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+        GroupIter {
+            num: <span class="self">self</span>.num.decoder(data),
+            values: <span class="self">self</span>.values.iter().map(|v| v.iter(data)).collect(),
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">range</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">start</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">num</span>.<span class="ident">start</span>();
-        <span class="kw">let</span> <span class="ident">end</span> <span class="op">=</span> <span class="self">self</span>
-            .<span class="ident">values</span>
-            .<span class="ident">last</span>()
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">v</span><span class="op">|</span> <span class="ident">v</span>.<span class="ident">range</span>().<span class="ident">end</span>)
-            .<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="self">self</span>.<span class="ident">num</span>.<span class="ident">end</span>());
-        <span class="ident">start</span>..<span class="ident">end</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>range(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Range&lt;usize&gt; {
+        <span class="kw">let </span>start = <span class="self">self</span>.num.start();
+        <span class="kw">let </span>end = <span class="self">self
+            </span>.values
+            .last()
+            .map(|v| v.range().end)
+            .unwrap_or_else(|| <span class="self">self</span>.num.end());
+        start..end
     }
 }
 
-<span class="doccomment">/// The type of ranges which can be the &quot;grouped&quot; columns in a `GroupRange`</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">GroupedColumnRange</span> {
-    <span class="ident">Value</span>(<span class="ident">ValueRange</span>),
-    <span class="ident">Simple</span>(<span class="ident">SimpleColRange</span>),
+<span class="doccomment">/// The type of ranges which can be the &quot;grouped&quot; columns in a `GroupRange`
+</span><span class="attribute">#[derive(Debug, Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>GroupedColumnRange {
+    Value(ValueRange),
+    Simple(SimpleColRange),
 }
 
-<span class="kw">impl</span> <span class="ident">GroupedColumnRange</span> {
-    <span class="kw">fn</span> <span class="ident">iter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>]) -&gt; <span class="ident">GroupedColIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident"><span class="self">Self</span>::Value</span>(<span class="ident">vr</span>) =&gt; <span class="ident">GroupedColIter::Value</span>(<span class="ident">vr</span>.<span class="ident">iter</span>(<span class="ident">data</span>)),
-            <span class="ident"><span class="self">Self</span>::Simple</span>(<span class="ident">sc</span>) =&gt; <span class="ident">GroupedColIter::Simple</span>(<span class="ident">sc</span>.<span class="ident">iter</span>(<span class="ident">data</span>)),
+<span class="kw">impl </span>GroupedColumnRange {
+    <span class="kw">fn </span>iter&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, data: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8]) -&gt; GroupedColIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            <span class="self">Self</span>::Value(vr) =&gt; GroupedColIter::Value(vr.iter(data)),
+            <span class="self">Self</span>::Simple(sc) =&gt; GroupedColIter::Simple(sc.iter(data)),
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">range</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident"><span class="self">Self</span>::Value</span>(<span class="ident">vr</span>) =&gt; <span class="ident">vr</span>.<span class="ident">range</span>(),
-            <span class="ident"><span class="self">Self</span>::Simple</span>(<span class="ident">s</span>) =&gt; <span class="ident">s</span>.<span class="ident">range</span>(),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>range(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Range&lt;usize&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            <span class="self">Self</span>::Value(vr) =&gt; vr.range(),
+            <span class="self">Self</span>::Simple(s) =&gt; s.range(),
         }
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">GroupIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">num</span>: <span class="ident">RleDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">u64</span><span class="op">&gt;</span>,
-    <span class="ident">values</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">GroupedColIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+<span class="attribute">#[derive(Debug, Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>GroupIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    num: RleDecoder&lt;<span class="lifetime">&#39;a</span>, u64&gt;,
+    values: Vec&lt;GroupedColIter&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">GroupIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">try_next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">CellValue</span><span class="op">&gt;</span>, <span class="ident">DecodeColumnError</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">num</span> <span class="op">=</span> <span class="self">self</span>
-            .<span class="ident">num</span>
-            .<span class="ident">next</span>()
-            .<span class="ident">transpose</span>()
-            .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">DecodeColumnError::decode_raw</span>(<span class="string">&quot;num&quot;</span>, <span class="ident">e</span>))<span class="question-mark">?</span>;
-        <span class="kw">match</span> <span class="ident">num</span> {
-            <span class="prelude-val">None</span> =&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>),
-            <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) =&gt; <span class="prelude-val">Err</span>(<span class="ident">DecodeColumnError::unexpected_null</span>(<span class="string">&quot;num&quot;</span>)),
-            <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(<span class="ident">num</span>)) =&gt; {
-                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">row</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
-                <span class="kw">for</span> <span class="kw">_</span> <span class="kw">in</span> <span class="number">0</span>..<span class="ident">num</span> {
-                    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">inner_row</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
-                    <span class="kw">for</span> (<span class="ident">index</span>, <span class="ident">value_col</span>) <span class="kw">in</span> <span class="self">self</span>.<span class="ident">values</span>.<span class="ident">iter_mut</span>().<span class="ident">enumerate</span>() {
-                        <span class="kw">match</span> <span class="ident">value_col</span>.<span class="ident">next</span>().<span class="ident">transpose</span>()<span class="question-mark">?</span> {
-                            <span class="prelude-val">None</span> =&gt; {
-                                <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">DecodeColumnError::unexpected_null</span>(<span class="macro">format!</span>(
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; GroupIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>try_next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;CellValue&gt;, DecodeColumnError&gt; {
+        <span class="kw">let </span>num = <span class="self">self
+            </span>.num
+            .next()
+            .transpose()
+            .map_err(|e| DecodeColumnError::decode_raw(<span class="string">&quot;num&quot;</span>, e))<span class="question-mark">?</span>;
+        <span class="kw">match </span>num {
+            <span class="prelude-val">None </span>=&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>),
+            <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) =&gt; <span class="prelude-val">Err</span>(DecodeColumnError::unexpected_null(<span class="string">&quot;num&quot;</span>)),
+            <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(num)) =&gt; {
+                <span class="kw">let </span><span class="kw-2">mut </span>row = Vec::new();
+                <span class="kw">for _ in </span><span class="number">0</span>..num {
+                    <span class="kw">let </span><span class="kw-2">mut </span>inner_row = Vec::new();
+                    <span class="kw">for </span>(index, value_col) <span class="kw">in </span><span class="self">self</span>.values.iter_mut().enumerate() {
+                        <span class="kw">match </span>value_col.next().transpose()<span class="question-mark">? </span>{
+                            <span class="prelude-val">None </span>=&gt; {
+                                <span class="kw">return </span><span class="prelude-val">Err</span>(DecodeColumnError::unexpected_null(<span class="macro">format!</span>(
                                     <span class="string">&quot;col {}&quot;</span>,
-                                    <span class="ident">index</span>
+                                    index
                                 )))
                             }
-                            <span class="prelude-val">Some</span>(<span class="ident">v</span>) =&gt; {
-                                <span class="ident">inner_row</span>.<span class="ident">push</span>(<span class="ident">v</span>);
+                            <span class="prelude-val">Some</span>(v) =&gt; {
+                                inner_row.push(v);
                             }
                         }
                     }
-                    <span class="ident">row</span>.<span class="ident">push</span>(<span class="ident">inner_row</span>);
+                    row.push(inner_row);
                 }
-                <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="ident">CellValue::Group</span>(<span class="ident">row</span>)))
+                <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(CellValue::Group(row)))
             }
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Iterator</span> <span class="kw">for</span> <span class="ident">GroupIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">CellValue</span>, <span class="ident">DecodeColumnError</span><span class="op">&gt;</span>;
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>GroupIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">type </span>Item = <span class="prelude-ty">Result</span>&lt;CellValue, DecodeColumnError&gt;;
 
-    <span class="kw">fn</span> <span class="ident">next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">try_next</span>().<span class="ident">transpose</span>()
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="self">self</span>.try_next().transpose()
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>)]</span>
-<span class="kw">enum</span> <span class="ident">GroupedColIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">Value</span>(<span class="ident">ValueIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>),
-    <span class="ident">Simple</span>(<span class="ident">SimpleColIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>),
+<span class="attribute">#[derive(Debug, Clone)]
+</span><span class="kw">enum </span>GroupedColIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    Value(ValueIter&lt;<span class="lifetime">&#39;a</span>&gt;),
+    Simple(SimpleColIter&lt;<span class="lifetime">&#39;a</span>&gt;),
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">GroupedColIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">try_next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">SimpleValue</span><span class="op">&gt;</span>, <span class="ident">DecodeColumnError</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident"><span class="self">Self</span>::Value</span>(<span class="ident">viter</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">viter</span>.<span class="ident">next</span>().<span class="ident">transpose</span>()<span class="question-mark">?</span>.<span class="ident">map</span>(<span class="ident">SimpleValue::Value</span>)),
-            <span class="ident"><span class="self">Self</span>::Simple</span>(<span class="ident">siter</span>) =&gt; <span class="ident">siter</span>
-                .<span class="ident">next</span>()
-                .<span class="ident">transpose</span>()
-                .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">DecodeColumnError::decode_raw</span>(<span class="string">&quot;a simple column&quot;</span>, <span class="ident">e</span>)),
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; GroupedColIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>try_next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;SimpleValue&gt;, DecodeColumnError&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            <span class="self">Self</span>::Value(viter) =&gt; <span class="prelude-val">Ok</span>(viter.next().transpose()<span class="question-mark">?</span>.map(SimpleValue::Value)),
+            <span class="self">Self</span>::Simple(siter) =&gt; siter
+                .next()
+                .transpose()
+                .map_err(|e| DecodeColumnError::decode_raw(<span class="string">&quot;a simple column&quot;</span>, e)),
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Iterator</span> <span class="kw">for</span> <span class="ident">GroupedColIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">SimpleValue</span>, <span class="ident">DecodeColumnError</span><span class="op">&gt;</span>;
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>GroupedColIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">type </span>Item = <span class="prelude-ty">Result</span>&lt;SimpleValue, DecodeColumnError&gt;;
 
-    <span class="kw">fn</span> <span class="ident">next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">try_next</span>().<span class="ident">transpose</span>()
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="self">self</span>.try_next().transpose()
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

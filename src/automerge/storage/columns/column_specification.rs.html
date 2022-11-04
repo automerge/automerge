@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/columns/column_specification.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>column_specification.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/columns/column_specification.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>column_specification.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -285,290 +285,290 @@
 <span id="283">283</span>
 <span id="284">284</span>
 <span id="285">285</span>
-</pre><pre class="rust"><code><span class="doccomment">/// An implementation of column specifications as specified in [1]</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// [1]: https://alexjg.github.io/automerge-storage-docs/#column-specifications</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Eq</span>, <span class="ident">PartialEq</span>, <span class="ident">Clone</span>, <span class="ident">Copy</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">ColumnSpec</span>(<span class="ident">u32</span>);
+</pre><pre class="rust"><code><span class="doccomment">/// An implementation of column specifications as specified in [1]
+///
+/// [1]: https://alexjg.github.io/automerge-storage-docs/#column-specifications
+</span><span class="attribute">#[derive(Eq, PartialEq, Clone, Copy)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ColumnSpec(u32);
 
-<span class="kw">impl</span> <span class="ident">ColumnSpec</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">id</span>: <span class="ident">ColumnId</span>, <span class="ident">col_type</span>: <span class="ident">ColumnType</span>, <span class="ident">deflate</span>: <span class="ident">bool</span>) -&gt; <span class="self">Self</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">raw</span> <span class="op">=</span> <span class="ident">id</span>.<span class="number">0</span> <span class="op">&lt;</span><span class="op">&lt;</span> <span class="number">4</span>;
-        <span class="ident">raw</span> <span class="op">|</span><span class="op">=</span> <span class="ident">u8::from</span>(<span class="ident">col_type</span>) <span class="kw">as</span> <span class="ident">u32</span>;
-        <span class="kw">if</span> <span class="ident">deflate</span> {
-            <span class="ident">raw</span> <span class="op">|</span><span class="op">=</span> <span class="number">0b00001000</span>;
-        } <span class="kw">else</span> {
-            <span class="ident">raw</span> <span class="op">&amp;=</span> <span class="number">0b11110111</span>;
+<span class="kw">impl </span>ColumnSpec {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(id: ColumnId, col_type: ColumnType, deflate: bool) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span><span class="kw-2">mut </span>raw = id.<span class="number">0 </span>&lt;&lt; <span class="number">4</span>;
+        raw |= u8::from(col_type) <span class="kw">as </span>u32;
+        <span class="kw">if </span>deflate {
+            raw |= <span class="number">0b00001000</span>;
+        } <span class="kw">else </span>{
+            raw &amp;= <span class="number">0b11110111</span>;
         }
-        <span class="ident">ColumnSpec</span>(<span class="ident">raw</span>)
+        ColumnSpec(raw)
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">col_type</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">ColumnType</span> {
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">to_be_bytes</span>()[<span class="number">3</span>].<span class="ident">into</span>()
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>col_type(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ColumnType {
+        <span class="self">self</span>.<span class="number">0</span>.to_be_bytes()[<span class="number">3</span>].into()
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">id</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">ColumnId</span> {
-        <span class="ident">ColumnId</span>(<span class="self">self</span>.<span class="number">0</span> <span class="op">&gt;</span><span class="op">&gt;</span> <span class="number">4</span>)
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ColumnId {
+        ColumnId(<span class="self">self</span>.<span class="number">0 </span>&gt;&gt; <span class="number">4</span>)
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">deflate</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="number">0</span> <span class="op">&amp;</span> <span class="number">0b00001000</span> <span class="op">&gt;</span> <span class="number">0</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>deflate(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="self">self</span>.<span class="number">0 </span>&amp; <span class="number">0b00001000 </span>&gt; <span class="number">0
+    </span>}
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>deflated(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>::new(<span class="self">self</span>.id(), <span class="self">self</span>.col_type(), <span class="bool-val">true</span>)
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">deflated</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident"><span class="self">Self</span>::new</span>(<span class="self">self</span>.<span class="ident">id</span>(), <span class="self">self</span>.<span class="ident">col_type</span>(), <span class="bool-val">true</span>)
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>inflated(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>::new(<span class="self">self</span>.id(), <span class="self">self</span>.col_type(), <span class="bool-val">false</span>)
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">inflated</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident"><span class="self">Self</span>::new</span>(<span class="self">self</span>.<span class="ident">id</span>(), <span class="self">self</span>.<span class="ident">col_type</span>(), <span class="bool-val">false</span>)
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">normalize</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Normalized</span> {
-        <span class="ident">Normalized</span>(<span class="self">self</span>.<span class="number">0</span> <span class="op">&amp;</span> <span class="number">0b11110111</span>)
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>normalize(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Normalized {
+        Normalized(<span class="self">self</span>.<span class="number">0 </span>&amp; <span class="number">0b11110111</span>)
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">PartialEq</span>, <span class="ident">PartialOrd</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">Normalized</span>(<span class="ident">u32</span>);
+<span class="attribute">#[derive(PartialEq, PartialOrd)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Normalized(u32);
 
-<span class="kw">impl</span> <span class="ident">std::fmt::Debug</span> <span class="kw">for</span> <span class="ident">ColumnSpec</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">std::fmt::Result</span> {
+<span class="kw">impl </span>std::fmt::Debug <span class="kw">for </span>ColumnSpec {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; std::fmt::Result {
         <span class="macro">write!</span>(
-            <span class="ident">f</span>,
+            f,
             <span class="string">&quot;ColumnSpec(id: {:?}, type: {}, deflate: {})&quot;</span>,
-            <span class="self">self</span>.<span class="ident">id</span>(),
-            <span class="self">self</span>.<span class="ident">col_type</span>(),
-            <span class="self">self</span>.<span class="ident">deflate</span>()
+            <span class="self">self</span>.id(),
+            <span class="self">self</span>.col_type(),
+            <span class="self">self</span>.deflate()
         )
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Eq</span>, <span class="ident">PartialEq</span>, <span class="ident">Clone</span>, <span class="ident">Copy</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">ColumnId</span>(<span class="ident">u32</span>);
+<span class="attribute">#[derive(Eq, PartialEq, Clone, Copy)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ColumnId(u32);
 
-<span class="kw">impl</span> <span class="ident">ColumnId</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">raw</span>: <span class="ident">u32</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">ColumnId</span>(<span class="ident">raw</span>)
+<span class="kw">impl </span>ColumnId {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const fn </span>new(raw: u32) -&gt; <span class="self">Self </span>{
+        ColumnId(raw)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">u32</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ColumnId</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">raw</span>: <span class="ident">u32</span>) -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span>(<span class="ident">raw</span>)
+<span class="kw">impl </span>From&lt;u32&gt; <span class="kw">for </span>ColumnId {
+    <span class="kw">fn </span>from(raw: u32) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>(raw)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">std::fmt::Debug</span> <span class="kw">for</span> <span class="ident">ColumnId</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">std::fmt::Result</span> {
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">fmt</span>(<span class="ident">f</span>)
+<span class="kw">impl </span>std::fmt::Debug <span class="kw">for </span>ColumnId {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; std::fmt::Result {
+        <span class="self">self</span>.<span class="number">0</span>.fmt(f)
     }
 }
 
-<span class="doccomment">/// The differente possible column types, as specified in [1]</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// [1]: https://alexjg.github.io/automerge-storage-docs/#column-specifications</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Eq</span>, <span class="ident">PartialEq</span>, <span class="ident">Clone</span>, <span class="ident">Copy</span>, <span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">ColumnType</span> {
-    <span class="ident">Group</span>,
-    <span class="ident">Actor</span>,
-    <span class="ident">Integer</span>,
-    <span class="ident">DeltaInteger</span>,
-    <span class="ident">Boolean</span>,
-    <span class="ident">String</span>,
-    <span class="ident">ValueMetadata</span>,
-    <span class="ident">Value</span>,
+<span class="doccomment">/// The differente possible column types, as specified in [1]
+///
+/// [1]: https://alexjg.github.io/automerge-storage-docs/#column-specifications
+</span><span class="attribute">#[derive(Eq, PartialEq, Clone, Copy, Debug)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>ColumnType {
+    Group,
+    Actor,
+    Integer,
+    DeltaInteger,
+    Boolean,
+    String,
+    ValueMetadata,
+    Value,
 }
 
-<span class="kw">impl</span> <span class="ident">std::fmt::Display</span> <span class="kw">for</span> <span class="ident">ColumnType</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">std::fmt::Result</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident"><span class="self">Self</span>::Group</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Group&quot;</span>),
-            <span class="ident"><span class="self">Self</span>::Actor</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Actor&quot;</span>),
-            <span class="ident"><span class="self">Self</span>::Integer</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Integer&quot;</span>),
-            <span class="ident"><span class="self">Self</span>::DeltaInteger</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;DeltaInteger&quot;</span>),
-            <span class="ident"><span class="self">Self</span>::Boolean</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Boolean&quot;</span>),
-            <span class="ident"><span class="self">Self</span>::String</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;String&quot;</span>),
-            <span class="ident"><span class="self">Self</span>::ValueMetadata</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;ValueMetadata&quot;</span>),
-            <span class="ident"><span class="self">Self</span>::Value</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Value&quot;</span>),
+<span class="kw">impl </span>std::fmt::Display <span class="kw">for </span>ColumnType {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; std::fmt::Result {
+        <span class="kw">match </span><span class="self">self </span>{
+            <span class="self">Self</span>::Group =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;Group&quot;</span>),
+            <span class="self">Self</span>::Actor =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;Actor&quot;</span>),
+            <span class="self">Self</span>::Integer =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;Integer&quot;</span>),
+            <span class="self">Self</span>::DeltaInteger =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;DeltaInteger&quot;</span>),
+            <span class="self">Self</span>::Boolean =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;Boolean&quot;</span>),
+            <span class="self">Self</span>::String =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;String&quot;</span>),
+            <span class="self">Self</span>::ValueMetadata =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;ValueMetadata&quot;</span>),
+            <span class="self">Self</span>::Value =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;Value&quot;</span>),
         }
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ColumnType</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">v</span>: <span class="ident">u8</span>) -&gt; <span class="self">Self</span> {
-        <span class="kw">let</span> <span class="ident">type_bits</span> <span class="op">=</span> <span class="ident">v</span> <span class="op">&amp;</span> <span class="number">0b00000111</span>;
-        <span class="kw">match</span> <span class="ident">type_bits</span> {
-            <span class="number">0</span> =&gt; <span class="ident"><span class="self">Self</span>::Group</span>,
-            <span class="number">1</span> =&gt; <span class="ident"><span class="self">Self</span>::Actor</span>,
-            <span class="number">2</span> =&gt; <span class="ident"><span class="self">Self</span>::Integer</span>,
-            <span class="number">3</span> =&gt; <span class="ident"><span class="self">Self</span>::DeltaInteger</span>,
-            <span class="number">4</span> =&gt; <span class="ident"><span class="self">Self</span>::Boolean</span>,
-            <span class="number">5</span> =&gt; <span class="ident"><span class="self">Self</span>::String</span>,
-            <span class="number">6</span> =&gt; <span class="ident"><span class="self">Self</span>::ValueMetadata</span>,
-            <span class="number">7</span> =&gt; <span class="ident"><span class="self">Self</span>::Value</span>,
-            <span class="kw">_</span> =&gt; <span class="macro">unreachable!</span>(),
+<span class="kw">impl </span>From&lt;u8&gt; <span class="kw">for </span>ColumnType {
+    <span class="kw">fn </span>from(v: u8) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>type_bits = v &amp; <span class="number">0b00000111</span>;
+        <span class="kw">match </span>type_bits {
+            <span class="number">0 </span>=&gt; <span class="self">Self</span>::Group,
+            <span class="number">1 </span>=&gt; <span class="self">Self</span>::Actor,
+            <span class="number">2 </span>=&gt; <span class="self">Self</span>::Integer,
+            <span class="number">3 </span>=&gt; <span class="self">Self</span>::DeltaInteger,
+            <span class="number">4 </span>=&gt; <span class="self">Self</span>::Boolean,
+            <span class="number">5 </span>=&gt; <span class="self">Self</span>::String,
+            <span class="number">6 </span>=&gt; <span class="self">Self</span>::ValueMetadata,
+            <span class="number">7 </span>=&gt; <span class="self">Self</span>::Value,
+            <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(),
         }
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">ColumnType</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">u8</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">ct</span>: <span class="ident">ColumnType</span>) -&gt; <span class="self">Self</span> {
-        <span class="kw">match</span> <span class="ident">ct</span> {
-            <span class="ident">ColumnType::Group</span> =&gt; <span class="number">0</span>,
-            <span class="ident">ColumnType::Actor</span> =&gt; <span class="number">1</span>,
-            <span class="ident">ColumnType::Integer</span> =&gt; <span class="number">2</span>,
-            <span class="ident">ColumnType::DeltaInteger</span> =&gt; <span class="number">3</span>,
-            <span class="ident">ColumnType::Boolean</span> =&gt; <span class="number">4</span>,
-            <span class="ident">ColumnType::String</span> =&gt; <span class="number">5</span>,
-            <span class="ident">ColumnType::ValueMetadata</span> =&gt; <span class="number">6</span>,
-            <span class="ident">ColumnType::Value</span> =&gt; <span class="number">7</span>,
+<span class="kw">impl </span>From&lt;ColumnType&gt; <span class="kw">for </span>u8 {
+    <span class="kw">fn </span>from(ct: ColumnType) -&gt; <span class="self">Self </span>{
+        <span class="kw">match </span>ct {
+            ColumnType::Group =&gt; <span class="number">0</span>,
+            ColumnType::Actor =&gt; <span class="number">1</span>,
+            ColumnType::Integer =&gt; <span class="number">2</span>,
+            ColumnType::DeltaInteger =&gt; <span class="number">3</span>,
+            ColumnType::Boolean =&gt; <span class="number">4</span>,
+            ColumnType::String =&gt; <span class="number">5</span>,
+            ColumnType::ValueMetadata =&gt; <span class="number">6</span>,
+            ColumnType::Value =&gt; <span class="number">7</span>,
         }
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">u32</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ColumnSpec</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">raw</span>: <span class="ident">u32</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">ColumnSpec</span>(<span class="ident">raw</span>)
+<span class="kw">impl </span>From&lt;u32&gt; <span class="kw">for </span>ColumnSpec {
+    <span class="kw">fn </span>from(raw: u32) -&gt; <span class="self">Self </span>{
+        ColumnSpec(raw)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">ColumnSpec</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">u32</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">spec</span>: <span class="ident">ColumnSpec</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">spec</span>.<span class="number">0</span>
+<span class="kw">impl </span>From&lt;ColumnSpec&gt; <span class="kw">for </span>u32 {
+    <span class="kw">fn </span>from(spec: ColumnSpec) -&gt; <span class="self">Self </span>{
+        spec.<span class="number">0
+    </span>}
+}
+
+<span class="kw">impl </span>From&lt;[u8; <span class="number">4</span>]&gt; <span class="kw">for </span>ColumnSpec {
+    <span class="kw">fn </span>from(raw: [u8; <span class="number">4</span>]) -&gt; <span class="self">Self </span>{
+        u32::from_be_bytes(raw).into()
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span>[<span class="ident">u8</span>; <span class="number">4</span>]<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ColumnSpec</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">raw</span>: [<span class="ident">u8</span>; <span class="number">4</span>]) -&gt; <span class="self">Self</span> {
-        <span class="ident">u32::from_be_bytes</span>(<span class="ident">raw</span>).<span class="ident">into</span>()
-    }
-}
+<span class="attribute">#[cfg(test)]
+</span><span class="kw">mod </span>tests {
+    <span class="kw">use super</span>::<span class="kw-2">*</span>;
 
-<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
-<span class="kw">mod</span> <span class="ident">tests</span> {
-    <span class="kw">use</span> <span class="kw">super</span>::<span class="kw-2">*</span>;
-
-    <span class="attribute">#[<span class="ident">test</span>]</span>
-    <span class="kw">fn</span> <span class="ident">column_spec_encoding</span>() {
-        <span class="kw">struct</span> <span class="ident">Scenario</span> {
-            <span class="ident">id</span>: <span class="ident">ColumnId</span>,
-            <span class="ident">col_type</span>: <span class="ident">ColumnType</span>,
-            <span class="ident">int_val</span>: <span class="ident">u32</span>,
+    <span class="attribute">#[test]
+    </span><span class="kw">fn </span>column_spec_encoding() {
+        <span class="kw">struct </span>Scenario {
+            id: ColumnId,
+            col_type: ColumnType,
+            int_val: u32,
         }
 
-        <span class="kw">let</span> <span class="ident">scenarios</span> <span class="op">=</span> <span class="macro">vec!</span>[
-            <span class="ident">Scenario</span> {
-                <span class="ident">id</span>: <span class="ident">ColumnId</span>(<span class="number">7</span>),
-                <span class="ident">col_type</span>: <span class="ident">ColumnType::Group</span>,
-                <span class="ident">int_val</span>: <span class="number">112</span>,
+        <span class="kw">let </span>scenarios = <span class="macro">vec!</span>[
+            Scenario {
+                id: ColumnId(<span class="number">7</span>),
+                col_type: ColumnType::Group,
+                int_val: <span class="number">112</span>,
             },
-            <span class="ident">Scenario</span> {
-                <span class="ident">id</span>: <span class="ident">ColumnId</span>(<span class="number">0</span>),
-                <span class="ident">col_type</span>: <span class="ident">ColumnType::Actor</span>,
-                <span class="ident">int_val</span>: <span class="number">1</span>,
+            Scenario {
+                id: ColumnId(<span class="number">0</span>),
+                col_type: ColumnType::Actor,
+                int_val: <span class="number">1</span>,
             },
-            <span class="ident">Scenario</span> {
-                <span class="ident">id</span>: <span class="ident">ColumnId</span>(<span class="number">0</span>),
-                <span class="ident">col_type</span>: <span class="ident">ColumnType::Integer</span>,
-                <span class="ident">int_val</span>: <span class="number">2</span>,
+            Scenario {
+                id: ColumnId(<span class="number">0</span>),
+                col_type: ColumnType::Integer,
+                int_val: <span class="number">2</span>,
             },
-            <span class="ident">Scenario</span> {
-                <span class="ident">id</span>: <span class="ident">ColumnId</span>(<span class="number">1</span>),
-                <span class="ident">col_type</span>: <span class="ident">ColumnType::DeltaInteger</span>,
-                <span class="ident">int_val</span>: <span class="number">19</span>,
+            Scenario {
+                id: ColumnId(<span class="number">1</span>),
+                col_type: ColumnType::DeltaInteger,
+                int_val: <span class="number">19</span>,
             },
-            <span class="ident">Scenario</span> {
-                <span class="ident">id</span>: <span class="ident">ColumnId</span>(<span class="number">3</span>),
-                <span class="ident">col_type</span>: <span class="ident">ColumnType::Boolean</span>,
-                <span class="ident">int_val</span>: <span class="number">52</span>,
+            Scenario {
+                id: ColumnId(<span class="number">3</span>),
+                col_type: ColumnType::Boolean,
+                int_val: <span class="number">52</span>,
             },
-            <span class="ident">Scenario</span> {
-                <span class="ident">id</span>: <span class="ident">ColumnId</span>(<span class="number">1</span>),
-                <span class="ident">col_type</span>: <span class="ident">ColumnType::String</span>,
-                <span class="ident">int_val</span>: <span class="number">21</span>,
+            Scenario {
+                id: ColumnId(<span class="number">1</span>),
+                col_type: ColumnType::String,
+                int_val: <span class="number">21</span>,
             },
-            <span class="ident">Scenario</span> {
-                <span class="ident">id</span>: <span class="ident">ColumnId</span>(<span class="number">5</span>),
-                <span class="ident">col_type</span>: <span class="ident">ColumnType::ValueMetadata</span>,
-                <span class="ident">int_val</span>: <span class="number">86</span>,
+            Scenario {
+                id: ColumnId(<span class="number">5</span>),
+                col_type: ColumnType::ValueMetadata,
+                int_val: <span class="number">86</span>,
             },
-            <span class="ident">Scenario</span> {
-                <span class="ident">id</span>: <span class="ident">ColumnId</span>(<span class="number">5</span>),
-                <span class="ident">col_type</span>: <span class="ident">ColumnType::Value</span>,
-                <span class="ident">int_val</span>: <span class="number">87</span>,
+            Scenario {
+                id: ColumnId(<span class="number">5</span>),
+                col_type: ColumnType::Value,
+                int_val: <span class="number">87</span>,
             },
         ];
 
-        <span class="kw">for</span> (<span class="ident">index</span>, <span class="ident">scenario</span>) <span class="kw">in</span> <span class="ident">scenarios</span>.<span class="ident">into_iter</span>().<span class="ident">enumerate</span>() {
-            <span class="kw">let</span> <span class="ident">spec</span> <span class="op">=</span> <span class="ident">ColumnSpec::new</span>(<span class="ident">scenario</span>.<span class="ident">id</span>, <span class="ident">scenario</span>.<span class="ident">col_type</span>, <span class="bool-val">false</span>);
+        <span class="kw">for </span>(index, scenario) <span class="kw">in </span>scenarios.into_iter().enumerate() {
+            <span class="kw">let </span>spec = ColumnSpec::new(scenario.id, scenario.col_type, <span class="bool-val">false</span>);
 
-            <span class="kw">let</span> <span class="ident">encoded_val</span> <span class="op">=</span> <span class="ident">u32::from</span>(<span class="ident">spec</span>);
-            <span class="kw">if</span> <span class="ident">encoded_val</span> <span class="op">!</span><span class="op">=</span> <span class="ident">scenario</span>.<span class="ident">int_val</span> {
+            <span class="kw">let </span>encoded_val = u32::from(spec);
+            <span class="kw">if </span>encoded_val != scenario.int_val {
                 <span class="macro">panic!</span>(
                     <span class="string">&quot;Scenario {} failed encoding: expected {} but got {}&quot;</span>,
-                    <span class="ident">index</span> <span class="op">+</span> <span class="number">1</span>,
-                    <span class="ident">scenario</span>.<span class="ident">int_val</span>,
-                    <span class="ident">encoded_val</span>
+                    index + <span class="number">1</span>,
+                    scenario.int_val,
+                    encoded_val
                 );
             }
 
-            <span class="kw">if</span> <span class="ident">spec</span>.<span class="ident">col_type</span>() <span class="op">!</span><span class="op">=</span> <span class="ident">scenario</span>.<span class="ident">col_type</span> {
+            <span class="kw">if </span>spec.col_type() != scenario.col_type {
                 <span class="macro">panic!</span>(
                     <span class="string">&quot;Scenario {} failed col type: expected {:?} but got {:?}&quot;</span>,
-                    <span class="ident">index</span> <span class="op">+</span> <span class="number">1</span>,
-                    <span class="ident">scenario</span>.<span class="ident">col_type</span>,
-                    <span class="ident">spec</span>.<span class="ident">col_type</span>()
+                    index + <span class="number">1</span>,
+                    scenario.col_type,
+                    spec.col_type()
                 );
             }
 
-            <span class="kw">if</span> <span class="ident">spec</span>.<span class="ident">deflate</span>() {
+            <span class="kw">if </span>spec.deflate() {
                 <span class="macro">panic!</span>(
                     <span class="string">&quot;Scenario {} failed: spec returned true for deflate, should have been false&quot;</span>,
-                    <span class="ident">index</span> <span class="op">+</span> <span class="number">1</span>
-                );
+                    index + <span class="number">1
+                </span>);
             }
 
-            <span class="kw">if</span> <span class="ident">spec</span>.<span class="ident">id</span>() <span class="op">!</span><span class="op">=</span> <span class="ident">scenario</span>.<span class="ident">id</span> {
+            <span class="kw">if </span>spec.id() != scenario.id {
                 <span class="macro">panic!</span>(
                     <span class="string">&quot;Scenario {} failed id: expected {:?} but got {:?}&quot;</span>,
-                    <span class="ident">index</span> <span class="op">+</span> <span class="number">1</span>,
-                    <span class="ident">scenario</span>.<span class="ident">id</span>,
-                    <span class="ident">spec</span>.<span class="ident">id</span>()
+                    index + <span class="number">1</span>,
+                    scenario.id,
+                    spec.id()
                 );
             }
 
-            <span class="kw">let</span> <span class="ident">deflated</span> <span class="op">=</span> <span class="ident">ColumnSpec::new</span>(<span class="ident">scenario</span>.<span class="ident">id</span>, <span class="ident">scenario</span>.<span class="ident">col_type</span>, <span class="bool-val">true</span>);
+            <span class="kw">let </span>deflated = ColumnSpec::new(scenario.id, scenario.col_type, <span class="bool-val">true</span>);
 
-            <span class="kw">if</span> <span class="ident">deflated</span>.<span class="ident">id</span>() <span class="op">!</span><span class="op">=</span> <span class="ident">spec</span>.<span class="ident">id</span>() {
-                <span class="macro">panic!</span>(<span class="string">&quot;Scenario {} failed deflate id test&quot;</span>, <span class="ident">index</span> <span class="op">+</span> <span class="number">1</span>);
+            <span class="kw">if </span>deflated.id() != spec.id() {
+                <span class="macro">panic!</span>(<span class="string">&quot;Scenario {} failed deflate id test&quot;</span>, index + <span class="number">1</span>);
             }
 
-            <span class="kw">if</span> <span class="ident">deflated</span>.<span class="ident">col_type</span>() <span class="op">!</span><span class="op">=</span> <span class="ident">spec</span>.<span class="ident">col_type</span>() {
-                <span class="macro">panic!</span>(<span class="string">&quot;Scenario {} failed col type test&quot;</span>, <span class="ident">index</span> <span class="op">+</span> <span class="number">1</span>);
+            <span class="kw">if </span>deflated.col_type() != spec.col_type() {
+                <span class="macro">panic!</span>(<span class="string">&quot;Scenario {} failed col type test&quot;</span>, index + <span class="number">1</span>);
             }
 
-            <span class="kw">if</span> <span class="op">!</span><span class="ident">deflated</span>.<span class="ident">deflate</span>() {
+            <span class="kw">if </span>!deflated.deflate() {
                 <span class="macro">panic!</span>(
                     <span class="string">&quot;Scenario {} failed: when deflate bit set deflate returned false&quot;</span>,
-                    <span class="ident">index</span> <span class="op">+</span> <span class="number">1</span>
-                );
+                    index + <span class="number">1
+                </span>);
             }
 
-            <span class="kw">let</span> <span class="ident">expected</span> <span class="op">=</span> <span class="ident">scenario</span>.<span class="ident">int_val</span> <span class="op">|</span> <span class="number">0b00001000</span>;
-            <span class="kw">if</span> <span class="ident">expected</span> <span class="op">!</span><span class="op">=</span> <span class="ident">u32::from</span>(<span class="ident">deflated</span>) {
+            <span class="kw">let </span>expected = scenario.int_val | <span class="number">0b00001000</span>;
+            <span class="kw">if </span>expected != u32::from(deflated) {
                 <span class="macro">panic!</span>(
                     <span class="string">&quot;Scenario {} failed deflate bit test, expected {} got {}&quot;</span>,
-                    <span class="ident">index</span> <span class="op">+</span> <span class="number">1</span>,
-                    <span class="ident">expected</span>,
-                    <span class="ident">u32::from</span>(<span class="ident">deflated</span>)
+                    index + <span class="number">1</span>,
+                    expected,
+                    u32::from(deflated)
                 );
             }
 
-            <span class="kw">if</span> <span class="ident">deflated</span>.<span class="ident">normalize</span>() <span class="op">!</span><span class="op">=</span> <span class="ident">spec</span>.<span class="ident">normalize</span>() {
-                <span class="macro">panic!</span>(<span class="string">&quot;Scenario {} failed normalize test&quot;</span>, <span class="ident">index</span> <span class="op">+</span> <span class="number">1</span>);
+            <span class="kw">if </span>deflated.normalize() != spec.normalize() {
+                <span class="macro">panic!</span>(<span class="string">&quot;Scenario {} failed normalize test&quot;</span>, index + <span class="number">1</span>);
             }
         }
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

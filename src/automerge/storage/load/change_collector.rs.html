@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/load/change_collector.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>change_collector.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/load/change_collector.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>change_collector.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -209,214 +209,214 @@
 <span id="207">207</span>
 <span id="208">208</span>
 <span id="209">209</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std</span>::{
-    <span class="ident">borrow::Cow</span>,
-    <span class="ident">collections</span>::{<span class="ident">BTreeSet</span>, <span class="ident">HashMap</span>},
-    <span class="ident">num::NonZeroU64</span>,
+</pre><pre class="rust"><code><span class="kw">use </span>std::{
+    borrow::Cow,
+    collections::{BTreeSet, HashMap},
+    num::NonZeroU64,
 };
 
-<span class="kw">use</span> <span class="ident">tracing::instrument</span>;
+<span class="kw">use </span>tracing::instrument;
 
-<span class="kw">use</span> <span class="kw">crate</span>::{
-    <span class="ident">op_tree::OpSetMetadata</span>,
-    <span class="ident">storage</span>::{
-        <span class="ident">change</span>::{<span class="ident">PredOutOfOrder</span>, <span class="ident">Verified</span>},
-        <span class="ident">convert::op_as_actor_id</span>,
-        <span class="ident">Change</span> <span class="kw">as</span> <span class="ident">StoredChange</span>, <span class="ident">ChangeMetadata</span>,
+<span class="kw">use crate</span>::{
+    op_tree::OpSetMetadata,
+    storage::{
+        change::{PredOutOfOrder, Verified},
+        convert::op_as_actor_id,
+        Change <span class="kw">as </span>StoredChange, ChangeMetadata,
     },
-    <span class="ident">types</span>::{<span class="ident">ChangeHash</span>, <span class="ident">ObjId</span>, <span class="ident">Op</span>},
+    types::{ChangeHash, ObjId, Op},
 };
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">thiserror::Error</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">Error</span> {
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;a change referenced an actor index we couldn&#39;t find&quot;</span>)]</span>
-    <span class="ident">MissingActor</span>,
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;changes out of order&quot;</span>)]</span>
-    <span class="ident">ChangesOutOfOrder</span>,
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;missing change&quot;</span>)]</span>
-    <span class="ident">MissingChange</span>,
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;unable to read change metadata: {0}&quot;</span>)]</span>
-    <span class="ident">ReadChange</span>(<span class="ident">Box</span><span class="op">&lt;</span><span class="kw">dyn</span> <span class="ident">std::error::Error</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Sync</span> <span class="op">+</span> <span class="lifetime">&#39;static</span><span class="op">&gt;</span>),
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;missing ops&quot;</span>)]</span>
-    <span class="ident">MissingOps</span>,
+<span class="attribute">#[derive(Debug, thiserror::Error)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>Error {
+    <span class="attribute">#[error(<span class="string">&quot;a change referenced an actor index we couldn&#39;t find&quot;</span>)]
+    </span>MissingActor,
+    <span class="attribute">#[error(<span class="string">&quot;changes out of order&quot;</span>)]
+    </span>ChangesOutOfOrder,
+    <span class="attribute">#[error(<span class="string">&quot;missing change&quot;</span>)]
+    </span>MissingChange,
+    <span class="attribute">#[error(<span class="string">&quot;unable to read change metadata: {0}&quot;</span>)]
+    </span>ReadChange(Box&lt;<span class="kw">dyn </span>std::error::Error + Send + Sync + <span class="lifetime">&#39;static</span>&gt;),
+    <span class="attribute">#[error(<span class="string">&quot;missing ops&quot;</span>)]
+    </span>MissingOps,
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">ChangeCollector</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">changes_by_actor</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">usize</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">PartialChange</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ChangeCollector&lt;<span class="lifetime">&#39;a</span>&gt; {
+    changes_by_actor: HashMap&lt;usize, Vec&lt;PartialChange&lt;<span class="lifetime">&#39;a</span>&gt;&gt;&gt;,
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">CollectedChanges</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">history</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">StoredChange</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Verified</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">heads</span>: <span class="ident">BTreeSet</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>,
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>CollectedChanges&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) history: Vec&lt;StoredChange&lt;<span class="lifetime">&#39;a</span>, Verified&gt;&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) heads: BTreeSet&lt;ChangeHash&gt;,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">ChangeCollector</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span><span class="op">&lt;</span><span class="ident">E</span>: <span class="ident">std::error::Error</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Sync</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>, <span class="ident">I</span><span class="op">&gt;</span>(
-        <span class="ident">changes</span>: <span class="ident">I</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">ChangeCollector</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>, <span class="ident">Error</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">I</span>: <span class="ident">IntoIterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">ChangeMetadata</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>, <span class="ident">E</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; ChangeCollector&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new&lt;E: std::error::Error + Send + Sync + <span class="lifetime">&#39;static</span>, I&gt;(
+        changes: I,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;ChangeCollector&lt;<span class="lifetime">&#39;a</span>&gt;, Error&gt;
+    <span class="kw">where
+        </span>I: IntoIterator&lt;Item = <span class="prelude-ty">Result</span>&lt;ChangeMetadata&lt;<span class="lifetime">&#39;a</span>&gt;, E&gt;&gt;,
     {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">changes_by_actor</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">usize</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">PartialChange</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">HashMap::new</span>();
-        <span class="kw">for</span> (<span class="ident">index</span>, <span class="ident">change</span>) <span class="kw">in</span> <span class="ident">changes</span>.<span class="ident">into_iter</span>().<span class="ident">enumerate</span>() {
-            <span class="macro">tracing::trace!</span>(<span class="question-mark">?</span><span class="ident">change</span>, <span class="string">&quot;importing change metadata&quot;</span>);
-            <span class="kw">let</span> <span class="ident">change</span> <span class="op">=</span> <span class="ident">change</span>.<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">Error::ReadChange</span>(<span class="ident">Box::new</span>(<span class="ident">e</span>)))<span class="question-mark">?</span>;
-            <span class="kw">let</span> <span class="ident">actor_changes</span> <span class="op">=</span> <span class="ident">changes_by_actor</span>.<span class="ident">entry</span>(<span class="ident">change</span>.<span class="ident">actor</span>).<span class="ident">or_default</span>();
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">prev</span>) <span class="op">=</span> <span class="ident">actor_changes</span>.<span class="ident">last</span>() {
-                <span class="comment">// Note that we allow max_op to be equal to the previous max_op in case the</span>
-                <span class="comment">// previous change had no ops (which is permitted)</span>
-                <span class="kw">if</span> <span class="ident">prev</span>.<span class="ident">max_op</span> <span class="op">&gt;</span> <span class="ident">change</span>.<span class="ident">max_op</span> {
-                    <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">Error::ChangesOutOfOrder</span>);
+        <span class="kw">let </span><span class="kw-2">mut </span>changes_by_actor: HashMap&lt;usize, Vec&lt;PartialChange&lt;<span class="lifetime">&#39;_</span>&gt;&gt;&gt; = HashMap::new();
+        <span class="kw">for </span>(index, change) <span class="kw">in </span>changes.into_iter().enumerate() {
+            <span class="macro">tracing::trace!</span>(<span class="question-mark">?</span>change, <span class="string">&quot;importing change metadata&quot;</span>);
+            <span class="kw">let </span>change = change.map_err(|e| Error::ReadChange(Box::new(e)))<span class="question-mark">?</span>;
+            <span class="kw">let </span>actor_changes = changes_by_actor.entry(change.actor).or_default();
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(prev) = actor_changes.last() {
+                <span class="comment">// Note that we allow max_op to be equal to the previous max_op in case the
+                // previous change had no ops (which is permitted)
+                </span><span class="kw">if </span>prev.max_op &gt; change.max_op {
+                    <span class="kw">return </span><span class="prelude-val">Err</span>(Error::ChangesOutOfOrder);
                 }
             }
-            <span class="ident">actor_changes</span>.<span class="ident">push</span>(<span class="ident">PartialChange</span> {
-                <span class="ident">index</span>,
-                <span class="ident">deps</span>: <span class="ident">change</span>.<span class="ident">deps</span>,
-                <span class="ident">actor</span>: <span class="ident">change</span>.<span class="ident">actor</span>,
-                <span class="ident">seq</span>: <span class="ident">change</span>.<span class="ident">seq</span>,
-                <span class="ident">timestamp</span>: <span class="ident">change</span>.<span class="ident">timestamp</span>,
-                <span class="ident">max_op</span>: <span class="ident">change</span>.<span class="ident">max_op</span>,
-                <span class="ident">message</span>: <span class="ident">change</span>.<span class="ident">message</span>,
-                <span class="ident">extra_bytes</span>: <span class="ident">change</span>.<span class="ident">extra</span>,
-                <span class="ident">ops</span>: <span class="ident">Vec::new</span>(),
+            actor_changes.push(PartialChange {
+                index,
+                deps: change.deps,
+                actor: change.actor,
+                seq: change.seq,
+                timestamp: change.timestamp,
+                max_op: change.max_op,
+                message: change.message,
+                extra_bytes: change.extra,
+                ops: Vec::new(),
             })
         }
-        <span class="kw">let</span> <span class="ident">num_changes</span>: <span class="ident">usize</span> <span class="op">=</span> <span class="ident">changes_by_actor</span>.<span class="ident">values</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">v</span><span class="op">|</span> <span class="ident">v</span>.<span class="ident">len</span>()).<span class="ident">sum</span>();
-        <span class="macro">tracing::trace!</span>(<span class="ident">num_changes</span>, <span class="string">&quot;change collection context created&quot;</span>);
-        <span class="prelude-val">Ok</span>(<span class="ident">ChangeCollector</span> { <span class="ident">changes_by_actor</span> })
+        <span class="kw">let </span>num_changes: usize = changes_by_actor.values().map(|v| v.len()).sum();
+        <span class="macro">tracing::trace!</span>(num_changes, <span class="string">&quot;change collection context created&quot;</span>);
+        <span class="prelude-val">Ok</span>(ChangeCollector { changes_by_actor })
     }
 
-    <span class="attribute">#[<span class="ident">instrument</span>(<span class="ident">skip</span>(<span class="self">self</span>))]</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">collect</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">ObjId</span>, <span class="ident">op</span>: <span class="ident">Op</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">actor_changes</span> <span class="op">=</span> <span class="self">self</span>
-            .<span class="ident">changes_by_actor</span>
-            .<span class="ident">get_mut</span>(<span class="kw-2">&amp;</span><span class="ident">op</span>.<span class="ident">id</span>.<span class="ident">actor</span>())
-            .<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> {
-                <span class="macro">tracing::error!</span>(<span class="ident">missing_actor</span> <span class="op">=</span> <span class="ident">op</span>.<span class="ident">id</span>.<span class="ident">actor</span>(), <span class="string">&quot;missing actor for op&quot;</span>);
-                <span class="ident">Error::MissingActor</span>
+    <span class="attribute">#[instrument(skip(<span class="self">self</span>))]
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>collect(<span class="kw-2">&amp;mut </span><span class="self">self</span>, obj: ObjId, op: Op) -&gt; <span class="prelude-ty">Result</span>&lt;(), Error&gt; {
+        <span class="kw">let </span>actor_changes = <span class="self">self
+            </span>.changes_by_actor
+            .get_mut(<span class="kw-2">&amp;</span>op.id.actor())
+            .ok_or_else(|| {
+                <span class="macro">tracing::error!</span>(missing_actor = op.id.actor(), <span class="string">&quot;missing actor for op&quot;</span>);
+                Error::MissingActor
             })<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">change_index</span> <span class="op">=</span> <span class="ident">actor_changes</span>.<span class="ident">partition_point</span>(<span class="op">|</span><span class="ident">c</span><span class="op">|</span> <span class="ident">c</span>.<span class="ident">max_op</span> <span class="op">&lt;</span> <span class="ident">op</span>.<span class="ident">id</span>.<span class="ident">counter</span>());
-        <span class="kw">let</span> <span class="ident">change</span> <span class="op">=</span> <span class="ident">actor_changes</span>.<span class="ident">get_mut</span>(<span class="ident">change_index</span>).<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> {
-            <span class="macro">tracing::error!</span>(<span class="ident">missing_change_index</span> <span class="op">=</span> <span class="ident">change_index</span>, <span class="string">&quot;missing change for op&quot;</span>);
-            <span class="ident">Error::MissingChange</span>
+        <span class="kw">let </span>change_index = actor_changes.partition_point(|c| c.max_op &lt; op.id.counter());
+        <span class="kw">let </span>change = actor_changes.get_mut(change_index).ok_or_else(|| {
+            <span class="macro">tracing::error!</span>(missing_change_index = change_index, <span class="string">&quot;missing change for op&quot;</span>);
+            Error::MissingChange
         })<span class="question-mark">?</span>;
-        <span class="ident">change</span>.<span class="ident">ops</span>.<span class="ident">push</span>((<span class="ident">obj</span>, <span class="ident">op</span>));
+        change.ops.push((obj, op));
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="attribute">#[<span class="ident">instrument</span>(<span class="ident">skip</span>(<span class="self">self</span>, <span class="ident">metadata</span>))]</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">finish</span>(
+    <span class="attribute">#[instrument(skip(<span class="self">self</span>, metadata))]
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>finish(
         <span class="self">self</span>,
-        <span class="ident">metadata</span>: <span class="kw-2">&amp;</span><span class="ident">OpSetMetadata</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">CollectedChanges</span><span class="op">&lt;</span><span class="lifetime">&#39;static</span><span class="op">&gt;</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">changes_in_order</span> <span class="op">=</span>
-            <span class="ident">Vec::with_capacity</span>(<span class="self">self</span>.<span class="ident">changes_by_actor</span>.<span class="ident">values</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">c</span><span class="op">|</span> <span class="ident">c</span>.<span class="ident">len</span>()).<span class="ident">sum</span>());
-        <span class="kw">for</span> (<span class="kw">_</span>, <span class="ident">changes</span>) <span class="kw">in</span> <span class="self">self</span>.<span class="ident">changes_by_actor</span> {
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">seq</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-            <span class="kw">for</span> <span class="ident">change</span> <span class="kw">in</span> <span class="ident">changes</span> {
-                <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">seq</span>) <span class="op">=</span> <span class="ident">seq</span> {
-                    <span class="kw">if</span> <span class="ident">seq</span> <span class="op">!</span><span class="op">=</span> <span class="ident">change</span>.<span class="ident">seq</span> <span class="op">-</span> <span class="number">1</span> {
-                        <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">Error::ChangesOutOfOrder</span>);
+        metadata: <span class="kw-2">&amp;</span>OpSetMetadata,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;CollectedChanges&lt;<span class="lifetime">&#39;static</span>&gt;, Error&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>changes_in_order =
+            Vec::with_capacity(<span class="self">self</span>.changes_by_actor.values().map(|c| c.len()).sum());
+        <span class="kw">for </span>(<span class="kw">_</span>, changes) <span class="kw">in </span><span class="self">self</span>.changes_by_actor {
+            <span class="kw">let </span><span class="kw-2">mut </span>seq = <span class="prelude-val">None</span>;
+            <span class="kw">for </span>change <span class="kw">in </span>changes {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(seq) = seq {
+                    <span class="kw">if </span>seq != change.seq - <span class="number">1 </span>{
+                        <span class="kw">return </span><span class="prelude-val">Err</span>(Error::ChangesOutOfOrder);
                     }
-                } <span class="kw">else</span> <span class="kw">if</span> <span class="ident">change</span>.<span class="ident">seq</span> <span class="op">!</span><span class="op">=</span> <span class="number">1</span> {
-                    <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">Error::ChangesOutOfOrder</span>);
+                } <span class="kw">else if </span>change.seq != <span class="number">1 </span>{
+                    <span class="kw">return </span><span class="prelude-val">Err</span>(Error::ChangesOutOfOrder);
                 }
-                <span class="ident">seq</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">change</span>.<span class="ident">seq</span>);
-                <span class="ident">changes_in_order</span>.<span class="ident">push</span>(<span class="ident">change</span>);
+                seq = <span class="prelude-val">Some</span>(change.seq);
+                changes_in_order.push(change);
             }
         }
-        <span class="ident">changes_in_order</span>.<span class="ident">sort_by_key</span>(<span class="op">|</span><span class="ident">c</span><span class="op">|</span> <span class="ident">c</span>.<span class="ident">index</span>);
+        changes_in_order.sort_by_key(|c| c.index);
 
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">hashes_by_index</span> <span class="op">=</span> <span class="ident">HashMap::new</span>();
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">history</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">heads</span> <span class="op">=</span> <span class="ident">BTreeSet::new</span>();
-        <span class="kw">for</span> (<span class="ident">index</span>, <span class="ident">change</span>) <span class="kw">in</span> <span class="ident">changes_in_order</span>.<span class="ident">into_iter</span>().<span class="ident">enumerate</span>() {
-            <span class="kw">let</span> <span class="ident">finished</span> <span class="op">=</span> <span class="ident">change</span>.<span class="ident">finish</span>(<span class="kw-2">&amp;</span><span class="ident">hashes_by_index</span>, <span class="ident">metadata</span>)<span class="question-mark">?</span>;
-            <span class="kw">let</span> <span class="ident">hash</span> <span class="op">=</span> <span class="ident">finished</span>.<span class="ident">hash</span>();
-            <span class="ident">hashes_by_index</span>.<span class="ident">insert</span>(<span class="ident">index</span>, <span class="ident">hash</span>);
-            <span class="kw">for</span> <span class="ident">dep</span> <span class="kw">in</span> <span class="ident">finished</span>.<span class="ident">dependencies</span>() {
-                <span class="ident">heads</span>.<span class="ident">remove</span>(<span class="ident">dep</span>);
+        <span class="kw">let </span><span class="kw-2">mut </span>hashes_by_index = HashMap::new();
+        <span class="kw">let </span><span class="kw-2">mut </span>history = Vec::new();
+        <span class="kw">let </span><span class="kw-2">mut </span>heads = BTreeSet::new();
+        <span class="kw">for </span>(index, change) <span class="kw">in </span>changes_in_order.into_iter().enumerate() {
+            <span class="kw">let </span>finished = change.finish(<span class="kw-2">&amp;</span>hashes_by_index, metadata)<span class="question-mark">?</span>;
+            <span class="kw">let </span>hash = finished.hash();
+            hashes_by_index.insert(index, hash);
+            <span class="kw">for </span>dep <span class="kw">in </span>finished.dependencies() {
+                heads.remove(dep);
             }
-            <span class="ident">heads</span>.<span class="ident">insert</span>(<span class="ident">hash</span>);
-            <span class="ident">history</span>.<span class="ident">push</span>(<span class="ident">finished</span>.<span class="ident">into_owned</span>());
+            heads.insert(hash);
+            history.push(finished.into_owned());
         }
 
-        <span class="prelude-val">Ok</span>(<span class="ident">CollectedChanges</span> { <span class="ident">history</span>, <span class="ident">heads</span> })
+        <span class="prelude-val">Ok</span>(CollectedChanges { history, heads })
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
-<span class="kw">struct</span> <span class="ident">PartialChange</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">index</span>: <span class="ident">usize</span>,
-    <span class="ident">deps</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>,
-    <span class="ident">actor</span>: <span class="ident">usize</span>,
-    <span class="ident">seq</span>: <span class="ident">u64</span>,
-    <span class="ident">max_op</span>: <span class="ident">u64</span>,
-    <span class="ident">timestamp</span>: <span class="ident">i64</span>,
-    <span class="ident">message</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">smol_str::SmolStr</span><span class="op">&gt;</span>,
-    <span class="ident">extra_bytes</span>: <span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, [<span class="ident">u8</span>]<span class="op">&gt;</span>,
-    <span class="ident">ops</span>: <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">ObjId</span>, <span class="ident">Op</span>)<span class="op">&gt;</span>,
+<span class="attribute">#[derive(Debug)]
+</span><span class="kw">struct </span>PartialChange&lt;<span class="lifetime">&#39;a</span>&gt; {
+    index: usize,
+    deps: Vec&lt;u64&gt;,
+    actor: usize,
+    seq: u64,
+    max_op: u64,
+    timestamp: i64,
+    message: <span class="prelude-ty">Option</span>&lt;smol_str::SmolStr&gt;,
+    extra_bytes: Cow&lt;<span class="lifetime">&#39;a</span>, [u8]&gt;,
+    ops: Vec&lt;(ObjId, Op)&gt;,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">PartialChange</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// # Panics</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// * If any op references a property index which is not in `props`</span>
-    <span class="doccomment">/// * If any op references an actor index which is not in `actors`</span>
-    <span class="attribute">#[<span class="ident">instrument</span>(<span class="ident">skip</span>(<span class="self">self</span>, <span class="ident">known_changes</span>, <span class="ident">metadata</span>))]</span>
-    <span class="kw">fn</span> <span class="ident">finish</span>(
-        <span class="kw-2">mut</span> <span class="self">self</span>,
-        <span class="ident">known_changes</span>: <span class="kw-2">&amp;</span><span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">usize</span>, <span class="ident">ChangeHash</span><span class="op">&gt;</span>,
-        <span class="ident">metadata</span>: <span class="kw-2">&amp;</span><span class="ident">OpSetMetadata</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">StoredChange</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Verified</span><span class="op">&gt;</span>, <span class="ident">Error</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">deps_len</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">deps</span>.<span class="ident">len</span>();
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">deps</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">deps</span>.<span class="ident">into_iter</span>().<span class="ident">try_fold</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="kw">_</span>, <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">Error</span><span class="op">&gt;</span><span class="op">&gt;</span>(
-            <span class="ident">Vec::with_capacity</span>(<span class="ident">deps_len</span>),
-            <span class="op">|</span><span class="kw-2">mut</span> <span class="ident">acc</span>, <span class="ident">dep</span><span class="op">|</span> {
-                <span class="ident">acc</span>.<span class="ident">push</span>(<span class="ident">known_changes</span>.<span class="ident">get</span>(<span class="kw-2">&amp;</span>(<span class="ident">dep</span> <span class="kw">as</span> <span class="ident">usize</span>)).<span class="ident">cloned</span>().<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> {
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; PartialChange&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="doccomment">/// # Panics
+    ///
+    /// * If any op references a property index which is not in `props`
+    /// * If any op references an actor index which is not in `actors`
+    </span><span class="attribute">#[instrument(skip(<span class="self">self</span>, known_changes, metadata))]
+    </span><span class="kw">fn </span>finish(
+        <span class="kw-2">mut </span><span class="self">self</span>,
+        known_changes: <span class="kw-2">&amp;</span>HashMap&lt;usize, ChangeHash&gt;,
+        metadata: <span class="kw-2">&amp;</span>OpSetMetadata,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;StoredChange&lt;<span class="lifetime">&#39;a</span>, Verified&gt;, Error&gt; {
+        <span class="kw">let </span>deps_len = <span class="self">self</span>.deps.len();
+        <span class="kw">let </span><span class="kw-2">mut </span>deps = <span class="self">self</span>.deps.into_iter().try_fold::&lt;<span class="kw">_</span>, <span class="kw">_</span>, <span class="prelude-ty">Result</span>&lt;<span class="kw">_</span>, Error&gt;&gt;(
+            Vec::with_capacity(deps_len),
+            |<span class="kw-2">mut </span>acc, dep| {
+                acc.push(known_changes.get(<span class="kw-2">&amp;</span>(dep <span class="kw">as </span>usize)).cloned().ok_or_else(|| {
                     <span class="macro">tracing::error!</span>(
-                        <span class="ident">dependent_index</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">index</span>,
-                        <span class="ident">dep_index</span> <span class="op">=</span> <span class="ident">dep</span>,
-                        <span class="string">&quot;could not find dependency&quot;</span>
-                    );
-                    <span class="ident">Error::MissingChange</span>
+                        dependent_index = <span class="self">self</span>.index,
+                        dep_index = dep,
+                        <span class="string">&quot;could not find dependency&quot;
+                    </span>);
+                    Error::MissingChange
                 })<span class="question-mark">?</span>);
-                <span class="prelude-val">Ok</span>(<span class="ident">acc</span>)
+                <span class="prelude-val">Ok</span>(acc)
             },
         )<span class="question-mark">?</span>;
-        <span class="ident">deps</span>.<span class="ident">sort</span>();
-        <span class="kw">let</span> <span class="ident">num_ops</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">ops</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>;
-        <span class="self">self</span>.<span class="ident">ops</span>.<span class="ident">sort_by_key</span>(<span class="op">|</span><span class="ident">o</span><span class="op">|</span> <span class="ident">o</span>.<span class="number">1</span>.<span class="ident">id</span>);
-        <span class="kw">let</span> <span class="ident">converted_ops</span> <span class="op">=</span> <span class="self">self</span>
-            .<span class="ident">ops</span>
-            .<span class="ident">iter</span>()
-            .<span class="ident">map</span>(<span class="op">|</span>(<span class="ident">obj</span>, <span class="ident">op</span>)<span class="op">|</span> <span class="ident">op_as_actor_id</span>(<span class="ident">obj</span>, <span class="ident">op</span>, <span class="ident">metadata</span>));
-        <span class="kw">let</span> <span class="ident">actor</span> <span class="op">=</span> <span class="ident">metadata</span>.<span class="ident">actors</span>.<span class="ident">get</span>(<span class="self">self</span>.<span class="ident">actor</span>).<span class="ident">clone</span>();
+        deps.sort();
+        <span class="kw">let </span>num_ops = <span class="self">self</span>.ops.len() <span class="kw">as </span>u64;
+        <span class="self">self</span>.ops.sort_by_key(|o| o.<span class="number">1</span>.id);
+        <span class="kw">let </span>converted_ops = <span class="self">self
+            </span>.ops
+            .iter()
+            .map(|(obj, op)| op_as_actor_id(obj, op, metadata));
+        <span class="kw">let </span>actor = metadata.actors.get(<span class="self">self</span>.actor).clone();
 
-        <span class="kw">let</span> <span class="ident">change</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">StoredChange::builder</span>()
-            .<span class="ident">with_dependencies</span>(<span class="ident">deps</span>)
-            .<span class="ident">with_actor</span>(<span class="ident">actor</span>)
-            .<span class="ident">with_seq</span>(<span class="self">self</span>.<span class="ident">seq</span>)
-            .<span class="ident">with_start_op</span>(<span class="ident">NonZeroU64::new</span>(<span class="self">self</span>.<span class="ident">max_op</span> <span class="op">-</span> <span class="ident">num_ops</span> <span class="op">+</span> <span class="number">1</span>).<span class="ident">ok_or</span>(<span class="ident">Error::MissingOps</span>)<span class="question-mark">?</span>)
-            .<span class="ident">with_timestamp</span>(<span class="self">self</span>.<span class="ident">timestamp</span>)
-            .<span class="ident">with_message</span>(<span class="self">self</span>.<span class="ident">message</span>.<span class="ident">map</span>(<span class="op">|</span><span class="ident">s</span><span class="op">|</span> <span class="ident">s</span>.<span class="ident">to_string</span>()))
-            .<span class="ident">with_extra_bytes</span>(<span class="self">self</span>.<span class="ident">extra_bytes</span>.<span class="ident">into_owned</span>())
-            .<span class="ident">build</span>(<span class="ident">converted_ops</span>)
+        <span class="kw">let </span>change = <span class="kw">match </span>StoredChange::builder()
+            .with_dependencies(deps)
+            .with_actor(actor)
+            .with_seq(<span class="self">self</span>.seq)
+            .with_start_op(NonZeroU64::new(<span class="self">self</span>.max_op - num_ops + <span class="number">1</span>).ok_or(Error::MissingOps)<span class="question-mark">?</span>)
+            .with_timestamp(<span class="self">self</span>.timestamp)
+            .with_message(<span class="self">self</span>.message.map(|s| s.to_string()))
+            .with_extra_bytes(<span class="self">self</span>.extra_bytes.into_owned())
+            .build(converted_ops)
         {
-            <span class="prelude-val">Ok</span>(<span class="ident">s</span>) =&gt; <span class="ident">s</span>,
-            <span class="prelude-val">Err</span>(<span class="ident">PredOutOfOrder</span>) =&gt; {
-                <span class="comment">// SAFETY: types::Op::preds is `types::OpIds` which ensures ops are always sorted</span>
-                <span class="macro">panic!</span>(<span class="string">&quot;preds out of order&quot;</span>);
+            <span class="prelude-val">Ok</span>(s) =&gt; s,
+            <span class="prelude-val">Err</span>(PredOutOfOrder) =&gt; {
+                <span class="comment">// SAFETY: types::Op::preds is `types::OpIds` which ensures ops are always sorted
+                </span><span class="macro">panic!</span>(<span class="string">&quot;preds out of order&quot;</span>);
             }
         };
-        <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">not</span>(<span class="ident">debug_assertions</span>))]</span>
-        <span class="macro">tracing::trace!</span>(<span class="question-mark">?</span><span class="ident">change</span>, <span class="ident">hash</span><span class="op">=</span><span class="question-mark">?</span><span class="ident">change</span>.<span class="ident">hash</span>(), <span class="string">&quot;collected change&quot;</span>);
-        <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">debug_assertions</span>)]</span>
-        {
-            <span class="macro">tracing::trace!</span>(<span class="question-mark">?</span><span class="ident">change</span>, <span class="ident">ops</span><span class="op">=</span><span class="question-mark">?</span><span class="self">self</span>.<span class="ident">ops</span>, <span class="ident">hash</span><span class="op">=</span><span class="question-mark">?</span><span class="ident">change</span>.<span class="ident">hash</span>(), <span class="string">&quot;collected change&quot;</span>);
+        <span class="attribute">#[cfg(not(debug_assertions))]
+        </span><span class="macro">tracing::trace!</span>(<span class="question-mark">?</span>change, hash=<span class="question-mark">?</span>change.hash(), <span class="string">&quot;collected change&quot;</span>);
+        <span class="attribute">#[cfg(debug_assertions)]
+        </span>{
+            <span class="macro">tracing::trace!</span>(<span class="question-mark">?</span>change, ops=<span class="question-mark">?</span><span class="self">self</span>.ops, hash=<span class="question-mark">?</span>change.hash(), <span class="string">&quot;collected change&quot;</span>);
         }
-        <span class="prelude-val">Ok</span>(<span class="ident">change</span>)
+        <span class="prelude-val">Ok</span>(change)
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

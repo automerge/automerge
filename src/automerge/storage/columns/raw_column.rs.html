@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/columns/raw_column.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>raw_column.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/columns/raw_column.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>raw_column.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -263,268 +263,268 @@
 <span id="261">261</span>
 <span id="262">262</span>
 <span id="263">263</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std</span>::{<span class="ident">io::Read</span>, <span class="ident">marker::PhantomData</span>, <span class="ident">ops::Range</span>};
+</pre><pre class="rust"><code><span class="kw">use </span>std::{io::Read, marker::PhantomData, ops::Range};
 
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::storage::parse</span>;
+<span class="kw">use </span><span class="kw">crate</span>::storage::parse;
 
-<span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">compression</span>, <span class="ident">ColumnSpec</span>};
+<span class="kw">use super</span>::{compression, ColumnSpec};
 
-<span class="doccomment">/// This is a &quot;raw&quot; column in the sense that it is just the column specification[1] and range. This</span>
-<span class="doccomment">/// is in contrast to [`super::Column`] which is aware of composite columns such as value columns[2] and</span>
-<span class="doccomment">/// group columns[3].</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// `RawColumn` is generally an intermediary object which is parsed into a [`super::Column`].</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// The type parameter `T` is a witness to whether this column is compressed. If `T:</span>
-<span class="doccomment">/// compression::Uncompressed` then we have proved that this column is not compressed, otherwise it</span>
-<span class="doccomment">/// may be compressed.</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// [1]: https://alexjg.github.io/automerge-storage-docs/#column-specifications</span>
-<span class="doccomment">/// [2]: https://alexjg.github.io/automerge-storage-docs/#raw-value-columns</span>
-<span class="doccomment">/// [3]: https://alexjg.github.io/automerge-storage-docs/#group-columns</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">RawColumn</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">compression::ColumnCompression</span><span class="op">&gt;</span> {
-    <span class="ident">spec</span>: <span class="ident">ColumnSpec</span>,
-    <span class="doccomment">/// The location of the data in the column data block. Note that this range starts at the</span>
-    <span class="doccomment">/// beginning of the column data block - i.e. the `data` attribute of the first column in the</span>
-    <span class="doccomment">/// column data block will be 0 - not at the start of the chunk.</span>
-    <span class="ident">data</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-    <span class="ident">_phantom</span>: <span class="ident">PhantomData</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>,
+<span class="doccomment">/// This is a &quot;raw&quot; column in the sense that it is just the column specification[1] and range. This
+/// is in contrast to [`super::Column`] which is aware of composite columns such as value columns[2] and
+/// group columns[3].
+///
+/// `RawColumn` is generally an intermediary object which is parsed into a [`super::Column`].
+///
+/// The type parameter `T` is a witness to whether this column is compressed. If `T:
+/// compression::Uncompressed` then we have proved that this column is not compressed, otherwise it
+/// may be compressed.
+///
+/// [1]: https://alexjg.github.io/automerge-storage-docs/#column-specifications
+/// [2]: https://alexjg.github.io/automerge-storage-docs/#raw-value-columns
+/// [3]: https://alexjg.github.io/automerge-storage-docs/#group-columns
+</span><span class="attribute">#[derive(Clone, Debug, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>RawColumn&lt;T: compression::ColumnCompression&gt; {
+    spec: ColumnSpec,
+    <span class="doccomment">/// The location of the data in the column data block. Note that this range starts at the
+    /// beginning of the column data block - i.e. the `data` attribute of the first column in the
+    /// column data block will be 0 - not at the start of the chunk.
+    </span>data: Range&lt;usize&gt;,
+    _phantom: PhantomData&lt;T&gt;,
 }
 
-<span class="kw">impl</span> <span class="ident">RawColumn</span><span class="op">&lt;</span><span class="ident">compression::Uncompressed</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">spec</span>: <span class="ident">ColumnSpec</span>, <span class="ident">data</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span> {
-            <span class="ident">spec</span>: <span class="ident">ColumnSpec::new</span>(<span class="ident">spec</span>.<span class="ident">id</span>(), <span class="ident">spec</span>.<span class="ident">col_type</span>(), <span class="bool-val">false</span>),
-            <span class="ident">data</span>,
-            <span class="ident">_phantom</span>: <span class="ident">PhantomData</span>,
+<span class="kw">impl </span>RawColumn&lt;compression::Uncompressed&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(spec: ColumnSpec, data: Range&lt;usize&gt;) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            spec: ColumnSpec::new(spec.id(), spec.col_type(), <span class="bool-val">false</span>),
+            data,
+            _phantom: PhantomData,
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">compression::ColumnCompression</span><span class="op">&gt;</span> <span class="ident">RawColumn</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">spec</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">ColumnSpec</span> {
-        <span class="self">self</span>.<span class="ident">spec</span>
+<span class="kw">impl</span>&lt;T: compression::ColumnCompression&gt; RawColumn&lt;T&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>spec(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ColumnSpec {
+        <span class="self">self</span>.spec
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">data</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">data</span>.<span class="ident">clone</span>()
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>data(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Range&lt;usize&gt; {
+        <span class="self">self</span>.data.clone()
     }
 
-    <span class="kw">fn</span> <span class="ident">compress</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">input</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>], <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>, <span class="ident">threshold</span>: <span class="ident">usize</span>) -&gt; (<span class="ident">ColumnSpec</span>, <span class="ident">usize</span>) {
-        <span class="kw">let</span> (<span class="ident">spec</span>, <span class="ident">len</span>) <span class="op">=</span> <span class="kw">if</span> <span class="self">self</span>.<span class="ident">data</span>.<span class="ident">len</span>() <span class="op">&lt;</span> <span class="ident">threshold</span> <span class="op">|</span><span class="op">|</span> <span class="self">self</span>.<span class="ident">spec</span>.<span class="ident">deflate</span>() {
-            <span class="ident">out</span>.<span class="ident">extend</span>(<span class="kw-2">&amp;</span><span class="ident">input</span>[<span class="self">self</span>.<span class="ident">data</span>.<span class="ident">clone</span>()]);
-            (<span class="self">self</span>.<span class="ident">spec</span>, <span class="self">self</span>.<span class="ident">data</span>.<span class="ident">len</span>())
-        } <span class="kw">else</span> {
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">deflater</span> <span class="op">=</span> <span class="ident">flate2::bufread::DeflateEncoder::new</span>(
-                <span class="kw-2">&amp;</span><span class="ident">input</span>[<span class="self">self</span>.<span class="ident">data</span>.<span class="ident">clone</span>()],
-                <span class="ident">flate2::Compression::default</span>(),
+    <span class="kw">fn </span>compress(<span class="kw-2">&amp;</span><span class="self">self</span>, input: <span class="kw-2">&amp;</span>[u8], out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;, threshold: usize) -&gt; (ColumnSpec, usize) {
+        <span class="kw">let </span>(spec, len) = <span class="kw">if </span><span class="self">self</span>.data.len() &lt; threshold || <span class="self">self</span>.spec.deflate() {
+            out.extend(<span class="kw-2">&amp;</span>input[<span class="self">self</span>.data.clone()]);
+            (<span class="self">self</span>.spec, <span class="self">self</span>.data.len())
+        } <span class="kw">else </span>{
+            <span class="kw">let </span><span class="kw-2">mut </span>deflater = flate2::bufread::DeflateEncoder::new(
+                <span class="kw-2">&amp;</span>input[<span class="self">self</span>.data.clone()],
+                flate2::Compression::default(),
             );
-            <span class="comment">//This unwrap should be okay as we&#39;re reading and writing to in memory buffers</span>
-            (<span class="self">self</span>.<span class="ident">spec</span>.<span class="ident">deflated</span>(), <span class="ident">deflater</span>.<span class="ident">read_to_end</span>(<span class="ident">out</span>).<span class="ident">unwrap</span>())
+            <span class="comment">//This unwrap should be okay as we&#39;re reading and writing to in memory buffers
+            </span>(<span class="self">self</span>.spec.deflated(), deflater.read_to_end(out).unwrap())
         };
-        (<span class="ident">spec</span>, <span class="ident">len</span>)
+        (spec, len)
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">uncompressed</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">RawColumn</span><span class="op">&lt;</span><span class="ident">compression::Uncompressed</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">spec</span>.<span class="ident">deflate</span>() {
-            <span class="prelude-val">None</span>
-        } <span class="kw">else</span> {
-            <span class="prelude-val">Some</span>(<span class="ident">RawColumn</span> {
-                <span class="ident">spec</span>: <span class="self">self</span>.<span class="ident">spec</span>,
-                <span class="ident">data</span>: <span class="self">self</span>.<span class="ident">data</span>.<span class="ident">clone</span>(),
-                <span class="ident">_phantom</span>: <span class="ident">PhantomData</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>uncompressed(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;RawColumn&lt;compression::Uncompressed&gt;&gt; {
+        <span class="kw">if </span><span class="self">self</span>.spec.deflate() {
+            <span class="prelude-val">None
+        </span>} <span class="kw">else </span>{
+            <span class="prelude-val">Some</span>(RawColumn {
+                spec: <span class="self">self</span>.spec,
+                data: <span class="self">self</span>.data.clone(),
+                _phantom: PhantomData,
             })
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">decompress</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">input</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>], <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) -&gt; (<span class="ident">ColumnSpec</span>, <span class="ident">usize</span>) {
-        <span class="kw">let</span> <span class="ident">len</span> <span class="op">=</span> <span class="kw">if</span> <span class="self">self</span>.<span class="ident">spec</span>.<span class="ident">deflate</span>() {
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">inflater</span> <span class="op">=</span> <span class="ident">flate2::bufread::DeflateDecoder::new</span>(<span class="kw-2">&amp;</span><span class="ident">input</span>[<span class="self">self</span>.<span class="ident">data</span>.<span class="ident">clone</span>()]);
-            <span class="ident">inflater</span>.<span class="ident">read_to_end</span>(<span class="ident">out</span>).<span class="ident">unwrap</span>()
-        } <span class="kw">else</span> {
-            <span class="ident">out</span>.<span class="ident">extend</span>(<span class="kw-2">&amp;</span><span class="ident">input</span>[<span class="self">self</span>.<span class="ident">data</span>.<span class="ident">clone</span>()]);
-            <span class="self">self</span>.<span class="ident">data</span>.<span class="ident">len</span>()
+    <span class="kw">fn </span>decompress(<span class="kw-2">&amp;</span><span class="self">self</span>, input: <span class="kw-2">&amp;</span>[u8], out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;) -&gt; (ColumnSpec, usize) {
+        <span class="kw">let </span>len = <span class="kw">if </span><span class="self">self</span>.spec.deflate() {
+            <span class="kw">let </span><span class="kw-2">mut </span>inflater = flate2::bufread::DeflateDecoder::new(<span class="kw-2">&amp;</span>input[<span class="self">self</span>.data.clone()]);
+            inflater.read_to_end(out).unwrap()
+        } <span class="kw">else </span>{
+            out.extend(<span class="kw-2">&amp;</span>input[<span class="self">self</span>.data.clone()]);
+            <span class="self">self</span>.data.len()
         };
-        (<span class="self">self</span>.<span class="ident">spec</span>.<span class="ident">inflated</span>(), <span class="ident">len</span>)
+        (<span class="self">self</span>.spec.inflated(), len)
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">RawColumns</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">compression::ColumnCompression</span><span class="op">&gt;</span>(<span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">RawColumn</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span><span class="op">&gt;</span>);
+<span class="attribute">#[derive(Clone, Debug, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>RawColumns&lt;T: compression::ColumnCompression&gt;(Vec&lt;RawColumn&lt;T&gt;&gt;);
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">compression::ColumnCompression</span><span class="op">&gt;</span> <span class="ident">RawColumns</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// Returns `Some` if no column in this set of columns is marked as compressed</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">uncompressed</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">RawColumns</span><span class="op">&lt;</span><span class="ident">compression::Uncompressed</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="self">self</span>.<span class="number">0</span>.<span class="ident">len</span>());
-        <span class="kw">for</span> <span class="ident">col</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span> {
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">uncomp</span>) <span class="op">=</span> <span class="ident">col</span>.<span class="ident">uncompressed</span>() {
-                <span class="ident">result</span>.<span class="ident">push</span>(<span class="ident">uncomp</span>);
-            } <span class="kw">else</span> {
-                <span class="kw">return</span> <span class="prelude-val">None</span>;
+<span class="kw">impl</span>&lt;T: compression::ColumnCompression&gt; RawColumns&lt;T&gt; {
+    <span class="doccomment">/// Returns `Some` if no column in this set of columns is marked as compressed
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>uncompressed(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;RawColumns&lt;compression::Uncompressed&gt;&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>result = Vec::with_capacity(<span class="self">self</span>.<span class="number">0</span>.len());
+        <span class="kw">for </span>col <span class="kw">in </span><span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0 </span>{
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(uncomp) = col.uncompressed() {
+                result.push(uncomp);
+            } <span class="kw">else </span>{
+                <span class="kw">return </span><span class="prelude-val">None</span>;
             }
         }
-        <span class="prelude-val">Some</span>(<span class="ident">RawColumns</span>(<span class="ident">result</span>))
+        <span class="prelude-val">Some</span>(RawColumns(result))
     }
 
-    <span class="doccomment">/// Write each column in `input` represented by `self` into `out`, possibly compressing.</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// # Returns</span>
-    <span class="doccomment">/// The `RawColumns` corresponding to the data written to `out`</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// # Panics</span>
-    <span class="doccomment">/// * If any of the ranges in `self` is outside the bounds of `input`</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">compress</span>(
+    <span class="doccomment">/// Write each column in `input` represented by `self` into `out`, possibly compressing.
+    ///
+    /// # Returns
+    /// The `RawColumns` corresponding to the data written to `out`
+    ///
+    /// # Panics
+    /// * If any of the ranges in `self` is outside the bounds of `input`
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>compress(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">input</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
-        <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
-        <span class="ident">threshold</span>: <span class="ident">usize</span>,
-    ) -&gt; <span class="ident">RawColumns</span><span class="op">&lt;</span><span class="ident">compression::Unknown</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="self">self</span>.<span class="number">0</span>.<span class="ident">len</span>());
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">start</span> <span class="op">=</span> <span class="number">0</span>;
-        <span class="kw">for</span> <span class="ident">col</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span> {
-            <span class="kw">let</span> (<span class="ident">spec</span>, <span class="ident">len</span>) <span class="op">=</span> <span class="ident">col</span>.<span class="ident">compress</span>(<span class="ident">input</span>, <span class="ident">out</span>, <span class="ident">threshold</span>);
-            <span class="ident">result</span>.<span class="ident">push</span>(<span class="ident">RawColumn</span> {
-                <span class="ident">spec</span>,
-                <span class="ident">data</span>: <span class="ident">start</span>..(<span class="ident">start</span> <span class="op">+</span> <span class="ident">len</span>),
-                <span class="ident">_phantom</span>: <span class="ident">PhantomData</span>::<span class="op">&lt;</span><span class="ident">compression::Unknown</span><span class="op">&gt;</span>,
+        input: <span class="kw-2">&amp;</span>[u8],
+        out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
+        threshold: usize,
+    ) -&gt; RawColumns&lt;compression::Unknown&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>result = Vec::with_capacity(<span class="self">self</span>.<span class="number">0</span>.len());
+        <span class="kw">let </span><span class="kw-2">mut </span>start = <span class="number">0</span>;
+        <span class="kw">for </span>col <span class="kw">in </span><span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0 </span>{
+            <span class="kw">let </span>(spec, len) = col.compress(input, out, threshold);
+            result.push(RawColumn {
+                spec,
+                data: start..(start + len),
+                _phantom: PhantomData::&lt;compression::Unknown&gt;,
             });
-            <span class="ident">start</span> <span class="op">+</span><span class="op">=</span> <span class="ident">len</span>;
+            start += len;
         }
-        <span class="ident">RawColumns</span>(<span class="ident">result</span>)
+        RawColumns(result)
     }
 
-    <span class="doccomment">/// Read each column from `input` and write to `out`, decompressing any compressed columns</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// # Returns</span>
-    <span class="doccomment">/// The `RawColumns` corresponding to the data written to `out`</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// # Panics</span>
-    <span class="doccomment">/// * If any of the ranges in `self` is outside the bounds of `input`</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">uncompress</span>(
+    <span class="doccomment">/// Read each column from `input` and write to `out`, decompressing any compressed columns
+    ///
+    /// # Returns
+    /// The `RawColumns` corresponding to the data written to `out`
+    ///
+    /// # Panics
+    /// * If any of the ranges in `self` is outside the bounds of `input`
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>uncompress(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">input</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
-        <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="ident">RawColumns</span><span class="op">&lt;</span><span class="ident">compression::Uncompressed</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="self">self</span>.<span class="number">0</span>.<span class="ident">len</span>());
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">start</span> <span class="op">=</span> <span class="number">0</span>;
-        <span class="kw">for</span> <span class="ident">col</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span> {
-            <span class="kw">let</span> (<span class="ident">spec</span>, <span class="ident">len</span>) <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">decomp</span>) <span class="op">=</span> <span class="ident">col</span>.<span class="ident">uncompressed</span>() {
-                <span class="ident">out</span>.<span class="ident">extend</span>(<span class="kw-2">&amp;</span><span class="ident">input</span>[<span class="ident">decomp</span>.<span class="ident">data</span>.<span class="ident">clone</span>()]);
-                (<span class="ident">decomp</span>.<span class="ident">spec</span>, <span class="ident">decomp</span>.<span class="ident">data</span>.<span class="ident">len</span>())
-            } <span class="kw">else</span> {
-                <span class="ident">col</span>.<span class="ident">decompress</span>(<span class="ident">input</span>, <span class="ident">out</span>)
+        input: <span class="kw-2">&amp;</span>[u8],
+        out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
+    ) -&gt; RawColumns&lt;compression::Uncompressed&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>result = Vec::with_capacity(<span class="self">self</span>.<span class="number">0</span>.len());
+        <span class="kw">let </span><span class="kw-2">mut </span>start = <span class="number">0</span>;
+        <span class="kw">for </span>col <span class="kw">in </span><span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0 </span>{
+            <span class="kw">let </span>(spec, len) = <span class="kw">if let </span><span class="prelude-val">Some</span>(decomp) = col.uncompressed() {
+                out.extend(<span class="kw-2">&amp;</span>input[decomp.data.clone()]);
+                (decomp.spec, decomp.data.len())
+            } <span class="kw">else </span>{
+                col.decompress(input, out)
             };
-            <span class="ident">result</span>.<span class="ident">push</span>(<span class="ident">RawColumn</span> {
-                <span class="ident">spec</span>,
-                <span class="ident">data</span>: <span class="ident">start</span>..(<span class="ident">start</span> <span class="op">+</span> <span class="ident">len</span>),
-                <span class="ident">_phantom</span>: <span class="ident">PhantomData</span>::<span class="op">&lt;</span><span class="ident">compression::Uncompressed</span><span class="op">&gt;</span>,
+            result.push(RawColumn {
+                spec,
+                data: start..(start + len),
+                _phantom: PhantomData::&lt;compression::Uncompressed&gt;,
             });
-            <span class="ident">start</span> <span class="op">+</span><span class="op">=</span> <span class="ident">len</span>;
+            start += len;
         }
-        <span class="ident">RawColumns</span>(<span class="ident">result</span>)
+        RawColumns(result)
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">compression::ColumnCompression</span><span class="op">&gt;</span> <span class="ident">FromIterator</span><span class="op">&lt;</span><span class="ident">RawColumn</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">RawColumns</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from_iter</span><span class="op">&lt;</span><span class="ident">U</span>: <span class="ident">IntoIterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">RawColumn</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="ident">iter</span>: <span class="ident">U</span>) -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span>(<span class="ident">iter</span>.<span class="ident">into_iter</span>().<span class="ident">filter</span>(<span class="op">|</span><span class="ident">c</span><span class="op">|</span> <span class="op">!</span><span class="ident">c</span>.<span class="ident">data</span>.<span class="ident">is_empty</span>()).<span class="ident">collect</span>())
+<span class="kw">impl</span>&lt;T: compression::ColumnCompression&gt; FromIterator&lt;RawColumn&lt;T&gt;&gt; <span class="kw">for </span>RawColumns&lt;T&gt; {
+    <span class="kw">fn </span>from_iter&lt;U: IntoIterator&lt;Item = RawColumn&lt;T&gt;&gt;&gt;(iter: U) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>(iter.into_iter().filter(|c| !c.data.is_empty()).collect())
     }
 }
 
-<span class="kw">impl</span> <span class="ident">FromIterator</span><span class="op">&lt;</span>(<span class="ident">ColumnSpec</span>, <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>)<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">RawColumns</span><span class="op">&lt;</span><span class="ident">compression::Unknown</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from_iter</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">IntoIterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> (<span class="ident">ColumnSpec</span>, <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>)<span class="op">&gt;</span><span class="op">&gt;</span>(<span class="ident">iter</span>: <span class="ident">T</span>) -&gt; <span class="self">Self</span> {
+<span class="kw">impl </span>FromIterator&lt;(ColumnSpec, Range&lt;usize&gt;)&gt; <span class="kw">for </span>RawColumns&lt;compression::Unknown&gt; {
+    <span class="kw">fn </span>from_iter&lt;T: IntoIterator&lt;Item = (ColumnSpec, Range&lt;usize&gt;)&gt;&gt;(iter: T) -&gt; <span class="self">Self </span>{
         <span class="self">Self</span>(
-            <span class="ident">iter</span>.<span class="ident">into_iter</span>()
-                .<span class="ident">filter_map</span>(<span class="op">|</span>(<span class="ident">spec</span>, <span class="ident">data</span>)<span class="op">|</span> {
-                    <span class="kw">if</span> <span class="ident">data</span>.<span class="ident">is_empty</span>() {
-                        <span class="prelude-val">None</span>
-                    } <span class="kw">else</span> {
-                        <span class="prelude-val">Some</span>(<span class="ident">RawColumn</span> {
-                            <span class="ident">spec</span>,
-                            <span class="ident">data</span>,
-                            <span class="ident">_phantom</span>: <span class="ident">PhantomData</span>,
+            iter.into_iter()
+                .filter_map(|(spec, data)| {
+                    <span class="kw">if </span>data.is_empty() {
+                        <span class="prelude-val">None
+                    </span>} <span class="kw">else </span>{
+                        <span class="prelude-val">Some</span>(RawColumn {
+                            spec,
+                            data,
+                            _phantom: PhantomData,
                         })
                     }
                 })
-                .<span class="ident">collect</span>(),
+                .collect(),
         )
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">thiserror::Error</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">ParseError</span> {
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;columns were not in normalized order&quot;</span>)]</span>
-    <span class="ident">NotInNormalOrder</span>,
-    <span class="attribute">#[<span class="ident">error</span>(<span class="ident">transparent</span>)]</span>
-    <span class="ident">Leb128</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident">parse::leb128::Error</span>),
+<span class="attribute">#[derive(Debug, thiserror::Error)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>ParseError {
+    <span class="attribute">#[error(<span class="string">&quot;columns were not in normalized order&quot;</span>)]
+    </span>NotInNormalOrder,
+    <span class="attribute">#[error(transparent)]
+    </span>Leb128(<span class="attribute">#[from] </span>parse::leb128::Error),
 }
 
-<span class="kw">impl</span> <span class="ident">RawColumns</span><span class="op">&lt;</span><span class="ident">compression::Unknown</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">parse</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span>(<span class="ident">input</span>: <span class="ident">parse::Input</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">parse::ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="self">Self</span>, <span class="ident">E</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">E</span>: <span class="ident">From</span><span class="op">&lt;</span><span class="ident">ParseError</span><span class="op">&gt;</span>,
+<span class="kw">impl </span>RawColumns&lt;compression::Unknown&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>parse&lt;E&gt;(input: parse::Input&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; parse::ParseResult&lt;<span class="lifetime">&#39;_</span>, <span class="self">Self</span>, E&gt;
+    <span class="kw">where
+        </span>E: From&lt;ParseError&gt;,
     {
-        <span class="kw">let</span> <span class="ident">i</span> <span class="op">=</span> <span class="ident">input</span>;
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">num_columns</span>) <span class="op">=</span> <span class="ident">parse::leb128_u64</span>(<span class="ident">i</span>).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">lift</span>())<span class="question-mark">?</span>;
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">specs_and_lens</span>) <span class="op">=</span> <span class="ident">parse::apply_n</span>(
-            <span class="ident">num_columns</span> <span class="kw">as</span> <span class="ident">usize</span>,
-            <span class="ident">parse::tuple2</span>(
-                <span class="ident">parse::map</span>(<span class="ident">parse::leb128_u32</span>, <span class="ident">ColumnSpec::from</span>),
-                <span class="ident">parse::leb128_u64</span>,
+        <span class="kw">let </span>i = input;
+        <span class="kw">let </span>(i, num_columns) = parse::leb128_u64(i).map_err(|e| e.lift())<span class="question-mark">?</span>;
+        <span class="kw">let </span>(i, specs_and_lens) = parse::apply_n(
+            num_columns <span class="kw">as </span>usize,
+            parse::tuple2(
+                parse::map(parse::leb128_u32, ColumnSpec::from),
+                parse::leb128_u64,
             ),
-        )(<span class="ident">i</span>)
-        .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">lift</span>())<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">columns</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">RawColumn</span><span class="op">&lt;</span><span class="ident">compression::Unknown</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">specs_and_lens</span>
-            .<span class="ident">into_iter</span>()
-            .<span class="ident">scan</span>(<span class="number">0_usize</span>, <span class="op">|</span><span class="ident">offset</span>, (<span class="ident">spec</span>, <span class="ident">len</span>)<span class="op">|</span> {
-                <span class="kw">let</span> <span class="ident">end</span> <span class="op">=</span> <span class="kw-2">*</span><span class="ident">offset</span> <span class="op">+</span> <span class="ident">len</span> <span class="kw">as</span> <span class="ident">usize</span>;
-                <span class="kw">let</span> <span class="ident">data</span> <span class="op">=</span> <span class="kw-2">*</span><span class="ident">offset</span>..<span class="ident">end</span>;
-                <span class="kw-2">*</span><span class="ident">offset</span> <span class="op">=</span> <span class="ident">end</span>;
-                <span class="prelude-val">Some</span>(<span class="ident">RawColumn</span> {
-                    <span class="ident">spec</span>,
-                    <span class="ident">data</span>,
-                    <span class="ident">_phantom</span>: <span class="ident">PhantomData</span>,
+        )(i)
+        .map_err(|e| e.lift())<span class="question-mark">?</span>;
+        <span class="kw">let </span>columns: Vec&lt;RawColumn&lt;compression::Unknown&gt;&gt; = specs_and_lens
+            .into_iter()
+            .scan(<span class="number">0_usize</span>, |offset, (spec, len)| {
+                <span class="kw">let </span>end = <span class="kw-2">*</span>offset + len <span class="kw">as </span>usize;
+                <span class="kw">let </span>data = <span class="kw-2">*</span>offset..end;
+                <span class="kw-2">*</span>offset = end;
+                <span class="prelude-val">Some</span>(RawColumn {
+                    spec,
+                    data,
+                    _phantom: PhantomData,
                 })
             })
-            .<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
-        <span class="kw">if</span> <span class="op">!</span><span class="ident">are_normal_sorted</span>(<span class="kw-2">&amp;</span><span class="ident">columns</span>) {
-            <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">parse::ParseError::Error</span>(
-                <span class="ident">ParseError::NotInNormalOrder</span>.<span class="ident">into</span>(),
+            .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+        <span class="kw">if </span>!are_normal_sorted(<span class="kw-2">&amp;</span>columns) {
+            <span class="kw">return </span><span class="prelude-val">Err</span>(parse::ParseError::Error(
+                ParseError::NotInNormalOrder.into(),
             ));
         }
-        <span class="prelude-val">Ok</span>((<span class="ident">i</span>, <span class="ident">RawColumns</span>(<span class="ident">columns</span>)))
+        <span class="prelude-val">Ok</span>((i, RawColumns(columns)))
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">compression::ColumnCompression</span><span class="op">&gt;</span> <span class="ident">RawColumns</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">write</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) -&gt; <span class="ident">usize</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">written</span> <span class="op">=</span> <span class="ident">leb128::write::unsigned</span>(<span class="ident">out</span>, <span class="self">self</span>.<span class="number">0</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>).<span class="ident">unwrap</span>();
-        <span class="kw">for</span> <span class="ident">col</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span> {
-            <span class="ident">written</span> <span class="op">+</span><span class="op">=</span> <span class="ident">leb128::write::unsigned</span>(<span class="ident">out</span>, <span class="ident">u32::from</span>(<span class="ident">col</span>.<span class="ident">spec</span>) <span class="kw">as</span> <span class="ident">u64</span>).<span class="ident">unwrap</span>();
-            <span class="ident">written</span> <span class="op">+</span><span class="op">=</span> <span class="ident">leb128::write::unsigned</span>(<span class="ident">out</span>, <span class="ident">col</span>.<span class="ident">data</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>).<span class="ident">unwrap</span>();
+<span class="kw">impl</span>&lt;T: compression::ColumnCompression&gt; RawColumns&lt;T&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>write(<span class="kw-2">&amp;</span><span class="self">self</span>, out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;) -&gt; usize {
+        <span class="kw">let </span><span class="kw-2">mut </span>written = leb128::write::unsigned(out, <span class="self">self</span>.<span class="number">0</span>.len() <span class="kw">as </span>u64).unwrap();
+        <span class="kw">for </span>col <span class="kw">in </span><span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0 </span>{
+            written += leb128::write::unsigned(out, u32::from(col.spec) <span class="kw">as </span>u64).unwrap();
+            written += leb128::write::unsigned(out, col.data.len() <span class="kw">as </span>u64).unwrap();
         }
-        <span class="ident">written</span>
+        written
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">total_column_len</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">iter</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">c</span><span class="op">|</span> <span class="ident">c</span>.<span class="ident">data</span>.<span class="ident">len</span>()).<span class="ident">sum</span>()
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>total_column_len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.<span class="number">0</span>.iter().map(|c| c.data.len()).sum()
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">iter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw">impl</span> <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">RawColumn</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">+</span> <span class="lifetime">&#39;_</span> {
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">iter</span>()
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>iter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span>RawColumn&lt;T&gt;&gt; + <span class="lifetime">&#39;_ </span>{
+        <span class="self">self</span>.<span class="number">0</span>.iter()
     }
 }
 
-<span class="kw">fn</span> <span class="ident">are_normal_sorted</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">compression::ColumnCompression</span><span class="op">&gt;</span>(<span class="ident">cols</span>: <span class="kw-2">&amp;</span>[<span class="ident">RawColumn</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>]) -&gt; <span class="ident">bool</span> {
-    <span class="kw">if</span> <span class="ident">cols</span>.<span class="ident">len</span>() <span class="op">&gt;</span> <span class="number">1</span> {
-        <span class="kw">for</span> (<span class="ident">i</span>, <span class="ident">col</span>) <span class="kw">in</span> <span class="ident">cols</span>[<span class="number">1</span>..].<span class="ident">iter</span>().<span class="ident">enumerate</span>() {
-            <span class="kw">if</span> <span class="ident">col</span>.<span class="ident">spec</span>.<span class="ident">normalize</span>() <span class="op">&lt;</span> <span class="ident">cols</span>[<span class="ident">i</span>].<span class="ident">spec</span>.<span class="ident">normalize</span>() {
-                <span class="kw">return</span> <span class="bool-val">false</span>;
+<span class="kw">fn </span>are_normal_sorted&lt;T: compression::ColumnCompression&gt;(cols: <span class="kw-2">&amp;</span>[RawColumn&lt;T&gt;]) -&gt; bool {
+    <span class="kw">if </span>cols.len() &gt; <span class="number">1 </span>{
+        <span class="kw">for </span>(i, col) <span class="kw">in </span>cols[<span class="number">1</span>..].iter().enumerate() {
+            <span class="kw">if </span>col.spec.normalize() &lt; cols[i].spec.normalize() {
+                <span class="kw">return </span><span class="bool-val">false</span>;
             }
         }
     }
-    <span class="bool-val">true</span>
-}
+    <span class="bool-val">true
+</span>}
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

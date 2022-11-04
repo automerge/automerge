@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge-wasm/src/sync.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>sync.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../automerge_wasm/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../automerge_wasm/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge-wasm/src/sync.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>sync.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../automerge_wasm/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../automerge_wasm/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../automerge_wasm/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -53,58 +53,58 @@
 <span id="51">51</span>
 <span id="52">52</span>
 <span id="53">53</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">automerge</span> <span class="kw">as</span> <span class="ident">am</span>;
-<span class="kw">use</span> <span class="ident">automerge::ChangeHash</span>;
-<span class="kw">use</span> <span class="ident">js_sys::Uint8Array</span>;
-<span class="kw">use</span> <span class="ident">std::collections</span>::{<span class="ident">BTreeSet</span>, <span class="ident">HashMap</span>};
-<span class="kw">use</span> <span class="ident">std::convert::TryInto</span>;
-<span class="kw">use</span> <span class="ident">wasm_bindgen::prelude</span>::<span class="kw-2">*</span>;
+</pre><pre class="rust"><code><span class="kw">use </span>automerge <span class="kw">as </span>am;
+<span class="kw">use </span>automerge::ChangeHash;
+<span class="kw">use </span>js_sys::Uint8Array;
+<span class="kw">use </span>std::collections::{BTreeSet, HashMap};
+<span class="kw">use </span>std::convert::TryInto;
+<span class="kw">use </span>wasm_bindgen::prelude::<span class="kw-2">*</span>;
 
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::interop</span>::{<span class="ident">to_js_err</span>, <span class="ident">AR</span>, <span class="ident">JS</span>};
+<span class="kw">use </span><span class="kw">crate</span>::interop::{to_js_err, AR, JS};
 
-<span class="attribute">#[<span class="ident">wasm_bindgen</span>]</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">SyncState</span>(<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">am::sync::State</span>);
+<span class="attribute">#[wasm_bindgen]
+#[derive(Debug)]
+</span><span class="kw">pub struct </span>SyncState(<span class="kw">pub</span>(<span class="kw">crate</span>) am::sync::State);
 
-<span class="attribute">#[<span class="ident">wasm_bindgen</span>]</span>
-<span class="kw">impl</span> <span class="ident">SyncState</span> {
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">getter</span>, <span class="ident">js_name</span> <span class="op">=</span> <span class="ident">sharedHeads</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">shared_heads</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">JsValue</span> {
-        <span class="ident">AR::from</span>(<span class="self">self</span>.<span class="number">0</span>.<span class="ident">shared_heads</span>.<span class="ident">as_slice</span>()).<span class="ident">into</span>()
+<span class="attribute">#[wasm_bindgen]
+</span><span class="kw">impl </span>SyncState {
+    <span class="attribute">#[wasm_bindgen(getter, js_name = sharedHeads)]
+    </span><span class="kw">pub fn </span>shared_heads(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; JsValue {
+        AR::from(<span class="self">self</span>.<span class="number">0</span>.shared_heads.as_slice()).into()
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">getter</span>, <span class="ident">js_name</span> <span class="op">=</span> <span class="ident">lastSentHeads</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">last_sent_heads</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">JsValue</span> {
-        <span class="ident">AR::from</span>(<span class="self">self</span>.<span class="number">0</span>.<span class="ident">last_sent_heads</span>.<span class="ident">as_slice</span>()).<span class="ident">into</span>()
+    <span class="attribute">#[wasm_bindgen(getter, js_name = lastSentHeads)]
+    </span><span class="kw">pub fn </span>last_sent_heads(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; JsValue {
+        AR::from(<span class="self">self</span>.<span class="number">0</span>.last_sent_heads.as_slice()).into()
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">setter</span>, <span class="ident">js_name</span> <span class="op">=</span> <span class="ident">lastSentHeads</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_last_sent_heads</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">heads</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">heads</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">JS</span>(<span class="ident">heads</span>).<span class="ident">try_into</span>()<span class="question-mark">?</span>;
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">last_sent_heads</span> <span class="op">=</span> <span class="ident">heads</span>;
+    <span class="attribute">#[wasm_bindgen(setter, js_name = lastSentHeads)]
+    </span><span class="kw">pub fn </span>set_last_sent_heads(<span class="kw-2">&amp;mut </span><span class="self">self</span>, heads: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;(), JsValue&gt; {
+        <span class="kw">let </span>heads: Vec&lt;ChangeHash&gt; = JS(heads).try_into()<span class="question-mark">?</span>;
+        <span class="self">self</span>.<span class="number">0</span>.last_sent_heads = heads;
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">setter</span>, <span class="ident">js_name</span> <span class="op">=</span> <span class="ident">sentHashes</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">set_sent_hashes</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">hashes</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">hashes_map</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">ChangeHash</span>, <span class="ident">bool</span><span class="op">&gt;</span> <span class="op">=</span>
-            <span class="ident">serde_wasm_bindgen::from_value</span>(<span class="ident">hashes</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">hashes_set</span>: <span class="ident">BTreeSet</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">hashes_map</span>.<span class="ident">keys</span>().<span class="ident">cloned</span>().<span class="ident">collect</span>();
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">sent_hashes</span> <span class="op">=</span> <span class="ident">hashes_set</span>;
+    <span class="attribute">#[wasm_bindgen(setter, js_name = sentHashes)]
+    </span><span class="kw">pub fn </span>set_sent_hashes(<span class="kw-2">&amp;mut </span><span class="self">self</span>, hashes: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;(), JsValue&gt; {
+        <span class="kw">let </span>hashes_map: HashMap&lt;ChangeHash, bool&gt; =
+            serde_wasm_bindgen::from_value(hashes).map_err(to_js_err)<span class="question-mark">?</span>;
+        <span class="kw">let </span>hashes_set: BTreeSet&lt;ChangeHash&gt; = hashes_map.keys().cloned().collect();
+        <span class="self">self</span>.<span class="number">0</span>.sent_hashes = hashes_set;
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::should_implement_trait</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clone</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">SyncState</span>(<span class="self">self</span>.<span class="number">0</span>.<span class="ident">clone</span>())
+    <span class="attribute">#[allow(clippy::should_implement_trait)]
+    </span><span class="kw">pub fn </span>clone(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
+        SyncState(<span class="self">self</span>.<span class="number">0</span>.clone())
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">decode</span>(<span class="ident">data</span>: <span class="ident">Uint8Array</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">SyncState</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">data</span> <span class="op">=</span> <span class="ident">data</span>.<span class="ident">to_vec</span>();
-        <span class="kw">let</span> <span class="ident">s</span> <span class="op">=</span> <span class="ident">am::sync::State::decode</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>);
-        <span class="kw">let</span> <span class="ident">s</span> <span class="op">=</span> <span class="ident">s</span>.<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(<span class="ident">SyncState</span>(<span class="ident">s</span>))
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>decode(data: Uint8Array) -&gt; <span class="prelude-ty">Result</span>&lt;SyncState, JsValue&gt; {
+        <span class="kw">let </span>data = data.to_vec();
+        <span class="kw">let </span>s = am::sync::State::decode(<span class="kw-2">&amp;</span>data);
+        <span class="kw">let </span>s = s.map_err(to_js_err)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(SyncState(s))
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge_wasm" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge_wasm" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

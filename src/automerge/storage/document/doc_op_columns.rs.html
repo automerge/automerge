@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/document/doc_op_columns.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>doc_op_columns.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/document/doc_op_columns.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>doc_op_columns.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -450,455 +450,455 @@
 <span id="448">448</span>
 <span id="449">449</span>
 <span id="450">450</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std</span>::{<span class="ident">borrow::Cow</span>, <span class="ident">convert::TryFrom</span>};
+</pre><pre class="rust"><code><span class="kw">use </span>std::{borrow::Cow, convert::TryFrom};
 
-<span class="kw">use</span> <span class="kw">crate</span>::{
-    <span class="ident">columnar</span>::{
-        <span class="ident">column_range</span>::{
-            <span class="ident">generic</span>::{<span class="ident">GenericColumnRange</span>, <span class="ident">GroupRange</span>, <span class="ident">GroupedColumnRange</span>, <span class="ident">SimpleColRange</span>},
-            <span class="ident">BooleanRange</span>, <span class="ident">DeltaRange</span>, <span class="ident">Key</span>, <span class="ident">KeyEncoder</span>, <span class="ident">KeyIter</span>, <span class="ident">KeyRange</span>, <span class="ident">ObjIdEncoder</span>, <span class="ident">ObjIdIter</span>,
-            <span class="ident">ObjIdRange</span>, <span class="ident">OpIdEncoder</span>, <span class="ident">OpIdIter</span>, <span class="ident">OpIdListEncoder</span>, <span class="ident">OpIdListIter</span>, <span class="ident">OpIdListRange</span>,
-            <span class="ident">OpIdRange</span>, <span class="ident">RleRange</span>, <span class="ident">ValueEncoder</span>, <span class="ident">ValueIter</span>, <span class="ident">ValueRange</span>,
+<span class="kw">use crate</span>::{
+    columnar::{
+        column_range::{
+            generic::{GenericColumnRange, GroupRange, GroupedColumnRange, SimpleColRange},
+            BooleanRange, DeltaRange, Key, KeyEncoder, KeyIter, KeyRange, ObjIdEncoder, ObjIdIter,
+            ObjIdRange, OpIdEncoder, OpIdIter, OpIdListEncoder, OpIdListIter, OpIdListRange,
+            OpIdRange, RleRange, ValueEncoder, ValueIter, ValueRange,
         },
-        <span class="ident">encoding</span>::{
-            <span class="ident">BooleanDecoder</span>, <span class="ident">BooleanEncoder</span>, <span class="ident">ColumnDecoder</span>, <span class="ident">DecodeColumnError</span>, <span class="ident">RleDecoder</span>,
-            <span class="ident">RleEncoder</span>,
+        encoding::{
+            BooleanDecoder, BooleanEncoder, ColumnDecoder, DecodeColumnError, RleDecoder,
+            RleEncoder,
         },
     },
-    <span class="ident">convert</span>,
-    <span class="ident">storage</span>::{
-        <span class="ident">columns</span>::{<span class="ident">compression</span>, <span class="ident">ColumnId</span>, <span class="ident">ColumnSpec</span>, <span class="ident">ColumnType</span>},
-        <span class="ident">Columns</span>, <span class="ident">MismatchingColumn</span>, <span class="ident">RawColumn</span>, <span class="ident">RawColumns</span>,
+    convert,
+    storage::{
+        columns::{compression, ColumnId, ColumnSpec, ColumnType},
+        Columns, MismatchingColumn, RawColumn, RawColumns,
     },
-    <span class="ident">types</span>::{<span class="ident">ObjId</span>, <span class="ident">OpId</span>, <span class="ident">ScalarValue</span>},
+    types::{ObjId, OpId, ScalarValue},
 };
 
-<span class="kw">const</span> <span class="ident">OBJ_COL_ID</span>: <span class="ident">ColumnId</span> <span class="op">=</span> <span class="ident">ColumnId::new</span>(<span class="number">0</span>);
-<span class="kw">const</span> <span class="ident">KEY_COL_ID</span>: <span class="ident">ColumnId</span> <span class="op">=</span> <span class="ident">ColumnId::new</span>(<span class="number">1</span>);
-<span class="kw">const</span> <span class="ident">ID_COL_ID</span>: <span class="ident">ColumnId</span> <span class="op">=</span> <span class="ident">ColumnId::new</span>(<span class="number">2</span>);
-<span class="kw">const</span> <span class="ident">INSERT_COL_ID</span>: <span class="ident">ColumnId</span> <span class="op">=</span> <span class="ident">ColumnId::new</span>(<span class="number">3</span>);
-<span class="kw">const</span> <span class="ident">ACTION_COL_ID</span>: <span class="ident">ColumnId</span> <span class="op">=</span> <span class="ident">ColumnId::new</span>(<span class="number">4</span>);
-<span class="kw">const</span> <span class="ident">VAL_COL_ID</span>: <span class="ident">ColumnId</span> <span class="op">=</span> <span class="ident">ColumnId::new</span>(<span class="number">5</span>);
-<span class="kw">const</span> <span class="ident">SUCC_COL_ID</span>: <span class="ident">ColumnId</span> <span class="op">=</span> <span class="ident">ColumnId::new</span>(<span class="number">8</span>);
+<span class="kw">const </span>OBJ_COL_ID: ColumnId = ColumnId::new(<span class="number">0</span>);
+<span class="kw">const </span>KEY_COL_ID: ColumnId = ColumnId::new(<span class="number">1</span>);
+<span class="kw">const </span>ID_COL_ID: ColumnId = ColumnId::new(<span class="number">2</span>);
+<span class="kw">const </span>INSERT_COL_ID: ColumnId = ColumnId::new(<span class="number">3</span>);
+<span class="kw">const </span>ACTION_COL_ID: ColumnId = ColumnId::new(<span class="number">4</span>);
+<span class="kw">const </span>VAL_COL_ID: ColumnId = ColumnId::new(<span class="number">5</span>);
+<span class="kw">const </span>SUCC_COL_ID: ColumnId = ColumnId::new(<span class="number">8</span>);
 
-<span class="doccomment">/// The form operations take in the compressed document format.</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">DocOp</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">id</span>: <span class="ident">OpId</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">object</span>: <span class="ident">ObjId</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">key</span>: <span class="ident">Key</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">insert</span>: <span class="ident">bool</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">action</span>: <span class="ident">usize</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">value</span>: <span class="ident">ScalarValue</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">succ</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">OpId</span><span class="op">&gt;</span>,
+<span class="doccomment">/// The form operations take in the compressed document format.
+</span><span class="attribute">#[derive(Debug)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>DocOp {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) id: OpId,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) object: ObjId,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) key: Key,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) insert: bool,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) action: usize,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) value: ScalarValue,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) succ: Vec&lt;OpId&gt;,
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">DocOpColumns</span> {
-    <span class="ident">obj</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ObjIdRange</span><span class="op">&gt;</span>,
-    <span class="ident">key</span>: <span class="ident">KeyRange</span>,
-    <span class="ident">id</span>: <span class="ident">OpIdRange</span>,
-    <span class="ident">insert</span>: <span class="ident">BooleanRange</span>,
-    <span class="ident">action</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>,
-    <span class="ident">val</span>: <span class="ident">ValueRange</span>,
-    <span class="ident">succ</span>: <span class="ident">OpIdListRange</span>,
-    <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">dead_code</span>)]</span>
-    <span class="ident">other</span>: <span class="ident">Columns</span>,
+<span class="attribute">#[derive(Debug, Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>DocOpColumns {
+    obj: <span class="prelude-ty">Option</span>&lt;ObjIdRange&gt;,
+    key: KeyRange,
+    id: OpIdRange,
+    insert: BooleanRange,
+    action: RleRange&lt;u64&gt;,
+    val: ValueRange,
+    succ: OpIdListRange,
+    <span class="attribute">#[allow(dead_code)]
+    </span>other: Columns,
 }
 
-<span class="kw">struct</span> <span class="ident">DocId</span> {
-    <span class="ident">actor</span>: <span class="ident">usize</span>,
-    <span class="ident">counter</span>: <span class="ident">u64</span>,
+<span class="kw">struct </span>DocId {
+    actor: usize,
+    counter: u64,
 }
 
-<span class="kw">impl</span> <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">DocId</span> {
-    <span class="kw">fn</span> <span class="ident">actor</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
-        <span class="self">self</span>.<span class="ident">actor</span>
+<span class="kw">impl </span>convert::OpId&lt;usize&gt; <span class="kw">for </span>DocId {
+    <span class="kw">fn </span>actor(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.actor
     }
 
-    <span class="kw">fn</span> <span class="ident">counter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u64</span> {
-        <span class="self">self</span>.<span class="ident">counter</span>
+    <span class="kw">fn </span>counter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
+        <span class="self">self</span>.counter
     }
 }
 
-<span class="doccomment">/// A row to be encoded as an op in the document format</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// The lifetime `&#39;a` is the lifetime of the value and key data types. For types which cannot</span>
-<span class="doccomment">/// provide a reference (e.g. because they are decoding from some columnar storage on each</span>
-<span class="doccomment">/// iteration) this should be `&#39;static`.</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">trait</span> <span class="ident">AsDocOp</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// The type of the Actor ID component of the op IDs for this impl. This is typically either</span>
-    <span class="doccomment">/// `&amp;&#39;a ActorID` or `usize`</span>
-    <span class="kw">type</span> <span class="ident">ActorId</span>;
-    <span class="doccomment">/// The type of the op IDs this impl produces.</span>
-    <span class="kw">type</span> <span class="ident">OpId</span>: <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::ActorId</span><span class="op">&gt;</span>;
-    <span class="doccomment">/// The type of the successor iterator returned by `Self::pred`. This can often be omitted</span>
-    <span class="kw">type</span> <span class="ident">SuccIter</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident"><span class="self">Self</span>::OpId</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">ExactSizeIterator</span>;
+<span class="doccomment">/// A row to be encoded as an op in the document format
+///
+/// The lifetime `&#39;a` is the lifetime of the value and key data types. For types which cannot
+/// provide a reference (e.g. because they are decoding from some columnar storage on each
+/// iteration) this should be `&#39;static`.
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">trait </span>AsDocOp&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="doccomment">/// The type of the Actor ID component of the op IDs for this impl. This is typically either
+    /// `&amp;&#39;a ActorID` or `usize`
+    </span><span class="kw">type </span>ActorId;
+    <span class="doccomment">/// The type of the op IDs this impl produces.
+    </span><span class="kw">type </span>OpId: convert::OpId&lt;<span class="self">Self</span>::ActorId&gt;;
+    <span class="doccomment">/// The type of the successor iterator returned by `Self::pred`. This can often be omitted
+    </span><span class="kw">type </span>SuccIter: Iterator&lt;Item = <span class="self">Self</span>::OpId&gt; + ExactSizeIterator;
 
-    <span class="kw">fn</span> <span class="ident">obj</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">convert::ObjId</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::OpId</span><span class="op">&gt;</span>;
-    <span class="kw">fn</span> <span class="ident">id</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident"><span class="self">Self</span>::OpId</span>;
-    <span class="kw">fn</span> <span class="ident">key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">convert::Key</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident"><span class="self">Self</span>::OpId</span><span class="op">&gt;</span>;
-    <span class="kw">fn</span> <span class="ident">insert</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span>;
-    <span class="kw">fn</span> <span class="ident">action</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u64</span>;
-    <span class="kw">fn</span> <span class="ident">val</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">ScalarValue</span><span class="op">&gt;</span>;
-    <span class="kw">fn</span> <span class="ident">succ</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident"><span class="self">Self</span>::SuccIter</span>;
+    <span class="kw">fn </span>obj(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; convert::ObjId&lt;<span class="self">Self</span>::OpId&gt;;
+    <span class="kw">fn </span>id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::OpId;
+    <span class="kw">fn </span>key(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; convert::Key&lt;<span class="lifetime">&#39;a</span>, <span class="self">Self</span>::OpId&gt;;
+    <span class="kw">fn </span>insert(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool;
+    <span class="kw">fn </span>action(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64;
+    <span class="kw">fn </span>val(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Cow&lt;<span class="lifetime">&#39;a</span>, ScalarValue&gt;;
+    <span class="kw">fn </span>succ(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::SuccIter;
 }
 
-<span class="kw">impl</span> <span class="ident">DocOpColumns</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">I</span>, <span class="ident">C</span>, <span class="ident">O</span><span class="op">&gt;</span>(<span class="ident">ops</span>: <span class="ident">I</span>, <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) -&gt; <span class="ident">DocOpColumns</span>
-    <span class="kw">where</span>
-        <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">C</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">ExactSizeIterator</span>,
-        <span class="ident">O</span>: <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-        <span class="ident">C</span>: <span class="ident">AsDocOp</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">OpId</span> <span class="op">=</span> <span class="ident">O</span><span class="op">&gt;</span>,
+<span class="kw">impl </span>DocOpColumns {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>encode&lt;<span class="lifetime">&#39;a</span>, I, C, O&gt;(ops: I, out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;) -&gt; DocOpColumns
+    <span class="kw">where
+        </span>I: Iterator&lt;Item = C&gt; + Clone + ExactSizeIterator,
+        O: convert::OpId&lt;usize&gt;,
+        C: AsDocOp&lt;<span class="lifetime">&#39;a</span>, OpId = O&gt;,
     {
-        <span class="kw">if</span> <span class="ident">ops</span>.<span class="ident">len</span>() <span class="op">&gt;</span> <span class="number">30000</span> {
-            <span class="ident"><span class="self">Self</span>::encode_rowwise</span>(<span class="ident">ops</span>, <span class="ident">out</span>)
-        } <span class="kw">else</span> {
-            <span class="ident"><span class="self">Self</span>::encode_columnwise</span>(<span class="ident">ops</span>, <span class="ident">out</span>)
+        <span class="kw">if </span>ops.len() &gt; <span class="number">30000 </span>{
+            <span class="self">Self</span>::encode_rowwise(ops, out)
+        } <span class="kw">else </span>{
+            <span class="self">Self</span>::encode_columnwise(ops, out)
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">encode_columnwise</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span><span class="op">&gt;</span>(<span class="ident">ops</span>: <span class="ident">I</span>, <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) -&gt; <span class="ident">DocOpColumns</span>
-    <span class="kw">where</span>
-        <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">C</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span>,
-        <span class="ident">O</span>: <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-        <span class="ident">C</span>: <span class="ident">AsDocOp</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">OpId</span> <span class="op">=</span> <span class="ident">O</span><span class="op">&gt;</span>,
+    <span class="kw">fn </span>encode_columnwise&lt;<span class="lifetime">&#39;a</span>, I, O, C&gt;(ops: I, out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;) -&gt; DocOpColumns
+    <span class="kw">where
+        </span>I: Iterator&lt;Item = C&gt; + Clone,
+        O: convert::OpId&lt;usize&gt;,
+        C: AsDocOp&lt;<span class="lifetime">&#39;a</span>, OpId = O&gt;,
     {
-        <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="ident">ObjIdRange::encode</span>(<span class="ident">ops</span>.<span class="ident">clone</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">o</span><span class="op">|</span> <span class="ident">o</span>.<span class="ident">obj</span>()), <span class="ident">out</span>);
-        <span class="kw">let</span> <span class="ident">key</span> <span class="op">=</span> <span class="ident">KeyRange::encode</span>(<span class="ident">ops</span>.<span class="ident">clone</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">o</span><span class="op">|</span> <span class="ident">o</span>.<span class="ident">key</span>()), <span class="ident">out</span>);
-        <span class="kw">let</span> <span class="ident">id</span> <span class="op">=</span> <span class="ident">OpIdRange::encode</span>(<span class="ident">ops</span>.<span class="ident">clone</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">o</span><span class="op">|</span> <span class="ident">o</span>.<span class="ident">id</span>()), <span class="ident">out</span>);
-        <span class="kw">let</span> <span class="ident">insert</span> <span class="op">=</span> <span class="ident">BooleanRange::encode</span>(<span class="ident">ops</span>.<span class="ident">clone</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">o</span><span class="op">|</span> <span class="ident">o</span>.<span class="ident">insert</span>()), <span class="ident">out</span>);
-        <span class="kw">let</span> <span class="ident">action</span> <span class="op">=</span> <span class="ident">RleRange::encode</span>(<span class="ident">ops</span>.<span class="ident">clone</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">o</span><span class="op">|</span> <span class="prelude-val">Some</span>(<span class="ident">o</span>.<span class="ident">action</span>() <span class="kw">as</span> <span class="ident">u64</span>)), <span class="ident">out</span>);
-        <span class="kw">let</span> <span class="ident">val</span> <span class="op">=</span> <span class="ident">ValueRange::encode</span>(<span class="ident">ops</span>.<span class="ident">clone</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">o</span><span class="op">|</span> <span class="ident">o</span>.<span class="ident">val</span>()), <span class="ident">out</span>);
-        <span class="kw">let</span> <span class="ident">succ</span> <span class="op">=</span> <span class="ident">OpIdListRange::encode</span>(<span class="ident">ops</span>.<span class="ident">map</span>(<span class="op">|</span><span class="ident">o</span><span class="op">|</span> <span class="ident">o</span>.<span class="ident">succ</span>()), <span class="ident">out</span>);
-        <span class="self">Self</span> {
-            <span class="ident">obj</span>,
-            <span class="ident">key</span>,
-            <span class="ident">id</span>,
-            <span class="ident">insert</span>,
-            <span class="ident">action</span>,
-            <span class="ident">val</span>,
-            <span class="ident">succ</span>,
-            <span class="ident">other</span>: <span class="ident">Columns::empty</span>(),
+        <span class="kw">let </span>obj = ObjIdRange::encode(ops.clone().map(|o| o.obj()), out);
+        <span class="kw">let </span>key = KeyRange::encode(ops.clone().map(|o| o.key()), out);
+        <span class="kw">let </span>id = OpIdRange::encode(ops.clone().map(|o| o.id()), out);
+        <span class="kw">let </span>insert = BooleanRange::encode(ops.clone().map(|o| o.insert()), out);
+        <span class="kw">let </span>action = RleRange::encode(ops.clone().map(|o| <span class="prelude-val">Some</span>(o.action() <span class="kw">as </span>u64)), out);
+        <span class="kw">let </span>val = ValueRange::encode(ops.clone().map(|o| o.val()), out);
+        <span class="kw">let </span>succ = OpIdListRange::encode(ops.map(|o| o.succ()), out);
+        <span class="self">Self </span>{
+            obj,
+            key,
+            id,
+            insert,
+            action,
+            val,
+            succ,
+            other: Columns::empty(),
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">encode_rowwise</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span><span class="op">&gt;</span>(<span class="ident">ops</span>: <span class="ident">I</span>, <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) -&gt; <span class="ident">DocOpColumns</span>
-    <span class="kw">where</span>
-        <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">C</span><span class="op">&gt;</span>,
-        <span class="ident">O</span>: <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-        <span class="ident">C</span>: <span class="ident">AsDocOp</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">OpId</span> <span class="op">=</span> <span class="ident">O</span><span class="op">&gt;</span>,
+    <span class="kw">fn </span>encode_rowwise&lt;<span class="lifetime">&#39;a</span>, I, O, C&gt;(ops: I, out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;) -&gt; DocOpColumns
+    <span class="kw">where
+        </span>I: Iterator&lt;Item = C&gt;,
+        O: convert::OpId&lt;usize&gt;,
+        C: AsDocOp&lt;<span class="lifetime">&#39;a</span>, OpId = O&gt;,
     {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">obj</span> <span class="op">=</span> <span class="ident">ObjIdEncoder::new</span>();
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">key</span> <span class="op">=</span> <span class="ident">KeyEncoder::new</span>();
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">id</span> <span class="op">=</span> <span class="ident">OpIdEncoder::new</span>();
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">insert</span> <span class="op">=</span> <span class="ident">BooleanEncoder::new</span>();
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">action</span> <span class="op">=</span> <span class="ident">RleEncoder</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">u64</span><span class="op">&gt;</span><span class="ident">::from</span>(<span class="ident">Vec::new</span>());
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">val</span> <span class="op">=</span> <span class="ident">ValueEncoder::new</span>();
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">succ</span> <span class="op">=</span> <span class="ident">OpIdListEncoder::new</span>();
-        <span class="kw">for</span> <span class="ident">op</span> <span class="kw">in</span> <span class="ident">ops</span> {
-            <span class="ident">obj</span>.<span class="ident">append</span>(<span class="ident">op</span>.<span class="ident">obj</span>());
-            <span class="ident">key</span>.<span class="ident">append</span>(<span class="ident">op</span>.<span class="ident">key</span>());
-            <span class="ident">id</span>.<span class="ident">append</span>(<span class="ident">op</span>.<span class="ident">id</span>());
-            <span class="ident">insert</span>.<span class="ident">append</span>(<span class="ident">op</span>.<span class="ident">insert</span>());
-            <span class="ident">action</span>.<span class="ident">append</span>(<span class="prelude-val">Some</span>(<span class="ident">op</span>.<span class="ident">action</span>()));
-            <span class="ident">val</span>.<span class="ident">append</span>(<span class="kw-2">&amp;</span><span class="ident">op</span>.<span class="ident">val</span>());
-            <span class="ident">succ</span>.<span class="ident">append</span>(<span class="ident">op</span>.<span class="ident">succ</span>());
+        <span class="kw">let </span><span class="kw-2">mut </span>obj = ObjIdEncoder::new();
+        <span class="kw">let </span><span class="kw-2">mut </span>key = KeyEncoder::new();
+        <span class="kw">let </span><span class="kw-2">mut </span>id = OpIdEncoder::new();
+        <span class="kw">let </span><span class="kw-2">mut </span>insert = BooleanEncoder::new();
+        <span class="kw">let </span><span class="kw-2">mut </span>action = RleEncoder::&lt;<span class="kw">_</span>, u64&gt;::from(Vec::new());
+        <span class="kw">let </span><span class="kw-2">mut </span>val = ValueEncoder::new();
+        <span class="kw">let </span><span class="kw-2">mut </span>succ = OpIdListEncoder::new();
+        <span class="kw">for </span>op <span class="kw">in </span>ops {
+            obj.append(op.obj());
+            key.append(op.key());
+            id.append(op.id());
+            insert.append(op.insert());
+            action.append(<span class="prelude-val">Some</span>(op.action()));
+            val.append(<span class="kw-2">&amp;</span>op.val());
+            succ.append(op.succ());
         }
-        <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="ident">obj</span>.<span class="ident">finish</span>(<span class="ident">out</span>);
-        <span class="kw">let</span> <span class="ident">key</span> <span class="op">=</span> <span class="ident">key</span>.<span class="ident">finish</span>(<span class="ident">out</span>);
-        <span class="kw">let</span> <span class="ident">id</span> <span class="op">=</span> <span class="ident">id</span>.<span class="ident">finish</span>(<span class="ident">out</span>);
+        <span class="kw">let </span>obj = obj.finish(out);
+        <span class="kw">let </span>key = key.finish(out);
+        <span class="kw">let </span>id = id.finish(out);
 
-        <span class="kw">let</span> <span class="ident">insert_start</span> <span class="op">=</span> <span class="ident">out</span>.<span class="ident">len</span>();
-        <span class="kw">let</span> (<span class="ident">insert_out</span>, <span class="kw">_</span>) <span class="op">=</span> <span class="ident">insert</span>.<span class="ident">finish</span>();
-        <span class="ident">out</span>.<span class="ident">extend</span>(<span class="ident">insert_out</span>);
-        <span class="kw">let</span> <span class="ident">insert</span> <span class="op">=</span> <span class="ident">BooleanRange::from</span>(<span class="ident">insert_start</span>..<span class="ident">out</span>.<span class="ident">len</span>());
+        <span class="kw">let </span>insert_start = out.len();
+        <span class="kw">let </span>(insert_out, <span class="kw">_</span>) = insert.finish();
+        out.extend(insert_out);
+        <span class="kw">let </span>insert = BooleanRange::from(insert_start..out.len());
 
-        <span class="kw">let</span> <span class="ident">action_start</span> <span class="op">=</span> <span class="ident">out</span>.<span class="ident">len</span>();
-        <span class="kw">let</span> (<span class="ident">action_out</span>, <span class="kw">_</span>) <span class="op">=</span> <span class="ident">action</span>.<span class="ident">finish</span>();
-        <span class="ident">out</span>.<span class="ident">extend</span>(<span class="ident">action_out</span>);
-        <span class="kw">let</span> <span class="ident">action</span> <span class="op">=</span> <span class="ident">RleRange::from</span>(<span class="ident">action_start</span>..<span class="ident">out</span>.<span class="ident">len</span>());
+        <span class="kw">let </span>action_start = out.len();
+        <span class="kw">let </span>(action_out, <span class="kw">_</span>) = action.finish();
+        out.extend(action_out);
+        <span class="kw">let </span>action = RleRange::from(action_start..out.len());
 
-        <span class="kw">let</span> <span class="ident">val</span> <span class="op">=</span> <span class="ident">val</span>.<span class="ident">finish</span>(<span class="ident">out</span>);
-        <span class="kw">let</span> <span class="ident">succ</span> <span class="op">=</span> <span class="ident">succ</span>.<span class="ident">finish</span>(<span class="ident">out</span>);
-        <span class="ident">DocOpColumns</span> {
-            <span class="ident">obj</span>,
-            <span class="ident">key</span>,
-            <span class="ident">id</span>,
-            <span class="ident">insert</span>,
-            <span class="ident">action</span>,
-            <span class="ident">val</span>,
-            <span class="ident">succ</span>,
-            <span class="ident">other</span>: <span class="ident">Columns::empty</span>(),
-        }
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">iter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>]) -&gt; <span class="ident">DocOpColumnIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="ident">DocOpColumnIter</span> {
-            <span class="ident">id</span>: <span class="self">self</span>.<span class="ident">id</span>.<span class="ident">iter</span>(<span class="ident">data</span>),
-            <span class="ident">action</span>: <span class="self">self</span>.<span class="ident">action</span>.<span class="ident">decoder</span>(<span class="ident">data</span>),
-            <span class="ident">objs</span>: <span class="self">self</span>.<span class="ident">obj</span>.<span class="ident">as_ref</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">o</span><span class="op">|</span> <span class="ident">o</span>.<span class="ident">iter</span>(<span class="ident">data</span>)),
-            <span class="ident">keys</span>: <span class="self">self</span>.<span class="ident">key</span>.<span class="ident">iter</span>(<span class="ident">data</span>),
-            <span class="ident">insert</span>: <span class="self">self</span>.<span class="ident">insert</span>.<span class="ident">decoder</span>(<span class="ident">data</span>),
-            <span class="ident">value</span>: <span class="self">self</span>.<span class="ident">val</span>.<span class="ident">iter</span>(<span class="ident">data</span>),
-            <span class="ident">succ</span>: <span class="self">self</span>.<span class="ident">succ</span>.<span class="ident">iter</span>(<span class="ident">data</span>),
+        <span class="kw">let </span>val = val.finish(out);
+        <span class="kw">let </span>succ = succ.finish(out);
+        DocOpColumns {
+            obj,
+            key,
+            id,
+            insert,
+            action,
+            val,
+            succ,
+            other: Columns::empty(),
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">raw_columns</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">RawColumns</span><span class="op">&lt;</span><span class="ident">compression::Uncompressed</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">cols</span> <span class="op">=</span> <span class="macro">vec!</span>[
-            <span class="ident">RawColumn::new</span>(
-                <span class="ident">ColumnSpec::new</span>(<span class="ident">OBJ_COL_ID</span>, <span class="ident">ColumnType::Actor</span>, <span class="bool-val">false</span>),
-                <span class="self">self</span>.<span class="ident">obj</span>
-                    .<span class="ident">as_ref</span>()
-                    .<span class="ident">map</span>(<span class="op">|</span><span class="ident">o</span><span class="op">|</span> <span class="ident">o</span>.<span class="ident">actor_range</span>().<span class="ident">clone</span>().<span class="ident">into</span>())
-                    .<span class="ident">unwrap_or</span>(<span class="number">0</span>..<span class="number">0</span>),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>iter&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, data: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8]) -&gt; DocOpColumnIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+        DocOpColumnIter {
+            id: <span class="self">self</span>.id.iter(data),
+            action: <span class="self">self</span>.action.decoder(data),
+            objs: <span class="self">self</span>.obj.as_ref().map(|o| o.iter(data)),
+            keys: <span class="self">self</span>.key.iter(data),
+            insert: <span class="self">self</span>.insert.decoder(data),
+            value: <span class="self">self</span>.val.iter(data),
+            succ: <span class="self">self</span>.succ.iter(data),
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>raw_columns(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; RawColumns&lt;compression::Uncompressed&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>cols = <span class="macro">vec!</span>[
+            RawColumn::new(
+                ColumnSpec::new(OBJ_COL_ID, ColumnType::Actor, <span class="bool-val">false</span>),
+                <span class="self">self</span>.obj
+                    .as_ref()
+                    .map(|o| o.actor_range().clone().into())
+                    .unwrap_or(<span class="number">0</span>..<span class="number">0</span>),
             ),
-            <span class="ident">RawColumn::new</span>(
-                <span class="ident">ColumnSpec::new</span>(<span class="ident">OBJ_COL_ID</span>, <span class="ident">ColumnType::Integer</span>, <span class="bool-val">false</span>),
-                <span class="self">self</span>.<span class="ident">obj</span>
-                    .<span class="ident">as_ref</span>()
-                    .<span class="ident">map</span>(<span class="op">|</span><span class="ident">o</span><span class="op">|</span> <span class="ident">o</span>.<span class="ident">counter_range</span>().<span class="ident">clone</span>().<span class="ident">into</span>())
-                    .<span class="ident">unwrap_or</span>(<span class="number">0</span>..<span class="number">0</span>),
+            RawColumn::new(
+                ColumnSpec::new(OBJ_COL_ID, ColumnType::Integer, <span class="bool-val">false</span>),
+                <span class="self">self</span>.obj
+                    .as_ref()
+                    .map(|o| o.counter_range().clone().into())
+                    .unwrap_or(<span class="number">0</span>..<span class="number">0</span>),
             ),
-            <span class="ident">RawColumn::new</span>(
-                <span class="ident">ColumnSpec::new</span>(<span class="ident">KEY_COL_ID</span>, <span class="ident">ColumnType::Actor</span>, <span class="bool-val">false</span>),
-                <span class="self">self</span>.<span class="ident">key</span>.<span class="ident">actor_range</span>().<span class="ident">clone</span>().<span class="ident">into</span>(),
+            RawColumn::new(
+                ColumnSpec::new(KEY_COL_ID, ColumnType::Actor, <span class="bool-val">false</span>),
+                <span class="self">self</span>.key.actor_range().clone().into(),
             ),
-            <span class="ident">RawColumn::new</span>(
-                <span class="ident">ColumnSpec::new</span>(<span class="ident">KEY_COL_ID</span>, <span class="ident">ColumnType::DeltaInteger</span>, <span class="bool-val">false</span>),
-                <span class="self">self</span>.<span class="ident">key</span>.<span class="ident">counter_range</span>().<span class="ident">clone</span>().<span class="ident">into</span>(),
+            RawColumn::new(
+                ColumnSpec::new(KEY_COL_ID, ColumnType::DeltaInteger, <span class="bool-val">false</span>),
+                <span class="self">self</span>.key.counter_range().clone().into(),
             ),
-            <span class="ident">RawColumn::new</span>(
-                <span class="ident">ColumnSpec::new</span>(<span class="ident">KEY_COL_ID</span>, <span class="ident">ColumnType::String</span>, <span class="bool-val">false</span>),
-                <span class="self">self</span>.<span class="ident">key</span>.<span class="ident">string_range</span>().<span class="ident">clone</span>().<span class="ident">into</span>(),
+            RawColumn::new(
+                ColumnSpec::new(KEY_COL_ID, ColumnType::String, <span class="bool-val">false</span>),
+                <span class="self">self</span>.key.string_range().clone().into(),
             ),
-            <span class="ident">RawColumn::new</span>(
-                <span class="ident">ColumnSpec::new</span>(<span class="ident">ID_COL_ID</span>, <span class="ident">ColumnType::Actor</span>, <span class="bool-val">false</span>),
-                <span class="self">self</span>.<span class="ident">id</span>.<span class="ident">actor_range</span>().<span class="ident">clone</span>().<span class="ident">into</span>(),
+            RawColumn::new(
+                ColumnSpec::new(ID_COL_ID, ColumnType::Actor, <span class="bool-val">false</span>),
+                <span class="self">self</span>.id.actor_range().clone().into(),
             ),
-            <span class="ident">RawColumn::new</span>(
-                <span class="ident">ColumnSpec::new</span>(<span class="ident">ID_COL_ID</span>, <span class="ident">ColumnType::DeltaInteger</span>, <span class="bool-val">false</span>),
-                <span class="self">self</span>.<span class="ident">id</span>.<span class="ident">counter_range</span>().<span class="ident">clone</span>().<span class="ident">into</span>(),
+            RawColumn::new(
+                ColumnSpec::new(ID_COL_ID, ColumnType::DeltaInteger, <span class="bool-val">false</span>),
+                <span class="self">self</span>.id.counter_range().clone().into(),
             ),
-            <span class="ident">RawColumn::new</span>(
-                <span class="ident">ColumnSpec::new</span>(<span class="ident">INSERT_COL_ID</span>, <span class="ident">ColumnType::Boolean</span>, <span class="bool-val">false</span>),
-                <span class="self">self</span>.<span class="ident">insert</span>.<span class="ident">clone</span>().<span class="ident">into</span>(),
+            RawColumn::new(
+                ColumnSpec::new(INSERT_COL_ID, ColumnType::Boolean, <span class="bool-val">false</span>),
+                <span class="self">self</span>.insert.clone().into(),
             ),
-            <span class="ident">RawColumn::new</span>(
-                <span class="ident">ColumnSpec::new</span>(<span class="ident">ACTION_COL_ID</span>, <span class="ident">ColumnType::Integer</span>, <span class="bool-val">false</span>),
-                <span class="self">self</span>.<span class="ident">action</span>.<span class="ident">clone</span>().<span class="ident">into</span>(),
+            RawColumn::new(
+                ColumnSpec::new(ACTION_COL_ID, ColumnType::Integer, <span class="bool-val">false</span>),
+                <span class="self">self</span>.action.clone().into(),
             ),
-            <span class="ident">RawColumn::new</span>(
-                <span class="ident">ColumnSpec::new</span>(<span class="ident">VAL_COL_ID</span>, <span class="ident">ColumnType::ValueMetadata</span>, <span class="bool-val">false</span>),
-                <span class="self">self</span>.<span class="ident">val</span>.<span class="ident">meta_range</span>().<span class="ident">clone</span>().<span class="ident">into</span>(),
+            RawColumn::new(
+                ColumnSpec::new(VAL_COL_ID, ColumnType::ValueMetadata, <span class="bool-val">false</span>),
+                <span class="self">self</span>.val.meta_range().clone().into(),
             ),
         ];
-        <span class="kw">if</span> <span class="op">!</span><span class="self">self</span>.<span class="ident">val</span>.<span class="ident">raw_range</span>().<span class="ident">is_empty</span>() {
-            <span class="ident">cols</span>.<span class="ident">push</span>(<span class="ident">RawColumn::new</span>(
-                <span class="ident">ColumnSpec::new</span>(<span class="ident">VAL_COL_ID</span>, <span class="ident">ColumnType::Value</span>, <span class="bool-val">false</span>),
-                <span class="self">self</span>.<span class="ident">val</span>.<span class="ident">raw_range</span>().<span class="ident">clone</span>().<span class="ident">into</span>(),
+        <span class="kw">if </span>!<span class="self">self</span>.val.raw_range().is_empty() {
+            cols.push(RawColumn::new(
+                ColumnSpec::new(VAL_COL_ID, ColumnType::Value, <span class="bool-val">false</span>),
+                <span class="self">self</span>.val.raw_range().clone().into(),
             ));
         }
-        <span class="ident">cols</span>.<span class="ident">push</span>(<span class="ident">RawColumn::new</span>(
-            <span class="ident">ColumnSpec::new</span>(<span class="ident">SUCC_COL_ID</span>, <span class="ident">ColumnType::Group</span>, <span class="bool-val">false</span>),
-            <span class="self">self</span>.<span class="ident">succ</span>.<span class="ident">group_range</span>().<span class="ident">clone</span>().<span class="ident">into</span>(),
+        cols.push(RawColumn::new(
+            ColumnSpec::new(SUCC_COL_ID, ColumnType::Group, <span class="bool-val">false</span>),
+            <span class="self">self</span>.succ.group_range().clone().into(),
         ));
-        <span class="kw">if</span> <span class="op">!</span><span class="self">self</span>.<span class="ident">succ</span>.<span class="ident">actor_range</span>().<span class="ident">is_empty</span>() {
-            <span class="ident">cols</span>.<span class="ident">extend</span>([
-                <span class="ident">RawColumn::new</span>(
-                    <span class="ident">ColumnSpec::new</span>(<span class="ident">SUCC_COL_ID</span>, <span class="ident">ColumnType::Actor</span>, <span class="bool-val">false</span>),
-                    <span class="self">self</span>.<span class="ident">succ</span>.<span class="ident">actor_range</span>().<span class="ident">clone</span>().<span class="ident">into</span>(),
+        <span class="kw">if </span>!<span class="self">self</span>.succ.actor_range().is_empty() {
+            cols.extend([
+                RawColumn::new(
+                    ColumnSpec::new(SUCC_COL_ID, ColumnType::Actor, <span class="bool-val">false</span>),
+                    <span class="self">self</span>.succ.actor_range().clone().into(),
                 ),
-                <span class="ident">RawColumn::new</span>(
-                    <span class="ident">ColumnSpec::new</span>(<span class="ident">SUCC_COL_ID</span>, <span class="ident">ColumnType::DeltaInteger</span>, <span class="bool-val">false</span>),
-                    <span class="self">self</span>.<span class="ident">succ</span>.<span class="ident">counter_range</span>().<span class="ident">clone</span>().<span class="ident">into</span>(),
+                RawColumn::new(
+                    ColumnSpec::new(SUCC_COL_ID, ColumnType::DeltaInteger, <span class="bool-val">false</span>),
+                    <span class="self">self</span>.succ.counter_range().clone().into(),
                 ),
             ]);
         }
-        <span class="ident">cols</span>.<span class="ident">into_iter</span>().<span class="ident">collect</span>()
+        cols.into_iter().collect()
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">DocOpColumnIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">id</span>: <span class="ident">OpIdIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
-    <span class="ident">action</span>: <span class="ident">RleDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">u64</span><span class="op">&gt;</span>,
-    <span class="ident">objs</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ObjIdIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    <span class="ident">keys</span>: <span class="ident">KeyIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
-    <span class="ident">insert</span>: <span class="ident">BooleanDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
-    <span class="ident">value</span>: <span class="ident">ValueIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
-    <span class="ident">succ</span>: <span class="ident">OpIdListIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
+<span class="attribute">#[derive(Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>DocOpColumnIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    id: OpIdIter&lt;<span class="lifetime">&#39;a</span>&gt;,
+    action: RleDecoder&lt;<span class="lifetime">&#39;a</span>, u64&gt;,
+    objs: <span class="prelude-ty">Option</span>&lt;ObjIdIter&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
+    keys: KeyIter&lt;<span class="lifetime">&#39;a</span>&gt;,
+    insert: BooleanDecoder&lt;<span class="lifetime">&#39;a</span>&gt;,
+    value: ValueIter&lt;<span class="lifetime">&#39;a</span>&gt;,
+    succ: OpIdListIter&lt;<span class="lifetime">&#39;a</span>&gt;,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">DocOpColumnIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">done</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="ident">id</span>.<span class="ident">done</span>()
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; DocOpColumnIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>done(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="self">self</span>.id.done()
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">thiserror::Error</span>)]</span>
-<span class="attribute">#[<span class="ident">error</span>(<span class="ident">transparent</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">ReadDocOpError</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident">DecodeColumnError</span>);
+<span class="attribute">#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ReadDocOpError(<span class="attribute">#[from] </span>DecodeColumnError);
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Iterator</span> <span class="kw">for</span> <span class="ident">DocOpColumnIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">DocOp</span>, <span class="ident">ReadDocOpError</span><span class="op">&gt;</span>;
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>DocOpColumnIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">type </span>Item = <span class="prelude-ty">Result</span>&lt;DocOp, ReadDocOpError&gt;;
 
-    <span class="kw">fn</span> <span class="ident">next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">done</span>() {
-            <span class="prelude-val">None</span>
-        } <span class="kw">else</span> {
-            <span class="kw">match</span> <span class="self">self</span>.<span class="ident">try_next</span>() {
-                <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="ident">op</span>)) =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(<span class="ident">op</span>)),
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="kw">if </span><span class="self">self</span>.done() {
+            <span class="prelude-val">None
+        </span>} <span class="kw">else </span>{
+            <span class="kw">match </span><span class="self">self</span>.try_next() {
+                <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(op)) =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(op)),
                 <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>) =&gt; <span class="prelude-val">None</span>,
-                <span class="prelude-val">Err</span>(<span class="ident">e</span>) =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Err</span>(<span class="ident">e</span>.<span class="ident">into</span>())),
+                <span class="prelude-val">Err</span>(e) =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Err</span>(e.into())),
             }
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">DocOpColumnIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">try_next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">DocOp</span><span class="op">&gt;</span>, <span class="ident">DecodeColumnError</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">done</span>() {
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; DocOpColumnIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>try_next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;DocOp&gt;, DecodeColumnError&gt; {
+        <span class="kw">if </span><span class="self">self</span>.done() {
             <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>)
-        } <span class="kw">else</span> {
-            <span class="kw">let</span> <span class="ident">id</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">id</span>.<span class="ident">next_in_col</span>(<span class="string">&quot;id&quot;</span>)<span class="question-mark">?</span>;
-            <span class="kw">let</span> <span class="ident">action</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">action</span>.<span class="ident">next_in_col</span>(<span class="string">&quot;action&quot;</span>)<span class="question-mark">?</span>;
-            <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="kw-2">ref</span> <span class="kw-2">mut</span> <span class="ident">objs</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">objs</span> {
-                <span class="ident">objs</span>.<span class="ident">next_in_col</span>(<span class="string">&quot;obj&quot;</span>)<span class="question-mark">?</span>
-            } <span class="kw">else</span> {
-                <span class="ident">ObjId::root</span>()
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>id = <span class="self">self</span>.id.next_in_col(<span class="string">&quot;id&quot;</span>)<span class="question-mark">?</span>;
+            <span class="kw">let </span>action = <span class="self">self</span>.action.next_in_col(<span class="string">&quot;action&quot;</span>)<span class="question-mark">?</span>;
+            <span class="kw">let </span>obj = <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref mut </span>objs) = <span class="self">self</span>.objs {
+                objs.next_in_col(<span class="string">&quot;obj&quot;</span>)<span class="question-mark">?
+            </span>} <span class="kw">else </span>{
+                ObjId::root()
             };
-            <span class="kw">let</span> <span class="ident">key</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">keys</span>.<span class="ident">next_in_col</span>(<span class="string">&quot;key&quot;</span>)<span class="question-mark">?</span>;
-            <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">value</span>.<span class="ident">next_in_col</span>(<span class="string">&quot;value&quot;</span>)<span class="question-mark">?</span>;
-            <span class="kw">let</span> <span class="ident">succ</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">succ</span>.<span class="ident">next_in_col</span>(<span class="string">&quot;succ&quot;</span>)<span class="question-mark">?</span>;
-            <span class="kw">let</span> <span class="ident">insert</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">insert</span>.<span class="ident">next_in_col</span>(<span class="string">&quot;insert&quot;</span>)<span class="question-mark">?</span>;
-            <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="ident">DocOp</span> {
-                <span class="ident">id</span>,
-                <span class="ident">value</span>,
-                <span class="ident">action</span>: <span class="ident">action</span> <span class="kw">as</span> <span class="ident">usize</span>,
-                <span class="ident">object</span>: <span class="ident">obj</span>,
-                <span class="ident">key</span>,
-                <span class="ident">succ</span>,
-                <span class="ident">insert</span>,
+            <span class="kw">let </span>key = <span class="self">self</span>.keys.next_in_col(<span class="string">&quot;key&quot;</span>)<span class="question-mark">?</span>;
+            <span class="kw">let </span>value = <span class="self">self</span>.value.next_in_col(<span class="string">&quot;value&quot;</span>)<span class="question-mark">?</span>;
+            <span class="kw">let </span>succ = <span class="self">self</span>.succ.next_in_col(<span class="string">&quot;succ&quot;</span>)<span class="question-mark">?</span>;
+            <span class="kw">let </span>insert = <span class="self">self</span>.insert.next_in_col(<span class="string">&quot;insert&quot;</span>)<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(DocOp {
+                id,
+                value,
+                action: action <span class="kw">as </span>usize,
+                object: obj,
+                key,
+                succ,
+                insert,
             }))
         }
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">thiserror::Error</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">Error</span> {
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;mismatching column at {index}.&quot;</span>)]</span>
-    <span class="ident">MismatchingColumn</span> { <span class="ident">index</span>: <span class="ident">usize</span> },
+<span class="attribute">#[derive(Debug, thiserror::Error)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>Error {
+    <span class="attribute">#[error(<span class="string">&quot;mismatching column at {index}.&quot;</span>)]
+    </span>MismatchingColumn { index: usize },
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">MismatchingColumn</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Error</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">m</span>: <span class="ident">MismatchingColumn</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">Error::MismatchingColumn</span> { <span class="ident">index</span>: <span class="ident">m</span>.<span class="ident">index</span> }
+<span class="kw">impl </span>From&lt;MismatchingColumn&gt; <span class="kw">for </span>Error {
+    <span class="kw">fn </span>from(m: MismatchingColumn) -&gt; <span class="self">Self </span>{
+        Error::MismatchingColumn { index: m.index }
     }
 }
 
-<span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span><span class="ident">Columns</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">DocOpColumns</span> {
-    <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">Error</span>;
+<span class="kw">impl </span>TryFrom&lt;Columns&gt; <span class="kw">for </span>DocOpColumns {
+    <span class="kw">type </span>Error = Error;
 
-    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">columns</span>: <span class="ident">Columns</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">obj_actor</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">obj_ctr</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">key_actor</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">key_ctr</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">DeltaRange</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">key_str</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">smol_str::SmolStr</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">id_actor</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">id_ctr</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">DeltaRange</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">insert</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">BooleanRange</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">action</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">val</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ValueRange</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">succ_group</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">succ_actor</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">succ_ctr</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">DeltaRange</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">other</span> <span class="op">=</span> <span class="ident">Columns::empty</span>();
+    <span class="kw">fn </span>try_from(columns: Columns) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, <span class="self">Self</span>::Error&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>obj_actor: <span class="prelude-ty">Option</span>&lt;RleRange&lt;u64&gt;&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>obj_ctr: <span class="prelude-ty">Option</span>&lt;RleRange&lt;u64&gt;&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>key_actor: <span class="prelude-ty">Option</span>&lt;RleRange&lt;u64&gt;&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>key_ctr: <span class="prelude-ty">Option</span>&lt;DeltaRange&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>key_str: <span class="prelude-ty">Option</span>&lt;RleRange&lt;smol_str::SmolStr&gt;&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>id_actor: <span class="prelude-ty">Option</span>&lt;RleRange&lt;u64&gt;&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>id_ctr: <span class="prelude-ty">Option</span>&lt;DeltaRange&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>insert: <span class="prelude-ty">Option</span>&lt;BooleanRange&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>action: <span class="prelude-ty">Option</span>&lt;RleRange&lt;u64&gt;&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>val: <span class="prelude-ty">Option</span>&lt;ValueRange&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>succ_group: <span class="prelude-ty">Option</span>&lt;RleRange&lt;u64&gt;&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>succ_actor: <span class="prelude-ty">Option</span>&lt;RleRange&lt;u64&gt;&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>succ_ctr: <span class="prelude-ty">Option</span>&lt;DeltaRange&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>other = Columns::empty();
 
-        <span class="kw">for</span> (<span class="ident">index</span>, <span class="ident">col</span>) <span class="kw">in</span> <span class="ident">columns</span>.<span class="ident">into_iter</span>().<span class="ident">enumerate</span>() {
-            <span class="kw">match</span> (<span class="ident">col</span>.<span class="ident">id</span>(), <span class="ident">col</span>.<span class="ident">col_type</span>()) {
-                (<span class="ident">ID_COL_ID</span>, <span class="ident">ColumnType::Actor</span>) =&gt; <span class="ident">id_actor</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">col</span>.<span class="ident">range</span>().<span class="ident">into</span>()),
-                (<span class="ident">ID_COL_ID</span>, <span class="ident">ColumnType::DeltaInteger</span>) =&gt; <span class="ident">id_ctr</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">col</span>.<span class="ident">range</span>().<span class="ident">into</span>()),
-                (<span class="ident">OBJ_COL_ID</span>, <span class="ident">ColumnType::Actor</span>) =&gt; <span class="ident">obj_actor</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">col</span>.<span class="ident">range</span>().<span class="ident">into</span>()),
-                (<span class="ident">OBJ_COL_ID</span>, <span class="ident">ColumnType::Integer</span>) =&gt; <span class="ident">obj_ctr</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">col</span>.<span class="ident">range</span>().<span class="ident">into</span>()),
-                (<span class="ident">KEY_COL_ID</span>, <span class="ident">ColumnType::Actor</span>) =&gt; <span class="ident">key_actor</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">col</span>.<span class="ident">range</span>().<span class="ident">into</span>()),
-                (<span class="ident">KEY_COL_ID</span>, <span class="ident">ColumnType::DeltaInteger</span>) =&gt; <span class="ident">key_ctr</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">col</span>.<span class="ident">range</span>().<span class="ident">into</span>()),
-                (<span class="ident">KEY_COL_ID</span>, <span class="ident">ColumnType::String</span>) =&gt; <span class="ident">key_str</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">col</span>.<span class="ident">range</span>().<span class="ident">into</span>()),
-                (<span class="ident">INSERT_COL_ID</span>, <span class="ident">ColumnType::Boolean</span>) =&gt; <span class="ident">insert</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">col</span>.<span class="ident">range</span>().<span class="ident">into</span>()),
-                (<span class="ident">ACTION_COL_ID</span>, <span class="ident">ColumnType::Integer</span>) =&gt; <span class="ident">action</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">col</span>.<span class="ident">range</span>().<span class="ident">into</span>()),
-                (<span class="ident">VAL_COL_ID</span>, <span class="ident">ColumnType::ValueMetadata</span>) =&gt; <span class="kw">match</span> <span class="ident">col</span>.<span class="ident">into_ranges</span>() {
-                    <span class="ident">GenericColumnRange::Value</span>(<span class="ident">v</span>) =&gt; <span class="ident">val</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">v</span>),
-                    <span class="kw">_</span> =&gt; {
+        <span class="kw">for </span>(index, col) <span class="kw">in </span>columns.into_iter().enumerate() {
+            <span class="kw">match </span>(col.id(), col.col_type()) {
+                (ID_COL_ID, ColumnType::Actor) =&gt; id_actor = <span class="prelude-val">Some</span>(col.range().into()),
+                (ID_COL_ID, ColumnType::DeltaInteger) =&gt; id_ctr = <span class="prelude-val">Some</span>(col.range().into()),
+                (OBJ_COL_ID, ColumnType::Actor) =&gt; obj_actor = <span class="prelude-val">Some</span>(col.range().into()),
+                (OBJ_COL_ID, ColumnType::Integer) =&gt; obj_ctr = <span class="prelude-val">Some</span>(col.range().into()),
+                (KEY_COL_ID, ColumnType::Actor) =&gt; key_actor = <span class="prelude-val">Some</span>(col.range().into()),
+                (KEY_COL_ID, ColumnType::DeltaInteger) =&gt; key_ctr = <span class="prelude-val">Some</span>(col.range().into()),
+                (KEY_COL_ID, ColumnType::String) =&gt; key_str = <span class="prelude-val">Some</span>(col.range().into()),
+                (INSERT_COL_ID, ColumnType::Boolean) =&gt; insert = <span class="prelude-val">Some</span>(col.range().into()),
+                (ACTION_COL_ID, ColumnType::Integer) =&gt; action = <span class="prelude-val">Some</span>(col.range().into()),
+                (VAL_COL_ID, ColumnType::ValueMetadata) =&gt; <span class="kw">match </span>col.into_ranges() {
+                    GenericColumnRange::Value(v) =&gt; val = <span class="prelude-val">Some</span>(v),
+                    <span class="kw">_ </span>=&gt; {
                         <span class="macro">tracing::error!</span>(<span class="string">&quot;col 9 should be a value column&quot;</span>);
-                        <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">Error::MismatchingColumn</span> { <span class="ident">index</span> });
+                        <span class="kw">return </span><span class="prelude-val">Err</span>(Error::MismatchingColumn { index });
                     }
                 },
-                (<span class="ident">SUCC_COL_ID</span>, <span class="ident">ColumnType::Group</span>) =&gt; <span class="kw">match</span> <span class="ident">col</span>.<span class="ident">into_ranges</span>() {
-                    <span class="ident">GenericColumnRange::Group</span>(<span class="ident">GroupRange</span> { <span class="ident">num</span>, <span class="ident">values</span> }) =&gt; {
-                        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">cols</span> <span class="op">=</span> <span class="ident">values</span>.<span class="ident">into_iter</span>();
-                        <span class="kw">let</span> <span class="ident">first</span> <span class="op">=</span> <span class="ident">cols</span>.<span class="ident">next</span>();
-                        <span class="kw">let</span> <span class="ident">second</span> <span class="op">=</span> <span class="ident">cols</span>.<span class="ident">next</span>();
-                        <span class="ident">succ_group</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">num</span>);
-                        <span class="kw">match</span> (<span class="ident">first</span>, <span class="ident">second</span>) {
+                (SUCC_COL_ID, ColumnType::Group) =&gt; <span class="kw">match </span>col.into_ranges() {
+                    GenericColumnRange::Group(GroupRange { num, values }) =&gt; {
+                        <span class="kw">let </span><span class="kw-2">mut </span>cols = values.into_iter();
+                        <span class="kw">let </span>first = cols.next();
+                        <span class="kw">let </span>second = cols.next();
+                        succ_group = <span class="prelude-val">Some</span>(num);
+                        <span class="kw">match </span>(first, second) {
                             (
-                                <span class="prelude-val">Some</span>(<span class="ident">GroupedColumnRange::Simple</span>(<span class="ident">SimpleColRange::RleInt</span>(
-                                    <span class="ident">actor_range</span>,
+                                <span class="prelude-val">Some</span>(GroupedColumnRange::Simple(SimpleColRange::RleInt(
+                                    actor_range,
                                 ))),
-                                <span class="prelude-val">Some</span>(<span class="ident">GroupedColumnRange::Simple</span>(<span class="ident">SimpleColRange::Delta</span>(<span class="ident">ctr_range</span>))),
+                                <span class="prelude-val">Some</span>(GroupedColumnRange::Simple(SimpleColRange::Delta(ctr_range))),
                             ) =&gt; {
-                                <span class="ident">succ_actor</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">actor_range</span>);
-                                <span class="ident">succ_ctr</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">ctr_range</span>);
+                                succ_actor = <span class="prelude-val">Some</span>(actor_range);
+                                succ_ctr = <span class="prelude-val">Some</span>(ctr_range);
                             }
                             (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>) =&gt; {
-                                <span class="ident">succ_actor</span> <span class="op">=</span> <span class="prelude-val">Some</span>((<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>());
-                                <span class="ident">succ_ctr</span> <span class="op">=</span> <span class="prelude-val">Some</span>((<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>());
+                                succ_actor = <span class="prelude-val">Some</span>((<span class="number">0</span>..<span class="number">0</span>).into());
+                                succ_ctr = <span class="prelude-val">Some</span>((<span class="number">0</span>..<span class="number">0</span>).into());
                             }
-                            <span class="kw">_</span> =&gt; {
+                            <span class="kw">_ </span>=&gt; {
                                 <span class="macro">tracing::error!</span>(
-                                    <span class="string">&quot;expected a two column group of (actor, rle int) for index 10&quot;</span>
-                                );
-                                <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">Error::MismatchingColumn</span> { <span class="ident">index</span> });
+                                    <span class="string">&quot;expected a two column group of (actor, rle int) for index 10&quot;
+                                </span>);
+                                <span class="kw">return </span><span class="prelude-val">Err</span>(Error::MismatchingColumn { index });
                             }
                         };
-                        <span class="kw">if</span> <span class="ident">cols</span>.<span class="ident">next</span>().<span class="ident">is_some</span>() {
-                            <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">Error::MismatchingColumn</span> { <span class="ident">index</span> });
+                        <span class="kw">if </span>cols.next().is_some() {
+                            <span class="kw">return </span><span class="prelude-val">Err</span>(Error::MismatchingColumn { index });
                         }
                     }
-                    <span class="kw">_</span> =&gt; <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">Error::MismatchingColumn</span> { <span class="ident">index</span> }),
+                    <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(Error::MismatchingColumn { index }),
                 },
-                (<span class="ident">other_col</span>, <span class="ident">other_type</span>) =&gt; {
-                    <span class="macro">tracing::warn!</span>(<span class="ident">id</span><span class="op">=</span><span class="question-mark">?</span><span class="ident">other_col</span>, <span class="ident">typ</span><span class="op">=</span><span class="question-mark">?</span><span class="ident">other_type</span>, <span class="string">&quot;unknown column type&quot;</span>);
-                    <span class="ident">other</span>.<span class="ident">append</span>(<span class="ident">col</span>)
+                (other_col, other_type) =&gt; {
+                    <span class="macro">tracing::warn!</span>(id=<span class="question-mark">?</span>other_col, typ=<span class="question-mark">?</span>other_type, <span class="string">&quot;unknown column type&quot;</span>);
+                    other.append(col)
                 }
             }
         }
-        <span class="prelude-val">Ok</span>(<span class="ident">DocOpColumns</span> {
-            <span class="ident">obj</span>: <span class="ident">ObjIdRange::new</span>(
-                <span class="ident">obj_actor</span>.<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>()),
-                <span class="ident">obj_ctr</span>.<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>()),
+        <span class="prelude-val">Ok</span>(DocOpColumns {
+            obj: ObjIdRange::new(
+                obj_actor.unwrap_or_else(|| (<span class="number">0</span>..<span class="number">0</span>).into()),
+                obj_ctr.unwrap_or_else(|| (<span class="number">0</span>..<span class="number">0</span>).into()),
             ),
-            <span class="ident">key</span>: <span class="ident">KeyRange::new</span>(
-                <span class="ident">key_actor</span>.<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>()),
-                <span class="ident">key_ctr</span>.<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>()),
-                <span class="ident">key_str</span>.<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>()),
+            key: KeyRange::new(
+                key_actor.unwrap_or_else(|| (<span class="number">0</span>..<span class="number">0</span>).into()),
+                key_ctr.unwrap_or_else(|| (<span class="number">0</span>..<span class="number">0</span>).into()),
+                key_str.unwrap_or_else(|| (<span class="number">0</span>..<span class="number">0</span>).into()),
             ),
-            <span class="ident">id</span>: <span class="ident">OpIdRange::new</span>(
-                <span class="ident">id_actor</span>.<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>()),
-                <span class="ident">id_ctr</span>.<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>()),
+            id: OpIdRange::new(
+                id_actor.unwrap_or_else(|| (<span class="number">0</span>..<span class="number">0</span>).into()),
+                id_ctr.unwrap_or_else(|| (<span class="number">0</span>..<span class="number">0</span>).into()),
             ),
-            <span class="ident">insert</span>: <span class="ident">insert</span>.<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>()),
-            <span class="ident">action</span>: <span class="ident">action</span>.<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>()),
-            <span class="ident">val</span>: <span class="ident">val</span>.<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">ValueRange::new</span>((<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>(), (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>())),
-            <span class="ident">succ</span>: <span class="ident">OpIdListRange::new</span>(
-                <span class="ident">succ_group</span>.<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>()),
-                <span class="ident">succ_actor</span>.<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>()),
-                <span class="ident">succ_ctr</span>.<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>()),
+            insert: insert.unwrap_or_else(|| (<span class="number">0</span>..<span class="number">0</span>).into()),
+            action: action.unwrap_or_else(|| (<span class="number">0</span>..<span class="number">0</span>).into()),
+            val: val.unwrap_or_else(|| ValueRange::new((<span class="number">0</span>..<span class="number">0</span>).into(), (<span class="number">0</span>..<span class="number">0</span>).into())),
+            succ: OpIdListRange::new(
+                succ_group.unwrap_or_else(|| (<span class="number">0</span>..<span class="number">0</span>).into()),
+                succ_actor.unwrap_or_else(|| (<span class="number">0</span>..<span class="number">0</span>).into()),
+                succ_ctr.unwrap_or_else(|| (<span class="number">0</span>..<span class="number">0</span>).into()),
             ),
-            <span class="ident">other</span>,
+            other,
         })
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

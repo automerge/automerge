@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/columnar/encoding/col_error.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>col_error.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/columnar/encoding/col_error.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>col_error.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -88,93 +88,93 @@
 <span id="86">86</span>
 <span id="87">87</span>
 <span id="88">88</span>
-</pre><pre class="rust"><code><span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">DecodeColumnError</span> {
-    <span class="ident">path</span>: <span class="ident">Path</span>,
-    <span class="ident">error</span>: <span class="ident">DecodeColErrorKind</span>,
+</pre><pre class="rust"><code><span class="attribute">#[derive(Clone, Debug)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>DecodeColumnError {
+    path: Path,
+    error: DecodeColErrorKind,
 }
 
-<span class="kw">impl</span> <span class="ident">std::error::Error</span> <span class="kw">for</span> <span class="ident">DecodeColumnError</span> {}
+<span class="kw">impl </span>std::error::Error <span class="kw">for </span>DecodeColumnError {}
 
-<span class="kw">impl</span> <span class="ident">std::fmt::Display</span> <span class="kw">for</span> <span class="ident">DecodeColumnError</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">std::fmt::Result</span> {
-        <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">error</span> {
-            <span class="ident">DecodeColErrorKind::UnexpectedNull</span> =&gt; {
-                <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;unexpected null in column {}&quot;</span>, <span class="self">self</span>.<span class="ident">path</span>)
+<span class="kw">impl </span>std::fmt::Display <span class="kw">for </span>DecodeColumnError {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; std::fmt::Result {
+        <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.error {
+            DecodeColErrorKind::UnexpectedNull =&gt; {
+                <span class="macro">write!</span>(f, <span class="string">&quot;unexpected null in column {}&quot;</span>, <span class="self">self</span>.path)
             }
-            <span class="ident">DecodeColErrorKind::InvalidValue</span> { <span class="ident">reason</span> } =&gt; {
-                <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;invalid value in column {}: {}&quot;</span>, <span class="self">self</span>.<span class="ident">path</span>, <span class="ident">reason</span>)
+            DecodeColErrorKind::InvalidValue { reason } =&gt; {
+                <span class="macro">write!</span>(f, <span class="string">&quot;invalid value in column {}: {}&quot;</span>, <span class="self">self</span>.path, reason)
             }
         }
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>)]</span>
-<span class="kw">struct</span> <span class="ident">Path</span>(<span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>);
+<span class="attribute">#[derive(Clone, Debug)]
+</span><span class="kw">struct </span>Path(Vec&lt;String&gt;);
 
-<span class="kw">impl</span> <span class="ident">std::fmt::Display</span> <span class="kw">for</span> <span class="ident">Path</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">std::fmt::Result</span> {
-        <span class="kw">for</span> (<span class="ident">index</span>, <span class="ident">elem</span>) <span class="kw">in</span> <span class="self">self</span>.<span class="number">0</span>.<span class="ident">iter</span>().<span class="ident">rev</span>().<span class="ident">enumerate</span>() {
-            <span class="kw">if</span> <span class="ident">index</span> <span class="op">!</span><span class="op">=</span> <span class="number">0</span> {
-                <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;:&quot;</span>)<span class="question-mark">?</span>;
+<span class="kw">impl </span>std::fmt::Display <span class="kw">for </span>Path {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; std::fmt::Result {
+        <span class="kw">for </span>(index, elem) <span class="kw">in </span><span class="self">self</span>.<span class="number">0</span>.iter().rev().enumerate() {
+            <span class="kw">if </span>index != <span class="number">0 </span>{
+                <span class="macro">write!</span>(f, <span class="string">&quot;:&quot;</span>)<span class="question-mark">?</span>;
             }
-            <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="ident">elem</span>)<span class="question-mark">?</span>;
+            <span class="macro">write!</span>(f, <span class="string">&quot;{}&quot;</span>, elem)<span class="question-mark">?</span>;
         }
         <span class="prelude-val">Ok</span>(())
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Path</span> {
-    <span class="kw">fn</span> <span class="ident">push</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">str</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">col</span>: <span class="ident">S</span>) {
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">push</span>(<span class="ident">col</span>.<span class="ident">as_ref</span>().<span class="ident">to_string</span>())
+<span class="kw">impl </span>Path {
+    <span class="kw">fn </span>push&lt;S: AsRef&lt;str&gt;&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, col: S) {
+        <span class="self">self</span>.<span class="number">0</span>.push(col.as_ref().to_string())
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">str</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">S</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Path</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">p</span>: <span class="ident">S</span>) -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span>(<span class="macro">vec!</span>[<span class="ident">p</span>.<span class="ident">as_ref</span>().<span class="ident">to_string</span>()])
+<span class="kw">impl</span>&lt;S: AsRef&lt;str&gt;&gt; From&lt;S&gt; <span class="kw">for </span>Path {
+    <span class="kw">fn </span>from(p: S) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>(<span class="macro">vec!</span>[p.as_ref().to_string()])
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>)]</span>
-<span class="kw">enum</span> <span class="ident">DecodeColErrorKind</span> {
-    <span class="ident">UnexpectedNull</span>,
-    <span class="ident">InvalidValue</span> { <span class="ident">reason</span>: <span class="ident">String</span> },
+<span class="attribute">#[derive(Clone, Debug)]
+</span><span class="kw">enum </span>DecodeColErrorKind {
+    UnexpectedNull,
+    InvalidValue { reason: String },
 }
 
-<span class="kw">impl</span> <span class="ident">DecodeColumnError</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">decode_raw</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">str</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="ident">col</span>: <span class="ident">S</span>, <span class="ident">raw_err</span>: <span class="ident"><span class="kw">super</span>::raw::Error</span>) -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span> {
-            <span class="ident">path</span>: <span class="ident">col</span>.<span class="ident">into</span>(),
-            <span class="ident">error</span>: <span class="ident">DecodeColErrorKind::InvalidValue</span> {
-                <span class="ident">reason</span>: <span class="ident">raw_err</span>.<span class="ident">to_string</span>(),
+<span class="kw">impl </span>DecodeColumnError {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>decode_raw&lt;S: AsRef&lt;str&gt;&gt;(col: S, raw_err: <span class="kw">super</span>::raw::Error) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            path: col.into(),
+            error: DecodeColErrorKind::InvalidValue {
+                reason: raw_err.to_string(),
             },
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">unexpected_null</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">str</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="ident">col</span>: <span class="ident">S</span>) -&gt; <span class="ident">DecodeColumnError</span> {
-        <span class="self">Self</span> {
-            <span class="ident">path</span>: <span class="ident">col</span>.<span class="ident">into</span>(),
-            <span class="ident">error</span>: <span class="ident">DecodeColErrorKind::UnexpectedNull</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>unexpected_null&lt;S: AsRef&lt;str&gt;&gt;(col: S) -&gt; DecodeColumnError {
+        <span class="self">Self </span>{
+            path: col.into(),
+            error: DecodeColErrorKind::UnexpectedNull,
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">invalid_value</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">str</span><span class="op">&gt;</span>, <span class="ident">R</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">str</span><span class="op">&gt;</span><span class="op">&gt;</span>(
-        <span class="ident">col</span>: <span class="ident">S</span>,
-        <span class="ident">reason</span>: <span class="ident">R</span>,
-    ) -&gt; <span class="ident">DecodeColumnError</span> {
-        <span class="self">Self</span> {
-            <span class="ident">path</span>: <span class="ident">col</span>.<span class="ident">into</span>(),
-            <span class="ident">error</span>: <span class="ident">DecodeColErrorKind::InvalidValue</span> {
-                <span class="ident">reason</span>: <span class="ident">reason</span>.<span class="ident">as_ref</span>().<span class="ident">to_string</span>(),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>invalid_value&lt;S: AsRef&lt;str&gt;, R: AsRef&lt;str&gt;&gt;(
+        col: S,
+        reason: R,
+    ) -&gt; DecodeColumnError {
+        <span class="self">Self </span>{
+            path: col.into(),
+            error: DecodeColErrorKind::InvalidValue {
+                reason: reason.as_ref().to_string(),
             },
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">in_column</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">str</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">col</span>: <span class="ident">S</span>) -&gt; <span class="ident">DecodeColumnError</span> {
-        <span class="self">self</span>.<span class="ident">path</span>.<span class="ident">push</span>(<span class="ident">col</span>.<span class="ident">as_ref</span>());
-        <span class="self">self</span>
-    }
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>in_column&lt;S: AsRef&lt;str&gt;&gt;(<span class="kw-2">mut </span><span class="self">self</span>, col: S) -&gt; DecodeColumnError {
+        <span class="self">self</span>.path.push(col.as_ref());
+        <span class="self">self
+    </span>}
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

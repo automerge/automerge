@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/columnar/column_range/value.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>value.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/columnar/column_range/value.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>value.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -545,550 +545,550 @@
 <span id="543">543</span>
 <span id="544">544</span>
 <span id="545">545</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std</span>::{<span class="ident">borrow::Cow</span>, <span class="ident">ops::Range</span>};
+</pre><pre class="rust"><code><span class="kw">use </span>std::{borrow::Cow, ops::Range};
 
-<span class="kw">use</span> <span class="kw">crate</span>::{
-    <span class="ident">columnar</span>::{
-        <span class="ident">encoding</span>::{
-            <span class="ident">leb128</span>::{<span class="ident">lebsize</span>, <span class="ident">ulebsize</span>},
-            <span class="ident">raw</span>, <span class="ident">DecodeColumnError</span>, <span class="ident">RawBytes</span>, <span class="ident">RawDecoder</span>, <span class="ident">RawEncoder</span>, <span class="ident">RleDecoder</span>, <span class="ident">RleEncoder</span>, <span class="ident">Sink</span>,
+<span class="kw">use crate</span>::{
+    columnar::{
+        encoding::{
+            leb128::{lebsize, ulebsize},
+            raw, DecodeColumnError, RawBytes, RawDecoder, RawEncoder, RleDecoder, RleEncoder, Sink,
         },
-        <span class="ident">SpliceError</span>,
+        SpliceError,
     },
-    <span class="ident">ScalarValue</span>,
+    ScalarValue,
 };
 
-<span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">RawRange</span>, <span class="ident">RleRange</span>};
+<span class="kw">use super</span>::{RawRange, RleRange};
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">ValueRange</span> {
-    <span class="ident">meta</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>,
-    <span class="ident">raw</span>: <span class="ident">RawRange</span>,
+<span class="attribute">#[derive(Debug, Clone, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ValueRange {
+    meta: RleRange&lt;u64&gt;,
+    raw: RawRange,
 }
 
-<span class="kw">impl</span> <span class="ident">ValueRange</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">meta</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>, <span class="ident">raw</span>: <span class="ident">RawRange</span>) -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span> { <span class="ident">meta</span>, <span class="ident">raw</span> }
+<span class="kw">impl </span>ValueRange {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(meta: RleRange&lt;u64&gt;, raw: RawRange) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{ meta, raw }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">range</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
-        <span class="comment">// This is a hack, instead `raw` should be `Option&lt;RawRange&gt;`</span>
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">raw</span>.<span class="ident">is_empty</span>() {
-            <span class="self">self</span>.<span class="ident">meta</span>.<span class="ident">clone</span>().<span class="ident">into</span>()
-        } <span class="kw">else</span> {
-            <span class="self">self</span>.<span class="ident">meta</span>.<span class="ident">start</span>()..<span class="self">self</span>.<span class="ident">raw</span>.<span class="ident">end</span>()
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>range(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Range&lt;usize&gt; {
+        <span class="comment">// This is a hack, instead `raw` should be `Option&lt;RawRange&gt;`
+        </span><span class="kw">if </span><span class="self">self</span>.raw.is_empty() {
+            <span class="self">self</span>.meta.clone().into()
+        } <span class="kw">else </span>{
+            <span class="self">self</span>.meta.start()..<span class="self">self</span>.raw.end()
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">meta_range</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span> {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">meta</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>meta_range(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>RleRange&lt;u64&gt; {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.meta
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">raw_range</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">RawRange</span> {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">raw</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>raw_range(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>RawRange {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.raw
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>, <span class="ident">I</span><span class="op">&gt;</span>(<span class="ident">items</span>: <span class="ident">I</span>, <span class="ident">out</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b</span> <span class="kw-2">mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span>
-    <span class="kw">where</span>
-        <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">ScalarValue</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span> <span class="op">+</span> <span class="lifetime">&#39;a</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>encode&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>, I&gt;(items: I, out: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="kw-2">mut </span>Vec&lt;u8&gt;) -&gt; <span class="self">Self
+    </span><span class="kw">where
+        </span>I: Iterator&lt;Item = Cow&lt;<span class="lifetime">&#39;a</span>, ScalarValue&gt;&gt; + Clone + <span class="lifetime">&#39;a</span>,
     {
-        <span class="self">Self</span> {
-            <span class="ident">meta</span>: (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>(),
-            <span class="ident">raw</span>: (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>(),
+        <span class="self">Self </span>{
+            meta: (<span class="number">0</span>..<span class="number">0</span>).into(),
+            raw: (<span class="number">0</span>..<span class="number">0</span>).into(),
         }
-        .<span class="ident">splice</span>(<span class="kw-2">&amp;</span>[], <span class="number">0</span>..<span class="number">0</span>, <span class="ident">items</span>, <span class="ident">out</span>)
+        .splice(<span class="kw-2">&amp;</span>[], <span class="number">0</span>..<span class="number">0</span>, items, out)
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">iter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>]) -&gt; <span class="ident">ValueIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="ident">ValueIter</span> {
-            <span class="ident">meta</span>: <span class="self">self</span>.<span class="ident">meta</span>.<span class="ident">decoder</span>(<span class="ident">data</span>),
-            <span class="ident">raw</span>: <span class="self">self</span>.<span class="ident">raw</span>.<span class="ident">decoder</span>(<span class="ident">data</span>),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>iter&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, data: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8]) -&gt; ValueIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+        ValueIter {
+            meta: <span class="self">self</span>.meta.decoder(data),
+            raw: <span class="self">self</span>.raw.decoder(data),
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">splice</span><span class="op">&lt;</span><span class="lifetime">&#39;b</span>, <span class="ident">I</span><span class="op">&gt;</span>(
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>splice&lt;<span class="lifetime">&#39;b</span>, I&gt;(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">data</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
-        <span class="ident">replace</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-        <span class="ident">replace_with</span>: <span class="ident">I</span>,
-        <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="self">Self</span>
-    <span class="kw">where</span>
-        <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;b</span>, <span class="ident">ScalarValue</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span>,
+        data: <span class="kw-2">&amp;</span>[u8],
+        replace: Range&lt;usize&gt;,
+        replace_with: I,
+        out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
+    ) -&gt; <span class="self">Self
+    </span><span class="kw">where
+        </span>I: Iterator&lt;Item = Cow&lt;<span class="lifetime">&#39;b</span>, ScalarValue&gt;&gt; + Clone,
     {
-        <span class="comment">// SAFETY: try_splice fails if either the iterator of replacements fails, or the iterator</span>
-        <span class="comment">//         of existing elements fails. But the replacement iterator is infallible and there</span>
-        <span class="comment">//         are no existing elements</span>
-        <span class="self">self</span>.<span class="ident">try_splice</span>::<span class="op">&lt;</span><span class="kw">_</span>, ()<span class="op">&gt;</span>(<span class="ident">data</span>, <span class="ident">replace</span>, <span class="ident">replace_with</span>.<span class="ident">map</span>(<span class="prelude-val">Ok</span>), <span class="ident">out</span>)
-            .<span class="ident">unwrap</span>()
+        <span class="comment">// SAFETY: try_splice fails if either the iterator of replacements fails, or the iterator
+        //         of existing elements fails. But the replacement iterator is infallible and there
+        //         are no existing elements
+        </span><span class="self">self</span>.try_splice::&lt;<span class="kw">_</span>, ()&gt;(data, replace, replace_with.map(<span class="prelude-val">Ok</span>), out)
+            .unwrap()
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">try_splice</span><span class="op">&lt;</span><span class="lifetime">&#39;b</span>, <span class="ident">I</span>, <span class="ident">E</span><span class="op">&gt;</span>(
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>try_splice&lt;<span class="lifetime">&#39;b</span>, I, E&gt;(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">data</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
-        <span class="ident">replace</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-        <span class="kw-2">mut</span> <span class="ident">replace_with</span>: <span class="ident">I</span>,
-        <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SpliceError</span><span class="op">&lt;</span><span class="ident">raw::Error</span>, <span class="ident">E</span><span class="op">&gt;</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;b</span>, <span class="ident">ScalarValue</span><span class="op">&gt;</span>, <span class="ident">E</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span>,
+        data: <span class="kw-2">&amp;</span>[u8],
+        replace: Range&lt;usize&gt;,
+        <span class="kw-2">mut </span>replace_with: I,
+        out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, SpliceError&lt;raw::Error, E&gt;&gt;
+    <span class="kw">where
+        </span>I: Iterator&lt;Item = <span class="prelude-ty">Result</span>&lt;Cow&lt;<span class="lifetime">&#39;b</span>, ScalarValue&gt;, E&gt;&gt; + Clone,
     {
-        <span class="comment">// Our semantics here are similar to those of Vec::splice. We can describe this</span>
-        <span class="comment">// imperatively like this:</span>
-        <span class="comment">//</span>
-        <span class="comment">// * First copy everything up to the start of `replace` into the output</span>
-        <span class="comment">// * For every index in `replace` skip that index from ourselves and if `replace_with`</span>
-        <span class="comment">//   returns `Some` then copy that value to the output</span>
-        <span class="comment">// * Once we have iterated past `replace.end` we continue to call `replace_with` until it</span>
-        <span class="comment">//   returns None, copying the results to the output</span>
-        <span class="comment">// * Finally we copy the remainder of our data into the output</span>
-        <span class="comment">//</span>
-        <span class="comment">// However, things are complicated by the fact that our data is stored in two columns. This</span>
-        <span class="comment">// means that we do this in two passes. First we execute the above logic for the metadata</span>
-        <span class="comment">// column. Then we do it all over again for the value column.</span>
+        <span class="comment">// Our semantics here are similar to those of Vec::splice. We can describe this
+        // imperatively like this:
+        //
+        // * First copy everything up to the start of `replace` into the output
+        // * For every index in `replace` skip that index from ourselves and if `replace_with`
+        //   returns `Some` then copy that value to the output
+        // * Once we have iterated past `replace.end` we continue to call `replace_with` until it
+        //   returns None, copying the results to the output
+        // * Finally we copy the remainder of our data into the output
+        //
+        // However, things are complicated by the fact that our data is stored in two columns. This
+        // means that we do this in two passes. First we execute the above logic for the metadata
+        // column. Then we do it all over again for the value column.
 
-        <span class="comment">// First pass - metadata</span>
-        <span class="comment">//</span>
-        <span class="comment">// Copy the metadata decoder so we can iterate over it again when we read the values in the</span>
-        <span class="comment">// second pass</span>
-        <span class="kw">let</span> <span class="ident">start</span> <span class="op">=</span> <span class="ident">out</span>.<span class="ident">len</span>();
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">meta_copy</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">meta</span>.<span class="ident">decoder</span>(<span class="ident">data</span>);
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">meta_out</span> <span class="op">=</span> <span class="ident">RleEncoder</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">u64</span><span class="op">&gt;</span><span class="ident">::from</span>(<span class="kw-2">&amp;mut</span> <span class="kw-2">*</span><span class="ident">out</span>);
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">idx</span> <span class="op">=</span> <span class="number">0</span>;
-        <span class="comment">// Copy everything up to replace.start to the output</span>
-        <span class="kw">while</span> <span class="ident">idx</span> <span class="op">&lt;</span> <span class="ident">replace</span>.<span class="ident">start</span> {
-            <span class="kw">let</span> <span class="ident">val</span> <span class="op">=</span> <span class="ident">meta_copy</span>
-                .<span class="ident">next</span>()
-                .<span class="ident">transpose</span>()
-                .<span class="ident">map_err</span>(<span class="ident">SpliceError::ReadExisting</span>)<span class="question-mark">?</span>
-                .<span class="ident">unwrap_or</span>(<span class="prelude-val">None</span>);
-            <span class="ident">meta_out</span>.<span class="ident">append</span>(<span class="ident">val</span>.<span class="ident">as_ref</span>());
-            <span class="ident">idx</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
+        // First pass - metadata
+        //
+        // Copy the metadata decoder so we can iterate over it again when we read the values in the
+        // second pass
+        </span><span class="kw">let </span>start = out.len();
+        <span class="kw">let </span><span class="kw-2">mut </span>meta_copy = <span class="self">self</span>.meta.decoder(data);
+        <span class="kw">let </span><span class="kw-2">mut </span>meta_out = RleEncoder::&lt;<span class="kw">_</span>, u64&gt;::from(<span class="kw-2">&amp;mut *</span>out);
+        <span class="kw">let </span><span class="kw-2">mut </span>idx = <span class="number">0</span>;
+        <span class="comment">// Copy everything up to replace.start to the output
+        </span><span class="kw">while </span>idx &lt; replace.start {
+            <span class="kw">let </span>val = meta_copy
+                .next()
+                .transpose()
+                .map_err(SpliceError::ReadExisting)<span class="question-mark">?
+                </span>.unwrap_or(<span class="prelude-val">None</span>);
+            meta_out.append(val.as_ref());
+            idx += <span class="number">1</span>;
         }
-        <span class="comment">// Now step through replace, skipping our data and inserting the replacement data (if there</span>
-        <span class="comment">// is any)</span>
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">meta_replace_with</span> <span class="op">=</span> <span class="ident">replace_with</span>.<span class="ident">clone</span>();
-        <span class="kw">for</span> <span class="kw">_</span> <span class="kw">in</span> <span class="number">0</span>..<span class="ident">replace</span>.<span class="ident">len</span>() {
-            <span class="ident">meta_copy</span>.<span class="ident">next</span>();
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">val</span>) <span class="op">=</span> <span class="ident">meta_replace_with</span>.<span class="ident">next</span>() {
-                <span class="kw">let</span> <span class="ident">val</span> <span class="op">=</span> <span class="ident">val</span>.<span class="ident">map_err</span>(<span class="ident">SpliceError::ReadReplace</span>)<span class="question-mark">?</span>;
-                <span class="comment">// Note that we are just constructing metadata values here.</span>
-                <span class="kw">let</span> <span class="ident">meta_val</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">u64::from</span>(<span class="ident">ValueMeta::from</span>(<span class="ident">val</span>.<span class="ident">as_ref</span>()));
-                <span class="ident">meta_out</span>.<span class="ident">append</span>(<span class="prelude-val">Some</span>(<span class="ident">meta_val</span>));
+        <span class="comment">// Now step through replace, skipping our data and inserting the replacement data (if there
+        // is any)
+        </span><span class="kw">let </span><span class="kw-2">mut </span>meta_replace_with = replace_with.clone();
+        <span class="kw">for _ in </span><span class="number">0</span>..replace.len() {
+            meta_copy.next();
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(val) = meta_replace_with.next() {
+                <span class="kw">let </span>val = val.map_err(SpliceError::ReadReplace)<span class="question-mark">?</span>;
+                <span class="comment">// Note that we are just constructing metadata values here.
+                </span><span class="kw">let </span>meta_val = <span class="kw-2">&amp;</span>u64::from(ValueMeta::from(val.as_ref()));
+                meta_out.append(<span class="prelude-val">Some</span>(meta_val));
             }
-            <span class="ident">idx</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
+            idx += <span class="number">1</span>;
         }
-        <span class="comment">// Copy any remaining input from the replacments to the output</span>
-        <span class="kw">for</span> <span class="ident">val</span> <span class="kw">in</span> <span class="ident">meta_replace_with</span> {
-            <span class="kw">let</span> <span class="ident">val</span> <span class="op">=</span> <span class="ident">val</span>.<span class="ident">map_err</span>(<span class="ident">SpliceError::ReadReplace</span>)<span class="question-mark">?</span>;
-            <span class="kw">let</span> <span class="ident">meta_val</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">u64::from</span>(<span class="ident">ValueMeta::from</span>(<span class="ident">val</span>.<span class="ident">as_ref</span>()));
-            <span class="ident">meta_out</span>.<span class="ident">append</span>(<span class="prelude-val">Some</span>(<span class="ident">meta_val</span>));
-            <span class="ident">idx</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
+        <span class="comment">// Copy any remaining input from the replacments to the output
+        </span><span class="kw">for </span>val <span class="kw">in </span>meta_replace_with {
+            <span class="kw">let </span>val = val.map_err(SpliceError::ReadReplace)<span class="question-mark">?</span>;
+            <span class="kw">let </span>meta_val = <span class="kw-2">&amp;</span>u64::from(ValueMeta::from(val.as_ref()));
+            meta_out.append(<span class="prelude-val">Some</span>(meta_val));
+            idx += <span class="number">1</span>;
         }
-        <span class="comment">// Now copy any remaining data we have to the output</span>
-        <span class="kw">while</span> <span class="op">!</span><span class="ident">meta_copy</span>.<span class="ident">done</span>() {
-            <span class="kw">let</span> <span class="ident">val</span> <span class="op">=</span> <span class="ident">meta_copy</span>
-                .<span class="ident">next</span>()
-                .<span class="ident">transpose</span>()
-                .<span class="ident">map_err</span>(<span class="ident">SpliceError::ReadExisting</span>)<span class="question-mark">?</span>
-                .<span class="ident">unwrap_or</span>(<span class="prelude-val">None</span>);
-            <span class="ident">meta_out</span>.<span class="ident">append</span>(<span class="ident">val</span>.<span class="ident">as_ref</span>());
+        <span class="comment">// Now copy any remaining data we have to the output
+        </span><span class="kw">while </span>!meta_copy.done() {
+            <span class="kw">let </span>val = meta_copy
+                .next()
+                .transpose()
+                .map_err(SpliceError::ReadExisting)<span class="question-mark">?
+                </span>.unwrap_or(<span class="prelude-val">None</span>);
+            meta_out.append(val.as_ref());
         }
-        <span class="kw">let</span> (<span class="kw">_</span>, <span class="ident">meta_len</span>) <span class="op">=</span> <span class="ident">meta_out</span>.<span class="ident">finish</span>();
-        <span class="kw">let</span> <span class="ident">meta_range</span> <span class="op">=</span> <span class="ident">start</span>..(<span class="ident">start</span> <span class="op">+</span> <span class="ident">meta_len</span>);
+        <span class="kw">let </span>(<span class="kw">_</span>, meta_len) = meta_out.finish();
+        <span class="kw">let </span>meta_range = start..(start + meta_len);
 
-        <span class="comment">// Second pass, copying the values. For this pass we iterate over ourselves.</span>
-        <span class="comment">//</span>
-        <span class="comment">//</span>
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">value_range_len</span> <span class="op">=</span> <span class="number">0</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">raw_encoder</span> <span class="op">=</span> <span class="ident">RawEncoder::from</span>(<span class="ident">out</span>);
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">iter</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">iter</span>(<span class="ident">data</span>);
-        <span class="ident">idx</span> <span class="op">=</span> <span class="number">0</span>;
-        <span class="comment">// Copy everything up to replace.start to the output</span>
-        <span class="kw">while</span> <span class="ident">idx</span> <span class="op">&lt;</span> <span class="ident">replace</span>.<span class="ident">start</span> {
-            <span class="kw">let</span> <span class="ident">val</span> <span class="op">=</span> <span class="ident">iter</span>.<span class="ident">next</span>().<span class="ident">unwrap</span>().<span class="ident">unwrap_or</span>(<span class="ident">ScalarValue::Null</span>);
-            <span class="ident">value_range_len</span> <span class="op">+</span><span class="op">=</span> <span class="ident">encode_val</span>(<span class="kw-2">&amp;mut</span> <span class="ident">raw_encoder</span>, <span class="kw-2">&amp;</span><span class="ident">val</span>);
-            <span class="ident">idx</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
+        <span class="comment">// Second pass, copying the values. For this pass we iterate over ourselves.
+        //
+        //
+        </span><span class="kw">let </span><span class="kw-2">mut </span>value_range_len = <span class="number">0</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>raw_encoder = RawEncoder::from(out);
+        <span class="kw">let </span><span class="kw-2">mut </span>iter = <span class="self">self</span>.iter(data);
+        idx = <span class="number">0</span>;
+        <span class="comment">// Copy everything up to replace.start to the output
+        </span><span class="kw">while </span>idx &lt; replace.start {
+            <span class="kw">let </span>val = iter.next().unwrap().unwrap_or(ScalarValue::Null);
+            value_range_len += encode_val(<span class="kw-2">&amp;mut </span>raw_encoder, <span class="kw-2">&amp;</span>val);
+            idx += <span class="number">1</span>;
         }
 
-        <span class="comment">// Now step through replace, skipping our data and inserting the replacement data (if there</span>
-        <span class="comment">// is any)</span>
-        <span class="kw">for</span> <span class="kw">_</span> <span class="kw">in</span> <span class="number">0</span>..<span class="ident">replace</span>.<span class="ident">len</span>() {
-            <span class="ident">iter</span>.<span class="ident">next</span>();
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">val</span>) <span class="op">=</span> <span class="ident">replace_with</span>.<span class="ident">next</span>() {
-                <span class="kw">let</span> <span class="ident">val</span> <span class="op">=</span> <span class="ident">val</span>.<span class="ident">map_err</span>(<span class="ident">SpliceError::ReadReplace</span>)<span class="question-mark">?</span>;
-                <span class="ident">value_range_len</span> <span class="op">+</span><span class="op">=</span> <span class="ident">encode_val</span>(<span class="kw-2">&amp;mut</span> <span class="ident">raw_encoder</span>, <span class="ident">val</span>.<span class="ident">as_ref</span>());
+        <span class="comment">// Now step through replace, skipping our data and inserting the replacement data (if there
+        // is any)
+        </span><span class="kw">for _ in </span><span class="number">0</span>..replace.len() {
+            iter.next();
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(val) = replace_with.next() {
+                <span class="kw">let </span>val = val.map_err(SpliceError::ReadReplace)<span class="question-mark">?</span>;
+                value_range_len += encode_val(<span class="kw-2">&amp;mut </span>raw_encoder, val.as_ref());
             }
-            <span class="ident">idx</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
+            idx += <span class="number">1</span>;
         }
-        <span class="comment">// Copy any remaining input from the replacments to the output</span>
-        <span class="kw">for</span> <span class="ident">val</span> <span class="kw">in</span> <span class="ident">replace_with</span> {
-            <span class="kw">let</span> <span class="ident">val</span> <span class="op">=</span> <span class="ident">val</span>.<span class="ident">map_err</span>(<span class="ident">SpliceError::ReadReplace</span>)<span class="question-mark">?</span>;
-            <span class="ident">value_range_len</span> <span class="op">+</span><span class="op">=</span> <span class="ident">encode_val</span>(<span class="kw-2">&amp;mut</span> <span class="ident">raw_encoder</span>, <span class="ident">val</span>.<span class="ident">as_ref</span>());
-            <span class="ident">idx</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
+        <span class="comment">// Copy any remaining input from the replacments to the output
+        </span><span class="kw">for </span>val <span class="kw">in </span>replace_with {
+            <span class="kw">let </span>val = val.map_err(SpliceError::ReadReplace)<span class="question-mark">?</span>;
+            value_range_len += encode_val(<span class="kw-2">&amp;mut </span>raw_encoder, val.as_ref());
+            idx += <span class="number">1</span>;
         }
-        <span class="comment">// Now copy any remaining data we have to the output</span>
-        <span class="kw">while</span> <span class="op">!</span><span class="ident">iter</span>.<span class="ident">done</span>() {
-            <span class="kw">let</span> <span class="ident">val</span> <span class="op">=</span> <span class="ident">iter</span>.<span class="ident">next</span>().<span class="ident">unwrap</span>().<span class="ident">unwrap_or</span>(<span class="ident">ScalarValue::Null</span>);
-            <span class="ident">value_range_len</span> <span class="op">+</span><span class="op">=</span> <span class="ident">encode_val</span>(<span class="kw-2">&amp;mut</span> <span class="ident">raw_encoder</span>, <span class="kw-2">&amp;</span><span class="ident">val</span>);
+        <span class="comment">// Now copy any remaining data we have to the output
+        </span><span class="kw">while </span>!iter.done() {
+            <span class="kw">let </span>val = iter.next().unwrap().unwrap_or(ScalarValue::Null);
+            value_range_len += encode_val(<span class="kw-2">&amp;mut </span>raw_encoder, <span class="kw-2">&amp;</span>val);
         }
 
-        <span class="kw">let</span> <span class="ident">value_range</span> <span class="op">=</span> <span class="ident">meta_range</span>.<span class="ident">end</span>..(<span class="ident">meta_range</span>.<span class="ident">end</span> <span class="op">+</span> <span class="ident">value_range_len</span>);
+        <span class="kw">let </span>value_range = meta_range.end..(meta_range.end + value_range_len);
 
-        <span class="prelude-val">Ok</span>(<span class="self">Self</span> {
-            <span class="ident">meta</span>: <span class="ident">meta_range</span>.<span class="ident">into</span>(),
-            <span class="ident">raw</span>: <span class="ident">value_range</span>.<span class="ident">into</span>(),
+        <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
+            meta: meta_range.into(),
+            raw: value_range.into(),
         })
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">ValueIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">meta</span>: <span class="ident">RleDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">u64</span><span class="op">&gt;</span>,
-    <span class="ident">raw</span>: <span class="ident">RawDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
+<span class="attribute">#[derive(Debug, Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ValueIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    meta: RleDecoder&lt;<span class="lifetime">&#39;a</span>, u64&gt;,
+    raw: RawDecoder&lt;<span class="lifetime">&#39;a</span>&gt;,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Iterator</span> <span class="kw">for</span> <span class="ident">ValueIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">ScalarValue</span>, <span class="ident">DecodeColumnError</span><span class="op">&gt;</span>;
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>ValueIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">type </span>Item = <span class="prelude-ty">Result</span>&lt;ScalarValue, DecodeColumnError&gt;;
 
-    <span class="kw">fn</span> <span class="ident">next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">next</span> <span class="op">=</span> <span class="kw">match</span> <span class="self">self</span>.<span class="ident">meta</span>.<span class="ident">next</span>().<span class="ident">transpose</span>() {
-            <span class="prelude-val">Ok</span>(<span class="ident">n</span>) =&gt; <span class="ident">n</span>,
-            <span class="prelude-val">Err</span>(<span class="ident">e</span>) =&gt; <span class="kw">return</span> <span class="prelude-val">Some</span>(<span class="prelude-val">Err</span>(<span class="ident">DecodeColumnError::decode_raw</span>(<span class="string">&quot;meta&quot;</span>, <span class="ident">e</span>))),
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="kw">let </span>next = <span class="kw">match </span><span class="self">self</span>.meta.next().transpose() {
+            <span class="prelude-val">Ok</span>(n) =&gt; n,
+            <span class="prelude-val">Err</span>(e) =&gt; <span class="kw">return </span><span class="prelude-val">Some</span>(<span class="prelude-val">Err</span>(DecodeColumnError::decode_raw(<span class="string">&quot;meta&quot;</span>, e))),
         };
-        <span class="kw">match</span> <span class="ident">next</span> {
-            <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(<span class="ident">next</span>)) =&gt; {
-                <span class="kw">let</span> <span class="ident">val_meta</span> <span class="op">=</span> <span class="ident">ValueMeta::from</span>(<span class="ident">next</span>);
-                <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::redundant_slicing</span>)]</span>
-                <span class="kw">match</span> <span class="ident">val_meta</span>.<span class="ident">type_code</span>() {
-                    <span class="ident">ValueType::Null</span> =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(<span class="ident">ScalarValue::Null</span>)),
-                    <span class="ident">ValueType::True</span> =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(<span class="ident">ScalarValue::Boolean</span>(<span class="bool-val">true</span>))),
-                    <span class="ident">ValueType::False</span> =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(<span class="ident">ScalarValue::Boolean</span>(<span class="bool-val">false</span>))),
-                    <span class="ident">ValueType::Uleb</span> =&gt; <span class="self">self</span>.<span class="ident">parse_raw</span>(<span class="ident">val_meta</span>, <span class="op">|</span><span class="kw-2">mut</span> <span class="ident">bytes</span><span class="op">|</span> {
-                        <span class="kw">let</span> <span class="ident">val</span> <span class="op">=</span> <span class="ident">leb128::read::unsigned</span>(<span class="kw-2">&amp;mut</span> <span class="ident">bytes</span>).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> {
-                            <span class="ident">DecodeColumnError::invalid_value</span>(<span class="string">&quot;value&quot;</span>, <span class="ident">e</span>.<span class="ident">to_string</span>())
+        <span class="kw">match </span>next {
+            <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(next)) =&gt; {
+                <span class="kw">let </span>val_meta = ValueMeta::from(next);
+                <span class="attribute">#[allow(clippy::redundant_slicing)]
+                </span><span class="kw">match </span>val_meta.type_code() {
+                    ValueType::Null =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(ScalarValue::Null)),
+                    ValueType::True =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(ScalarValue::Boolean(<span class="bool-val">true</span>))),
+                    ValueType::False =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(ScalarValue::Boolean(<span class="bool-val">false</span>))),
+                    ValueType::Uleb =&gt; <span class="self">self</span>.parse_raw(val_meta, |<span class="kw-2">mut </span>bytes| {
+                        <span class="kw">let </span>val = leb128::read::unsigned(<span class="kw-2">&amp;mut </span>bytes).map_err(|e| {
+                            DecodeColumnError::invalid_value(<span class="string">&quot;value&quot;</span>, e.to_string())
                         })<span class="question-mark">?</span>;
-                        <span class="prelude-val">Ok</span>(<span class="ident">ScalarValue::Uint</span>(<span class="ident">val</span>))
+                        <span class="prelude-val">Ok</span>(ScalarValue::Uint(val))
                     }),
-                    <span class="ident">ValueType::Leb</span> =&gt; <span class="self">self</span>.<span class="ident">parse_raw</span>(<span class="ident">val_meta</span>, <span class="op">|</span><span class="kw-2">mut</span> <span class="ident">bytes</span><span class="op">|</span> {
-                        <span class="kw">let</span> <span class="ident">val</span> <span class="op">=</span> <span class="ident">leb128::read::signed</span>(<span class="kw-2">&amp;mut</span> <span class="ident">bytes</span>).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> {
-                            <span class="ident">DecodeColumnError::invalid_value</span>(<span class="string">&quot;value&quot;</span>, <span class="ident">e</span>.<span class="ident">to_string</span>())
+                    ValueType::Leb =&gt; <span class="self">self</span>.parse_raw(val_meta, |<span class="kw-2">mut </span>bytes| {
+                        <span class="kw">let </span>val = leb128::read::signed(<span class="kw-2">&amp;mut </span>bytes).map_err(|e| {
+                            DecodeColumnError::invalid_value(<span class="string">&quot;value&quot;</span>, e.to_string())
                         })<span class="question-mark">?</span>;
-                        <span class="prelude-val">Ok</span>(<span class="ident">ScalarValue::Int</span>(<span class="ident">val</span>))
+                        <span class="prelude-val">Ok</span>(ScalarValue::Int(val))
                     }),
-                    <span class="ident">ValueType::String</span> =&gt; <span class="self">self</span>.<span class="ident">parse_raw</span>(<span class="ident">val_meta</span>, <span class="op">|</span><span class="ident">bytes</span><span class="op">|</span> {
-                        <span class="kw">let</span> <span class="ident">val</span> <span class="op">=</span> <span class="ident">std::str::from_utf8</span>(<span class="ident">bytes</span>)
-                            .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">DecodeColumnError::invalid_value</span>(<span class="string">&quot;value&quot;</span>, <span class="ident">e</span>.<span class="ident">to_string</span>()))<span class="question-mark">?</span>
-                            .<span class="ident">into</span>();
-                        <span class="prelude-val">Ok</span>(<span class="ident">ScalarValue::Str</span>(<span class="ident">val</span>))
+                    ValueType::String =&gt; <span class="self">self</span>.parse_raw(val_meta, |bytes| {
+                        <span class="kw">let </span>val = std::str::from_utf8(bytes)
+                            .map_err(|e| DecodeColumnError::invalid_value(<span class="string">&quot;value&quot;</span>, e.to_string()))<span class="question-mark">?
+                            </span>.into();
+                        <span class="prelude-val">Ok</span>(ScalarValue::Str(val))
                     }),
-                    <span class="ident">ValueType::Float</span> =&gt; <span class="self">self</span>.<span class="ident">parse_raw</span>(<span class="ident">val_meta</span>, <span class="op">|</span><span class="ident">bytes</span><span class="op">|</span> {
-                        <span class="kw">if</span> <span class="ident">val_meta</span>.<span class="ident">length</span>() <span class="op">!</span><span class="op">=</span> <span class="number">8</span> {
-                            <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">DecodeColumnError::invalid_value</span>(
+                    ValueType::Float =&gt; <span class="self">self</span>.parse_raw(val_meta, |bytes| {
+                        <span class="kw">if </span>val_meta.length() != <span class="number">8 </span>{
+                            <span class="kw">return </span><span class="prelude-val">Err</span>(DecodeColumnError::invalid_value(
                                 <span class="string">&quot;value&quot;</span>,
-                                <span class="macro">format!</span>(<span class="string">&quot;float should have length 8, had {0}&quot;</span>, <span class="ident">val_meta</span>.<span class="ident">length</span>()),
+                                <span class="macro">format!</span>(<span class="string">&quot;float should have length 8, had {0}&quot;</span>, val_meta.length()),
                             ));
                         }
-                        <span class="kw">let</span> <span class="ident">raw</span>: [<span class="ident">u8</span>; <span class="number">8</span>] <span class="op">=</span> <span class="ident">bytes</span>
-                            .<span class="ident">try_into</span>()
-                            <span class="comment">// SAFETY: parse_raw() calls read_bytes(val_meta.length()) and we have</span>
-                            <span class="comment">//         checked that val_meta.length() == 8</span>
-                            .<span class="ident">unwrap</span>();
-                        <span class="kw">let</span> <span class="ident">val</span> <span class="op">=</span> <span class="ident">f64::from_le_bytes</span>(<span class="ident">raw</span>);
-                        <span class="prelude-val">Ok</span>(<span class="ident">ScalarValue::F64</span>(<span class="ident">val</span>))
+                        <span class="kw">let </span>raw: [u8; <span class="number">8</span>] = bytes
+                            .try_into()
+                            <span class="comment">// SAFETY: parse_raw() calls read_bytes(val_meta.length()) and we have
+                            //         checked that val_meta.length() == 8
+                            </span>.unwrap();
+                        <span class="kw">let </span>val = f64::from_le_bytes(raw);
+                        <span class="prelude-val">Ok</span>(ScalarValue::F64(val))
                     }),
-                    <span class="ident">ValueType::Counter</span> =&gt; <span class="self">self</span>.<span class="ident">parse_raw</span>(<span class="ident">val_meta</span>, <span class="op">|</span><span class="kw-2">mut</span> <span class="ident">bytes</span><span class="op">|</span> {
-                        <span class="kw">let</span> <span class="ident">val</span> <span class="op">=</span> <span class="ident">leb128::read::signed</span>(<span class="kw-2">&amp;mut</span> <span class="ident">bytes</span>).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> {
-                            <span class="ident">DecodeColumnError::invalid_value</span>(<span class="string">&quot;value&quot;</span>, <span class="ident">e</span>.<span class="ident">to_string</span>())
+                    ValueType::Counter =&gt; <span class="self">self</span>.parse_raw(val_meta, |<span class="kw-2">mut </span>bytes| {
+                        <span class="kw">let </span>val = leb128::read::signed(<span class="kw-2">&amp;mut </span>bytes).map_err(|e| {
+                            DecodeColumnError::invalid_value(<span class="string">&quot;value&quot;</span>, e.to_string())
                         })<span class="question-mark">?</span>;
-                        <span class="prelude-val">Ok</span>(<span class="ident">ScalarValue::Counter</span>(<span class="ident">val</span>.<span class="ident">into</span>()))
+                        <span class="prelude-val">Ok</span>(ScalarValue::Counter(val.into()))
                     }),
-                    <span class="ident">ValueType::Timestamp</span> =&gt; <span class="self">self</span>.<span class="ident">parse_raw</span>(<span class="ident">val_meta</span>, <span class="op">|</span><span class="kw-2">mut</span> <span class="ident">bytes</span><span class="op">|</span> {
-                        <span class="kw">let</span> <span class="ident">val</span> <span class="op">=</span> <span class="ident">leb128::read::signed</span>(<span class="kw-2">&amp;mut</span> <span class="ident">bytes</span>).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> {
-                            <span class="ident">DecodeColumnError::invalid_value</span>(<span class="string">&quot;value&quot;</span>, <span class="ident">e</span>.<span class="ident">to_string</span>())
+                    ValueType::Timestamp =&gt; <span class="self">self</span>.parse_raw(val_meta, |<span class="kw-2">mut </span>bytes| {
+                        <span class="kw">let </span>val = leb128::read::signed(<span class="kw-2">&amp;mut </span>bytes).map_err(|e| {
+                            DecodeColumnError::invalid_value(<span class="string">&quot;value&quot;</span>, e.to_string())
                         })<span class="question-mark">?</span>;
-                        <span class="prelude-val">Ok</span>(<span class="ident">ScalarValue::Timestamp</span>(<span class="ident">val</span>))
+                        <span class="prelude-val">Ok</span>(ScalarValue::Timestamp(val))
                     }),
-                    <span class="ident">ValueType::Unknown</span>(<span class="ident">code</span>) =&gt; <span class="self">self</span>.<span class="ident">parse_raw</span>(<span class="ident">val_meta</span>, <span class="op">|</span><span class="ident">bytes</span><span class="op">|</span> {
-                        <span class="prelude-val">Ok</span>(<span class="ident">ScalarValue::Unknown</span> {
-                            <span class="ident">type_code</span>: <span class="ident">code</span>,
-                            <span class="ident">bytes</span>: <span class="ident">bytes</span>.<span class="ident">to_vec</span>(),
+                    ValueType::Unknown(code) =&gt; <span class="self">self</span>.parse_raw(val_meta, |bytes| {
+                        <span class="prelude-val">Ok</span>(ScalarValue::Unknown {
+                            type_code: code,
+                            bytes: bytes.to_vec(),
                         })
                     }),
-                    <span class="ident">ValueType::Bytes</span> =&gt; <span class="kw">match</span> <span class="self">self</span>.<span class="ident">raw</span>.<span class="ident">read_bytes</span>(<span class="ident">val_meta</span>.<span class="ident">length</span>()) {
-                        <span class="prelude-val">Err</span>(<span class="ident">e</span>) =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Err</span>(<span class="ident">DecodeColumnError::invalid_value</span>(
+                    ValueType::Bytes =&gt; <span class="kw">match </span><span class="self">self</span>.raw.read_bytes(val_meta.length()) {
+                        <span class="prelude-val">Err</span>(e) =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Err</span>(DecodeColumnError::invalid_value(
                             <span class="string">&quot;value&quot;</span>,
-                            <span class="ident">e</span>.<span class="ident">to_string</span>(),
+                            e.to_string(),
                         ))),
-                        <span class="prelude-val">Ok</span>(<span class="ident">bytes</span>) =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(<span class="ident">ScalarValue::Bytes</span>(<span class="ident">bytes</span>.<span class="ident">to_vec</span>()))),
+                        <span class="prelude-val">Ok</span>(bytes) =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(ScalarValue::Bytes(bytes.to_vec()))),
                     },
                 }
             }
-            <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Err</span>(<span class="ident">DecodeColumnError::unexpected_null</span>(<span class="string">&quot;meta&quot;</span>))),
-            <span class="prelude-val">None</span> =&gt; <span class="prelude-val">None</span>,
+            <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Err</span>(DecodeColumnError::unexpected_null(<span class="string">&quot;meta&quot;</span>))),
+            <span class="prelude-val">None </span>=&gt; <span class="prelude-val">None</span>,
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">ValueIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">parse_raw</span><span class="op">&lt;</span><span class="ident">R</span>, <span class="ident">F</span>: <span class="ident">Fn</span>(<span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">R</span>, <span class="ident">DecodeColumnError</span><span class="op">&gt;</span><span class="op">&gt;</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">meta</span>: <span class="ident">ValueMeta</span>,
-        <span class="ident">f</span>: <span class="ident">F</span>,
-    ) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">R</span>, <span class="ident">DecodeColumnError</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">raw</span> <span class="op">=</span> <span class="kw">match</span> <span class="self">self</span>.<span class="ident">raw</span>.<span class="ident">read_bytes</span>(<span class="ident">meta</span>.<span class="ident">length</span>()) {
-            <span class="prelude-val">Err</span>(<span class="ident">e</span>) =&gt; {
-                <span class="kw">return</span> <span class="prelude-val">Some</span>(<span class="prelude-val">Err</span>(<span class="ident">DecodeColumnError::invalid_value</span>(
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; ValueIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>parse_raw&lt;R, F: Fn(<span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;R, DecodeColumnError&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        meta: ValueMeta,
+        f: F,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="prelude-ty">Result</span>&lt;R, DecodeColumnError&gt;&gt; {
+        <span class="kw">let </span>raw = <span class="kw">match </span><span class="self">self</span>.raw.read_bytes(meta.length()) {
+            <span class="prelude-val">Err</span>(e) =&gt; {
+                <span class="kw">return </span><span class="prelude-val">Some</span>(<span class="prelude-val">Err</span>(DecodeColumnError::invalid_value(
                     <span class="string">&quot;value&quot;</span>,
-                    <span class="ident">e</span>.<span class="ident">to_string</span>(),
+                    e.to_string(),
                 )))
             }
-            <span class="prelude-val">Ok</span>(<span class="ident">bytes</span>) =&gt; <span class="ident">bytes</span>,
+            <span class="prelude-val">Ok</span>(bytes) =&gt; bytes,
         };
-        <span class="kw">let</span> <span class="ident">val</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">f</span>(<span class="ident">raw</span>) {
-            <span class="prelude-val">Ok</span>(<span class="ident">v</span>) =&gt; <span class="ident">v</span>,
-            <span class="prelude-val">Err</span>(<span class="ident">e</span>) =&gt; <span class="kw">return</span> <span class="prelude-val">Some</span>(<span class="prelude-val">Err</span>(<span class="ident">e</span>)),
+        <span class="kw">let </span>val = <span class="kw">match </span>f(raw) {
+            <span class="prelude-val">Ok</span>(v) =&gt; v,
+            <span class="prelude-val">Err</span>(e) =&gt; <span class="kw">return </span><span class="prelude-val">Some</span>(<span class="prelude-val">Err</span>(e)),
         };
-        <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(<span class="ident">val</span>))
+        <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(val))
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">done</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="ident">meta</span>.<span class="ident">done</span>()
-    }
-}
-
-<span class="doccomment">/// Appends values row-wise. That is to say, this struct manages two separate chunks of memory, one</span>
-<span class="doccomment">/// for the value metadata and one for the raw values. To use it, create a new encoder using</span>
-<span class="doccomment">/// `ValueEncoder::new`, sequentially append values using `ValueEncoder::append`, and finallly</span>
-<span class="doccomment">/// concatenate the two columns and append them to a buffer returning the range within the output</span>
-<span class="doccomment">/// buffer which contains the concatenated columns using `ValueEncoder::finish`.</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">ValueEncoder</span><span class="op">&lt;</span><span class="ident">S</span><span class="op">&gt;</span> {
-    <span class="ident">meta</span>: <span class="ident">RleEncoder</span><span class="op">&lt;</span><span class="ident">S</span>, <span class="ident">u64</span><span class="op">&gt;</span>,
-    <span class="ident">raw</span>: <span class="ident">RawEncoder</span><span class="op">&lt;</span><span class="ident">S</span><span class="op">&gt;</span>,
-}
-
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span><span class="op">&gt;</span> <span class="ident">ValueEncoder</span><span class="op">&lt;</span><span class="ident">S</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">append</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">value</span>: <span class="kw-2">&amp;</span><span class="ident">ScalarValue</span>) {
-        <span class="kw">let</span> <span class="ident">meta_val</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">u64::from</span>(<span class="ident">ValueMeta::from</span>(<span class="ident">value</span>));
-        <span class="self">self</span>.<span class="ident">meta</span>.<span class="ident">append_value</span>(<span class="ident">meta_val</span>);
-        <span class="ident">encode_val</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">raw</span>, <span class="ident">value</span>);
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>done(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="self">self</span>.meta.done()
     }
 }
 
-<span class="kw">impl</span> <span class="ident">ValueEncoder</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>() -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span> {
-            <span class="ident">meta</span>: <span class="ident">RleEncoder::new</span>(<span class="ident">Vec::new</span>()),
-            <span class="ident">raw</span>: <span class="ident">RawEncoder::from</span>(<span class="ident">Vec::new</span>()),
+<span class="doccomment">/// Appends values row-wise. That is to say, this struct manages two separate chunks of memory, one
+/// for the value metadata and one for the raw values. To use it, create a new encoder using
+/// `ValueEncoder::new`, sequentially append values using `ValueEncoder::append`, and finallly
+/// concatenate the two columns and append them to a buffer returning the range within the output
+/// buffer which contains the concatenated columns using `ValueEncoder::finish`.
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ValueEncoder&lt;S&gt; {
+    meta: RleEncoder&lt;S, u64&gt;,
+    raw: RawEncoder&lt;S&gt;,
+}
+
+<span class="kw">impl</span>&lt;S: Sink&gt; ValueEncoder&lt;S&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>append(<span class="kw-2">&amp;mut </span><span class="self">self</span>, value: <span class="kw-2">&amp;</span>ScalarValue) {
+        <span class="kw">let </span>meta_val = <span class="kw-2">&amp;</span>u64::from(ValueMeta::from(value));
+        <span class="self">self</span>.meta.append_value(meta_val);
+        encode_val(<span class="kw-2">&amp;mut </span><span class="self">self</span>.raw, value);
+    }
+}
+
+<span class="kw">impl </span>ValueEncoder&lt;Vec&lt;u8&gt;&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new() -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            meta: RleEncoder::new(Vec::new()),
+            raw: RawEncoder::from(Vec::new()),
         }
     }
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">finish</span>(<span class="self">self</span>, <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) -&gt; <span class="ident">ValueRange</span> {
-        <span class="kw">let</span> <span class="ident">meta_start</span> <span class="op">=</span> <span class="ident">out</span>.<span class="ident">len</span>();
-        <span class="kw">let</span> (<span class="ident">meta</span>, <span class="kw">_</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">meta</span>.<span class="ident">finish</span>();
-        <span class="ident">out</span>.<span class="ident">extend</span>(<span class="ident">meta</span>);
-        <span class="kw">let</span> <span class="ident">meta_end</span> <span class="op">=</span> <span class="ident">out</span>.<span class="ident">len</span>();
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>finish(<span class="self">self</span>, out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;) -&gt; ValueRange {
+        <span class="kw">let </span>meta_start = out.len();
+        <span class="kw">let </span>(meta, <span class="kw">_</span>) = <span class="self">self</span>.meta.finish();
+        out.extend(meta);
+        <span class="kw">let </span>meta_end = out.len();
 
-        <span class="kw">let</span> (<span class="ident">val</span>, <span class="kw">_</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">raw</span>.<span class="ident">finish</span>();
-        <span class="ident">out</span>.<span class="ident">extend</span>(<span class="ident">val</span>);
-        <span class="kw">let</span> <span class="ident">val_end</span> <span class="op">=</span> <span class="ident">out</span>.<span class="ident">len</span>();
-        <span class="ident">ValueRange</span> {
-            <span class="ident">meta</span>: (<span class="ident">meta_start</span>..<span class="ident">meta_end</span>).<span class="ident">into</span>(),
-            <span class="ident">raw</span>: (<span class="ident">meta_end</span>..<span class="ident">val_end</span>).<span class="ident">into</span>(),
+        <span class="kw">let </span>(val, <span class="kw">_</span>) = <span class="self">self</span>.raw.finish();
+        out.extend(val);
+        <span class="kw">let </span>val_end = out.len();
+        ValueRange {
+            meta: (meta_start..meta_end).into(),
+            raw: (meta_end..val_end).into(),
         }
     }
 }
 
-<span class="kw">fn</span> <span class="ident">encode_val</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span><span class="op">&gt;</span>(<span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">RawEncoder</span><span class="op">&lt;</span><span class="ident">S</span><span class="op">&gt;</span>, <span class="ident">val</span>: <span class="kw-2">&amp;</span><span class="ident">ScalarValue</span>) -&gt; <span class="ident">usize</span> {
-    <span class="kw">match</span> <span class="ident">val</span> {
-        <span class="ident">ScalarValue::Uint</span>(<span class="ident">i</span>) =&gt; <span class="ident">out</span>.<span class="ident">append</span>(<span class="kw-2">*</span><span class="ident">i</span>),
-        <span class="ident">ScalarValue::Int</span>(<span class="ident">i</span>) =&gt; <span class="ident">out</span>.<span class="ident">append</span>(<span class="kw-2">*</span><span class="ident">i</span>),
-        <span class="ident">ScalarValue::Null</span> =&gt; <span class="number">0</span>,
-        <span class="ident">ScalarValue::Boolean</span>(<span class="kw">_</span>) =&gt; <span class="number">0</span>,
-        <span class="ident">ScalarValue::Timestamp</span>(<span class="ident">i</span>) =&gt; <span class="ident">out</span>.<span class="ident">append</span>(<span class="kw-2">*</span><span class="ident">i</span>),
-        <span class="ident">ScalarValue::F64</span>(<span class="ident">f</span>) =&gt; <span class="ident">out</span>.<span class="ident">append</span>(<span class="kw-2">*</span><span class="ident">f</span>),
-        <span class="ident">ScalarValue::Counter</span>(<span class="ident">i</span>) =&gt; <span class="ident">out</span>.<span class="ident">append</span>(<span class="ident">i</span>.<span class="ident">start</span>),
-        <span class="ident">ScalarValue::Str</span>(<span class="ident">s</span>) =&gt; <span class="ident">out</span>.<span class="ident">append</span>(<span class="ident">RawBytes::from</span>(<span class="ident">s</span>.<span class="ident">as_bytes</span>())),
-        <span class="ident">ScalarValue::Bytes</span>(<span class="ident">b</span>) =&gt; <span class="ident">out</span>.<span class="ident">append</span>(<span class="ident">RawBytes::from</span>(<span class="kw-2">&amp;</span><span class="ident">b</span>[..])),
-        <span class="ident">ScalarValue::Unknown</span> { <span class="ident">bytes</span>, .. } =&gt; <span class="ident">out</span>.<span class="ident">append</span>(<span class="ident">RawBytes::from</span>(<span class="kw-2">&amp;</span><span class="ident">bytes</span>[..])),
+<span class="kw">fn </span>encode_val&lt;S: Sink&gt;(out: <span class="kw-2">&amp;mut </span>RawEncoder&lt;S&gt;, val: <span class="kw-2">&amp;</span>ScalarValue) -&gt; usize {
+    <span class="kw">match </span>val {
+        ScalarValue::Uint(i) =&gt; out.append(<span class="kw-2">*</span>i),
+        ScalarValue::Int(i) =&gt; out.append(<span class="kw-2">*</span>i),
+        ScalarValue::Null =&gt; <span class="number">0</span>,
+        ScalarValue::Boolean(<span class="kw">_</span>) =&gt; <span class="number">0</span>,
+        ScalarValue::Timestamp(i) =&gt; out.append(<span class="kw-2">*</span>i),
+        ScalarValue::F64(f) =&gt; out.append(<span class="kw-2">*</span>f),
+        ScalarValue::Counter(i) =&gt; out.append(i.start),
+        ScalarValue::Str(s) =&gt; out.append(RawBytes::from(s.as_bytes())),
+        ScalarValue::Bytes(b) =&gt; out.append(RawBytes::from(<span class="kw-2">&amp;</span>b[..])),
+        ScalarValue::Unknown { bytes, .. } =&gt; out.append(RawBytes::from(<span class="kw-2">&amp;</span>bytes[..])),
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
-<span class="kw">enum</span> <span class="ident">ValueType</span> {
-    <span class="ident">Null</span>,
-    <span class="ident">False</span>,
-    <span class="ident">True</span>,
-    <span class="ident">Uleb</span>,
-    <span class="ident">Leb</span>,
-    <span class="ident">Float</span>,
-    <span class="ident">String</span>,
-    <span class="ident">Bytes</span>,
-    <span class="ident">Counter</span>,
-    <span class="ident">Timestamp</span>,
-    <span class="ident">Unknown</span>(<span class="ident">u8</span>),
+<span class="attribute">#[derive(Debug)]
+</span><span class="kw">enum </span>ValueType {
+    Null,
+    False,
+    True,
+    Uleb,
+    Leb,
+    Float,
+    String,
+    Bytes,
+    Counter,
+    Timestamp,
+    Unknown(u8),
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Copy</span>, <span class="ident">Clone</span>)]</span>
-<span class="kw">struct</span> <span class="ident">ValueMeta</span>(<span class="ident">u64</span>);
+<span class="attribute">#[derive(Copy, Clone)]
+</span><span class="kw">struct </span>ValueMeta(u64);
 
-<span class="kw">impl</span> <span class="ident">ValueMeta</span> {
-    <span class="kw">fn</span> <span class="ident">type_code</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">ValueType</span> {
-        <span class="kw">let</span> <span class="ident">low_byte</span> <span class="op">=</span> (<span class="self">self</span>.<span class="number">0</span> <span class="kw">as</span> <span class="ident">u8</span>) <span class="op">&amp;</span> <span class="number">0b00001111</span>;
-        <span class="kw">match</span> <span class="ident">low_byte</span> {
-            <span class="number">0</span> =&gt; <span class="ident">ValueType::Null</span>,
-            <span class="number">1</span> =&gt; <span class="ident">ValueType::False</span>,
-            <span class="number">2</span> =&gt; <span class="ident">ValueType::True</span>,
-            <span class="number">3</span> =&gt; <span class="ident">ValueType::Uleb</span>,
-            <span class="number">4</span> =&gt; <span class="ident">ValueType::Leb</span>,
-            <span class="number">5</span> =&gt; <span class="ident">ValueType::Float</span>,
-            <span class="number">6</span> =&gt; <span class="ident">ValueType::String</span>,
-            <span class="number">7</span> =&gt; <span class="ident">ValueType::Bytes</span>,
-            <span class="number">8</span> =&gt; <span class="ident">ValueType::Counter</span>,
-            <span class="number">9</span> =&gt; <span class="ident">ValueType::Timestamp</span>,
-            <span class="ident">other</span> =&gt; <span class="ident">ValueType::Unknown</span>(<span class="ident">other</span>),
+<span class="kw">impl </span>ValueMeta {
+    <span class="kw">fn </span>type_code(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ValueType {
+        <span class="kw">let </span>low_byte = (<span class="self">self</span>.<span class="number">0 </span><span class="kw">as </span>u8) &amp; <span class="number">0b00001111</span>;
+        <span class="kw">match </span>low_byte {
+            <span class="number">0 </span>=&gt; ValueType::Null,
+            <span class="number">1 </span>=&gt; ValueType::False,
+            <span class="number">2 </span>=&gt; ValueType::True,
+            <span class="number">3 </span>=&gt; ValueType::Uleb,
+            <span class="number">4 </span>=&gt; ValueType::Leb,
+            <span class="number">5 </span>=&gt; ValueType::Float,
+            <span class="number">6 </span>=&gt; ValueType::String,
+            <span class="number">7 </span>=&gt; ValueType::Bytes,
+            <span class="number">8 </span>=&gt; ValueType::Counter,
+            <span class="number">9 </span>=&gt; ValueType::Timestamp,
+            other =&gt; ValueType::Unknown(other),
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">length</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
-        (<span class="self">self</span>.<span class="number">0</span> <span class="op">&gt;</span><span class="op">&gt;</span> <span class="number">4</span>) <span class="kw">as</span> <span class="ident">usize</span>
+    <span class="kw">fn </span>length(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        (<span class="self">self</span>.<span class="number">0 </span>&gt;&gt; <span class="number">4</span>) <span class="kw">as </span>usize
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">ScalarValue</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ValueMeta</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">p</span>: <span class="kw-2">&amp;</span><span class="ident">ScalarValue</span>) -&gt; <span class="self">Self</span> {
-        <span class="kw">match</span> <span class="ident">p</span> {
-            <span class="ident">ScalarValue::Uint</span>(<span class="ident">i</span>) =&gt; <span class="self">Self</span>((<span class="ident">ulebsize</span>(<span class="kw-2">*</span><span class="ident">i</span>) <span class="op">&lt;</span><span class="op">&lt;</span> <span class="number">4</span>) <span class="op">|</span> <span class="number">3</span>),
-            <span class="ident">ScalarValue::Int</span>(<span class="ident">i</span>) =&gt; <span class="self">Self</span>((<span class="ident">lebsize</span>(<span class="kw-2">*</span><span class="ident">i</span>) <span class="op">&lt;</span><span class="op">&lt;</span> <span class="number">4</span>) <span class="op">|</span> <span class="number">4</span>),
-            <span class="ident">ScalarValue::Null</span> =&gt; <span class="self">Self</span>(<span class="number">0</span>),
-            <span class="ident">ScalarValue::Boolean</span>(<span class="ident">b</span>) =&gt; <span class="self">Self</span>(<span class="kw">match</span> <span class="ident">b</span> {
-                <span class="bool-val">false</span> =&gt; <span class="number">1</span>,
-                <span class="bool-val">true</span> =&gt; <span class="number">2</span>,
+<span class="kw">impl </span>From&lt;<span class="kw-2">&amp;</span>ScalarValue&gt; <span class="kw">for </span>ValueMeta {
+    <span class="kw">fn </span>from(p: <span class="kw-2">&amp;</span>ScalarValue) -&gt; <span class="self">Self </span>{
+        <span class="kw">match </span>p {
+            ScalarValue::Uint(i) =&gt; <span class="self">Self</span>((ulebsize(<span class="kw-2">*</span>i) &lt;&lt; <span class="number">4</span>) | <span class="number">3</span>),
+            ScalarValue::Int(i) =&gt; <span class="self">Self</span>((lebsize(<span class="kw-2">*</span>i) &lt;&lt; <span class="number">4</span>) | <span class="number">4</span>),
+            ScalarValue::Null =&gt; <span class="self">Self</span>(<span class="number">0</span>),
+            ScalarValue::Boolean(b) =&gt; <span class="self">Self</span>(<span class="kw">match </span>b {
+                <span class="bool-val">false </span>=&gt; <span class="number">1</span>,
+                <span class="bool-val">true </span>=&gt; <span class="number">2</span>,
             }),
-            <span class="ident">ScalarValue::Timestamp</span>(<span class="ident">i</span>) =&gt; <span class="self">Self</span>((<span class="ident">lebsize</span>(<span class="kw-2">*</span><span class="ident">i</span>) <span class="op">&lt;</span><span class="op">&lt;</span> <span class="number">4</span>) <span class="op">|</span> <span class="number">9</span>),
-            <span class="ident">ScalarValue::F64</span>(<span class="kw">_</span>) =&gt; <span class="self">Self</span>((<span class="number">8</span> <span class="op">&lt;</span><span class="op">&lt;</span> <span class="number">4</span>) <span class="op">|</span> <span class="number">5</span>),
-            <span class="ident">ScalarValue::Counter</span>(<span class="ident">i</span>) =&gt; <span class="self">Self</span>((<span class="ident">lebsize</span>(<span class="ident">i</span>.<span class="ident">start</span>) <span class="op">&lt;</span><span class="op">&lt;</span> <span class="number">4</span>) <span class="op">|</span> <span class="number">8</span>),
-            <span class="ident">ScalarValue::Str</span>(<span class="ident">s</span>) =&gt; <span class="self">Self</span>(((<span class="ident">s</span>.<span class="ident">as_bytes</span>().<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>) <span class="op">&lt;</span><span class="op">&lt;</span> <span class="number">4</span>) <span class="op">|</span> <span class="number">6</span>),
-            <span class="ident">ScalarValue::Bytes</span>(<span class="ident">b</span>) =&gt; <span class="self">Self</span>(((<span class="ident">b</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>) <span class="op">&lt;</span><span class="op">&lt;</span> <span class="number">4</span>) <span class="op">|</span> <span class="number">7</span>),
-            <span class="ident">ScalarValue::Unknown</span> { <span class="ident">type_code</span>, <span class="ident">bytes</span> } =&gt; {
-                <span class="self">Self</span>(((<span class="ident">bytes</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>) <span class="op">&lt;</span><span class="op">&lt;</span> <span class="number">4</span>) <span class="op">|</span> (<span class="kw-2">*</span><span class="ident">type_code</span> <span class="kw">as</span> <span class="ident">u64</span>))
+            ScalarValue::Timestamp(i) =&gt; <span class="self">Self</span>((lebsize(<span class="kw-2">*</span>i) &lt;&lt; <span class="number">4</span>) | <span class="number">9</span>),
+            ScalarValue::F64(<span class="kw">_</span>) =&gt; <span class="self">Self</span>((<span class="number">8 </span>&lt;&lt; <span class="number">4</span>) | <span class="number">5</span>),
+            ScalarValue::Counter(i) =&gt; <span class="self">Self</span>((lebsize(i.start) &lt;&lt; <span class="number">4</span>) | <span class="number">8</span>),
+            ScalarValue::Str(s) =&gt; <span class="self">Self</span>(((s.as_bytes().len() <span class="kw">as </span>u64) &lt;&lt; <span class="number">4</span>) | <span class="number">6</span>),
+            ScalarValue::Bytes(b) =&gt; <span class="self">Self</span>(((b.len() <span class="kw">as </span>u64) &lt;&lt; <span class="number">4</span>) | <span class="number">7</span>),
+            ScalarValue::Unknown { type_code, bytes } =&gt; {
+                <span class="self">Self</span>(((bytes.len() <span class="kw">as </span>u64) &lt;&lt; <span class="number">4</span>) | (<span class="kw-2">*</span>type_code <span class="kw">as </span>u64))
             }
         }
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ValueMeta</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">raw</span>: <span class="ident">u64</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">ValueMeta</span>(<span class="ident">raw</span>)
+<span class="kw">impl </span>From&lt;u64&gt; <span class="kw">for </span>ValueMeta {
+    <span class="kw">fn </span>from(raw: u64) -&gt; <span class="self">Self </span>{
+        ValueMeta(raw)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">ValueMeta</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">u64</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">v</span>: <span class="ident">ValueMeta</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">v</span>.<span class="number">0</span>
-    }
+<span class="kw">impl </span>From&lt;ValueMeta&gt; <span class="kw">for </span>u64 {
+    <span class="kw">fn </span>from(v: ValueMeta) -&gt; <span class="self">Self </span>{
+        v.<span class="number">0
+    </span>}
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">ScalarValue</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ValueType</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">p</span>: <span class="kw-2">&amp;</span><span class="ident">ScalarValue</span>) -&gt; <span class="self">Self</span> {
-        <span class="kw">match</span> <span class="ident">p</span> {
-            <span class="ident">ScalarValue::Uint</span>(<span class="kw">_</span>) =&gt; <span class="ident">ValueType::Uleb</span>,
-            <span class="ident">ScalarValue::Int</span>(<span class="kw">_</span>) =&gt; <span class="ident">ValueType::Leb</span>,
-            <span class="ident">ScalarValue::Null</span> =&gt; <span class="ident">ValueType::Null</span>,
-            <span class="ident">ScalarValue::Boolean</span>(<span class="ident">b</span>) =&gt; <span class="kw">match</span> <span class="ident">b</span> {
-                <span class="bool-val">true</span> =&gt; <span class="ident">ValueType::True</span>,
-                <span class="bool-val">false</span> =&gt; <span class="ident">ValueType::False</span>,
+<span class="kw">impl </span>From&lt;<span class="kw-2">&amp;</span>ScalarValue&gt; <span class="kw">for </span>ValueType {
+    <span class="kw">fn </span>from(p: <span class="kw-2">&amp;</span>ScalarValue) -&gt; <span class="self">Self </span>{
+        <span class="kw">match </span>p {
+            ScalarValue::Uint(<span class="kw">_</span>) =&gt; ValueType::Uleb,
+            ScalarValue::Int(<span class="kw">_</span>) =&gt; ValueType::Leb,
+            ScalarValue::Null =&gt; ValueType::Null,
+            ScalarValue::Boolean(b) =&gt; <span class="kw">match </span>b {
+                <span class="bool-val">true </span>=&gt; ValueType::True,
+                <span class="bool-val">false </span>=&gt; ValueType::False,
             },
-            <span class="ident">ScalarValue::Timestamp</span>(<span class="kw">_</span>) =&gt; <span class="ident">ValueType::Timestamp</span>,
-            <span class="ident">ScalarValue::F64</span>(<span class="kw">_</span>) =&gt; <span class="ident">ValueType::Float</span>,
-            <span class="ident">ScalarValue::Counter</span>(<span class="kw">_</span>) =&gt; <span class="ident">ValueType::Counter</span>,
-            <span class="ident">ScalarValue::Str</span>(<span class="kw">_</span>) =&gt; <span class="ident">ValueType::String</span>,
-            <span class="ident">ScalarValue::Bytes</span>(<span class="kw">_</span>) =&gt; <span class="ident">ValueType::Bytes</span>,
-            <span class="ident">ScalarValue::Unknown</span> { <span class="ident">type_code</span>, .. } =&gt; <span class="ident">ValueType::Unknown</span>(<span class="kw-2">*</span><span class="ident">type_code</span>),
+            ScalarValue::Timestamp(<span class="kw">_</span>) =&gt; ValueType::Timestamp,
+            ScalarValue::F64(<span class="kw">_</span>) =&gt; ValueType::Float,
+            ScalarValue::Counter(<span class="kw">_</span>) =&gt; ValueType::Counter,
+            ScalarValue::Str(<span class="kw">_</span>) =&gt; ValueType::String,
+            ScalarValue::Bytes(<span class="kw">_</span>) =&gt; ValueType::Bytes,
+            ScalarValue::Unknown { type_code, .. } =&gt; ValueType::Unknown(<span class="kw-2">*</span>type_code),
         }
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">ValueType</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">u64</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">v</span>: <span class="ident">ValueType</span>) -&gt; <span class="self">Self</span> {
-        <span class="kw">match</span> <span class="ident">v</span> {
-            <span class="ident">ValueType::Null</span> =&gt; <span class="number">0</span>,
-            <span class="ident">ValueType::False</span> =&gt; <span class="number">1</span>,
-            <span class="ident">ValueType::True</span> =&gt; <span class="number">2</span>,
-            <span class="ident">ValueType::Uleb</span> =&gt; <span class="number">3</span>,
-            <span class="ident">ValueType::Leb</span> =&gt; <span class="number">4</span>,
-            <span class="ident">ValueType::Float</span> =&gt; <span class="number">5</span>,
-            <span class="ident">ValueType::String</span> =&gt; <span class="number">6</span>,
-            <span class="ident">ValueType::Bytes</span> =&gt; <span class="number">7</span>,
-            <span class="ident">ValueType::Counter</span> =&gt; <span class="number">8</span>,
-            <span class="ident">ValueType::Timestamp</span> =&gt; <span class="number">9</span>,
-            <span class="ident">ValueType::Unknown</span>(<span class="ident">other</span>) =&gt; <span class="ident">other</span> <span class="kw">as</span> <span class="ident">u64</span>,
+<span class="kw">impl </span>From&lt;ValueType&gt; <span class="kw">for </span>u64 {
+    <span class="kw">fn </span>from(v: ValueType) -&gt; <span class="self">Self </span>{
+        <span class="kw">match </span>v {
+            ValueType::Null =&gt; <span class="number">0</span>,
+            ValueType::False =&gt; <span class="number">1</span>,
+            ValueType::True =&gt; <span class="number">2</span>,
+            ValueType::Uleb =&gt; <span class="number">3</span>,
+            ValueType::Leb =&gt; <span class="number">4</span>,
+            ValueType::Float =&gt; <span class="number">5</span>,
+            ValueType::String =&gt; <span class="number">6</span>,
+            ValueType::Bytes =&gt; <span class="number">7</span>,
+            ValueType::Counter =&gt; <span class="number">8</span>,
+            ValueType::Timestamp =&gt; <span class="number">9</span>,
+            ValueType::Unknown(other) =&gt; other <span class="kw">as </span>u64,
         }
     }
 }
-<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
-<span class="kw">mod</span> <span class="ident">tests</span> {
-    <span class="kw">use</span> <span class="kw">super</span>::<span class="kw-2">*</span>;
-    <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::columnar::encoding::properties</span>::{<span class="ident">scalar_value</span>, <span class="ident">splice_scenario</span>};
-    <span class="kw">use</span> <span class="ident">proptest::prelude</span>::<span class="kw-2">*</span>;
-    <span class="kw">use</span> <span class="ident">std::borrow::Cow</span>;
+<span class="attribute">#[cfg(test)]
+</span><span class="kw">mod </span>tests {
+    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+    <span class="kw">use </span><span class="kw">crate</span>::columnar::encoding::properties::{scalar_value, splice_scenario};
+    <span class="kw">use </span>proptest::prelude::<span class="kw-2">*</span>;
+    <span class="kw">use </span>std::borrow::Cow;
 
-    <span class="kw">fn</span> <span class="ident">encode_values</span>(<span class="ident">vals</span>: <span class="kw-2">&amp;</span>[<span class="ident">ScalarValue</span>]) -&gt; (<span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>, <span class="ident">ValueRange</span>) {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">out</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
-        <span class="kw">let</span> <span class="ident">range</span> <span class="op">=</span> <span class="ident">ValueRange::encode</span>(<span class="ident">vals</span>.<span class="ident">iter</span>().<span class="ident">cloned</span>().<span class="ident">map</span>(<span class="ident">Cow::Owned</span>), <span class="kw-2">&amp;mut</span> <span class="ident">out</span>);
-        (<span class="ident">out</span>, <span class="ident">range</span>)
+    <span class="kw">fn </span>encode_values(vals: <span class="kw-2">&amp;</span>[ScalarValue]) -&gt; (Vec&lt;u8&gt;, ValueRange) {
+        <span class="kw">let </span><span class="kw-2">mut </span>out = Vec::new();
+        <span class="kw">let </span>range = ValueRange::encode(vals.iter().cloned().map(Cow::Owned), <span class="kw-2">&amp;mut </span>out);
+        (out, range)
     }
 
-    <span class="kw">fn</span> <span class="ident">encode_rowwise</span>(<span class="ident">vals</span>: <span class="kw-2">&amp;</span>[<span class="ident">ScalarValue</span>]) -&gt; (<span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>, <span class="ident">ValueRange</span>) {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">out</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">encoder</span> <span class="op">=</span> <span class="ident">ValueEncoder::new</span>();
-        <span class="kw">for</span> <span class="ident">val</span> <span class="kw">in</span> <span class="ident">vals</span> {
-            <span class="ident">encoder</span>.<span class="ident">append</span>(<span class="ident">val</span>);
+    <span class="kw">fn </span>encode_rowwise(vals: <span class="kw-2">&amp;</span>[ScalarValue]) -&gt; (Vec&lt;u8&gt;, ValueRange) {
+        <span class="kw">let </span><span class="kw-2">mut </span>out = Vec::new();
+        <span class="kw">let </span><span class="kw-2">mut </span>encoder = ValueEncoder::new();
+        <span class="kw">for </span>val <span class="kw">in </span>vals {
+            encoder.append(val);
         }
-        <span class="kw">let</span> <span class="ident">range</span> <span class="op">=</span> <span class="ident">encoder</span>.<span class="ident">finish</span>(<span class="kw-2">&amp;mut</span> <span class="ident">out</span>);
-        (<span class="ident">out</span>, <span class="ident">range</span>)
+        <span class="kw">let </span>range = encoder.finish(<span class="kw-2">&amp;mut </span>out);
+        (out, range)
     }
 
-    <span class="macro">proptest!</span> {
-        <span class="attribute">#[<span class="ident">test</span>]</span>
-        <span class="kw">fn</span> <span class="ident">test_initialize_splice</span>(<span class="ident">values</span> <span class="kw">in</span> <span class="ident">proptest::collection::vec</span>(<span class="ident">scalar_value</span>(), <span class="number">0</span>..<span class="number">100</span>)) {
-            <span class="kw">let</span> (<span class="ident">out</span>, <span class="ident">range</span>) <span class="op">=</span> <span class="ident">encode_values</span>(<span class="kw-2">&amp;</span><span class="ident">values</span>[..]);
-            <span class="kw">let</span> <span class="ident">testvals</span> <span class="op">=</span> <span class="ident">range</span>.<span class="ident">iter</span>(<span class="kw-2">&amp;</span><span class="ident">out</span>).<span class="ident">collect</span>::<span class="op">&lt;</span><span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span>, <span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>().<span class="ident">unwrap</span>();
-            <span class="macro">assert_eq!</span>(<span class="ident">values</span>, <span class="ident">testvals</span>);
+    <span class="macro">proptest! </span>{
+        <span class="attribute">#[test]
+        </span><span class="kw">fn </span>test_initialize_splice(values <span class="kw">in </span>proptest::collection::vec(scalar_value(), <span class="number">0</span>..<span class="number">100</span>)) {
+            <span class="kw">let </span>(out, range) = encode_values(<span class="kw-2">&amp;</span>values[..]);
+            <span class="kw">let </span>testvals = range.iter(<span class="kw-2">&amp;</span>out).collect::&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">_</span>&gt;, <span class="kw">_</span>&gt;&gt;().unwrap();
+            <span class="macro">assert_eq!</span>(values, testvals);
         }
 
-        <span class="attribute">#[<span class="ident">test</span>]</span>
-        <span class="kw">fn</span> <span class="ident">test_splice_values</span>(<span class="ident">scenario</span> <span class="kw">in</span> <span class="ident">splice_scenario</span>(<span class="ident">scalar_value</span>())){
-            <span class="kw">let</span> (<span class="ident">out</span>, <span class="ident">range</span>) <span class="op">=</span> <span class="ident">encode_values</span>(<span class="kw-2">&amp;</span><span class="ident">scenario</span>.<span class="ident">initial_values</span>);
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">spliced</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
-            <span class="kw">let</span> <span class="ident">new_range</span> <span class="op">=</span> <span class="ident">range</span>
-                .<span class="ident">splice</span>(
-                    <span class="kw-2">&amp;</span><span class="ident">out</span>,
-                    <span class="ident">scenario</span>.<span class="ident">replace_range</span>.<span class="ident">clone</span>(),
-                    <span class="ident">scenario</span>.<span class="ident">replacements</span>.<span class="ident">clone</span>().<span class="ident">into_iter</span>().<span class="ident">map</span>(<span class="ident">Cow::Owned</span>),
-                    <span class="kw-2">&amp;mut</span> <span class="ident">spliced</span>,
+        <span class="attribute">#[test]
+        </span><span class="kw">fn </span>test_splice_values(scenario <span class="kw">in </span>splice_scenario(scalar_value())){
+            <span class="kw">let </span>(out, range) = encode_values(<span class="kw-2">&amp;</span>scenario.initial_values);
+            <span class="kw">let </span><span class="kw-2">mut </span>spliced = Vec::new();
+            <span class="kw">let </span>new_range = range
+                .splice(
+                    <span class="kw-2">&amp;</span>out,
+                    scenario.replace_range.clone(),
+                    scenario.replacements.clone().into_iter().map(Cow::Owned),
+                    <span class="kw-2">&amp;mut </span>spliced,
                 );
-            <span class="kw">let</span> <span class="ident">result_values</span> <span class="op">=</span> <span class="ident">new_range</span>.<span class="ident">iter</span>(<span class="kw-2">&amp;</span><span class="ident">spliced</span>).<span class="ident">collect</span>::<span class="op">&lt;</span><span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span>, <span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>().<span class="ident">unwrap</span>();
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">expected</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">scenario</span>.<span class="ident">initial_values</span>.<span class="ident">clone</span>();
-            <span class="ident">expected</span>.<span class="ident">splice</span>(<span class="ident">scenario</span>.<span class="ident">replace_range</span>, <span class="ident">scenario</span>.<span class="ident">replacements</span>);
-            <span class="macro">assert_eq!</span>(<span class="ident">result_values</span>, <span class="ident">expected</span>);
+            <span class="kw">let </span>result_values = new_range.iter(<span class="kw-2">&amp;</span>spliced).collect::&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">_</span>&gt;, <span class="kw">_</span>&gt;&gt;().unwrap();
+            <span class="kw">let </span><span class="kw-2">mut </span>expected: Vec&lt;<span class="kw">_</span>&gt; = scenario.initial_values.clone();
+            expected.splice(scenario.replace_range, scenario.replacements);
+            <span class="macro">assert_eq!</span>(result_values, expected);
         }
 
-        <span class="attribute">#[<span class="ident">test</span>]</span>
-        <span class="kw">fn</span> <span class="ident">encode_row_wise_and_columnwise_equal</span>(<span class="ident">values</span> <span class="kw">in</span> <span class="ident">proptest::collection::vec</span>(<span class="ident">scalar_value</span>(), <span class="number">0</span>..<span class="number">50</span>)) {
-            <span class="kw">let</span> (<span class="ident">colwise</span>, <span class="ident">col_range</span>) <span class="op">=</span> <span class="ident">encode_values</span>(<span class="kw-2">&amp;</span><span class="ident">values</span>[..]);
-            <span class="kw">let</span> (<span class="ident">rowwise</span>, <span class="ident">row_range</span>) <span class="op">=</span> <span class="ident">encode_rowwise</span>(<span class="kw-2">&amp;</span><span class="ident">values</span>[..]);
-            <span class="macro">assert_eq!</span>(<span class="ident">colwise</span>, <span class="ident">rowwise</span>);
-            <span class="macro">assert_eq!</span>(<span class="ident">col_range</span>, <span class="ident">row_range</span>);
+        <span class="attribute">#[test]
+        </span><span class="kw">fn </span>encode_row_wise_and_columnwise_equal(values <span class="kw">in </span>proptest::collection::vec(scalar_value(), <span class="number">0</span>..<span class="number">50</span>)) {
+            <span class="kw">let </span>(colwise, col_range) = encode_values(<span class="kw-2">&amp;</span>values[..]);
+            <span class="kw">let </span>(rowwise, row_range) = encode_rowwise(<span class="kw-2">&amp;</span>values[..]);
+            <span class="macro">assert_eq!</span>(colwise, rowwise);
+            <span class="macro">assert_eq!</span>(col_range, row_range);
         }
     }
 
-    <span class="attribute">#[<span class="ident">test</span>]</span>
-    <span class="kw">fn</span> <span class="ident">test_value_uleb</span>() {
-        <span class="kw">let</span> <span class="ident">vals</span> <span class="op">=</span> [<span class="ident">ScalarValue::Uint</span>(<span class="number">127</span>), <span class="ident">ScalarValue::Uint</span>(<span class="number">183</span>)];
-        <span class="kw">let</span> (<span class="ident">out</span>, <span class="ident">range</span>) <span class="op">=</span> <span class="ident">encode_values</span>(<span class="kw-2">&amp;</span><span class="ident">vals</span>);
-        <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">range</span>.<span class="ident">iter</span>(<span class="kw-2">&amp;</span><span class="ident">out</span>).<span class="ident">collect</span>::<span class="op">&lt;</span><span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span>, <span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>().<span class="ident">unwrap</span>();
-        <span class="macro">assert_eq!</span>(<span class="ident">result</span>, <span class="ident">vals</span>);
+    <span class="attribute">#[test]
+    </span><span class="kw">fn </span>test_value_uleb() {
+        <span class="kw">let </span>vals = [ScalarValue::Uint(<span class="number">127</span>), ScalarValue::Uint(<span class="number">183</span>)];
+        <span class="kw">let </span>(out, range) = encode_values(<span class="kw-2">&amp;</span>vals);
+        <span class="kw">let </span>result = range.iter(<span class="kw-2">&amp;</span>out).collect::&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">_</span>&gt;, <span class="kw">_</span>&gt;&gt;().unwrap();
+        <span class="macro">assert_eq!</span>(result, vals);
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

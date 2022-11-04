@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/columnar/column_range/key.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>key.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/columnar/column_range/key.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>key.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -258,263 +258,263 @@
 <span id="256">256</span>
 <span id="257">257</span>
 <span id="258">258</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std</span>::{<span class="ident">convert::Infallible</span>, <span class="ident">ops::Range</span>};
+</pre><pre class="rust"><code><span class="kw">use </span>std::{convert::Infallible, ops::Range};
 
-<span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">DeltaRange</span>, <span class="ident">RleRange</span>};
-<span class="kw">use</span> <span class="kw">crate</span>::{
-    <span class="ident">columnar</span>::{
-        <span class="ident">encoding</span>::{
-            <span class="ident">raw</span>, <span class="ident">DecodeColumnError</span>, <span class="ident">DeltaDecoder</span>, <span class="ident">DeltaEncoder</span>, <span class="ident">RleDecoder</span>, <span class="ident">RleEncoder</span>, <span class="ident">Sink</span>,
+<span class="kw">use super</span>::{DeltaRange, RleRange};
+<span class="kw">use crate</span>::{
+    columnar::{
+        encoding::{
+            raw, DecodeColumnError, DeltaDecoder, DeltaEncoder, RleDecoder, RleEncoder, Sink,
         },
-        <span class="ident">SpliceError</span>,
+        SpliceError,
     },
-    <span class="ident">convert</span>,
-    <span class="ident">types</span>::{<span class="ident">ElemId</span>, <span class="ident">OpId</span>},
+    convert,
+    types::{ElemId, OpId},
 };
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">Key</span> {
-    <span class="ident">Prop</span>(<span class="ident">smol_str::SmolStr</span>),
-    <span class="ident">Elem</span>(<span class="ident">ElemId</span>),
+<span class="attribute">#[derive(Clone, Debug, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>Key {
+    Prop(smol_str::SmolStr),
+    Elem(ElemId),
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">KeyRange</span> {
-    <span class="ident">actor</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>,
-    <span class="ident">counter</span>: <span class="ident">DeltaRange</span>,
-    <span class="ident">string</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">smol_str::SmolStr</span><span class="op">&gt;</span>,
+<span class="attribute">#[derive(Clone, Debug, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>KeyRange {
+    actor: RleRange&lt;u64&gt;,
+    counter: DeltaRange,
+    string: RleRange&lt;smol_str::SmolStr&gt;,
 }
 
-<span class="kw">impl</span> <span class="ident">KeyRange</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>(
-        <span class="ident">actor</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>,
-        <span class="ident">counter</span>: <span class="ident">DeltaRange</span>,
-        <span class="ident">string</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">smol_str::SmolStr</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span> {
-            <span class="ident">actor</span>,
-            <span class="ident">counter</span>,
-            <span class="ident">string</span>,
+<span class="kw">impl </span>KeyRange {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(
+        actor: RleRange&lt;u64&gt;,
+        counter: DeltaRange,
+        string: RleRange&lt;smol_str::SmolStr&gt;,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            actor,
+            counter,
+            string,
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">actor_range</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span> {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">actor</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>actor_range(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>RleRange&lt;u64&gt; {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.actor
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">counter_range</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">DeltaRange</span> {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">counter</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>counter_range(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>DeltaRange {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.counter
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">string_range</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">smol_str::SmolStr</span><span class="op">&gt;</span> {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">string</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>string_range(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>RleRange&lt;smol_str::SmolStr&gt; {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.string
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">iter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>]) -&gt; <span class="ident">KeyIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="ident">KeyIter</span> {
-            <span class="ident">actor</span>: <span class="self">self</span>.<span class="ident">actor</span>.<span class="ident">decoder</span>(<span class="ident">data</span>),
-            <span class="ident">counter</span>: <span class="self">self</span>.<span class="ident">counter</span>.<span class="ident">decoder</span>(<span class="ident">data</span>),
-            <span class="ident">string</span>: <span class="self">self</span>.<span class="ident">string</span>.<span class="ident">decoder</span>(<span class="ident">data</span>),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>iter&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, data: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8]) -&gt; KeyIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+        KeyIter {
+            actor: <span class="self">self</span>.actor.decoder(data),
+            counter: <span class="self">self</span>.counter.decoder(data),
+            string: <span class="self">self</span>.string.decoder(data),
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="lifetime">&#39;b</span>, <span class="ident">O</span>, <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">convert::Key</span><span class="op">&lt;</span><span class="lifetime">&#39;b</span>, <span class="ident">O</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span><span class="op">&gt;</span>(
-        <span class="ident">items</span>: <span class="ident">I</span>,
-        <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="self">Self</span>
-    <span class="kw">where</span>
-        <span class="ident">O</span>: <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>encode&lt;<span class="lifetime">&#39;b</span>, O, I: Iterator&lt;Item = convert::Key&lt;<span class="lifetime">&#39;b</span>, O&gt;&gt; + Clone&gt;(
+        items: I,
+        out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
+    ) -&gt; <span class="self">Self
+    </span><span class="kw">where
+        </span>O: convert::OpId&lt;usize&gt;,
     {
-        <span class="comment">// SAFETY: The incoming iterator is infallible and there are no existing items</span>
-        <span class="self">Self</span> {
-            <span class="ident">actor</span>: (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>(),
-            <span class="ident">counter</span>: (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>(),
-            <span class="ident">string</span>: (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>(),
+        <span class="comment">// SAFETY: The incoming iterator is infallible and there are no existing items
+        </span><span class="self">Self </span>{
+            actor: (<span class="number">0</span>..<span class="number">0</span>).into(),
+            counter: (<span class="number">0</span>..<span class="number">0</span>).into(),
+            string: (<span class="number">0</span>..<span class="number">0</span>).into(),
         }
-        .<span class="ident">splice</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">Infallible</span>, <span class="kw">_</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span>[], <span class="number">0</span>..<span class="number">0</span>, <span class="ident">items</span>.<span class="ident">map</span>(<span class="prelude-val">Ok</span>), <span class="ident">out</span>)
-        .<span class="ident">unwrap</span>()
+        .splice::&lt;<span class="kw">_</span>, Infallible, <span class="kw">_</span>&gt;(<span class="kw-2">&amp;</span>[], <span class="number">0</span>..<span class="number">0</span>, items.map(<span class="prelude-val">Ok</span>), out)
+        .unwrap()
     }
 
-    <span class="doccomment">/// Splice new keys into this set of keys, encoding the resulting actor, counter, and str</span>
-    <span class="doccomment">/// columns in `out`.</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">splice</span><span class="op">&lt;</span><span class="lifetime">&#39;b</span>, <span class="ident">O</span>, <span class="ident">E</span>, <span class="ident">I</span><span class="op">&gt;</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">data</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
-        <span class="ident">replace</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-        <span class="ident">replace_with</span>: <span class="ident">I</span>,
-        <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SpliceError</span><span class="op">&lt;</span><span class="ident">raw::Error</span>, <span class="ident">E</span><span class="op">&gt;</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">O</span>: <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-        <span class="ident">E</span>: <span class="ident">std::error::Error</span>,
-        <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">convert::Key</span><span class="op">&lt;</span><span class="lifetime">&#39;b</span>, <span class="ident">O</span><span class="op">&gt;</span>, <span class="ident">E</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span>,
+    <span class="doccomment">/// Splice new keys into this set of keys, encoding the resulting actor, counter, and str
+    /// columns in `out`.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>splice&lt;<span class="lifetime">&#39;b</span>, O, E, I&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        data: <span class="kw-2">&amp;</span>[u8],
+        replace: Range&lt;usize&gt;,
+        replace_with: I,
+        out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, SpliceError&lt;raw::Error, E&gt;&gt;
+    <span class="kw">where
+        </span>O: convert::OpId&lt;usize&gt;,
+        E: std::error::Error,
+        I: Iterator&lt;Item = <span class="prelude-ty">Result</span>&lt;convert::Key&lt;<span class="lifetime">&#39;b</span>, O&gt;, E&gt;&gt; + Clone,
     {
-        <span class="kw">let</span> <span class="ident">actor</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">actor</span>.<span class="ident">splice</span>(
-            <span class="ident">data</span>,
-            <span class="ident">replace</span>.<span class="ident">clone</span>(),
-            <span class="ident">replace_with</span>.<span class="ident">clone</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">k</span><span class="op">|</span> {
-                <span class="ident">k</span>.<span class="ident">map</span>(<span class="op">|</span><span class="ident">k</span><span class="op">|</span> <span class="kw">match</span> <span class="ident">k</span> {
-                    <span class="ident">convert::Key::Prop</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
-                    <span class="ident">convert::Key::Elem</span>(<span class="ident">convert::ElemId::Head</span>) =&gt; <span class="prelude-val">None</span>,
-                    <span class="ident">convert::Key::Elem</span>(<span class="ident">convert::ElemId::Op</span>(<span class="ident">o</span>)) =&gt; <span class="prelude-val">Some</span>(<span class="ident">o</span>.<span class="ident">actor</span>() <span class="kw">as</span> <span class="ident">u64</span>),
+        <span class="kw">let </span>actor = <span class="self">self</span>.actor.splice(
+            data,
+            replace.clone(),
+            replace_with.clone().map(|k| {
+                k.map(|k| <span class="kw">match </span>k {
+                    convert::Key::Prop(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+                    convert::Key::Elem(convert::ElemId::Head) =&gt; <span class="prelude-val">None</span>,
+                    convert::Key::Elem(convert::ElemId::Op(o)) =&gt; <span class="prelude-val">Some</span>(o.actor() <span class="kw">as </span>u64),
                 })
             }),
-            <span class="ident">out</span>,
+            out,
         )<span class="question-mark">?</span>;
 
-        <span class="kw">let</span> <span class="ident">counter</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">counter</span>.<span class="ident">splice</span>(
-            <span class="ident">data</span>,
-            <span class="ident">replace</span>.<span class="ident">clone</span>(),
-            <span class="ident">replace_with</span>.<span class="ident">clone</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">k</span><span class="op">|</span> {
-                <span class="ident">k</span>.<span class="ident">map</span>(<span class="op">|</span><span class="ident">k</span><span class="op">|</span> <span class="kw">match</span> <span class="ident">k</span> {
-                    <span class="ident">convert::Key::Prop</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
-                    <span class="ident">convert::Key::Elem</span>(<span class="ident">convert::ElemId::Head</span>) =&gt; <span class="prelude-val">Some</span>(<span class="number">0</span>),
-                    <span class="ident">convert::Key::Elem</span>(<span class="ident">convert::ElemId::Op</span>(<span class="ident">o</span>)) =&gt; <span class="prelude-val">Some</span>(<span class="ident">o</span>.<span class="ident">counter</span>() <span class="kw">as</span> <span class="ident">i64</span>),
+        <span class="kw">let </span>counter = <span class="self">self</span>.counter.splice(
+            data,
+            replace.clone(),
+            replace_with.clone().map(|k| {
+                k.map(|k| <span class="kw">match </span>k {
+                    convert::Key::Prop(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+                    convert::Key::Elem(convert::ElemId::Head) =&gt; <span class="prelude-val">Some</span>(<span class="number">0</span>),
+                    convert::Key::Elem(convert::ElemId::Op(o)) =&gt; <span class="prelude-val">Some</span>(o.counter() <span class="kw">as </span>i64),
                 })
             }),
-            <span class="ident">out</span>,
+            out,
         )<span class="question-mark">?</span>;
 
-        <span class="kw">let</span> <span class="ident">string</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">string</span>.<span class="ident">splice</span>(
-            <span class="ident">data</span>,
-            <span class="ident">replace</span>,
-            <span class="ident">replace_with</span>.<span class="ident">map</span>(<span class="op">|</span><span class="ident">k</span><span class="op">|</span> {
-                <span class="ident">k</span>.<span class="ident">map</span>(<span class="op">|</span><span class="ident">k</span><span class="op">|</span> <span class="kw">match</span> <span class="ident">k</span> {
-                    <span class="ident">convert::Key::Prop</span>(<span class="ident">s</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">s</span>),
-                    <span class="ident">convert::Key::Elem</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+        <span class="kw">let </span>string = <span class="self">self</span>.string.splice(
+            data,
+            replace,
+            replace_with.map(|k| {
+                k.map(|k| <span class="kw">match </span>k {
+                    convert::Key::Prop(s) =&gt; <span class="prelude-val">Some</span>(s),
+                    convert::Key::Elem(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
                 })
             }),
-            <span class="ident">out</span>,
+            out,
         )<span class="question-mark">?</span>;
 
-        <span class="prelude-val">Ok</span>(<span class="self">Self</span> {
-            <span class="ident">actor</span>,
-            <span class="ident">counter</span>,
-            <span class="ident">string</span>,
+        <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
+            actor,
+            counter,
+            string,
         })
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">KeyIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">actor</span>: <span class="ident">RleDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">u64</span><span class="op">&gt;</span>,
-    <span class="ident">counter</span>: <span class="ident">DeltaDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
-    <span class="ident">string</span>: <span class="ident">RleDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">smol_str::SmolStr</span><span class="op">&gt;</span>,
+<span class="attribute">#[derive(Clone, Debug)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>KeyIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    actor: RleDecoder&lt;<span class="lifetime">&#39;a</span>, u64&gt;,
+    counter: DeltaDecoder&lt;<span class="lifetime">&#39;a</span>&gt;,
+    string: RleDecoder&lt;<span class="lifetime">&#39;a</span>, smol_str::SmolStr&gt;,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">KeyIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">try_next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Key</span><span class="op">&gt;</span>, <span class="ident">DecodeColumnError</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">actor</span> <span class="op">=</span> <span class="self">self</span>
-            .<span class="ident">actor</span>
-            .<span class="ident">next</span>()
-            .<span class="ident">transpose</span>()
-            .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">DecodeColumnError::decode_raw</span>(<span class="string">&quot;actor&quot;</span>, <span class="ident">e</span>))<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">counter</span> <span class="op">=</span> <span class="self">self</span>
-            .<span class="ident">counter</span>
-            .<span class="ident">next</span>()
-            .<span class="ident">transpose</span>()
-            .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">DecodeColumnError::decode_raw</span>(<span class="string">&quot;counter&quot;</span>, <span class="ident">e</span>))<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">string</span> <span class="op">=</span> <span class="self">self</span>
-            .<span class="ident">string</span>
-            .<span class="ident">next</span>()
-            .<span class="ident">transpose</span>()
-            .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">DecodeColumnError::decode_raw</span>(<span class="string">&quot;string&quot;</span>, <span class="ident">e</span>))<span class="question-mark">?</span>;
-        <span class="kw">match</span> (<span class="ident">actor</span>, <span class="ident">counter</span>, <span class="ident">string</span>) {
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; KeyIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>try_next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;Key&gt;, DecodeColumnError&gt; {
+        <span class="kw">let </span>actor = <span class="self">self
+            </span>.actor
+            .next()
+            .transpose()
+            .map_err(|e| DecodeColumnError::decode_raw(<span class="string">&quot;actor&quot;</span>, e))<span class="question-mark">?</span>;
+        <span class="kw">let </span>counter = <span class="self">self
+            </span>.counter
+            .next()
+            .transpose()
+            .map_err(|e| DecodeColumnError::decode_raw(<span class="string">&quot;counter&quot;</span>, e))<span class="question-mark">?</span>;
+        <span class="kw">let </span>string = <span class="self">self
+            </span>.string
+            .next()
+            .transpose()
+            .map_err(|e| DecodeColumnError::decode_raw(<span class="string">&quot;string&quot;</span>, e))<span class="question-mark">?</span>;
+        <span class="kw">match </span>(actor, counter, string) {
             (<span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(<span class="kw">_</span>)), <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(<span class="kw">_</span>)), <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(<span class="kw">_</span>))) =&gt; {
-                <span class="prelude-val">Err</span>(<span class="ident">DecodeColumnError::invalid_value</span>(<span class="string">&quot;key&quot;</span>, <span class="string">&quot;too many values&quot;</span>))
+                <span class="prelude-val">Err</span>(DecodeColumnError::invalid_value(<span class="string">&quot;key&quot;</span>, <span class="string">&quot;too many values&quot;</span>))
             }
-            (<span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) <span class="op">|</span> <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) <span class="op">|</span> <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(<span class="ident">string</span>))) =&gt; {
-                <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="ident">Key::Prop</span>(<span class="ident">string</span>)))
+            (<span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) | <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) | <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(string))) =&gt; {
+                <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(Key::Prop(string)))
             }
-            (<span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) <span class="op">|</span> <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(<span class="number">0</span>)), <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) <span class="op">|</span> <span class="prelude-val">None</span>) =&gt; {
-                <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="ident">Key::Elem</span>(<span class="ident">ElemId</span>(<span class="ident">OpId</span>(<span class="number">0</span>, <span class="number">0</span>)))))
+            (<span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) | <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(<span class="number">0</span>)), <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) | <span class="prelude-val">None</span>) =&gt; {
+                <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(Key::Elem(ElemId(OpId(<span class="number">0</span>, <span class="number">0</span>)))))
             }
-            (<span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(<span class="ident">actor</span>)), <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(<span class="ident">ctr</span>)), <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) <span class="op">|</span> <span class="prelude-val">None</span>) =&gt; <span class="kw">match</span> <span class="ident">ctr</span>.<span class="ident">try_into</span>() {
-                <span class="comment">//Ok(ctr) =&gt; Some(Ok(Key::Elem(ElemId(OpId(ctr, actor as usize))))),</span>
-                <span class="prelude-val">Ok</span>(<span class="ident">ctr</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="ident">Key::Elem</span>(<span class="ident">ElemId</span>(<span class="ident">OpId::new</span>(<span class="ident">actor</span> <span class="kw">as</span> <span class="ident">usize</span>, <span class="ident">ctr</span>))))),
-                <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(<span class="ident">DecodeColumnError::invalid_value</span>(
+            (<span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(actor)), <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(ctr)), <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) | <span class="prelude-val">None</span>) =&gt; <span class="kw">match </span>ctr.try_into() {
+                <span class="comment">//Ok(ctr) =&gt; Some(Ok(Key::Elem(ElemId(OpId(ctr, actor as usize))))),
+                </span><span class="prelude-val">Ok</span>(ctr) =&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(Key::Elem(ElemId(OpId::new(actor <span class="kw">as </span>usize, ctr))))),
+                <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(DecodeColumnError::invalid_value(
                     <span class="string">&quot;counter&quot;</span>,
                     <span class="string">&quot;negative value for counter&quot;</span>,
                 )),
             },
-            (<span class="prelude-val">None</span> <span class="op">|</span> <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>), <span class="prelude-val">None</span> <span class="op">|</span> <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>), <span class="prelude-val">None</span> <span class="op">|</span> <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>)) =&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>),
-            (<span class="prelude-val">None</span> <span class="op">|</span> <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>), <span class="ident">k</span>, <span class="kw">_</span>) =&gt; {
-                <span class="macro">tracing::error!</span>(<span class="ident">key</span><span class="op">=</span><span class="question-mark">?</span><span class="ident">k</span>, <span class="string">&quot;unexpected null actor&quot;</span>);
-                <span class="prelude-val">Err</span>(<span class="ident">DecodeColumnError::unexpected_null</span>(<span class="string">&quot;actor&quot;</span>))
+            (<span class="prelude-val">None </span>| <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>), <span class="prelude-val">None </span>| <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>), <span class="prelude-val">None </span>| <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>)) =&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>),
+            (<span class="prelude-val">None </span>| <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>), k, <span class="kw">_</span>) =&gt; {
+                <span class="macro">tracing::error!</span>(key=<span class="question-mark">?</span>k, <span class="string">&quot;unexpected null actor&quot;</span>);
+                <span class="prelude-val">Err</span>(DecodeColumnError::unexpected_null(<span class="string">&quot;actor&quot;</span>))
             }
-            (<span class="kw">_</span>, <span class="prelude-val">None</span> <span class="op">|</span> <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>), <span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(<span class="ident">DecodeColumnError::unexpected_null</span>(<span class="string">&quot;counter&quot;</span>)),
+            (<span class="kw">_</span>, <span class="prelude-val">None </span>| <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>), <span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(DecodeColumnError::unexpected_null(<span class="string">&quot;counter&quot;</span>)),
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Iterator</span> <span class="kw">for</span> <span class="ident">KeyIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Key</span>, <span class="ident">DecodeColumnError</span><span class="op">&gt;</span>;
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>KeyIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">type </span>Item = <span class="prelude-ty">Result</span>&lt;Key, DecodeColumnError&gt;;
 
-    <span class="kw">fn</span> <span class="ident">next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">try_next</span>().<span class="ident">transpose</span>()
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="self">self</span>.try_next().transpose()
     }
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">KeyEncoder</span><span class="op">&lt;</span><span class="ident">S</span><span class="op">&gt;</span> {
-    <span class="ident">actor</span>: <span class="ident">RleEncoder</span><span class="op">&lt;</span><span class="ident">S</span>, <span class="ident">u64</span><span class="op">&gt;</span>,
-    <span class="ident">counter</span>: <span class="ident">DeltaEncoder</span><span class="op">&lt;</span><span class="ident">S</span><span class="op">&gt;</span>,
-    <span class="ident">string</span>: <span class="ident">RleEncoder</span><span class="op">&lt;</span><span class="ident">S</span>, <span class="ident">smol_str::SmolStr</span><span class="op">&gt;</span>,
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>KeyEncoder&lt;S&gt; {
+    actor: RleEncoder&lt;S, u64&gt;,
+    counter: DeltaEncoder&lt;S&gt;,
+    string: RleEncoder&lt;S, smol_str::SmolStr&gt;,
 }
 
-<span class="kw">impl</span> <span class="ident">KeyEncoder</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>() -&gt; <span class="ident">KeyEncoder</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-        <span class="ident">KeyEncoder</span> {
-            <span class="ident">actor</span>: <span class="ident">RleEncoder::new</span>(<span class="ident">Vec::new</span>()),
-            <span class="ident">counter</span>: <span class="ident">DeltaEncoder::new</span>(<span class="ident">Vec::new</span>()),
-            <span class="ident">string</span>: <span class="ident">RleEncoder::new</span>(<span class="ident">Vec::new</span>()),
+<span class="kw">impl </span>KeyEncoder&lt;Vec&lt;u8&gt;&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new() -&gt; KeyEncoder&lt;Vec&lt;u8&gt;&gt; {
+        KeyEncoder {
+            actor: RleEncoder::new(Vec::new()),
+            counter: DeltaEncoder::new(Vec::new()),
+            string: RleEncoder::new(Vec::new()),
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">finish</span>(<span class="self">self</span>, <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) -&gt; <span class="ident">KeyRange</span> {
-        <span class="kw">let</span> <span class="ident">actor_start</span> <span class="op">=</span> <span class="ident">out</span>.<span class="ident">len</span>();
-        <span class="kw">let</span> (<span class="ident">actor</span>, <span class="kw">_</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">actor</span>.<span class="ident">finish</span>();
-        <span class="ident">out</span>.<span class="ident">extend</span>(<span class="ident">actor</span>);
-        <span class="kw">let</span> <span class="ident">actor_end</span> <span class="op">=</span> <span class="ident">out</span>.<span class="ident">len</span>();
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>finish(<span class="self">self</span>, out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;) -&gt; KeyRange {
+        <span class="kw">let </span>actor_start = out.len();
+        <span class="kw">let </span>(actor, <span class="kw">_</span>) = <span class="self">self</span>.actor.finish();
+        out.extend(actor);
+        <span class="kw">let </span>actor_end = out.len();
 
-        <span class="kw">let</span> (<span class="ident">counter</span>, <span class="kw">_</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">counter</span>.<span class="ident">finish</span>();
-        <span class="ident">out</span>.<span class="ident">extend</span>(<span class="ident">counter</span>);
-        <span class="kw">let</span> <span class="ident">counter_end</span> <span class="op">=</span> <span class="ident">out</span>.<span class="ident">len</span>();
+        <span class="kw">let </span>(counter, <span class="kw">_</span>) = <span class="self">self</span>.counter.finish();
+        out.extend(counter);
+        <span class="kw">let </span>counter_end = out.len();
 
-        <span class="kw">let</span> (<span class="ident">string</span>, <span class="kw">_</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">string</span>.<span class="ident">finish</span>();
-        <span class="ident">out</span>.<span class="ident">extend</span>(<span class="ident">string</span>);
-        <span class="kw">let</span> <span class="ident">string_end</span> <span class="op">=</span> <span class="ident">out</span>.<span class="ident">len</span>();
+        <span class="kw">let </span>(string, <span class="kw">_</span>) = <span class="self">self</span>.string.finish();
+        out.extend(string);
+        <span class="kw">let </span>string_end = out.len();
 
-        <span class="ident">KeyRange</span> {
-            <span class="ident">actor</span>: (<span class="ident">actor_start</span>..<span class="ident">actor_end</span>).<span class="ident">into</span>(),
-            <span class="ident">counter</span>: (<span class="ident">actor_end</span>..<span class="ident">counter_end</span>).<span class="ident">into</span>(),
-            <span class="ident">string</span>: (<span class="ident">counter_end</span>..<span class="ident">string_end</span>).<span class="ident">into</span>(),
+        KeyRange {
+            actor: (actor_start..actor_end).into(),
+            counter: (actor_end..counter_end).into(),
+            string: (counter_end..string_end).into(),
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span><span class="op">&gt;</span> <span class="ident">KeyEncoder</span><span class="op">&lt;</span><span class="ident">S</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">append</span><span class="op">&lt;</span><span class="ident">O</span><span class="op">&gt;</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">key</span>: <span class="ident">convert::Key</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">O</span><span class="op">&gt;</span>)
-    <span class="kw">where</span>
-        <span class="ident">O</span>: <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
+<span class="kw">impl</span>&lt;S: Sink&gt; KeyEncoder&lt;S&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>append&lt;O&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, key: convert::Key&lt;<span class="lifetime">&#39;_</span>, O&gt;)
+    <span class="kw">where
+        </span>O: convert::OpId&lt;usize&gt;,
     {
-        <span class="kw">match</span> <span class="ident">key</span> {
-            <span class="ident">convert::Key::Prop</span>(<span class="ident">p</span>) =&gt; {
-                <span class="self">self</span>.<span class="ident">string</span>.<span class="ident">append_value</span>(<span class="ident">p</span>.<span class="ident">clone</span>());
-                <span class="self">self</span>.<span class="ident">actor</span>.<span class="ident">append_null</span>();
-                <span class="self">self</span>.<span class="ident">counter</span>.<span class="ident">append_null</span>();
+        <span class="kw">match </span>key {
+            convert::Key::Prop(p) =&gt; {
+                <span class="self">self</span>.string.append_value(p.clone());
+                <span class="self">self</span>.actor.append_null();
+                <span class="self">self</span>.counter.append_null();
             }
-            <span class="ident">convert::Key::Elem</span>(<span class="ident">convert::ElemId::Head</span>) =&gt; {
-                <span class="self">self</span>.<span class="ident">string</span>.<span class="ident">append_null</span>();
-                <span class="self">self</span>.<span class="ident">actor</span>.<span class="ident">append_null</span>();
-                <span class="self">self</span>.<span class="ident">counter</span>.<span class="ident">append_value</span>(<span class="number">0</span>);
+            convert::Key::Elem(convert::ElemId::Head) =&gt; {
+                <span class="self">self</span>.string.append_null();
+                <span class="self">self</span>.actor.append_null();
+                <span class="self">self</span>.counter.append_value(<span class="number">0</span>);
             }
-            <span class="ident">convert::Key::Elem</span>(<span class="ident">convert::ElemId::Op</span>(<span class="ident">o</span>)) =&gt; {
-                <span class="self">self</span>.<span class="ident">string</span>.<span class="ident">append_null</span>();
-                <span class="self">self</span>.<span class="ident">actor</span>.<span class="ident">append_value</span>(<span class="ident">o</span>.<span class="ident">actor</span>() <span class="kw">as</span> <span class="ident">u64</span>);
-                <span class="self">self</span>.<span class="ident">counter</span>.<span class="ident">append_value</span>(<span class="ident">o</span>.<span class="ident">counter</span>() <span class="kw">as</span> <span class="ident">i64</span>);
+            convert::Key::Elem(convert::ElemId::Op(o)) =&gt; {
+                <span class="self">self</span>.string.append_null();
+                <span class="self">self</span>.actor.append_value(o.actor() <span class="kw">as </span>u64);
+                <span class="self">self</span>.counter.append_value(o.counter() <span class="kw">as </span>i64);
             }
         }
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

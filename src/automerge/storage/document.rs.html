@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/document.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>document.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/document.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>document.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -342,347 +342,347 @@
 <span id="340">340</span>
 <span id="341">341</span>
 <span id="342">342</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std</span>::{<span class="ident">borrow::Cow</span>, <span class="ident">ops::Range</span>};
+</pre><pre class="rust"><code><span class="kw">use </span>std::{borrow::Cow, ops::Range};
 
-<span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">parse</span>, <span class="ident">shift_range</span>, <span class="ident">ChunkType</span>, <span class="ident">Columns</span>, <span class="ident">Header</span>, <span class="ident">RawColumns</span>};
+<span class="kw">use super</span>::{parse, shift_range, ChunkType, Columns, Header, RawColumns};
 
-<span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">convert</span>, <span class="ident">ActorId</span>, <span class="ident">ChangeHash</span>};
+<span class="kw">use crate</span>::{convert, ActorId, ChangeHash};
 
-<span class="kw">mod</span> <span class="ident">doc_op_columns</span>;
-<span class="kw">use</span> <span class="ident">doc_op_columns::DocOpColumns</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">doc_op_columns</span>::{<span class="ident">AsDocOp</span>, <span class="ident">DocOp</span>, <span class="ident">ReadDocOpError</span>};
-<span class="kw">mod</span> <span class="ident">doc_change_columns</span>;
-<span class="kw">use</span> <span class="ident">doc_change_columns::DocChangeColumns</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">doc_change_columns</span>::{<span class="ident">AsChangeMeta</span>, <span class="ident">ChangeMetadata</span>, <span class="ident">ReadChangeError</span>};
-<span class="kw">mod</span> <span class="ident">compression</span>;
+<span class="kw">mod </span>doc_op_columns;
+<span class="kw">use </span>doc_op_columns::DocOpColumns;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>doc_op_columns::{AsDocOp, DocOp, ReadDocOpError};
+<span class="kw">mod </span>doc_change_columns;
+<span class="kw">use </span>doc_change_columns::DocChangeColumns;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>doc_change_columns::{AsChangeMeta, ChangeMetadata, ReadChangeError};
+<span class="kw">mod </span>compression;
 
-<span class="attribute">#[<span class="ident">allow</span>(<span class="ident">dead_code</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">CompressConfig</span> {
+<span class="attribute">#[allow(dead_code)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>CompressConfig {
     <span class="prelude-val">None</span>,
-    <span class="ident">Threshold</span>(<span class="ident">usize</span>),
+    Threshold(usize),
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">Document</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">bytes</span>: <span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, [<span class="ident">u8</span>]<span class="op">&gt;</span>,
-    <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">dead_code</span>)]</span>
-    <span class="ident">compressed_bytes</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, [<span class="ident">u8</span>]<span class="op">&gt;</span><span class="op">&gt;</span>,
-    <span class="ident">header</span>: <span class="ident">Header</span>,
-    <span class="ident">actors</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ActorId</span><span class="op">&gt;</span>,
-    <span class="ident">heads</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>,
-    <span class="ident">op_metadata</span>: <span class="ident">DocOpColumns</span>,
-    <span class="ident">op_bytes</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-    <span class="ident">change_metadata</span>: <span class="ident">DocChangeColumns</span>,
-    <span class="ident">change_bytes</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-    <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">dead_code</span>)]</span>
-    <span class="ident">head_indices</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>,
+<span class="attribute">#[derive(Debug)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Document&lt;<span class="lifetime">&#39;a</span>&gt; {
+    bytes: Cow&lt;<span class="lifetime">&#39;a</span>, [u8]&gt;,
+    <span class="attribute">#[allow(dead_code)]
+    </span>compressed_bytes: <span class="prelude-ty">Option</span>&lt;Cow&lt;<span class="lifetime">&#39;a</span>, [u8]&gt;&gt;,
+    header: Header,
+    actors: Vec&lt;ActorId&gt;,
+    heads: Vec&lt;ChangeHash&gt;,
+    op_metadata: DocOpColumns,
+    op_bytes: Range&lt;usize&gt;,
+    change_metadata: DocChangeColumns,
+    change_bytes: Range&lt;usize&gt;,
+    <span class="attribute">#[allow(dead_code)]
+    </span>head_indices: Vec&lt;u64&gt;,
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">thiserror::Error</span>, <span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">ParseError</span> {
-    <span class="attribute">#[<span class="ident">error</span>(<span class="ident">transparent</span>)]</span>
-    <span class="ident">Leb128</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident">parse::leb128::Error</span>),
-    <span class="attribute">#[<span class="ident">error</span>(<span class="ident">transparent</span>)]</span>
-    <span class="ident">RawColumns</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident"><span class="kw">crate</span>::storage::columns::raw_column::ParseError</span>),
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;bad column layout for {column_type}s: {error}&quot;</span>)]</span>
-    <span class="ident">BadColumnLayout</span> {
-        <span class="ident">column_type</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static</span> <span class="ident">str</span>,
-        <span class="ident">error</span>: <span class="ident"><span class="kw">super</span>::columns::BadColumnLayout</span>,
+<span class="attribute">#[derive(thiserror::Error, Debug)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>ParseError {
+    <span class="attribute">#[error(transparent)]
+    </span>Leb128(<span class="attribute">#[from] </span>parse::leb128::Error),
+    <span class="attribute">#[error(transparent)]
+    </span>RawColumns(<span class="attribute">#[from] </span><span class="kw">crate</span>::storage::columns::raw_column::ParseError),
+    <span class="attribute">#[error(<span class="string">&quot;bad column layout for {column_type}s: {error}&quot;</span>)]
+    </span>BadColumnLayout {
+        column_type: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span>str,
+        error: <span class="kw">super</span>::columns::BadColumnLayout,
     },
-    <span class="attribute">#[<span class="ident">error</span>(<span class="ident">transparent</span>)]</span>
-    <span class="ident">BadDocOps</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident">doc_op_columns::Error</span>),
-    <span class="attribute">#[<span class="ident">error</span>(<span class="ident">transparent</span>)]</span>
-    <span class="ident">BadDocChanges</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident">doc_change_columns::ReadChangeError</span>),
+    <span class="attribute">#[error(transparent)]
+    </span>BadDocOps(<span class="attribute">#[from] </span>doc_op_columns::Error),
+    <span class="attribute">#[error(transparent)]
+    </span>BadDocChanges(<span class="attribute">#[from] </span>doc_change_columns::ReadChangeError),
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Document</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// Parse a document chunk. Input must be the entire chunk including the header and magic</span>
-    <span class="doccomment">/// bytes but the header must already have been parsed. That is to say, this is expected to be</span>
-    <span class="doccomment">/// used like so:</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// ```rust,ignore</span>
-    <span class="doccomment">/// # use automerge::storage::{parse::{ParseResult, Input}, Document, Header};</span>
-    <span class="doccomment">/// # fn main() -&gt; ParseResult&lt;(), ()&gt; {</span>
-    <span class="doccomment">/// let chunkbytes: &amp;[u8] = todo!();</span>
-    <span class="doccomment">/// let input = Input::new(chunkbytes);</span>
-    <span class="doccomment">/// let (i, header) = Header::parse(input)?;</span>
-    <span class="doccomment">/// let (i, doc) = Document::parse(i, header)?;</span>
-    <span class="doccomment">/// # }</span>
-    <span class="doccomment">/// ```</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">parse</span>(
-        <span class="ident">input</span>: <span class="ident">parse::Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
-        <span class="ident">header</span>: <span class="ident">Header</span>,
-    ) -&gt; <span class="ident">parse::ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Document</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>, <span class="ident">ParseError</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">i</span> <span class="op">=</span> <span class="ident">input</span>;
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Document&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="doccomment">/// Parse a document chunk. Input must be the entire chunk including the header and magic
+    /// bytes but the header must already have been parsed. That is to say, this is expected to be
+    /// used like so:
+    ///
+    /// ```rust,ignore
+    /// # use automerge::storage::{parse::{ParseResult, Input}, Document, Header};
+    /// # fn main() -&gt; ParseResult&lt;(), ()&gt; {
+    /// let chunkbytes: &amp;[u8] = todo!();
+    /// let input = Input::new(chunkbytes);
+    /// let (i, header) = Header::parse(input)?;
+    /// let (i, doc) = Document::parse(i, header)?;
+    /// # }
+    /// ```
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>parse(
+        input: parse::Input&lt;<span class="lifetime">&#39;a</span>&gt;,
+        header: Header,
+    ) -&gt; parse::ParseResult&lt;<span class="lifetime">&#39;a</span>, Document&lt;<span class="lifetime">&#39;a</span>&gt;, ParseError&gt; {
+        <span class="kw">let </span>i = input;
 
-        <span class="comment">// Because some columns in a document may be compressed we do some funky stuff when</span>
-        <span class="comment">// parsing. As we&#39;re parsing the chunk we split the data into four parts:</span>
-        <span class="comment">//</span>
-        <span class="comment">// .----------------.</span>
-        <span class="comment">// | Prefix         |</span>
-        <span class="comment">// |.--------------.|</span>
-        <span class="comment">// || Actors       ||</span>
-        <span class="comment">// || Heads        ||</span>
-        <span class="comment">// || Change Meta  ||</span>
-        <span class="comment">// || Ops Meta     ||</span>
-        <span class="comment">// |&#39;--------------&#39;|</span>
-        <span class="comment">// +----------------+</span>
-        <span class="comment">// | Change data    |</span>
-        <span class="comment">// +----------------+</span>
-        <span class="comment">// | Ops data       |</span>
-        <span class="comment">// +----------------+</span>
-        <span class="comment">// | Suffix         |</span>
-        <span class="comment">// |.--------------.|</span>
-        <span class="comment">// || Head indices ||</span>
-        <span class="comment">// |&#39;--------------&#39;|</span>
-        <span class="comment">// &#39;----------------&#39;</span>
-        <span class="comment">//</span>
-        <span class="comment">// We record the range of each of these sections using `parse::range_of`. Later, we check</span>
-        <span class="comment">// if any of the column definitions in change meta or ops meta specify that their columns</span>
-        <span class="comment">// are compressed. If there are compressed columns then we copy the uncompressed parts of the</span>
-        <span class="comment">// input data to a new output vec, then decompress the compressed parts. Specifically we do</span>
-        <span class="comment">// the following:</span>
-        <span class="comment">//</span>
-        <span class="comment">// * Copy everything in prefix to the output buffer</span>
-        <span class="comment">// * If any of change columns are compressed, copy all of change data to the output buffer</span>
-        <span class="comment">//   decompressing each compressed column</span>
-        <span class="comment">// * Likewise if any of ops columns are compressed copy the data decompressing as required</span>
-        <span class="comment">// * Finally copy the suffix</span>
-        <span class="comment">//</span>
-        <span class="comment">// The reason for all this work is that we end up keeping all of the data behind the</span>
-        <span class="comment">// document chunk in a single Vec, which plays nicely with the cache and makes dumping the</span>
-        <span class="comment">// document to disk or network straightforward.</span>
+        <span class="comment">// Because some columns in a document may be compressed we do some funky stuff when
+        // parsing. As we&#39;re parsing the chunk we split the data into four parts:
+        //
+        // .----------------.
+        // | Prefix         |
+        // |.--------------.|
+        // || Actors       ||
+        // || Heads        ||
+        // || Change Meta  ||
+        // || Ops Meta     ||
+        // |&#39;--------------&#39;|
+        // +----------------+
+        // | Change data    |
+        // +----------------+
+        // | Ops data       |
+        // +----------------+
+        // | Suffix         |
+        // |.--------------.|
+        // || Head indices ||
+        // |&#39;--------------&#39;|
+        // &#39;----------------&#39;
+        //
+        // We record the range of each of these sections using `parse::range_of`. Later, we check
+        // if any of the column definitions in change meta or ops meta specify that their columns
+        // are compressed. If there are compressed columns then we copy the uncompressed parts of the
+        // input data to a new output vec, then decompress the compressed parts. Specifically we do
+        // the following:
+        //
+        // * Copy everything in prefix to the output buffer
+        // * If any of change columns are compressed, copy all of change data to the output buffer
+        //   decompressing each compressed column
+        // * Likewise if any of ops columns are compressed copy the data decompressing as required
+        // * Finally copy the suffix
+        //
+        // The reason for all this work is that we end up keeping all of the data behind the
+        // document chunk in a single Vec, which plays nicely with the cache and makes dumping the
+        // document to disk or network straightforward.
 
-        <span class="comment">// parse everything in the prefix</span>
-        <span class="kw">let</span> (
-            <span class="ident">i</span>,
-            <span class="ident">parse::RangeOf</span> {
-                <span class="ident">range</span>: <span class="ident">prefix</span>,
-                <span class="ident">value</span>: (<span class="ident">actors</span>, <span class="ident">heads</span>, <span class="ident">change_meta</span>, <span class="ident">ops_meta</span>),
+        // parse everything in the prefix
+        </span><span class="kw">let </span>(
+            i,
+            parse::RangeOf {
+                range: prefix,
+                value: (actors, heads, change_meta, ops_meta),
             },
-        ) <span class="op">=</span> <span class="ident">parse::range_of</span>(
-            <span class="op">|</span><span class="ident">i</span><span class="op">|</span> -&gt; <span class="ident">parse::ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="kw">_</span>, <span class="ident">ParseError</span><span class="op">&gt;</span> {
-                <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">actors</span>) <span class="op">=</span> <span class="ident">parse::length_prefixed</span>(<span class="ident">parse::actor_id</span>)(<span class="ident">i</span>)<span class="question-mark">?</span>;
-                <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">heads</span>) <span class="op">=</span> <span class="ident">parse::length_prefixed</span>(<span class="ident">parse::change_hash</span>)(<span class="ident">i</span>)<span class="question-mark">?</span>;
-                <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">change_meta</span>) <span class="op">=</span> <span class="ident">RawColumns::parse</span>::<span class="op">&lt;</span><span class="ident">ParseError</span><span class="op">&gt;</span>(<span class="ident">i</span>)<span class="question-mark">?</span>;
-                <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">ops_meta</span>) <span class="op">=</span> <span class="ident">RawColumns::parse</span>::<span class="op">&lt;</span><span class="ident">ParseError</span><span class="op">&gt;</span>(<span class="ident">i</span>)<span class="question-mark">?</span>;
-                <span class="prelude-val">Ok</span>((<span class="ident">i</span>, (<span class="ident">actors</span>, <span class="ident">heads</span>, <span class="ident">change_meta</span>, <span class="ident">ops_meta</span>)))
+        ) = parse::range_of(
+            |i| -&gt; parse::ParseResult&lt;<span class="lifetime">&#39;_</span>, <span class="kw">_</span>, ParseError&gt; {
+                <span class="kw">let </span>(i, actors) = parse::length_prefixed(parse::actor_id)(i)<span class="question-mark">?</span>;
+                <span class="kw">let </span>(i, heads) = parse::length_prefixed(parse::change_hash)(i)<span class="question-mark">?</span>;
+                <span class="kw">let </span>(i, change_meta) = RawColumns::parse::&lt;ParseError&gt;(i)<span class="question-mark">?</span>;
+                <span class="kw">let </span>(i, ops_meta) = RawColumns::parse::&lt;ParseError&gt;(i)<span class="question-mark">?</span>;
+                <span class="prelude-val">Ok</span>((i, (actors, heads, change_meta, ops_meta)))
             },
-            <span class="ident">i</span>,
+            i,
         )<span class="question-mark">?</span>;
 
-        <span class="comment">// parse the change data</span>
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">parse::RangeOf</span> { <span class="ident">range</span>: <span class="ident">changes</span>, .. }) <span class="op">=</span>
-            <span class="ident">parse::range_of</span>(<span class="op">|</span><span class="ident">i</span><span class="op">|</span> <span class="ident">parse::take_n</span>(<span class="ident">change_meta</span>.<span class="ident">total_column_len</span>(), <span class="ident">i</span>), <span class="ident">i</span>)<span class="question-mark">?</span>;
+        <span class="comment">// parse the change data
+        </span><span class="kw">let </span>(i, parse::RangeOf { range: changes, .. }) =
+            parse::range_of(|i| parse::take_n(change_meta.total_column_len(), i), i)<span class="question-mark">?</span>;
 
-        <span class="comment">// parse the ops data</span>
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">parse::RangeOf</span> { <span class="ident">range</span>: <span class="ident">ops</span>, .. }) <span class="op">=</span>
-            <span class="ident">parse::range_of</span>(<span class="op">|</span><span class="ident">i</span><span class="op">|</span> <span class="ident">parse::take_n</span>(<span class="ident">ops_meta</span>.<span class="ident">total_column_len</span>(), <span class="ident">i</span>), <span class="ident">i</span>)<span class="question-mark">?</span>;
+        <span class="comment">// parse the ops data
+        </span><span class="kw">let </span>(i, parse::RangeOf { range: ops, .. }) =
+            parse::range_of(|i| parse::take_n(ops_meta.total_column_len(), i), i)<span class="question-mark">?</span>;
 
-        <span class="comment">// parse the suffix, which may be empty if this document was produced by an older version</span>
-        <span class="comment">// of the JS automerge implementation</span>
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">suffix</span>, <span class="ident">head_indices</span>) <span class="op">=</span> <span class="kw">if</span> <span class="ident">i</span>.<span class="ident">is_empty</span>() {
-            (<span class="ident">i</span>, <span class="number">0</span>..<span class="number">0</span>, <span class="ident">Vec::new</span>())
-        } <span class="kw">else</span> {
-            <span class="kw">let</span> (
-                <span class="ident">i</span>,
-                <span class="ident">parse::RangeOf</span> {
-                    <span class="ident">range</span>: <span class="ident">suffix</span>,
-                    <span class="ident">value</span>: <span class="ident">head_indices</span>,
+        <span class="comment">// parse the suffix, which may be empty if this document was produced by an older version
+        // of the JS automerge implementation
+        </span><span class="kw">let </span>(i, suffix, head_indices) = <span class="kw">if </span>i.is_empty() {
+            (i, <span class="number">0</span>..<span class="number">0</span>, Vec::new())
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>(
+                i,
+                parse::RangeOf {
+                    range: suffix,
+                    value: head_indices,
                 },
-            ) <span class="op">=</span> <span class="ident">parse::range_of</span>(
-                <span class="op">|</span><span class="ident">i</span><span class="op">|</span> <span class="ident">parse::apply_n</span>(<span class="ident">heads</span>.<span class="ident">len</span>(), <span class="ident">parse::leb128_u64</span>::<span class="op">&lt;</span><span class="ident">ParseError</span><span class="op">&gt;</span>)(<span class="ident">i</span>),
-                <span class="ident">i</span>,
+            ) = parse::range_of(
+                |i| parse::apply_n(heads.len(), parse::leb128_u64::&lt;ParseError&gt;)(i),
+                i,
             )<span class="question-mark">?</span>;
-            (<span class="ident">i</span>, <span class="ident">suffix</span>, <span class="ident">head_indices</span>)
+            (i, suffix, head_indices)
         };
 
-        <span class="kw">let</span> <span class="ident">compression::Decompressed</span> {
-            <span class="ident">change_bytes</span>,
-            <span class="ident">op_bytes</span>,
-            <span class="ident">uncompressed</span>,
-            <span class="ident">compressed</span>,
-            <span class="ident">changes</span>,
-            <span class="ident">ops</span>,
-        } <span class="op">=</span> <span class="ident">compression::decompress</span>(<span class="ident">compression::Args</span> {
-            <span class="ident">prefix</span>: <span class="ident">prefix</span>.<span class="ident">start</span>,
-            <span class="ident">suffix</span>: <span class="ident">suffix</span>.<span class="ident">start</span>,
-            <span class="ident">original</span>: <span class="ident">Cow::Borrowed</span>(<span class="ident">input</span>.<span class="ident">bytes</span>()),
-            <span class="ident">changes</span>: <span class="ident">compression::Cols</span> {
-                <span class="ident">data</span>: <span class="ident">changes</span>,
-                <span class="ident">raw_columns</span>: <span class="ident">change_meta</span>,
+        <span class="kw">let </span>compression::Decompressed {
+            change_bytes,
+            op_bytes,
+            uncompressed,
+            compressed,
+            changes,
+            ops,
+        } = compression::decompress(compression::Args {
+            prefix: prefix.start,
+            suffix: suffix.start,
+            original: Cow::Borrowed(input.bytes()),
+            changes: compression::Cols {
+                data: changes,
+                raw_columns: change_meta,
             },
-            <span class="ident">ops</span>: <span class="ident">compression::Cols</span> {
-                <span class="ident">data</span>: <span class="ident">ops</span>,
-                <span class="ident">raw_columns</span>: <span class="ident">ops_meta</span>,
+            ops: compression::Cols {
+                data: ops,
+                raw_columns: ops_meta,
             },
-            <span class="ident">extra_args</span>: (),
+            extra_args: (),
         });
 
-        <span class="kw">let</span> <span class="ident">ops_layout</span> <span class="op">=</span> <span class="ident">Columns::parse</span>(<span class="ident">op_bytes</span>.<span class="ident">len</span>(), <span class="ident">ops</span>.<span class="ident">iter</span>()).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> {
-            <span class="ident">parse::ParseError::Error</span>(<span class="ident">ParseError::BadColumnLayout</span> {
-                <span class="ident">column_type</span>: <span class="string">&quot;ops&quot;</span>,
-                <span class="ident">error</span>: <span class="ident">e</span>,
+        <span class="kw">let </span>ops_layout = Columns::parse(op_bytes.len(), ops.iter()).map_err(|e| {
+            parse::ParseError::Error(ParseError::BadColumnLayout {
+                column_type: <span class="string">&quot;ops&quot;</span>,
+                error: e,
             })
         })<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">ops_cols</span> <span class="op">=</span>
-            <span class="ident">DocOpColumns::try_from</span>(<span class="ident">ops_layout</span>).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">parse::ParseError::Error</span>(<span class="ident">e</span>.<span class="ident">into</span>()))<span class="question-mark">?</span>;
+        <span class="kw">let </span>ops_cols =
+            DocOpColumns::try_from(ops_layout).map_err(|e| parse::ParseError::Error(e.into()))<span class="question-mark">?</span>;
 
-        <span class="kw">let</span> <span class="ident">change_layout</span> <span class="op">=</span> <span class="ident">Columns::parse</span>(<span class="ident">change_bytes</span>.<span class="ident">len</span>(), <span class="ident">changes</span>.<span class="ident">iter</span>()).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> {
-            <span class="ident">parse::ParseError::Error</span>(<span class="ident">ParseError::BadColumnLayout</span> {
-                <span class="ident">column_type</span>: <span class="string">&quot;changes&quot;</span>,
-                <span class="ident">error</span>: <span class="ident">e</span>,
+        <span class="kw">let </span>change_layout = Columns::parse(change_bytes.len(), changes.iter()).map_err(|e| {
+            parse::ParseError::Error(ParseError::BadColumnLayout {
+                column_type: <span class="string">&quot;changes&quot;</span>,
+                error: e,
             })
         })<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">change_cols</span> <span class="op">=</span> <span class="ident">DocChangeColumns::try_from</span>(<span class="ident">change_layout</span>)
-            .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">parse::ParseError::Error</span>(<span class="ident">e</span>.<span class="ident">into</span>()))<span class="question-mark">?</span>;
+        <span class="kw">let </span>change_cols = DocChangeColumns::try_from(change_layout)
+            .map_err(|e| parse::ParseError::Error(e.into()))<span class="question-mark">?</span>;
 
         <span class="prelude-val">Ok</span>((
-            <span class="ident">i</span>,
-            <span class="ident">Document</span> {
-                <span class="ident">bytes</span>: <span class="ident">uncompressed</span>,
-                <span class="ident">compressed_bytes</span>: <span class="ident">compressed</span>,
-                <span class="ident">header</span>,
-                <span class="ident">actors</span>,
-                <span class="ident">heads</span>,
-                <span class="ident">op_metadata</span>: <span class="ident">ops_cols</span>,
-                <span class="ident">op_bytes</span>,
-                <span class="ident">change_metadata</span>: <span class="ident">change_cols</span>,
-                <span class="ident">change_bytes</span>,
-                <span class="ident">head_indices</span>,
+            i,
+            Document {
+                bytes: uncompressed,
+                compressed_bytes: compressed,
+                header,
+                actors,
+                heads,
+                op_metadata: ops_cols,
+                op_bytes,
+                change_metadata: change_cols,
+                change_bytes,
+                head_indices,
             },
         ))
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span><span class="op">&lt;</span><span class="lifetime">&#39;b</span>, <span class="ident">I</span>, <span class="ident">C</span>, <span class="ident">IC</span>, <span class="ident">D</span>, <span class="ident">O</span><span class="op">&gt;</span>(
-        <span class="kw-2">mut</span> <span class="ident">actors</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ActorId</span><span class="op">&gt;</span>,
-        <span class="ident">heads_with_indices</span>: <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">ChangeHash</span>, <span class="ident">usize</span>)<span class="op">&gt;</span>,
-        <span class="ident">ops</span>: <span class="ident">I</span>,
-        <span class="ident">changes</span>: <span class="ident">IC</span>,
-        <span class="ident">compress</span>: <span class="ident">CompressConfig</span>,
-    ) -&gt; <span class="ident">Document</span><span class="op">&lt;</span><span class="lifetime">&#39;static</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">D</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">ExactSizeIterator</span>,
-        <span class="ident">O</span>: <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-        <span class="ident">D</span>: <span class="ident">AsDocOp</span><span class="op">&lt;</span><span class="lifetime">&#39;b</span>, <span class="ident">OpId</span> <span class="op">=</span> <span class="ident">O</span><span class="op">&gt;</span>,
-        <span class="ident">C</span>: <span class="ident">AsChangeMeta</span><span class="op">&lt;</span><span class="lifetime">&#39;b</span><span class="op">&gt;</span>,
-        <span class="ident">IC</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">C</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new&lt;<span class="lifetime">&#39;b</span>, I, C, IC, D, O&gt;(
+        <span class="kw-2">mut </span>actors: Vec&lt;ActorId&gt;,
+        heads_with_indices: Vec&lt;(ChangeHash, usize)&gt;,
+        ops: I,
+        changes: IC,
+        compress: CompressConfig,
+    ) -&gt; Document&lt;<span class="lifetime">&#39;static</span>&gt;
+    <span class="kw">where
+        </span>I: Iterator&lt;Item = D&gt; + Clone + ExactSizeIterator,
+        O: convert::OpId&lt;usize&gt;,
+        D: AsDocOp&lt;<span class="lifetime">&#39;b</span>, OpId = O&gt;,
+        C: AsChangeMeta&lt;<span class="lifetime">&#39;b</span>&gt;,
+        IC: Iterator&lt;Item = C&gt; + Clone,
     {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">ops_out</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
-        <span class="kw">let</span> <span class="ident">ops_meta</span> <span class="op">=</span> <span class="ident">DocOpColumns::encode</span>(<span class="ident">ops</span>, <span class="kw-2">&amp;mut</span> <span class="ident">ops_out</span>);
+        <span class="kw">let </span><span class="kw-2">mut </span>ops_out = Vec::new();
+        <span class="kw">let </span>ops_meta = DocOpColumns::encode(ops, <span class="kw-2">&amp;mut </span>ops_out);
 
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">change_out</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
-        <span class="kw">let</span> <span class="ident">change_meta</span> <span class="op">=</span> <span class="ident">DocChangeColumns::encode</span>(<span class="ident">changes</span>, <span class="kw-2">&amp;mut</span> <span class="ident">change_out</span>);
-        <span class="ident">actors</span>.<span class="ident">sort_unstable</span>();
+        <span class="kw">let </span><span class="kw-2">mut </span>change_out = Vec::new();
+        <span class="kw">let </span>change_meta = DocChangeColumns::encode(changes, <span class="kw-2">&amp;mut </span>change_out);
+        actors.sort_unstable();
 
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">data</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">ops_out</span>.<span class="ident">len</span>() <span class="op">+</span> <span class="ident">change_out</span>.<span class="ident">len</span>());
-        <span class="ident">leb128::write::unsigned</span>(<span class="kw-2">&amp;mut</span> <span class="ident">data</span>, <span class="ident">actors</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>).<span class="ident">unwrap</span>();
-        <span class="kw">for</span> <span class="ident">actor</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">actors</span> {
-            <span class="ident">leb128::write::unsigned</span>(<span class="kw-2">&amp;mut</span> <span class="ident">data</span>, <span class="ident">actor</span>.<span class="ident">to_bytes</span>().<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>).<span class="ident">unwrap</span>();
-            <span class="ident">data</span>.<span class="ident">extend</span>(<span class="ident">actor</span>.<span class="ident">to_bytes</span>());
+        <span class="kw">let </span><span class="kw-2">mut </span>data = Vec::with_capacity(ops_out.len() + change_out.len());
+        leb128::write::unsigned(<span class="kw-2">&amp;mut </span>data, actors.len() <span class="kw">as </span>u64).unwrap();
+        <span class="kw">for </span>actor <span class="kw">in </span><span class="kw-2">&amp;</span>actors {
+            leb128::write::unsigned(<span class="kw-2">&amp;mut </span>data, actor.to_bytes().len() <span class="kw">as </span>u64).unwrap();
+            data.extend(actor.to_bytes());
         }
-        <span class="ident">leb128::write::unsigned</span>(<span class="kw-2">&amp;mut</span> <span class="ident">data</span>, <span class="ident">heads_with_indices</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>).<span class="ident">unwrap</span>();
-        <span class="kw">for</span> (<span class="ident">head</span>, <span class="kw">_</span>) <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">heads_with_indices</span> {
-            <span class="ident">data</span>.<span class="ident">extend</span>(<span class="ident">head</span>.<span class="ident">as_bytes</span>());
+        leb128::write::unsigned(<span class="kw-2">&amp;mut </span>data, heads_with_indices.len() <span class="kw">as </span>u64).unwrap();
+        <span class="kw">for </span>(head, <span class="kw">_</span>) <span class="kw">in </span><span class="kw-2">&amp;</span>heads_with_indices {
+            data.extend(head.as_bytes());
         }
-        <span class="kw">let</span> <span class="ident">prefix_len</span> <span class="op">=</span> <span class="ident">data</span>.<span class="ident">len</span>();
+        <span class="kw">let </span>prefix_len = data.len();
 
-        <span class="ident">change_meta</span>.<span class="ident">raw_columns</span>().<span class="ident">write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">data</span>);
-        <span class="ident">ops_meta</span>.<span class="ident">raw_columns</span>().<span class="ident">write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">data</span>);
-        <span class="kw">let</span> <span class="ident">change_start</span> <span class="op">=</span> <span class="ident">data</span>.<span class="ident">len</span>();
-        <span class="kw">let</span> <span class="ident">change_end</span> <span class="op">=</span> <span class="ident">change_start</span> <span class="op">+</span> <span class="ident">change_out</span>.<span class="ident">len</span>();
-        <span class="ident">data</span>.<span class="ident">extend</span>(<span class="ident">change_out</span>);
-        <span class="kw">let</span> <span class="ident">ops_start</span> <span class="op">=</span> <span class="ident">data</span>.<span class="ident">len</span>();
-        <span class="kw">let</span> <span class="ident">ops_end</span> <span class="op">=</span> <span class="ident">ops_start</span> <span class="op">+</span> <span class="ident">ops_out</span>.<span class="ident">len</span>();
-        <span class="ident">data</span>.<span class="ident">extend</span>(<span class="ident">ops_out</span>);
-        <span class="kw">let</span> <span class="ident">suffix_start</span> <span class="op">=</span> <span class="ident">data</span>.<span class="ident">len</span>();
+        change_meta.raw_columns().write(<span class="kw-2">&amp;mut </span>data);
+        ops_meta.raw_columns().write(<span class="kw-2">&amp;mut </span>data);
+        <span class="kw">let </span>change_start = data.len();
+        <span class="kw">let </span>change_end = change_start + change_out.len();
+        data.extend(change_out);
+        <span class="kw">let </span>ops_start = data.len();
+        <span class="kw">let </span>ops_end = ops_start + ops_out.len();
+        data.extend(ops_out);
+        <span class="kw">let </span>suffix_start = data.len();
 
-        <span class="kw">let</span> <span class="ident">head_indices</span> <span class="op">=</span> <span class="ident">heads_with_indices</span>
-            .<span class="ident">iter</span>()
-            .<span class="ident">map</span>(<span class="op">|</span>(<span class="kw">_</span>, <span class="ident">i</span>)<span class="op">|</span> <span class="kw-2">*</span><span class="ident">i</span> <span class="kw">as</span> <span class="ident">u64</span>)
-            .<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
-        <span class="kw">for</span> <span class="ident">index</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">head_indices</span> {
-            <span class="ident">leb128::write::unsigned</span>(<span class="kw-2">&amp;mut</span> <span class="ident">data</span>, <span class="kw-2">*</span><span class="ident">index</span>).<span class="ident">unwrap</span>();
+        <span class="kw">let </span>head_indices = heads_with_indices
+            .iter()
+            .map(|(<span class="kw">_</span>, i)| <span class="kw-2">*</span>i <span class="kw">as </span>u64)
+            .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+        <span class="kw">for </span>index <span class="kw">in </span><span class="kw-2">&amp;</span>head_indices {
+            leb128::write::unsigned(<span class="kw-2">&amp;mut </span>data, <span class="kw-2">*</span>index).unwrap();
         }
 
-        <span class="kw">let</span> <span class="ident">header</span> <span class="op">=</span> <span class="ident">Header::new</span>(<span class="ident">ChunkType::Document</span>, <span class="kw-2">&amp;</span><span class="ident">data</span>);
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">bytes</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">data</span>.<span class="ident">len</span>() <span class="op">+</span> <span class="ident">header</span>.<span class="ident">len</span>());
-        <span class="ident">header</span>.<span class="ident">write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">bytes</span>);
-        <span class="kw">let</span> <span class="ident">header_len</span> <span class="op">=</span> <span class="ident">bytes</span>.<span class="ident">len</span>();
-        <span class="ident">bytes</span>.<span class="ident">extend</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>);
+        <span class="kw">let </span>header = Header::new(ChunkType::Document, <span class="kw-2">&amp;</span>data);
+        <span class="kw">let </span><span class="kw-2">mut </span>bytes = Vec::with_capacity(data.len() + header.len());
+        header.write(<span class="kw-2">&amp;mut </span>bytes);
+        <span class="kw">let </span>header_len = bytes.len();
+        bytes.extend(<span class="kw-2">&amp;</span>data);
 
-        <span class="kw">let</span> <span class="ident">op_bytes</span> <span class="op">=</span> <span class="ident">shift_range</span>(<span class="ident">ops_start</span>..<span class="ident">ops_end</span>, <span class="ident">header</span>.<span class="ident">len</span>());
-        <span class="kw">let</span> <span class="ident">change_bytes</span> <span class="op">=</span> <span class="ident">shift_range</span>(<span class="ident">change_start</span>..<span class="ident">change_end</span>, <span class="ident">header</span>.<span class="ident">len</span>());
+        <span class="kw">let </span>op_bytes = shift_range(ops_start..ops_end, header.len());
+        <span class="kw">let </span>change_bytes = shift_range(change_start..change_end, header.len());
 
-        <span class="kw">let</span> <span class="ident">compressed_bytes</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="ident">CompressConfig::Threshold</span>(<span class="ident">threshold</span>) <span class="op">=</span> <span class="ident">compress</span> {
-            <span class="kw">let</span> <span class="ident">compressed</span> <span class="op">=</span> <span class="ident">Cow::Owned</span>(<span class="ident">compression::compress</span>(<span class="ident">compression::Args</span> {
-                <span class="ident">prefix</span>: <span class="ident">prefix_len</span> <span class="op">+</span> <span class="ident">header</span>.<span class="ident">len</span>(),
-                <span class="ident">suffix</span>: <span class="ident">suffix_start</span> <span class="op">+</span> <span class="ident">header</span>.<span class="ident">len</span>(),
-                <span class="ident">ops</span>: <span class="ident">compression::Cols</span> {
-                    <span class="ident">raw_columns</span>: <span class="ident">ops_meta</span>.<span class="ident">raw_columns</span>(),
-                    <span class="ident">data</span>: <span class="ident">op_bytes</span>.<span class="ident">clone</span>(),
+        <span class="kw">let </span>compressed_bytes = <span class="kw">if let </span>CompressConfig::Threshold(threshold) = compress {
+            <span class="kw">let </span>compressed = Cow::Owned(compression::compress(compression::Args {
+                prefix: prefix_len + header.len(),
+                suffix: suffix_start + header.len(),
+                ops: compression::Cols {
+                    raw_columns: ops_meta.raw_columns(),
+                    data: op_bytes.clone(),
                 },
-                <span class="ident">changes</span>: <span class="ident">compression::Cols</span> {
-                    <span class="ident">raw_columns</span>: <span class="ident">change_meta</span>.<span class="ident">raw_columns</span>(),
-                    <span class="ident">data</span>: <span class="ident">change_bytes</span>.<span class="ident">clone</span>(),
+                changes: compression::Cols {
+                    raw_columns: change_meta.raw_columns(),
+                    data: change_bytes.clone(),
                 },
-                <span class="ident">original</span>: <span class="ident">Cow::Borrowed</span>(<span class="kw-2">&amp;</span><span class="ident">bytes</span>),
-                <span class="ident">extra_args</span>: <span class="ident">compression::CompressArgs</span> {
-                    <span class="ident">threshold</span>,
-                    <span class="ident">original_header_len</span>: <span class="ident">header_len</span>,
+                original: Cow::Borrowed(<span class="kw-2">&amp;</span>bytes),
+                extra_args: compression::CompressArgs {
+                    threshold,
+                    original_header_len: header_len,
                 },
             }));
-            <span class="prelude-val">Some</span>(<span class="ident">compressed</span>)
-        } <span class="kw">else</span> {
-            <span class="prelude-val">None</span>
-        };
+            <span class="prelude-val">Some</span>(compressed)
+        } <span class="kw">else </span>{
+            <span class="prelude-val">None
+        </span>};
 
-        <span class="ident">Document</span> {
-            <span class="ident">actors</span>,
-            <span class="ident">bytes</span>: <span class="ident">Cow::Owned</span>(<span class="ident">bytes</span>),
-            <span class="ident">compressed_bytes</span>,
-            <span class="ident">header</span>,
-            <span class="ident">heads</span>: <span class="ident">heads_with_indices</span>.<span class="ident">into_iter</span>().<span class="ident">map</span>(<span class="op">|</span>(<span class="ident">h</span>, <span class="kw">_</span>)<span class="op">|</span> <span class="ident">h</span>).<span class="ident">collect</span>(),
-            <span class="ident">op_metadata</span>: <span class="ident">ops_meta</span>,
-            <span class="ident">op_bytes</span>,
-            <span class="ident">change_metadata</span>: <span class="ident">change_meta</span>,
-            <span class="ident">change_bytes</span>,
-            <span class="ident">head_indices</span>,
+        Document {
+            actors,
+            bytes: Cow::Owned(bytes),
+            compressed_bytes,
+            header,
+            heads: heads_with_indices.into_iter().map(|(h, <span class="kw">_</span>)| h).collect(),
+            op_metadata: ops_meta,
+            op_bytes,
+            change_metadata: change_meta,
+            change_bytes,
+            head_indices,
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">iter_ops</span>(
-        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="self">self</span>,
-    ) -&gt; <span class="kw">impl</span> <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">DocOp</span>, <span class="ident">ReadDocOpError</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span> <span class="op">+</span> <span class="lifetime">&#39;a</span> {
-        <span class="self">self</span>.<span class="ident">op_metadata</span>.<span class="ident">iter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">bytes</span>[<span class="self">self</span>.<span class="ident">op_bytes</span>.<span class="ident">clone</span>()])
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>iter_ops(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
+    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="prelude-ty">Result</span>&lt;DocOp, ReadDocOpError&gt;&gt; + Clone + <span class="lifetime">&#39;a </span>{
+        <span class="self">self</span>.op_metadata.iter(<span class="kw-2">&amp;</span><span class="self">self</span>.bytes[<span class="self">self</span>.op_bytes.clone()])
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">iter_changes</span>(
-        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="self">self</span>,
-    ) -&gt; <span class="kw">impl</span> <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">ChangeMetadata</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>, <span class="ident">ReadChangeError</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span> <span class="op">+</span> <span class="lifetime">&#39;a</span> {
-        <span class="self">self</span>.<span class="ident">change_metadata</span>
-            .<span class="ident">iter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">bytes</span>[<span class="self">self</span>.<span class="ident">change_bytes</span>.<span class="ident">clone</span>()])
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>iter_changes(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
+    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="prelude-ty">Result</span>&lt;ChangeMetadata&lt;<span class="lifetime">&#39;_</span>&gt;, ReadChangeError&gt;&gt; + Clone + <span class="lifetime">&#39;a </span>{
+        <span class="self">self</span>.change_metadata
+            .iter(<span class="kw-2">&amp;</span><span class="self">self</span>.bytes[<span class="self">self</span>.change_bytes.clone()])
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">into_bytes</span>(<span class="self">self</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">compressed</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">compressed_bytes</span> {
-            <span class="ident">compressed</span>.<span class="ident">into_owned</span>()
-        } <span class="kw">else</span> {
-            <span class="self">self</span>.<span class="ident">bytes</span>.<span class="ident">into_owned</span>()
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>into_bytes(<span class="self">self</span>) -&gt; Vec&lt;u8&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(compressed) = <span class="self">self</span>.compressed_bytes {
+            compressed.into_owned()
+        } <span class="kw">else </span>{
+            <span class="self">self</span>.bytes.into_owned()
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">checksum_valid</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="ident">header</span>.<span class="ident">checksum_valid</span>()
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>checksum_valid(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="self">self</span>.header.checksum_valid()
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">actors</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">ActorId</span>] {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">actors</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>actors(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[ActorId] {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.actors
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">heads</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>] {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">heads</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>heads(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[ChangeHash] {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.heads
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

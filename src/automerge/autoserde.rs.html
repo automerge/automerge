@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/autoserde.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>autoserde.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/autoserde.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>autoserde.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -109,114 +109,114 @@
 <span id="107">107</span>
 <span id="108">108</span>
 <span id="109">109</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">serde::ser</span>::{<span class="ident">SerializeMap</span>, <span class="ident">SerializeSeq</span>};
+</pre><pre class="rust"><code><span class="kw">use </span>serde::ser::{SerializeMap, SerializeSeq};
 
-<span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">Automerge</span>, <span class="ident">ObjId</span>, <span class="ident">ObjType</span>, <span class="ident">Value</span>};
+<span class="kw">use crate</span>::{Automerge, ObjId, ObjType, Value};
 
-<span class="doccomment">/// A wrapper type which implements [`serde::Serialize`] for an [`Automerge`].</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">AutoSerde</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Automerge</span>);
+<span class="doccomment">/// A wrapper type which implements [`serde::Serialize`] for an [`Automerge`].
+</span><span class="attribute">#[derive(Debug)]
+</span><span class="kw">pub struct </span>AutoSerde&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge);
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Automerge</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">AutoSerde</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">a</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Automerge</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">AutoSerde</span>(<span class="ident">a</span>)
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge&gt; <span class="kw">for </span>AutoSerde&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>from(a: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge) -&gt; <span class="self">Self </span>{
+        AutoSerde(a)
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">serde::Serialize</span> <span class="kw">for</span> <span class="ident">AutoSerde</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">serialize</span><span class="op">&lt;</span><span class="ident">S</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">serializer</span>: <span class="ident">S</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">S::Ok</span>, <span class="ident">S::Error</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">S</span>: <span class="ident">serde::Serializer</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; serde::Serialize <span class="kw">for </span>AutoSerde&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>serialize&lt;S&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, serializer: S) -&gt; <span class="prelude-ty">Result</span>&lt;S::Ok, S::Error&gt;
+    <span class="kw">where
+        </span>S: serde::Serializer,
     {
-        <span class="ident">AutoSerdeMap</span> {
-            <span class="ident">doc</span>: <span class="self">self</span>.<span class="number">0</span>,
-            <span class="ident">obj</span>: <span class="ident">ObjId::Root</span>,
+        AutoSerdeMap {
+            doc: <span class="self">self</span>.<span class="number">0</span>,
+            obj: ObjId::Root,
         }
-        .<span class="ident">serialize</span>(<span class="ident">serializer</span>)
+        .serialize(serializer)
     }
 }
 
-<span class="kw">struct</span> <span class="ident">AutoSerdeMap</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">doc</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Automerge</span>,
-    <span class="ident">obj</span>: <span class="ident">ObjId</span>,
+<span class="kw">struct </span>AutoSerdeMap&lt;<span class="lifetime">&#39;a</span>&gt; {
+    doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
+    obj: ObjId,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">serde::Serialize</span> <span class="kw">for</span> <span class="ident">AutoSerdeMap</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">serialize</span><span class="op">&lt;</span><span class="ident">S</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">serializer</span>: <span class="ident">S</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">S::Ok</span>, <span class="ident">S::Error</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">S</span>: <span class="ident">serde::Serializer</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; serde::Serialize <span class="kw">for </span>AutoSerdeMap&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>serialize&lt;S&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, serializer: S) -&gt; <span class="prelude-ty">Result</span>&lt;S::Ok, S::Error&gt;
+    <span class="kw">where
+        </span>S: serde::Serializer,
     {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">map_ser</span> <span class="op">=</span> <span class="ident">serializer</span>.<span class="ident">serialize_map</span>(<span class="prelude-val">Some</span>(<span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">length</span>(<span class="kw-2">&amp;</span><span class="ident">ObjId::Root</span>)))<span class="question-mark">?</span>;
-        <span class="kw">for</span> <span class="ident">key</span> <span class="kw">in</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">keys</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">obj</span>) {
-            <span class="comment">// SAFETY: This only errors if the object ID is unknown, but we construct this type</span>
-            <span class="comment">// with a known real object ID</span>
-            <span class="kw">let</span> (<span class="ident">val</span>, <span class="ident">obj</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">obj</span>, <span class="kw-2">&amp;</span><span class="ident">key</span>).<span class="ident">unwrap</span>().<span class="ident">unwrap</span>();
-            <span class="kw">let</span> <span class="ident">serdeval</span> <span class="op">=</span> <span class="ident">AutoSerdeVal</span> {
-                <span class="ident">doc</span>: <span class="self">self</span>.<span class="ident">doc</span>,
-                <span class="ident">val</span>,
-                <span class="ident">obj</span>,
+        <span class="kw">let </span><span class="kw-2">mut </span>map_ser = serializer.serialize_map(<span class="prelude-val">Some</span>(<span class="self">self</span>.doc.length(<span class="kw-2">&amp;</span>ObjId::Root)))<span class="question-mark">?</span>;
+        <span class="kw">for </span>key <span class="kw">in </span><span class="self">self</span>.doc.keys(<span class="kw-2">&amp;</span><span class="self">self</span>.obj) {
+            <span class="comment">// SAFETY: This only errors if the object ID is unknown, but we construct this type
+            // with a known real object ID
+            </span><span class="kw">let </span>(val, obj) = <span class="self">self</span>.doc.get(<span class="kw-2">&amp;</span><span class="self">self</span>.obj, <span class="kw-2">&amp;</span>key).unwrap().unwrap();
+            <span class="kw">let </span>serdeval = AutoSerdeVal {
+                doc: <span class="self">self</span>.doc,
+                val,
+                obj,
             };
-            <span class="ident">map_ser</span>.<span class="ident">serialize_entry</span>(<span class="kw-2">&amp;</span><span class="ident">key</span>, <span class="kw-2">&amp;</span><span class="ident">serdeval</span>)<span class="question-mark">?</span>;
+            map_ser.serialize_entry(<span class="kw-2">&amp;</span>key, <span class="kw-2">&amp;</span>serdeval)<span class="question-mark">?</span>;
         }
-        <span class="ident">map_ser</span>.<span class="ident">end</span>()
+        map_ser.end()
     }
 }
 
-<span class="kw">struct</span> <span class="ident">AutoSerdeSeq</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">doc</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Automerge</span>,
-    <span class="ident">obj</span>: <span class="ident">ObjId</span>,
+<span class="kw">struct </span>AutoSerdeSeq&lt;<span class="lifetime">&#39;a</span>&gt; {
+    doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
+    obj: ObjId,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">serde::Serialize</span> <span class="kw">for</span> <span class="ident">AutoSerdeSeq</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">serialize</span><span class="op">&lt;</span><span class="ident">S</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">serializer</span>: <span class="ident">S</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">S::Ok</span>, <span class="ident">S::Error</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">S</span>: <span class="ident">serde::Serializer</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; serde::Serialize <span class="kw">for </span>AutoSerdeSeq&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>serialize&lt;S&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, serializer: S) -&gt; <span class="prelude-ty">Result</span>&lt;S::Ok, S::Error&gt;
+    <span class="kw">where
+        </span>S: serde::Serializer,
     {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">seq_ser</span> <span class="op">=</span> <span class="ident">serializer</span>.<span class="ident">serialize_seq</span>(<span class="prelude-val">None</span>)<span class="question-mark">?</span>;
-        <span class="kw">for</span> <span class="ident">i</span> <span class="kw">in</span> <span class="number">0</span>..<span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">length</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">obj</span>) {
-            <span class="comment">// SAFETY: This only errors if the object ID is unknown, but we construct this type</span>
-            <span class="comment">// with a known real object ID</span>
-            <span class="kw">let</span> (<span class="ident">val</span>, <span class="ident">obj</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">obj</span>, <span class="ident">i</span>).<span class="ident">unwrap</span>().<span class="ident">unwrap</span>();
-            <span class="kw">let</span> <span class="ident">serdeval</span> <span class="op">=</span> <span class="ident">AutoSerdeVal</span> {
-                <span class="ident">doc</span>: <span class="self">self</span>.<span class="ident">doc</span>,
-                <span class="ident">val</span>,
-                <span class="ident">obj</span>,
+        <span class="kw">let </span><span class="kw-2">mut </span>seq_ser = serializer.serialize_seq(<span class="prelude-val">None</span>)<span class="question-mark">?</span>;
+        <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..<span class="self">self</span>.doc.length(<span class="kw-2">&amp;</span><span class="self">self</span>.obj) {
+            <span class="comment">// SAFETY: This only errors if the object ID is unknown, but we construct this type
+            // with a known real object ID
+            </span><span class="kw">let </span>(val, obj) = <span class="self">self</span>.doc.get(<span class="kw-2">&amp;</span><span class="self">self</span>.obj, i).unwrap().unwrap();
+            <span class="kw">let </span>serdeval = AutoSerdeVal {
+                doc: <span class="self">self</span>.doc,
+                val,
+                obj,
             };
-            <span class="ident">seq_ser</span>.<span class="ident">serialize_element</span>(<span class="kw-2">&amp;</span><span class="ident">serdeval</span>)<span class="question-mark">?</span>;
+            seq_ser.serialize_element(<span class="kw-2">&amp;</span>serdeval)<span class="question-mark">?</span>;
         }
-        <span class="ident">seq_ser</span>.<span class="ident">end</span>()
+        seq_ser.end()
     }
 }
 
-<span class="kw">struct</span> <span class="ident">AutoSerdeVal</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">doc</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Automerge</span>,
-    <span class="ident">val</span>: <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
-    <span class="ident">obj</span>: <span class="ident">ObjId</span>,
+<span class="kw">struct </span>AutoSerdeVal&lt;<span class="lifetime">&#39;a</span>&gt; {
+    doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
+    val: Value&lt;<span class="lifetime">&#39;a</span>&gt;,
+    obj: ObjId,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">serde::Serialize</span> <span class="kw">for</span> <span class="ident">AutoSerdeVal</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">serialize</span><span class="op">&lt;</span><span class="ident">S</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">serializer</span>: <span class="ident">S</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">S::Ok</span>, <span class="ident">S::Error</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">S</span>: <span class="ident">serde::Serializer</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; serde::Serialize <span class="kw">for </span>AutoSerdeVal&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>serialize&lt;S&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, serializer: S) -&gt; <span class="prelude-ty">Result</span>&lt;S::Ok, S::Error&gt;
+    <span class="kw">where
+        </span>S: serde::Serializer,
     {
-        <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">val</span> {
-            <span class="ident">Value::Object</span>(<span class="ident">ObjType::Map</span> <span class="op">|</span> <span class="ident">ObjType::Table</span>) =&gt; {
-                <span class="kw">let</span> <span class="ident">map</span> <span class="op">=</span> <span class="ident">AutoSerdeMap</span> {
-                    <span class="ident">doc</span>: <span class="self">self</span>.<span class="ident">doc</span>,
-                    <span class="ident">obj</span>: <span class="self">self</span>.<span class="ident">obj</span>.<span class="ident">clone</span>(),
+        <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.val {
+            Value::Object(ObjType::Map | ObjType::Table) =&gt; {
+                <span class="kw">let </span>map = AutoSerdeMap {
+                    doc: <span class="self">self</span>.doc,
+                    obj: <span class="self">self</span>.obj.clone(),
                 };
-                <span class="ident">map</span>.<span class="ident">serialize</span>(<span class="ident">serializer</span>)
+                map.serialize(serializer)
             }
-            <span class="ident">Value::Object</span>(<span class="ident">ObjType::List</span> <span class="op">|</span> <span class="ident">ObjType::Text</span>) =&gt; {
-                <span class="kw">let</span> <span class="ident">seq</span> <span class="op">=</span> <span class="ident">AutoSerdeSeq</span> {
-                    <span class="ident">doc</span>: <span class="self">self</span>.<span class="ident">doc</span>,
-                    <span class="ident">obj</span>: <span class="self">self</span>.<span class="ident">obj</span>.<span class="ident">clone</span>(),
+            Value::Object(ObjType::List | ObjType::Text) =&gt; {
+                <span class="kw">let </span>seq = AutoSerdeSeq {
+                    doc: <span class="self">self</span>.doc,
+                    obj: <span class="self">self</span>.obj.clone(),
                 };
-                <span class="ident">seq</span>.<span class="ident">serialize</span>(<span class="ident">serializer</span>)
+                seq.serialize(serializer)
             }
-            <span class="ident">Value::Scalar</span>(<span class="ident">v</span>) =&gt; <span class="ident">v</span>.<span class="ident">serialize</span>(<span class="ident">serializer</span>),
+            Value::Scalar(v) =&gt; v.serialize(serializer),
         }
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

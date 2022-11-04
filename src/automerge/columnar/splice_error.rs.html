@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/columnar/splice_error.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>splice_error.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/columnar/splice_error.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>splice_error.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -47,52 +47,52 @@
 <span id="45">45</span>
 <span id="46">46</span>
 <span id="47">47</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::convert::Infallible</span>;
+</pre><pre class="rust"><code><span class="kw">use </span>std::convert::Infallible;
 
-<span class="doccomment">/// Represents an error which occurred when splicing.</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// When splicing values into existing column storage there are two kinds of errors which can</span>
-<span class="doccomment">/// occur, those caused by iterating over the existing items, and those caused by iterating over</span>
-<span class="doccomment">/// the replacement items.</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">SpliceError</span><span class="op">&lt;</span><span class="ident">E</span>, <span class="ident">R</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// There was an error reading from the existing column storage</span>
-    <span class="ident">ReadExisting</span>(<span class="ident">E</span>),
-    <span class="doccomment">/// There was an error reading from the iterator of new rows</span>
-    <span class="ident">ReadReplace</span>(<span class="ident">R</span>),
+<span class="doccomment">/// Represents an error which occurred when splicing.
+///
+/// When splicing values into existing column storage there are two kinds of errors which can
+/// occur, those caused by iterating over the existing items, and those caused by iterating over
+/// the replacement items.
+</span><span class="attribute">#[derive(Debug)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>SpliceError&lt;E, R&gt; {
+    <span class="doccomment">/// There was an error reading from the existing column storage
+    </span>ReadExisting(E),
+    <span class="doccomment">/// There was an error reading from the iterator of new rows
+    </span>ReadReplace(R),
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span> <span class="ident">SpliceError</span><span class="op">&lt;</span><span class="ident">E</span>, <span class="ident">Infallible</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// Map a spliceerror which is infallible in it&#39;s `Replace` error type into a different error.</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// This is used when you have performed a splice with a `replace` iterator which is</span>
-    <span class="doccomment">/// infallible and need to return a more general `SpliceError`</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">existing</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="self">self</span>) -&gt; <span class="ident">SpliceError</span><span class="op">&lt;</span><span class="ident">E</span>, <span class="ident">R</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">SpliceError::ReadExisting</span>(<span class="ident">e</span>) =&gt; <span class="ident">SpliceError::ReadExisting</span>(<span class="ident">e</span>),
-            <span class="ident">SpliceError::ReadReplace</span>(<span class="kw">_</span>) =&gt; <span class="macro">unreachable!</span>(<span class="string">&quot;absurd&quot;</span>),
+<span class="kw">impl</span>&lt;E&gt; SpliceError&lt;E, Infallible&gt; {
+    <span class="doccomment">/// Map a spliceerror which is infallible in it&#39;s `Replace` error type into a different error.
+    ///
+    /// This is used when you have performed a splice with a `replace` iterator which is
+    /// infallible and need to return a more general `SpliceError`
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>existing&lt;R&gt;(<span class="self">self</span>) -&gt; SpliceError&lt;E, R&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            SpliceError::ReadExisting(e) =&gt; SpliceError::ReadExisting(e),
+            SpliceError::ReadReplace(<span class="kw">_</span>) =&gt; <span class="macro">unreachable!</span>(<span class="string">&quot;absurd&quot;</span>),
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">E</span>, <span class="ident">R</span><span class="op">&gt;</span> <span class="ident">std::error::Error</span> <span class="kw">for</span> <span class="ident">SpliceError</span><span class="op">&lt;</span><span class="ident">E</span>, <span class="ident">R</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">E</span>: <span class="ident">std::error::Error</span>,
-    <span class="ident">R</span>: <span class="ident">std::error::Error</span>,
+<span class="kw">impl</span>&lt;E, R&gt; std::error::Error <span class="kw">for </span>SpliceError&lt;E, R&gt;
+<span class="kw">where
+    </span>E: std::error::Error,
+    R: std::error::Error,
 {
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">E</span>, <span class="ident">R</span><span class="op">&gt;</span> <span class="ident">std::fmt::Display</span> <span class="kw">for</span> <span class="ident">SpliceError</span><span class="op">&lt;</span><span class="ident">E</span>, <span class="ident">R</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">E</span>: <span class="ident">std::fmt::Display</span>,
-    <span class="ident">R</span>: <span class="ident">std::fmt::Display</span>,
+<span class="kw">impl</span>&lt;E, R&gt; std::fmt::Display <span class="kw">for </span>SpliceError&lt;E, R&gt;
+<span class="kw">where
+    </span>E: std::fmt::Display,
+    R: std::fmt::Display,
 {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">std::fmt::Result</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident"><span class="self">Self</span>::ReadExisting</span>(<span class="ident">e</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;error reading from existing rows: {}&quot;</span>, <span class="ident">e</span>),
-            <span class="ident"><span class="self">Self</span>::ReadReplace</span>(<span class="ident">e</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;error reading from replacement rows: {}&quot;</span>, <span class="ident">e</span>),
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; std::fmt::Result {
+        <span class="kw">match </span><span class="self">self </span>{
+            <span class="self">Self</span>::ReadExisting(e) =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;error reading from existing rows: {}&quot;</span>, e),
+            <span class="self">Self</span>::ReadReplace(e) =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;error reading from replacement rows: {}&quot;</span>, e),
         }
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

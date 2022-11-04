@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/change/change_actors.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>change_actors.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/change/change_actors.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>change_actors.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -304,309 +304,309 @@
 <span id="302">302</span>
 <span id="303">303</span>
 <span id="304">304</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::collections</span>::{<span class="ident">BTreeMap</span>, <span class="ident">BTreeSet</span>};
+</pre><pre class="rust"><code><span class="kw">use </span>std::collections::{BTreeMap, BTreeSet};
 
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::convert</span>;
+<span class="kw">use </span><span class="kw">crate</span>::convert;
 
-<span class="kw">use</span> <span class="ident"><span class="kw">super</span>::AsChangeOp</span>;
+<span class="kw">use </span><span class="kw">super</span>::AsChangeOp;
 
-<span class="doccomment">/// This struct represents the ordering of actor indices in a change chunk. Operations in a change</span>
-<span class="doccomment">/// chunk are encoded with the actor ID represented as an offset into an array of actors which are</span>
-<span class="doccomment">/// encoded at the start of the chunk. This array is in a specific order: the author of the change</span>
-<span class="doccomment">/// is always the first actor, then all other actors referenced in a change are encoded in</span>
-<span class="doccomment">/// lexicographic order.</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// The intended usage is to construct a `ChangeActors` from an iterator over `AsChangeOp` where</span>
-<span class="doccomment">/// the `ActorId` of the `AsChangeOp` implementation is the original actor ID. The resulting</span>
-<span class="doccomment">/// `ChangeActors` implements `Iterator` where the `item` implements</span>
-<span class="doccomment">/// `AsChangeOp&lt;OpId=convert::OpId&lt;usize&gt;&gt;`, which can be passed to `ChangeOpColumns::encode`.</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// Once encoding is complete you can use `ChangeActors::done` to retrieve the original actor and the</span>
-<span class="doccomment">/// other actors in the change.</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// # Note on type parameters</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// The type paramters are annoying, they basically exist because we can&#39;t have generic associated</span>
-<span class="doccomment">/// types, so we have to feed the concrete types of the associated types of the `AsChangeOp`</span>
-<span class="doccomment">/// implementation through here. Here&#39;s what they all refer to:</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// * A - The type of the actor ID used in the operation IDs of the incoming changes</span>
-<span class="doccomment">/// * I - The type of the iterator over the `AsChangeOp` implementation of the incoming changes</span>
-<span class="doccomment">/// * O - The concrete type of the operation ID which implementas `convert::OpId`</span>
-<span class="doccomment">/// * C - The concrete type (which implements `AsChangeOp`) of the incoming changes</span>
-<span class="doccomment">/// * &#39;a - The lifetime bound for the AsChangeOp trait and it&#39;s associated types</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// Maybe when GATs land we can make this simpler.</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">ChangeActors</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">ActorId</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span><span class="op">&gt;</span> {
-    <span class="ident">actor</span>: <span class="ident">ActorId</span>,
-    <span class="ident">other_actors</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ActorId</span><span class="op">&gt;</span>,
-    <span class="ident">index</span>: <span class="ident">BTreeMap</span><span class="op">&lt;</span><span class="ident">ActorId</span>, <span class="ident">usize</span><span class="op">&gt;</span>,
-    <span class="ident">wrapped</span>: <span class="ident">I</span>,
-    <span class="ident">num_ops</span>: <span class="ident">usize</span>,
-    <span class="ident">_phantom</span>: <span class="ident">std::marker::PhantomData</span><span class="op">&lt;</span>(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">O</span>, <span class="ident">C</span>)<span class="op">&gt;</span>,
+<span class="doccomment">/// This struct represents the ordering of actor indices in a change chunk. Operations in a change
+/// chunk are encoded with the actor ID represented as an offset into an array of actors which are
+/// encoded at the start of the chunk. This array is in a specific order: the author of the change
+/// is always the first actor, then all other actors referenced in a change are encoded in
+/// lexicographic order.
+///
+/// The intended usage is to construct a `ChangeActors` from an iterator over `AsChangeOp` where
+/// the `ActorId` of the `AsChangeOp` implementation is the original actor ID. The resulting
+/// `ChangeActors` implements `Iterator` where the `item` implements
+/// `AsChangeOp&lt;OpId=convert::OpId&lt;usize&gt;&gt;`, which can be passed to `ChangeOpColumns::encode`.
+///
+/// Once encoding is complete you can use `ChangeActors::done` to retrieve the original actor and the
+/// other actors in the change.
+///
+/// # Note on type parameters
+///
+/// The type paramters are annoying, they basically exist because we can&#39;t have generic associated
+/// types, so we have to feed the concrete types of the associated types of the `AsChangeOp`
+/// implementation through here. Here&#39;s what they all refer to:
+///
+/// * A - The type of the actor ID used in the operation IDs of the incoming changes
+/// * I - The type of the iterator over the `AsChangeOp` implementation of the incoming changes
+/// * O - The concrete type of the operation ID which implementas `convert::OpId`
+/// * C - The concrete type (which implements `AsChangeOp`) of the incoming changes
+/// * &#39;a - The lifetime bound for the AsChangeOp trait and it&#39;s associated types
+///
+/// Maybe when GATs land we can make this simpler.
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ChangeActors&lt;<span class="lifetime">&#39;a</span>, ActorId, I, O, C&gt; {
+    actor: ActorId,
+    other_actors: Vec&lt;ActorId&gt;,
+    index: BTreeMap&lt;ActorId, usize&gt;,
+    wrapped: I,
+    num_ops: usize,
+    _phantom: std::marker::PhantomData&lt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>O, C)&gt;,
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">thiserror::Error</span>, <span class="ident">Debug</span>)]</span>
-<span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;actor index {0} referenced by an operation was not found in the changes&quot;</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">MissingActor</span>(<span class="ident">usize</span>);
+<span class="attribute">#[derive(thiserror::Error, Debug)]
+#[error(<span class="string">&quot;actor index {0} referenced by an operation was not found in the changes&quot;</span>)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>MissingActor(usize);
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">thiserror::Error</span>)]</span>
-<span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;pred OpIds out of order&quot;</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">PredOutOfOrder</span>;
+<span class="attribute">#[derive(Debug, thiserror::Error)]
+#[error(<span class="string">&quot;pred OpIds out of order&quot;</span>)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>PredOutOfOrder;
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">A</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span><span class="op">&gt;</span> <span class="ident">ChangeActors</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">A</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">A</span>: <span class="ident">PartialEq</span> <span class="op">+</span> <span class="ident">Ord</span> <span class="op">+</span> <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">std::hash::Hash</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-    <span class="ident">O</span>: <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">A</span><span class="op">&gt;</span> <span class="op">+</span> <span class="lifetime">&#39;a</span>,
-    <span class="ident">C</span>: <span class="ident">AsChangeOp</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">OpId</span> <span class="op">=</span> <span class="ident">O</span><span class="op">&gt;</span> <span class="op">+</span> <span class="lifetime">&#39;a</span>,
-    <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">C</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span> <span class="op">+</span> <span class="lifetime">&#39;a</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, A, I, O, C&gt; ChangeActors&lt;<span class="lifetime">&#39;a</span>, A, I, O, C&gt;
+<span class="kw">where
+    </span>A: PartialEq + Ord + Clone + std::hash::Hash + <span class="lifetime">&#39;static</span>,
+    O: convert::OpId&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>A&gt; + <span class="lifetime">&#39;a</span>,
+    C: AsChangeOp&lt;<span class="lifetime">&#39;a</span>, OpId = O&gt; + <span class="lifetime">&#39;a</span>,
+    I: Iterator&lt;Item = C&gt; + Clone + <span class="lifetime">&#39;a</span>,
 {
-    <span class="doccomment">/// Create a new change actor mapping</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// # Arguments</span>
-    <span class="doccomment">/// * actor - the actor ID of the actor who authored this change</span>
-    <span class="doccomment">/// * ops - an iterator containing the operations which will be encoded into the change</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// # Errors</span>
-    <span class="doccomment">/// * If one of the ops herein contains a `pred` with ops which are not in lamport timestamp</span>
-    <span class="doccomment">///   order</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">actor</span>: <span class="ident">A</span>, <span class="ident">ops</span>: <span class="ident">I</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">ChangeActors</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">A</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span><span class="op">&gt;</span>, <span class="ident">PredOutOfOrder</span><span class="op">&gt;</span> {
-        <span class="comment">// Change actors indices are encoded with the 0th element being the actor who authored the</span>
-        <span class="comment">// change and all other actors referenced in the chain following the author in</span>
-        <span class="comment">// lexicographic order. Here we collect all the actors referenced by operations in `ops`</span>
-        <span class="kw">let</span> (<span class="ident">num_ops</span>, <span class="kw-2">mut</span> <span class="ident">other_actors</span>) <span class="op">=</span>
-            <span class="ident">ops</span>.<span class="ident">clone</span>()
-                .<span class="ident">try_fold</span>((<span class="number">0</span>, <span class="ident">BTreeSet::new</span>()), <span class="op">|</span>(<span class="ident">count</span>, <span class="kw-2">mut</span> <span class="ident">acc</span>), <span class="ident">op</span><span class="op">|</span> {
-                    <span class="kw">if</span> <span class="kw">let</span> <span class="ident">convert::Key::Elem</span>(<span class="ident">convert::ElemId::Op</span>(<span class="ident">o</span>)) <span class="op">=</span> <span class="ident">op</span>.<span class="ident">key</span>() {
-                        <span class="kw">if</span> <span class="ident">o</span>.<span class="ident">actor</span>() <span class="op">!</span><span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">actor</span> {
-                            <span class="ident">acc</span>.<span class="ident">insert</span>(<span class="ident">o</span>.<span class="ident">actor</span>());
+    <span class="doccomment">/// Create a new change actor mapping
+    ///
+    /// # Arguments
+    /// * actor - the actor ID of the actor who authored this change
+    /// * ops - an iterator containing the operations which will be encoded into the change
+    ///
+    /// # Errors
+    /// * If one of the ops herein contains a `pred` with ops which are not in lamport timestamp
+    ///   order
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(actor: A, ops: I) -&gt; <span class="prelude-ty">Result</span>&lt;ChangeActors&lt;<span class="lifetime">&#39;a</span>, A, I, O, C&gt;, PredOutOfOrder&gt; {
+        <span class="comment">// Change actors indices are encoded with the 0th element being the actor who authored the
+        // change and all other actors referenced in the chain following the author in
+        // lexicographic order. Here we collect all the actors referenced by operations in `ops`
+        </span><span class="kw">let </span>(num_ops, <span class="kw-2">mut </span>other_actors) =
+            ops.clone()
+                .try_fold((<span class="number">0</span>, BTreeSet::new()), |(count, <span class="kw-2">mut </span>acc), op| {
+                    <span class="kw">if let </span>convert::Key::Elem(convert::ElemId::Op(o)) = op.key() {
+                        <span class="kw">if </span>o.actor() != <span class="kw-2">&amp;</span>actor {
+                            acc.insert(o.actor());
                         }
                     }
 
-                    <span class="kw">if</span> <span class="op">!</span><span class="ident">are_sorted</span>(<span class="ident">op</span>.<span class="ident">pred</span>()) {
-                        <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">PredOutOfOrder</span>);
+                    <span class="kw">if </span>!are_sorted(op.pred()) {
+                        <span class="kw">return </span><span class="prelude-val">Err</span>(PredOutOfOrder);
                     }
-                    <span class="kw">for</span> <span class="ident">pred</span> <span class="kw">in</span> <span class="ident">op</span>.<span class="ident">pred</span>() {
-                        <span class="kw">if</span> <span class="ident">pred</span>.<span class="ident">actor</span>() <span class="op">!</span><span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">actor</span> {
-                            <span class="ident">acc</span>.<span class="ident">insert</span>(<span class="ident">pred</span>.<span class="ident">actor</span>());
+                    <span class="kw">for </span>pred <span class="kw">in </span>op.pred() {
+                        <span class="kw">if </span>pred.actor() != <span class="kw-2">&amp;</span>actor {
+                            acc.insert(pred.actor());
                         }
                     }
-                    <span class="kw">if</span> <span class="kw">let</span> <span class="ident">convert::ObjId::Op</span>(<span class="ident">o</span>) <span class="op">=</span> <span class="ident">op</span>.<span class="ident">obj</span>() {
-                        <span class="kw">if</span> <span class="ident">o</span>.<span class="ident">actor</span>() <span class="op">!</span><span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">actor</span> {
-                            <span class="ident">acc</span>.<span class="ident">insert</span>(<span class="ident">o</span>.<span class="ident">actor</span>());
+                    <span class="kw">if let </span>convert::ObjId::Op(o) = op.obj() {
+                        <span class="kw">if </span>o.actor() != <span class="kw-2">&amp;</span>actor {
+                            acc.insert(o.actor());
                         }
                     }
-                    <span class="prelude-val">Ok</span>((<span class="ident">count</span> <span class="op">+</span> <span class="number">1</span>, <span class="ident">acc</span>))
+                    <span class="prelude-val">Ok</span>((count + <span class="number">1</span>, acc))
                 })<span class="question-mark">?</span>;
-        <span class="comment">// This shouldn&#39;t be necessary but just in case</span>
-        <span class="ident">other_actors</span>.<span class="ident">remove</span>(<span class="kw-2">&amp;</span><span class="ident">actor</span>);
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">other_actors</span> <span class="op">=</span> <span class="ident">other_actors</span>.<span class="ident">into_iter</span>().<span class="ident">cloned</span>().<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
-        <span class="ident">other_actors</span>.<span class="ident">sort</span>();
-        <span class="kw">let</span> <span class="ident">index</span> <span class="op">=</span> <span class="ident">std::iter::once</span>(<span class="ident">actor</span>.<span class="ident">clone</span>())
-            .<span class="ident">chain</span>(<span class="ident">other_actors</span>.<span class="ident">clone</span>().<span class="ident">into_iter</span>())
-            .<span class="ident">enumerate</span>()
-            .<span class="ident">map</span>(<span class="op">|</span>(<span class="ident">idx</span>, <span class="ident">actor</span>)<span class="op">|</span> (<span class="ident">actor</span>, <span class="ident">idx</span>))
-            .<span class="ident">collect</span>();
-        <span class="prelude-val">Ok</span>(<span class="ident">ChangeActors</span> {
-            <span class="ident">actor</span>,
-            <span class="ident">other_actors</span>,
-            <span class="ident">index</span>,
-            <span class="ident">wrapped</span>: <span class="ident">ops</span>,
-            <span class="ident">num_ops</span>,
-            <span class="ident">_phantom</span>: <span class="ident">std::marker::PhantomData</span>,
+        <span class="comment">// This shouldn&#39;t be necessary but just in case
+        </span>other_actors.remove(<span class="kw-2">&amp;</span>actor);
+        <span class="kw">let </span><span class="kw-2">mut </span>other_actors = other_actors.into_iter().cloned().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+        other_actors.sort();
+        <span class="kw">let </span>index = std::iter::once(actor.clone())
+            .chain(other_actors.clone().into_iter())
+            .enumerate()
+            .map(|(idx, actor)| (actor, idx))
+            .collect();
+        <span class="prelude-val">Ok</span>(ChangeActors {
+            actor,
+            other_actors,
+            index,
+            wrapped: ops,
+            num_ops,
+            _phantom: std::marker::PhantomData,
         })
     }
 
-    <span class="doccomment">/// Translate an OpID from the OpSet index to the change index</span>
-    <span class="kw">fn</span> <span class="ident">translate_opid</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">opid</span>: <span class="kw-2">&amp;</span><span class="ident">O</span>) -&gt; <span class="ident">ChangeOpId</span> {
-        <span class="ident">ChangeOpId</span> {
-            <span class="ident">actor</span>: <span class="kw-2">*</span><span class="self">self</span>.<span class="ident">index</span>.<span class="ident">get</span>(<span class="ident">opid</span>.<span class="ident">actor</span>()).<span class="ident">unwrap</span>(),
-            <span class="ident">counter</span>: <span class="ident">opid</span>.<span class="ident">counter</span>(),
+    <span class="doccomment">/// Translate an OpID from the OpSet index to the change index
+    </span><span class="kw">fn </span>translate_opid(<span class="kw-2">&amp;</span><span class="self">self</span>, opid: <span class="kw-2">&amp;</span>O) -&gt; ChangeOpId {
+        ChangeOpId {
+            actor: <span class="kw-2">*</span><span class="self">self</span>.index.get(opid.actor()).unwrap(),
+            counter: opid.counter(),
         }
     }
 
-    <span class="doccomment">/// Returns a clonable iterator over the converted operations. The item of the iterator is an</span>
-    <span class="doccomment">/// implementation of `AsChangeOp` which uses the index of the actor of each operation into the</span>
-    <span class="doccomment">/// actors as encoded in a change. This is suitable for passing to `ChangeOpColumns::encode`</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">iter</span><span class="op">&lt;</span><span class="lifetime">&#39;b</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="lifetime">&#39;b</span> <span class="self">self</span>) -&gt; <span class="ident">WithChangeActorsOpIter</span><span class="op">&lt;</span><span class="lifetime">&#39;b</span>, <span class="lifetime">&#39;a</span>, <span class="ident">A</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span><span class="op">&gt;</span> {
-        <span class="ident">WithChangeActorsOpIter</span> {
-            <span class="ident">change_actors</span>: <span class="self">self</span>,
-            <span class="ident">inner</span>: <span class="self">self</span>.<span class="ident">wrapped</span>.<span class="ident">clone</span>(),
+    <span class="doccomment">/// Returns a clonable iterator over the converted operations. The item of the iterator is an
+    /// implementation of `AsChangeOp` which uses the index of the actor of each operation into the
+    /// actors as encoded in a change. This is suitable for passing to `ChangeOpColumns::encode`
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>iter&lt;<span class="lifetime">&#39;b</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="self">self</span>) -&gt; WithChangeActorsOpIter&lt;<span class="lifetime">&#39;b</span>, <span class="lifetime">&#39;a</span>, A, I, O, C&gt; {
+        WithChangeActorsOpIter {
+            change_actors: <span class="self">self</span>,
+            inner: <span class="self">self</span>.wrapped.clone(),
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">done</span>(<span class="self">self</span>) -&gt; (<span class="ident">A</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span>) {
-        (<span class="self">self</span>.<span class="ident">actor</span>, <span class="self">self</span>.<span class="ident">other_actors</span>)
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>done(<span class="self">self</span>) -&gt; (A, Vec&lt;A&gt;) {
+        (<span class="self">self</span>.actor, <span class="self">self</span>.other_actors)
     }
 }
 
-<span class="doccomment">/// The actual implementation of the converted iterator</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">WithChangeActorsOpIter</span><span class="op">&lt;</span><span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, <span class="ident">A</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span><span class="op">&gt;</span> {
-    <span class="ident">change_actors</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;actors</span> <span class="ident">ChangeActors</span><span class="op">&lt;</span><span class="lifetime">&#39;aschangeop</span>, <span class="ident">A</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span><span class="op">&gt;</span>,
-    <span class="ident">inner</span>: <span class="ident">I</span>,
+<span class="doccomment">/// The actual implementation of the converted iterator
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>WithChangeActorsOpIter&lt;<span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, A, I, O, C&gt; {
+    change_actors: <span class="kw-2">&amp;</span><span class="lifetime">&#39;actors </span>ChangeActors&lt;<span class="lifetime">&#39;aschangeop</span>, A, I, O, C&gt;,
+    inner: I,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, <span class="ident">A</span>: <span class="lifetime">&#39;aschangeop</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span><span class="op">&gt;</span> <span class="ident">Clone</span>
-    <span class="kw">for</span> <span class="ident">WithChangeActorsOpIter</span><span class="op">&lt;</span><span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, <span class="ident">A</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">I</span>: <span class="ident">Clone</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, A: <span class="lifetime">&#39;aschangeop</span>, I, O, C&gt; Clone
+    <span class="kw">for </span>WithChangeActorsOpIter&lt;<span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, A, I, O, C&gt;
+<span class="kw">where
+    </span>I: Clone,
 {
-    <span class="kw">fn</span> <span class="ident">clone</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span> {
-            <span class="ident">change_actors</span>: <span class="self">self</span>.<span class="ident">change_actors</span>,
-            <span class="ident">inner</span>: <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">clone</span>(),
+    <span class="kw">fn </span>clone(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            change_actors: <span class="self">self</span>.change_actors,
+            inner: <span class="self">self</span>.inner.clone(),
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, <span class="ident">A</span>: <span class="lifetime">&#39;aschangeop</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span><span class="op">&gt;</span> <span class="ident">Iterator</span>
-    <span class="kw">for</span> <span class="ident">WithChangeActorsOpIter</span><span class="op">&lt;</span><span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, <span class="ident">A</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">C</span>: <span class="ident">AsChangeOp</span><span class="op">&lt;</span><span class="lifetime">&#39;aschangeop</span>, <span class="ident">OpId</span> <span class="op">=</span> <span class="ident">O</span><span class="op">&gt;</span>,
-    <span class="ident">O</span>: <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="lifetime">&#39;aschangeop</span> <span class="ident">A</span><span class="op">&gt;</span>,
-    <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">C</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, A: <span class="lifetime">&#39;aschangeop</span>, I, O, C&gt; Iterator
+    <span class="kw">for </span>WithChangeActorsOpIter&lt;<span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, A, I, O, C&gt;
+<span class="kw">where
+    </span>C: AsChangeOp&lt;<span class="lifetime">&#39;aschangeop</span>, OpId = O&gt;,
+    O: convert::OpId&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;aschangeop </span>A&gt;,
+    I: Iterator&lt;Item = C&gt; + Clone,
 {
-    <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="ident">WithChangeActors</span><span class="op">&lt;</span><span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, <span class="ident">A</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span><span class="op">&gt;</span>;
+    <span class="kw">type </span>Item = WithChangeActors&lt;<span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, A, I, O, C&gt;;
 
-    <span class="kw">fn</span> <span class="ident">next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">next</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">o</span><span class="op">|</span> <span class="ident">WithChangeActors</span> {
-            <span class="ident">op</span>: <span class="ident">o</span>,
-            <span class="ident">actors</span>: <span class="self">self</span>.<span class="ident">change_actors</span>,
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="self">self</span>.inner.next().map(|o| WithChangeActors {
+            op: o,
+            actors: <span class="self">self</span>.change_actors,
         })
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, <span class="ident">A</span>: <span class="lifetime">&#39;aschangeop</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span><span class="op">&gt;</span> <span class="ident">ExactSizeIterator</span>
-    <span class="kw">for</span> <span class="ident">WithChangeActorsOpIter</span><span class="op">&lt;</span><span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, <span class="ident">A</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">C</span>: <span class="ident">AsChangeOp</span><span class="op">&lt;</span><span class="lifetime">&#39;aschangeop</span>, <span class="ident">OpId</span> <span class="op">=</span> <span class="ident">O</span><span class="op">&gt;</span>,
-    <span class="ident">O</span>: <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="lifetime">&#39;aschangeop</span> <span class="ident">A</span><span class="op">&gt;</span>,
-    <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">C</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, A: <span class="lifetime">&#39;aschangeop</span>, I, O, C&gt; ExactSizeIterator
+    <span class="kw">for </span>WithChangeActorsOpIter&lt;<span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, A, I, O, C&gt;
+<span class="kw">where
+    </span>C: AsChangeOp&lt;<span class="lifetime">&#39;aschangeop</span>, OpId = O&gt;,
+    O: convert::OpId&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;aschangeop </span>A&gt;,
+    I: Iterator&lt;Item = C&gt; + Clone,
 {
-    <span class="kw">fn</span> <span class="ident">len</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
-        <span class="self">self</span>.<span class="ident">change_actors</span>.<span class="ident">num_ops</span>
+    <span class="kw">fn </span>len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.change_actors.num_ops
     }
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">ChangeOpId</span> {
-    <span class="ident">actor</span>: <span class="ident">usize</span>,
-    <span class="ident">counter</span>: <span class="ident">u64</span>,
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ChangeOpId {
+    actor: usize,
+    counter: u64,
 }
 
-<span class="kw">impl</span> <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ChangeOpId</span> {
-    <span class="kw">fn</span> <span class="ident">actor</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
-        <span class="self">self</span>.<span class="ident">actor</span>
+<span class="kw">impl </span>convert::OpId&lt;usize&gt; <span class="kw">for </span>ChangeOpId {
+    <span class="kw">fn </span>actor(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.actor
     }
 
-    <span class="kw">fn</span> <span class="ident">counter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u64</span> {
-        <span class="self">self</span>.<span class="ident">counter</span>
+    <span class="kw">fn </span>counter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
+        <span class="self">self</span>.counter
     }
 }
 
-<span class="doccomment">/// A struct which implements `AsChangeOp` by translating the actor IDs in the incoming operations</span>
-<span class="doccomment">/// into the index into the actors in the `ChangeActors`.</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">WithChangeActors</span><span class="op">&lt;</span><span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, <span class="ident">A</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span><span class="op">&gt;</span> {
-    <span class="ident">op</span>: <span class="ident">C</span>,
-    <span class="ident">actors</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;actors</span> <span class="ident">ChangeActors</span><span class="op">&lt;</span><span class="lifetime">&#39;aschangeop</span>, <span class="ident">A</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span><span class="op">&gt;</span>,
+<span class="doccomment">/// A struct which implements `AsChangeOp` by translating the actor IDs in the incoming operations
+/// into the index into the actors in the `ChangeActors`.
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>WithChangeActors&lt;<span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, A, I, O, C&gt; {
+    op: C,
+    actors: <span class="kw-2">&amp;</span><span class="lifetime">&#39;actors </span>ChangeActors&lt;<span class="lifetime">&#39;aschangeop</span>, A, I, O, C&gt;,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, <span class="ident">A</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">P</span>, <span class="ident">C</span><span class="op">&gt;</span> <span class="ident">AsChangeOp</span><span class="op">&lt;</span><span class="lifetime">&#39;aschangeop</span><span class="op">&gt;</span>
-    <span class="kw">for</span> <span class="ident">WithChangeActors</span><span class="op">&lt;</span><span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, <span class="ident">A</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">A</span>: <span class="ident">PartialEq</span> <span class="op">+</span> <span class="ident">Ord</span> <span class="op">+</span> <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">std::hash::Hash</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-    <span class="ident">O</span>: <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="lifetime">&#39;aschangeop</span> <span class="ident">A</span><span class="op">&gt;</span>,
-    <span class="ident">P</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">O</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">ExactSizeIterator</span> <span class="op">+</span> <span class="lifetime">&#39;aschangeop</span>,
-    <span class="ident">C</span>: <span class="ident">AsChangeOp</span><span class="op">&lt;</span><span class="lifetime">&#39;aschangeop</span>, <span class="ident">PredIter</span> <span class="op">=</span> <span class="ident">P</span>, <span class="ident">OpId</span> <span class="op">=</span> <span class="ident">O</span><span class="op">&gt;</span> <span class="op">+</span> <span class="lifetime">&#39;aschangeop</span>,
-    <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">C</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span> <span class="op">+</span> <span class="lifetime">&#39;aschangeop</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, A, I, O, P, C&gt; AsChangeOp&lt;<span class="lifetime">&#39;aschangeop</span>&gt;
+    <span class="kw">for </span>WithChangeActors&lt;<span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, A, I, O, C&gt;
+<span class="kw">where
+    </span>A: PartialEq + Ord + Clone + std::hash::Hash + <span class="lifetime">&#39;static</span>,
+    O: convert::OpId&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;aschangeop </span>A&gt;,
+    P: Iterator&lt;Item = O&gt; + ExactSizeIterator + <span class="lifetime">&#39;aschangeop</span>,
+    C: AsChangeOp&lt;<span class="lifetime">&#39;aschangeop</span>, PredIter = P, OpId = O&gt; + <span class="lifetime">&#39;aschangeop</span>,
+    I: Iterator&lt;Item = C&gt; + Clone + <span class="lifetime">&#39;aschangeop</span>,
 {
-    <span class="kw">type</span> <span class="ident">ActorId</span> <span class="op">=</span> <span class="ident">usize</span>;
-    <span class="kw">type</span> <span class="ident">OpId</span> <span class="op">=</span> <span class="ident">ChangeOpId</span>;
-    <span class="kw">type</span> <span class="ident">PredIter</span> <span class="op">=</span> <span class="ident">WithChangeActorsPredIter</span><span class="op">&lt;</span><span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, <span class="ident">A</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span>, <span class="ident">P</span><span class="op">&gt;</span>;
+    <span class="kw">type </span>ActorId = usize;
+    <span class="kw">type </span>OpId = ChangeOpId;
+    <span class="kw">type </span>PredIter = WithChangeActorsPredIter&lt;<span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, A, I, O, C, P&gt;;
 
-    <span class="kw">fn</span> <span class="ident">action</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u64</span> {
-        <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">action</span>()
+    <span class="kw">fn </span>action(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
+        <span class="self">self</span>.op.action()
     }
 
-    <span class="kw">fn</span> <span class="ident">insert</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">insert</span>()
+    <span class="kw">fn </span>insert(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="self">self</span>.op.insert()
     }
 
-    <span class="kw">fn</span> <span class="ident">pred</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident"><span class="self">Self</span>::PredIter</span> {
-        <span class="ident">WithChangeActorsPredIter</span> {
-            <span class="ident">wrapped</span>: <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">pred</span>(),
-            <span class="ident">actors</span>: <span class="self">self</span>.<span class="ident">actors</span>,
-            <span class="ident">_phantom</span>: <span class="ident">std::marker::PhantomData</span>,
+    <span class="kw">fn </span>pred(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::PredIter {
+        WithChangeActorsPredIter {
+            wrapped: <span class="self">self</span>.op.pred(),
+            actors: <span class="self">self</span>.actors,
+            _phantom: std::marker::PhantomData,
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">convert::Key</span><span class="op">&lt;</span><span class="lifetime">&#39;aschangeop</span>, <span class="ident"><span class="self">Self</span>::OpId</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">key</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">o</span><span class="op">|</span> <span class="self">self</span>.<span class="ident">actors</span>.<span class="ident">translate_opid</span>(<span class="kw-2">&amp;</span><span class="ident">o</span>))
+    <span class="kw">fn </span>key(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; convert::Key&lt;<span class="lifetime">&#39;aschangeop</span>, <span class="self">Self</span>::OpId&gt; {
+        <span class="self">self</span>.op.key().map(|o| <span class="self">self</span>.actors.translate_opid(<span class="kw-2">&amp;</span>o))
     }
 
-    <span class="kw">fn</span> <span class="ident">obj</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">convert::ObjId</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::OpId</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">obj</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">o</span><span class="op">|</span> <span class="self">self</span>.<span class="ident">actors</span>.<span class="ident">translate_opid</span>(<span class="kw-2">&amp;</span><span class="ident">o</span>))
+    <span class="kw">fn </span>obj(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; convert::ObjId&lt;<span class="self">Self</span>::OpId&gt; {
+        <span class="self">self</span>.op.obj().map(|o| <span class="self">self</span>.actors.translate_opid(<span class="kw-2">&amp;</span>o))
     }
 
-    <span class="kw">fn</span> <span class="ident">val</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">std::borrow::Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;aschangeop</span>, <span class="ident"><span class="kw">crate</span>::ScalarValue</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">val</span>()
+    <span class="kw">fn </span>val(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; std::borrow::Cow&lt;<span class="lifetime">&#39;aschangeop</span>, <span class="kw">crate</span>::ScalarValue&gt; {
+        <span class="self">self</span>.op.val()
     }
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">WithChangeActorsPredIter</span><span class="op">&lt;</span><span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, <span class="ident">A</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span>, <span class="ident">P</span><span class="op">&gt;</span> {
-    <span class="ident">wrapped</span>: <span class="ident">P</span>,
-    <span class="ident">actors</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;actors</span> <span class="ident">ChangeActors</span><span class="op">&lt;</span><span class="lifetime">&#39;aschangeop</span>, <span class="ident">A</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span><span class="op">&gt;</span>,
-    <span class="ident">_phantom</span>: <span class="ident">std::marker::PhantomData</span><span class="op">&lt;</span><span class="ident">O</span><span class="op">&gt;</span>,
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>WithChangeActorsPredIter&lt;<span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, A, I, O, C, P&gt; {
+    wrapped: P,
+    actors: <span class="kw-2">&amp;</span><span class="lifetime">&#39;actors </span>ChangeActors&lt;<span class="lifetime">&#39;aschangeop</span>, A, I, O, C&gt;,
+    _phantom: std::marker::PhantomData&lt;O&gt;,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, <span class="ident">A</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span>, <span class="ident">P</span><span class="op">&gt;</span> <span class="ident">ExactSizeIterator</span>
-    <span class="kw">for</span> <span class="ident">WithChangeActorsPredIter</span><span class="op">&lt;</span><span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, <span class="ident">A</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span>, <span class="ident">P</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">A</span>: <span class="ident">PartialEq</span> <span class="op">+</span> <span class="ident">Ord</span> <span class="op">+</span> <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">std::hash::Hash</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-    <span class="ident">O</span>: <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="lifetime">&#39;aschangeop</span> <span class="ident">A</span><span class="op">&gt;</span>,
-    <span class="ident">P</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">O</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">ExactSizeIterator</span> <span class="op">+</span> <span class="lifetime">&#39;aschangeop</span>,
-    <span class="ident">C</span>: <span class="ident">AsChangeOp</span><span class="op">&lt;</span><span class="lifetime">&#39;aschangeop</span>, <span class="ident">OpId</span> <span class="op">=</span> <span class="ident">O</span><span class="op">&gt;</span> <span class="op">+</span> <span class="lifetime">&#39;aschangeop</span>,
-    <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">C</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span> <span class="op">+</span> <span class="lifetime">&#39;aschangeop</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, A, I, O, C, P&gt; ExactSizeIterator
+    <span class="kw">for </span>WithChangeActorsPredIter&lt;<span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, A, I, O, C, P&gt;
+<span class="kw">where
+    </span>A: PartialEq + Ord + Clone + std::hash::Hash + <span class="lifetime">&#39;static</span>,
+    O: convert::OpId&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;aschangeop </span>A&gt;,
+    P: Iterator&lt;Item = O&gt; + ExactSizeIterator + <span class="lifetime">&#39;aschangeop</span>,
+    C: AsChangeOp&lt;<span class="lifetime">&#39;aschangeop</span>, OpId = O&gt; + <span class="lifetime">&#39;aschangeop</span>,
+    I: Iterator&lt;Item = C&gt; + Clone + <span class="lifetime">&#39;aschangeop</span>,
 {
-    <span class="kw">fn</span> <span class="ident">len</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
-        <span class="self">self</span>.<span class="ident">wrapped</span>.<span class="ident">len</span>()
+    <span class="kw">fn </span>len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.wrapped.len()
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, <span class="ident">A</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span>, <span class="ident">P</span><span class="op">&gt;</span> <span class="ident">Iterator</span>
-    <span class="kw">for</span> <span class="ident">WithChangeActorsPredIter</span><span class="op">&lt;</span><span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, <span class="ident">A</span>, <span class="ident">I</span>, <span class="ident">O</span>, <span class="ident">C</span>, <span class="ident">P</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">A</span>: <span class="ident">PartialEq</span> <span class="op">+</span> <span class="ident">Ord</span> <span class="op">+</span> <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">std::hash::Hash</span> <span class="op">+</span> <span class="lifetime">&#39;static</span>,
-    <span class="ident">O</span>: <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="lifetime">&#39;aschangeop</span> <span class="ident">A</span><span class="op">&gt;</span>,
-    <span class="ident">P</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">O</span><span class="op">&gt;</span> <span class="op">+</span> <span class="lifetime">&#39;aschangeop</span>,
-    <span class="ident">C</span>: <span class="ident">AsChangeOp</span><span class="op">&lt;</span><span class="lifetime">&#39;aschangeop</span>, <span class="ident">OpId</span> <span class="op">=</span> <span class="ident">O</span><span class="op">&gt;</span> <span class="op">+</span> <span class="lifetime">&#39;aschangeop</span>,
-    <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">C</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span> <span class="op">+</span> <span class="lifetime">&#39;aschangeop</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, A, I, O, C, P&gt; Iterator
+    <span class="kw">for </span>WithChangeActorsPredIter&lt;<span class="lifetime">&#39;actors</span>, <span class="lifetime">&#39;aschangeop</span>, A, I, O, C, P&gt;
+<span class="kw">where
+    </span>A: PartialEq + Ord + Clone + std::hash::Hash + <span class="lifetime">&#39;static</span>,
+    O: convert::OpId&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;aschangeop </span>A&gt;,
+    P: Iterator&lt;Item = O&gt; + <span class="lifetime">&#39;aschangeop</span>,
+    C: AsChangeOp&lt;<span class="lifetime">&#39;aschangeop</span>, OpId = O&gt; + <span class="lifetime">&#39;aschangeop</span>,
+    I: Iterator&lt;Item = C&gt; + Clone + <span class="lifetime">&#39;aschangeop</span>,
 {
-    <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="ident">ChangeOpId</span>;
+    <span class="kw">type </span>Item = ChangeOpId;
 
-    <span class="kw">fn</span> <span class="ident">next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">wrapped</span>.<span class="ident">next</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">o</span><span class="op">|</span> <span class="self">self</span>.<span class="ident">actors</span>.<span class="ident">translate_opid</span>(<span class="kw-2">&amp;</span><span class="ident">o</span>))
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="self">self</span>.wrapped.next().map(|o| <span class="self">self</span>.actors.translate_opid(<span class="kw-2">&amp;</span>o))
     }
 }
 
-<span class="kw">fn</span> <span class="ident">are_sorted</span><span class="op">&lt;</span><span class="ident">A</span>, <span class="ident">O</span>, <span class="ident">I</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">opids</span>: <span class="ident">I</span>) -&gt; <span class="ident">bool</span>
-<span class="kw">where</span>
-    <span class="ident">A</span>: <span class="ident">PartialEq</span> <span class="op">+</span> <span class="ident">Ord</span> <span class="op">+</span> <span class="ident">Clone</span>,
-    <span class="ident">O</span>: <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="ident">A</span><span class="op">&gt;</span>,
-    <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">O</span><span class="op">&gt;</span>,
+<span class="kw">fn </span>are_sorted&lt;A, O, I&gt;(<span class="kw-2">mut </span>opids: I) -&gt; bool
+<span class="kw">where
+    </span>A: PartialEq + Ord + Clone,
+    O: convert::OpId&lt;A&gt;,
+    I: Iterator&lt;Item = O&gt;,
 {
-    <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">first</span>) <span class="op">=</span> <span class="ident">opids</span>.<span class="ident">next</span>() {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">prev</span> <span class="op">=</span> <span class="ident">first</span>;
-        <span class="kw">for</span> <span class="ident">opid</span> <span class="kw">in</span> <span class="ident">opids</span> {
-            <span class="kw">if</span> <span class="ident">opid</span>.<span class="ident">counter</span>() <span class="op">&lt;</span> <span class="ident">prev</span>.<span class="ident">counter</span>() {
-                <span class="kw">return</span> <span class="bool-val">false</span>;
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(first) = opids.next() {
+        <span class="kw">let </span><span class="kw-2">mut </span>prev = first;
+        <span class="kw">for </span>opid <span class="kw">in </span>opids {
+            <span class="kw">if </span>opid.counter() &lt; prev.counter() {
+                <span class="kw">return </span><span class="bool-val">false</span>;
             }
-            <span class="kw">if</span> <span class="ident">opid</span>.<span class="ident">counter</span>() <span class="op">==</span> <span class="ident">prev</span>.<span class="ident">counter</span>() <span class="op">&amp;&amp;</span> <span class="ident">opid</span>.<span class="ident">actor</span>() <span class="op">&lt;</span> <span class="ident">prev</span>.<span class="ident">actor</span>() {
-                <span class="kw">return</span> <span class="bool-val">false</span>;
+            <span class="kw">if </span>opid.counter() == prev.counter() &amp;&amp; opid.actor() &lt; prev.actor() {
+                <span class="kw">return </span><span class="bool-val">false</span>;
             }
-            <span class="ident">prev</span> <span class="op">=</span> <span class="ident">opid</span>;
+            prev = opid;
         }
     }
-    <span class="bool-val">true</span>
-}
+    <span class="bool-val">true
+</span>}
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

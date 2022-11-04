@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/op_tree/iter.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>iter.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/op_tree/iter.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>iter.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -438,443 +438,443 @@
 <span id="436">436</span>
 <span id="437">437</span>
 <span id="438">438</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::cmp::Ordering</span>;
+</pre><pre class="rust"><code><span class="kw">use </span>std::cmp::Ordering;
 
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::types::Op</span>;
+<span class="kw">use </span><span class="kw">crate</span>::types::Op;
 
-<span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">OpTreeInternal</span>, <span class="ident">OpTreeNode</span>};
+<span class="kw">use super</span>::{OpTreeInternal, OpTreeNode};
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">OpTreeIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(<span class="ident">Inner</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>);
+<span class="attribute">#[derive(Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpTreeIter&lt;<span class="lifetime">&#39;a</span>&gt;(Inner&lt;<span class="lifetime">&#39;a</span>&gt;);
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">OpTreeIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">tree</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">OpTreeInternal</span>) -&gt; <span class="ident">OpTreeIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; OpTreeIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(tree: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeInternal) -&gt; OpTreeIter&lt;<span class="lifetime">&#39;a</span>&gt; {
         <span class="self">Self</span>(
-            <span class="ident">tree</span>.<span class="ident">root_node</span>
-                .<span class="ident">as_ref</span>()
-                .<span class="ident">map</span>(<span class="op">|</span><span class="ident">root</span><span class="op">|</span> <span class="ident">Inner::NonEmpty</span> {
-                    <span class="comment">// This is a guess at the average depth of an OpTree</span>
-                    <span class="ident">ancestors</span>: <span class="ident">Vec::with_capacity</span>(<span class="number">6</span>),
-                    <span class="ident">current</span>: <span class="ident">NodeIter</span> {
-                        <span class="ident">node</span>: <span class="ident">root</span>,
-                        <span class="ident">index</span>: <span class="number">0</span>,
+            tree.root_node
+                .as_ref()
+                .map(|root| Inner::NonEmpty {
+                    <span class="comment">// This is a guess at the average depth of an OpTree
+                    </span>ancestors: Vec::with_capacity(<span class="number">6</span>),
+                    current: NodeIter {
+                        node: root,
+                        index: <span class="number">0</span>,
                     },
-                    <span class="ident">cumulative_index</span>: <span class="number">0</span>,
-                    <span class="ident">root_node</span>: <span class="ident">root</span>,
+                    cumulative_index: <span class="number">0</span>,
+                    root_node: root,
                 })
-                .<span class="ident">unwrap_or</span>(<span class="ident">Inner::Empty</span>),
+                .unwrap_or(Inner::Empty),
         )
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Iterator</span> <span class="kw">for</span> <span class="ident">OpTreeIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Op</span>;
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>OpTreeIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">type </span>Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op;
 
-    <span class="kw">fn</span> <span class="ident">next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">next</span>()
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="self">self</span>.<span class="number">0</span>.next()
     }
 
-    <span class="kw">fn</span> <span class="ident">nth</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">n</span>: <span class="ident">usize</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">nth</span>(<span class="ident">n</span>)
+    <span class="kw">fn </span>nth(<span class="kw-2">&amp;mut </span><span class="self">self</span>, n: usize) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="self">self</span>.<span class="number">0</span>.nth(n)
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>)]</span>
-<span class="kw">enum</span> <span class="ident">Inner</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">Empty</span>,
-    <span class="ident">NonEmpty</span> {
-        <span class="comment">// A stack of nodes in the optree which we have descended in to to get to the current</span>
-        <span class="comment">// element.</span>
-        <span class="ident">ancestors</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">NodeIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-        <span class="ident">current</span>: <span class="ident">NodeIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
-        <span class="comment">// How far through the whole optree we are</span>
-        <span class="ident">cumulative_index</span>: <span class="ident">usize</span>,
-        <span class="ident">root_node</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">OpTreeNode</span>,
+<span class="attribute">#[derive(Clone)]
+</span><span class="kw">enum </span>Inner&lt;<span class="lifetime">&#39;a</span>&gt; {
+    Empty,
+    NonEmpty {
+        <span class="comment">// A stack of nodes in the optree which we have descended in to to get to the current
+        // element.
+        </span>ancestors: Vec&lt;NodeIter&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
+        current: NodeIter&lt;<span class="lifetime">&#39;a</span>&gt;,
+        <span class="comment">// How far through the whole optree we are
+        </span>cumulative_index: usize,
+        root_node: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode,
     },
 }
 
-<span class="doccomment">/// A node in the op tree which we are iterating over</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>)]</span>
-<span class="kw">struct</span> <span class="ident">NodeIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// The node itself</span>
-    <span class="ident">node</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">OpTreeNode</span>,
-    <span class="doccomment">/// The index of the next element we will pull from the node. This means something different</span>
-    <span class="doccomment">/// depending on whether the node is a leaf node or not. If the node is a leaf node then this</span>
-    <span class="doccomment">/// index is the index in `node.elements` which will be returned on the next call to `next()`.</span>
-    <span class="doccomment">/// If the node is not an internal node then this index is the index of `children` which we are</span>
-    <span class="doccomment">/// currently iterating as well as being the index of the next element of `elements` which we</span>
-    <span class="doccomment">/// will return once we have finished iterating over the child node.</span>
-    <span class="ident">index</span>: <span class="ident">usize</span>,
+<span class="doccomment">/// A node in the op tree which we are iterating over
+</span><span class="attribute">#[derive(Clone)]
+</span><span class="kw">struct </span>NodeIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="doccomment">/// The node itself
+    </span>node: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode,
+    <span class="doccomment">/// The index of the next element we will pull from the node. This means something different
+    /// depending on whether the node is a leaf node or not. If the node is a leaf node then this
+    /// index is the index in `node.elements` which will be returned on the next call to `next()`.
+    /// If the node is not an internal node then this index is the index of `children` which we are
+    /// currently iterating as well as being the index of the next element of `elements` which we
+    /// will return once we have finished iterating over the child node.
+    </span>index: usize,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Iterator</span> <span class="kw">for</span> <span class="ident">Inner</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Op</span>;
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>Inner&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">type </span>Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op;
 
-    <span class="kw">fn</span> <span class="ident">next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Inner::Empty</span> =&gt; <span class="prelude-val">None</span>,
-            <span class="ident">Inner::NonEmpty</span> {
-                <span class="ident">ancestors</span>,
-                <span class="ident">current</span>,
-                <span class="ident">cumulative_index</span>,
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            Inner::Empty =&gt; <span class="prelude-val">None</span>,
+            Inner::NonEmpty {
+                ancestors,
+                current,
+                cumulative_index,
                 ..
             } =&gt; {
-                <span class="kw">if</span> <span class="ident">current</span>.<span class="ident">node</span>.<span class="ident">is_leaf</span>() {
-                    <span class="comment">// If we&#39;re in a leaf node and we haven&#39;t exhausted it yet we just return the elements</span>
-                    <span class="comment">// of the leaf node</span>
-                    <span class="kw">if</span> <span class="ident">current</span>.<span class="ident">index</span> <span class="op">&lt;</span> <span class="ident">current</span>.<span class="ident">node</span>.<span class="ident">len</span>() {
-                        <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">current</span>.<span class="ident">node</span>.<span class="ident">elements</span>[<span class="ident">current</span>.<span class="ident">index</span>];
-                        <span class="ident">current</span>.<span class="ident">index</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
-                        <span class="kw-2">*</span><span class="ident">cumulative_index</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
-                        <span class="prelude-val">Some</span>(<span class="ident">result</span>)
-                    } <span class="kw">else</span> {
-                        <span class="comment">// We&#39;ve exhausted the leaf node, we must find the nearest non-exhausted parent (lol)</span>
-                        <span class="kw">let</span> <span class="ident">node_iter</span> <span class="op">=</span> <span class="kw">loop</span> {
-                            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(
-                                <span class="ident">node_iter</span> @ <span class="ident">NodeIter</span> {
-                                    <span class="ident">node</span>: <span class="ident">parent</span>,
-                                    <span class="ident">index</span>: <span class="ident">parent_index</span>,
+                <span class="kw">if </span>current.node.is_leaf() {
+                    <span class="comment">// If we&#39;re in a leaf node and we haven&#39;t exhausted it yet we just return the elements
+                    // of the leaf node
+                    </span><span class="kw">if </span>current.index &lt; current.node.len() {
+                        <span class="kw">let </span>result = <span class="kw-2">&amp;</span>current.node.elements[current.index];
+                        current.index += <span class="number">1</span>;
+                        <span class="kw-2">*</span>cumulative_index += <span class="number">1</span>;
+                        <span class="prelude-val">Some</span>(result)
+                    } <span class="kw">else </span>{
+                        <span class="comment">// We&#39;ve exhausted the leaf node, we must find the nearest non-exhausted parent (lol)
+                        </span><span class="kw">let </span>node_iter = <span class="kw">loop </span>{
+                            <span class="kw">if let </span><span class="prelude-val">Some</span>(
+                                node_iter @ NodeIter {
+                                    node: parent,
+                                    index: parent_index,
                                 },
-                            ) <span class="op">=</span> <span class="ident">ancestors</span>.<span class="ident">pop</span>()
+                            ) = ancestors.pop()
                             {
-                                <span class="comment">// We&#39;ve exhausted this parent</span>
-                                <span class="kw">if</span> <span class="ident">parent_index</span> <span class="op">&gt;</span><span class="op">=</span> <span class="ident">parent</span>.<span class="ident">elements</span>.<span class="ident">len</span>() {
+                                <span class="comment">// We&#39;ve exhausted this parent
+                                </span><span class="kw">if </span>parent_index &gt;= parent.elements.len() {
                                     <span class="kw">continue</span>;
-                                } <span class="kw">else</span> {
-                                    <span class="comment">// This parent still has elements to process, let&#39;s use it!</span>
-                                    <span class="kw">break</span> <span class="ident">node_iter</span>;
+                                } <span class="kw">else </span>{
+                                    <span class="comment">// This parent still has elements to process, let&#39;s use it!
+                                    </span><span class="kw">break </span>node_iter;
                                 }
-                            } <span class="kw">else</span> {
-                                <span class="comment">// No parents left, we&#39;re done</span>
-                                <span class="kw">return</span> <span class="prelude-val">None</span>;
+                            } <span class="kw">else </span>{
+                                <span class="comment">// No parents left, we&#39;re done
+                                </span><span class="kw">return </span><span class="prelude-val">None</span>;
                             }
                         };
-                        <span class="comment">// if we&#39;ve finished the elements in a leaf node and there&#39;s a parent node then we</span>
-                        <span class="comment">// return the element from the parent node which is one after the index at which we</span>
-                        <span class="comment">// descended into the child</span>
-                        <span class="kw-2">*</span><span class="ident">current</span> <span class="op">=</span> <span class="ident">node_iter</span>;
-                        <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">current</span>.<span class="ident">node</span>.<span class="ident">elements</span>[<span class="ident">current</span>.<span class="ident">index</span>];
-                        <span class="ident">current</span>.<span class="ident">index</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
-                        <span class="kw-2">*</span><span class="ident">cumulative_index</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
-                        <span class="prelude-val">Some</span>(<span class="ident">result</span>)
+                        <span class="comment">// if we&#39;ve finished the elements in a leaf node and there&#39;s a parent node then we
+                        // return the element from the parent node which is one after the index at which we
+                        // descended into the child
+                        </span><span class="kw-2">*</span>current = node_iter;
+                        <span class="kw">let </span>result = <span class="kw-2">&amp;</span>current.node.elements[current.index];
+                        current.index += <span class="number">1</span>;
+                        <span class="kw-2">*</span>cumulative_index += <span class="number">1</span>;
+                        <span class="prelude-val">Some</span>(result)
                     }
-                } <span class="kw">else</span> {
-                    <span class="comment">// If we&#39;re in a non-leaf node then the last iteration returned an element from the</span>
-                    <span class="comment">// current nodes `elements`, so we must now descend into a leaf child</span>
-                    <span class="ident">ancestors</span>.<span class="ident">push</span>(<span class="ident">current</span>.<span class="ident">clone</span>());
-                    <span class="kw">loop</span> {
-                        <span class="kw">let</span> <span class="ident">child</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">current</span>.<span class="ident">node</span>.<span class="ident">children</span>[<span class="ident">current</span>.<span class="ident">index</span>];
-                        <span class="ident">current</span>.<span class="ident">index</span> <span class="op">=</span> <span class="number">0</span>;
-                        <span class="kw">if</span> <span class="op">!</span><span class="ident">child</span>.<span class="ident">is_leaf</span>() {
-                            <span class="ident">ancestors</span>.<span class="ident">push</span>(<span class="ident">NodeIter</span> {
-                                <span class="ident">node</span>: <span class="ident">child</span>,
-                                <span class="ident">index</span>: <span class="number">0</span>,
+                } <span class="kw">else </span>{
+                    <span class="comment">// If we&#39;re in a non-leaf node then the last iteration returned an element from the
+                    // current nodes `elements`, so we must now descend into a leaf child
+                    </span>ancestors.push(current.clone());
+                    <span class="kw">loop </span>{
+                        <span class="kw">let </span>child = <span class="kw-2">&amp;</span>current.node.children[current.index];
+                        current.index = <span class="number">0</span>;
+                        <span class="kw">if </span>!child.is_leaf() {
+                            ancestors.push(NodeIter {
+                                node: child,
+                                index: <span class="number">0</span>,
                             });
-                            <span class="ident">current</span>.<span class="ident">node</span> <span class="op">=</span> <span class="ident">child</span>
-                        } <span class="kw">else</span> {
-                            <span class="ident">current</span>.<span class="ident">node</span> <span class="op">=</span> <span class="ident">child</span>;
+                            current.node = child
+                        } <span class="kw">else </span>{
+                            current.node = child;
                             <span class="kw">break</span>;
                         }
                     }
-                    <span class="self">self</span>.<span class="ident">next</span>()
+                    <span class="self">self</span>.next()
                 }
             }
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">nth</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">n</span>: <span class="ident">usize</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident"><span class="self">Self</span>::Empty</span> =&gt; <span class="prelude-val">None</span>,
-            <span class="ident"><span class="self">Self</span>::NonEmpty</span> {
-                <span class="ident">root_node</span>,
-                <span class="ident">cumulative_index</span>,
-                <span class="ident">current</span>,
-                <span class="ident">ancestors</span>,
+    <span class="kw">fn </span>nth(<span class="kw-2">&amp;mut </span><span class="self">self</span>, n: usize) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            <span class="self">Self</span>::Empty =&gt; <span class="prelude-val">None</span>,
+            <span class="self">Self</span>::NonEmpty {
+                root_node,
+                cumulative_index,
+                current,
+                ancestors,
                 ..
             } =&gt; {
-                <span class="comment">// Make sure that we don&#39;t rewind when calling nth more than once</span>
-                <span class="kw">if</span> <span class="ident">n</span> <span class="op">&lt;</span> <span class="kw-2">*</span><span class="ident">cumulative_index</span> {
-                    <span class="prelude-val">None</span>
-                } <span class="kw">else</span> <span class="kw">if</span> <span class="ident">n</span> <span class="op">&gt;</span><span class="op">=</span> <span class="ident">root_node</span>.<span class="ident">len</span>() {
-                    <span class="kw-2">*</span><span class="ident">cumulative_index</span> <span class="op">=</span> <span class="ident">root_node</span>.<span class="ident">len</span>() <span class="op">-</span> <span class="number">1</span>;
-                    <span class="prelude-val">None</span>
-                } <span class="kw">else</span> {
-                    <span class="comment">// rather than trying to go back up through the ancestors to find the right</span>
-                    <span class="comment">// node we just start at the root.</span>
-                    <span class="kw-2">*</span><span class="ident">current</span> <span class="op">=</span> <span class="ident">NodeIter</span> {
-                        <span class="ident">node</span>: <span class="ident">root_node</span>,
-                        <span class="ident">index</span>: <span class="ident">n</span>,
+                <span class="comment">// Make sure that we don&#39;t rewind when calling nth more than once
+                </span><span class="kw">if </span>n &lt; <span class="kw-2">*</span>cumulative_index {
+                    <span class="prelude-val">None
+                </span>} <span class="kw">else if </span>n &gt;= root_node.len() {
+                    <span class="kw-2">*</span>cumulative_index = root_node.len() - <span class="number">1</span>;
+                    <span class="prelude-val">None
+                </span>} <span class="kw">else </span>{
+                    <span class="comment">// rather than trying to go back up through the ancestors to find the right
+                    // node we just start at the root.
+                    </span><span class="kw-2">*</span>current = NodeIter {
+                        node: root_node,
+                        index: n,
                     };
-                    <span class="kw-2">*</span><span class="ident">cumulative_index</span> <span class="op">=</span> <span class="number">0</span>;
-                    <span class="ident">ancestors</span>.<span class="ident">clear</span>();
-                    <span class="kw">while</span> <span class="op">!</span><span class="ident">current</span>.<span class="ident">node</span>.<span class="ident">is_leaf</span>() {
-                        <span class="kw">for</span> (<span class="ident">child_index</span>, <span class="ident">child</span>) <span class="kw">in</span> <span class="ident">current</span>.<span class="ident">node</span>.<span class="ident">children</span>.<span class="ident">iter</span>().<span class="ident">enumerate</span>() {
-                            <span class="kw">match</span> (<span class="kw-2">*</span><span class="ident">cumulative_index</span> <span class="op">+</span> <span class="ident">child</span>.<span class="ident">len</span>()).<span class="ident">cmp</span>(<span class="kw-2">&amp;</span><span class="ident">n</span>) {
-                                <span class="ident">Ordering::Less</span> =&gt; {
-                                    <span class="kw-2">*</span><span class="ident">cumulative_index</span> <span class="op">+</span><span class="op">=</span> <span class="ident">child</span>.<span class="ident">len</span>() <span class="op">+</span> <span class="number">1</span>;
-                                    <span class="ident">current</span>.<span class="ident">index</span> <span class="op">=</span> <span class="ident">child_index</span> <span class="op">+</span> <span class="number">1</span>;
+                    <span class="kw-2">*</span>cumulative_index = <span class="number">0</span>;
+                    ancestors.clear();
+                    <span class="kw">while </span>!current.node.is_leaf() {
+                        <span class="kw">for </span>(child_index, child) <span class="kw">in </span>current.node.children.iter().enumerate() {
+                            <span class="kw">match </span>(<span class="kw-2">*</span>cumulative_index + child.len()).cmp(<span class="kw-2">&amp;</span>n) {
+                                Ordering::Less =&gt; {
+                                    <span class="kw-2">*</span>cumulative_index += child.len() + <span class="number">1</span>;
+                                    current.index = child_index + <span class="number">1</span>;
                                 }
-                                <span class="ident">Ordering::Equal</span> =&gt; {
-                                    <span class="kw-2">*</span><span class="ident">cumulative_index</span> <span class="op">+</span><span class="op">=</span> <span class="ident">child</span>.<span class="ident">len</span>() <span class="op">+</span> <span class="number">1</span>;
-                                    <span class="ident">current</span>.<span class="ident">index</span> <span class="op">=</span> <span class="ident">child_index</span> <span class="op">+</span> <span class="number">1</span>;
-                                    <span class="kw">return</span> <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="ident">current</span>.<span class="ident">node</span>.<span class="ident">elements</span>[<span class="ident">child_index</span>]);
+                                Ordering::Equal =&gt; {
+                                    <span class="kw-2">*</span>cumulative_index += child.len() + <span class="number">1</span>;
+                                    current.index = child_index + <span class="number">1</span>;
+                                    <span class="kw">return </span><span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>current.node.elements[child_index]);
                                 }
-                                <span class="ident">Ordering::Greater</span> =&gt; {
-                                    <span class="ident">current</span>.<span class="ident">index</span> <span class="op">=</span> <span class="ident">child_index</span>;
-                                    <span class="kw">let</span> <span class="ident">old</span> <span class="op">=</span> <span class="ident">std::mem::replace</span>(
-                                        <span class="ident">current</span>,
-                                        <span class="ident">NodeIter</span> {
-                                            <span class="ident">node</span>: <span class="ident">child</span>,
-                                            <span class="ident">index</span>: <span class="number">0</span>,
+                                Ordering::Greater =&gt; {
+                                    current.index = child_index;
+                                    <span class="kw">let </span>old = std::mem::replace(
+                                        current,
+                                        NodeIter {
+                                            node: child,
+                                            index: <span class="number">0</span>,
                                         },
                                     );
-                                    <span class="ident">ancestors</span>.<span class="ident">push</span>(<span class="ident">old</span>);
+                                    ancestors.push(old);
                                     <span class="kw">break</span>;
                                 }
                             }
                         }
                     }
-                    <span class="comment">// we&#39;re in a leaf node and we kept track of the cumulative index as we went,</span>
-                    <span class="kw">let</span> <span class="ident">index_in_this_node</span> <span class="op">=</span> <span class="ident">n</span>.<span class="ident">saturating_sub</span>(<span class="kw-2">*</span><span class="ident">cumulative_index</span>);
-                    <span class="ident">current</span>.<span class="ident">index</span> <span class="op">=</span> <span class="ident">index_in_this_node</span> <span class="op">+</span> <span class="number">1</span>;
-                    <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="ident">current</span>.<span class="ident">node</span>.<span class="ident">elements</span>[<span class="ident">index_in_this_node</span>])
+                    <span class="comment">// we&#39;re in a leaf node and we kept track of the cumulative index as we went,
+                    </span><span class="kw">let </span>index_in_this_node = n.saturating_sub(<span class="kw-2">*</span>cumulative_index);
+                    current.index = index_in_this_node + <span class="number">1</span>;
+                    <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>current.node.elements[index_in_this_node])
                 }
             }
         }
     }
 }
 
-<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
-<span class="kw">mod</span> <span class="ident">tests</span> {
-    <span class="kw">use</span> <span class="ident"><span class="kw">super</span>::<span class="kw">super</span>::OpTreeInternal</span>;
-    <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::types</span>::{<span class="ident">Key</span>, <span class="ident">Op</span>, <span class="ident">OpId</span>, <span class="ident">OpType</span>, <span class="ident">ScalarValue</span>};
-    <span class="kw">use</span> <span class="ident">proptest::prelude</span>::<span class="kw-2">*</span>;
+<span class="attribute">#[cfg(test)]
+</span><span class="kw">mod </span>tests {
+    <span class="kw">use </span><span class="kw">super</span>::<span class="kw">super</span>::OpTreeInternal;
+    <span class="kw">use </span><span class="kw">crate</span>::types::{Key, Op, OpId, OpType, ScalarValue};
+    <span class="kw">use </span>proptest::prelude::<span class="kw-2">*</span>;
 
-    <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>)]</span>
-    <span class="kw">enum</span> <span class="ident">Action</span> {
-        <span class="ident">Insert</span>(<span class="ident">usize</span>, <span class="ident">Op</span>),
-        <span class="ident">Delete</span>(<span class="ident">usize</span>),
+    <span class="attribute">#[derive(Clone)]
+    </span><span class="kw">enum </span>Action {
+        Insert(usize, Op),
+        Delete(usize),
     }
 
-    <span class="kw">impl</span> <span class="ident">std::fmt::Debug</span> <span class="kw">for</span> <span class="ident">Action</span> {
-        <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">std::fmt::Result</span> {
-            <span class="kw">match</span> <span class="self">self</span> {
-                <span class="ident"><span class="self">Self</span>::Insert</span>(<span class="ident">index</span>, ..) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Insert({})&quot;</span>, <span class="ident">index</span>),
-                <span class="ident"><span class="self">Self</span>::Delete</span>(<span class="ident">index</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Delete({})&quot;</span>, <span class="ident">index</span>),
+    <span class="kw">impl </span>std::fmt::Debug <span class="kw">for </span>Action {
+        <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; std::fmt::Result {
+            <span class="kw">match </span><span class="self">self </span>{
+                <span class="self">Self</span>::Insert(index, ..) =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;Insert({})&quot;</span>, index),
+                <span class="self">Self</span>::Delete(index) =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;Delete({})&quot;</span>, index),
             }
         }
     }
 
-    <span class="comment">// A struct which impls Debug by only printing the counters of the IDs of the  ops it wraps.</span>
-    <span class="comment">// This is useful because the only difference between the ops that we generate is the counter</span>
-    <span class="comment">// of their IDs. Wrapping a Vec&lt;Op&gt; in DebugOps will result in output from assert! etc. which</span>
-    <span class="comment">// only shows the counters. For example, the output of a failing assert_eq! like this</span>
-    <span class="comment">//</span>
-    <span class="comment">//     assert_eq!(DebugOps(&amp;ops1), DebugOps(&amp;ops2))</span>
-    <span class="comment">//</span>
-    <span class="comment">// Might look like this</span>
-    <span class="comment">//</span>
-    <span class="comment">//     left: `[0,1,2,3]</span>
-    <span class="comment">//     right: `[0,1,2,3,4]</span>
-    <span class="comment">//</span>
-    <span class="comment">// i.e. all the other details of the ops are elided</span>
-    <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">PartialEq</span>)]</span>
-    <span class="kw">struct</span> <span class="ident">DebugOps</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">Op</span>]);
+    <span class="comment">// A struct which impls Debug by only printing the counters of the IDs of the  ops it wraps.
+    // This is useful because the only difference between the ops that we generate is the counter
+    // of their IDs. Wrapping a Vec&lt;Op&gt; in DebugOps will result in output from assert! etc. which
+    // only shows the counters. For example, the output of a failing assert_eq! like this
+    //
+    //     assert_eq!(DebugOps(&amp;ops1), DebugOps(&amp;ops2))
+    //
+    // Might look like this
+    //
+    //     left: `[0,1,2,3]
+    //     right: `[0,1,2,3,4]
+    //
+    // i.e. all the other details of the ops are elided
+    </span><span class="attribute">#[derive(PartialEq)]
+    </span><span class="kw">struct </span>DebugOps&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[Op]);
 
-    <span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">std::fmt::Debug</span> <span class="kw">for</span> <span class="ident">DebugOps</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">std::fmt::Result</span> {
-            <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;[&quot;</span>)<span class="question-mark">?</span>;
-            <span class="kw">for</span> (<span class="ident">index</span>, <span class="ident">op</span>) <span class="kw">in</span> <span class="self">self</span>.<span class="number">0</span>.<span class="ident">iter</span>().<span class="ident">enumerate</span>() {
-                <span class="kw">if</span> <span class="ident">index</span> <span class="op">&lt;</span> <span class="self">self</span>.<span class="number">0</span>.<span class="ident">len</span>() <span class="op">-</span> <span class="number">1</span> {
-                    <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{},&quot;</span>, <span class="ident">op</span>.<span class="ident">id</span>.<span class="ident">counter</span>())<span class="question-mark">?</span>;
-                } <span class="kw">else</span> {
-                    <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}]&quot;</span>, <span class="ident">op</span>.<span class="ident">id</span>.<span class="ident">counter</span>())<span class="question-mark">?</span>
-                }
+    <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; std::fmt::Debug <span class="kw">for </span>DebugOps&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; std::fmt::Result {
+            <span class="macro">write!</span>(f, <span class="string">&quot;[&quot;</span>)<span class="question-mark">?</span>;
+            <span class="kw">for </span>(index, op) <span class="kw">in </span><span class="self">self</span>.<span class="number">0</span>.iter().enumerate() {
+                <span class="kw">if </span>index &lt; <span class="self">self</span>.<span class="number">0</span>.len() - <span class="number">1 </span>{
+                    <span class="macro">write!</span>(f, <span class="string">&quot;{},&quot;</span>, op.id.counter())<span class="question-mark">?</span>;
+                } <span class="kw">else </span>{
+                    <span class="macro">write!</span>(f, <span class="string">&quot;{}]&quot;</span>, op.id.counter())<span class="question-mark">?
+                </span>}
             }
             <span class="prelude-val">Ok</span>(())
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">op</span>(<span class="ident">counter</span>: <span class="ident">u64</span>) -&gt; <span class="ident">Op</span> {
-        <span class="ident">Op</span> {
-            <span class="ident">action</span>: <span class="ident">OpType::Put</span>(<span class="ident">ScalarValue::Uint</span>(<span class="ident">counter</span>)),
-            <span class="ident">id</span>: <span class="ident">OpId</span>(<span class="ident">counter</span>, <span class="number">0</span>),
-            <span class="ident">key</span>: <span class="ident">Key::Map</span>(<span class="number">0</span>),
-            <span class="ident">succ</span>: <span class="ident">Default::default</span>(),
-            <span class="ident">pred</span>: <span class="ident">Default::default</span>(),
-            <span class="ident">insert</span>: <span class="bool-val">false</span>,
+    <span class="kw">fn </span>op(counter: u64) -&gt; Op {
+        Op {
+            action: OpType::Put(ScalarValue::Uint(counter)),
+            id: OpId(counter, <span class="number">0</span>),
+            key: Key::Map(<span class="number">0</span>),
+            succ: Default::default(),
+            pred: Default::default(),
+            insert: <span class="bool-val">false</span>,
         }
     }
 
-    <span class="doccomment">/// A model for a property based test of the OpTreeIter. We generate a set of actions, each</span>
-    <span class="doccomment">/// action pertaining to a `model` - which is just a `Vec&lt;Op&gt;`. As we generate each action we</span>
-    <span class="doccomment">/// apply it to the model and record the action we took. In the property test we replay the</span>
-    <span class="doccomment">/// same actions against an `OpTree` and check that the iterator returns the same result as the</span>
-    <span class="doccomment">/// `model`.</span>
-    <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>)]</span>
-    <span class="kw">struct</span> <span class="ident">Model</span> {
-        <span class="ident">actions</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Action</span><span class="op">&gt;</span>,
-        <span class="ident">model</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Op</span><span class="op">&gt;</span>,
+    <span class="doccomment">/// A model for a property based test of the OpTreeIter. We generate a set of actions, each
+    /// action pertaining to a `model` - which is just a `Vec&lt;Op&gt;`. As we generate each action we
+    /// apply it to the model and record the action we took. In the property test we replay the
+    /// same actions against an `OpTree` and check that the iterator returns the same result as the
+    /// `model`.
+    </span><span class="attribute">#[derive(Clone)]
+    </span><span class="kw">struct </span>Model {
+        actions: Vec&lt;Action&gt;,
+        model: Vec&lt;Op&gt;,
     }
 
-    <span class="kw">impl</span> <span class="ident">std::fmt::Debug</span> <span class="kw">for</span> <span class="ident">Model</span> {
-        <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">std::fmt::Result</span> {
-            <span class="ident">f</span>.<span class="ident">debug_struct</span>(<span class="string">&quot;Model&quot;</span>)
-                .<span class="ident">field</span>(<span class="string">&quot;actions&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">actions</span>)
-                .<span class="ident">field</span>(<span class="string">&quot;model&quot;</span>, <span class="kw-2">&amp;</span><span class="ident">DebugOps</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">model</span>))
-                .<span class="ident">finish</span>()
+    <span class="kw">impl </span>std::fmt::Debug <span class="kw">for </span>Model {
+        <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; std::fmt::Result {
+            f.debug_struct(<span class="string">&quot;Model&quot;</span>)
+                .field(<span class="string">&quot;actions&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.actions)
+                .field(<span class="string">&quot;model&quot;</span>, <span class="kw-2">&amp;</span>DebugOps(<span class="kw-2">&amp;</span><span class="self">self</span>.model))
+                .finish()
         }
     }
 
-    <span class="kw">impl</span> <span class="ident">Model</span> {
-        <span class="kw">fn</span> <span class="ident">insert</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">index</span>: <span class="ident">usize</span>, <span class="ident">next_op_counter</span>: <span class="ident">u64</span>) -&gt; <span class="self">Self</span> {
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">actions</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">actions</span>.<span class="ident">clone</span>();
-            <span class="kw">let</span> <span class="ident">op</span> <span class="op">=</span> <span class="ident">op</span>(<span class="ident">next_op_counter</span>);
-            <span class="ident">actions</span>.<span class="ident">push</span>(<span class="ident">Action::Insert</span>(<span class="ident">index</span>, <span class="ident">op</span>.<span class="ident">clone</span>()));
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">model</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">model</span>.<span class="ident">clone</span>();
-            <span class="ident">model</span>.<span class="ident">insert</span>(<span class="ident">index</span>, <span class="ident">op</span>);
-            <span class="self">Self</span> { <span class="ident">actions</span>, <span class="ident">model</span> }
+    <span class="kw">impl </span>Model {
+        <span class="kw">fn </span>insert(<span class="kw-2">&amp;</span><span class="self">self</span>, index: usize, next_op_counter: u64) -&gt; <span class="self">Self </span>{
+            <span class="kw">let </span><span class="kw-2">mut </span>actions = <span class="self">self</span>.actions.clone();
+            <span class="kw">let </span>op = op(next_op_counter);
+            actions.push(Action::Insert(index, op.clone()));
+            <span class="kw">let </span><span class="kw-2">mut </span>model = <span class="self">self</span>.model.clone();
+            model.insert(index, op);
+            <span class="self">Self </span>{ actions, model }
         }
 
-        <span class="kw">fn</span> <span class="ident">delete</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">index</span>: <span class="ident">usize</span>) -&gt; <span class="self">Self</span> {
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">actions</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">actions</span>.<span class="ident">clone</span>();
-            <span class="ident">actions</span>.<span class="ident">push</span>(<span class="ident">Action::Delete</span>(<span class="ident">index</span>));
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">model</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">model</span>.<span class="ident">clone</span>();
-            <span class="ident">model</span>.<span class="ident">remove</span>(<span class="ident">index</span>);
-            <span class="self">Self</span> { <span class="ident">actions</span>, <span class="ident">model</span> }
+        <span class="kw">fn </span>delete(<span class="kw-2">&amp;</span><span class="self">self</span>, index: usize) -&gt; <span class="self">Self </span>{
+            <span class="kw">let </span><span class="kw-2">mut </span>actions = <span class="self">self</span>.actions.clone();
+            actions.push(Action::Delete(index));
+            <span class="kw">let </span><span class="kw-2">mut </span>model = <span class="self">self</span>.model.clone();
+            model.remove(index);
+            <span class="self">Self </span>{ actions, model }
         }
 
-        <span class="kw">fn</span> <span class="ident">next</span>(<span class="self">self</span>, <span class="ident">next_op_counter</span>: <span class="ident">u64</span>) -&gt; <span class="kw">impl</span> <span class="ident">Strategy</span><span class="op">&lt;</span><span class="ident">Value</span> <span class="op">=</span> <span class="ident">Model</span><span class="op">&gt;</span> {
-            <span class="kw">if</span> <span class="self">self</span>.<span class="ident">model</span>.<span class="ident">is_empty</span>() {
-                <span class="ident">Just</span>(<span class="self">self</span>.<span class="ident">insert</span>(<span class="number">0</span>, <span class="ident">next_op_counter</span>)).<span class="ident">boxed</span>()
-            } <span class="kw">else</span> {
-                <span class="comment">// Note that we have to feed `self` through the `prop_flat_map` using `Just` to</span>
-                <span class="comment">// appease the borrow checker, this is annoying because it does obscure the meaning</span>
-                <span class="comment">// of the code heere which is basically &quot;decide whether the next action should be</span>
-                <span class="comment">// insert, if it is insert choose an index between 0..model.len() + 1 and generate</span>
-                <span class="comment">// an op to insert, otherwise choose an index between 0..model.len() and generate a</span>
-                <span class="comment">// delete action&quot;.</span>
-                <span class="comment">//</span>
-                <span class="comment">// 95% chance of inserting to make sure we deal with large lists</span>
-                (<span class="ident">proptest::bool::weighted</span>(<span class="number">0.95</span>), <span class="ident">Just</span>(<span class="self">self</span>))
-                    .<span class="ident">prop_flat_map</span>(<span class="kw">move</span> <span class="op">|</span>(<span class="ident">insert</span>, <span class="ident">model</span>)<span class="op">|</span> {
-                        <span class="kw">if</span> <span class="ident">insert</span> {
-                            (<span class="number">0</span>..<span class="ident">model</span>.<span class="ident">model</span>.<span class="ident">len</span>() <span class="op">+</span> <span class="number">1</span>, <span class="ident">Just</span>(<span class="ident">model</span>))
-                                .<span class="ident">prop_map</span>(<span class="kw">move</span> <span class="op">|</span>(<span class="ident">index</span>, <span class="ident">model</span>)<span class="op">|</span> {
-                                    <span class="ident">model</span>.<span class="ident">insert</span>(<span class="ident">index</span>, <span class="ident">next_op_counter</span>)
+        <span class="kw">fn </span>next(<span class="self">self</span>, next_op_counter: u64) -&gt; <span class="kw">impl </span>Strategy&lt;Value = Model&gt; {
+            <span class="kw">if </span><span class="self">self</span>.model.is_empty() {
+                Just(<span class="self">self</span>.insert(<span class="number">0</span>, next_op_counter)).boxed()
+            } <span class="kw">else </span>{
+                <span class="comment">// Note that we have to feed `self` through the `prop_flat_map` using `Just` to
+                // appease the borrow checker, this is annoying because it does obscure the meaning
+                // of the code heere which is basically &quot;decide whether the next action should be
+                // insert, if it is insert choose an index between 0..model.len() + 1 and generate
+                // an op to insert, otherwise choose an index between 0..model.len() and generate a
+                // delete action&quot;.
+                //
+                // 95% chance of inserting to make sure we deal with large lists
+                </span>(proptest::bool::weighted(<span class="number">0.95</span>), Just(<span class="self">self</span>))
+                    .prop_flat_map(<span class="kw">move </span>|(insert, model)| {
+                        <span class="kw">if </span>insert {
+                            (<span class="number">0</span>..model.model.len() + <span class="number">1</span>, Just(model))
+                                .prop_map(<span class="kw">move </span>|(index, model)| {
+                                    model.insert(index, next_op_counter)
                                 })
-                                .<span class="ident">boxed</span>()
-                        } <span class="kw">else</span> {
-                            ((<span class="number">0</span>..<span class="ident">model</span>.<span class="ident">model</span>.<span class="ident">len</span>()), <span class="ident">Just</span>(<span class="ident">model</span>))
-                                .<span class="ident">prop_map</span>(<span class="kw">move</span> <span class="op">|</span>(<span class="ident">index</span>, <span class="ident">model</span>)<span class="op">|</span> <span class="ident">model</span>.<span class="ident">delete</span>(<span class="ident">index</span>))
-                                .<span class="ident">boxed</span>()
+                                .boxed()
+                        } <span class="kw">else </span>{
+                            ((<span class="number">0</span>..model.model.len()), Just(model))
+                                .prop_map(<span class="kw">move </span>|(index, model)| model.delete(index))
+                                .boxed()
                         }
                     })
-                    .<span class="ident">boxed</span>()
+                    .boxed()
             }
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">model</span>() -&gt; <span class="kw">impl</span> <span class="ident">Strategy</span><span class="op">&lt;</span><span class="ident">Value</span> <span class="op">=</span> <span class="ident">Model</span><span class="op">&gt;</span> {
-        (<span class="number">0_u64</span>..<span class="number">150</span>).<span class="ident">prop_flat_map</span>(<span class="op">|</span><span class="ident">num_steps</span><span class="op">|</span> {
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">strat</span> <span class="op">=</span> <span class="ident">Just</span>((
+    <span class="kw">fn </span>model() -&gt; <span class="kw">impl </span>Strategy&lt;Value = Model&gt; {
+        (<span class="number">0_u64</span>..<span class="number">150</span>).prop_flat_map(|num_steps| {
+            <span class="kw">let </span><span class="kw-2">mut </span>strat = Just((
                 <span class="number">0</span>,
-                <span class="ident">Model</span> {
-                    <span class="ident">actions</span>: <span class="ident">Vec::new</span>(),
-                    <span class="ident">model</span>: <span class="ident">Vec::new</span>(),
+                Model {
+                    actions: Vec::new(),
+                    model: Vec::new(),
                 },
             ))
-            .<span class="ident">boxed</span>();
-            <span class="kw">for</span> <span class="kw">_</span> <span class="kw">in</span> <span class="number">0</span>..<span class="ident">num_steps</span> {
-                <span class="ident">strat</span> <span class="op">=</span> <span class="ident">strat</span>
-                    <span class="comment">// Note the counter, which we feed through each `prop_flat_map`, incrementing</span>
-                    <span class="comment">// it by one each time. This mean that the generated ops have ascending (but</span>
-                    <span class="comment">// not necessarily consecutive because not every `Action` is an `Insert`)</span>
-                    <span class="comment">// counters. This makes it easier to debug failures - if we just used a random</span>
-                    <span class="comment">// counter it would be much harder to see where things are out of order.</span>
-                    .<span class="ident">prop_flat_map</span>(<span class="op">|</span>(<span class="ident">counter</span>, <span class="ident">model</span>)<span class="op">|</span> {
-                        <span class="kw">let</span> <span class="ident">next_counter</span> <span class="op">=</span> <span class="ident">counter</span> <span class="op">+</span> <span class="number">1</span>;
-                        <span class="ident">model</span>.<span class="ident">next</span>(<span class="ident">counter</span>).<span class="ident">prop_map</span>(<span class="kw">move</span> <span class="op">|</span><span class="ident">m</span><span class="op">|</span> (<span class="ident">next_counter</span>, <span class="ident">m</span>))
+            .boxed();
+            <span class="kw">for _ in </span><span class="number">0</span>..num_steps {
+                strat = strat
+                    <span class="comment">// Note the counter, which we feed through each `prop_flat_map`, incrementing
+                    // it by one each time. This mean that the generated ops have ascending (but
+                    // not necessarily consecutive because not every `Action` is an `Insert`)
+                    // counters. This makes it easier to debug failures - if we just used a random
+                    // counter it would be much harder to see where things are out of order.
+                    </span>.prop_flat_map(|(counter, model)| {
+                        <span class="kw">let </span>next_counter = counter + <span class="number">1</span>;
+                        model.next(counter).prop_map(<span class="kw">move </span>|m| (next_counter, m))
                     })
-                    .<span class="ident">boxed</span>();
+                    .boxed();
             }
-            <span class="ident">strat</span>.<span class="ident">prop_map</span>(<span class="op">|</span>(<span class="kw">_</span>, <span class="ident">model</span>)<span class="op">|</span> <span class="ident">model</span>)
+            strat.prop_map(|(<span class="kw">_</span>, model)| model)
         })
     }
 
-    <span class="kw">fn</span> <span class="ident">make_optree</span>(<span class="ident">actions</span>: <span class="kw-2">&amp;</span>[<span class="ident">Action</span>]) -&gt; <span class="ident"><span class="kw">super</span>::OpTreeInternal</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">optree</span> <span class="op">=</span> <span class="ident">OpTreeInternal::new</span>();
-        <span class="kw">for</span> <span class="ident">action</span> <span class="kw">in</span> <span class="ident">actions</span> {
-            <span class="kw">match</span> <span class="ident">action</span> {
-                <span class="ident">Action::Insert</span>(<span class="ident">index</span>, <span class="ident">op</span>) =&gt; <span class="ident">optree</span>.<span class="ident">insert</span>(<span class="kw-2">*</span><span class="ident">index</span>, <span class="ident">op</span>.<span class="ident">clone</span>()),
-                <span class="ident">Action::Delete</span>(<span class="ident">index</span>) =&gt; {
-                    <span class="ident">optree</span>.<span class="ident">remove</span>(<span class="kw-2">*</span><span class="ident">index</span>);
+    <span class="kw">fn </span>make_optree(actions: <span class="kw-2">&amp;</span>[Action]) -&gt; <span class="kw">super</span>::OpTreeInternal {
+        <span class="kw">let </span><span class="kw-2">mut </span>optree = OpTreeInternal::new();
+        <span class="kw">for </span>action <span class="kw">in </span>actions {
+            <span class="kw">match </span>action {
+                Action::Insert(index, op) =&gt; optree.insert(<span class="kw-2">*</span>index, op.clone()),
+                Action::Delete(index) =&gt; {
+                    optree.remove(<span class="kw-2">*</span>index);
                 }
             }
         }
-        <span class="ident">optree</span>
+        optree
     }
 
-    <span class="doccomment">/// A model for calls to `nth`. `NthModel::n` is guarnateed to be in `(0..model.len())`</span>
-    <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>)]</span>
-    <span class="kw">struct</span> <span class="ident">NthModel</span> {
-        <span class="ident">model</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Op</span><span class="op">&gt;</span>,
-        <span class="ident">actions</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Action</span><span class="op">&gt;</span>,
-        <span class="ident">n</span>: <span class="ident">usize</span>,
+    <span class="doccomment">/// A model for calls to `nth`. `NthModel::n` is guarnateed to be in `(0..model.len())`
+    </span><span class="attribute">#[derive(Clone)]
+    </span><span class="kw">struct </span>NthModel {
+        model: Vec&lt;Op&gt;,
+        actions: Vec&lt;Action&gt;,
+        n: usize,
     }
 
-    <span class="kw">impl</span> <span class="ident">std::fmt::Debug</span> <span class="kw">for</span> <span class="ident">NthModel</span> {
-        <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">std::fmt::Result</span> {
-            <span class="ident">f</span>.<span class="ident">debug_struct</span>(<span class="string">&quot;Model&quot;</span>)
-                .<span class="ident">field</span>(<span class="string">&quot;actions&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">actions</span>)
-                .<span class="ident">field</span>(<span class="string">&quot;model&quot;</span>, <span class="kw-2">&amp;</span><span class="ident">DebugOps</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">model</span>))
-                .<span class="ident">field</span>(<span class="string">&quot;n&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">n</span>)
-                .<span class="ident">finish</span>()
+    <span class="kw">impl </span>std::fmt::Debug <span class="kw">for </span>NthModel {
+        <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; std::fmt::Result {
+            f.debug_struct(<span class="string">&quot;Model&quot;</span>)
+                .field(<span class="string">&quot;actions&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.actions)
+                .field(<span class="string">&quot;model&quot;</span>, <span class="kw-2">&amp;</span>DebugOps(<span class="kw-2">&amp;</span><span class="self">self</span>.model))
+                .field(<span class="string">&quot;n&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.n)
+                .finish()
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">nth_model</span>() -&gt; <span class="kw">impl</span> <span class="ident">Strategy</span><span class="op">&lt;</span><span class="ident">Value</span> <span class="op">=</span> <span class="ident">NthModel</span><span class="op">&gt;</span> {
-        <span class="ident">model</span>().<span class="ident">prop_flat_map</span>(<span class="op">|</span><span class="ident">model</span><span class="op">|</span> {
-            <span class="kw">if</span> <span class="ident">model</span>.<span class="ident">model</span>.<span class="ident">is_empty</span>() {
-                <span class="ident">Just</span>(<span class="ident">NthModel</span> {
-                    <span class="ident">model</span>: <span class="ident">model</span>.<span class="ident">model</span>,
-                    <span class="ident">actions</span>: <span class="ident">model</span>.<span class="ident">actions</span>,
-                    <span class="ident">n</span>: <span class="number">0</span>,
+    <span class="kw">fn </span>nth_model() -&gt; <span class="kw">impl </span>Strategy&lt;Value = NthModel&gt; {
+        model().prop_flat_map(|model| {
+            <span class="kw">if </span>model.model.is_empty() {
+                Just(NthModel {
+                    model: model.model,
+                    actions: model.actions,
+                    n: <span class="number">0</span>,
                 })
-                .<span class="ident">boxed</span>()
-            } <span class="kw">else</span> {
-                (<span class="number">0</span>..<span class="ident">model</span>.<span class="ident">model</span>.<span class="ident">len</span>(), <span class="ident">Just</span>(<span class="ident">model</span>))
-                    .<span class="ident">prop_map</span>(<span class="op">|</span>(<span class="ident">index</span>, <span class="ident">model</span>)<span class="op">|</span> <span class="ident">NthModel</span> {
-                        <span class="ident">model</span>: <span class="ident">model</span>.<span class="ident">model</span>,
-                        <span class="ident">actions</span>: <span class="ident">model</span>.<span class="ident">actions</span>,
-                        <span class="ident">n</span>: <span class="ident">index</span>,
+                .boxed()
+            } <span class="kw">else </span>{
+                (<span class="number">0</span>..model.model.len(), Just(model))
+                    .prop_map(|(index, model)| NthModel {
+                        model: model.model,
+                        actions: model.actions,
+                        n: index,
                     })
-                    .<span class="ident">boxed</span>()
+                    .boxed()
             }
         })
     }
 
-    <span class="macro">proptest!</span> {
-        <span class="attribute">#[<span class="ident">test</span>]</span>
-        <span class="kw">fn</span> <span class="ident">optree_iter_proptest</span>(<span class="ident">model</span> <span class="kw">in</span> <span class="ident">model</span>()) {
-            <span class="kw">let</span> <span class="ident">optree</span> <span class="op">=</span> <span class="ident">make_optree</span>(<span class="kw-2">&amp;</span><span class="ident">model</span>.<span class="ident">actions</span>);
-            <span class="kw">let</span> <span class="ident">iter</span> <span class="op">=</span> <span class="ident"><span class="kw">super</span>::OpTreeIter::new</span>(<span class="kw-2">&amp;</span><span class="ident">optree</span>);
-            <span class="kw">let</span> <span class="ident">iterated</span> <span class="op">=</span> <span class="ident">iter</span>.<span class="ident">cloned</span>().<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
-            <span class="macro">assert_eq!</span>(<span class="ident">DebugOps</span>(<span class="kw-2">&amp;</span><span class="ident">model</span>.<span class="ident">model</span>), <span class="ident">DebugOps</span>(<span class="kw-2">&amp;</span><span class="ident">iterated</span>))
+    <span class="macro">proptest! </span>{
+        <span class="attribute">#[test]
+        </span><span class="kw">fn </span>optree_iter_proptest(model <span class="kw">in </span>model()) {
+            <span class="kw">let </span>optree = make_optree(<span class="kw-2">&amp;</span>model.actions);
+            <span class="kw">let </span>iter = <span class="kw">super</span>::OpTreeIter::new(<span class="kw-2">&amp;</span>optree);
+            <span class="kw">let </span>iterated = iter.cloned().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+            <span class="macro">assert_eq!</span>(DebugOps(<span class="kw-2">&amp;</span>model.model), DebugOps(<span class="kw-2">&amp;</span>iterated))
         }
 
-        <span class="attribute">#[<span class="ident">test</span>]</span>
-        <span class="kw">fn</span> <span class="ident">optree_iter_nth</span>(<span class="ident">model</span> <span class="kw">in</span> <span class="ident">nth_model</span>()) {
-            <span class="kw">let</span> <span class="ident">optree</span> <span class="op">=</span> <span class="ident">make_optree</span>(<span class="kw-2">&amp;</span><span class="ident">model</span>.<span class="ident">actions</span>);
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">iter</span> <span class="op">=</span> <span class="ident"><span class="kw">super</span>::OpTreeIter::new</span>(<span class="kw-2">&amp;</span><span class="ident">optree</span>);
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">model_iter</span> <span class="op">=</span> <span class="ident">model</span>.<span class="ident">model</span>.<span class="ident">iter</span>();
-            <span class="macro">assert_eq!</span>(<span class="ident">model_iter</span>.<span class="ident">nth</span>(<span class="ident">model</span>.<span class="ident">n</span>), <span class="ident">iter</span>.<span class="ident">nth</span>(<span class="ident">model</span>.<span class="ident">n</span>));
+        <span class="attribute">#[test]
+        </span><span class="kw">fn </span>optree_iter_nth(model <span class="kw">in </span>nth_model()) {
+            <span class="kw">let </span>optree = make_optree(<span class="kw-2">&amp;</span>model.actions);
+            <span class="kw">let </span><span class="kw-2">mut </span>iter = <span class="kw">super</span>::OpTreeIter::new(<span class="kw-2">&amp;</span>optree);
+            <span class="kw">let </span><span class="kw-2">mut </span>model_iter = model.model.iter();
+            <span class="macro">assert_eq!</span>(model_iter.nth(model.n), iter.nth(model.n));
 
-            <span class="kw">let</span> <span class="ident">tail</span> <span class="op">=</span> <span class="ident">iter</span>.<span class="ident">cloned</span>().<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
-            <span class="kw">let</span> <span class="ident">expected_tail</span> <span class="op">=</span> <span class="ident">model_iter</span>.<span class="ident">cloned</span>().<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
-            <span class="macro">assert_eq!</span>(<span class="ident">DebugOps</span>(<span class="ident">tail</span>.<span class="ident">as_slice</span>()), <span class="ident">DebugOps</span>(<span class="ident">expected_tail</span>.<span class="ident">as_slice</span>()));
+            <span class="kw">let </span>tail = iter.cloned().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+            <span class="kw">let </span>expected_tail = model_iter.cloned().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+            <span class="macro">assert_eq!</span>(DebugOps(tail.as_slice()), DebugOps(expected_tail.as_slice()));
         }
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

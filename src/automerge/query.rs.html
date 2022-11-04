@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/query.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>query.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/query.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>query.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -271,276 +271,276 @@
 <span id="269">269</span>
 <span id="270">270</span>
 <span id="271">271</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::op_tree</span>::{<span class="ident">OpSetMetadata</span>, <span class="ident">OpTreeNode</span>};
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::types</span>::{<span class="ident">Clock</span>, <span class="ident">Counter</span>, <span class="ident">Key</span>, <span class="ident">Op</span>, <span class="ident">OpId</span>, <span class="ident">OpType</span>, <span class="ident">ScalarValue</span>};
-<span class="kw">use</span> <span class="ident">fxhash::FxBuildHasher</span>;
-<span class="kw">use</span> <span class="ident">std::cmp::Ordering</span>;
-<span class="kw">use</span> <span class="ident">std::collections</span>::{<span class="ident">HashMap</span>, <span class="ident">HashSet</span>};
-<span class="kw">use</span> <span class="ident">std::fmt::Debug</span>;
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTreeNode};
+<span class="kw">use </span><span class="kw">crate</span>::types::{Clock, Counter, Key, Op, OpId, OpType, ScalarValue};
+<span class="kw">use </span>fxhash::FxBuildHasher;
+<span class="kw">use </span>std::cmp::Ordering;
+<span class="kw">use </span>std::collections::{HashMap, HashSet};
+<span class="kw">use </span>std::fmt::Debug;
 
-<span class="kw">mod</span> <span class="ident">elem_id_pos</span>;
-<span class="kw">mod</span> <span class="ident">insert</span>;
-<span class="kw">mod</span> <span class="ident">keys</span>;
-<span class="kw">mod</span> <span class="ident">keys_at</span>;
-<span class="kw">mod</span> <span class="ident">len</span>;
-<span class="kw">mod</span> <span class="ident">len_at</span>;
-<span class="kw">mod</span> <span class="ident">list_range</span>;
-<span class="kw">mod</span> <span class="ident">list_range_at</span>;
-<span class="kw">mod</span> <span class="ident">list_vals</span>;
-<span class="kw">mod</span> <span class="ident">list_vals_at</span>;
-<span class="kw">mod</span> <span class="ident">map_range</span>;
-<span class="kw">mod</span> <span class="ident">map_range_at</span>;
-<span class="kw">mod</span> <span class="ident">nth</span>;
-<span class="kw">mod</span> <span class="ident">nth_at</span>;
-<span class="kw">mod</span> <span class="ident">opid</span>;
-<span class="kw">mod</span> <span class="ident">prop</span>;
-<span class="kw">mod</span> <span class="ident">prop_at</span>;
-<span class="kw">mod</span> <span class="ident">seek_op</span>;
-<span class="kw">mod</span> <span class="ident">seek_op_with_patch</span>;
+<span class="kw">mod </span>elem_id_pos;
+<span class="kw">mod </span>insert;
+<span class="kw">mod </span>keys;
+<span class="kw">mod </span>keys_at;
+<span class="kw">mod </span>len;
+<span class="kw">mod </span>len_at;
+<span class="kw">mod </span>list_range;
+<span class="kw">mod </span>list_range_at;
+<span class="kw">mod </span>list_vals;
+<span class="kw">mod </span>list_vals_at;
+<span class="kw">mod </span>map_range;
+<span class="kw">mod </span>map_range_at;
+<span class="kw">mod </span>nth;
+<span class="kw">mod </span>nth_at;
+<span class="kw">mod </span>opid;
+<span class="kw">mod </span>prop;
+<span class="kw">mod </span>prop_at;
+<span class="kw">mod </span>seek_op;
+<span class="kw">mod </span>seek_op_with_patch;
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">elem_id_pos::ElemIdPos</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">insert::InsertNth</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">keys::Keys</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">keys_at::KeysAt</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">len::Len</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">len_at::LenAt</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">list_range::ListRange</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">list_range_at::ListRangeAt</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">list_vals::ListVals</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">list_vals_at::ListValsAt</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">map_range::MapRange</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">map_range_at::MapRangeAt</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">nth::Nth</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">nth_at::NthAt</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">opid::OpIdSearch</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">prop::Prop</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">prop_at::PropAt</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">seek_op::SeekOp</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">seek_op_with_patch::SeekOpWithPatch</span>;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>elem_id_pos::ElemIdPos;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>insert::InsertNth;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>keys::Keys;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>keys_at::KeysAt;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>len::Len;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>len_at::LenAt;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>list_range::ListRange;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>list_range_at::ListRangeAt;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>list_vals::ListVals;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>list_vals_at::ListValsAt;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>map_range::MapRange;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>map_range_at::MapRangeAt;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>nth::Nth;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>nth_at::NthAt;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>opid::OpIdSearch;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>prop::Prop;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>prop_at::PropAt;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>seek_op::SeekOp;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>seek_op_with_patch::SeekOpWithPatch;
 
-<span class="comment">// use a struct for the args for clarity as they are passed up the update chain in the optree</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">ReplaceArgs</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">old_id</span>: <span class="ident">OpId</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">new_id</span>: <span class="ident">OpId</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">old_visible</span>: <span class="ident">bool</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">new_visible</span>: <span class="ident">bool</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">new_key</span>: <span class="ident">Key</span>,
+<span class="comment">// use a struct for the args for clarity as they are passed up the update chain in the optree
+</span><span class="attribute">#[derive(Debug, Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ReplaceArgs {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) old_id: OpId,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) new_id: OpId,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) old_visible: bool,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) new_visible: bool,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) new_key: Key,
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">CounterData</span> {
-    <span class="ident">pos</span>: <span class="ident">usize</span>,
-    <span class="ident">val</span>: <span class="ident">i64</span>,
-    <span class="ident">succ</span>: <span class="ident">HashSet</span><span class="op">&lt;</span><span class="ident">OpId</span><span class="op">&gt;</span>,
-    <span class="ident">op</span>: <span class="ident">Op</span>,
+<span class="attribute">#[derive(Debug, Clone, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>CounterData {
+    pos: usize,
+    val: i64,
+    succ: HashSet&lt;OpId&gt;,
+    op: Op,
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">trait</span> <span class="ident">TreeQuery</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="attribute">#[<span class="ident">inline</span>(<span class="ident">always</span>)]</span>
-    <span class="kw">fn</span> <span class="ident">query_node_with_metadata</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">child</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">OpTreeNode</span>,
-        <span class="ident">_m</span>: <span class="kw-2">&amp;</span><span class="ident">OpSetMetadata</span>,
-    ) -&gt; <span class="ident">QueryResult</span> {
-        <span class="self">self</span>.<span class="ident">query_node</span>(<span class="ident">child</span>)
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">trait </span>TreeQuery&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">fn </span>query_node_with_metadata(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode,
+        _m: <span class="kw-2">&amp;</span>OpSetMetadata,
+    ) -&gt; QueryResult {
+        <span class="self">self</span>.query_node(child)
     }
 
-    <span class="kw">fn</span> <span class="ident">query_node</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">_child</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">OpTreeNode</span>) -&gt; <span class="ident">QueryResult</span> {
-        <span class="ident">QueryResult::Descend</span>
+    <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode) -&gt; QueryResult {
+        QueryResult::Descend
     }
 
-    <span class="attribute">#[<span class="ident">inline</span>(<span class="ident">always</span>)]</span>
-    <span class="kw">fn</span> <span class="ident">query_element_with_metadata</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">element</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Op</span>, <span class="ident">_m</span>: <span class="kw-2">&amp;</span><span class="ident">OpSetMetadata</span>) -&gt; <span class="ident">QueryResult</span> {
-        <span class="self">self</span>.<span class="ident">query_element</span>(<span class="ident">element</span>)
+    <span class="attribute">#[inline(always)]
+    </span><span class="kw">fn </span>query_element_with_metadata(<span class="kw-2">&amp;mut </span><span class="self">self</span>, element: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op, _m: <span class="kw-2">&amp;</span>OpSetMetadata) -&gt; QueryResult {
+        <span class="self">self</span>.query_element(element)
     }
 
-    <span class="kw">fn</span> <span class="ident">query_element</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">_element</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Op</span>) -&gt; <span class="ident">QueryResult</span> {
+    <span class="kw">fn </span>query_element(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _element: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op) -&gt; QueryResult {
         <span class="macro">panic!</span>(<span class="string">&quot;invalid element query&quot;</span>)
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">QueryResult</span> {
-    <span class="ident">Next</span>,
-    <span class="doccomment">/// Skip this many elements, only allowed from the root node.</span>
-    <span class="ident">Skip</span>(<span class="ident">usize</span>),
-    <span class="ident">Descend</span>,
-    <span class="ident">Finish</span>,
+<span class="attribute">#[derive(Debug, Clone, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>QueryResult {
+    Next,
+    <span class="doccomment">/// Skip this many elements, only allowed from the root node.
+    </span>Skip(usize),
+    Descend,
+    Finish,
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">Index</span> {
-    <span class="doccomment">/// The map of visible keys to the number of visible operations for that key.</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">visible</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Key</span>, <span class="ident">usize</span>, <span class="ident">FxBuildHasher</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// Set of opids found in this node and below.</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">ops</span>: <span class="ident">HashSet</span><span class="op">&lt;</span><span class="ident">OpId</span>, <span class="ident">FxBuildHasher</span><span class="op">&gt;</span>,
+<span class="attribute">#[derive(Clone, Debug, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Index {
+    <span class="doccomment">/// The map of visible keys to the number of visible operations for that key.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) visible: HashMap&lt;Key, usize, FxBuildHasher&gt;,
+    <span class="doccomment">/// Set of opids found in this node and below.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) ops: HashSet&lt;OpId, FxBuildHasher&gt;,
 }
 
-<span class="kw">impl</span> <span class="ident">Index</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>() -&gt; <span class="self">Self</span> {
-        <span class="ident">Index</span> {
-            <span class="ident">visible</span>: <span class="ident">Default::default</span>(),
-            <span class="ident">ops</span>: <span class="ident">Default::default</span>(),
+<span class="kw">impl </span>Index {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new() -&gt; <span class="self">Self </span>{
+        Index {
+            visible: Default::default(),
+            ops: Default::default(),
         }
     }
 
-    <span class="doccomment">/// Get the number of visible elements in this index.</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">visible_len</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
-        <span class="self">self</span>.<span class="ident">visible</span>.<span class="ident">len</span>()
+    <span class="doccomment">/// Get the number of visible elements in this index.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>visible_len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.visible.len()
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">has_visible</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">seen</span>: <span class="kw-2">&amp;</span><span class="ident">Key</span>) -&gt; <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="ident">visible</span>.<span class="ident">contains_key</span>(<span class="ident">seen</span>)
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>has_visible(<span class="kw-2">&amp;</span><span class="self">self</span>, seen: <span class="kw-2">&amp;</span>Key) -&gt; bool {
+        <span class="self">self</span>.visible.contains_key(seen)
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">replace</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">ReplaceArgs</span> {
-            <span class="ident">old_id</span>,
-            <span class="ident">new_id</span>,
-            <span class="ident">old_visible</span>,
-            <span class="ident">new_visible</span>,
-            <span class="ident">new_key</span>,
-        }: <span class="kw-2">&amp;</span><span class="ident">ReplaceArgs</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>replace(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        ReplaceArgs {
+            old_id,
+            new_id,
+            old_visible,
+            new_visible,
+            new_key,
+        }: <span class="kw-2">&amp;</span>ReplaceArgs,
     ) {
-        <span class="kw">if</span> <span class="ident">old_id</span> <span class="op">!</span><span class="op">=</span> <span class="ident">new_id</span> {
-            <span class="self">self</span>.<span class="ident">ops</span>.<span class="ident">remove</span>(<span class="ident">old_id</span>);
-            <span class="self">self</span>.<span class="ident">ops</span>.<span class="ident">insert</span>(<span class="kw-2">*</span><span class="ident">new_id</span>);
+        <span class="kw">if </span>old_id != new_id {
+            <span class="self">self</span>.ops.remove(old_id);
+            <span class="self">self</span>.ops.insert(<span class="kw-2">*</span>new_id);
         }
 
-        <span class="kw">match</span> (<span class="ident">new_visible</span>, <span class="ident">old_visible</span>, <span class="ident">new_key</span>) {
-            (<span class="bool-val">false</span>, <span class="bool-val">true</span>, <span class="ident">key</span>) =&gt; <span class="kw">match</span> <span class="self">self</span>.<span class="ident">visible</span>.<span class="ident">get</span>(<span class="ident">key</span>).<span class="ident">copied</span>() {
-                <span class="prelude-val">Some</span>(<span class="ident">n</span>) <span class="kw">if</span> <span class="ident">n</span> <span class="op">==</span> <span class="number">1</span> =&gt; {
-                    <span class="self">self</span>.<span class="ident">visible</span>.<span class="ident">remove</span>(<span class="ident">key</span>);
+        <span class="kw">match </span>(new_visible, old_visible, new_key) {
+            (<span class="bool-val">false</span>, <span class="bool-val">true</span>, key) =&gt; <span class="kw">match </span><span class="self">self</span>.visible.get(key).copied() {
+                <span class="prelude-val">Some</span>(n) <span class="kw">if </span>n == <span class="number">1 </span>=&gt; {
+                    <span class="self">self</span>.visible.remove(key);
                 }
-                <span class="prelude-val">Some</span>(<span class="ident">n</span>) =&gt; {
-                    <span class="self">self</span>.<span class="ident">visible</span>.<span class="ident">insert</span>(<span class="kw-2">*</span><span class="ident">key</span>, <span class="ident">n</span> <span class="op">-</span> <span class="number">1</span>);
+                <span class="prelude-val">Some</span>(n) =&gt; {
+                    <span class="self">self</span>.visible.insert(<span class="kw-2">*</span>key, n - <span class="number">1</span>);
                 }
-                <span class="prelude-val">None</span> =&gt; <span class="macro">panic!</span>(<span class="string">&quot;remove overun in index&quot;</span>),
+                <span class="prelude-val">None </span>=&gt; <span class="macro">panic!</span>(<span class="string">&quot;remove overun in index&quot;</span>),
             },
-            (<span class="bool-val">true</span>, <span class="bool-val">false</span>, <span class="ident">key</span>) =&gt; <span class="kw-2">*</span><span class="self">self</span>.<span class="ident">visible</span>.<span class="ident">entry</span>(<span class="kw-2">*</span><span class="ident">key</span>).<span class="ident">or_default</span>() <span class="op">+</span><span class="op">=</span> <span class="number">1</span>,
-            <span class="kw">_</span> =&gt; {}
+            (<span class="bool-val">true</span>, <span class="bool-val">false</span>, key) =&gt; <span class="kw-2">*</span><span class="self">self</span>.visible.entry(<span class="kw-2">*</span>key).or_default() += <span class="number">1</span>,
+            <span class="kw">_ </span>=&gt; {}
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">insert</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">op</span>: <span class="kw-2">&amp;</span><span class="ident">Op</span>) {
-        <span class="self">self</span>.<span class="ident">ops</span>.<span class="ident">insert</span>(<span class="ident">op</span>.<span class="ident">id</span>);
-        <span class="kw">if</span> <span class="ident">op</span>.<span class="ident">visible</span>() {
-            <span class="kw-2">*</span><span class="self">self</span>.<span class="ident">visible</span>.<span class="ident">entry</span>(<span class="ident">op</span>.<span class="ident">elemid_or_key</span>()).<span class="ident">or_default</span>() <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: <span class="kw-2">&amp;</span>Op) {
+        <span class="self">self</span>.ops.insert(op.id);
+        <span class="kw">if </span>op.visible() {
+            <span class="kw-2">*</span><span class="self">self</span>.visible.entry(op.elemid_or_key()).or_default() += <span class="number">1</span>;
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">remove</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">op</span>: <span class="kw-2">&amp;</span><span class="ident">Op</span>) {
-        <span class="self">self</span>.<span class="ident">ops</span>.<span class="ident">remove</span>(<span class="kw-2">&amp;</span><span class="ident">op</span>.<span class="ident">id</span>);
-        <span class="kw">if</span> <span class="ident">op</span>.<span class="ident">visible</span>() {
-            <span class="kw">let</span> <span class="ident">key</span> <span class="op">=</span> <span class="ident">op</span>.<span class="ident">elemid_or_key</span>();
-            <span class="kw">match</span> <span class="self">self</span>.<span class="ident">visible</span>.<span class="ident">get</span>(<span class="kw-2">&amp;</span><span class="ident">key</span>).<span class="ident">copied</span>() {
-                <span class="prelude-val">Some</span>(<span class="ident">n</span>) <span class="kw">if</span> <span class="ident">n</span> <span class="op">==</span> <span class="number">1</span> =&gt; {
-                    <span class="self">self</span>.<span class="ident">visible</span>.<span class="ident">remove</span>(<span class="kw-2">&amp;</span><span class="ident">key</span>);
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>remove(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: <span class="kw-2">&amp;</span>Op) {
+        <span class="self">self</span>.ops.remove(<span class="kw-2">&amp;</span>op.id);
+        <span class="kw">if </span>op.visible() {
+            <span class="kw">let </span>key = op.elemid_or_key();
+            <span class="kw">match </span><span class="self">self</span>.visible.get(<span class="kw-2">&amp;</span>key).copied() {
+                <span class="prelude-val">Some</span>(n) <span class="kw">if </span>n == <span class="number">1 </span>=&gt; {
+                    <span class="self">self</span>.visible.remove(<span class="kw-2">&amp;</span>key);
                 }
-                <span class="prelude-val">Some</span>(<span class="ident">n</span>) =&gt; {
-                    <span class="self">self</span>.<span class="ident">visible</span>.<span class="ident">insert</span>(<span class="ident">key</span>, <span class="ident">n</span> <span class="op">-</span> <span class="number">1</span>);
+                <span class="prelude-val">Some</span>(n) =&gt; {
+                    <span class="self">self</span>.visible.insert(key, n - <span class="number">1</span>);
                 }
-                <span class="prelude-val">None</span> =&gt; <span class="macro">panic!</span>(<span class="string">&quot;remove overun in index&quot;</span>),
+                <span class="prelude-val">None </span>=&gt; <span class="macro">panic!</span>(<span class="string">&quot;remove overun in index&quot;</span>),
             }
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">merge</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="ident">Index</span>) {
-        <span class="kw">for</span> <span class="ident">id</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">other</span>.<span class="ident">ops</span> {
-            <span class="self">self</span>.<span class="ident">ops</span>.<span class="ident">insert</span>(<span class="kw-2">*</span><span class="ident">id</span>);
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;</span>Index) {
+        <span class="kw">for </span>id <span class="kw">in </span><span class="kw-2">&amp;</span>other.ops {
+            <span class="self">self</span>.ops.insert(<span class="kw-2">*</span>id);
         }
-        <span class="kw">for</span> (<span class="ident">elem</span>, <span class="ident">n</span>) <span class="kw">in</span> <span class="ident">other</span>.<span class="ident">visible</span>.<span class="ident">iter</span>() {
-            <span class="kw-2">*</span><span class="self">self</span>.<span class="ident">visible</span>.<span class="ident">entry</span>(<span class="kw-2">*</span><span class="ident">elem</span>).<span class="ident">or_default</span>() <span class="op">+</span><span class="op">=</span> <span class="ident">n</span>;
+        <span class="kw">for </span>(elem, n) <span class="kw">in </span>other.visible.iter() {
+            <span class="kw-2">*</span><span class="self">self</span>.visible.entry(<span class="kw-2">*</span>elem).or_default() += n;
         }
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Default</span> <span class="kw">for</span> <span class="ident">Index</span> {
-    <span class="kw">fn</span> <span class="ident">default</span>() -&gt; <span class="self">Self</span> {
-        <span class="ident"><span class="self">Self</span>::new</span>()
+<span class="kw">impl </span>Default <span class="kw">for </span>Index {
+    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>::new()
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>, <span class="ident">Default</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">VisWindow</span> {
-    <span class="ident">counters</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">OpId</span>, <span class="ident">CounterData</span><span class="op">&gt;</span>,
+<span class="attribute">#[derive(Debug, Clone, PartialEq, Default)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>VisWindow {
+    counters: HashMap&lt;OpId, CounterData&gt;,
 }
 
-<span class="kw">impl</span> <span class="ident">VisWindow</span> {
-    <span class="kw">fn</span> <span class="ident">visible_at</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">op</span>: <span class="kw-2">&amp;</span><span class="ident">Op</span>, <span class="ident">pos</span>: <span class="ident">usize</span>, <span class="ident">clock</span>: <span class="kw-2">&amp;</span><span class="ident">Clock</span>) -&gt; <span class="ident">bool</span> {
-        <span class="kw">if</span> <span class="op">!</span><span class="ident">clock</span>.<span class="ident">covers</span>(<span class="kw-2">&amp;</span><span class="ident">op</span>.<span class="ident">id</span>) {
-            <span class="kw">return</span> <span class="bool-val">false</span>;
+<span class="kw">impl </span>VisWindow {
+    <span class="kw">fn </span>visible_at(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: <span class="kw-2">&amp;</span>Op, pos: usize, clock: <span class="kw-2">&amp;</span>Clock) -&gt; bool {
+        <span class="kw">if </span>!clock.covers(<span class="kw-2">&amp;</span>op.id) {
+            <span class="kw">return </span><span class="bool-val">false</span>;
         }
 
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">visible</span> <span class="op">=</span> <span class="bool-val">false</span>;
-        <span class="kw">match</span> <span class="ident">op</span>.<span class="ident">action</span> {
-            <span class="ident">OpType::Put</span>(<span class="ident">ScalarValue::Counter</span>(<span class="ident">Counter</span> { <span class="ident">start</span>, .. })) =&gt; {
-                <span class="self">self</span>.<span class="ident">counters</span>.<span class="ident">insert</span>(
-                    <span class="ident">op</span>.<span class="ident">id</span>,
-                    <span class="ident">CounterData</span> {
-                        <span class="ident">pos</span>,
-                        <span class="ident">val</span>: <span class="ident">start</span>,
-                        <span class="ident">succ</span>: <span class="ident">op</span>.<span class="ident">succ</span>.<span class="ident">into_iter</span>().<span class="ident">cloned</span>().<span class="ident">collect</span>(),
-                        <span class="ident">op</span>: <span class="ident">op</span>.<span class="ident">clone</span>(),
+        <span class="kw">let </span><span class="kw-2">mut </span>visible = <span class="bool-val">false</span>;
+        <span class="kw">match </span>op.action {
+            OpType::Put(ScalarValue::Counter(Counter { start, .. })) =&gt; {
+                <span class="self">self</span>.counters.insert(
+                    op.id,
+                    CounterData {
+                        pos,
+                        val: start,
+                        succ: op.succ.into_iter().cloned().collect(),
+                        op: op.clone(),
                     },
                 );
-                <span class="kw">if</span> <span class="op">!</span><span class="ident">op</span>.<span class="ident">succ</span>.<span class="ident">into_iter</span>().<span class="ident">any</span>(<span class="op">|</span><span class="ident">i</span><span class="op">|</span> <span class="ident">clock</span>.<span class="ident">covers</span>(<span class="ident">i</span>)) {
-                    <span class="ident">visible</span> <span class="op">=</span> <span class="bool-val">true</span>;
+                <span class="kw">if </span>!op.succ.into_iter().any(|i| clock.covers(i)) {
+                    visible = <span class="bool-val">true</span>;
                 }
             }
-            <span class="ident">OpType::Increment</span>(<span class="ident">inc_val</span>) =&gt; {
-                <span class="kw">for</span> <span class="ident">id</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">op</span>.<span class="ident">pred</span> {
-                    <span class="comment">// pred is always before op.id so we can see them</span>
-                    <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="kw-2">mut</span> <span class="ident">entry</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">counters</span>.<span class="ident">get_mut</span>(<span class="ident">id</span>) {
-                        <span class="ident">entry</span>.<span class="ident">succ</span>.<span class="ident">remove</span>(<span class="kw-2">&amp;</span><span class="ident">op</span>.<span class="ident">id</span>);
-                        <span class="ident">entry</span>.<span class="ident">val</span> <span class="op">+</span><span class="op">=</span> <span class="ident">inc_val</span>;
-                        <span class="ident">entry</span>.<span class="ident">op</span>.<span class="ident">action</span> <span class="op">=</span> <span class="ident">OpType::Put</span>(<span class="ident">ScalarValue::counter</span>(<span class="ident">entry</span>.<span class="ident">val</span>));
-                        <span class="kw">if</span> <span class="op">!</span><span class="ident">entry</span>.<span class="ident">succ</span>.<span class="ident">iter</span>().<span class="ident">any</span>(<span class="op">|</span><span class="ident">i</span><span class="op">|</span> <span class="ident">clock</span>.<span class="ident">covers</span>(<span class="ident">i</span>)) {
-                            <span class="ident">visible</span> <span class="op">=</span> <span class="bool-val">true</span>;
+            OpType::Increment(inc_val) =&gt; {
+                <span class="kw">for </span>id <span class="kw">in </span><span class="kw-2">&amp;</span>op.pred {
+                    <span class="comment">// pred is always before op.id so we can see them
+                    </span><span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">mut </span>entry) = <span class="self">self</span>.counters.get_mut(id) {
+                        entry.succ.remove(<span class="kw-2">&amp;</span>op.id);
+                        entry.val += inc_val;
+                        entry.op.action = OpType::Put(ScalarValue::counter(entry.val));
+                        <span class="kw">if </span>!entry.succ.iter().any(|i| clock.covers(i)) {
+                            visible = <span class="bool-val">true</span>;
                         }
                     }
                 }
             }
-            <span class="kw">_</span> =&gt; {
-                <span class="kw">if</span> <span class="op">!</span><span class="ident">op</span>.<span class="ident">succ</span>.<span class="ident">into_iter</span>().<span class="ident">any</span>(<span class="op">|</span><span class="ident">i</span><span class="op">|</span> <span class="ident">clock</span>.<span class="ident">covers</span>(<span class="ident">i</span>)) {
-                    <span class="ident">visible</span> <span class="op">=</span> <span class="bool-val">true</span>;
+            <span class="kw">_ </span>=&gt; {
+                <span class="kw">if </span>!op.succ.into_iter().any(|i| clock.covers(i)) {
+                    visible = <span class="bool-val">true</span>;
                 }
             }
         };
-        <span class="ident">visible</span>
+        visible
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">seen_op</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">op</span>: <span class="kw-2">&amp;</span><span class="ident">Op</span>, <span class="ident">pos</span>: <span class="ident">usize</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">usize</span>, <span class="ident">Op</span>)<span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">result</span> <span class="op">=</span> <span class="macro">vec!</span>[];
-        <span class="kw">for</span> <span class="ident">pred</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">op</span>.<span class="ident">pred</span> {
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">entry</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">counters</span>.<span class="ident">get</span>(<span class="ident">pred</span>) {
-                <span class="ident">result</span>.<span class="ident">push</span>((<span class="ident">entry</span>.<span class="ident">pos</span>, <span class="ident">entry</span>.<span class="ident">op</span>.<span class="ident">clone</span>()));
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>seen_op(<span class="kw-2">&amp;</span><span class="self">self</span>, op: <span class="kw-2">&amp;</span>Op, pos: usize) -&gt; Vec&lt;(usize, Op)&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>result = <span class="macro">vec!</span>[];
+        <span class="kw">for </span>pred <span class="kw">in </span><span class="kw-2">&amp;</span>op.pred {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(entry) = <span class="self">self</span>.counters.get(pred) {
+                result.push((entry.pos, entry.op.clone()));
             }
         }
-        <span class="kw">if</span> <span class="ident">result</span>.<span class="ident">is_empty</span>() {
-            <span class="ident">result</span>.<span class="ident">push</span>((<span class="ident">pos</span>, <span class="ident">op</span>.<span class="ident">clone</span>()));
+        <span class="kw">if </span>result.is_empty() {
+            result.push((pos, op.clone()));
         }
-        <span class="ident">result</span>
+        result
     }
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">binary_search_by</span><span class="op">&lt;</span><span class="ident">F</span><span class="op">&gt;</span>(<span class="ident">node</span>: <span class="kw-2">&amp;</span><span class="ident">OpTreeNode</span>, <span class="ident">f</span>: <span class="ident">F</span>) -&gt; <span class="ident">usize</span>
-<span class="kw">where</span>
-    <span class="ident">F</span>: <span class="ident">Fn</span>(<span class="kw-2">&amp;</span><span class="ident">Op</span>) -&gt; <span class="ident">Ordering</span>,
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>binary_search_by&lt;F&gt;(node: <span class="kw-2">&amp;</span>OpTreeNode, f: F) -&gt; usize
+<span class="kw">where
+    </span>F: Fn(<span class="kw-2">&amp;</span>Op) -&gt; Ordering,
 {
-    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">right</span> <span class="op">=</span> <span class="ident">node</span>.<span class="ident">len</span>();
-    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">left</span> <span class="op">=</span> <span class="number">0</span>;
-    <span class="kw">while</span> <span class="ident">left</span> <span class="op">&lt;</span> <span class="ident">right</span> {
-        <span class="kw">let</span> <span class="ident">seq</span> <span class="op">=</span> (<span class="ident">left</span> <span class="op">+</span> <span class="ident">right</span>) <span class="op">/</span> <span class="number">2</span>;
-        <span class="kw">if</span> <span class="ident">f</span>(<span class="ident">node</span>.<span class="ident">get</span>(<span class="ident">seq</span>).<span class="ident">unwrap</span>()) <span class="op">==</span> <span class="ident">Ordering::Less</span> {
-            <span class="ident">left</span> <span class="op">=</span> <span class="ident">seq</span> <span class="op">+</span> <span class="number">1</span>;
-        } <span class="kw">else</span> {
-            <span class="ident">right</span> <span class="op">=</span> <span class="ident">seq</span>;
+    <span class="kw">let </span><span class="kw-2">mut </span>right = node.len();
+    <span class="kw">let </span><span class="kw-2">mut </span>left = <span class="number">0</span>;
+    <span class="kw">while </span>left &lt; right {
+        <span class="kw">let </span>seq = (left + right) / <span class="number">2</span>;
+        <span class="kw">if </span>f(node.get(seq).unwrap()) == Ordering::Less {
+            left = seq + <span class="number">1</span>;
+        } <span class="kw">else </span>{
+            right = seq;
         }
     }
-    <span class="ident">left</span>
+    left
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

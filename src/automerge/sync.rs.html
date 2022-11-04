@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/sync.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>sync.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/sync.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>sync.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -528,533 +528,533 @@
 <span id="526">526</span>
 <span id="527">527</span>
 <span id="528">528</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">itertools::Itertools</span>;
-<span class="kw">use</span> <span class="ident">serde::ser::SerializeMap</span>;
-<span class="kw">use</span> <span class="ident">std::collections</span>::{<span class="ident">HashMap</span>, <span class="ident">HashSet</span>};
+</pre><pre class="rust"><code><span class="kw">use </span>itertools::Itertools;
+<span class="kw">use </span>serde::ser::SerializeMap;
+<span class="kw">use </span>std::collections::{HashMap, HashSet};
 
-<span class="kw">use</span> <span class="kw">crate</span>::{
-    <span class="ident">storage</span>::{<span class="ident">parse</span>, <span class="ident">Change</span> <span class="kw">as</span> <span class="ident">StoredChange</span>, <span class="ident">ReadChangeOpError</span>},
-    <span class="ident">Automerge</span>, <span class="ident">AutomergeError</span>, <span class="ident">Change</span>, <span class="ident">ChangeHash</span>, <span class="ident">OpObserver</span>,
+<span class="kw">use crate</span>::{
+    storage::{parse, Change <span class="kw">as </span>StoredChange, ReadChangeOpError},
+    Automerge, AutomergeError, Change, ChangeHash, OpObserver,
 };
 
-<span class="kw">mod</span> <span class="ident">bloom</span>;
-<span class="kw">mod</span> <span class="ident">state</span>;
+<span class="kw">mod </span>bloom;
+<span class="kw">mod </span>state;
 
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">bloom::BloomFilter</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">state::DecodeError</span> <span class="kw">as</span> <span class="ident">DecodeStateError</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">state</span>::{<span class="ident">Have</span>, <span class="ident">State</span>};
+<span class="kw">pub use </span>bloom::BloomFilter;
+<span class="kw">pub use </span>state::DecodeError <span class="kw">as </span>DecodeStateError;
+<span class="kw">pub use </span>state::{Have, State};
 
-<span class="kw">const</span> <span class="ident">MESSAGE_TYPE_SYNC</span>: <span class="ident">u8</span> <span class="op">=</span> <span class="number">0x42</span>; <span class="comment">// first byte of a sync message, for identification</span>
+<span class="kw">const </span>MESSAGE_TYPE_SYNC: u8 = <span class="number">0x42</span>; <span class="comment">// first byte of a sync message, for identification
 
-<span class="kw">impl</span> <span class="ident">Automerge</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">generate_sync_message</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">sync_state</span>: <span class="kw-2">&amp;mut</span> <span class="ident">State</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Message</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">our_heads</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">get_heads</span>();
+</span><span class="kw">impl </span>Automerge {
+    <span class="kw">pub fn </span>generate_sync_message(<span class="kw-2">&amp;</span><span class="self">self</span>, sync_state: <span class="kw-2">&amp;mut </span>State) -&gt; <span class="prelude-ty">Option</span>&lt;Message&gt; {
+        <span class="kw">let </span>our_heads = <span class="self">self</span>.get_heads();
 
-        <span class="kw">let</span> <span class="ident">our_need</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">get_missing_deps</span>(<span class="ident">sync_state</span>.<span class="ident">their_heads</span>.<span class="ident">as_ref</span>().<span class="ident">unwrap_or</span>(<span class="kw-2">&amp;</span><span class="macro">vec!</span>[]));
+        <span class="kw">let </span>our_need = <span class="self">self</span>.get_missing_deps(sync_state.their_heads.as_ref().unwrap_or(<span class="kw-2">&amp;</span><span class="macro">vec!</span>[]));
 
-        <span class="kw">let</span> <span class="ident">their_heads_set</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="kw-2">ref</span> <span class="ident">heads</span>) <span class="op">=</span> <span class="ident">sync_state</span>.<span class="ident">their_heads</span> {
-            <span class="ident">heads</span>.<span class="ident">iter</span>().<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">HashSet</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>()
-        } <span class="kw">else</span> {
-            <span class="ident">HashSet::new</span>()
+        <span class="kw">let </span>their_heads_set = <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref </span>heads) = sync_state.their_heads {
+            heads.iter().collect::&lt;HashSet&lt;<span class="kw">_</span>&gt;&gt;()
+        } <span class="kw">else </span>{
+            HashSet::new()
         };
-        <span class="kw">let</span> <span class="ident">our_have</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">our_need</span>.<span class="ident">iter</span>().<span class="ident">all</span>(<span class="op">|</span><span class="ident">hash</span><span class="op">|</span> <span class="ident">their_heads_set</span>.<span class="ident">contains</span>(<span class="ident">hash</span>)) {
-            <span class="macro">vec!</span>[<span class="self">self</span>.<span class="ident">make_bloom_filter</span>(<span class="ident">sync_state</span>.<span class="ident">shared_heads</span>.<span class="ident">clone</span>())]
-        } <span class="kw">else</span> {
-            <span class="ident">Vec::new</span>()
+        <span class="kw">let </span>our_have = <span class="kw">if </span>our_need.iter().all(|hash| their_heads_set.contains(hash)) {
+            <span class="macro">vec!</span>[<span class="self">self</span>.make_bloom_filter(sync_state.shared_heads.clone())]
+        } <span class="kw">else </span>{
+            Vec::new()
         };
 
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="kw-2">ref</span> <span class="ident">their_have</span>) <span class="op">=</span> <span class="ident">sync_state</span>.<span class="ident">their_have</span> {
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">first_have</span>) <span class="op">=</span> <span class="ident">their_have</span>.<span class="ident">first</span>().<span class="ident">as_ref</span>() {
-                <span class="kw">if</span> <span class="op">!</span><span class="ident">first_have</span>
-                    .<span class="ident">last_sync</span>
-                    .<span class="ident">iter</span>()
-                    .<span class="ident">all</span>(<span class="op">|</span><span class="ident">hash</span><span class="op">|</span> <span class="self">self</span>.<span class="ident">get_change_by_hash</span>(<span class="ident">hash</span>).<span class="ident">is_some</span>())
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref </span>their_have) = sync_state.their_have {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(first_have) = their_have.first().as_ref() {
+                <span class="kw">if </span>!first_have
+                    .last_sync
+                    .iter()
+                    .all(|hash| <span class="self">self</span>.get_change_by_hash(hash).is_some())
                 {
-                    <span class="kw">let</span> <span class="ident">reset_msg</span> <span class="op">=</span> <span class="ident">Message</span> {
-                        <span class="ident">heads</span>: <span class="ident">our_heads</span>,
-                        <span class="ident">need</span>: <span class="ident">Vec::new</span>(),
-                        <span class="ident">have</span>: <span class="macro">vec!</span>[<span class="ident">Have::default</span>()],
-                        <span class="ident">changes</span>: <span class="ident">Vec::new</span>(),
+                    <span class="kw">let </span>reset_msg = Message {
+                        heads: our_heads,
+                        need: Vec::new(),
+                        have: <span class="macro">vec!</span>[Have::default()],
+                        changes: Vec::new(),
                     };
-                    <span class="kw">return</span> <span class="prelude-val">Some</span>(<span class="ident">reset_msg</span>);
+                    <span class="kw">return </span><span class="prelude-val">Some</span>(reset_msg);
                 }
             }
         }
 
-        <span class="kw">let</span> <span class="ident">changes_to_send</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> (<span class="prelude-val">Some</span>(<span class="ident">their_have</span>), <span class="prelude-val">Some</span>(<span class="ident">their_need</span>)) <span class="op">=</span> (
-            <span class="ident">sync_state</span>.<span class="ident">their_have</span>.<span class="ident">as_ref</span>(),
-            <span class="ident">sync_state</span>.<span class="ident">their_need</span>.<span class="ident">as_ref</span>(),
+        <span class="kw">let </span>changes_to_send = <span class="kw">if let </span>(<span class="prelude-val">Some</span>(their_have), <span class="prelude-val">Some</span>(their_need)) = (
+            sync_state.their_have.as_ref(),
+            sync_state.their_need.as_ref(),
         ) {
-            <span class="self">self</span>.<span class="ident">get_changes_to_send</span>(<span class="ident">their_have</span>, <span class="ident">their_need</span>)
-                .<span class="ident">expect</span>(<span class="string">&quot;Should have only used hashes that are in the document&quot;</span>)
-        } <span class="kw">else</span> {
-            <span class="ident">Vec::new</span>()
+            <span class="self">self</span>.get_changes_to_send(their_have, their_need)
+                .expect(<span class="string">&quot;Should have only used hashes that are in the document&quot;</span>)
+        } <span class="kw">else </span>{
+            Vec::new()
         };
 
-        <span class="kw">let</span> <span class="ident">heads_unchanged</span> <span class="op">=</span> <span class="ident">sync_state</span>.<span class="ident">last_sent_heads</span> <span class="op">==</span> <span class="ident">our_heads</span>;
+        <span class="kw">let </span>heads_unchanged = sync_state.last_sent_heads == our_heads;
 
-        <span class="kw">let</span> <span class="ident">heads_equal</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">their_heads</span>) <span class="op">=</span> <span class="ident">sync_state</span>.<span class="ident">their_heads</span>.<span class="ident">as_ref</span>() {
-            <span class="ident">their_heads</span> <span class="op">==</span> <span class="kw-2">&amp;</span><span class="ident">our_heads</span>
-        } <span class="kw">else</span> {
-            <span class="bool-val">false</span>
-        };
+        <span class="kw">let </span>heads_equal = <span class="kw">if let </span><span class="prelude-val">Some</span>(their_heads) = sync_state.their_heads.as_ref() {
+            their_heads == <span class="kw-2">&amp;</span>our_heads
+        } <span class="kw">else </span>{
+            <span class="bool-val">false
+        </span>};
 
-        <span class="kw">if</span> <span class="ident">heads_unchanged</span> <span class="op">&amp;&amp;</span> <span class="ident">heads_equal</span> <span class="op">&amp;&amp;</span> <span class="ident">changes_to_send</span>.<span class="ident">is_empty</span>() {
-            <span class="kw">return</span> <span class="prelude-val">None</span>;
+        <span class="kw">if </span>heads_unchanged &amp;&amp; heads_equal &amp;&amp; changes_to_send.is_empty() {
+            <span class="kw">return </span><span class="prelude-val">None</span>;
         }
 
-        <span class="comment">// deduplicate the changes to send with those we have already sent and clone it now</span>
-        <span class="kw">let</span> <span class="ident">changes_to_send</span> <span class="op">=</span> <span class="ident">changes_to_send</span>
-            .<span class="ident">into_iter</span>()
-            .<span class="ident">filter_map</span>(<span class="op">|</span><span class="ident">change</span><span class="op">|</span> {
-                <span class="kw">if</span> <span class="op">!</span><span class="ident">sync_state</span>.<span class="ident">sent_hashes</span>.<span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="ident">change</span>.<span class="ident">hash</span>()) {
-                    <span class="prelude-val">Some</span>(<span class="ident">change</span>.<span class="ident">clone</span>())
-                } <span class="kw">else</span> {
-                    <span class="prelude-val">None</span>
-                }
+        <span class="comment">// deduplicate the changes to send with those we have already sent and clone it now
+        </span><span class="kw">let </span>changes_to_send = changes_to_send
+            .into_iter()
+            .filter_map(|change| {
+                <span class="kw">if </span>!sync_state.sent_hashes.contains(<span class="kw-2">&amp;</span>change.hash()) {
+                    <span class="prelude-val">Some</span>(change.clone())
+                } <span class="kw">else </span>{
+                    <span class="prelude-val">None
+                </span>}
             })
-            .<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
+            .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
 
-        <span class="ident">sync_state</span>.<span class="ident">last_sent_heads</span> <span class="op">=</span> <span class="ident">our_heads</span>.<span class="ident">clone</span>();
-        <span class="ident">sync_state</span>
-            .<span class="ident">sent_hashes</span>
-            .<span class="ident">extend</span>(<span class="ident">changes_to_send</span>.<span class="ident">iter</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">c</span><span class="op">|</span> <span class="ident">c</span>.<span class="ident">hash</span>()));
+        sync_state.last_sent_heads = our_heads.clone();
+        sync_state
+            .sent_hashes
+            .extend(changes_to_send.iter().map(|c| c.hash()));
 
-        <span class="kw">let</span> <span class="ident">sync_message</span> <span class="op">=</span> <span class="ident">Message</span> {
-            <span class="ident">heads</span>: <span class="ident">our_heads</span>,
-            <span class="ident">have</span>: <span class="ident">our_have</span>,
-            <span class="ident">need</span>: <span class="ident">our_need</span>,
-            <span class="ident">changes</span>: <span class="ident">changes_to_send</span>,
+        <span class="kw">let </span>sync_message = Message {
+            heads: our_heads,
+            have: our_have,
+            need: our_need,
+            changes: changes_to_send,
         };
 
-        <span class="prelude-val">Some</span>(<span class="ident">sync_message</span>)
+        <span class="prelude-val">Some</span>(sync_message)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">receive_sync_message</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">sync_state</span>: <span class="kw-2">&amp;mut</span> <span class="ident">State</span>,
-        <span class="ident">message</span>: <span class="ident">Message</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">receive_sync_message_with</span>::<span class="op">&lt;</span>()<span class="op">&gt;</span>(<span class="ident">sync_state</span>, <span class="ident">message</span>, <span class="prelude-val">None</span>)
+    <span class="kw">pub fn </span>receive_sync_message(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        sync_state: <span class="kw-2">&amp;mut </span>State,
+        message: Message,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
+        <span class="self">self</span>.receive_sync_message_with::&lt;()&gt;(sync_state, message, <span class="prelude-val">None</span>)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">receive_sync_message_with</span><span class="op">&lt;</span><span class="ident">Obs</span>: <span class="ident">OpObserver</span><span class="op">&gt;</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">sync_state</span>: <span class="kw-2">&amp;mut</span> <span class="ident">State</span>,
-        <span class="ident">message</span>: <span class="ident">Message</span>,
-        <span class="ident">op_observer</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;mut</span> <span class="ident">Obs</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">before_heads</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">get_heads</span>();
+    <span class="kw">pub fn </span>receive_sync_message_with&lt;Obs: OpObserver&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        sync_state: <span class="kw-2">&amp;mut </span>State,
+        message: Message,
+        op_observer: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span>Obs&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
+        <span class="kw">let </span>before_heads = <span class="self">self</span>.get_heads();
 
-        <span class="kw">let</span> <span class="ident">Message</span> {
-            <span class="ident">heads</span>: <span class="ident">message_heads</span>,
-            <span class="ident">changes</span>: <span class="ident">message_changes</span>,
-            <span class="ident">need</span>: <span class="ident">message_need</span>,
-            <span class="ident">have</span>: <span class="ident">message_have</span>,
-        } <span class="op">=</span> <span class="ident">message</span>;
+        <span class="kw">let </span>Message {
+            heads: message_heads,
+            changes: message_changes,
+            need: message_need,
+            have: message_have,
+        } = message;
 
-        <span class="kw">let</span> <span class="ident">changes_is_empty</span> <span class="op">=</span> <span class="ident">message_changes</span>.<span class="ident">is_empty</span>();
-        <span class="kw">if</span> <span class="op">!</span><span class="ident">changes_is_empty</span> {
-            <span class="self">self</span>.<span class="ident">apply_changes_with</span>(<span class="ident">message_changes</span>, <span class="ident">op_observer</span>)<span class="question-mark">?</span>;
-            <span class="ident">sync_state</span>.<span class="ident">shared_heads</span> <span class="op">=</span> <span class="ident">advance_heads</span>(
-                <span class="kw-2">&amp;</span><span class="ident">before_heads</span>.<span class="ident">iter</span>().<span class="ident">collect</span>(),
-                <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">get_heads</span>().<span class="ident">into_iter</span>().<span class="ident">collect</span>(),
-                <span class="kw-2">&amp;</span><span class="ident">sync_state</span>.<span class="ident">shared_heads</span>,
+        <span class="kw">let </span>changes_is_empty = message_changes.is_empty();
+        <span class="kw">if </span>!changes_is_empty {
+            <span class="self">self</span>.apply_changes_with(message_changes, op_observer)<span class="question-mark">?</span>;
+            sync_state.shared_heads = advance_heads(
+                <span class="kw-2">&amp;</span>before_heads.iter().collect(),
+                <span class="kw-2">&amp;</span><span class="self">self</span>.get_heads().into_iter().collect(),
+                <span class="kw-2">&amp;</span>sync_state.shared_heads,
             );
         }
 
-        <span class="comment">// trim down the sent hashes to those that we know they haven&#39;t seen</span>
-        <span class="self">self</span>.<span class="ident">filter_changes</span>(<span class="kw-2">&amp;</span><span class="ident">message_heads</span>, <span class="kw-2">&amp;mut</span> <span class="ident">sync_state</span>.<span class="ident">sent_hashes</span>)<span class="question-mark">?</span>;
+        <span class="comment">// trim down the sent hashes to those that we know they haven&#39;t seen
+        </span><span class="self">self</span>.filter_changes(<span class="kw-2">&amp;</span>message_heads, <span class="kw-2">&amp;mut </span>sync_state.sent_hashes)<span class="question-mark">?</span>;
 
-        <span class="kw">if</span> <span class="ident">changes_is_empty</span> <span class="op">&amp;&amp;</span> <span class="ident">message_heads</span> <span class="op">==</span> <span class="ident">before_heads</span> {
-            <span class="ident">sync_state</span>.<span class="ident">last_sent_heads</span> <span class="op">=</span> <span class="ident">message_heads</span>.<span class="ident">clone</span>();
+        <span class="kw">if </span>changes_is_empty &amp;&amp; message_heads == before_heads {
+            sync_state.last_sent_heads = message_heads.clone();
         }
 
-        <span class="kw">let</span> <span class="ident">known_heads</span> <span class="op">=</span> <span class="ident">message_heads</span>
-            .<span class="ident">iter</span>()
-            .<span class="ident">filter</span>(<span class="op">|</span><span class="ident">head</span><span class="op">|</span> <span class="self">self</span>.<span class="ident">get_change_by_hash</span>(<span class="ident">head</span>).<span class="ident">is_some</span>())
-            .<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
-        <span class="kw">if</span> <span class="ident">known_heads</span>.<span class="ident">len</span>() <span class="op">==</span> <span class="ident">message_heads</span>.<span class="ident">len</span>() {
-            <span class="ident">sync_state</span>.<span class="ident">shared_heads</span> <span class="op">=</span> <span class="ident">message_heads</span>.<span class="ident">clone</span>();
-            <span class="comment">// If the remote peer has lost all its data, reset our state to perform a full resync</span>
-            <span class="kw">if</span> <span class="ident">message_heads</span>.<span class="ident">is_empty</span>() {
-                <span class="ident">sync_state</span>.<span class="ident">last_sent_heads</span> <span class="op">=</span> <span class="ident">Default::default</span>();
-                <span class="ident">sync_state</span>.<span class="ident">sent_hashes</span> <span class="op">=</span> <span class="ident">Default::default</span>();
+        <span class="kw">let </span>known_heads = message_heads
+            .iter()
+            .filter(|head| <span class="self">self</span>.get_change_by_hash(head).is_some())
+            .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+        <span class="kw">if </span>known_heads.len() == message_heads.len() {
+            sync_state.shared_heads = message_heads.clone();
+            <span class="comment">// If the remote peer has lost all its data, reset our state to perform a full resync
+            </span><span class="kw">if </span>message_heads.is_empty() {
+                sync_state.last_sent_heads = Default::default();
+                sync_state.sent_hashes = Default::default();
             }
-        } <span class="kw">else</span> {
-            <span class="ident">sync_state</span>.<span class="ident">shared_heads</span> <span class="op">=</span> <span class="ident">sync_state</span>
-                .<span class="ident">shared_heads</span>
-                .<span class="ident">iter</span>()
-                .<span class="ident">chain</span>(<span class="ident">known_heads</span>)
-                .<span class="ident">copied</span>()
-                .<span class="ident">unique</span>()
-                .<span class="ident">sorted</span>()
-                .<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
+        } <span class="kw">else </span>{
+            sync_state.shared_heads = sync_state
+                .shared_heads
+                .iter()
+                .chain(known_heads)
+                .copied()
+                .unique()
+                .sorted()
+                .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
         }
 
-        <span class="ident">sync_state</span>.<span class="ident">their_have</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">message_have</span>);
-        <span class="ident">sync_state</span>.<span class="ident">their_heads</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">message_heads</span>);
-        <span class="ident">sync_state</span>.<span class="ident">their_need</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">message_need</span>);
+        sync_state.their_have = <span class="prelude-val">Some</span>(message_have);
+        sync_state.their_heads = <span class="prelude-val">Some</span>(message_heads);
+        sync_state.their_need = <span class="prelude-val">Some</span>(message_need);
 
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="kw">fn</span> <span class="ident">make_bloom_filter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">last_sync</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>) -&gt; <span class="ident">Have</span> {
-        <span class="kw">let</span> <span class="ident">new_changes</span> <span class="op">=</span> <span class="self">self</span>
-            .<span class="ident">get_changes</span>(<span class="kw-2">&amp;</span><span class="ident">last_sync</span>)
-            .<span class="ident">expect</span>(<span class="string">&quot;Should have only used hashes that are in the document&quot;</span>);
-        <span class="kw">let</span> <span class="ident">hashes</span> <span class="op">=</span> <span class="ident">new_changes</span>.<span class="ident">iter</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">change</span><span class="op">|</span> <span class="ident">change</span>.<span class="ident">hash</span>());
-        <span class="ident">Have</span> {
-            <span class="ident">last_sync</span>,
-            <span class="ident">bloom</span>: <span class="ident">BloomFilter::from_hashes</span>(<span class="ident">hashes</span>),
+    <span class="kw">fn </span>make_bloom_filter(<span class="kw-2">&amp;</span><span class="self">self</span>, last_sync: Vec&lt;ChangeHash&gt;) -&gt; Have {
+        <span class="kw">let </span>new_changes = <span class="self">self
+            </span>.get_changes(<span class="kw-2">&amp;</span>last_sync)
+            .expect(<span class="string">&quot;Should have only used hashes that are in the document&quot;</span>);
+        <span class="kw">let </span>hashes = new_changes.iter().map(|change| change.hash());
+        Have {
+            last_sync,
+            bloom: BloomFilter::from_hashes(hashes),
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">get_changes_to_send</span>(
+    <span class="kw">fn </span>get_changes_to_send(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">have</span>: <span class="kw-2">&amp;</span>[<span class="ident">Have</span>],
-        <span class="ident">need</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>],
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">Change</span><span class="op">&gt;</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="ident">have</span>.<span class="ident">is_empty</span>() {
-            <span class="prelude-val">Ok</span>(<span class="ident">need</span>
-                .<span class="ident">iter</span>()
-                .<span class="ident">filter_map</span>(<span class="op">|</span><span class="ident">hash</span><span class="op">|</span> <span class="self">self</span>.<span class="ident">get_change_by_hash</span>(<span class="ident">hash</span>))
-                .<span class="ident">collect</span>())
-        } <span class="kw">else</span> {
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">last_sync_hashes</span> <span class="op">=</span> <span class="ident">HashSet::new</span>();
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">bloom_filters</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">have</span>.<span class="ident">len</span>());
+        have: <span class="kw-2">&amp;</span>[Have],
+        need: <span class="kw-2">&amp;</span>[ChangeHash],
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw-2">&amp;</span>Change&gt;, AutomergeError&gt; {
+        <span class="kw">if </span>have.is_empty() {
+            <span class="prelude-val">Ok</span>(need
+                .iter()
+                .filter_map(|hash| <span class="self">self</span>.get_change_by_hash(hash))
+                .collect())
+        } <span class="kw">else </span>{
+            <span class="kw">let </span><span class="kw-2">mut </span>last_sync_hashes = HashSet::new();
+            <span class="kw">let </span><span class="kw-2">mut </span>bloom_filters = Vec::with_capacity(have.len());
 
-            <span class="kw">for</span> <span class="ident">h</span> <span class="kw">in</span> <span class="ident">have</span> {
-                <span class="kw">let</span> <span class="ident">Have</span> { <span class="ident">last_sync</span>, <span class="ident">bloom</span> } <span class="op">=</span> <span class="ident">h</span>;
-                <span class="ident">last_sync_hashes</span>.<span class="ident">extend</span>(<span class="ident">last_sync</span>);
-                <span class="ident">bloom_filters</span>.<span class="ident">push</span>(<span class="ident">bloom</span>);
+            <span class="kw">for </span>h <span class="kw">in </span>have {
+                <span class="kw">let </span>Have { last_sync, bloom } = h;
+                last_sync_hashes.extend(last_sync);
+                bloom_filters.push(bloom);
             }
-            <span class="kw">let</span> <span class="ident">last_sync_hashes</span> <span class="op">=</span> <span class="ident">last_sync_hashes</span>.<span class="ident">into_iter</span>().<span class="ident">copied</span>().<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
+            <span class="kw">let </span>last_sync_hashes = last_sync_hashes.into_iter().copied().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
 
-            <span class="kw">let</span> <span class="ident">changes</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">get_changes</span>(<span class="kw-2">&amp;</span><span class="ident">last_sync_hashes</span>)<span class="question-mark">?</span>;
+            <span class="kw">let </span>changes = <span class="self">self</span>.get_changes(<span class="kw-2">&amp;</span>last_sync_hashes)<span class="question-mark">?</span>;
 
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">change_hashes</span> <span class="op">=</span> <span class="ident">HashSet::with_capacity</span>(<span class="ident">changes</span>.<span class="ident">len</span>());
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">dependents</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">ChangeHash</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">HashMap::new</span>();
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">hashes_to_send</span> <span class="op">=</span> <span class="ident">HashSet::new</span>();
+            <span class="kw">let </span><span class="kw-2">mut </span>change_hashes = HashSet::with_capacity(changes.len());
+            <span class="kw">let </span><span class="kw-2">mut </span>dependents: HashMap&lt;ChangeHash, Vec&lt;ChangeHash&gt;&gt; = HashMap::new();
+            <span class="kw">let </span><span class="kw-2">mut </span>hashes_to_send = HashSet::new();
 
-            <span class="kw">for</span> <span class="ident">change</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">changes</span> {
-                <span class="ident">change_hashes</span>.<span class="ident">insert</span>(<span class="ident">change</span>.<span class="ident">hash</span>());
+            <span class="kw">for </span>change <span class="kw">in </span><span class="kw-2">&amp;</span>changes {
+                change_hashes.insert(change.hash());
 
-                <span class="kw">for</span> <span class="ident">dep</span> <span class="kw">in</span> <span class="ident">change</span>.<span class="ident">deps</span>() {
-                    <span class="ident">dependents</span>.<span class="ident">entry</span>(<span class="kw-2">*</span><span class="ident">dep</span>).<span class="ident">or_default</span>().<span class="ident">push</span>(<span class="ident">change</span>.<span class="ident">hash</span>());
+                <span class="kw">for </span>dep <span class="kw">in </span>change.deps() {
+                    dependents.entry(<span class="kw-2">*</span>dep).or_default().push(change.hash());
                 }
 
-                <span class="kw">if</span> <span class="ident">bloom_filters</span>
-                    .<span class="ident">iter</span>()
-                    .<span class="ident">all</span>(<span class="op">|</span><span class="ident">bloom</span><span class="op">|</span> <span class="op">!</span><span class="ident">bloom</span>.<span class="ident">contains_hash</span>(<span class="kw-2">&amp;</span><span class="ident">change</span>.<span class="ident">hash</span>()))
+                <span class="kw">if </span>bloom_filters
+                    .iter()
+                    .all(|bloom| !bloom.contains_hash(<span class="kw-2">&amp;</span>change.hash()))
                 {
-                    <span class="ident">hashes_to_send</span>.<span class="ident">insert</span>(<span class="ident">change</span>.<span class="ident">hash</span>());
+                    hashes_to_send.insert(change.hash());
                 }
             }
 
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">stack</span> <span class="op">=</span> <span class="ident">hashes_to_send</span>.<span class="ident">iter</span>().<span class="ident">copied</span>().<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
-            <span class="kw">while</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">hash</span>) <span class="op">=</span> <span class="ident">stack</span>.<span class="ident">pop</span>() {
-                <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">deps</span>) <span class="op">=</span> <span class="ident">dependents</span>.<span class="ident">get</span>(<span class="kw-2">&amp;</span><span class="ident">hash</span>) {
-                    <span class="kw">for</span> <span class="ident">dep</span> <span class="kw">in</span> <span class="ident">deps</span> {
-                        <span class="kw">if</span> <span class="ident">hashes_to_send</span>.<span class="ident">insert</span>(<span class="kw-2">*</span><span class="ident">dep</span>) {
-                            <span class="ident">stack</span>.<span class="ident">push</span>(<span class="kw-2">*</span><span class="ident">dep</span>);
+            <span class="kw">let </span><span class="kw-2">mut </span>stack = hashes_to_send.iter().copied().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+            <span class="kw">while let </span><span class="prelude-val">Some</span>(hash) = stack.pop() {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(deps) = dependents.get(<span class="kw-2">&amp;</span>hash) {
+                    <span class="kw">for </span>dep <span class="kw">in </span>deps {
+                        <span class="kw">if </span>hashes_to_send.insert(<span class="kw-2">*</span>dep) {
+                            stack.push(<span class="kw-2">*</span>dep);
                         }
                     }
                 }
             }
 
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">changes_to_send</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
-            <span class="kw">for</span> <span class="ident">hash</span> <span class="kw">in</span> <span class="ident">need</span> {
-                <span class="kw">if</span> <span class="op">!</span><span class="ident">hashes_to_send</span>.<span class="ident">contains</span>(<span class="ident">hash</span>) {
-                    <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">change</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">get_change_by_hash</span>(<span class="ident">hash</span>) {
-                        <span class="ident">changes_to_send</span>.<span class="ident">push</span>(<span class="ident">change</span>);
+            <span class="kw">let </span><span class="kw-2">mut </span>changes_to_send = Vec::new();
+            <span class="kw">for </span>hash <span class="kw">in </span>need {
+                <span class="kw">if </span>!hashes_to_send.contains(hash) {
+                    <span class="kw">if let </span><span class="prelude-val">Some</span>(change) = <span class="self">self</span>.get_change_by_hash(hash) {
+                        changes_to_send.push(change);
                     }
                 }
             }
 
-            <span class="kw">for</span> <span class="ident">change</span> <span class="kw">in</span> <span class="ident">changes</span> {
-                <span class="kw">if</span> <span class="ident">hashes_to_send</span>.<span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="ident">change</span>.<span class="ident">hash</span>()) {
-                    <span class="ident">changes_to_send</span>.<span class="ident">push</span>(<span class="ident">change</span>);
+            <span class="kw">for </span>change <span class="kw">in </span>changes {
+                <span class="kw">if </span>hashes_to_send.contains(<span class="kw-2">&amp;</span>change.hash()) {
+                    changes_to_send.push(change);
                 }
             }
-            <span class="prelude-val">Ok</span>(<span class="ident">changes_to_send</span>)
+            <span class="prelude-val">Ok</span>(changes_to_send)
         }
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">thiserror::Error</span>)]</span>
-<span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">ReadMessageError</span> {
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;expected {expected_one_of:?} but found {found}&quot;</span>)]</span>
-    <span class="ident">WrongType</span> { <span class="ident">expected_one_of</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>, <span class="ident">found</span>: <span class="ident">u8</span> },
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;{0}&quot;</span>)]</span>
-    <span class="ident">Parse</span>(<span class="ident">String</span>),
-    <span class="attribute">#[<span class="ident">error</span>(<span class="ident">transparent</span>)]</span>
-    <span class="ident">ReadChangeOps</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident">ReadChangeOpError</span>),
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;not enough input&quot;</span>)]</span>
-    <span class="ident">NotEnoughInput</span>,
+<span class="attribute">#[derive(Debug, thiserror::Error)]
+</span><span class="kw">pub enum </span>ReadMessageError {
+    <span class="attribute">#[error(<span class="string">&quot;expected {expected_one_of:?} but found {found}&quot;</span>)]
+    </span>WrongType { expected_one_of: Vec&lt;u8&gt;, found: u8 },
+    <span class="attribute">#[error(<span class="string">&quot;{0}&quot;</span>)]
+    </span>Parse(String),
+    <span class="attribute">#[error(transparent)]
+    </span>ReadChangeOps(<span class="attribute">#[from] </span>ReadChangeOpError),
+    <span class="attribute">#[error(<span class="string">&quot;not enough input&quot;</span>)]
+    </span>NotEnoughInput,
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">parse::leb128::Error</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ReadMessageError</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">e</span>: <span class="ident">parse::leb128::Error</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">ReadMessageError::Parse</span>(<span class="ident">e</span>.<span class="ident">to_string</span>())
+<span class="kw">impl </span>From&lt;parse::leb128::Error&gt; <span class="kw">for </span>ReadMessageError {
+    <span class="kw">fn </span>from(e: parse::leb128::Error) -&gt; <span class="self">Self </span>{
+        ReadMessageError::Parse(e.to_string())
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">bloom::ParseError</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ReadMessageError</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">e</span>: <span class="ident">bloom::ParseError</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">ReadMessageError::Parse</span>(<span class="ident">e</span>.<span class="ident">to_string</span>())
+<span class="kw">impl </span>From&lt;bloom::ParseError&gt; <span class="kw">for </span>ReadMessageError {
+    <span class="kw">fn </span>from(e: bloom::ParseError) -&gt; <span class="self">Self </span>{
+        ReadMessageError::Parse(e.to_string())
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident"><span class="kw">crate</span>::storage::change::ParseError</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ReadMessageError</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">e</span>: <span class="ident"><span class="kw">crate</span>::storage::change::ParseError</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">ReadMessageError::Parse</span>(<span class="macro">format!</span>(<span class="string">&quot;error parsing changes: {}&quot;</span>, <span class="ident">e</span>))
+<span class="kw">impl </span>From&lt;<span class="kw">crate</span>::storage::change::ParseError&gt; <span class="kw">for </span>ReadMessageError {
+    <span class="kw">fn </span>from(e: <span class="kw">crate</span>::storage::change::ParseError) -&gt; <span class="self">Self </span>{
+        ReadMessageError::Parse(<span class="macro">format!</span>(<span class="string">&quot;error parsing changes: {}&quot;</span>, e))
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">ReadMessageError</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">parse::ParseError</span><span class="op">&lt;</span><span class="ident">ReadMessageError</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">e</span>: <span class="ident">ReadMessageError</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">parse::ParseError::Error</span>(<span class="ident">e</span>)
+<span class="kw">impl </span>From&lt;ReadMessageError&gt; <span class="kw">for </span>parse::ParseError&lt;ReadMessageError&gt; {
+    <span class="kw">fn </span>from(e: ReadMessageError) -&gt; <span class="self">Self </span>{
+        parse::ParseError::Error(e)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">parse::ParseError</span><span class="op">&lt;</span><span class="ident">ReadMessageError</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ReadMessageError</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">p</span>: <span class="ident">parse::ParseError</span><span class="op">&lt;</span><span class="ident">ReadMessageError</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
-        <span class="kw">match</span> <span class="ident">p</span> {
-            <span class="ident">parse::ParseError::Error</span>(<span class="ident">e</span>) =&gt; <span class="ident">e</span>,
-            <span class="ident">parse::ParseError::Incomplete</span>(..) =&gt; <span class="ident"><span class="self">Self</span>::NotEnoughInput</span>,
+<span class="kw">impl </span>From&lt;parse::ParseError&lt;ReadMessageError&gt;&gt; <span class="kw">for </span>ReadMessageError {
+    <span class="kw">fn </span>from(p: parse::ParseError&lt;ReadMessageError&gt;) -&gt; <span class="self">Self </span>{
+        <span class="kw">match </span>p {
+            parse::ParseError::Error(e) =&gt; e,
+            parse::ParseError::Incomplete(..) =&gt; <span class="self">Self</span>::NotEnoughInput,
         }
     }
 }
 
-<span class="doccomment">/// The sync message to be sent.</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Message</span> {
-    <span class="doccomment">/// The heads of the sender.</span>
-    <span class="kw">pub</span> <span class="ident">heads</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// The hashes of any changes that are being explicitly requested from the recipient.</span>
-    <span class="kw">pub</span> <span class="ident">need</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// A summary of the changes that the sender already has.</span>
-    <span class="kw">pub</span> <span class="ident">have</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Have</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// The changes for the recipient to apply.</span>
-    <span class="kw">pub</span> <span class="ident">changes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Change</span><span class="op">&gt;</span>,
+<span class="doccomment">/// The sync message to be sent.
+</span><span class="attribute">#[derive(Clone, Debug, PartialEq)]
+</span><span class="kw">pub struct </span>Message {
+    <span class="doccomment">/// The heads of the sender.
+    </span><span class="kw">pub </span>heads: Vec&lt;ChangeHash&gt;,
+    <span class="doccomment">/// The hashes of any changes that are being explicitly requested from the recipient.
+    </span><span class="kw">pub </span>need: Vec&lt;ChangeHash&gt;,
+    <span class="doccomment">/// A summary of the changes that the sender already has.
+    </span><span class="kw">pub </span>have: Vec&lt;Have&gt;,
+    <span class="doccomment">/// The changes for the recipient to apply.
+    </span><span class="kw">pub </span>changes: Vec&lt;Change&gt;,
 }
 
-<span class="kw">impl</span> <span class="ident">serde::Serialize</span> <span class="kw">for</span> <span class="ident">Message</span> {
-    <span class="kw">fn</span> <span class="ident">serialize</span><span class="op">&lt;</span><span class="ident">S</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">serializer</span>: <span class="ident">S</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">S::Ok</span>, <span class="ident">S::Error</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">S</span>: <span class="ident">serde::Serializer</span>,
+<span class="kw">impl </span>serde::Serialize <span class="kw">for </span>Message {
+    <span class="kw">fn </span>serialize&lt;S&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, serializer: S) -&gt; <span class="prelude-ty">Result</span>&lt;S::Ok, S::Error&gt;
+    <span class="kw">where
+        </span>S: serde::Serializer,
     {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">map</span> <span class="op">=</span> <span class="ident">serializer</span>.<span class="ident">serialize_map</span>(<span class="prelude-val">Some</span>(<span class="number">4</span>))<span class="question-mark">?</span>;
-        <span class="ident">map</span>.<span class="ident">serialize_entry</span>(<span class="string">&quot;heads&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">heads</span>)<span class="question-mark">?</span>;
-        <span class="ident">map</span>.<span class="ident">serialize_entry</span>(<span class="string">&quot;need&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">need</span>)<span class="question-mark">?</span>;
-        <span class="ident">map</span>.<span class="ident">serialize_entry</span>(<span class="string">&quot;have&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">have</span>)<span class="question-mark">?</span>;
-        <span class="ident">map</span>.<span class="ident">serialize_entry</span>(
+        <span class="kw">let </span><span class="kw-2">mut </span>map = serializer.serialize_map(<span class="prelude-val">Some</span>(<span class="number">4</span>))<span class="question-mark">?</span>;
+        map.serialize_entry(<span class="string">&quot;heads&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.heads)<span class="question-mark">?</span>;
+        map.serialize_entry(<span class="string">&quot;need&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.need)<span class="question-mark">?</span>;
+        map.serialize_entry(<span class="string">&quot;have&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.have)<span class="question-mark">?</span>;
+        map.serialize_entry(
             <span class="string">&quot;changes&quot;</span>,
-            <span class="kw-2">&amp;</span><span class="self">self</span>
-                .<span class="ident">changes</span>
-                .<span class="ident">iter</span>()
-                .<span class="ident">map</span>(<span class="ident"><span class="kw">crate</span>::ExpandedChange::from</span>)
-                .<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>(),
+            <span class="kw-2">&amp;</span><span class="self">self
+                </span>.changes
+                .iter()
+                .map(<span class="kw">crate</span>::ExpandedChange::from)
+                .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;(),
         )<span class="question-mark">?</span>;
-        <span class="ident">map</span>.<span class="ident">end</span>()
+        map.end()
     }
 }
 
-<span class="kw">fn</span> <span class="ident">parse_have</span>(<span class="ident">input</span>: <span class="ident">parse::Input</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">parse::ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">Have</span>, <span class="ident">ReadMessageError</span><span class="op">&gt;</span> {
-    <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">last_sync</span>) <span class="op">=</span> <span class="ident">parse::length_prefixed</span>(<span class="ident">parse::change_hash</span>)(<span class="ident">input</span>)<span class="question-mark">?</span>;
-    <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">bloom_bytes</span>) <span class="op">=</span> <span class="ident">parse::length_prefixed_bytes</span>(<span class="ident">i</span>)<span class="question-mark">?</span>;
-    <span class="kw">let</span> (<span class="kw">_</span>, <span class="ident">bloom</span>) <span class="op">=</span> <span class="ident">BloomFilter::parse</span>(<span class="ident">parse::Input::new</span>(<span class="ident">bloom_bytes</span>)).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">lift</span>())<span class="question-mark">?</span>;
-    <span class="prelude-val">Ok</span>((<span class="ident">i</span>, <span class="ident">Have</span> { <span class="ident">last_sync</span>, <span class="ident">bloom</span> }))
+<span class="kw">fn </span>parse_have(input: parse::Input&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; parse::ParseResult&lt;<span class="lifetime">&#39;_</span>, Have, ReadMessageError&gt; {
+    <span class="kw">let </span>(i, last_sync) = parse::length_prefixed(parse::change_hash)(input)<span class="question-mark">?</span>;
+    <span class="kw">let </span>(i, bloom_bytes) = parse::length_prefixed_bytes(i)<span class="question-mark">?</span>;
+    <span class="kw">let </span>(<span class="kw">_</span>, bloom) = BloomFilter::parse(parse::Input::new(bloom_bytes)).map_err(|e| e.lift())<span class="question-mark">?</span>;
+    <span class="prelude-val">Ok</span>((i, Have { last_sync, bloom }))
 }
 
-<span class="kw">impl</span> <span class="ident">Message</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">decode</span>(<span class="ident">input</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">ReadMessageError</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">input</span> <span class="op">=</span> <span class="ident">parse::Input::new</span>(<span class="ident">input</span>);
-        <span class="kw">match</span> <span class="ident"><span class="self">Self</span>::parse</span>(<span class="ident">input</span>) {
-            <span class="prelude-val">Ok</span>((<span class="kw">_</span>, <span class="ident">msg</span>)) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">msg</span>),
-            <span class="prelude-val">Err</span>(<span class="ident">parse::ParseError::Error</span>(<span class="ident">e</span>)) =&gt; <span class="prelude-val">Err</span>(<span class="ident">e</span>),
-            <span class="prelude-val">Err</span>(<span class="ident">parse::ParseError::Incomplete</span>(<span class="kw">_</span>)) =&gt; <span class="prelude-val">Err</span>(<span class="ident">ReadMessageError::NotEnoughInput</span>),
+<span class="kw">impl </span>Message {
+    <span class="kw">pub fn </span>decode(input: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, ReadMessageError&gt; {
+        <span class="kw">let </span>input = parse::Input::new(input);
+        <span class="kw">match </span><span class="self">Self</span>::parse(input) {
+            <span class="prelude-val">Ok</span>((<span class="kw">_</span>, msg)) =&gt; <span class="prelude-val">Ok</span>(msg),
+            <span class="prelude-val">Err</span>(parse::ParseError::Error(e)) =&gt; <span class="prelude-val">Err</span>(e),
+            <span class="prelude-val">Err</span>(parse::ParseError::Incomplete(<span class="kw">_</span>)) =&gt; <span class="prelude-val">Err</span>(ReadMessageError::NotEnoughInput),
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">parse</span>(<span class="ident">input</span>: <span class="ident">parse::Input</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">parse::ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="self">Self</span>, <span class="ident">ReadMessageError</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">message_type</span>) <span class="op">=</span> <span class="ident">parse::take1</span>(<span class="ident">input</span>)<span class="question-mark">?</span>;
-        <span class="kw">if</span> <span class="ident">message_type</span> <span class="op">!</span><span class="op">=</span> <span class="ident">MESSAGE_TYPE_SYNC</span> {
-            <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">parse::ParseError::Error</span>(<span class="ident">ReadMessageError::WrongType</span> {
-                <span class="ident">expected_one_of</span>: <span class="macro">vec!</span>[<span class="ident">MESSAGE_TYPE_SYNC</span>],
-                <span class="ident">found</span>: <span class="ident">message_type</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>parse(input: parse::Input&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; parse::ParseResult&lt;<span class="lifetime">&#39;_</span>, <span class="self">Self</span>, ReadMessageError&gt; {
+        <span class="kw">let </span>(i, message_type) = parse::take1(input)<span class="question-mark">?</span>;
+        <span class="kw">if </span>message_type != MESSAGE_TYPE_SYNC {
+            <span class="kw">return </span><span class="prelude-val">Err</span>(parse::ParseError::Error(ReadMessageError::WrongType {
+                expected_one_of: <span class="macro">vec!</span>[MESSAGE_TYPE_SYNC],
+                found: message_type,
             }));
         }
 
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">heads</span>) <span class="op">=</span> <span class="ident">parse::length_prefixed</span>(<span class="ident">parse::change_hash</span>)(<span class="ident">i</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">need</span>) <span class="op">=</span> <span class="ident">parse::length_prefixed</span>(<span class="ident">parse::change_hash</span>)(<span class="ident">i</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">have</span>) <span class="op">=</span> <span class="ident">parse::length_prefixed</span>(<span class="ident">parse_have</span>)(<span class="ident">i</span>)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(i, heads) = parse::length_prefixed(parse::change_hash)(i)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(i, need) = parse::length_prefixed(parse::change_hash)(i)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(i, have) = parse::length_prefixed(parse_have)(i)<span class="question-mark">?</span>;
 
-        <span class="kw">let</span> <span class="ident">change_parser</span> <span class="op">=</span> <span class="op">|</span><span class="ident">i</span><span class="op">|</span> {
-            <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">bytes</span>) <span class="op">=</span> <span class="ident">parse::length_prefixed_bytes</span>(<span class="ident">i</span>)<span class="question-mark">?</span>;
-            <span class="kw">let</span> (<span class="kw">_</span>, <span class="ident">change</span>) <span class="op">=</span>
-                <span class="ident">StoredChange::parse</span>(<span class="ident">parse::Input::new</span>(<span class="ident">bytes</span>)).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">lift</span>())<span class="question-mark">?</span>;
-            <span class="prelude-val">Ok</span>((<span class="ident">i</span>, <span class="ident">change</span>))
+        <span class="kw">let </span>change_parser = |i| {
+            <span class="kw">let </span>(i, bytes) = parse::length_prefixed_bytes(i)<span class="question-mark">?</span>;
+            <span class="kw">let </span>(<span class="kw">_</span>, change) =
+                StoredChange::parse(parse::Input::new(bytes)).map_err(|e| e.lift())<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>((i, change))
         };
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">stored_changes</span>) <span class="op">=</span> <span class="ident">parse::length_prefixed</span>(<span class="ident">change_parser</span>)(<span class="ident">i</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">changes_len</span> <span class="op">=</span> <span class="ident">stored_changes</span>.<span class="ident">len</span>();
-        <span class="kw">let</span> <span class="ident">changes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Change</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">stored_changes</span>
-            .<span class="ident">into_iter</span>()
-            .<span class="ident">try_fold</span>::<span class="op">&lt;</span><span class="kw">_</span>, <span class="kw">_</span>, <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">ReadMessageError</span><span class="op">&gt;</span><span class="op">&gt;</span>(
-                <span class="ident">Vec::with_capacity</span>(<span class="ident">changes_len</span>),
-                <span class="op">|</span><span class="kw-2">mut</span> <span class="ident">acc</span>, <span class="ident">stored</span><span class="op">|</span> {
-                    <span class="kw">let</span> <span class="ident">change</span> <span class="op">=</span> <span class="ident">Change::new_from_unverified</span>(<span class="ident">stored</span>.<span class="ident">into_owned</span>(), <span class="prelude-val">None</span>)
-                        .<span class="ident">map_err</span>(<span class="ident">ReadMessageError::ReadChangeOps</span>)<span class="question-mark">?</span>;
-                    <span class="ident">acc</span>.<span class="ident">push</span>(<span class="ident">change</span>);
-                    <span class="prelude-val">Ok</span>(<span class="ident">acc</span>)
+        <span class="kw">let </span>(i, stored_changes) = parse::length_prefixed(change_parser)(i)<span class="question-mark">?</span>;
+        <span class="kw">let </span>changes_len = stored_changes.len();
+        <span class="kw">let </span>changes: Vec&lt;Change&gt; = stored_changes
+            .into_iter()
+            .try_fold::&lt;<span class="kw">_</span>, <span class="kw">_</span>, <span class="prelude-ty">Result</span>&lt;<span class="kw">_</span>, ReadMessageError&gt;&gt;(
+                Vec::with_capacity(changes_len),
+                |<span class="kw-2">mut </span>acc, stored| {
+                    <span class="kw">let </span>change = Change::new_from_unverified(stored.into_owned(), <span class="prelude-val">None</span>)
+                        .map_err(ReadMessageError::ReadChangeOps)<span class="question-mark">?</span>;
+                    acc.push(change);
+                    <span class="prelude-val">Ok</span>(acc)
                 },
             )<span class="question-mark">?</span>;
 
         <span class="prelude-val">Ok</span>((
-            <span class="ident">i</span>,
-            <span class="ident">Message</span> {
-                <span class="ident">heads</span>,
-                <span class="ident">need</span>,
-                <span class="ident">have</span>,
-                <span class="ident">changes</span>,
+            i,
+            Message {
+                heads,
+                need,
+                have,
+                changes,
             },
         ))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">encode</span>(<span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">buf</span> <span class="op">=</span> <span class="macro">vec!</span>[<span class="ident">MESSAGE_TYPE_SYNC</span>];
+    <span class="kw">pub fn </span>encode(<span class="kw-2">mut </span><span class="self">self</span>) -&gt; Vec&lt;u8&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>buf = <span class="macro">vec!</span>[MESSAGE_TYPE_SYNC];
 
-        <span class="ident">encode_hashes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">buf</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">heads</span>);
-        <span class="ident">encode_hashes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">buf</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">need</span>);
-        <span class="ident">encode_many</span>(<span class="kw-2">&amp;mut</span> <span class="ident">buf</span>, <span class="self">self</span>.<span class="ident">have</span>.<span class="ident">iter</span>(), <span class="op">|</span><span class="ident">buf</span>, <span class="ident">h</span><span class="op">|</span> {
-            <span class="ident">encode_hashes</span>(<span class="ident">buf</span>, <span class="kw-2">&amp;</span><span class="ident">h</span>.<span class="ident">last_sync</span>);
-            <span class="ident">leb128::write::unsigned</span>(<span class="ident">buf</span>, <span class="ident">h</span>.<span class="ident">bloom</span>.<span class="ident">to_bytes</span>().<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>).<span class="ident">unwrap</span>();
-            <span class="ident">buf</span>.<span class="ident">extend</span>(<span class="ident">h</span>.<span class="ident">bloom</span>.<span class="ident">to_bytes</span>());
+        encode_hashes(<span class="kw-2">&amp;mut </span>buf, <span class="kw-2">&amp;</span><span class="self">self</span>.heads);
+        encode_hashes(<span class="kw-2">&amp;mut </span>buf, <span class="kw-2">&amp;</span><span class="self">self</span>.need);
+        encode_many(<span class="kw-2">&amp;mut </span>buf, <span class="self">self</span>.have.iter(), |buf, h| {
+            encode_hashes(buf, <span class="kw-2">&amp;</span>h.last_sync);
+            leb128::write::unsigned(buf, h.bloom.to_bytes().len() <span class="kw">as </span>u64).unwrap();
+            buf.extend(h.bloom.to_bytes());
         });
 
-        <span class="ident">encode_many</span>(<span class="kw-2">&amp;mut</span> <span class="ident">buf</span>, <span class="self">self</span>.<span class="ident">changes</span>.<span class="ident">iter_mut</span>(), <span class="op">|</span><span class="ident">buf</span>, <span class="ident">change</span><span class="op">|</span> {
-            <span class="ident">leb128::write::unsigned</span>(<span class="ident">buf</span>, <span class="ident">change</span>.<span class="ident">raw_bytes</span>().<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>).<span class="ident">unwrap</span>();
-            <span class="ident">buf</span>.<span class="ident">extend</span>(<span class="ident">change</span>.<span class="ident">raw_bytes</span>().<span class="ident">as_ref</span>())
+        encode_many(<span class="kw-2">&amp;mut </span>buf, <span class="self">self</span>.changes.iter_mut(), |buf, change| {
+            leb128::write::unsigned(buf, change.raw_bytes().len() <span class="kw">as </span>u64).unwrap();
+            buf.extend(change.raw_bytes().as_ref())
         });
 
-        <span class="ident">buf</span>
+        buf
     }
 }
 
-<span class="kw">fn</span> <span class="ident">encode_many</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">I</span>, <span class="ident">It</span>, <span class="ident">F</span><span class="op">&gt;</span>(<span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>, <span class="ident">data</span>: <span class="ident">I</span>, <span class="ident">f</span>: <span class="ident">F</span>)
-<span class="kw">where</span>
-    <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">It</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">ExactSizeIterator</span> <span class="op">+</span> <span class="lifetime">&#39;a</span>,
-    <span class="ident">F</span>: <span class="ident">Fn</span>(<span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>, <span class="ident">It</span>),
+<span class="kw">fn </span>encode_many&lt;<span class="lifetime">&#39;a</span>, I, It, F&gt;(out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;, data: I, f: F)
+<span class="kw">where
+    </span>I: Iterator&lt;Item = It&gt; + ExactSizeIterator + <span class="lifetime">&#39;a</span>,
+    F: Fn(<span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;, It),
 {
-    <span class="ident">leb128::write::unsigned</span>(<span class="ident">out</span>, <span class="ident">data</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>).<span class="ident">unwrap</span>();
-    <span class="kw">for</span> <span class="ident">datum</span> <span class="kw">in</span> <span class="ident">data</span> {
-        <span class="ident">f</span>(<span class="ident">out</span>, <span class="ident">datum</span>)
+    leb128::write::unsigned(out, data.len() <span class="kw">as </span>u64).unwrap();
+    <span class="kw">for </span>datum <span class="kw">in </span>data {
+        f(out, datum)
     }
 }
 
-<span class="kw">fn</span> <span class="ident">encode_hashes</span>(<span class="ident">buf</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>, <span class="ident">hashes</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>]) {
+<span class="kw">fn </span>encode_hashes(buf: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;, hashes: <span class="kw-2">&amp;</span>[ChangeHash]) {
     <span class="macro">debug_assert!</span>(
-        <span class="ident">hashes</span>.<span class="ident">windows</span>(<span class="number">2</span>).<span class="ident">all</span>(<span class="op">|</span><span class="ident">h</span><span class="op">|</span> <span class="ident">h</span>[<span class="number">0</span>] <span class="op">&lt;</span><span class="op">=</span> <span class="ident">h</span>[<span class="number">1</span>]),
-        <span class="string">&quot;hashes were not sorted&quot;</span>
-    );
-    <span class="ident">encode_many</span>(<span class="ident">buf</span>, <span class="ident">hashes</span>.<span class="ident">iter</span>(), <span class="op">|</span><span class="ident">buf</span>, <span class="ident">hash</span><span class="op">|</span> <span class="ident">buf</span>.<span class="ident">extend</span>(<span class="ident">hash</span>.<span class="ident">as_bytes</span>()))
+        hashes.windows(<span class="number">2</span>).all(|h| h[<span class="number">0</span>] &lt;= h[<span class="number">1</span>]),
+        <span class="string">&quot;hashes were not sorted&quot;
+    </span>);
+    encode_many(buf, hashes.iter(), |buf, hash| buf.extend(hash.as_bytes()))
 }
 
-<span class="kw">fn</span> <span class="ident">advance_heads</span>(
-    <span class="ident">my_old_heads</span>: <span class="kw-2">&amp;</span><span class="ident">HashSet</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>,
-    <span class="ident">my_new_heads</span>: <span class="kw-2">&amp;</span><span class="ident">HashSet</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>,
-    <span class="ident">our_old_shared_heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>],
-) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span> {
-    <span class="kw">let</span> <span class="ident">new_heads</span> <span class="op">=</span> <span class="ident">my_new_heads</span>
-        .<span class="ident">iter</span>()
-        .<span class="ident">filter</span>(<span class="op">|</span><span class="ident">head</span><span class="op">|</span> <span class="op">!</span><span class="ident">my_old_heads</span>.<span class="ident">contains</span>(<span class="ident">head</span>))
-        .<span class="ident">copied</span>()
-        .<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
+<span class="kw">fn </span>advance_heads(
+    my_old_heads: <span class="kw-2">&amp;</span>HashSet&lt;<span class="kw-2">&amp;</span>ChangeHash&gt;,
+    my_new_heads: <span class="kw-2">&amp;</span>HashSet&lt;ChangeHash&gt;,
+    our_old_shared_heads: <span class="kw-2">&amp;</span>[ChangeHash],
+) -&gt; Vec&lt;ChangeHash&gt; {
+    <span class="kw">let </span>new_heads = my_new_heads
+        .iter()
+        .filter(|head| !my_old_heads.contains(head))
+        .copied()
+        .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
 
-    <span class="kw">let</span> <span class="ident">common_heads</span> <span class="op">=</span> <span class="ident">our_old_shared_heads</span>
-        .<span class="ident">iter</span>()
-        .<span class="ident">filter</span>(<span class="op">|</span><span class="ident">head</span><span class="op">|</span> <span class="ident">my_new_heads</span>.<span class="ident">contains</span>(<span class="ident">head</span>))
-        .<span class="ident">copied</span>()
-        .<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
+    <span class="kw">let </span>common_heads = our_old_shared_heads
+        .iter()
+        .filter(|head| my_new_heads.contains(head))
+        .copied()
+        .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
 
-    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">advanced_heads</span> <span class="op">=</span> <span class="ident">HashSet::with_capacity</span>(<span class="ident">new_heads</span>.<span class="ident">len</span>() <span class="op">+</span> <span class="ident">common_heads</span>.<span class="ident">len</span>());
-    <span class="kw">for</span> <span class="ident">head</span> <span class="kw">in</span> <span class="ident">new_heads</span>.<span class="ident">into_iter</span>().<span class="ident">chain</span>(<span class="ident">common_heads</span>) {
-        <span class="ident">advanced_heads</span>.<span class="ident">insert</span>(<span class="ident">head</span>);
+    <span class="kw">let </span><span class="kw-2">mut </span>advanced_heads = HashSet::with_capacity(new_heads.len() + common_heads.len());
+    <span class="kw">for </span>head <span class="kw">in </span>new_heads.into_iter().chain(common_heads) {
+        advanced_heads.insert(head);
     }
-    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">advanced_heads</span> <span class="op">=</span> <span class="ident">advanced_heads</span>.<span class="ident">into_iter</span>().<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
-    <span class="ident">advanced_heads</span>.<span class="ident">sort</span>();
-    <span class="ident">advanced_heads</span>
+    <span class="kw">let </span><span class="kw-2">mut </span>advanced_heads = advanced_heads.into_iter().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+    advanced_heads.sort();
+    advanced_heads
 }
 
-<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
-<span class="kw">mod</span> <span class="ident">tests</span> {
-    <span class="kw">use</span> <span class="kw">super</span>::<span class="kw-2">*</span>;
-    <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::change::gen::gen_change</span>;
-    <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::storage::parse::Input</span>;
-    <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::types::gen::gen_hash</span>;
-    <span class="kw">use</span> <span class="ident">proptest::prelude</span>::<span class="kw-2">*</span>;
+<span class="attribute">#[cfg(test)]
+</span><span class="kw">mod </span>tests {
+    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+    <span class="kw">use </span><span class="kw">crate</span>::change::gen::gen_change;
+    <span class="kw">use </span><span class="kw">crate</span>::storage::parse::Input;
+    <span class="kw">use </span><span class="kw">crate</span>::types::gen::gen_hash;
+    <span class="kw">use </span>proptest::prelude::<span class="kw-2">*</span>;
 
-    <span class="macro">prop_compose!</span> {
-        <span class="kw">fn</span> <span class="ident">gen_bloom</span>()(<span class="ident">hashes</span> <span class="kw">in</span> <span class="ident">gen_sorted_hashes</span>(<span class="number">0</span>..<span class="number">10</span>)) -&gt; <span class="ident">BloomFilter</span> {
-            <span class="ident">BloomFilter::from_hashes</span>(<span class="ident">hashes</span>.<span class="ident">into_iter</span>())
+    <span class="macro">prop_compose! </span>{
+        <span class="kw">fn </span>gen_bloom()(hashes <span class="kw">in </span>gen_sorted_hashes(<span class="number">0</span>..<span class="number">10</span>)) -&gt; BloomFilter {
+            BloomFilter::from_hashes(hashes.into_iter())
         }
     }
 
-    <span class="macro">prop_compose!</span> {
-        <span class="kw">fn</span> <span class="ident">gen_have</span>()(<span class="ident">bloom</span> <span class="kw">in</span> <span class="ident">gen_bloom</span>(), <span class="ident">last_sync</span> <span class="kw">in</span> <span class="ident">gen_sorted_hashes</span>(<span class="number">0</span>..<span class="number">10</span>))  -&gt; <span class="ident">Have</span> {
-            <span class="ident">Have</span> {
-                <span class="ident">bloom</span>,
-                <span class="ident">last_sync</span>,
+    <span class="macro">prop_compose! </span>{
+        <span class="kw">fn </span>gen_have()(bloom <span class="kw">in </span>gen_bloom(), last_sync <span class="kw">in </span>gen_sorted_hashes(<span class="number">0</span>..<span class="number">10</span>))  -&gt; Have {
+            Have {
+                bloom,
+                last_sync,
             }
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">gen_sorted_hashes</span>(<span class="ident">size</span>: <span class="ident">std::ops::Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>) -&gt; <span class="kw">impl</span> <span class="ident">Strategy</span><span class="op">&lt;</span><span class="ident">Value</span> <span class="op">=</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-        <span class="ident">proptest::collection::vec</span>(<span class="ident">gen_hash</span>(), <span class="ident">size</span>).<span class="ident">prop_map</span>(<span class="op">|</span><span class="kw-2">mut</span> <span class="ident">h</span><span class="op">|</span> {
-            <span class="ident">h</span>.<span class="ident">sort</span>();
-            <span class="ident">h</span>
+    <span class="kw">fn </span>gen_sorted_hashes(size: std::ops::Range&lt;usize&gt;) -&gt; <span class="kw">impl </span>Strategy&lt;Value = Vec&lt;ChangeHash&gt;&gt; {
+        proptest::collection::vec(gen_hash(), size).prop_map(|<span class="kw-2">mut </span>h| {
+            h.sort();
+            h
         })
     }
 
-    <span class="macro">prop_compose!</span> {
-        <span class="kw">fn</span> <span class="ident">gen_sync_message</span>()(
-            <span class="ident">heads</span> <span class="kw">in</span> <span class="ident">gen_sorted_hashes</span>(<span class="number">0</span>..<span class="number">10</span>),
-            <span class="ident">need</span> <span class="kw">in</span> <span class="ident">gen_sorted_hashes</span>(<span class="number">0</span>..<span class="number">10</span>),
-            <span class="ident">have</span> <span class="kw">in</span> <span class="ident">proptest::collection::vec</span>(<span class="ident">gen_have</span>(), <span class="number">0</span>..<span class="number">10</span>),
-            <span class="ident">changes</span> <span class="kw">in</span> <span class="ident">proptest::collection::vec</span>(<span class="ident">gen_change</span>(), <span class="number">0</span>..<span class="number">10</span>),
-        ) -&gt; <span class="ident">Message</span> {
-            <span class="ident">Message</span> {
-                <span class="ident">heads</span>,
-                <span class="ident">need</span>,
-                <span class="ident">have</span>,
-                <span class="ident">changes</span>,
+    <span class="macro">prop_compose! </span>{
+        <span class="kw">fn </span>gen_sync_message()(
+            heads <span class="kw">in </span>gen_sorted_hashes(<span class="number">0</span>..<span class="number">10</span>),
+            need <span class="kw">in </span>gen_sorted_hashes(<span class="number">0</span>..<span class="number">10</span>),
+            have <span class="kw">in </span>proptest::collection::vec(gen_have(), <span class="number">0</span>..<span class="number">10</span>),
+            changes <span class="kw">in </span>proptest::collection::vec(gen_change(), <span class="number">0</span>..<span class="number">10</span>),
+        ) -&gt; Message {
+            Message {
+                heads,
+                need,
+                have,
+                changes,
             }
         }
 
     }
 
-    <span class="attribute">#[<span class="ident">test</span>]</span>
-    <span class="kw">fn</span> <span class="ident">encode_decode_empty_message</span>() {
-        <span class="kw">let</span> <span class="ident">msg</span> <span class="op">=</span> <span class="ident">Message</span> {
-            <span class="ident">heads</span>: <span class="macro">vec!</span>[],
-            <span class="ident">need</span>: <span class="macro">vec!</span>[],
-            <span class="ident">have</span>: <span class="macro">vec!</span>[],
-            <span class="ident">changes</span>: <span class="macro">vec!</span>[],
+    <span class="attribute">#[test]
+    </span><span class="kw">fn </span>encode_decode_empty_message() {
+        <span class="kw">let </span>msg = Message {
+            heads: <span class="macro">vec!</span>[],
+            need: <span class="macro">vec!</span>[],
+            have: <span class="macro">vec!</span>[],
+            changes: <span class="macro">vec!</span>[],
         };
-        <span class="kw">let</span> <span class="ident">encoded</span> <span class="op">=</span> <span class="ident">msg</span>.<span class="ident">encode</span>();
-        <span class="ident">Message::parse</span>(<span class="ident">Input::new</span>(<span class="kw-2">&amp;</span><span class="ident">encoded</span>)).<span class="ident">unwrap</span>();
+        <span class="kw">let </span>encoded = msg.encode();
+        Message::parse(Input::new(<span class="kw-2">&amp;</span>encoded)).unwrap();
     }
 
-    <span class="macro">proptest!</span> {
-        <span class="attribute">#[<span class="ident">test</span>]</span>
-        <span class="kw">fn</span> <span class="ident">encode_decode_message</span>(<span class="ident">msg</span> <span class="kw">in</span> <span class="ident">gen_sync_message</span>()) {
-            <span class="kw">let</span> <span class="ident">encoded</span> <span class="op">=</span> <span class="ident">msg</span>.<span class="ident">clone</span>().<span class="ident">encode</span>();
-            <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">decoded</span>) <span class="op">=</span> <span class="ident">Message::parse</span>(<span class="ident">Input::new</span>(<span class="kw-2">&amp;</span><span class="ident">encoded</span>)).<span class="ident">unwrap</span>();
-            <span class="macro">assert!</span>(<span class="ident">i</span>.<span class="ident">is_empty</span>());
-            <span class="macro">assert_eq!</span>(<span class="ident">msg</span>, <span class="ident">decoded</span>);
+    <span class="macro">proptest! </span>{
+        <span class="attribute">#[test]
+        </span><span class="kw">fn </span>encode_decode_message(msg <span class="kw">in </span>gen_sync_message()) {
+            <span class="kw">let </span>encoded = msg.clone().encode();
+            <span class="kw">let </span>(i, decoded) = Message::parse(Input::new(<span class="kw-2">&amp;</span>encoded)).unwrap();
+            <span class="macro">assert!</span>(i.is_empty());
+            <span class="macro">assert_eq!</span>(msg, decoded);
         }
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

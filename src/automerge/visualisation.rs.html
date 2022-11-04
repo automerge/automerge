@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/visualisation.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>visualisation.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/visualisation.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>visualisation.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -272,192 +272,192 @@
 <span id="270">270</span>
 <span id="271">271</span>
 <span id="272">272</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::types::ObjId</span>;
-<span class="kw">use</span> <span class="ident">fxhash::FxHasher</span>;
-<span class="kw">use</span> <span class="ident">std</span>::{<span class="ident">borrow::Cow</span>, <span class="ident">collections::HashMap</span>, <span class="ident">hash::BuildHasherDefault</span>};
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::types::ObjId;
+<span class="kw">use </span>fxhash::FxHasher;
+<span class="kw">use </span>std::{borrow::Cow, collections::HashMap, hash::BuildHasherDefault};
 
-<span class="kw">use</span> <span class="ident">rand::Rng</span>;
+<span class="kw">use </span>rand::Rng;
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Copy</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>, <span class="ident">Hash</span>, <span class="ident">Eq</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">NodeId</span>(<span class="ident">u64</span>);
+<span class="attribute">#[derive(Copy, Clone, PartialEq, Hash, Eq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>NodeId(u64);
 
-<span class="kw">impl</span> <span class="ident">Default</span> <span class="kw">for</span> <span class="ident">NodeId</span> {
-    <span class="kw">fn</span> <span class="ident">default</span>() -&gt; <span class="self">Self</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">rng</span> <span class="op">=</span> <span class="ident">rand::thread_rng</span>();
-        <span class="kw">let</span> <span class="ident">u</span> <span class="op">=</span> <span class="ident">rng</span>.<span class="ident">gen</span>();
-        <span class="ident">NodeId</span>(<span class="ident">u</span>)
+<span class="kw">impl </span>Default <span class="kw">for </span>NodeId {
+    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span><span class="kw-2">mut </span>rng = rand::thread_rng();
+        <span class="kw">let </span>u = rng.gen();
+        NodeId(u)
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">Node</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">id</span>: <span class="ident">NodeId</span>,
-    <span class="ident">children</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">NodeId</span><span class="op">&gt;</span>,
-    <span class="ident">node_type</span>: <span class="ident">NodeType</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
-    <span class="ident">metadata</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident"><span class="kw">crate</span>::op_set::OpSetMetadata</span>,
+<span class="attribute">#[derive(Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Node&lt;<span class="lifetime">&#39;a</span>&gt; {
+    id: NodeId,
+    children: Vec&lt;NodeId&gt;,
+    node_type: NodeType&lt;<span class="lifetime">&#39;a</span>&gt;,
+    metadata: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw">crate</span>::op_set::OpSetMetadata,
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">NodeType</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">ObjRoot</span>(<span class="ident"><span class="kw">crate</span>::types::ObjId</span>),
-    <span class="ident">ObjTreeNode</span>(<span class="ident">ObjId</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident"><span class="kw">crate</span>::op_tree::OpTreeNode</span>),
+<span class="attribute">#[derive(Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>NodeType&lt;<span class="lifetime">&#39;a</span>&gt; {
+    ObjRoot(<span class="kw">crate</span>::types::ObjId),
+    ObjTreeNode(ObjId, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw">crate</span>::op_tree::OpTreeNode),
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">Edge</span> {
-    <span class="ident">parent_id</span>: <span class="ident">NodeId</span>,
-    <span class="ident">child_id</span>: <span class="ident">NodeId</span>,
+<span class="attribute">#[derive(Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Edge {
+    parent_id: NodeId,
+    child_id: NodeId,
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">GraphVisualisation</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">nodes</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">NodeId</span>, <span class="ident">Node</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    <span class="ident">actor_shorthands</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">usize</span>, <span class="ident">String</span><span class="op">&gt;</span>,
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>GraphVisualisation&lt;<span class="lifetime">&#39;a</span>&gt; {
+    nodes: HashMap&lt;NodeId, Node&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
+    actor_shorthands: HashMap&lt;usize, String&gt;,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">GraphVisualisation</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn</span> <span class="ident">construct</span>(
-        <span class="ident">trees</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">HashMap</span><span class="op">&lt;</span>
-            <span class="ident"><span class="kw">crate</span>::types::ObjId</span>,
-            <span class="ident"><span class="kw">crate</span>::op_tree::OpTree</span>,
-            <span class="ident">BuildHasherDefault</span><span class="op">&lt;</span><span class="ident">FxHasher</span><span class="op">&gt;</span>,
-        <span class="op">&gt;</span>,
-        <span class="ident">metadata</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident"><span class="kw">crate</span>::op_set::OpSetMetadata</span>,
-    ) -&gt; <span class="ident">GraphVisualisation</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">nodes</span> <span class="op">=</span> <span class="ident">HashMap::new</span>();
-        <span class="kw">for</span> (<span class="ident">obj_id</span>, <span class="ident">tree</span>) <span class="kw">in</span> <span class="ident">trees</span> {
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">root_node</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">tree</span>.<span class="ident">internal</span>.<span class="ident">root_node</span> {
-                <span class="kw">let</span> <span class="ident">tree_id</span> <span class="op">=</span> <span class="ident"><span class="self">Self</span>::construct_nodes</span>(<span class="ident">root_node</span>, <span class="ident">obj_id</span>, <span class="kw-2">&amp;mut</span> <span class="ident">nodes</span>, <span class="ident">metadata</span>);
-                <span class="kw">let</span> <span class="ident">obj_tree_id</span> <span class="op">=</span> <span class="ident">NodeId::default</span>();
-                <span class="ident">nodes</span>.<span class="ident">insert</span>(
-                    <span class="ident">obj_tree_id</span>,
-                    <span class="ident">Node</span> {
-                        <span class="ident">id</span>: <span class="ident">obj_tree_id</span>,
-                        <span class="ident">children</span>: <span class="macro">vec!</span>[<span class="ident">tree_id</span>],
-                        <span class="ident">node_type</span>: <span class="ident">NodeType::ObjRoot</span>(<span class="kw-2">*</span><span class="ident">obj_id</span>),
-                        <span class="ident">metadata</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; GraphVisualisation&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>construct(
+        trees: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>HashMap&lt;
+            <span class="kw">crate</span>::types::ObjId,
+            <span class="kw">crate</span>::op_tree::OpTree,
+            BuildHasherDefault&lt;FxHasher&gt;,
+        &gt;,
+        metadata: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw">crate</span>::op_set::OpSetMetadata,
+    ) -&gt; GraphVisualisation&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>nodes = HashMap::new();
+        <span class="kw">for </span>(obj_id, tree) <span class="kw">in </span>trees {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(root_node) = <span class="kw-2">&amp;</span>tree.internal.root_node {
+                <span class="kw">let </span>tree_id = <span class="self">Self</span>::construct_nodes(root_node, obj_id, <span class="kw-2">&amp;mut </span>nodes, metadata);
+                <span class="kw">let </span>obj_tree_id = NodeId::default();
+                nodes.insert(
+                    obj_tree_id,
+                    Node {
+                        id: obj_tree_id,
+                        children: <span class="macro">vec!</span>[tree_id],
+                        node_type: NodeType::ObjRoot(<span class="kw-2">*</span>obj_id),
+                        metadata,
                     },
                 );
             }
         }
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">actor_shorthands</span> <span class="op">=</span> <span class="ident">HashMap::new</span>();
-        <span class="kw">for</span> <span class="ident">actor</span> <span class="kw">in</span> <span class="number">0</span>..<span class="ident">metadata</span>.<span class="ident">actors</span>.<span class="ident">len</span>() {
-            <span class="ident">actor_shorthands</span>.<span class="ident">insert</span>(<span class="ident">actor</span>, <span class="macro">format!</span>(<span class="string">&quot;actor{}&quot;</span>, <span class="ident">actor</span>));
+        <span class="kw">let </span><span class="kw-2">mut </span>actor_shorthands = HashMap::new();
+        <span class="kw">for </span>actor <span class="kw">in </span><span class="number">0</span>..metadata.actors.len() {
+            actor_shorthands.insert(actor, <span class="macro">format!</span>(<span class="string">&quot;actor{}&quot;</span>, actor));
         }
-        <span class="ident">GraphVisualisation</span> {
-            <span class="ident">nodes</span>,
-            <span class="ident">actor_shorthands</span>,
+        GraphVisualisation {
+            nodes,
+            actor_shorthands,
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">construct_nodes</span>(
-        <span class="ident">node</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident"><span class="kw">crate</span>::op_tree::OpTreeNode</span>,
-        <span class="ident">objid</span>: <span class="kw-2">&amp;</span><span class="ident">ObjId</span>,
-        <span class="ident">nodes</span>: <span class="kw-2">&amp;mut</span> <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">NodeId</span>, <span class="ident">Node</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-        <span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident"><span class="kw">crate</span>::op_set::OpSetMetadata</span>,
-    ) -&gt; <span class="ident">NodeId</span> {
-        <span class="kw">let</span> <span class="ident">node_id</span> <span class="op">=</span> <span class="ident">NodeId::default</span>();
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">child_ids</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
-        <span class="kw">for</span> <span class="ident">child</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">node</span>.<span class="ident">children</span> {
-            <span class="kw">let</span> <span class="ident">child_id</span> <span class="op">=</span> <span class="ident"><span class="self">Self</span>::construct_nodes</span>(<span class="ident">child</span>, <span class="ident">objid</span>, <span class="ident">nodes</span>, <span class="ident">m</span>);
-            <span class="ident">child_ids</span>.<span class="ident">push</span>(<span class="ident">child_id</span>);
+    <span class="kw">fn </span>construct_nodes(
+        node: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw">crate</span>::op_tree::OpTreeNode,
+        objid: <span class="kw-2">&amp;</span>ObjId,
+        nodes: <span class="kw-2">&amp;mut </span>HashMap&lt;NodeId, Node&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
+        m: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw">crate</span>::op_set::OpSetMetadata,
+    ) -&gt; NodeId {
+        <span class="kw">let </span>node_id = NodeId::default();
+        <span class="kw">let </span><span class="kw-2">mut </span>child_ids = Vec::new();
+        <span class="kw">for </span>child <span class="kw">in </span><span class="kw-2">&amp;</span>node.children {
+            <span class="kw">let </span>child_id = <span class="self">Self</span>::construct_nodes(child, objid, nodes, m);
+            child_ids.push(child_id);
         }
-        <span class="ident">nodes</span>.<span class="ident">insert</span>(
-            <span class="ident">node_id</span>,
-            <span class="ident">Node</span> {
-                <span class="ident">id</span>: <span class="ident">node_id</span>,
-                <span class="ident">children</span>: <span class="ident">child_ids</span>,
-                <span class="ident">node_type</span>: <span class="ident">NodeType::ObjTreeNode</span>(<span class="kw-2">*</span><span class="ident">objid</span>, <span class="ident">node</span>),
-                <span class="ident">metadata</span>: <span class="ident">m</span>,
+        nodes.insert(
+            node_id,
+            Node {
+                id: node_id,
+                children: child_ids,
+                node_type: NodeType::ObjTreeNode(<span class="kw-2">*</span>objid, node),
+                metadata: m,
             },
         );
-        <span class="ident">node_id</span>
+        node_id
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">dot::GraphWalk</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Node</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>, <span class="ident">Edge</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">GraphVisualisation</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">nodes</span>(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="self">self</span>) -&gt; <span class="ident">dot::Nodes</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Node</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-        <span class="ident">Cow::Owned</span>(<span class="self">self</span>.<span class="ident">nodes</span>.<span class="ident">values</span>().<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>())
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; dot::GraphWalk&lt;<span class="lifetime">&#39;a</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Node&lt;<span class="lifetime">&#39;a</span>&gt;, Edge&gt; <span class="kw">for </span>GraphVisualisation&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>nodes(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>) -&gt; dot::Nodes&lt;<span class="lifetime">&#39;a</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Node&lt;<span class="lifetime">&#39;a</span>&gt;&gt; {
+        Cow::Owned(<span class="self">self</span>.nodes.values().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;())
     }
 
-    <span class="kw">fn</span> <span class="ident">edges</span>(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="self">self</span>) -&gt; <span class="ident">dot::Edges</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Edge</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">edges</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
-        <span class="kw">for</span> <span class="ident">node</span> <span class="kw">in</span> <span class="self">self</span>.<span class="ident">nodes</span>.<span class="ident">values</span>() {
-            <span class="kw">for</span> <span class="ident">child</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">node</span>.<span class="ident">children</span> {
-                <span class="ident">edges</span>.<span class="ident">push</span>(<span class="ident">Edge</span> {
-                    <span class="ident">parent_id</span>: <span class="ident">node</span>.<span class="ident">id</span>,
-                    <span class="ident">child_id</span>: <span class="kw-2">*</span><span class="ident">child</span>,
+    <span class="kw">fn </span>edges(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>) -&gt; dot::Edges&lt;<span class="lifetime">&#39;a</span>, Edge&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>edges = Vec::new();
+        <span class="kw">for </span>node <span class="kw">in </span><span class="self">self</span>.nodes.values() {
+            <span class="kw">for </span>child <span class="kw">in </span><span class="kw-2">&amp;</span>node.children {
+                edges.push(Edge {
+                    parent_id: node.id,
+                    child_id: <span class="kw-2">*</span>child,
                 });
             }
         }
-        <span class="ident">Cow::Owned</span>(<span class="ident">edges</span>)
+        Cow::Owned(edges)
     }
 
-    <span class="kw">fn</span> <span class="ident">source</span>(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="self">self</span>, <span class="ident">edge</span>: <span class="kw-2">&amp;</span><span class="ident">Edge</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Node</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">nodes</span>.<span class="ident">get</span>(<span class="kw-2">&amp;</span><span class="ident">edge</span>.<span class="ident">parent_id</span>).<span class="ident">unwrap</span>()
+    <span class="kw">fn </span>source(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>, edge: <span class="kw-2">&amp;</span>Edge) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Node&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <span class="self">self</span>.nodes.get(<span class="kw-2">&amp;</span>edge.parent_id).unwrap()
     }
 
-    <span class="kw">fn</span> <span class="ident">target</span>(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="self">self</span>, <span class="ident">edge</span>: <span class="kw-2">&amp;</span><span class="ident">Edge</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Node</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">nodes</span>.<span class="ident">get</span>(<span class="kw-2">&amp;</span><span class="ident">edge</span>.<span class="ident">child_id</span>).<span class="ident">unwrap</span>()
+    <span class="kw">fn </span>target(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>, edge: <span class="kw-2">&amp;</span>Edge) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Node&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <span class="self">self</span>.nodes.get(<span class="kw-2">&amp;</span>edge.child_id).unwrap()
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">dot::Labeller</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Node</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>, <span class="ident">Edge</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">GraphVisualisation</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">graph_id</span>(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="self">self</span>) -&gt; <span class="ident">dot::Id</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="ident">dot::Id::new</span>(<span class="string">&quot;OpSet&quot;</span>).<span class="ident">unwrap</span>()
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; dot::Labeller&lt;<span class="lifetime">&#39;a</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Node&lt;<span class="lifetime">&#39;a</span>&gt;, Edge&gt; <span class="kw">for </span>GraphVisualisation&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>graph_id(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>) -&gt; dot::Id&lt;<span class="lifetime">&#39;a</span>&gt; {
+        dot::Id::new(<span class="string">&quot;OpSet&quot;</span>).unwrap()
     }
 
-    <span class="kw">fn</span> <span class="ident">node_id</span>(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="self">self</span>, <span class="ident">n</span>: <span class="op">&amp;&amp;</span><span class="ident">Node</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>) -&gt; <span class="ident">dot::Id</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="ident">dot::Id::new</span>(<span class="macro">format!</span>(<span class="string">&quot;node_{}&quot;</span>, <span class="ident">n</span>.<span class="ident">id</span>.<span class="number">0</span>)).<span class="ident">unwrap</span>()
+    <span class="kw">fn </span>node_id(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>, n: &amp;&amp;Node&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; dot::Id&lt;<span class="lifetime">&#39;a</span>&gt; {
+        dot::Id::new(<span class="macro">format!</span>(<span class="string">&quot;node_{}&quot;</span>, n.id.<span class="number">0</span>)).unwrap()
     }
 
-    <span class="kw">fn</span> <span class="ident">node_shape</span>(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="self">self</span>, <span class="ident">node</span>: <span class="op">&amp;&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Node</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">dot::LabelText</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">shape</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">node</span>.<span class="ident">node_type</span> {
-            <span class="ident">NodeType::ObjTreeNode</span>(<span class="kw">_</span>, <span class="kw">_</span>) =&gt; <span class="ident">dot::LabelText::label</span>(<span class="string">&quot;none&quot;</span>),
-            <span class="ident">NodeType::ObjRoot</span>(<span class="kw">_</span>) =&gt; <span class="ident">dot::LabelText::label</span>(<span class="string">&quot;ellipse&quot;</span>),
+    <span class="kw">fn </span>node_shape(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>, node: &amp;&amp;<span class="lifetime">&#39;a </span>Node&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;dot::LabelText&lt;<span class="lifetime">&#39;a</span>&gt;&gt; {
+        <span class="kw">let </span>shape = <span class="kw">match </span>node.node_type {
+            NodeType::ObjTreeNode(<span class="kw">_</span>, <span class="kw">_</span>) =&gt; dot::LabelText::label(<span class="string">&quot;none&quot;</span>),
+            NodeType::ObjRoot(<span class="kw">_</span>) =&gt; dot::LabelText::label(<span class="string">&quot;ellipse&quot;</span>),
         };
-        <span class="prelude-val">Some</span>(<span class="ident">shape</span>)
+        <span class="prelude-val">Some</span>(shape)
     }
 
-    <span class="kw">fn</span> <span class="ident">node_label</span>(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="self">self</span>, <span class="ident">n</span>: <span class="op">&amp;&amp;</span><span class="ident">Node</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>) -&gt; <span class="ident">dot::LabelText</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="ident">n</span>.<span class="ident">node_type</span> {
-            <span class="ident">NodeType::ObjTreeNode</span>(<span class="ident">objid</span>, <span class="ident">tree_node</span>) =&gt; <span class="ident">dot::LabelText::HtmlStr</span>(
-                <span class="ident">OpTable::create</span>(<span class="ident">tree_node</span>, <span class="kw-2">&amp;</span><span class="ident">objid</span>, <span class="ident">n</span>.<span class="ident">metadata</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">actor_shorthands</span>)
-                    .<span class="ident">to_html</span>()
-                    .<span class="ident">into</span>(),
+    <span class="kw">fn </span>node_label(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>, n: &amp;&amp;Node&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; dot::LabelText&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <span class="kw">match </span>n.node_type {
+            NodeType::ObjTreeNode(objid, tree_node) =&gt; dot::LabelText::HtmlStr(
+                OpTable::create(tree_node, <span class="kw-2">&amp;</span>objid, n.metadata, <span class="kw-2">&amp;</span><span class="self">self</span>.actor_shorthands)
+                    .to_html()
+                    .into(),
             ),
-            <span class="ident">NodeType::ObjRoot</span>(<span class="ident">objid</span>) =&gt; {
-                <span class="ident">dot::LabelText::label</span>(<span class="ident">print_opid</span>(<span class="kw-2">&amp;</span><span class="ident">objid</span>.<span class="number">0</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">actor_shorthands</span>))
+            NodeType::ObjRoot(objid) =&gt; {
+                dot::LabelText::label(print_opid(<span class="kw-2">&amp;</span>objid.<span class="number">0</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.actor_shorthands))
             }
         }
     }
 }
 
-<span class="kw">struct</span> <span class="ident">OpTable</span> {
-    <span class="ident">rows</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">OpTableRow</span><span class="op">&gt;</span>,
+<span class="kw">struct </span>OpTable {
+    rows: Vec&lt;OpTableRow&gt;,
 }
 
-<span class="kw">impl</span> <span class="ident">OpTable</span> {
-    <span class="kw">fn</span> <span class="ident">create</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(
-        <span class="ident">node</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident"><span class="kw">crate</span>::op_tree::OpTreeNode</span>,
-        <span class="ident">obj</span>: <span class="kw-2">&amp;</span><span class="ident">ObjId</span>,
-        <span class="ident">metadata</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="kw">crate</span>::op_set::OpSetMetadata</span>,
-        <span class="ident">actor_shorthands</span>: <span class="kw-2">&amp;</span><span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">usize</span>, <span class="ident">String</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="self">Self</span> {
-        <span class="kw">let</span> <span class="ident">rows</span> <span class="op">=</span> <span class="ident">node</span>
-            .<span class="ident">elements</span>
-            .<span class="ident">iter</span>()
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">OpTableRow::create</span>(<span class="ident">e</span>, <span class="ident">obj</span>, <span class="ident">metadata</span>, <span class="ident">actor_shorthands</span>))
-            .<span class="ident">collect</span>();
-        <span class="ident">OpTable</span> { <span class="ident">rows</span> }
+<span class="kw">impl </span>OpTable {
+    <span class="kw">fn </span>create&lt;<span class="lifetime">&#39;a</span>&gt;(
+        node: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw">crate</span>::op_tree::OpTreeNode,
+        obj: <span class="kw-2">&amp;</span>ObjId,
+        metadata: <span class="kw-2">&amp;</span><span class="kw">crate</span>::op_set::OpSetMetadata,
+        actor_shorthands: <span class="kw-2">&amp;</span>HashMap&lt;usize, String&gt;,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>rows = node
+            .elements
+            .iter()
+            .map(|e| OpTableRow::create(e, obj, metadata, actor_shorthands))
+            .collect();
+        OpTable { rows }
     }
 
-    <span class="kw">fn</span> <span class="ident">to_html</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">String</span> {
-        <span class="kw">let</span> <span class="ident">rows</span> <span class="op">=</span> <span class="self">self</span>
-            .<span class="ident">rows</span>
-            .<span class="ident">iter</span>()
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">r</span><span class="op">|</span> <span class="ident">r</span>.<span class="ident">to_html</span>())
-            .<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>()
-            .<span class="ident">join</span>(<span class="string">&quot;&quot;</span>);
+    <span class="kw">fn </span>to_html(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; String {
+        <span class="kw">let </span>rows = <span class="self">self
+            </span>.rows
+            .iter()
+            .map(|r| r.to_html())
+            .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
+            .join(<span class="string">&quot;&quot;</span>);
         <span class="macro">format!</span>(
             <span class="string">&quot;&lt;table cellspacing=\&quot;0\&quot;&gt;\
             &lt;tr&gt;\
@@ -471,78 +471,78 @@
             &lt;hr/&gt;\
             {}\
             &lt;/table&gt;&quot;</span>,
-            <span class="ident">rows</span>
+            rows
         )
     }
 }
 
-<span class="kw">struct</span> <span class="ident">OpTableRow</span> {
-    <span class="ident">obj_id</span>: <span class="ident">String</span>,
-    <span class="ident">op_id</span>: <span class="ident">String</span>,
-    <span class="ident">prop</span>: <span class="ident">String</span>,
-    <span class="ident">op_description</span>: <span class="ident">String</span>,
-    <span class="ident">succ</span>: <span class="ident">String</span>,
-    <span class="ident">pred</span>: <span class="ident">String</span>,
+<span class="kw">struct </span>OpTableRow {
+    obj_id: String,
+    op_id: String,
+    prop: String,
+    op_description: String,
+    succ: String,
+    pred: String,
 }
 
-<span class="kw">impl</span> <span class="ident">OpTableRow</span> {
-    <span class="kw">fn</span> <span class="ident">to_html</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">String</span> {
-        <span class="kw">let</span> <span class="ident">rows</span> <span class="op">=</span> [
-            <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">op_id</span>,
-            <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">obj_id</span>,
-            <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">prop</span>,
-            <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">op_description</span>,
-            <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">succ</span>,
-            <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">pred</span>,
+<span class="kw">impl </span>OpTableRow {
+    <span class="kw">fn </span>to_html(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; String {
+        <span class="kw">let </span>rows = [
+            <span class="kw-2">&amp;</span><span class="self">self</span>.op_id,
+            <span class="kw-2">&amp;</span><span class="self">self</span>.obj_id,
+            <span class="kw-2">&amp;</span><span class="self">self</span>.prop,
+            <span class="kw-2">&amp;</span><span class="self">self</span>.op_description,
+            <span class="kw-2">&amp;</span><span class="self">self</span>.succ,
+            <span class="kw-2">&amp;</span><span class="self">self</span>.pred,
         ];
-        <span class="kw">let</span> <span class="ident">row</span> <span class="op">=</span> <span class="ident">rows</span>
-            .<span class="ident">iter</span>()
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">r</span><span class="op">|</span> <span class="macro">format!</span>(<span class="string">&quot;&lt;td&gt;{}&lt;/td&gt;&quot;</span>, <span class="kw-2">&amp;</span><span class="ident">r</span>))
-            .<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>();
-        <span class="macro">format!</span>(<span class="string">&quot;&lt;tr&gt;{}&lt;/tr&gt;&quot;</span>, <span class="ident">row</span>)
+        <span class="kw">let </span>row = rows
+            .iter()
+            .map(|r| <span class="macro">format!</span>(<span class="string">&quot;&lt;td&gt;{}&lt;/td&gt;&quot;</span>, <span class="kw-2">&amp;</span>r))
+            .collect::&lt;String&gt;();
+        <span class="macro">format!</span>(<span class="string">&quot;&lt;tr&gt;{}&lt;/tr&gt;&quot;</span>, row)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">OpTableRow</span> {
-    <span class="kw">fn</span> <span class="ident">create</span>(
-        <span class="ident">op</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="kw">super</span>::types::Op</span>,
-        <span class="ident">obj</span>: <span class="kw-2">&amp;</span><span class="ident">ObjId</span>,
-        <span class="ident">metadata</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="kw">crate</span>::op_set::OpSetMetadata</span>,
-        <span class="ident">actor_shorthands</span>: <span class="kw-2">&amp;</span><span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">usize</span>, <span class="ident">String</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="self">Self</span> {
-        <span class="kw">let</span> <span class="ident">op_description</span> <span class="op">=</span> <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="ident">op</span>.<span class="ident">action</span> {
-            <span class="ident"><span class="kw">crate</span>::OpType::Delete</span> =&gt; <span class="string">&quot;del&quot;</span>.<span class="ident">to_string</span>(),
-            <span class="ident"><span class="kw">crate</span>::OpType::Put</span>(<span class="ident">v</span>) =&gt; <span class="macro">format!</span>(<span class="string">&quot;set {}&quot;</span>, <span class="ident">v</span>),
-            <span class="ident"><span class="kw">crate</span>::OpType::Make</span>(<span class="ident">obj</span>) =&gt; <span class="macro">format!</span>(<span class="string">&quot;make {}&quot;</span>, <span class="ident">obj</span>),
-            <span class="ident"><span class="kw">crate</span>::OpType::Increment</span>(<span class="ident">v</span>) =&gt; <span class="macro">format!</span>(<span class="string">&quot;inc {}&quot;</span>, <span class="ident">v</span>),
+<span class="kw">impl </span>OpTableRow {
+    <span class="kw">fn </span>create(
+        op: <span class="kw-2">&amp;</span><span class="kw">super</span>::types::Op,
+        obj: <span class="kw-2">&amp;</span>ObjId,
+        metadata: <span class="kw-2">&amp;</span><span class="kw">crate</span>::op_set::OpSetMetadata,
+        actor_shorthands: <span class="kw-2">&amp;</span>HashMap&lt;usize, String&gt;,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>op_description = <span class="kw">match </span><span class="kw-2">&amp;</span>op.action {
+            <span class="kw">crate</span>::OpType::Delete =&gt; <span class="string">&quot;del&quot;</span>.to_string(),
+            <span class="kw">crate</span>::OpType::Put(v) =&gt; <span class="macro">format!</span>(<span class="string">&quot;set {}&quot;</span>, v),
+            <span class="kw">crate</span>::OpType::Make(obj) =&gt; <span class="macro">format!</span>(<span class="string">&quot;make {}&quot;</span>, obj),
+            <span class="kw">crate</span>::OpType::Increment(v) =&gt; <span class="macro">format!</span>(<span class="string">&quot;inc {}&quot;</span>, v),
         };
-        <span class="kw">let</span> <span class="ident">prop</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">op</span>.<span class="ident">key</span> {
-            <span class="ident"><span class="kw">crate</span>::types::Key::Map</span>(<span class="ident">k</span>) =&gt; <span class="ident">metadata</span>.<span class="ident">props</span>[<span class="ident">k</span>].<span class="ident">clone</span>(),
-            <span class="ident"><span class="kw">crate</span>::types::Key::Seq</span>(<span class="ident">e</span>) =&gt; <span class="ident">print_opid</span>(<span class="kw-2">&amp;</span><span class="ident">e</span>.<span class="number">0</span>, <span class="ident">actor_shorthands</span>),
+        <span class="kw">let </span>prop = <span class="kw">match </span>op.key {
+            <span class="kw">crate</span>::types::Key::Map(k) =&gt; metadata.props[k].clone(),
+            <span class="kw">crate</span>::types::Key::Seq(e) =&gt; print_opid(<span class="kw-2">&amp;</span>e.<span class="number">0</span>, actor_shorthands),
         };
-        <span class="kw">let</span> <span class="ident">succ</span> <span class="op">=</span> <span class="ident">op</span>
-            .<span class="ident">succ</span>
-            .<span class="ident">iter</span>()
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">s</span><span class="op">|</span> <span class="macro">format!</span>(<span class="string">&quot;,{}&quot;</span>, <span class="ident">print_opid</span>(<span class="ident">s</span>, <span class="ident">actor_shorthands</span>)))
-            .<span class="ident">collect</span>();
-        <span class="kw">let</span> <span class="ident">pred</span> <span class="op">=</span> <span class="ident">op</span>
-            .<span class="ident">pred</span>
-            .<span class="ident">iter</span>()
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">s</span><span class="op">|</span> <span class="macro">format!</span>(<span class="string">&quot;,{}&quot;</span>, <span class="ident">print_opid</span>(<span class="ident">s</span>, <span class="ident">actor_shorthands</span>)))
-            .<span class="ident">collect</span>();
-        <span class="ident">OpTableRow</span> {
-            <span class="ident">op_description</span>,
-            <span class="ident">obj_id</span>: <span class="ident">print_opid</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>.<span class="number">0</span>, <span class="ident">actor_shorthands</span>),
-            <span class="ident">op_id</span>: <span class="ident">print_opid</span>(<span class="kw-2">&amp;</span><span class="ident">op</span>.<span class="ident">id</span>, <span class="ident">actor_shorthands</span>),
-            <span class="ident">prop</span>,
-            <span class="ident">succ</span>,
-            <span class="ident">pred</span>,
+        <span class="kw">let </span>succ = op
+            .succ
+            .iter()
+            .map(|s| <span class="macro">format!</span>(<span class="string">&quot;,{}&quot;</span>, print_opid(s, actor_shorthands)))
+            .collect();
+        <span class="kw">let </span>pred = op
+            .pred
+            .iter()
+            .map(|s| <span class="macro">format!</span>(<span class="string">&quot;,{}&quot;</span>, print_opid(s, actor_shorthands)))
+            .collect();
+        OpTableRow {
+            op_description,
+            obj_id: print_opid(<span class="kw-2">&amp;</span>obj.<span class="number">0</span>, actor_shorthands),
+            op_id: print_opid(<span class="kw-2">&amp;</span>op.id, actor_shorthands),
+            prop,
+            succ,
+            pred,
         }
     }
 }
 
-<span class="kw">fn</span> <span class="ident">print_opid</span>(<span class="ident">opid</span>: <span class="kw-2">&amp;</span><span class="ident"><span class="kw">crate</span>::types::OpId</span>, <span class="ident">actor_shorthands</span>: <span class="kw-2">&amp;</span><span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">usize</span>, <span class="ident">String</span><span class="op">&gt;</span>) -&gt; <span class="ident">String</span> {
-    <span class="macro">format!</span>(<span class="string">&quot;{}@{}&quot;</span>, <span class="ident">opid</span>.<span class="ident">counter</span>(), <span class="ident">actor_shorthands</span>[<span class="kw-2">&amp;</span><span class="ident">opid</span>.<span class="ident">actor</span>()])
+<span class="kw">fn </span>print_opid(opid: <span class="kw-2">&amp;</span><span class="kw">crate</span>::types::OpId, actor_shorthands: <span class="kw-2">&amp;</span>HashMap&lt;usize, String&gt;) -&gt; String {
+    <span class="macro">format!</span>(<span class="string">&quot;{}@{}&quot;</span>, opid.counter(), actor_shorthands[<span class="kw-2">&amp;</span>opid.actor()])
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

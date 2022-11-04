@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/legacy/serde_impls/op.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>op.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/legacy/serde_impls/op.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>op.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -634,105 +634,105 @@
 <span id="632">632</span>
 <span id="633">633</span>
 <span id="634">634</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">serde</span>::{
-    <span class="ident">de</span>::{<span class="ident">Error</span>, <span class="ident">MapAccess</span>, <span class="ident">Unexpected</span>, <span class="ident">Visitor</span>},
-    <span class="ident">ser::SerializeStruct</span>,
-    <span class="ident">Deserialize</span>, <span class="ident">Deserializer</span>, <span class="ident">Serialize</span>, <span class="ident">Serializer</span>,
+</pre><pre class="rust"><code><span class="kw">use </span>serde::{
+    de::{Error, MapAccess, Unexpected, Visitor},
+    ser::SerializeStruct,
+    Deserialize, Deserializer, Serialize, Serializer,
 };
 
-<span class="kw">use</span> <span class="ident"><span class="kw">super</span>::read_field</span>;
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::legacy</span>::{<span class="ident">DataType</span>, <span class="ident">Key</span>, <span class="ident">ObjType</span>, <span class="ident">ObjectId</span>, <span class="ident">Op</span>, <span class="ident">OpId</span>, <span class="ident">OpType</span>, <span class="ident">ScalarValue</span>, <span class="ident">SortedVec</span>};
+<span class="kw">use </span><span class="kw">super</span>::read_field;
+<span class="kw">use </span><span class="kw">crate</span>::legacy::{DataType, Key, ObjType, ObjectId, Op, OpId, OpType, ScalarValue, SortedVec};
 
-<span class="kw">impl</span> <span class="ident">Serialize</span> <span class="kw">for</span> <span class="ident">Op</span> {
-    <span class="kw">fn</span> <span class="ident">serialize</span><span class="op">&lt;</span><span class="ident">S</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">serializer</span>: <span class="ident">S</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">S::Ok</span>, <span class="ident">S::Error</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">S</span>: <span class="ident">Serializer</span>,
+<span class="kw">impl </span>Serialize <span class="kw">for </span>Op {
+    <span class="kw">fn </span>serialize&lt;S&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, serializer: S) -&gt; <span class="prelude-ty">Result</span>&lt;S::Ok, S::Error&gt;
+    <span class="kw">where
+        </span>S: Serializer,
     {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">fields</span> <span class="op">=</span> <span class="number">4</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>fields = <span class="number">4</span>;
 
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">insert</span> {
-            <span class="ident">fields</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>
-        }
+        <span class="kw">if </span><span class="self">self</span>.insert {
+            fields += <span class="number">1
+        </span>}
 
-        <span class="kw">let</span> <span class="ident">numerical_datatype</span> <span class="op">=</span> <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">action</span> {
-            <span class="ident">OpType::Put</span>(<span class="ident">value</span>) =&gt; <span class="ident">value</span>.<span class="ident">as_numerical_datatype</span>(),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">None</span>,
+        <span class="kw">let </span>numerical_datatype = <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.action {
+            OpType::Put(value) =&gt; value.as_numerical_datatype(),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
         };
 
-        <span class="kw">if</span> <span class="ident">numerical_datatype</span>.<span class="ident">is_some</span>() {
-            <span class="ident">fields</span> <span class="op">+</span><span class="op">=</span> <span class="number">2</span>
-        } <span class="kw">else</span> <span class="kw">if</span> <span class="op">!</span><span class="macro">matches!</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">action</span>, <span class="ident">OpType::Make</span>(..)) {
-            <span class="ident">fields</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>
-        };
+        <span class="kw">if </span>numerical_datatype.is_some() {
+            fields += <span class="number">2
+        </span>} <span class="kw">else if </span>!<span class="macro">matches!</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.action, OpType::Make(..)) {
+            fields += <span class="number">1
+        </span>};
 
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">op</span> <span class="op">=</span> <span class="ident">serializer</span>.<span class="ident">serialize_struct</span>(<span class="string">&quot;Operation&quot;</span>, <span class="ident">fields</span>)<span class="question-mark">?</span>;
-        <span class="ident">op</span>.<span class="ident">serialize_field</span>(<span class="string">&quot;action&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">action</span>)<span class="question-mark">?</span>;
-        <span class="ident">op</span>.<span class="ident">serialize_field</span>(<span class="string">&quot;obj&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">obj</span>)<span class="question-mark">?</span>;
-        <span class="ident">op</span>.<span class="ident">serialize_field</span>(
-            <span class="kw">if</span> <span class="self">self</span>.<span class="ident">key</span>.<span class="ident">is_map_key</span>() {
-                <span class="string">&quot;key&quot;</span>
-            } <span class="kw">else</span> {
-                <span class="string">&quot;elemId&quot;</span>
-            },
-            <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">key</span>,
+        <span class="kw">let </span><span class="kw-2">mut </span>op = serializer.serialize_struct(<span class="string">&quot;Operation&quot;</span>, fields)<span class="question-mark">?</span>;
+        op.serialize_field(<span class="string">&quot;action&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.action)<span class="question-mark">?</span>;
+        op.serialize_field(<span class="string">&quot;obj&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.obj)<span class="question-mark">?</span>;
+        op.serialize_field(
+            <span class="kw">if </span><span class="self">self</span>.key.is_map_key() {
+                <span class="string">&quot;key&quot;
+            </span>} <span class="kw">else </span>{
+                <span class="string">&quot;elemId&quot;
+            </span>},
+            <span class="kw-2">&amp;</span><span class="self">self</span>.key,
         )<span class="question-mark">?</span>;
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">insert</span> {
-            <span class="ident">op</span>.<span class="ident">serialize_field</span>(<span class="string">&quot;insert&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">insert</span>)<span class="question-mark">?</span>;
+        <span class="kw">if </span><span class="self">self</span>.insert {
+            op.serialize_field(<span class="string">&quot;insert&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.insert)<span class="question-mark">?</span>;
         }
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">datatype</span>) <span class="op">=</span> <span class="ident">numerical_datatype</span> {
-            <span class="ident">op</span>.<span class="ident">serialize_field</span>(<span class="string">&quot;datatype&quot;</span>, <span class="kw-2">&amp;</span><span class="ident">datatype</span>)<span class="question-mark">?</span>;
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(datatype) = numerical_datatype {
+            op.serialize_field(<span class="string">&quot;datatype&quot;</span>, <span class="kw-2">&amp;</span>datatype)<span class="question-mark">?</span>;
         }
-        <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">action</span> {
-            <span class="ident">OpType::Increment</span>(<span class="ident">n</span>) =&gt; <span class="ident">op</span>.<span class="ident">serialize_field</span>(<span class="string">&quot;value&quot;</span>, <span class="kw-2">&amp;</span><span class="ident">n</span>)<span class="question-mark">?</span>,
-            <span class="ident">OpType::Put</span>(<span class="ident">ScalarValue::Counter</span>(<span class="ident">c</span>)) =&gt; <span class="ident">op</span>.<span class="ident">serialize_field</span>(<span class="string">&quot;value&quot;</span>, <span class="kw-2">&amp;</span><span class="ident">c</span>.<span class="ident">start</span>)<span class="question-mark">?</span>,
-            <span class="ident">OpType::Put</span>(<span class="ident">value</span>) =&gt; <span class="ident">op</span>.<span class="ident">serialize_field</span>(<span class="string">&quot;value&quot;</span>, <span class="kw-2">&amp;</span><span class="ident">value</span>)<span class="question-mark">?</span>,
-            <span class="kw">_</span> =&gt; {}
+        <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.action {
+            OpType::Increment(n) =&gt; op.serialize_field(<span class="string">&quot;value&quot;</span>, <span class="kw-2">&amp;</span>n)<span class="question-mark">?</span>,
+            OpType::Put(ScalarValue::Counter(c)) =&gt; op.serialize_field(<span class="string">&quot;value&quot;</span>, <span class="kw-2">&amp;</span>c.start)<span class="question-mark">?</span>,
+            OpType::Put(value) =&gt; op.serialize_field(<span class="string">&quot;value&quot;</span>, <span class="kw-2">&amp;</span>value)<span class="question-mark">?</span>,
+            <span class="kw">_ </span>=&gt; {}
         }
-        <span class="ident">op</span>.<span class="ident">serialize_field</span>(<span class="string">&quot;pred&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">pred</span>)<span class="question-mark">?</span>;
-        <span class="ident">op</span>.<span class="ident">end</span>()
+        op.serialize_field(<span class="string">&quot;pred&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.pred)<span class="question-mark">?</span>;
+        op.end()
     }
 }
 
-<span class="comment">// We need to manually implement deserialization for `RawOpType`</span>
-<span class="comment">// b/c by default rmp-serde (serde msgpack integration) serializes enums as maps with a</span>
-<span class="comment">// single KV pair where the key is an integer representing the enum variant &amp; the value</span>
-<span class="comment">// is the associated data</span>
-<span class="comment">// But we serialize `RawOpType` as a string, causing rmp-serde to choke on deserialization</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">PartialEq</span>, <span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">Copy</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">RawOpType</span> {
-    <span class="ident">MakeMap</span>,
-    <span class="ident">MakeTable</span>,
-    <span class="ident">MakeList</span>,
-    <span class="ident">MakeText</span>,
-    <span class="ident">Del</span>,
-    <span class="ident">Inc</span>,
-    <span class="ident">Set</span>,
+<span class="comment">// We need to manually implement deserialization for `RawOpType`
+// b/c by default rmp-serde (serde msgpack integration) serializes enums as maps with a
+// single KV pair where the key is an integer representing the enum variant &amp; the value
+// is the associated data
+// But we serialize `RawOpType` as a string, causing rmp-serde to choke on deserialization
+</span><span class="attribute">#[derive(PartialEq, Debug, Clone, Copy)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>RawOpType {
+    MakeMap,
+    MakeTable,
+    MakeList,
+    MakeText,
+    Del,
+    Inc,
+    Set,
 }
 
-<span class="kw">impl</span> <span class="ident">Serialize</span> <span class="kw">for</span> <span class="ident">RawOpType</span> {
-    <span class="kw">fn</span> <span class="ident">serialize</span><span class="op">&lt;</span><span class="ident">S</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">serializer</span>: <span class="ident">S</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">S::Ok</span>, <span class="ident">S::Error</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">S</span>: <span class="ident">Serializer</span>,
+<span class="kw">impl </span>Serialize <span class="kw">for </span>RawOpType {
+    <span class="kw">fn </span>serialize&lt;S&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, serializer: S) -&gt; <span class="prelude-ty">Result</span>&lt;S::Ok, S::Error&gt;
+    <span class="kw">where
+        </span>S: Serializer,
     {
-        <span class="kw">let</span> <span class="ident">s</span> <span class="op">=</span> <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">RawOpType::MakeMap</span> =&gt; <span class="string">&quot;makeMap&quot;</span>,
-            <span class="ident">RawOpType::MakeTable</span> =&gt; <span class="string">&quot;makeTable&quot;</span>,
-            <span class="ident">RawOpType::MakeList</span> =&gt; <span class="string">&quot;makeList&quot;</span>,
-            <span class="ident">RawOpType::MakeText</span> =&gt; <span class="string">&quot;makeText&quot;</span>,
-            <span class="ident">RawOpType::Del</span> =&gt; <span class="string">&quot;del&quot;</span>,
-            <span class="ident">RawOpType::Inc</span> =&gt; <span class="string">&quot;inc&quot;</span>,
-            <span class="ident">RawOpType::Set</span> =&gt; <span class="string">&quot;set&quot;</span>,
+        <span class="kw">let </span>s = <span class="kw">match </span><span class="self">self </span>{
+            RawOpType::MakeMap =&gt; <span class="string">&quot;makeMap&quot;</span>,
+            RawOpType::MakeTable =&gt; <span class="string">&quot;makeTable&quot;</span>,
+            RawOpType::MakeList =&gt; <span class="string">&quot;makeList&quot;</span>,
+            RawOpType::MakeText =&gt; <span class="string">&quot;makeText&quot;</span>,
+            RawOpType::Del =&gt; <span class="string">&quot;del&quot;</span>,
+            RawOpType::Inc =&gt; <span class="string">&quot;inc&quot;</span>,
+            RawOpType::Set =&gt; <span class="string">&quot;set&quot;</span>,
         };
-        <span class="ident">serializer</span>.<span class="ident">serialize_str</span>(<span class="ident">s</span>)
+        serializer.serialize_str(s)
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;de</span><span class="op">&gt;</span> <span class="ident">Deserialize</span><span class="op">&lt;</span><span class="lifetime">&#39;de</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">RawOpType</span> {
-    <span class="kw">fn</span> <span class="ident">deserialize</span><span class="op">&lt;</span><span class="ident">D</span><span class="op">&gt;</span>(<span class="ident">deserializer</span>: <span class="ident">D</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">D::Error</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">D</span>: <span class="ident">Deserializer</span><span class="op">&lt;</span><span class="lifetime">&#39;de</span><span class="op">&gt;</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;de</span>&gt; Deserialize&lt;<span class="lifetime">&#39;de</span>&gt; <span class="kw">for </span>RawOpType {
+    <span class="kw">fn </span>deserialize&lt;D&gt;(deserializer: D) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, D::Error&gt;
+    <span class="kw">where
+        </span>D: Deserializer&lt;<span class="lifetime">&#39;de</span>&gt;,
     {
-        <span class="kw">const</span> <span class="ident">VARIANTS</span>: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span><span class="ident">str</span>] <span class="op">=</span> <span class="kw-2">&amp;</span>[
+        <span class="kw">const </span>VARIANTS: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span>str] = <span class="kw-2">&amp;</span>[
             <span class="string">&quot;makeMap&quot;</span>,
             <span class="string">&quot;makeTable&quot;</span>,
             <span class="string">&quot;makeList&quot;</span>,
@@ -743,161 +743,161 @@
             <span class="string">&quot;mark&quot;</span>,
             <span class="string">&quot;unmark&quot;</span>,
         ];
-        <span class="comment">// TODO: Probably more efficient to deserialize to a `&amp;str`</span>
-        <span class="kw">let</span> <span class="ident">raw_type</span> <span class="op">=</span> <span class="ident">String::deserialize</span>(<span class="ident">deserializer</span>)<span class="question-mark">?</span>;
-        <span class="kw">match</span> <span class="ident">raw_type</span>.<span class="ident">as_str</span>() {
-            <span class="string">&quot;makeMap&quot;</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">RawOpType::MakeMap</span>),
-            <span class="string">&quot;makeTable&quot;</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">RawOpType::MakeTable</span>),
-            <span class="string">&quot;makeList&quot;</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">RawOpType::MakeList</span>),
-            <span class="string">&quot;makeText&quot;</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">RawOpType::MakeText</span>),
-            <span class="string">&quot;del&quot;</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">RawOpType::Del</span>),
-            <span class="string">&quot;inc&quot;</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">RawOpType::Inc</span>),
-            <span class="string">&quot;set&quot;</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">RawOpType::Set</span>),
-            <span class="ident">other</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">Error::unknown_variant</span>(<span class="ident">other</span>, <span class="ident">VARIANTS</span>)),
+        <span class="comment">// TODO: Probably more efficient to deserialize to a `&amp;str`
+        </span><span class="kw">let </span>raw_type = String::deserialize(deserializer)<span class="question-mark">?</span>;
+        <span class="kw">match </span>raw_type.as_str() {
+            <span class="string">&quot;makeMap&quot; </span>=&gt; <span class="prelude-val">Ok</span>(RawOpType::MakeMap),
+            <span class="string">&quot;makeTable&quot; </span>=&gt; <span class="prelude-val">Ok</span>(RawOpType::MakeTable),
+            <span class="string">&quot;makeList&quot; </span>=&gt; <span class="prelude-val">Ok</span>(RawOpType::MakeList),
+            <span class="string">&quot;makeText&quot; </span>=&gt; <span class="prelude-val">Ok</span>(RawOpType::MakeText),
+            <span class="string">&quot;del&quot; </span>=&gt; <span class="prelude-val">Ok</span>(RawOpType::Del),
+            <span class="string">&quot;inc&quot; </span>=&gt; <span class="prelude-val">Ok</span>(RawOpType::Inc),
+            <span class="string">&quot;set&quot; </span>=&gt; <span class="prelude-val">Ok</span>(RawOpType::Set),
+            other =&gt; <span class="prelude-val">Err</span>(Error::unknown_variant(other, VARIANTS)),
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;de</span><span class="op">&gt;</span> <span class="ident">Deserialize</span><span class="op">&lt;</span><span class="lifetime">&#39;de</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Op</span> {
-    <span class="kw">fn</span> <span class="ident">deserialize</span><span class="op">&lt;</span><span class="ident">D</span><span class="op">&gt;</span>(<span class="ident">deserializer</span>: <span class="ident">D</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">D::Error</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">D</span>: <span class="ident">Deserializer</span><span class="op">&lt;</span><span class="lifetime">&#39;de</span><span class="op">&gt;</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;de</span>&gt; Deserialize&lt;<span class="lifetime">&#39;de</span>&gt; <span class="kw">for </span>Op {
+    <span class="kw">fn </span>deserialize&lt;D&gt;(deserializer: D) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, D::Error&gt;
+    <span class="kw">where
+        </span>D: Deserializer&lt;<span class="lifetime">&#39;de</span>&gt;,
     {
-        <span class="kw">const</span> <span class="ident">FIELDS</span>: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span><span class="ident">str</span>] <span class="op">=</span> <span class="kw-2">&amp;</span>[<span class="string">&quot;ops&quot;</span>, <span class="string">&quot;deps&quot;</span>, <span class="string">&quot;message&quot;</span>, <span class="string">&quot;seq&quot;</span>, <span class="string">&quot;actor&quot;</span>, <span class="string">&quot;requestType&quot;</span>];
-        <span class="kw">struct</span> <span class="ident">OperationVisitor</span>;
-        <span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;de</span><span class="op">&gt;</span> <span class="ident">Visitor</span><span class="op">&lt;</span><span class="lifetime">&#39;de</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">OperationVisitor</span> {
-            <span class="kw">type</span> <span class="ident">Value</span> <span class="op">=</span> <span class="ident">Op</span>;
+        <span class="kw">const </span>FIELDS: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span>str] = <span class="kw-2">&amp;</span>[<span class="string">&quot;ops&quot;</span>, <span class="string">&quot;deps&quot;</span>, <span class="string">&quot;message&quot;</span>, <span class="string">&quot;seq&quot;</span>, <span class="string">&quot;actor&quot;</span>, <span class="string">&quot;requestType&quot;</span>];
+        <span class="kw">struct </span>OperationVisitor;
+        <span class="kw">impl</span>&lt;<span class="lifetime">&#39;de</span>&gt; Visitor&lt;<span class="lifetime">&#39;de</span>&gt; <span class="kw">for </span>OperationVisitor {
+            <span class="kw">type </span>Value = Op;
 
-            <span class="kw">fn</span> <span class="ident">expecting</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">formatter</span>: <span class="kw-2">&amp;mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">std::fmt::Result</span> {
-                <span class="ident">formatter</span>.<span class="ident">write_str</span>(<span class="string">&quot;An operation object&quot;</span>)
+            <span class="kw">fn </span>expecting(<span class="kw-2">&amp;</span><span class="self">self</span>, formatter: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; std::fmt::Result {
+                formatter.write_str(<span class="string">&quot;An operation object&quot;</span>)
             }
 
-            <span class="kw">fn</span> <span class="ident">visit_map</span><span class="op">&lt;</span><span class="ident">V</span><span class="op">&gt;</span>(<span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">map</span>: <span class="ident">V</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Op</span>, <span class="ident">V::Error</span><span class="op">&gt;</span>
-            <span class="kw">where</span>
-                <span class="ident">V</span>: <span class="ident">MapAccess</span><span class="op">&lt;</span><span class="lifetime">&#39;de</span><span class="op">&gt;</span>,
+            <span class="kw">fn </span>visit_map&lt;V&gt;(<span class="self">self</span>, <span class="kw-2">mut </span>map: V) -&gt; <span class="prelude-ty">Result</span>&lt;Op, V::Error&gt;
+            <span class="kw">where
+                </span>V: MapAccess&lt;<span class="lifetime">&#39;de</span>&gt;,
             {
-                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">action</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">RawOpType</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">obj</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ObjectId</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">key</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Key</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">pred</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">SortedVec</span><span class="op">&lt;</span><span class="ident">OpId</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">insert</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">bool</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">datatype</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">DataType</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">value</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ScalarValue</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">name</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">expand</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">bool</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">ref_id</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">OpId</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-                <span class="kw">while</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">field</span>) <span class="op">=</span> <span class="ident">map</span>.<span class="ident">next_key</span>::<span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>()<span class="question-mark">?</span> {
-                    <span class="kw">match</span> <span class="ident">field</span>.<span class="ident">as_ref</span>() {
-                        <span class="string">&quot;action&quot;</span> =&gt; <span class="ident">read_field</span>(<span class="string">&quot;action&quot;</span>, <span class="kw-2">&amp;mut</span> <span class="ident">action</span>, <span class="kw-2">&amp;mut</span> <span class="ident">map</span>)<span class="question-mark">?</span>,
-                        <span class="string">&quot;obj&quot;</span> =&gt; <span class="ident">read_field</span>(<span class="string">&quot;obj&quot;</span>, <span class="kw-2">&amp;mut</span> <span class="ident">obj</span>, <span class="kw-2">&amp;mut</span> <span class="ident">map</span>)<span class="question-mark">?</span>,
-                        <span class="string">&quot;key&quot;</span> =&gt; {
-                            <span class="kw">if</span> <span class="ident">key</span>.<span class="ident">is_some</span>() {
-                                <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">Error::duplicate_field</span>(<span class="string">&quot;key&quot;</span>));
-                            } <span class="kw">else</span> {
-                                <span class="ident">key</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">Key::Map</span>(<span class="ident">map</span>.<span class="ident">next_value</span>()<span class="question-mark">?</span>));
+                <span class="kw">let </span><span class="kw-2">mut </span>action: <span class="prelude-ty">Option</span>&lt;RawOpType&gt; = <span class="prelude-val">None</span>;
+                <span class="kw">let </span><span class="kw-2">mut </span>obj: <span class="prelude-ty">Option</span>&lt;ObjectId&gt; = <span class="prelude-val">None</span>;
+                <span class="kw">let </span><span class="kw-2">mut </span>key: <span class="prelude-ty">Option</span>&lt;Key&gt; = <span class="prelude-val">None</span>;
+                <span class="kw">let </span><span class="kw-2">mut </span>pred: <span class="prelude-ty">Option</span>&lt;SortedVec&lt;OpId&gt;&gt; = <span class="prelude-val">None</span>;
+                <span class="kw">let </span><span class="kw-2">mut </span>insert: <span class="prelude-ty">Option</span>&lt;bool&gt; = <span class="prelude-val">None</span>;
+                <span class="kw">let </span><span class="kw-2">mut </span>datatype: <span class="prelude-ty">Option</span>&lt;DataType&gt; = <span class="prelude-val">None</span>;
+                <span class="kw">let </span><span class="kw-2">mut </span>value: <span class="prelude-ty">Option</span>&lt;<span class="prelude-ty">Option</span>&lt;ScalarValue&gt;&gt; = <span class="prelude-val">None</span>;
+                <span class="kw">let </span><span class="kw-2">mut </span>name: <span class="prelude-ty">Option</span>&lt;String&gt; = <span class="prelude-val">None</span>;
+                <span class="kw">let </span><span class="kw-2">mut </span>expand: <span class="prelude-ty">Option</span>&lt;bool&gt; = <span class="prelude-val">None</span>;
+                <span class="kw">let </span><span class="kw-2">mut </span>ref_id: <span class="prelude-ty">Option</span>&lt;OpId&gt; = <span class="prelude-val">None</span>;
+                <span class="kw">while let </span><span class="prelude-val">Some</span>(field) = map.next_key::&lt;String&gt;()<span class="question-mark">? </span>{
+                    <span class="kw">match </span>field.as_ref() {
+                        <span class="string">&quot;action&quot; </span>=&gt; read_field(<span class="string">&quot;action&quot;</span>, <span class="kw-2">&amp;mut </span>action, <span class="kw-2">&amp;mut </span>map)<span class="question-mark">?</span>,
+                        <span class="string">&quot;obj&quot; </span>=&gt; read_field(<span class="string">&quot;obj&quot;</span>, <span class="kw-2">&amp;mut </span>obj, <span class="kw-2">&amp;mut </span>map)<span class="question-mark">?</span>,
+                        <span class="string">&quot;key&quot; </span>=&gt; {
+                            <span class="kw">if </span>key.is_some() {
+                                <span class="kw">return </span><span class="prelude-val">Err</span>(Error::duplicate_field(<span class="string">&quot;key&quot;</span>));
+                            } <span class="kw">else </span>{
+                                key = <span class="prelude-val">Some</span>(Key::Map(map.next_value()<span class="question-mark">?</span>));
                             }
                         }
-                        <span class="string">&quot;elemId&quot;</span> =&gt; {
-                            <span class="kw">if</span> <span class="ident">key</span>.<span class="ident">is_some</span>() {
-                                <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">Error::duplicate_field</span>(<span class="string">&quot;elemId&quot;</span>));
-                            } <span class="kw">else</span> {
-                                <span class="ident">key</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">Key::Seq</span>(<span class="ident">map</span>.<span class="ident">next_value</span>()<span class="question-mark">?</span>))
+                        <span class="string">&quot;elemId&quot; </span>=&gt; {
+                            <span class="kw">if </span>key.is_some() {
+                                <span class="kw">return </span><span class="prelude-val">Err</span>(Error::duplicate_field(<span class="string">&quot;elemId&quot;</span>));
+                            } <span class="kw">else </span>{
+                                key = <span class="prelude-val">Some</span>(Key::Seq(map.next_value()<span class="question-mark">?</span>))
                             }
                         }
-                        <span class="string">&quot;pred&quot;</span> =&gt; <span class="ident">read_field</span>(<span class="string">&quot;pred&quot;</span>, <span class="kw-2">&amp;mut</span> <span class="ident">pred</span>, <span class="kw-2">&amp;mut</span> <span class="ident">map</span>)<span class="question-mark">?</span>,
-                        <span class="string">&quot;insert&quot;</span> =&gt; <span class="ident">read_field</span>(<span class="string">&quot;insert&quot;</span>, <span class="kw-2">&amp;mut</span> <span class="ident">insert</span>, <span class="kw-2">&amp;mut</span> <span class="ident">map</span>)<span class="question-mark">?</span>,
-                        <span class="string">&quot;datatype&quot;</span> =&gt; <span class="ident">read_field</span>(<span class="string">&quot;datatype&quot;</span>, <span class="kw-2">&amp;mut</span> <span class="ident">datatype</span>, <span class="kw-2">&amp;mut</span> <span class="ident">map</span>)<span class="question-mark">?</span>,
-                        <span class="string">&quot;value&quot;</span> =&gt; <span class="ident">read_field</span>(<span class="string">&quot;value&quot;</span>, <span class="kw-2">&amp;mut</span> <span class="ident">value</span>, <span class="kw-2">&amp;mut</span> <span class="ident">map</span>)<span class="question-mark">?</span>,
-                        <span class="string">&quot;name&quot;</span> =&gt; <span class="ident">read_field</span>(<span class="string">&quot;name&quot;</span>, <span class="kw-2">&amp;mut</span> <span class="ident">name</span>, <span class="kw-2">&amp;mut</span> <span class="ident">map</span>)<span class="question-mark">?</span>,
-                        <span class="string">&quot;expand&quot;</span> =&gt; <span class="ident">read_field</span>(<span class="string">&quot;expand&quot;</span>, <span class="kw-2">&amp;mut</span> <span class="ident">expand</span>, <span class="kw-2">&amp;mut</span> <span class="ident">map</span>)<span class="question-mark">?</span>,
-                        <span class="string">&quot;ref&quot;</span> =&gt; <span class="ident">read_field</span>(<span class="string">&quot;ref&quot;</span>, <span class="kw-2">&amp;mut</span> <span class="ident">ref_id</span>, <span class="kw-2">&amp;mut</span> <span class="ident">map</span>)<span class="question-mark">?</span>,
-                        <span class="kw">_</span> =&gt; <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">Error::unknown_field</span>(<span class="kw-2">&amp;</span><span class="ident">field</span>, <span class="ident">FIELDS</span>)),
+                        <span class="string">&quot;pred&quot; </span>=&gt; read_field(<span class="string">&quot;pred&quot;</span>, <span class="kw-2">&amp;mut </span>pred, <span class="kw-2">&amp;mut </span>map)<span class="question-mark">?</span>,
+                        <span class="string">&quot;insert&quot; </span>=&gt; read_field(<span class="string">&quot;insert&quot;</span>, <span class="kw-2">&amp;mut </span>insert, <span class="kw-2">&amp;mut </span>map)<span class="question-mark">?</span>,
+                        <span class="string">&quot;datatype&quot; </span>=&gt; read_field(<span class="string">&quot;datatype&quot;</span>, <span class="kw-2">&amp;mut </span>datatype, <span class="kw-2">&amp;mut </span>map)<span class="question-mark">?</span>,
+                        <span class="string">&quot;value&quot; </span>=&gt; read_field(<span class="string">&quot;value&quot;</span>, <span class="kw-2">&amp;mut </span>value, <span class="kw-2">&amp;mut </span>map)<span class="question-mark">?</span>,
+                        <span class="string">&quot;name&quot; </span>=&gt; read_field(<span class="string">&quot;name&quot;</span>, <span class="kw-2">&amp;mut </span>name, <span class="kw-2">&amp;mut </span>map)<span class="question-mark">?</span>,
+                        <span class="string">&quot;expand&quot; </span>=&gt; read_field(<span class="string">&quot;expand&quot;</span>, <span class="kw-2">&amp;mut </span>expand, <span class="kw-2">&amp;mut </span>map)<span class="question-mark">?</span>,
+                        <span class="string">&quot;ref&quot; </span>=&gt; read_field(<span class="string">&quot;ref&quot;</span>, <span class="kw-2">&amp;mut </span>ref_id, <span class="kw-2">&amp;mut </span>map)<span class="question-mark">?</span>,
+                        <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(Error::unknown_field(<span class="kw-2">&amp;</span>field, FIELDS)),
                     }
                 }
-                <span class="kw">let</span> <span class="ident">action</span> <span class="op">=</span> <span class="ident">action</span>.<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">Error::missing_field</span>(<span class="string">&quot;action&quot;</span>))<span class="question-mark">?</span>;
-                <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="ident">obj</span>.<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">Error::missing_field</span>(<span class="string">&quot;obj&quot;</span>))<span class="question-mark">?</span>;
-                <span class="kw">let</span> <span class="ident">key</span> <span class="op">=</span> <span class="ident">key</span>.<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">Error::missing_field</span>(<span class="string">&quot;key&quot;</span>))<span class="question-mark">?</span>;
-                <span class="kw">let</span> <span class="ident">pred</span> <span class="op">=</span> <span class="ident">pred</span>.<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">Error::missing_field</span>(<span class="string">&quot;pred&quot;</span>))<span class="question-mark">?</span>;
-                <span class="kw">let</span> <span class="ident">insert</span> <span class="op">=</span> <span class="ident">insert</span>.<span class="ident">unwrap_or</span>(<span class="bool-val">false</span>);
-                <span class="kw">let</span> <span class="ident">action</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">action</span> {
-                    <span class="ident">RawOpType::MakeMap</span> =&gt; <span class="ident">OpType::Make</span>(<span class="ident">ObjType::Map</span>),
-                    <span class="ident">RawOpType::MakeTable</span> =&gt; <span class="ident">OpType::Make</span>(<span class="ident">ObjType::Table</span>),
-                    <span class="ident">RawOpType::MakeList</span> =&gt; <span class="ident">OpType::Make</span>(<span class="ident">ObjType::List</span>),
-                    <span class="ident">RawOpType::MakeText</span> =&gt; <span class="ident">OpType::Make</span>(<span class="ident">ObjType::Text</span>),
-                    <span class="ident">RawOpType::Del</span> =&gt; <span class="ident">OpType::Delete</span>,
-                    <span class="ident">RawOpType::Set</span> =&gt; {
-                        <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">datatype</span>) <span class="op">=</span> <span class="ident">datatype</span> {
-                            <span class="kw">let</span> <span class="ident">raw_value</span> <span class="op">=</span> <span class="ident">value</span>
-                                .<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">Error::missing_field</span>(<span class="string">&quot;value&quot;</span>))<span class="question-mark">?</span>
-                                .<span class="ident">unwrap_or</span>(<span class="ident">ScalarValue::Null</span>);
-                            <span class="ident">raw_value</span>.<span class="ident">as_datatype</span>(<span class="ident">datatype</span>).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> {
-                                <span class="ident">Error::invalid_value</span>(
-                                    <span class="ident">Unexpected::Other</span>(<span class="ident">e</span>.<span class="ident">unexpected</span>.<span class="ident">as_str</span>()),
-                                    <span class="kw-2">&amp;</span><span class="ident">e</span>.<span class="ident">expected</span>.<span class="ident">as_str</span>(),
+                <span class="kw">let </span>action = action.ok_or_else(|| Error::missing_field(<span class="string">&quot;action&quot;</span>))<span class="question-mark">?</span>;
+                <span class="kw">let </span>obj = obj.ok_or_else(|| Error::missing_field(<span class="string">&quot;obj&quot;</span>))<span class="question-mark">?</span>;
+                <span class="kw">let </span>key = key.ok_or_else(|| Error::missing_field(<span class="string">&quot;key&quot;</span>))<span class="question-mark">?</span>;
+                <span class="kw">let </span>pred = pred.ok_or_else(|| Error::missing_field(<span class="string">&quot;pred&quot;</span>))<span class="question-mark">?</span>;
+                <span class="kw">let </span>insert = insert.unwrap_or(<span class="bool-val">false</span>);
+                <span class="kw">let </span>action = <span class="kw">match </span>action {
+                    RawOpType::MakeMap =&gt; OpType::Make(ObjType::Map),
+                    RawOpType::MakeTable =&gt; OpType::Make(ObjType::Table),
+                    RawOpType::MakeList =&gt; OpType::Make(ObjType::List),
+                    RawOpType::MakeText =&gt; OpType::Make(ObjType::Text),
+                    RawOpType::Del =&gt; OpType::Delete,
+                    RawOpType::Set =&gt; {
+                        <span class="kw">let </span>value = <span class="kw">if let </span><span class="prelude-val">Some</span>(datatype) = datatype {
+                            <span class="kw">let </span>raw_value = value
+                                .ok_or_else(|| Error::missing_field(<span class="string">&quot;value&quot;</span>))<span class="question-mark">?
+                                </span>.unwrap_or(ScalarValue::Null);
+                            raw_value.as_datatype(datatype).map_err(|e| {
+                                Error::invalid_value(
+                                    Unexpected::Other(e.unexpected.as_str()),
+                                    <span class="kw-2">&amp;</span>e.expected.as_str(),
                                 )
-                            })<span class="question-mark">?</span>
-                        } <span class="kw">else</span> {
-                            <span class="ident">value</span>
-                                .<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">Error::missing_field</span>(<span class="string">&quot;value&quot;</span>))<span class="question-mark">?</span>
-                                .<span class="ident">unwrap_or</span>(<span class="ident">ScalarValue::Null</span>)
+                            })<span class="question-mark">?
+                        </span>} <span class="kw">else </span>{
+                            value
+                                .ok_or_else(|| Error::missing_field(<span class="string">&quot;value&quot;</span>))<span class="question-mark">?
+                                </span>.unwrap_or(ScalarValue::Null)
                         };
-                        <span class="ident">OpType::Put</span>(<span class="ident">value</span>)
+                        OpType::Put(value)
                     }
-                    <span class="ident">RawOpType::Inc</span> =&gt; <span class="kw">match</span> <span class="ident">value</span>.<span class="ident">flatten</span>() {
-                        <span class="prelude-val">Some</span>(<span class="ident">ScalarValue::Int</span>(<span class="ident">n</span>)) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">OpType::Increment</span>(<span class="ident">n</span>)),
-                        <span class="prelude-val">Some</span>(<span class="ident">ScalarValue::Uint</span>(<span class="ident">n</span>)) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">OpType::Increment</span>(<span class="ident">n</span> <span class="kw">as</span> <span class="ident">i64</span>)),
-                        <span class="prelude-val">Some</span>(<span class="ident">ScalarValue::F64</span>(<span class="ident">n</span>)) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">OpType::Increment</span>(<span class="ident">n</span> <span class="kw">as</span> <span class="ident">i64</span>)),
-                        <span class="prelude-val">Some</span>(<span class="ident">ScalarValue::Counter</span>(<span class="ident">n</span>)) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">OpType::Increment</span>(<span class="ident">n</span>.<span class="ident">into</span>())),
-                        <span class="prelude-val">Some</span>(<span class="ident">ScalarValue::Timestamp</span>(<span class="ident">n</span>)) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">OpType::Increment</span>(<span class="ident">n</span>)),
-                        <span class="prelude-val">Some</span>(<span class="ident">ScalarValue::Bytes</span>(<span class="ident">s</span>)) =&gt; {
-                            <span class="prelude-val">Err</span>(<span class="ident">Error::invalid_value</span>(<span class="ident">Unexpected::Bytes</span>(<span class="kw-2">&amp;</span><span class="ident">s</span>), <span class="kw-2">&amp;</span><span class="string">&quot;a number&quot;</span>))
+                    RawOpType::Inc =&gt; <span class="kw">match </span>value.flatten() {
+                        <span class="prelude-val">Some</span>(ScalarValue::Int(n)) =&gt; <span class="prelude-val">Ok</span>(OpType::Increment(n)),
+                        <span class="prelude-val">Some</span>(ScalarValue::Uint(n)) =&gt; <span class="prelude-val">Ok</span>(OpType::Increment(n <span class="kw">as </span>i64)),
+                        <span class="prelude-val">Some</span>(ScalarValue::F64(n)) =&gt; <span class="prelude-val">Ok</span>(OpType::Increment(n <span class="kw">as </span>i64)),
+                        <span class="prelude-val">Some</span>(ScalarValue::Counter(n)) =&gt; <span class="prelude-val">Ok</span>(OpType::Increment(n.into())),
+                        <span class="prelude-val">Some</span>(ScalarValue::Timestamp(n)) =&gt; <span class="prelude-val">Ok</span>(OpType::Increment(n)),
+                        <span class="prelude-val">Some</span>(ScalarValue::Bytes(s)) =&gt; {
+                            <span class="prelude-val">Err</span>(Error::invalid_value(Unexpected::Bytes(<span class="kw-2">&amp;</span>s), <span class="kw-2">&amp;</span><span class="string">&quot;a number&quot;</span>))
                         }
-                        <span class="prelude-val">Some</span>(<span class="ident">ScalarValue::Unknown</span> { <span class="ident">bytes</span>, .. }) =&gt; {
-                            <span class="prelude-val">Err</span>(<span class="ident">Error::invalid_value</span>(<span class="ident">Unexpected::Bytes</span>(<span class="kw-2">&amp;</span><span class="ident">bytes</span>), <span class="kw-2">&amp;</span><span class="string">&quot;a number&quot;</span>))
+                        <span class="prelude-val">Some</span>(ScalarValue::Unknown { bytes, .. }) =&gt; {
+                            <span class="prelude-val">Err</span>(Error::invalid_value(Unexpected::Bytes(<span class="kw-2">&amp;</span>bytes), <span class="kw-2">&amp;</span><span class="string">&quot;a number&quot;</span>))
                         }
-                        <span class="prelude-val">Some</span>(<span class="ident">ScalarValue::Str</span>(<span class="ident">s</span>)) =&gt; {
-                            <span class="prelude-val">Err</span>(<span class="ident">Error::invalid_value</span>(<span class="ident">Unexpected::Str</span>(<span class="kw-2">&amp;</span><span class="ident">s</span>), <span class="kw-2">&amp;</span><span class="string">&quot;a number&quot;</span>))
+                        <span class="prelude-val">Some</span>(ScalarValue::Str(s)) =&gt; {
+                            <span class="prelude-val">Err</span>(Error::invalid_value(Unexpected::Str(<span class="kw-2">&amp;</span>s), <span class="kw-2">&amp;</span><span class="string">&quot;a number&quot;</span>))
                         }
-                        <span class="prelude-val">Some</span>(<span class="ident">ScalarValue::Boolean</span>(<span class="ident">b</span>)) =&gt; {
-                            <span class="prelude-val">Err</span>(<span class="ident">Error::invalid_value</span>(<span class="ident">Unexpected::Bool</span>(<span class="ident">b</span>), <span class="kw-2">&amp;</span><span class="string">&quot;a number&quot;</span>))
+                        <span class="prelude-val">Some</span>(ScalarValue::Boolean(b)) =&gt; {
+                            <span class="prelude-val">Err</span>(Error::invalid_value(Unexpected::Bool(b), <span class="kw-2">&amp;</span><span class="string">&quot;a number&quot;</span>))
                         }
-                        <span class="prelude-val">Some</span>(<span class="ident">ScalarValue::Null</span>) =&gt; {
-                            <span class="prelude-val">Err</span>(<span class="ident">Error::invalid_value</span>(<span class="ident">Unexpected::Other</span>(<span class="string">&quot;null&quot;</span>), <span class="kw-2">&amp;</span><span class="string">&quot;a number&quot;</span>))
+                        <span class="prelude-val">Some</span>(ScalarValue::Null) =&gt; {
+                            <span class="prelude-val">Err</span>(Error::invalid_value(Unexpected::Other(<span class="string">&quot;null&quot;</span>), <span class="kw-2">&amp;</span><span class="string">&quot;a number&quot;</span>))
                         }
-                        <span class="prelude-val">None</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">Error::missing_field</span>(<span class="string">&quot;value&quot;</span>)),
+                        <span class="prelude-val">None </span>=&gt; <span class="prelude-val">Err</span>(Error::missing_field(<span class="string">&quot;value&quot;</span>)),
                     }<span class="question-mark">?</span>,
                 };
-                <span class="prelude-val">Ok</span>(<span class="ident">Op</span> {
-                    <span class="ident">action</span>,
-                    <span class="ident">obj</span>,
-                    <span class="ident">key</span>,
-                    <span class="ident">pred</span>,
-                    <span class="ident">insert</span>,
+                <span class="prelude-val">Ok</span>(Op {
+                    action,
+                    obj,
+                    key,
+                    pred,
+                    insert,
                 })
             }
         }
-        <span class="ident">deserializer</span>.<span class="ident">deserialize_struct</span>(<span class="string">&quot;Operation&quot;</span>, <span class="ident">FIELDS</span>, <span class="ident">OperationVisitor</span>)
+        deserializer.deserialize_struct(<span class="string">&quot;Operation&quot;</span>, FIELDS, OperationVisitor)
     }
 }
 
-<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
-<span class="kw">mod</span> <span class="ident">tests</span> {
-    <span class="kw">use</span> <span class="ident">std::str::FromStr</span>;
+<span class="attribute">#[cfg(test)]
+</span><span class="kw">mod </span>tests {
+    <span class="kw">use </span>std::str::FromStr;
 
-    <span class="kw">use</span> <span class="kw">super</span>::<span class="kw-2">*</span>;
-    <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::legacy</span> <span class="kw">as</span> <span class="ident">amp</span>;
+    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+    <span class="kw">use </span><span class="kw">crate</span>::legacy <span class="kw">as </span>amp;
 
-    <span class="attribute">#[<span class="ident">test</span>]</span>
-    <span class="kw">fn</span> <span class="ident">test_deserialize_action</span>() {
-        <span class="kw">struct</span> <span class="ident">Scenario</span> {
-            <span class="ident">name</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static</span> <span class="ident">str</span>,
-            <span class="ident">json</span>: <span class="ident">serde_json::Value</span>,
-            <span class="ident">expected</span>: <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Op</span>, <span class="ident">serde_json::Error</span><span class="op">&gt;</span>,
+    <span class="attribute">#[test]
+    </span><span class="kw">fn </span>test_deserialize_action() {
+        <span class="kw">struct </span>Scenario {
+            name: <span class="kw-2">&amp;</span><span class="lifetime">&#39;static </span>str,
+            json: serde_json::Value,
+            expected: <span class="prelude-ty">Result</span>&lt;Op, serde_json::Error&gt;,
         }
-        <span class="kw">let</span> <span class="ident">scenarios</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Scenario</span><span class="op">&gt;</span> <span class="op">=</span> <span class="macro">vec!</span>[
-            <span class="ident">Scenario</span> {
-                <span class="ident">name</span>: <span class="string">&quot;Set with Uint&quot;</span>,
-                <span class="ident">json</span>: <span class="macro">serde_json::json!</span>({
+        <span class="kw">let </span>scenarios: Vec&lt;Scenario&gt; = <span class="macro">vec!</span>[
+            Scenario {
+                name: <span class="string">&quot;Set with Uint&quot;</span>,
+                json: <span class="macro">serde_json::json!</span>({
                     <span class="string">&quot;action&quot;</span>: <span class="string">&quot;set&quot;</span>,
                     <span class="string">&quot;obj&quot;</span>: <span class="string">&quot;_root&quot;</span>,
                     <span class="string">&quot;key&quot;</span>: <span class="string">&quot;somekey&quot;</span>,
@@ -905,115 +905,115 @@
                     <span class="string">&quot;value&quot;</span>: <span class="number">123</span>,
                     <span class="string">&quot;pred&quot;</span>: []
                 }),
-                <span class="ident">expected</span>: <span class="prelude-val">Ok</span>(<span class="ident">Op</span> {
-                    <span class="ident">action</span>: <span class="ident">OpType::Put</span>(<span class="ident">ScalarValue::Uint</span>(<span class="number">123</span>)),
-                    <span class="ident">obj</span>: <span class="ident">ObjectId::Root</span>,
-                    <span class="ident">key</span>: <span class="string">&quot;somekey&quot;</span>.<span class="ident">into</span>(),
-                    <span class="ident">insert</span>: <span class="bool-val">false</span>,
-                    <span class="ident">pred</span>: <span class="ident">SortedVec::new</span>(),
+                expected: <span class="prelude-val">Ok</span>(Op {
+                    action: OpType::Put(ScalarValue::Uint(<span class="number">123</span>)),
+                    obj: ObjectId::Root,
+                    key: <span class="string">&quot;somekey&quot;</span>.into(),
+                    insert: <span class="bool-val">false</span>,
+                    pred: SortedVec::new(),
                 }),
             },
-            <span class="ident">Scenario</span> {
-                <span class="ident">name</span>: <span class="string">&quot;Set with Int&quot;</span>,
-                <span class="ident">json</span>: <span class="macro">serde_json::json!</span>({
+            Scenario {
+                name: <span class="string">&quot;Set with Int&quot;</span>,
+                json: <span class="macro">serde_json::json!</span>({
                     <span class="string">&quot;action&quot;</span>: <span class="string">&quot;set&quot;</span>,
                     <span class="string">&quot;obj&quot;</span>: <span class="string">&quot;_root&quot;</span>,
                     <span class="string">&quot;key&quot;</span>: <span class="string">&quot;somekey&quot;</span>,
-                    <span class="string">&quot;value&quot;</span>: <span class="op">-</span><span class="number">123</span>,
+                    <span class="string">&quot;value&quot;</span>: -<span class="number">123</span>,
                     <span class="string">&quot;datatype&quot;</span>: <span class="string">&quot;int&quot;</span>,
                     <span class="string">&quot;pred&quot;</span>: []
                 }),
-                <span class="ident">expected</span>: <span class="prelude-val">Ok</span>(<span class="ident">Op</span> {
-                    <span class="ident">action</span>: <span class="ident">OpType::Put</span>(<span class="ident">ScalarValue::Int</span>(<span class="op">-</span><span class="number">123</span>)),
-                    <span class="ident">obj</span>: <span class="ident">ObjectId::Root</span>,
-                    <span class="ident">key</span>: <span class="string">&quot;somekey&quot;</span>.<span class="ident">into</span>(),
-                    <span class="ident">insert</span>: <span class="bool-val">false</span>,
-                    <span class="ident">pred</span>: <span class="ident">SortedVec::new</span>(),
+                expected: <span class="prelude-val">Ok</span>(Op {
+                    action: OpType::Put(ScalarValue::Int(-<span class="number">123</span>)),
+                    obj: ObjectId::Root,
+                    key: <span class="string">&quot;somekey&quot;</span>.into(),
+                    insert: <span class="bool-val">false</span>,
+                    pred: SortedVec::new(),
                 }),
             },
-            <span class="ident">Scenario</span> {
-                <span class="ident">name</span>: <span class="string">&quot;Set with F64&quot;</span>,
-                <span class="ident">json</span>: <span class="macro">serde_json::json!</span>({
+            Scenario {
+                name: <span class="string">&quot;Set with F64&quot;</span>,
+                json: <span class="macro">serde_json::json!</span>({
                     <span class="string">&quot;action&quot;</span>: <span class="string">&quot;set&quot;</span>,
                     <span class="string">&quot;obj&quot;</span>: <span class="string">&quot;_root&quot;</span>,
                     <span class="string">&quot;key&quot;</span>: <span class="string">&quot;somekey&quot;</span>,
-                    <span class="string">&quot;value&quot;</span>: <span class="op">-</span><span class="number">123</span>,
+                    <span class="string">&quot;value&quot;</span>: -<span class="number">123</span>,
                     <span class="string">&quot;datatype&quot;</span>: <span class="string">&quot;float64&quot;</span>,
                     <span class="string">&quot;pred&quot;</span>: []
                 }),
-                <span class="ident">expected</span>: <span class="prelude-val">Ok</span>(<span class="ident">Op</span> {
-                    <span class="ident">action</span>: <span class="ident">OpType::Put</span>(<span class="ident">ScalarValue::F64</span>(<span class="op">-</span><span class="number">123.0</span>)),
-                    <span class="ident">obj</span>: <span class="ident">ObjectId::Root</span>,
-                    <span class="ident">key</span>: <span class="string">&quot;somekey&quot;</span>.<span class="ident">into</span>(),
-                    <span class="ident">insert</span>: <span class="bool-val">false</span>,
-                    <span class="ident">pred</span>: <span class="ident">Vec::new</span>().<span class="ident">into</span>(),
+                expected: <span class="prelude-val">Ok</span>(Op {
+                    action: OpType::Put(ScalarValue::F64(-<span class="number">123.0</span>)),
+                    obj: ObjectId::Root,
+                    key: <span class="string">&quot;somekey&quot;</span>.into(),
+                    insert: <span class="bool-val">false</span>,
+                    pred: Vec::new().into(),
                 }),
             },
-            <span class="ident">Scenario</span> {
-                <span class="ident">name</span>: <span class="string">&quot;Set with string&quot;</span>,
-                <span class="ident">json</span>: <span class="macro">serde_json::json!</span>({
+            Scenario {
+                name: <span class="string">&quot;Set with string&quot;</span>,
+                json: <span class="macro">serde_json::json!</span>({
                     <span class="string">&quot;action&quot;</span>: <span class="string">&quot;set&quot;</span>,
                     <span class="string">&quot;obj&quot;</span>: <span class="string">&quot;_root&quot;</span>,
                     <span class="string">&quot;key&quot;</span>: <span class="string">&quot;somekey&quot;</span>,
                     <span class="string">&quot;value&quot;</span>: <span class="string">&quot;somestring&quot;</span>,
                     <span class="string">&quot;pred&quot;</span>: []
                 }),
-                <span class="ident">expected</span>: <span class="prelude-val">Ok</span>(<span class="ident">Op</span> {
-                    <span class="ident">action</span>: <span class="ident">OpType::Put</span>(<span class="ident">ScalarValue::Str</span>(<span class="string">&quot;somestring&quot;</span>.<span class="ident">into</span>())),
-                    <span class="ident">obj</span>: <span class="ident">ObjectId::Root</span>,
-                    <span class="ident">key</span>: <span class="string">&quot;somekey&quot;</span>.<span class="ident">into</span>(),
-                    <span class="ident">insert</span>: <span class="bool-val">false</span>,
-                    <span class="ident">pred</span>: <span class="ident">SortedVec::new</span>(),
+                expected: <span class="prelude-val">Ok</span>(Op {
+                    action: OpType::Put(ScalarValue::Str(<span class="string">&quot;somestring&quot;</span>.into())),
+                    obj: ObjectId::Root,
+                    key: <span class="string">&quot;somekey&quot;</span>.into(),
+                    insert: <span class="bool-val">false</span>,
+                    pred: SortedVec::new(),
                 }),
             },
-            <span class="ident">Scenario</span> {
-                <span class="ident">name</span>: <span class="string">&quot;Set with f64&quot;</span>,
-                <span class="ident">json</span>: <span class="macro">serde_json::json!</span>({
+            Scenario {
+                name: <span class="string">&quot;Set with f64&quot;</span>,
+                json: <span class="macro">serde_json::json!</span>({
                     <span class="string">&quot;action&quot;</span>: <span class="string">&quot;set&quot;</span>,
                     <span class="string">&quot;obj&quot;</span>: <span class="string">&quot;_root&quot;</span>,
                     <span class="string">&quot;key&quot;</span>: <span class="string">&quot;somekey&quot;</span>,
                     <span class="string">&quot;value&quot;</span>: <span class="number">1.23</span>,
                     <span class="string">&quot;pred&quot;</span>: []
                 }),
-                <span class="ident">expected</span>: <span class="prelude-val">Ok</span>(<span class="ident">Op</span> {
-                    <span class="ident">action</span>: <span class="ident">OpType::Put</span>(<span class="ident">ScalarValue::F64</span>(<span class="number">1.23</span>)),
-                    <span class="ident">obj</span>: <span class="ident">ObjectId::Root</span>,
-                    <span class="ident">key</span>: <span class="string">&quot;somekey&quot;</span>.<span class="ident">into</span>(),
-                    <span class="ident">insert</span>: <span class="bool-val">false</span>,
-                    <span class="ident">pred</span>: <span class="ident">SortedVec::new</span>(),
+                expected: <span class="prelude-val">Ok</span>(Op {
+                    action: OpType::Put(ScalarValue::F64(<span class="number">1.23</span>)),
+                    obj: ObjectId::Root,
+                    key: <span class="string">&quot;somekey&quot;</span>.into(),
+                    insert: <span class="bool-val">false</span>,
+                    pred: SortedVec::new(),
                 }),
             },
-            <span class="ident">Scenario</span> {
-                <span class="ident">name</span>: <span class="string">&quot;Set with boolean&quot;</span>,
-                <span class="ident">json</span>: <span class="macro">serde_json::json!</span>({
+            Scenario {
+                name: <span class="string">&quot;Set with boolean&quot;</span>,
+                json: <span class="macro">serde_json::json!</span>({
                     <span class="string">&quot;action&quot;</span>: <span class="string">&quot;set&quot;</span>,
                     <span class="string">&quot;obj&quot;</span>: <span class="string">&quot;_root&quot;</span>,
                     <span class="string">&quot;key&quot;</span>: <span class="string">&quot;somekey&quot;</span>,
                     <span class="string">&quot;value&quot;</span>: <span class="bool-val">true</span>,
                     <span class="string">&quot;pred&quot;</span>: []
                 }),
-                <span class="ident">expected</span>: <span class="prelude-val">Ok</span>(<span class="ident">Op</span> {
-                    <span class="ident">action</span>: <span class="ident">OpType::Put</span>(<span class="ident">ScalarValue::Boolean</span>(<span class="bool-val">true</span>)),
-                    <span class="ident">obj</span>: <span class="ident">ObjectId::Root</span>,
-                    <span class="ident">key</span>: <span class="string">&quot;somekey&quot;</span>.<span class="ident">into</span>(),
-                    <span class="ident">insert</span>: <span class="bool-val">false</span>,
-                    <span class="ident">pred</span>: <span class="ident">SortedVec::new</span>(),
+                expected: <span class="prelude-val">Ok</span>(Op {
+                    action: OpType::Put(ScalarValue::Boolean(<span class="bool-val">true</span>)),
+                    obj: ObjectId::Root,
+                    key: <span class="string">&quot;somekey&quot;</span>.into(),
+                    insert: <span class="bool-val">false</span>,
+                    pred: SortedVec::new(),
                 }),
             },
-            <span class="ident">Scenario</span> {
-                <span class="ident">name</span>: <span class="string">&quot;Set without value&quot;</span>,
-                <span class="ident">json</span>: <span class="macro">serde_json::json!</span>({
+            Scenario {
+                name: <span class="string">&quot;Set without value&quot;</span>,
+                json: <span class="macro">serde_json::json!</span>({
                     <span class="string">&quot;action&quot;</span>: <span class="string">&quot;set&quot;</span>,
                     <span class="string">&quot;obj&quot;</span>: <span class="string">&quot;_root&quot;</span>,
                     <span class="string">&quot;key&quot;</span>: <span class="string">&quot;somekey&quot;</span>,
                     <span class="string">&quot;datatype&quot;</span>: <span class="string">&quot;counter&quot;</span>,
                     <span class="string">&quot;pred&quot;</span>: []
                 }),
-                <span class="ident">expected</span>: <span class="prelude-val">Err</span>(<span class="ident">serde_json::Error::missing_field</span>(<span class="string">&quot;value&quot;</span>)),
+                expected: <span class="prelude-val">Err</span>(serde_json::Error::missing_field(<span class="string">&quot;value&quot;</span>)),
             },
-            <span class="ident">Scenario</span> {
-                <span class="ident">name</span>: <span class="string">&quot;Set with counter&quot;</span>,
-                <span class="ident">json</span>: <span class="macro">serde_json::json!</span>({
+            Scenario {
+                name: <span class="string">&quot;Set with counter&quot;</span>,
+                json: <span class="macro">serde_json::json!</span>({
                     <span class="string">&quot;action&quot;</span>: <span class="string">&quot;set&quot;</span>,
                     <span class="string">&quot;obj&quot;</span>: <span class="string">&quot;_root&quot;</span>,
                     <span class="string">&quot;key&quot;</span>: <span class="string">&quot;somekey&quot;</span>,
@@ -1021,17 +1021,17 @@
                     <span class="string">&quot;datatype&quot;</span>: <span class="string">&quot;counter&quot;</span>,
                     <span class="string">&quot;pred&quot;</span>: []
                 }),
-                <span class="ident">expected</span>: <span class="prelude-val">Ok</span>(<span class="ident">Op</span> {
-                    <span class="ident">action</span>: <span class="ident">OpType::Put</span>(<span class="ident">ScalarValue::Counter</span>(<span class="number">123</span>.<span class="ident">into</span>())),
-                    <span class="ident">obj</span>: <span class="ident">ObjectId::Root</span>,
-                    <span class="ident">key</span>: <span class="string">&quot;somekey&quot;</span>.<span class="ident">into</span>(),
-                    <span class="ident">insert</span>: <span class="bool-val">false</span>,
-                    <span class="ident">pred</span>: <span class="ident">SortedVec::new</span>(),
+                expected: <span class="prelude-val">Ok</span>(Op {
+                    action: OpType::Put(ScalarValue::Counter(<span class="number">123</span>.into())),
+                    obj: ObjectId::Root,
+                    key: <span class="string">&quot;somekey&quot;</span>.into(),
+                    insert: <span class="bool-val">false</span>,
+                    pred: SortedVec::new(),
                 }),
             },
-            <span class="ident">Scenario</span> {
-                <span class="ident">name</span>: <span class="string">&quot;Set with counter datatype and string value&quot;</span>,
-                <span class="ident">json</span>: <span class="macro">serde_json::json!</span>({
+            Scenario {
+                name: <span class="string">&quot;Set with counter datatype and string value&quot;</span>,
+                json: <span class="macro">serde_json::json!</span>({
                     <span class="string">&quot;action&quot;</span>: <span class="string">&quot;set&quot;</span>,
                     <span class="string">&quot;obj&quot;</span>: <span class="string">&quot;_root&quot;</span>,
                     <span class="string">&quot;key&quot;</span>: <span class="string">&quot;somekey&quot;</span>,
@@ -1039,14 +1039,14 @@
                     <span class="string">&quot;datatype&quot;</span>: <span class="string">&quot;counter&quot;</span>,
                     <span class="string">&quot;pred&quot;</span>: []
                 }),
-                <span class="ident">expected</span>: <span class="prelude-val">Err</span>(<span class="ident">serde_json::Error::invalid_value</span>(
-                    <span class="ident">Unexpected::Other</span>(<span class="string">&quot;\&quot;somestring\&quot;&quot;</span>),
+                expected: <span class="prelude-val">Err</span>(serde_json::Error::invalid_value(
+                    Unexpected::Other(<span class="string">&quot;\&quot;somestring\&quot;&quot;</span>),
                     <span class="kw-2">&amp;</span><span class="string">&quot;an integer&quot;</span>,
                 )),
             },
-            <span class="ident">Scenario</span> {
-                <span class="ident">name</span>: <span class="string">&quot;Set with timestamp datatype and string value&quot;</span>,
-                <span class="ident">json</span>: <span class="macro">serde_json::json!</span>({
+            Scenario {
+                name: <span class="string">&quot;Set with timestamp datatype and string value&quot;</span>,
+                json: <span class="macro">serde_json::json!</span>({
                     <span class="string">&quot;action&quot;</span>: <span class="string">&quot;set&quot;</span>,
                     <span class="string">&quot;obj&quot;</span>: <span class="string">&quot;_root&quot;</span>,
                     <span class="string">&quot;key&quot;</span>: <span class="string">&quot;somekey&quot;</span>,
@@ -1054,14 +1054,14 @@
                     <span class="string">&quot;datatype&quot;</span>: <span class="string">&quot;timestamp&quot;</span>,
                     <span class="string">&quot;pred&quot;</span>: []
                 }),
-                <span class="ident">expected</span>: <span class="prelude-val">Err</span>(<span class="ident">serde_json::Error::invalid_value</span>(
-                    <span class="ident">Unexpected::Other</span>(<span class="string">&quot;\&quot;somestring\&quot;&quot;</span>),
+                expected: <span class="prelude-val">Err</span>(serde_json::Error::invalid_value(
+                    Unexpected::Other(<span class="string">&quot;\&quot;somestring\&quot;&quot;</span>),
                     <span class="kw-2">&amp;</span><span class="string">&quot;an integer&quot;</span>,
                 )),
             },
-            <span class="ident">Scenario</span> {
-                <span class="ident">name</span>: <span class="string">&quot;Inc with counter&quot;</span>,
-                <span class="ident">json</span>: <span class="macro">serde_json::json!</span>({
+            Scenario {
+                name: <span class="string">&quot;Inc with counter&quot;</span>,
+                json: <span class="macro">serde_json::json!</span>({
                     <span class="string">&quot;action&quot;</span>: <span class="string">&quot;inc&quot;</span>,
                     <span class="string">&quot;obj&quot;</span>: <span class="string">&quot;_root&quot;</span>,
                     <span class="string">&quot;key&quot;</span>: <span class="string">&quot;somekey&quot;</span>,
@@ -1069,204 +1069,204 @@
                     <span class="string">&quot;datatype&quot;</span>: <span class="string">&quot;counter&quot;</span>,
                     <span class="string">&quot;pred&quot;</span>: []
                 }),
-                <span class="ident">expected</span>: <span class="prelude-val">Ok</span>(<span class="ident">Op</span> {
-                    <span class="ident">action</span>: <span class="ident">OpType::Increment</span>(<span class="number">12</span>),
-                    <span class="ident">obj</span>: <span class="ident">ObjectId::Root</span>,
-                    <span class="ident">key</span>: <span class="string">&quot;somekey&quot;</span>.<span class="ident">into</span>(),
-                    <span class="ident">insert</span>: <span class="bool-val">false</span>,
-                    <span class="ident">pred</span>: <span class="ident">SortedVec::new</span>(),
+                expected: <span class="prelude-val">Ok</span>(Op {
+                    action: OpType::Increment(<span class="number">12</span>),
+                    obj: ObjectId::Root,
+                    key: <span class="string">&quot;somekey&quot;</span>.into(),
+                    insert: <span class="bool-val">false</span>,
+                    pred: SortedVec::new(),
                 }),
             },
-            <span class="ident">Scenario</span> {
-                <span class="ident">name</span>: <span class="string">&quot;Inc without counter&quot;</span>,
-                <span class="ident">json</span>: <span class="macro">serde_json::json!</span>({
+            Scenario {
+                name: <span class="string">&quot;Inc without counter&quot;</span>,
+                json: <span class="macro">serde_json::json!</span>({
                     <span class="string">&quot;action&quot;</span>: <span class="string">&quot;inc&quot;</span>,
                     <span class="string">&quot;obj&quot;</span>: <span class="string">&quot;_root&quot;</span>,
                     <span class="string">&quot;key&quot;</span>: <span class="string">&quot;somekey&quot;</span>,
                     <span class="string">&quot;value&quot;</span>: <span class="number">12</span>,
                     <span class="string">&quot;pred&quot;</span>: []
                 }),
-                <span class="ident">expected</span>: <span class="prelude-val">Ok</span>(<span class="ident">Op</span> {
-                    <span class="ident">action</span>: <span class="ident">OpType::Increment</span>(<span class="number">12</span>),
-                    <span class="ident">obj</span>: <span class="ident">ObjectId::Root</span>,
-                    <span class="ident">key</span>: <span class="string">&quot;somekey&quot;</span>.<span class="ident">into</span>(),
-                    <span class="ident">insert</span>: <span class="bool-val">false</span>,
-                    <span class="ident">pred</span>: <span class="ident">SortedVec::new</span>(),
+                expected: <span class="prelude-val">Ok</span>(Op {
+                    action: OpType::Increment(<span class="number">12</span>),
+                    obj: ObjectId::Root,
+                    key: <span class="string">&quot;somekey&quot;</span>.into(),
+                    insert: <span class="bool-val">false</span>,
+                    pred: SortedVec::new(),
                 }),
             },
-            <span class="ident">Scenario</span> {
-                <span class="ident">name</span>: <span class="string">&quot;Inc without value&quot;</span>,
-                <span class="ident">json</span>: <span class="macro">serde_json::json!</span>({
+            Scenario {
+                name: <span class="string">&quot;Inc without value&quot;</span>,
+                json: <span class="macro">serde_json::json!</span>({
                     <span class="string">&quot;action&quot;</span>: <span class="string">&quot;inc&quot;</span>,
                     <span class="string">&quot;obj&quot;</span>: <span class="string">&quot;_root&quot;</span>,
                     <span class="string">&quot;key&quot;</span>: <span class="string">&quot;somekey&quot;</span>,
                     <span class="string">&quot;pred&quot;</span>: []
                 }),
-                <span class="ident">expected</span>: <span class="prelude-val">Err</span>(<span class="ident">serde_json::Error::missing_field</span>(<span class="string">&quot;value&quot;</span>)),
+                expected: <span class="prelude-val">Err</span>(serde_json::Error::missing_field(<span class="string">&quot;value&quot;</span>)),
             },
-            <span class="ident">Scenario</span> {
-                <span class="ident">name</span>: <span class="string">&quot;Set with null&quot;</span>,
-                <span class="ident">json</span>: <span class="macro">serde_json::json!</span>({
+            Scenario {
+                name: <span class="string">&quot;Set with null&quot;</span>,
+                json: <span class="macro">serde_json::json!</span>({
                     <span class="string">&quot;action&quot;</span>: <span class="string">&quot;set&quot;</span>,
                     <span class="string">&quot;obj&quot;</span>: <span class="string">&quot;_root&quot;</span>,
                     <span class="string">&quot;key&quot;</span>: <span class="string">&quot;somekey&quot;</span>,
-                    <span class="string">&quot;value&quot;</span>: <span class="ident">null</span>,
+                    <span class="string">&quot;value&quot;</span>: null,
                     <span class="string">&quot;pred&quot;</span>: []
                 }),
-                <span class="ident">expected</span>: <span class="prelude-val">Ok</span>(<span class="ident">Op</span> {
-                    <span class="ident">action</span>: <span class="ident">OpType::Put</span>(<span class="ident">ScalarValue::Null</span>),
-                    <span class="ident">obj</span>: <span class="ident">ObjectId::Root</span>,
-                    <span class="ident">key</span>: <span class="string">&quot;somekey&quot;</span>.<span class="ident">into</span>(),
-                    <span class="ident">insert</span>: <span class="bool-val">false</span>,
-                    <span class="ident">pred</span>: <span class="ident">SortedVec::new</span>(),
+                expected: <span class="prelude-val">Ok</span>(Op {
+                    action: OpType::Put(ScalarValue::Null),
+                    obj: ObjectId::Root,
+                    key: <span class="string">&quot;somekey&quot;</span>.into(),
+                    insert: <span class="bool-val">false</span>,
+                    pred: SortedVec::new(),
                 }),
             },
         ];
 
-        <span class="kw">for</span> <span class="ident">scenario</span> <span class="kw">in</span> <span class="ident">scenarios</span>.<span class="ident">into_iter</span>() {
-            <span class="kw">let</span> <span class="ident">result</span>: <span class="ident">serde_json::Result</span><span class="op">&lt;</span><span class="ident">Op</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">serde_json::from_value</span>(<span class="ident">scenario</span>.<span class="ident">json</span>);
-            <span class="kw">match</span> (<span class="ident">result</span>, <span class="ident">scenario</span>.<span class="ident">expected</span>) {
-                (<span class="prelude-val">Ok</span>(<span class="ident">result_op</span>), <span class="prelude-val">Ok</span>(<span class="ident">expected_op</span>)) =&gt; <span class="macro">assert_eq!</span>(
-                    <span class="ident">result_op</span>, <span class="ident">expected_op</span>,
+        <span class="kw">for </span>scenario <span class="kw">in </span>scenarios.into_iter() {
+            <span class="kw">let </span>result: serde_json::Result&lt;Op&gt; = serde_json::from_value(scenario.json);
+            <span class="kw">match </span>(result, scenario.expected) {
+                (<span class="prelude-val">Ok</span>(result_op), <span class="prelude-val">Ok</span>(expected_op)) =&gt; <span class="macro">assert_eq!</span>(
+                    result_op, expected_op,
                     <span class="string">&quot;Scenario {}: Expected Ok({:?}) but got Ok({:?})&quot;</span>,
-                    <span class="ident">scenario</span>.<span class="ident">name</span>, <span class="ident">expected_op</span>, <span class="ident">result_op</span>
+                    scenario.name, expected_op, result_op
                 ),
-                (<span class="prelude-val">Ok</span>(<span class="ident">result_op</span>), <span class="prelude-val">Err</span>(<span class="ident">e</span>)) =&gt; <span class="macro">panic!</span>(
+                (<span class="prelude-val">Ok</span>(result_op), <span class="prelude-val">Err</span>(e)) =&gt; <span class="macro">panic!</span>(
                     <span class="string">&quot;Scenario {}: expected Err({:?}) but got Ok({:?})&quot;</span>,
-                    <span class="ident">scenario</span>.<span class="ident">name</span>, <span class="ident">e</span>, <span class="ident">result_op</span>
+                    scenario.name, e, result_op
                 ),
-                (<span class="prelude-val">Err</span>(<span class="ident">result_e</span>), <span class="prelude-val">Err</span>(<span class="ident">expected_e</span>)) =&gt; <span class="macro">assert_eq!</span>(
-                    <span class="ident">result_e</span>.<span class="ident">to_string</span>(),
-                    <span class="ident">expected_e</span>.<span class="ident">to_string</span>(),
+                (<span class="prelude-val">Err</span>(result_e), <span class="prelude-val">Err</span>(expected_e)) =&gt; <span class="macro">assert_eq!</span>(
+                    result_e.to_string(),
+                    expected_e.to_string(),
                     <span class="string">&quot;Scenario {}: expected Err({:?}) but got Err({:?})&quot;</span>,
-                    <span class="ident">scenario</span>.<span class="ident">name</span>,
-                    <span class="ident">expected_e</span>,
-                    <span class="ident">result_e</span>
+                    scenario.name,
+                    expected_e,
+                    result_e
                 ),
-                (<span class="prelude-val">Err</span>(<span class="ident">result_e</span>), <span class="prelude-val">Ok</span>(<span class="ident">expected</span>)) =&gt; <span class="macro">panic!</span>(
+                (<span class="prelude-val">Err</span>(result_e), <span class="prelude-val">Ok</span>(expected)) =&gt; <span class="macro">panic!</span>(
                     <span class="string">&quot;Scenario {}: expected Ok({:?}) but got Err({:?})&quot;</span>,
-                    <span class="ident">scenario</span>.<span class="ident">name</span>, <span class="ident">expected</span>, <span class="ident">result_e</span>
+                    scenario.name, expected, result_e
                 ),
             }
         }
     }
 
-    <span class="attribute">#[<span class="ident">test</span>]</span>
-    <span class="kw">fn</span> <span class="ident">test_deserialize_obj</span>() {
-        <span class="kw">let</span> <span class="ident">root</span>: <span class="ident">Op</span> <span class="op">=</span> <span class="ident">serde_json::from_value</span>(<span class="macro">serde_json::json!</span>({
+    <span class="attribute">#[test]
+    </span><span class="kw">fn </span>test_deserialize_obj() {
+        <span class="kw">let </span>root: Op = serde_json::from_value(<span class="macro">serde_json::json!</span>({
             <span class="string">&quot;action&quot;</span>: <span class="string">&quot;inc&quot;</span>,
             <span class="string">&quot;obj&quot;</span>: <span class="string">&quot;_root&quot;</span>,
             <span class="string">&quot;key&quot;</span>: <span class="string">&quot;somekey&quot;</span>,
             <span class="string">&quot;value&quot;</span>: <span class="number">1</span>,
             <span class="string">&quot;pred&quot;</span>: []
         }))
-        .<span class="ident">unwrap</span>();
-        <span class="macro">assert_eq!</span>(<span class="ident">root</span>.<span class="ident">obj</span>, <span class="ident">amp::ObjectId::Root</span>);
+        .unwrap();
+        <span class="macro">assert_eq!</span>(root.obj, amp::ObjectId::Root);
 
-        <span class="kw">let</span> <span class="ident">opid</span>: <span class="ident">Op</span> <span class="op">=</span> <span class="ident">serde_json::from_value</span>(<span class="macro">serde_json::json!</span>({
+        <span class="kw">let </span>opid: Op = serde_json::from_value(<span class="macro">serde_json::json!</span>({
             <span class="string">&quot;action&quot;</span>: <span class="string">&quot;inc&quot;</span>,
             <span class="string">&quot;obj&quot;</span>: <span class="string">&quot;1@7ef48769b04d47e9a88e98a134d62716&quot;</span>,
             <span class="string">&quot;key&quot;</span>: <span class="string">&quot;somekey&quot;</span>,
             <span class="string">&quot;value&quot;</span>: <span class="number">1</span>,
             <span class="string">&quot;pred&quot;</span>: []
         }))
-        .<span class="ident">unwrap</span>();
+        .unwrap();
         <span class="macro">assert_eq!</span>(
-            <span class="ident">opid</span>.<span class="ident">obj</span>,
-            <span class="ident">amp::ObjectId::from_str</span>(<span class="string">&quot;1@7ef48769b04d47e9a88e98a134d62716&quot;</span>).<span class="ident">unwrap</span>()
+            opid.obj,
+            amp::ObjectId::from_str(<span class="string">&quot;1@7ef48769b04d47e9a88e98a134d62716&quot;</span>).unwrap()
         );
 
-        <span class="kw">let</span> <span class="ident">invalid</span>: <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Op</span>, <span class="ident">serde_json::Error</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">serde_json::from_value</span>(<span class="macro">serde_json::json!</span>({
+        <span class="kw">let </span>invalid: <span class="prelude-ty">Result</span>&lt;Op, serde_json::Error&gt; = serde_json::from_value(<span class="macro">serde_json::json!</span>({
             <span class="string">&quot;action&quot;</span>: <span class="string">&quot;inc&quot;</span>,
             <span class="string">&quot;obj&quot;</span>: <span class="string">&quot;notanobject&quot;</span>,
             <span class="string">&quot;key&quot;</span>: <span class="string">&quot;somekey&quot;</span>,
             <span class="string">&quot;value&quot;</span>: <span class="number">1</span>,
             <span class="string">&quot;pred&quot;</span>: []
         }));
-        <span class="kw">match</span> <span class="ident">invalid</span> {
+        <span class="kw">match </span>invalid {
             <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; <span class="macro">panic!</span>(<span class="string">&quot;Parsing an invalid object id should fail&quot;</span>),
-            <span class="prelude-val">Err</span>(<span class="ident">e</span>) =&gt; <span class="macro">assert!</span>(<span class="ident">e</span>.<span class="ident">to_string</span>().<span class="ident">contains</span>(<span class="string">&quot;A valid ObjectID&quot;</span>)),
+            <span class="prelude-val">Err</span>(e) =&gt; <span class="macro">assert!</span>(e.to_string().contains(<span class="string">&quot;A valid ObjectID&quot;</span>)),
         }
     }
 
-    <span class="attribute">#[<span class="ident">test</span>]</span>
-    <span class="kw">fn</span> <span class="ident">test_serialize_key</span>() {
-        <span class="kw">let</span> <span class="ident">map_key</span> <span class="op">=</span> <span class="ident">Op</span> {
-            <span class="ident">action</span>: <span class="ident">OpType::Increment</span>(<span class="number">12</span>),
-            <span class="ident">obj</span>: <span class="ident">ObjectId::Root</span>,
-            <span class="ident">key</span>: <span class="string">&quot;somekey&quot;</span>.<span class="ident">into</span>(),
-            <span class="ident">insert</span>: <span class="bool-val">false</span>,
-            <span class="ident">pred</span>: <span class="ident">SortedVec::new</span>(),
+    <span class="attribute">#[test]
+    </span><span class="kw">fn </span>test_serialize_key() {
+        <span class="kw">let </span>map_key = Op {
+            action: OpType::Increment(<span class="number">12</span>),
+            obj: ObjectId::Root,
+            key: <span class="string">&quot;somekey&quot;</span>.into(),
+            insert: <span class="bool-val">false</span>,
+            pred: SortedVec::new(),
         };
-        <span class="kw">let</span> <span class="ident">json</span> <span class="op">=</span> <span class="ident">serde_json::to_value</span>(<span class="ident">map_key</span>).<span class="ident">unwrap</span>();
-        <span class="kw">let</span> <span class="ident">expected</span>: <span class="ident">serde_json::Value</span> <span class="op">=</span> <span class="string">&quot;somekey&quot;</span>.<span class="ident">into</span>();
-        <span class="macro">assert_eq!</span>(<span class="ident">json</span>.<span class="ident">as_object</span>().<span class="ident">unwrap</span>().<span class="ident">get</span>(<span class="string">&quot;key&quot;</span>), <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="ident">expected</span>));
+        <span class="kw">let </span>json = serde_json::to_value(map_key).unwrap();
+        <span class="kw">let </span>expected: serde_json::Value = <span class="string">&quot;somekey&quot;</span>.into();
+        <span class="macro">assert_eq!</span>(json.as_object().unwrap().get(<span class="string">&quot;key&quot;</span>), <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>expected));
 
-        <span class="kw">let</span> <span class="ident">elemid_key</span> <span class="op">=</span> <span class="ident">Op</span> {
-            <span class="ident">action</span>: <span class="ident">OpType::Increment</span>(<span class="number">12</span>),
-            <span class="ident">obj</span>: <span class="ident">ObjectId::Root</span>,
-            <span class="ident">key</span>: <span class="ident">OpId::from_str</span>(<span class="string">&quot;1@7ef48769b04d47e9a88e98a134d62716&quot;</span>)
-                .<span class="ident">unwrap</span>()
-                .<span class="ident">into</span>(),
-            <span class="ident">insert</span>: <span class="bool-val">false</span>,
-            <span class="ident">pred</span>: <span class="ident">SortedVec::new</span>(),
+        <span class="kw">let </span>elemid_key = Op {
+            action: OpType::Increment(<span class="number">12</span>),
+            obj: ObjectId::Root,
+            key: OpId::from_str(<span class="string">&quot;1@7ef48769b04d47e9a88e98a134d62716&quot;</span>)
+                .unwrap()
+                .into(),
+            insert: <span class="bool-val">false</span>,
+            pred: SortedVec::new(),
         };
-        <span class="kw">let</span> <span class="ident">json</span> <span class="op">=</span> <span class="ident">serde_json::to_value</span>(<span class="ident">elemid_key</span>).<span class="ident">unwrap</span>();
-        <span class="kw">let</span> <span class="ident">expected</span>: <span class="ident">serde_json::Value</span> <span class="op">=</span> <span class="string">&quot;1@7ef48769b04d47e9a88e98a134d62716&quot;</span>.<span class="ident">into</span>();
-        <span class="macro">assert_eq!</span>(<span class="ident">json</span>.<span class="ident">as_object</span>().<span class="ident">unwrap</span>().<span class="ident">get</span>(<span class="string">&quot;elemId&quot;</span>), <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span><span class="ident">expected</span>));
+        <span class="kw">let </span>json = serde_json::to_value(elemid_key).unwrap();
+        <span class="kw">let </span>expected: serde_json::Value = <span class="string">&quot;1@7ef48769b04d47e9a88e98a134d62716&quot;</span>.into();
+        <span class="macro">assert_eq!</span>(json.as_object().unwrap().get(<span class="string">&quot;elemId&quot;</span>), <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>expected));
     }
 
-    <span class="attribute">#[<span class="ident">test</span>]</span>
-    <span class="kw">fn</span> <span class="ident">test_round_trips</span>() {
-        <span class="kw">let</span> <span class="ident">testcases</span> <span class="op">=</span> <span class="macro">vec!</span>[
-            <span class="ident">Op</span> {
-                <span class="ident">action</span>: <span class="ident">OpType::Put</span>(<span class="ident">ScalarValue::Uint</span>(<span class="number">12</span>)),
-                <span class="ident">obj</span>: <span class="ident">ObjectId::Root</span>,
-                <span class="ident">key</span>: <span class="string">&quot;somekey&quot;</span>.<span class="ident">into</span>(),
-                <span class="ident">insert</span>: <span class="bool-val">false</span>,
-                <span class="ident">pred</span>: <span class="ident">SortedVec::new</span>(),
+    <span class="attribute">#[test]
+    </span><span class="kw">fn </span>test_round_trips() {
+        <span class="kw">let </span>testcases = <span class="macro">vec!</span>[
+            Op {
+                action: OpType::Put(ScalarValue::Uint(<span class="number">12</span>)),
+                obj: ObjectId::Root,
+                key: <span class="string">&quot;somekey&quot;</span>.into(),
+                insert: <span class="bool-val">false</span>,
+                pred: SortedVec::new(),
             },
-            <span class="ident">Op</span> {
-                <span class="ident">action</span>: <span class="ident">OpType::Increment</span>(<span class="number">12</span>),
-                <span class="ident">obj</span>: <span class="ident">ObjectId::from_str</span>(<span class="string">&quot;1@7ef48769b04d47e9a88e98a134d62716&quot;</span>).<span class="ident">unwrap</span>(),
-                <span class="ident">key</span>: <span class="string">&quot;somekey&quot;</span>.<span class="ident">into</span>(),
-                <span class="ident">insert</span>: <span class="bool-val">false</span>,
-                <span class="ident">pred</span>: <span class="ident">SortedVec::new</span>(),
+            Op {
+                action: OpType::Increment(<span class="number">12</span>),
+                obj: ObjectId::from_str(<span class="string">&quot;1@7ef48769b04d47e9a88e98a134d62716&quot;</span>).unwrap(),
+                key: <span class="string">&quot;somekey&quot;</span>.into(),
+                insert: <span class="bool-val">false</span>,
+                pred: SortedVec::new(),
             },
-            <span class="ident">Op</span> {
-                <span class="ident">action</span>: <span class="ident">OpType::Put</span>(<span class="ident">ScalarValue::Uint</span>(<span class="number">12</span>)),
-                <span class="ident">obj</span>: <span class="ident">ObjectId::from_str</span>(<span class="string">&quot;1@7ef48769b04d47e9a88e98a134d62716&quot;</span>).<span class="ident">unwrap</span>(),
-                <span class="ident">key</span>: <span class="string">&quot;somekey&quot;</span>.<span class="ident">into</span>(),
-                <span class="ident">insert</span>: <span class="bool-val">false</span>,
-                <span class="ident">pred</span>: <span class="macro">vec!</span>[<span class="ident">OpId::from_str</span>(<span class="string">&quot;1@7ef48769b04d47e9a88e98a134d62716&quot;</span>).<span class="ident">unwrap</span>()].<span class="ident">into</span>(),
+            Op {
+                action: OpType::Put(ScalarValue::Uint(<span class="number">12</span>)),
+                obj: ObjectId::from_str(<span class="string">&quot;1@7ef48769b04d47e9a88e98a134d62716&quot;</span>).unwrap(),
+                key: <span class="string">&quot;somekey&quot;</span>.into(),
+                insert: <span class="bool-val">false</span>,
+                pred: <span class="macro">vec!</span>[OpId::from_str(<span class="string">&quot;1@7ef48769b04d47e9a88e98a134d62716&quot;</span>).unwrap()].into(),
             },
-            <span class="ident">Op</span> {
-                <span class="ident">action</span>: <span class="ident">OpType::Increment</span>(<span class="number">12</span>),
-                <span class="ident">obj</span>: <span class="ident">ObjectId::Root</span>,
-                <span class="ident">key</span>: <span class="string">&quot;somekey&quot;</span>.<span class="ident">into</span>(),
-                <span class="ident">insert</span>: <span class="bool-val">false</span>,
-                <span class="ident">pred</span>: <span class="ident">SortedVec::new</span>(),
+            Op {
+                action: OpType::Increment(<span class="number">12</span>),
+                obj: ObjectId::Root,
+                key: <span class="string">&quot;somekey&quot;</span>.into(),
+                insert: <span class="bool-val">false</span>,
+                pred: SortedVec::new(),
             },
-            <span class="ident">Op</span> {
-                <span class="ident">action</span>: <span class="ident">OpType::Put</span>(<span class="string">&quot;seomthing&quot;</span>.<span class="ident">into</span>()),
-                <span class="ident">obj</span>: <span class="ident">ObjectId::from_str</span>(<span class="string">&quot;1@7ef48769b04d47e9a88e98a134d62716&quot;</span>).<span class="ident">unwrap</span>(),
-                <span class="ident">key</span>: <span class="ident">OpId::from_str</span>(<span class="string">&quot;1@7ef48769b04d47e9a88e98a134d62716&quot;</span>)
-                    .<span class="ident">unwrap</span>()
-                    .<span class="ident">into</span>(),
-                <span class="ident">insert</span>: <span class="bool-val">false</span>,
-                <span class="ident">pred</span>: <span class="macro">vec!</span>[<span class="ident">OpId::from_str</span>(<span class="string">&quot;1@7ef48769b04d47e9a88e98a134d62716&quot;</span>).<span class="ident">unwrap</span>()].<span class="ident">into</span>(),
+            Op {
+                action: OpType::Put(<span class="string">&quot;seomthing&quot;</span>.into()),
+                obj: ObjectId::from_str(<span class="string">&quot;1@7ef48769b04d47e9a88e98a134d62716&quot;</span>).unwrap(),
+                key: OpId::from_str(<span class="string">&quot;1@7ef48769b04d47e9a88e98a134d62716&quot;</span>)
+                    .unwrap()
+                    .into(),
+                insert: <span class="bool-val">false</span>,
+                pred: <span class="macro">vec!</span>[OpId::from_str(<span class="string">&quot;1@7ef48769b04d47e9a88e98a134d62716&quot;</span>).unwrap()].into(),
             },
         ];
-        <span class="kw">for</span> (<span class="ident">testcase_num</span>, <span class="ident">testcase</span>) <span class="kw">in</span> <span class="ident">testcases</span>.<span class="ident">iter</span>().<span class="ident">enumerate</span>() {
-            <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::expect_fun_call</span>)]</span>
-            <span class="kw">let</span> <span class="ident">serialized</span> <span class="op">=</span> <span class="ident">serde_json::to_string</span>(<span class="ident">testcase</span>)
-                .<span class="ident">expect</span>(<span class="macro">format!</span>(<span class="string">&quot;Failed to serialize testcase {}&quot;</span>, <span class="ident">testcase_num</span>).<span class="ident">as_str</span>());
-            <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::expect_fun_call</span>)]</span>
-            <span class="kw">let</span> <span class="ident">deserialized</span>: <span class="ident">Op</span> <span class="op">=</span> <span class="ident">serde_json::from_str</span>(<span class="kw-2">&amp;</span><span class="ident">serialized</span>)
-                .<span class="ident">expect</span>(<span class="macro">format!</span>(<span class="string">&quot;Failed to deserialize testcase {}&quot;</span>, <span class="ident">testcase_num</span>).<span class="ident">as_str</span>());
-            <span class="macro">assert_eq!</span>(<span class="ident">testcase</span>, <span class="kw-2">&amp;</span><span class="ident">deserialized</span>, <span class="string">&quot;Testcase {} failed&quot;</span>, <span class="ident">testcase_num</span>);
+        <span class="kw">for </span>(testcase_num, testcase) <span class="kw">in </span>testcases.iter().enumerate() {
+            <span class="attribute">#[allow(clippy::expect_fun_call)]
+            </span><span class="kw">let </span>serialized = serde_json::to_string(testcase)
+                .expect(<span class="macro">format!</span>(<span class="string">&quot;Failed to serialize testcase {}&quot;</span>, testcase_num).as_str());
+            <span class="attribute">#[allow(clippy::expect_fun_call)]
+            </span><span class="kw">let </span>deserialized: Op = serde_json::from_str(<span class="kw-2">&amp;</span>serialized)
+                .expect(<span class="macro">format!</span>(<span class="string">&quot;Failed to deserialize testcase {}&quot;</span>, testcase_num).as_str());
+            <span class="macro">assert_eq!</span>(testcase, <span class="kw-2">&amp;</span>deserialized, <span class="string">&quot;Testcase {} failed&quot;</span>, testcase_num);
         }
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

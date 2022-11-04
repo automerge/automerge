@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/columnar/encoding/decodable_impls.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>decodable_impls.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/columnar/encoding/decodable_impls.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>decodable_impls.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -175,180 +175,180 @@
 <span id="173">173</span>
 <span id="174">174</span>
 <span id="175">175</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">smol_str::SmolStr</span>;
-<span class="kw">use</span> <span class="ident">std</span>::{<span class="ident">borrow::Cow</span>, <span class="ident">convert::TryFrom</span>, <span class="ident">io::Read</span>, <span class="ident">str</span>};
+</pre><pre class="rust"><code><span class="kw">use </span>smol_str::SmolStr;
+<span class="kw">use </span>std::{borrow::Cow, convert::TryFrom, io::Read, str};
 
-<span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">Decodable</span>, <span class="ident">DecodeError</span>};
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::ActorId</span>;
+<span class="kw">use super</span>::{Decodable, DecodeError};
+<span class="kw">use </span><span class="kw">crate</span>::ActorId;
 
-<span class="comment">// We don&#39;t allow decoding items which are larger than this. Almost nothing should be this large</span>
-<span class="comment">// so this is really guarding against bad encodings which accidentally grab loads of memory</span>
-<span class="kw">const</span> <span class="ident">MAX_ALLOCATION</span>: <span class="ident">usize</span> <span class="op">=</span> <span class="number">1000000000</span>;
+<span class="comment">// We don&#39;t allow decoding items which are larger than this. Almost nothing should be this large
+// so this is really guarding against bad encodings which accidentally grab loads of memory
+</span><span class="kw">const </span>MAX_ALLOCATION: usize = <span class="number">1000000000</span>;
 
-<span class="kw">impl</span> <span class="ident">Decodable</span> <span class="kw">for</span> <span class="ident">u8</span> {
-    <span class="kw">fn</span> <span class="ident">decode</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">DecodeError</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">R</span>: <span class="ident">Read</span>,
+<span class="kw">impl </span>Decodable <span class="kw">for </span>u8 {
+    <span class="kw">fn </span>decode&lt;R&gt;(bytes: <span class="kw-2">&amp;mut </span>R) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, DecodeError&gt;
+    <span class="kw">where
+        </span>R: Read,
     {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">buffer</span> <span class="op">=</span> [<span class="number">0</span>; <span class="number">1</span>];
-        <span class="ident">bytes</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;mut</span> <span class="ident">buffer</span>)<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(<span class="ident">buffer</span>[<span class="number">0</span>])
+        <span class="kw">let </span><span class="kw-2">mut </span>buffer = [<span class="number">0</span>; <span class="number">1</span>];
+        bytes.read_exact(<span class="kw-2">&amp;mut </span>buffer)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(buffer[<span class="number">0</span>])
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Decodable</span> <span class="kw">for</span> <span class="ident">u32</span> {
-    <span class="kw">fn</span> <span class="ident">decode</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">DecodeError</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">R</span>: <span class="ident">Read</span>,
+<span class="kw">impl </span>Decodable <span class="kw">for </span>u32 {
+    <span class="kw">fn </span>decode&lt;R&gt;(bytes: <span class="kw-2">&amp;mut </span>R) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, DecodeError&gt;
+    <span class="kw">where
+        </span>R: Read,
     {
-        <span class="ident">u64::decode</span>::<span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="ident">bytes</span>).<span class="ident">and_then</span>(<span class="op">|</span><span class="ident">val</span><span class="op">|</span> <span class="ident"><span class="self">Self</span>::try_from</span>(<span class="ident">val</span>).<span class="ident">map_err</span>(<span class="ident">DecodeError::from</span>))
+        u64::decode::&lt;R&gt;(bytes).and_then(|val| <span class="self">Self</span>::try_from(val).map_err(DecodeError::from))
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Decodable</span> <span class="kw">for</span> <span class="ident">usize</span> {
-    <span class="kw">fn</span> <span class="ident">decode</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">DecodeError</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">R</span>: <span class="ident">Read</span>,
+<span class="kw">impl </span>Decodable <span class="kw">for </span>usize {
+    <span class="kw">fn </span>decode&lt;R&gt;(bytes: <span class="kw-2">&amp;mut </span>R) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, DecodeError&gt;
+    <span class="kw">where
+        </span>R: Read,
     {
-        <span class="ident">u64::decode</span>::<span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="ident">bytes</span>).<span class="ident">and_then</span>(<span class="op">|</span><span class="ident">val</span><span class="op">|</span> <span class="ident"><span class="self">Self</span>::try_from</span>(<span class="ident">val</span>).<span class="ident">map_err</span>(<span class="ident">DecodeError::from</span>))
+        u64::decode::&lt;R&gt;(bytes).and_then(|val| <span class="self">Self</span>::try_from(val).map_err(DecodeError::from))
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Decodable</span> <span class="kw">for</span> <span class="ident">isize</span> {
-    <span class="kw">fn</span> <span class="ident">decode</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">DecodeError</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">R</span>: <span class="ident">Read</span>,
+<span class="kw">impl </span>Decodable <span class="kw">for </span>isize {
+    <span class="kw">fn </span>decode&lt;R&gt;(bytes: <span class="kw-2">&amp;mut </span>R) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, DecodeError&gt;
+    <span class="kw">where
+        </span>R: Read,
     {
-        <span class="ident">i64::decode</span>::<span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="ident">bytes</span>).<span class="ident">and_then</span>(<span class="op">|</span><span class="ident">val</span><span class="op">|</span> <span class="ident"><span class="self">Self</span>::try_from</span>(<span class="ident">val</span>).<span class="ident">map_err</span>(<span class="ident">DecodeError::from</span>))
+        i64::decode::&lt;R&gt;(bytes).and_then(|val| <span class="self">Self</span>::try_from(val).map_err(DecodeError::from))
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Decodable</span> <span class="kw">for</span> <span class="ident">i32</span> {
-    <span class="kw">fn</span> <span class="ident">decode</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">DecodeError</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">R</span>: <span class="ident">Read</span>,
+<span class="kw">impl </span>Decodable <span class="kw">for </span>i32 {
+    <span class="kw">fn </span>decode&lt;R&gt;(bytes: <span class="kw-2">&amp;mut </span>R) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, DecodeError&gt;
+    <span class="kw">where
+        </span>R: Read,
     {
-        <span class="ident">i64::decode</span>::<span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="ident">bytes</span>).<span class="ident">and_then</span>(<span class="op">|</span><span class="ident">val</span><span class="op">|</span> <span class="ident"><span class="self">Self</span>::try_from</span>(<span class="ident">val</span>).<span class="ident">map_err</span>(<span class="ident">DecodeError::from</span>))
+        i64::decode::&lt;R&gt;(bytes).and_then(|val| <span class="self">Self</span>::try_from(val).map_err(DecodeError::from))
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Decodable</span> <span class="kw">for</span> <span class="ident">i64</span> {
-    <span class="kw">fn</span> <span class="ident">decode</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">DecodeError</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">R</span>: <span class="ident">Read</span>,
+<span class="kw">impl </span>Decodable <span class="kw">for </span>i64 {
+    <span class="kw">fn </span>decode&lt;R&gt;(bytes: <span class="kw-2">&amp;mut </span>R) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, DecodeError&gt;
+    <span class="kw">where
+        </span>R: Read,
     {
-        <span class="ident">leb128::read::signed</span>(<span class="ident">bytes</span>).<span class="ident">map_err</span>(<span class="ident">DecodeError::from</span>)
+        leb128::read::signed(bytes).map_err(DecodeError::from)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Decodable</span> <span class="kw">for</span> <span class="ident">f64</span> {
-    <span class="kw">fn</span> <span class="ident">decode</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">DecodeError</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">R</span>: <span class="ident">Read</span>,
+<span class="kw">impl </span>Decodable <span class="kw">for </span>f64 {
+    <span class="kw">fn </span>decode&lt;R&gt;(bytes: <span class="kw-2">&amp;mut </span>R) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, DecodeError&gt;
+    <span class="kw">where
+        </span>R: Read,
     {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">buffer</span> <span class="op">=</span> [<span class="number">0</span>; <span class="number">8</span>];
-        <span class="ident">bytes</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;mut</span> <span class="ident">buffer</span>)<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(<span class="ident"><span class="self">Self</span>::from_le_bytes</span>(<span class="ident">buffer</span>))
+        <span class="kw">let </span><span class="kw-2">mut </span>buffer = [<span class="number">0</span>; <span class="number">8</span>];
+        bytes.read_exact(<span class="kw-2">&amp;mut </span>buffer)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(<span class="self">Self</span>::from_le_bytes(buffer))
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Decodable</span> <span class="kw">for</span> <span class="ident">f32</span> {
-    <span class="kw">fn</span> <span class="ident">decode</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">DecodeError</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">R</span>: <span class="ident">Read</span>,
+<span class="kw">impl </span>Decodable <span class="kw">for </span>f32 {
+    <span class="kw">fn </span>decode&lt;R&gt;(bytes: <span class="kw-2">&amp;mut </span>R) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, DecodeError&gt;
+    <span class="kw">where
+        </span>R: Read,
     {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">buffer</span> <span class="op">=</span> [<span class="number">0</span>; <span class="number">4</span>];
-        <span class="ident">bytes</span>.<span class="ident">read_exact</span>(<span class="kw-2">&amp;mut</span> <span class="ident">buffer</span>)<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(<span class="ident"><span class="self">Self</span>::from_le_bytes</span>(<span class="ident">buffer</span>))
+        <span class="kw">let </span><span class="kw-2">mut </span>buffer = [<span class="number">0</span>; <span class="number">4</span>];
+        bytes.read_exact(<span class="kw-2">&amp;mut </span>buffer)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(<span class="self">Self</span>::from_le_bytes(buffer))
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Decodable</span> <span class="kw">for</span> <span class="ident">u64</span> {
-    <span class="kw">fn</span> <span class="ident">decode</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">DecodeError</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">R</span>: <span class="ident">Read</span>,
+<span class="kw">impl </span>Decodable <span class="kw">for </span>u64 {
+    <span class="kw">fn </span>decode&lt;R&gt;(bytes: <span class="kw-2">&amp;mut </span>R) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, DecodeError&gt;
+    <span class="kw">where
+        </span>R: Read,
     {
-        <span class="ident">leb128::read::unsigned</span>(<span class="ident">bytes</span>).<span class="ident">map_err</span>(<span class="ident">DecodeError::from</span>)
+        leb128::read::unsigned(bytes).map_err(DecodeError::from)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Decodable</span> <span class="kw">for</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">decode</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">DecodeError</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">R</span>: <span class="ident">Read</span>,
+<span class="kw">impl </span>Decodable <span class="kw">for </span>Vec&lt;u8&gt; {
+    <span class="kw">fn </span>decode&lt;R&gt;(bytes: <span class="kw-2">&amp;mut </span>R) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, DecodeError&gt;
+    <span class="kw">where
+        </span>R: Read,
     {
-        <span class="kw">let</span> <span class="ident">len</span> <span class="op">=</span> <span class="ident">usize::decode</span>::<span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="ident">bytes</span>)<span class="question-mark">?</span>;
-        <span class="kw">if</span> <span class="ident">len</span> <span class="op">==</span> <span class="number">0</span> {
-            <span class="kw">return</span> <span class="prelude-val">Ok</span>(<span class="macro">vec!</span>[]);
+        <span class="kw">let </span>len = usize::decode::&lt;R&gt;(bytes)<span class="question-mark">?</span>;
+        <span class="kw">if </span>len == <span class="number">0 </span>{
+            <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="macro">vec!</span>[]);
         }
-        <span class="kw">if</span> <span class="ident">len</span> <span class="op">&gt;</span> <span class="ident">MAX_ALLOCATION</span> {
-            <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">DecodeError::OverlargeAllocation</span> {
-                <span class="ident">attempted</span>: <span class="ident">len</span>,
-                <span class="ident">maximum</span>: <span class="ident">MAX_ALLOCATION</span>,
+        <span class="kw">if </span>len &gt; MAX_ALLOCATION {
+            <span class="kw">return </span><span class="prelude-val">Err</span>(DecodeError::OverlargeAllocation {
+                attempted: len,
+                maximum: MAX_ALLOCATION,
             });
         }
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">buffer</span> <span class="op">=</span> <span class="macro">vec!</span>[<span class="number">0</span>; <span class="ident">len</span>];
-        <span class="ident">bytes</span>.<span class="ident">read_exact</span>(<span class="ident">buffer</span>.<span class="ident">as_mut_slice</span>())<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(<span class="ident">buffer</span>)
+        <span class="kw">let </span><span class="kw-2">mut </span>buffer = <span class="macro">vec!</span>[<span class="number">0</span>; len];
+        bytes.read_exact(buffer.as_mut_slice())<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(buffer)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Decodable</span> <span class="kw">for</span> <span class="ident">SmolStr</span> {
-    <span class="kw">fn</span> <span class="ident">decode</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">SmolStr</span>, <span class="ident">DecodeError</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">R</span>: <span class="ident">Read</span>,
+<span class="kw">impl </span>Decodable <span class="kw">for </span>SmolStr {
+    <span class="kw">fn </span>decode&lt;R&gt;(bytes: <span class="kw-2">&amp;mut </span>R) -&gt; <span class="prelude-ty">Result</span>&lt;SmolStr, DecodeError&gt;
+    <span class="kw">where
+        </span>R: Read,
     {
-        <span class="kw">let</span> <span class="ident">buffer</span> <span class="op">=</span> <span class="ident">Vec::decode</span>(<span class="ident">bytes</span>)<span class="question-mark">?</span>;
-        <span class="ident">str::from_utf8</span>(<span class="kw-2">&amp;</span><span class="ident">buffer</span>)
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">t</span><span class="op">|</span> <span class="ident">t</span>.<span class="ident">into</span>())
-            .<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">DecodeError::BadString</span>)
+        <span class="kw">let </span>buffer = Vec::decode(bytes)<span class="question-mark">?</span>;
+        str::from_utf8(<span class="kw-2">&amp;</span>buffer)
+            .map(|t| t.into())
+            .map_err(|<span class="kw">_</span>| DecodeError::BadString)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Decodable</span> <span class="kw">for</span> <span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;static</span>, <span class="ident">SmolStr</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">decode</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">DecodeError</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">R</span>: <span class="ident">std::io::Read</span>,
+<span class="kw">impl </span>Decodable <span class="kw">for </span>Cow&lt;<span class="lifetime">&#39;static</span>, SmolStr&gt; {
+    <span class="kw">fn </span>decode&lt;R&gt;(bytes: <span class="kw-2">&amp;mut </span>R) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, DecodeError&gt;
+    <span class="kw">where
+        </span>R: std::io::Read,
     {
-        <span class="ident">SmolStr::decode</span>(<span class="ident">bytes</span>).<span class="ident">map</span>(<span class="ident">Cow::Owned</span>)
+        SmolStr::decode(bytes).map(Cow::Owned)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Decodable</span> <span class="kw">for</span> <span class="ident">String</span> {
-    <span class="kw">fn</span> <span class="ident">decode</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">String</span>, <span class="ident">DecodeError</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">R</span>: <span class="ident">Read</span>,
+<span class="kw">impl </span>Decodable <span class="kw">for </span>String {
+    <span class="kw">fn </span>decode&lt;R&gt;(bytes: <span class="kw-2">&amp;mut </span>R) -&gt; <span class="prelude-ty">Result</span>&lt;String, DecodeError&gt;
+    <span class="kw">where
+        </span>R: Read,
     {
-        <span class="kw">let</span> <span class="ident">buffer</span> <span class="op">=</span> <span class="ident">Vec::decode</span>(<span class="ident">bytes</span>)<span class="question-mark">?</span>;
-        <span class="ident">str::from_utf8</span>(<span class="kw-2">&amp;</span><span class="ident">buffer</span>)
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">t</span><span class="op">|</span> <span class="ident">t</span>.<span class="ident">into</span>())
-            .<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">DecodeError::BadString</span>)
+        <span class="kw">let </span>buffer = Vec::decode(bytes)<span class="question-mark">?</span>;
+        str::from_utf8(<span class="kw-2">&amp;</span>buffer)
+            .map(|t| t.into())
+            .map_err(|<span class="kw">_</span>| DecodeError::BadString)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Decodable</span> <span class="kw">for</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">decode</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">DecodeError</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">R</span>: <span class="ident">Read</span>,
+<span class="kw">impl </span>Decodable <span class="kw">for </span><span class="prelude-ty">Option</span>&lt;String&gt; {
+    <span class="kw">fn </span>decode&lt;R&gt;(bytes: <span class="kw-2">&amp;mut </span>R) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, DecodeError&gt;
+    <span class="kw">where
+        </span>R: Read,
     {
-        <span class="kw">let</span> <span class="ident">buffer</span> <span class="op">=</span> <span class="ident">Vec::decode</span>(<span class="ident">bytes</span>)<span class="question-mark">?</span>;
-        <span class="kw">if</span> <span class="ident">buffer</span>.<span class="ident">is_empty</span>() {
-            <span class="kw">return</span> <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>);
+        <span class="kw">let </span>buffer = Vec::decode(bytes)<span class="question-mark">?</span>;
+        <span class="kw">if </span>buffer.is_empty() {
+            <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>);
         }
-        <span class="ident">str::from_utf8</span>(<span class="kw-2">&amp;</span><span class="ident">buffer</span>)
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">t</span><span class="op">|</span> <span class="prelude-val">Some</span>(<span class="ident">t</span>.<span class="ident">into</span>()))
-            .<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">DecodeError::BadString</span>)
+        str::from_utf8(<span class="kw-2">&amp;</span>buffer)
+            .map(|t| <span class="prelude-val">Some</span>(t.into()))
+            .map_err(|<span class="kw">_</span>| DecodeError::BadString)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Decodable</span> <span class="kw">for</span> <span class="ident">ActorId</span> {
-    <span class="kw">fn</span> <span class="ident">decode</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;mut</span> <span class="ident">R</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">DecodeError</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">R</span>: <span class="ident">Read</span>,
+<span class="kw">impl </span>Decodable <span class="kw">for </span>ActorId {
+    <span class="kw">fn </span>decode&lt;R&gt;(bytes: <span class="kw-2">&amp;mut </span>R) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, DecodeError&gt;
+    <span class="kw">where
+        </span>R: Read,
     {
-        <span class="kw">let</span> <span class="ident">buffer</span> <span class="op">=</span> <span class="ident">Vec::decode</span>(<span class="ident">bytes</span>)<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(<span class="ident">buffer</span>.<span class="ident">into</span>())
+        <span class="kw">let </span>buffer = Vec::decode(bytes)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(buffer.into())
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

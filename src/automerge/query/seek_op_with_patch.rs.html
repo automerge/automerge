@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/query/seek_op_with_patch.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>seek_op_with_patch.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/query/seek_op_with_patch.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>seek_op_with_patch.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -285,290 +285,290 @@
 <span id="283">283</span>
 <span id="284">284</span>
 <span id="285">285</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::op_tree</span>::{<span class="ident">OpSetMetadata</span>, <span class="ident">OpTreeNode</span>};
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::query</span>::{<span class="ident">binary_search_by</span>, <span class="ident">QueryResult</span>, <span class="ident">TreeQuery</span>};
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::types</span>::{<span class="ident">Key</span>, <span class="ident">Op</span>, <span class="ident">HEAD</span>};
-<span class="kw">use</span> <span class="ident">std::cmp::Ordering</span>;
-<span class="kw">use</span> <span class="ident">std::fmt::Debug</span>;
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTreeNode};
+<span class="kw">use </span><span class="kw">crate</span>::query::{binary_search_by, QueryResult, TreeQuery};
+<span class="kw">use </span><span class="kw">crate</span>::types::{Key, Op, HEAD};
+<span class="kw">use </span>std::cmp::Ordering;
+<span class="kw">use </span>std::fmt::Debug;
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">SeekOpWithPatch</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">op</span>: <span class="ident">Op</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">pos</span>: <span class="ident">usize</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">succ</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-    <span class="ident">found</span>: <span class="ident">bool</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">seen</span>: <span class="ident">usize</span>,
-    <span class="ident">last_seen</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Key</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">values</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Op</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">had_value_before</span>: <span class="ident">bool</span>,
-    <span class="doccomment">/// The found start position of the key if there is one yet (for map objects).</span>
-    <span class="ident">start</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
+<span class="attribute">#[derive(Debug, Clone, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>SeekOpWithPatch&lt;<span class="lifetime">&#39;a</span>&gt; {
+    op: Op,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) pos: usize,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) succ: Vec&lt;usize&gt;,
+    found: bool,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) seen: usize,
+    last_seen: <span class="prelude-ty">Option</span>&lt;Key&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) values: Vec&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) had_value_before: bool,
+    <span class="doccomment">/// The found start position of the key if there is one yet (for map objects).
+    </span>start: <span class="prelude-ty">Option</span>&lt;usize&gt;,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">SeekOpWithPatch</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">op</span>: <span class="kw-2">&amp;</span><span class="ident">Op</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">SeekOpWithPatch</span> {
-            <span class="ident">op</span>: <span class="ident">op</span>.<span class="ident">clone</span>(),
-            <span class="ident">succ</span>: <span class="macro">vec!</span>[],
-            <span class="ident">pos</span>: <span class="number">0</span>,
-            <span class="ident">found</span>: <span class="bool-val">false</span>,
-            <span class="ident">seen</span>: <span class="number">0</span>,
-            <span class="ident">last_seen</span>: <span class="prelude-val">None</span>,
-            <span class="ident">values</span>: <span class="macro">vec!</span>[],
-            <span class="ident">had_value_before</span>: <span class="bool-val">false</span>,
-            <span class="ident">start</span>: <span class="prelude-val">None</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; SeekOpWithPatch&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(op: <span class="kw-2">&amp;</span>Op) -&gt; <span class="self">Self </span>{
+        SeekOpWithPatch {
+            op: op.clone(),
+            succ: <span class="macro">vec!</span>[],
+            pos: <span class="number">0</span>,
+            found: <span class="bool-val">false</span>,
+            seen: <span class="number">0</span>,
+            last_seen: <span class="prelude-val">None</span>,
+            values: <span class="macro">vec!</span>[],
+            had_value_before: <span class="bool-val">false</span>,
+            start: <span class="prelude-val">None</span>,
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">lesser_insert</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">op</span>: <span class="kw-2">&amp;</span><span class="ident">Op</span>, <span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">OpSetMetadata</span>) -&gt; <span class="ident">bool</span> {
-        <span class="ident">op</span>.<span class="ident">insert</span> <span class="op">&amp;&amp;</span> <span class="ident">m</span>.<span class="ident">lamport_cmp</span>(<span class="ident">op</span>.<span class="ident">id</span>, <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">id</span>) <span class="op">==</span> <span class="ident">Ordering::Less</span>
+    <span class="kw">fn </span>lesser_insert(<span class="kw-2">&amp;</span><span class="self">self</span>, op: <span class="kw-2">&amp;</span>Op, m: <span class="kw-2">&amp;</span>OpSetMetadata) -&gt; bool {
+        op.insert &amp;&amp; m.lamport_cmp(op.id, <span class="self">self</span>.op.id) == Ordering::Less
     }
 
-    <span class="kw">fn</span> <span class="ident">greater_opid</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">op</span>: <span class="kw-2">&amp;</span><span class="ident">Op</span>, <span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">OpSetMetadata</span>) -&gt; <span class="ident">bool</span> {
-        <span class="ident">m</span>.<span class="ident">lamport_cmp</span>(<span class="ident">op</span>.<span class="ident">id</span>, <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">id</span>) <span class="op">==</span> <span class="ident">Ordering::Greater</span>
+    <span class="kw">fn </span>greater_opid(<span class="kw-2">&amp;</span><span class="self">self</span>, op: <span class="kw-2">&amp;</span>Op, m: <span class="kw-2">&amp;</span>OpSetMetadata) -&gt; bool {
+        m.lamport_cmp(op.id, <span class="self">self</span>.op.id) == Ordering::Greater
     }
 
-    <span class="kw">fn</span> <span class="ident">is_target_insert</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">op</span>: <span class="kw-2">&amp;</span><span class="ident">Op</span>) -&gt; <span class="ident">bool</span> {
-        <span class="ident">op</span>.<span class="ident">insert</span> <span class="op">&amp;&amp;</span> <span class="ident">op</span>.<span class="ident">elemid</span>() <span class="op">==</span> <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">key</span>.<span class="ident">elemid</span>()
+    <span class="kw">fn </span>is_target_insert(<span class="kw-2">&amp;</span><span class="self">self</span>, op: <span class="kw-2">&amp;</span>Op) -&gt; bool {
+        op.insert &amp;&amp; op.elemid() == <span class="self">self</span>.op.key.elemid()
     }
 
-    <span class="doccomment">/// Keeps track of the number of visible list elements we have seen. Increments `self.seen` if</span>
-    <span class="doccomment">/// operation `e` associates a visible value with a list element, and if we have not already</span>
-    <span class="doccomment">/// counted that list element (this ensures that if a list element has several values, i.e.</span>
-    <span class="doccomment">/// a conflict, then it is still only counted once).</span>
-    <span class="kw">fn</span> <span class="ident">count_visible</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">e</span>: <span class="kw-2">&amp;</span><span class="ident">Op</span>) {
-        <span class="kw">if</span> <span class="ident">e</span>.<span class="ident">elemid</span>() <span class="op">==</span> <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">elemid</span>() {
+    <span class="doccomment">/// Keeps track of the number of visible list elements we have seen. Increments `self.seen` if
+    /// operation `e` associates a visible value with a list element, and if we have not already
+    /// counted that list element (this ensures that if a list element has several values, i.e.
+    /// a conflict, then it is still only counted once).
+    </span><span class="kw">fn </span>count_visible(<span class="kw-2">&amp;mut </span><span class="self">self</span>, e: <span class="kw-2">&amp;</span>Op) {
+        <span class="kw">if </span>e.elemid() == <span class="self">self</span>.op.elemid() {
             <span class="kw">return</span>;
         }
-        <span class="kw">if</span> <span class="ident">e</span>.<span class="ident">insert</span> {
-            <span class="self">self</span>.<span class="ident">last_seen</span> <span class="op">=</span> <span class="prelude-val">None</span>
-        }
-        <span class="kw">if</span> <span class="ident">e</span>.<span class="ident">visible</span>() <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">last_seen</span>.<span class="ident">is_none</span>() {
-            <span class="self">self</span>.<span class="ident">seen</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
-            <span class="self">self</span>.<span class="ident">last_seen</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">e</span>.<span class="ident">elemid_or_key</span>())
+        <span class="kw">if </span>e.insert {
+            <span class="self">self</span>.last_seen = <span class="prelude-val">None
+        </span>}
+        <span class="kw">if </span>e.visible() &amp;&amp; <span class="self">self</span>.last_seen.is_none() {
+            <span class="self">self</span>.seen += <span class="number">1</span>;
+            <span class="self">self</span>.last_seen = <span class="prelude-val">Some</span>(e.elemid_or_key())
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">TreeQuery</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">SeekOpWithPatch</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">query_node_with_metadata</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">child</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">OpTreeNode</span>,
-        <span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">OpSetMetadata</span>,
-    ) -&gt; <span class="ident">QueryResult</span> {
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">found</span> {
-            <span class="kw">return</span> <span class="ident">QueryResult::Descend</span>;
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; TreeQuery&lt;<span class="lifetime">&#39;a</span>&gt; <span class="kw">for </span>SeekOpWithPatch&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>query_node_with_metadata(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode,
+        m: <span class="kw-2">&amp;</span>OpSetMetadata,
+    ) -&gt; QueryResult {
+        <span class="kw">if </span><span class="self">self</span>.found {
+            <span class="kw">return </span>QueryResult::Descend;
         }
-        <span class="kw">match</span> <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">key</span> {
-            <span class="comment">// Special case for insertion at the head of the list (`e == HEAD` is only possible for</span>
-            <span class="comment">// an insertion operation). Skip over any list elements whose elemId is greater than</span>
-            <span class="comment">// the opId of the operation being inserted.</span>
-            <span class="ident">Key::Seq</span>(<span class="ident">e</span>) <span class="kw">if</span> <span class="ident">e</span> <span class="op">==</span> <span class="ident">HEAD</span> =&gt; {
-                <span class="kw">while</span> <span class="self">self</span>.<span class="ident">pos</span> <span class="op">&lt;</span> <span class="ident">child</span>.<span class="ident">len</span>() {
-                    <span class="kw">let</span> <span class="ident">op</span> <span class="op">=</span> <span class="ident">child</span>.<span class="ident">get</span>(<span class="self">self</span>.<span class="ident">pos</span>).<span class="ident">unwrap</span>();
-                    <span class="kw">if</span> <span class="ident">op</span>.<span class="ident">insert</span> <span class="op">&amp;&amp;</span> <span class="ident">m</span>.<span class="ident">lamport_cmp</span>(<span class="ident">op</span>.<span class="ident">id</span>, <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">id</span>) <span class="op">==</span> <span class="ident">Ordering::Less</span> {
+        <span class="kw">match </span><span class="self">self</span>.op.key {
+            <span class="comment">// Special case for insertion at the head of the list (`e == HEAD` is only possible for
+            // an insertion operation). Skip over any list elements whose elemId is greater than
+            // the opId of the operation being inserted.
+            </span>Key::Seq(e) <span class="kw">if </span>e == HEAD =&gt; {
+                <span class="kw">while </span><span class="self">self</span>.pos &lt; child.len() {
+                    <span class="kw">let </span>op = child.get(<span class="self">self</span>.pos).unwrap();
+                    <span class="kw">if </span>op.insert &amp;&amp; m.lamport_cmp(op.id, <span class="self">self</span>.op.id) == Ordering::Less {
                         <span class="kw">break</span>;
                     }
-                    <span class="self">self</span>.<span class="ident">count_visible</span>(<span class="ident">op</span>);
-                    <span class="self">self</span>.<span class="ident">pos</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
+                    <span class="self">self</span>.count_visible(op);
+                    <span class="self">self</span>.pos += <span class="number">1</span>;
                 }
-                <span class="ident">QueryResult::Finish</span>
+                QueryResult::Finish
             }
 
-            <span class="comment">// Updating a list: search for the tree node that contains the new operation&#39;s</span>
-            <span class="comment">// reference element (i.e. the element we&#39;re updating or inserting after)</span>
-            <span class="ident">Key::Seq</span>(<span class="ident">e</span>) =&gt; {
-                <span class="kw">if</span> <span class="self">self</span>.<span class="ident">found</span> <span class="op">|</span><span class="op">|</span> <span class="ident">child</span>.<span class="ident">index</span>.<span class="ident">ops</span>.<span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="ident">e</span>.<span class="number">0</span>) {
-                    <span class="ident">QueryResult::Descend</span>
-                } <span class="kw">else</span> {
-                    <span class="self">self</span>.<span class="ident">pos</span> <span class="op">+</span><span class="op">=</span> <span class="ident">child</span>.<span class="ident">len</span>();
+            <span class="comment">// Updating a list: search for the tree node that contains the new operation&#39;s
+            // reference element (i.e. the element we&#39;re updating or inserting after)
+            </span>Key::Seq(e) =&gt; {
+                <span class="kw">if </span><span class="self">self</span>.found || child.index.ops.contains(<span class="kw-2">&amp;</span>e.<span class="number">0</span>) {
+                    QueryResult::Descend
+                } <span class="kw">else </span>{
+                    <span class="self">self</span>.pos += child.len();
 
-                    <span class="comment">// When we skip over a subtree, we need to count the number of visible list</span>
-                    <span class="comment">// elements we&#39;re skipping over. Each node stores the number of visible</span>
-                    <span class="comment">// elements it contains. However, it could happen that a visible element is</span>
-                    <span class="comment">// split across two tree nodes. To avoid double-counting in this situation, we</span>
-                    <span class="comment">// subtract one if the last visible element also appears in this tree node.</span>
-                    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">num_vis</span> <span class="op">=</span> <span class="ident">child</span>.<span class="ident">index</span>.<span class="ident">visible_len</span>();
-                    <span class="kw">if</span> <span class="ident">num_vis</span> <span class="op">&gt;</span> <span class="number">0</span> {
-                        <span class="comment">// FIXME: I think this is wrong: we should subtract one only if this</span>
-                        <span class="comment">// subtree contains a *visible* (i.e. empty succs) operation for the list</span>
-                        <span class="comment">// element with elemId `last_seen`; this will subtract one even if all</span>
-                        <span class="comment">// values for this list element have been deleted in this subtree.</span>
-                        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">last_seen</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">last_seen</span> {
-                            <span class="kw">if</span> <span class="ident">child</span>.<span class="ident">index</span>.<span class="ident">has_visible</span>(<span class="kw-2">&amp;</span><span class="ident">last_seen</span>) {
-                                <span class="ident">num_vis</span> <span class="op">-</span><span class="op">=</span> <span class="number">1</span>;
+                    <span class="comment">// When we skip over a subtree, we need to count the number of visible list
+                    // elements we&#39;re skipping over. Each node stores the number of visible
+                    // elements it contains. However, it could happen that a visible element is
+                    // split across two tree nodes. To avoid double-counting in this situation, we
+                    // subtract one if the last visible element also appears in this tree node.
+                    </span><span class="kw">let </span><span class="kw-2">mut </span>num_vis = child.index.visible_len();
+                    <span class="kw">if </span>num_vis &gt; <span class="number">0 </span>{
+                        <span class="comment">// FIXME: I think this is wrong: we should subtract one only if this
+                        // subtree contains a *visible* (i.e. empty succs) operation for the list
+                        // element with elemId `last_seen`; this will subtract one even if all
+                        // values for this list element have been deleted in this subtree.
+                        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(last_seen) = <span class="self">self</span>.last_seen {
+                            <span class="kw">if </span>child.index.has_visible(<span class="kw-2">&amp;</span>last_seen) {
+                                num_vis -= <span class="number">1</span>;
                             }
                         }
-                        <span class="self">self</span>.<span class="ident">seen</span> <span class="op">+</span><span class="op">=</span> <span class="ident">num_vis</span>;
+                        <span class="self">self</span>.seen += num_vis;
 
-                        <span class="comment">// FIXME: this is also wrong: `last_seen` needs to be the elemId of the</span>
-                        <span class="comment">// last *visible* list element in this subtree, but I think this returns</span>
-                        <span class="comment">// the last operation&#39;s elemId regardless of whether it&#39;s visible or not.</span>
-                        <span class="comment">// This will lead to incorrect counting if `last_seen` is not visible: it&#39;s</span>
-                        <span class="comment">// not counted towards `num_vis`, so we shouldn&#39;t be subtracting 1.</span>
-                        <span class="self">self</span>.<span class="ident">last_seen</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">child</span>.<span class="ident">last</span>().<span class="ident">elemid_or_key</span>());
+                        <span class="comment">// FIXME: this is also wrong: `last_seen` needs to be the elemId of the
+                        // last *visible* list element in this subtree, but I think this returns
+                        // the last operation&#39;s elemId regardless of whether it&#39;s visible or not.
+                        // This will lead to incorrect counting if `last_seen` is not visible: it&#39;s
+                        // not counted towards `num_vis`, so we shouldn&#39;t be subtracting 1.
+                        </span><span class="self">self</span>.last_seen = <span class="prelude-val">Some</span>(child.last().elemid_or_key());
                     }
-                    <span class="ident">QueryResult::Next</span>
+                    QueryResult::Next
                 }
             }
 
-            <span class="comment">// Updating a map: operations appear in sorted order by key</span>
-            <span class="ident">Key::Map</span>(<span class="kw">_</span>) =&gt; {
-                <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">start</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">start</span> {
-                    <span class="kw">if</span> <span class="self">self</span>.<span class="ident">pos</span> <span class="op">+</span> <span class="ident">child</span>.<span class="ident">len</span>() <span class="op">&gt;</span><span class="op">=</span> <span class="ident">start</span> {
-                        <span class="comment">// skip empty nodes</span>
-                        <span class="kw">if</span> <span class="ident">child</span>.<span class="ident">index</span>.<span class="ident">visible_len</span>() <span class="op">==</span> <span class="number">0</span> {
-                            <span class="self">self</span>.<span class="ident">pos</span> <span class="op">+</span><span class="op">=</span> <span class="ident">child</span>.<span class="ident">len</span>();
-                            <span class="ident">QueryResult::Next</span>
-                        } <span class="kw">else</span> {
-                            <span class="ident">QueryResult::Descend</span>
+            <span class="comment">// Updating a map: operations appear in sorted order by key
+            </span>Key::Map(<span class="kw">_</span>) =&gt; {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(start) = <span class="self">self</span>.start {
+                    <span class="kw">if </span><span class="self">self</span>.pos + child.len() &gt;= start {
+                        <span class="comment">// skip empty nodes
+                        </span><span class="kw">if </span>child.index.visible_len() == <span class="number">0 </span>{
+                            <span class="self">self</span>.pos += child.len();
+                            QueryResult::Next
+                        } <span class="kw">else </span>{
+                            QueryResult::Descend
                         }
-                    } <span class="kw">else</span> {
-                        <span class="self">self</span>.<span class="ident">pos</span> <span class="op">+</span><span class="op">=</span> <span class="ident">child</span>.<span class="ident">len</span>();
-                        <span class="ident">QueryResult::Next</span>
+                    } <span class="kw">else </span>{
+                        <span class="self">self</span>.pos += child.len();
+                        QueryResult::Next
                     }
-                } <span class="kw">else</span> {
-                    <span class="comment">// in the root node find the first op position for the key</span>
-                    <span class="comment">// Search for the place where we need to insert the new operation. First find the</span>
-                    <span class="comment">// first op with a key &gt;= the key we&#39;re updating</span>
-                    <span class="kw">let</span> <span class="ident">start</span> <span class="op">=</span> <span class="ident">binary_search_by</span>(<span class="ident">child</span>, <span class="op">|</span><span class="ident">op</span><span class="op">|</span> <span class="ident">m</span>.<span class="ident">key_cmp</span>(<span class="kw-2">&amp;</span><span class="ident">op</span>.<span class="ident">key</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">op</span>.<span class="ident">key</span>));
-                    <span class="self">self</span>.<span class="ident">start</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">start</span>);
-                    <span class="self">self</span>.<span class="ident">pos</span> <span class="op">=</span> <span class="ident">start</span>;
-                    <span class="ident">QueryResult::Skip</span>(<span class="ident">start</span>)
+                } <span class="kw">else </span>{
+                    <span class="comment">// in the root node find the first op position for the key
+                    // Search for the place where we need to insert the new operation. First find the
+                    // first op with a key &gt;= the key we&#39;re updating
+                    </span><span class="kw">let </span>start = binary_search_by(child, |op| m.key_cmp(<span class="kw-2">&amp;</span>op.key, <span class="kw-2">&amp;</span><span class="self">self</span>.op.key));
+                    <span class="self">self</span>.start = <span class="prelude-val">Some</span>(start);
+                    <span class="self">self</span>.pos = start;
+                    QueryResult::Skip(start)
                 }
             }
         }
     }
 
-    <span class="comment">// Only called when operating on a sequence (list/text) object, since updates of a map are</span>
-    <span class="comment">// handled in `query_node_with_metadata`.</span>
-    <span class="kw">fn</span> <span class="ident">query_element_with_metadata</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">e</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Op</span>, <span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">OpSetMetadata</span>) -&gt; <span class="ident">QueryResult</span> {
-        <span class="kw">match</span> <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">key</span> {
-            <span class="ident">Key::Map</span>(<span class="kw">_</span>) =&gt; {
-                <span class="kw">if</span> <span class="op">!</span><span class="self">self</span>.<span class="ident">found</span> {
-                    <span class="comment">// Iterate over any existing operations for the same key; stop when we reach an</span>
-                    <span class="comment">// operation with a different key</span>
-                    <span class="kw">if</span> <span class="ident">e</span>.<span class="ident">key</span> <span class="op">!</span><span class="op">=</span> <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">key</span> {
-                        <span class="kw">return</span> <span class="ident">QueryResult::Finish</span>;
+    <span class="comment">// Only called when operating on a sequence (list/text) object, since updates of a map are
+    // handled in `query_node_with_metadata`.
+    </span><span class="kw">fn </span>query_element_with_metadata(<span class="kw-2">&amp;mut </span><span class="self">self</span>, e: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op, m: <span class="kw-2">&amp;</span>OpSetMetadata) -&gt; QueryResult {
+        <span class="kw">match </span><span class="self">self</span>.op.key {
+            Key::Map(<span class="kw">_</span>) =&gt; {
+                <span class="kw">if </span>!<span class="self">self</span>.found {
+                    <span class="comment">// Iterate over any existing operations for the same key; stop when we reach an
+                    // operation with a different key
+                    </span><span class="kw">if </span>e.key != <span class="self">self</span>.op.key {
+                        <span class="kw">return </span>QueryResult::Finish;
                     }
 
-                    <span class="comment">// Keep track of any ops we&#39;re overwriting and any conflicts on this key</span>
-                    <span class="kw">if</span> <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">overwrites</span>(<span class="ident">e</span>) {
-                        <span class="comment">// when we encounter an increment op we also want to find the counter for</span>
-                        <span class="comment">// it.</span>
-                        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">is_inc</span>() <span class="op">&amp;&amp;</span> <span class="ident">e</span>.<span class="ident">is_counter</span>() <span class="op">&amp;&amp;</span> <span class="ident">e</span>.<span class="ident">visible</span>() {
-                            <span class="self">self</span>.<span class="ident">values</span>.<span class="ident">push</span>(<span class="ident">e</span>);
+                    <span class="comment">// Keep track of any ops we&#39;re overwriting and any conflicts on this key
+                    </span><span class="kw">if </span><span class="self">self</span>.op.overwrites(e) {
+                        <span class="comment">// when we encounter an increment op we also want to find the counter for
+                        // it.
+                        </span><span class="kw">if </span><span class="self">self</span>.op.is_inc() &amp;&amp; e.is_counter() &amp;&amp; e.visible() {
+                            <span class="self">self</span>.values.push(e);
                         }
-                        <span class="self">self</span>.<span class="ident">succ</span>.<span class="ident">push</span>(<span class="self">self</span>.<span class="ident">pos</span>);
+                        <span class="self">self</span>.succ.push(<span class="self">self</span>.pos);
 
-                        <span class="kw">if</span> <span class="ident">e</span>.<span class="ident">visible</span>() {
-                            <span class="self">self</span>.<span class="ident">had_value_before</span> <span class="op">=</span> <span class="bool-val">true</span>;
+                        <span class="kw">if </span>e.visible() {
+                            <span class="self">self</span>.had_value_before = <span class="bool-val">true</span>;
                         }
-                    } <span class="kw">else</span> <span class="kw">if</span> <span class="ident">e</span>.<span class="ident">visible</span>() {
-                        <span class="self">self</span>.<span class="ident">values</span>.<span class="ident">push</span>(<span class="ident">e</span>);
+                    } <span class="kw">else if </span>e.visible() {
+                        <span class="self">self</span>.values.push(e);
                     }
 
-                    <span class="comment">// Ops for the same key should be in ascending order of opId, so we break when</span>
-                    <span class="comment">// we reach an op with an opId greater than that of the new operation</span>
-                    <span class="kw">if</span> <span class="ident">m</span>.<span class="ident">lamport_cmp</span>(<span class="ident">e</span>.<span class="ident">id</span>, <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">id</span>) <span class="op">==</span> <span class="ident">Ordering::Greater</span> {
-                        <span class="self">self</span>.<span class="ident">found</span> <span class="op">=</span> <span class="bool-val">true</span>;
-                        <span class="kw">return</span> <span class="ident">QueryResult::Next</span>;
+                    <span class="comment">// Ops for the same key should be in ascending order of opId, so we break when
+                    // we reach an op with an opId greater than that of the new operation
+                    </span><span class="kw">if </span>m.lamport_cmp(e.id, <span class="self">self</span>.op.id) == Ordering::Greater {
+                        <span class="self">self</span>.found = <span class="bool-val">true</span>;
+                        <span class="kw">return </span>QueryResult::Next;
                     }
 
-                    <span class="self">self</span>.<span class="ident">pos</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
-                } <span class="kw">else</span> {
-                    <span class="comment">// For the purpose of reporting conflicts, we also need to take into account any</span>
-                    <span class="comment">// ops for the same key that appear after the new operation</span>
+                    <span class="self">self</span>.pos += <span class="number">1</span>;
+                } <span class="kw">else </span>{
+                    <span class="comment">// For the purpose of reporting conflicts, we also need to take into account any
+                    // ops for the same key that appear after the new operation
 
-                    <span class="kw">if</span> <span class="ident">e</span>.<span class="ident">key</span> <span class="op">!</span><span class="op">=</span> <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">key</span> {
-                        <span class="kw">return</span> <span class="ident">QueryResult::Finish</span>;
+                    </span><span class="kw">if </span>e.key != <span class="self">self</span>.op.key {
+                        <span class="kw">return </span>QueryResult::Finish;
                     }
-                    <span class="comment">// No need to check if `self.op.overwrites(op)` because an operation&#39;s `preds`</span>
-                    <span class="comment">// must always have lower Lamport timestamps than that op itself, and the ops</span>
-                    <span class="comment">// here all have greater opIds than the new op</span>
-                    <span class="kw">if</span> <span class="ident">e</span>.<span class="ident">visible</span>() {
-                        <span class="self">self</span>.<span class="ident">values</span>.<span class="ident">push</span>(<span class="ident">e</span>);
+                    <span class="comment">// No need to check if `self.op.overwrites(op)` because an operation&#39;s `preds`
+                    // must always have lower Lamport timestamps than that op itself, and the ops
+                    // here all have greater opIds than the new op
+                    </span><span class="kw">if </span>e.visible() {
+                        <span class="self">self</span>.values.push(e);
                     }
                 }
-                <span class="ident">QueryResult::Next</span>
+                QueryResult::Next
             }
-            <span class="ident">Key::Seq</span>(<span class="kw">_</span>) =&gt; {
-                <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="kw">if</span> <span class="op">!</span><span class="self">self</span>.<span class="ident">found</span> {
-                    <span class="comment">// First search for the referenced list element (i.e. the element we&#39;re updating, or</span>
-                    <span class="comment">// after which we&#39;re inserting)</span>
-                    <span class="kw">if</span> <span class="self">self</span>.<span class="ident">is_target_insert</span>(<span class="ident">e</span>) {
-                        <span class="self">self</span>.<span class="ident">found</span> <span class="op">=</span> <span class="bool-val">true</span>;
-                        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">overwrites</span>(<span class="ident">e</span>) {
-                            <span class="comment">// when we encounter an increment op we also want to find the counter for</span>
-                            <span class="comment">// it.</span>
-                            <span class="kw">if</span> <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">is_inc</span>() <span class="op">&amp;&amp;</span> <span class="ident">e</span>.<span class="ident">is_counter</span>() <span class="op">&amp;&amp;</span> <span class="ident">e</span>.<span class="ident">visible</span>() {
-                                <span class="self">self</span>.<span class="ident">values</span>.<span class="ident">push</span>(<span class="ident">e</span>);
+            Key::Seq(<span class="kw">_</span>) =&gt; {
+                <span class="kw">let </span>result = <span class="kw">if </span>!<span class="self">self</span>.found {
+                    <span class="comment">// First search for the referenced list element (i.e. the element we&#39;re updating, or
+                    // after which we&#39;re inserting)
+                    </span><span class="kw">if </span><span class="self">self</span>.is_target_insert(e) {
+                        <span class="self">self</span>.found = <span class="bool-val">true</span>;
+                        <span class="kw">if </span><span class="self">self</span>.op.overwrites(e) {
+                            <span class="comment">// when we encounter an increment op we also want to find the counter for
+                            // it.
+                            </span><span class="kw">if </span><span class="self">self</span>.op.is_inc() &amp;&amp; e.is_counter() &amp;&amp; e.visible() {
+                                <span class="self">self</span>.values.push(e);
                             }
-                            <span class="self">self</span>.<span class="ident">succ</span>.<span class="ident">push</span>(<span class="self">self</span>.<span class="ident">pos</span>);
+                            <span class="self">self</span>.succ.push(<span class="self">self</span>.pos);
                         }
-                        <span class="kw">if</span> <span class="ident">e</span>.<span class="ident">visible</span>() {
-                            <span class="self">self</span>.<span class="ident">had_value_before</span> <span class="op">=</span> <span class="bool-val">true</span>;
+                        <span class="kw">if </span>e.visible() {
+                            <span class="self">self</span>.had_value_before = <span class="bool-val">true</span>;
                         }
                     }
-                    <span class="self">self</span>.<span class="ident">pos</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
-                    <span class="ident">QueryResult::Next</span>
-                } <span class="kw">else</span> {
-                    <span class="comment">// Once we&#39;ve found the reference element, keep track of any ops that we&#39;re overwriting</span>
-                    <span class="kw">let</span> <span class="ident">overwritten</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">overwrites</span>(<span class="ident">e</span>);
-                    <span class="kw">if</span> <span class="ident">overwritten</span> {
-                        <span class="comment">// when we encounter an increment op we also want to find the counter for</span>
-                        <span class="comment">// it.</span>
-                        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">is_inc</span>() <span class="op">&amp;&amp;</span> <span class="ident">e</span>.<span class="ident">is_counter</span>() <span class="op">&amp;&amp;</span> <span class="ident">e</span>.<span class="ident">visible</span>() {
-                            <span class="self">self</span>.<span class="ident">values</span>.<span class="ident">push</span>(<span class="ident">e</span>);
+                    <span class="self">self</span>.pos += <span class="number">1</span>;
+                    QueryResult::Next
+                } <span class="kw">else </span>{
+                    <span class="comment">// Once we&#39;ve found the reference element, keep track of any ops that we&#39;re overwriting
+                    </span><span class="kw">let </span>overwritten = <span class="self">self</span>.op.overwrites(e);
+                    <span class="kw">if </span>overwritten {
+                        <span class="comment">// when we encounter an increment op we also want to find the counter for
+                        // it.
+                        </span><span class="kw">if </span><span class="self">self</span>.op.is_inc() &amp;&amp; e.is_counter() &amp;&amp; e.visible() {
+                            <span class="self">self</span>.values.push(e);
                         }
-                        <span class="self">self</span>.<span class="ident">succ</span>.<span class="ident">push</span>(<span class="self">self</span>.<span class="ident">pos</span>);
+                        <span class="self">self</span>.succ.push(<span class="self">self</span>.pos);
                     }
 
-                    <span class="comment">// If the new op is an insertion, skip over any existing list elements whose elemId is</span>
-                    <span class="comment">// greater than the ID of the new insertion</span>
-                    <span class="kw">if</span> <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">insert</span> {
-                        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">lesser_insert</span>(<span class="ident">e</span>, <span class="ident">m</span>) {
-                            <span class="comment">// Insert before the first existing list element whose elemId is less than that</span>
-                            <span class="comment">// of the new insertion</span>
-                            <span class="ident">QueryResult::Finish</span>
-                        } <span class="kw">else</span> {
-                            <span class="self">self</span>.<span class="ident">pos</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
-                            <span class="ident">QueryResult::Next</span>
+                    <span class="comment">// If the new op is an insertion, skip over any existing list elements whose elemId is
+                    // greater than the ID of the new insertion
+                    </span><span class="kw">if </span><span class="self">self</span>.op.insert {
+                        <span class="kw">if </span><span class="self">self</span>.lesser_insert(e, m) {
+                            <span class="comment">// Insert before the first existing list element whose elemId is less than that
+                            // of the new insertion
+                            </span>QueryResult::Finish
+                        } <span class="kw">else </span>{
+                            <span class="self">self</span>.pos += <span class="number">1</span>;
+                            QueryResult::Next
                         }
-                    } <span class="kw">else</span> <span class="kw">if</span> <span class="ident">e</span>.<span class="ident">insert</span> {
-                        <span class="comment">// If the new op is an update of an existing list element, the first insertion op</span>
-                        <span class="comment">// we encounter after the reference element indicates the end of the reference elem</span>
-                        <span class="ident">QueryResult::Finish</span>
-                    } <span class="kw">else</span> {
-                        <span class="comment">// When updating an existing list element, keep track of any conflicts on this list</span>
-                        <span class="comment">// element. We also need to remember if the list element had any visible elements</span>
-                        <span class="comment">// prior to applying the new operation: if not, the new operation is resurrecting</span>
-                        <span class="comment">// a deleted list element, so it looks like an insertion in the patch.</span>
-                        <span class="kw">if</span> <span class="ident">e</span>.<span class="ident">visible</span>() {
-                            <span class="self">self</span>.<span class="ident">had_value_before</span> <span class="op">=</span> <span class="bool-val">true</span>;
-                            <span class="kw">if</span> <span class="op">!</span><span class="ident">overwritten</span> {
-                                <span class="self">self</span>.<span class="ident">values</span>.<span class="ident">push</span>(<span class="ident">e</span>);
+                    } <span class="kw">else if </span>e.insert {
+                        <span class="comment">// If the new op is an update of an existing list element, the first insertion op
+                        // we encounter after the reference element indicates the end of the reference elem
+                        </span>QueryResult::Finish
+                    } <span class="kw">else </span>{
+                        <span class="comment">// When updating an existing list element, keep track of any conflicts on this list
+                        // element. We also need to remember if the list element had any visible elements
+                        // prior to applying the new operation: if not, the new operation is resurrecting
+                        // a deleted list element, so it looks like an insertion in the patch.
+                        </span><span class="kw">if </span>e.visible() {
+                            <span class="self">self</span>.had_value_before = <span class="bool-val">true</span>;
+                            <span class="kw">if </span>!overwritten {
+                                <span class="self">self</span>.values.push(e);
                             }
                         }
 
-                        <span class="comment">// We now need to put the ops for the same list element into ascending order, so we</span>
-                        <span class="comment">// skip over any ops whose ID is less than that of the new operation.</span>
-                        <span class="kw">if</span> <span class="op">!</span><span class="self">self</span>.<span class="ident">greater_opid</span>(<span class="ident">e</span>, <span class="ident">m</span>) {
-                            <span class="self">self</span>.<span class="ident">pos</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
+                        <span class="comment">// We now need to put the ops for the same list element into ascending order, so we
+                        // skip over any ops whose ID is less than that of the new operation.
+                        </span><span class="kw">if </span>!<span class="self">self</span>.greater_opid(e, m) {
+                            <span class="self">self</span>.pos += <span class="number">1</span>;
                         }
-                        <span class="ident">QueryResult::Next</span>
+                        QueryResult::Next
                     }
                 };
 
-                <span class="comment">// The patch needs to know the list index of each operation, so we count the number of</span>
-                <span class="comment">// visible list elements up to the insertion position of the new operation</span>
-                <span class="kw">if</span> <span class="ident">result</span> <span class="op">==</span> <span class="ident">QueryResult::Next</span> {
-                    <span class="self">self</span>.<span class="ident">count_visible</span>(<span class="ident">e</span>);
+                <span class="comment">// The patch needs to know the list index of each operation, so we count the number of
+                // visible list elements up to the insertion position of the new operation
+                </span><span class="kw">if </span>result == QueryResult::Next {
+                    <span class="self">self</span>.count_visible(e);
                 }
-                <span class="ident">result</span>
+                result
             }
         }
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

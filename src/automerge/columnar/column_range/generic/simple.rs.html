@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/columnar/column_range/generic/simple.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>simple.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../../storage.js"></script><script defer src="../../../../../source-script.js"></script><script defer src="../../../../../source-files.js"></script><script defer src="../../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/columnar/column_range/generic/simple.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>simple.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../../normalize.css"><link rel="stylesheet" href="../../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../../dark.css" disabled><link rel="stylesheet" href="../../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../../storage.js"></script><script defer src="../../../../../source-script.js"></script><script defer src="../../../../../source-files.js"></script><script defer src="../../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -76,81 +76,81 @@
 <span id="74">74</span>
 <span id="75">75</span>
 <span id="76">76</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::ops::Range</span>;
+</pre><pre class="rust"><code><span class="kw">use </span>std::ops::Range;
 
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::columnar</span>::{
-    <span class="ident">column_range</span>::{<span class="ident">BooleanRange</span>, <span class="ident">DeltaRange</span>, <span class="ident">RleRange</span>},
-    <span class="ident">encoding</span>::{<span class="ident">raw</span>, <span class="ident">BooleanDecoder</span>, <span class="ident">DeltaDecoder</span>, <span class="ident">RleDecoder</span>},
+<span class="kw">use </span><span class="kw">crate</span>::columnar::{
+    column_range::{BooleanRange, DeltaRange, RleRange},
+    encoding::{raw, BooleanDecoder, DeltaDecoder, RleDecoder},
 };
 
-<span class="kw">use</span> <span class="ident"><span class="kw">super</span>::SimpleValue</span>;
+<span class="kw">use </span><span class="kw">super</span>::SimpleValue;
 
-<span class="doccomment">/// The four types of &quot;simple&quot; column defined in the raw format</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">SimpleColRange</span> {
-    <span class="doccomment">/// A column containing RLE encoded u64&#39;s</span>
-    <span class="ident">RleInt</span>(<span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>),
-    <span class="doccomment">/// A column containing RLE encoded strings</span>
-    <span class="ident">RleString</span>(<span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">smol_str::SmolStr</span><span class="op">&gt;</span>),
-    <span class="doccomment">/// A column containing delta -&gt; RLE encoded i64s</span>
-    <span class="ident">Delta</span>(<span class="ident">DeltaRange</span>),
-    <span class="doccomment">/// A column containing boolean values</span>
-    <span class="ident">Boolean</span>(<span class="ident">BooleanRange</span>),
+<span class="doccomment">/// The four types of &quot;simple&quot; column defined in the raw format
+</span><span class="attribute">#[derive(Debug, Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>SimpleColRange {
+    <span class="doccomment">/// A column containing RLE encoded u64&#39;s
+    </span>RleInt(RleRange&lt;u64&gt;),
+    <span class="doccomment">/// A column containing RLE encoded strings
+    </span>RleString(RleRange&lt;smol_str::SmolStr&gt;),
+    <span class="doccomment">/// A column containing delta -&gt; RLE encoded i64s
+    </span>Delta(DeltaRange),
+    <span class="doccomment">/// A column containing boolean values
+    </span>Boolean(BooleanRange),
 }
 
-<span class="kw">impl</span> <span class="ident">SimpleColRange</span> {
-    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn</span> <span class="ident">iter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>]) -&gt; <span class="ident">SimpleColIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident"><span class="self">Self</span>::RleInt</span>(<span class="ident">r</span>) =&gt; <span class="ident">SimpleColIter::RleInt</span>(<span class="ident">r</span>.<span class="ident">decoder</span>(<span class="ident">data</span>)),
-            <span class="ident"><span class="self">Self</span>::RleString</span>(<span class="ident">r</span>) =&gt; <span class="ident">SimpleColIter::RleString</span>(<span class="ident">r</span>.<span class="ident">decoder</span>(<span class="ident">data</span>)),
-            <span class="ident"><span class="self">Self</span>::Delta</span>(<span class="ident">r</span>) =&gt; <span class="ident">SimpleColIter::Delta</span>(<span class="ident">r</span>.<span class="ident">decoder</span>(<span class="ident">data</span>)),
-            <span class="ident"><span class="self">Self</span>::Boolean</span>(<span class="ident">r</span>) =&gt; <span class="ident">SimpleColIter::Boolean</span>(<span class="ident">r</span>.<span class="ident">decoder</span>(<span class="ident">data</span>)),
+<span class="kw">impl </span>SimpleColRange {
+    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>iter&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, data: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8]) -&gt; SimpleColIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            <span class="self">Self</span>::RleInt(r) =&gt; SimpleColIter::RleInt(r.decoder(data)),
+            <span class="self">Self</span>::RleString(r) =&gt; SimpleColIter::RleString(r.decoder(data)),
+            <span class="self">Self</span>::Delta(r) =&gt; SimpleColIter::Delta(r.decoder(data)),
+            <span class="self">Self</span>::Boolean(r) =&gt; SimpleColIter::Boolean(r.decoder(data)),
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">range</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident"><span class="self">Self</span>::RleInt</span>(<span class="ident">r</span>) =&gt; <span class="ident">r</span>.<span class="ident">clone</span>().<span class="ident">into</span>(),
-            <span class="ident"><span class="self">Self</span>::RleString</span>(<span class="ident">r</span>) =&gt; <span class="ident">r</span>.<span class="ident">clone</span>().<span class="ident">into</span>(),
-            <span class="ident"><span class="self">Self</span>::Delta</span>(<span class="ident">r</span>) =&gt; <span class="ident">r</span>.<span class="ident">clone</span>().<span class="ident">into</span>(),
-            <span class="ident"><span class="self">Self</span>::Boolean</span>(<span class="ident">r</span>) =&gt; <span class="ident">r</span>.<span class="ident">clone</span>().<span class="ident">into</span>(),
-        }
-    }
-}
-
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">SimpleColIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">RleInt</span>(<span class="ident">RleDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">u64</span><span class="op">&gt;</span>),
-    <span class="ident">RleString</span>(<span class="ident">RleDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">smol_str::SmolStr</span><span class="op">&gt;</span>),
-    <span class="ident">Delta</span>(<span class="ident">DeltaDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>),
-    <span class="ident">Boolean</span>(<span class="ident">BooleanDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>),
-}
-
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">SimpleColIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">try_next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">SimpleValue</span><span class="op">&gt;</span>, <span class="ident">raw::Error</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident"><span class="self">Self</span>::RleInt</span>(<span class="ident">d</span>) =&gt; <span class="ident">read_col</span>(<span class="ident">d</span>, <span class="ident">SimpleValue::Uint</span>),
-            <span class="ident"><span class="self">Self</span>::RleString</span>(<span class="ident">d</span>) =&gt; <span class="ident">read_col</span>(<span class="ident">d</span>, <span class="ident">SimpleValue::String</span>),
-            <span class="ident"><span class="self">Self</span>::Delta</span>(<span class="ident">d</span>) =&gt; <span class="ident">read_col</span>(<span class="ident">d</span>, <span class="ident">SimpleValue::Int</span>),
-            <span class="ident"><span class="self">Self</span>::Boolean</span>(<span class="ident">d</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">d</span>.<span class="ident">next</span>().<span class="ident">transpose</span>()<span class="question-mark">?</span>.<span class="ident">map</span>(<span class="ident">SimpleValue::Bool</span>)),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>range(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Range&lt;usize&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            <span class="self">Self</span>::RleInt(r) =&gt; r.clone().into(),
+            <span class="self">Self</span>::RleString(r) =&gt; r.clone().into(),
+            <span class="self">Self</span>::Delta(r) =&gt; r.clone().into(),
+            <span class="self">Self</span>::Boolean(r) =&gt; r.clone().into(),
         }
     }
 }
 
-<span class="kw">fn</span> <span class="ident">read_col</span><span class="op">&lt;</span><span class="ident">C</span>, <span class="ident">T</span>, <span class="ident">F</span>, <span class="ident">U</span><span class="op">&gt;</span>(<span class="kw-2">mut</span> <span class="ident">col</span>: <span class="ident">C</span>, <span class="ident">f</span>: <span class="ident">F</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">U</span><span class="op">&gt;</span>, <span class="ident">raw::Error</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">C</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>, <span class="ident">raw::Error</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    <span class="ident">F</span>: <span class="ident">Fn</span>(<span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>) -&gt; <span class="ident">U</span>,
+<span class="attribute">#[derive(Debug, Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>SimpleColIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    RleInt(RleDecoder&lt;<span class="lifetime">&#39;a</span>, u64&gt;),
+    RleString(RleDecoder&lt;<span class="lifetime">&#39;a</span>, smol_str::SmolStr&gt;),
+    Delta(DeltaDecoder&lt;<span class="lifetime">&#39;a</span>&gt;),
+    Boolean(BooleanDecoder&lt;<span class="lifetime">&#39;a</span>&gt;),
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; SimpleColIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>try_next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;SimpleValue&gt;, raw::Error&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            <span class="self">Self</span>::RleInt(d) =&gt; read_col(d, SimpleValue::Uint),
+            <span class="self">Self</span>::RleString(d) =&gt; read_col(d, SimpleValue::String),
+            <span class="self">Self</span>::Delta(d) =&gt; read_col(d, SimpleValue::Int),
+            <span class="self">Self</span>::Boolean(d) =&gt; <span class="prelude-val">Ok</span>(d.next().transpose()<span class="question-mark">?</span>.map(SimpleValue::Bool)),
+        }
+    }
+}
+
+<span class="kw">fn </span>read_col&lt;C, T, F, U&gt;(<span class="kw-2">mut </span>col: C, f: F) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;U&gt;, raw::Error&gt;
+<span class="kw">where
+    </span>C: Iterator&lt;Item = <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;T&gt;, raw::Error&gt;&gt;,
+    F: Fn(<span class="prelude-ty">Option</span>&lt;T&gt;) -&gt; U,
 {
-    <span class="ident">col</span>.<span class="ident">next</span>().<span class="ident">transpose</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">v</span><span class="op">|</span> <span class="ident">v</span>.<span class="ident">map</span>(<span class="ident">f</span>))
+    col.next().transpose().map(|v| v.map(f))
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Iterator</span> <span class="kw">for</span> <span class="ident">SimpleColIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">SimpleValue</span>, <span class="ident">raw::Error</span><span class="op">&gt;</span>;
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>SimpleColIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">type </span>Item = <span class="prelude-ty">Result</span>&lt;SimpleValue, raw::Error&gt;;
 
-    <span class="kw">fn</span> <span class="ident">next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">try_next</span>().<span class="ident">transpose</span>()
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="self">self</span>.try_next().transpose()
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

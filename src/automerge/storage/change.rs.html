@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/change.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>change.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/change.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>change.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -508,513 +508,513 @@
 <span id="506">506</span>
 <span id="507">507</span>
 <span id="508">508</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std</span>::{<span class="ident">borrow::Cow</span>, <span class="ident">io::Write</span>, <span class="ident">marker::PhantomData</span>, <span class="ident">num::NonZeroU64</span>, <span class="ident">ops::Range</span>};
+</pre><pre class="rust"><code><span class="kw">use </span>std::{borrow::Cow, io::Write, marker::PhantomData, num::NonZeroU64, ops::Range};
 
-<span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">convert</span>, <span class="ident">ActorId</span>, <span class="ident">ChangeHash</span>, <span class="ident">ScalarValue</span>};
+<span class="kw">use crate</span>::{convert, ActorId, ChangeHash, ScalarValue};
 
-<span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">parse</span>, <span class="ident">shift_range</span>, <span class="ident">CheckSum</span>, <span class="ident">ChunkType</span>, <span class="ident">Columns</span>, <span class="ident">Header</span>, <span class="ident">RawColumns</span>};
+<span class="kw">use super</span>::{parse, shift_range, CheckSum, ChunkType, Columns, Header, RawColumns};
 
-<span class="kw">mod</span> <span class="ident">change_op_columns</span>;
-<span class="kw">use</span> <span class="ident">change_op_columns::ChangeOpsColumns</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">change_op_columns</span>::{<span class="ident">ChangeOp</span>, <span class="ident">ReadChangeOpError</span>};
+<span class="kw">mod </span>change_op_columns;
+<span class="kw">use </span>change_op_columns::ChangeOpsColumns;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>change_op_columns::{ChangeOp, ReadChangeOpError};
 
-<span class="kw">mod</span> <span class="ident">change_actors</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">change_actors::PredOutOfOrder</span>;
-<span class="kw">mod</span> <span class="ident">compressed</span>;
-<span class="kw">mod</span> <span class="ident">op_with_change_actors</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident">compressed::Compressed</span>;
+<span class="kw">mod </span>change_actors;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>change_actors::PredOutOfOrder;
+<span class="kw">mod </span>compressed;
+<span class="kw">mod </span>op_with_change_actors;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>compressed::Compressed;
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const</span> <span class="ident">DEFLATE_MIN_SIZE</span>: <span class="ident">usize</span> <span class="op">=</span> <span class="number">256</span>;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>DEFLATE_MIN_SIZE: usize = <span class="number">256</span>;
 
-<span class="doccomment">/// Changes present an iterator over the operations encoded in them. Before we have read these</span>
-<span class="doccomment">/// changes we don&#39;t know if they are valid, so we expose an iterator with items which are</span>
-<span class="doccomment">/// `Result`s. However, frequently we know that the changes are valid, this trait is used as a</span>
-<span class="doccomment">/// witness that we have verified the operations in a change so we can expose an iterator which</span>
-<span class="doccomment">/// does not return `Results`</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">trait</span> <span class="ident">OpReadState</span> {}
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">Verified</span>;
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">Unverified</span>;
-<span class="kw">impl</span> <span class="ident">OpReadState</span> <span class="kw">for</span> <span class="ident">Verified</span> {}
-<span class="kw">impl</span> <span class="ident">OpReadState</span> <span class="kw">for</span> <span class="ident">Unverified</span> {}
+<span class="doccomment">/// Changes present an iterator over the operations encoded in them. Before we have read these
+/// changes we don&#39;t know if they are valid, so we expose an iterator with items which are
+/// `Result`s. However, frequently we know that the changes are valid, this trait is used as a
+/// witness that we have verified the operations in a change so we can expose an iterator which
+/// does not return `Results`
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">trait </span>OpReadState {}
+<span class="attribute">#[derive(Debug, Clone, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Verified;
+<span class="attribute">#[derive(Debug, Clone, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Unverified;
+<span class="kw">impl </span>OpReadState <span class="kw">for </span>Verified {}
+<span class="kw">impl </span>OpReadState <span class="kw">for </span>Unverified {}
 
-<span class="doccomment">/// A `Change` is the result of parsing a change chunk as specified in [1]</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// The type parameter to this type represents whether or not operation have been &quot;verified&quot;.</span>
-<span class="doccomment">/// Operations in a change chunk are stored in a compressed column oriented storage format. In</span>
-<span class="doccomment">/// general there is no guarantee that this storage is valid. Therefore we use the `OpReadState`</span>
-<span class="doccomment">/// type parameter to distinguish between contexts where we know that the ops are valid and those</span>
-<span class="doccomment">/// where we don&#39;t. The `Change::verify_ops` method can be used to obtain a verified `Change` which</span>
-<span class="doccomment">/// can provide an iterator over `ChangeOp`s directly, rather than over `Result&lt;ChangeOp,</span>
-<span class="doccomment">/// ReadChangeOpError&gt;`.</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// [1]: https://alexjg.github.io/automerge-storage-docs/#change-chunks</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">Change</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">O</span>: <span class="ident">OpReadState</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// The raw bytes of the entire chunk containing this change, including the header.</span>
-    <span class="ident">bytes</span>: <span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, [<span class="ident">u8</span>]<span class="op">&gt;</span>,
-    <span class="ident">header</span>: <span class="ident">Header</span>,
-    <span class="ident">dependencies</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>,
-    <span class="ident">actor</span>: <span class="ident">ActorId</span>,
-    <span class="ident">other_actors</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ActorId</span><span class="op">&gt;</span>,
-    <span class="ident">seq</span>: <span class="ident">u64</span>,
-    <span class="ident">start_op</span>: <span class="ident">NonZeroU64</span>,
-    <span class="ident">timestamp</span>: <span class="ident">i64</span>,
-    <span class="ident">message</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>,
-    <span class="ident">ops_meta</span>: <span class="ident">ChangeOpsColumns</span>,
-    <span class="doccomment">/// The range in `Self::bytes` where the ops column data is</span>
-    <span class="ident">ops_data</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-    <span class="ident">extra_bytes</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-    <span class="ident">_phantom</span>: <span class="ident">PhantomData</span><span class="op">&lt;</span><span class="ident">O</span><span class="op">&gt;</span>,
+<span class="doccomment">/// A `Change` is the result of parsing a change chunk as specified in [1]
+///
+/// The type parameter to this type represents whether or not operation have been &quot;verified&quot;.
+/// Operations in a change chunk are stored in a compressed column oriented storage format. In
+/// general there is no guarantee that this storage is valid. Therefore we use the `OpReadState`
+/// type parameter to distinguish between contexts where we know that the ops are valid and those
+/// where we don&#39;t. The `Change::verify_ops` method can be used to obtain a verified `Change` which
+/// can provide an iterator over `ChangeOp`s directly, rather than over `Result&lt;ChangeOp,
+/// ReadChangeOpError&gt;`.
+///
+/// [1]: https://alexjg.github.io/automerge-storage-docs/#change-chunks
+</span><span class="attribute">#[derive(Clone, Debug)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Change&lt;<span class="lifetime">&#39;a</span>, O: OpReadState&gt; {
+    <span class="doccomment">/// The raw bytes of the entire chunk containing this change, including the header.
+    </span>bytes: Cow&lt;<span class="lifetime">&#39;a</span>, [u8]&gt;,
+    header: Header,
+    dependencies: Vec&lt;ChangeHash&gt;,
+    actor: ActorId,
+    other_actors: Vec&lt;ActorId&gt;,
+    seq: u64,
+    start_op: NonZeroU64,
+    timestamp: i64,
+    message: <span class="prelude-ty">Option</span>&lt;String&gt;,
+    ops_meta: ChangeOpsColumns,
+    <span class="doccomment">/// The range in `Self::bytes` where the ops column data is
+    </span>ops_data: Range&lt;usize&gt;,
+    extra_bytes: Range&lt;usize&gt;,
+    _phantom: PhantomData&lt;O&gt;,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">O</span>: <span class="ident">OpReadState</span><span class="op">&gt;</span> <span class="ident">PartialEq</span> <span class="kw">for</span> <span class="ident">Change</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">O</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">eq</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="ident">bytes</span> <span class="op">==</span> <span class="ident">other</span>.<span class="ident">bytes</span>
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, O: OpReadState&gt; PartialEq <span class="kw">for </span>Change&lt;<span class="lifetime">&#39;a</span>, O&gt; {
+    <span class="kw">fn </span>eq(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; bool {
+        <span class="self">self</span>.bytes == other.bytes
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">thiserror::Error</span>, <span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">ParseError</span> {
-    <span class="attribute">#[<span class="ident">error</span>(<span class="ident">transparent</span>)]</span>
-    <span class="ident">Leb128</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident">parse::leb128::Error</span>),
-    <span class="attribute">#[<span class="ident">error</span>(<span class="ident">transparent</span>)]</span>
-    <span class="ident">InvalidUtf8</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident">parse::InvalidUtf8</span>),
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;failed to parse change columns: {0}&quot;</span>)]</span>
-    <span class="ident">RawColumns</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident"><span class="kw">crate</span>::storage::columns::raw_column::ParseError</span>),
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;failed to parse header: {0}&quot;</span>)]</span>
-    <span class="ident">Header</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident"><span class="kw">super</span>::chunk::error::Header</span>),
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;change contained compressed columns&quot;</span>)]</span>
-    <span class="ident">CompressedChangeCols</span>,
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;invalid change cols: {0}&quot;</span>)]</span>
-    <span class="ident">InvalidColumns</span>(<span class="ident">Box</span><span class="op">&lt;</span><span class="kw">dyn</span> <span class="ident">std::error::Error</span> <span class="op">+</span> <span class="ident">Send</span> <span class="op">+</span> <span class="ident">Sync</span> <span class="op">+</span> <span class="lifetime">&#39;static</span><span class="op">&gt;</span>),
+<span class="attribute">#[derive(thiserror::Error, Debug)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>ParseError {
+    <span class="attribute">#[error(transparent)]
+    </span>Leb128(<span class="attribute">#[from] </span>parse::leb128::Error),
+    <span class="attribute">#[error(transparent)]
+    </span>InvalidUtf8(<span class="attribute">#[from] </span>parse::InvalidUtf8),
+    <span class="attribute">#[error(<span class="string">&quot;failed to parse change columns: {0}&quot;</span>)]
+    </span>RawColumns(<span class="attribute">#[from] </span><span class="kw">crate</span>::storage::columns::raw_column::ParseError),
+    <span class="attribute">#[error(<span class="string">&quot;failed to parse header: {0}&quot;</span>)]
+    </span>Header(<span class="attribute">#[from] </span><span class="kw">super</span>::chunk::error::Header),
+    <span class="attribute">#[error(<span class="string">&quot;change contained compressed columns&quot;</span>)]
+    </span>CompressedChangeCols,
+    <span class="attribute">#[error(<span class="string">&quot;invalid change cols: {0}&quot;</span>)]
+    </span>InvalidColumns(Box&lt;<span class="kw">dyn </span>std::error::Error + Send + Sync + <span class="lifetime">&#39;static</span>&gt;),
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Change</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Unverified</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">parse</span>(
-        <span class="ident">input</span>: <span class="ident">parse::Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="ident">parse::ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Change</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Unverified</span><span class="op">&gt;</span>, <span class="ident">ParseError</span><span class="op">&gt;</span> {
-        <span class="comment">// TODO(alex): check chunk type</span>
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">header</span>) <span class="op">=</span> <span class="ident">Header::parse</span>(<span class="ident">input</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">parse::Split</span> {
-            <span class="ident">first</span>: <span class="ident">chunk_input</span>,
-            <span class="ident">remaining</span>,
-        } <span class="op">=</span> <span class="ident">i</span>.<span class="ident">split</span>(<span class="ident">header</span>.<span class="ident">data_bytes</span>().<span class="ident">len</span>());
-        <span class="kw">let</span> (<span class="kw">_</span>, <span class="ident">change</span>) <span class="op">=</span> <span class="ident"><span class="self">Self</span>::parse_following_header</span>(<span class="ident">chunk_input</span>, <span class="ident">header</span>)<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>((<span class="ident">remaining</span>, <span class="ident">change</span>))
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Change&lt;<span class="lifetime">&#39;a</span>, Unverified&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>parse(
+        input: parse::Input&lt;<span class="lifetime">&#39;a</span>&gt;,
+    ) -&gt; parse::ParseResult&lt;<span class="lifetime">&#39;a</span>, Change&lt;<span class="lifetime">&#39;a</span>, Unverified&gt;, ParseError&gt; {
+        <span class="comment">// TODO(alex): check chunk type
+        </span><span class="kw">let </span>(i, header) = Header::parse(input)<span class="question-mark">?</span>;
+        <span class="kw">let </span>parse::Split {
+            first: chunk_input,
+            remaining,
+        } = i.split(header.data_bytes().len());
+        <span class="kw">let </span>(<span class="kw">_</span>, change) = <span class="self">Self</span>::parse_following_header(chunk_input, header)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>((remaining, change))
     }
 
-    <span class="doccomment">/// Parse a change chunk. `input` should be the entire chunk, including the header bytes.</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">parse_following_header</span>(
-        <span class="ident">input</span>: <span class="ident">parse::Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
-        <span class="ident">header</span>: <span class="ident">Header</span>,
-    ) -&gt; <span class="ident">parse::ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">Change</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Unverified</span><span class="op">&gt;</span>, <span class="ident">ParseError</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">deps</span>) <span class="op">=</span> <span class="ident">parse::length_prefixed</span>(<span class="ident">parse::change_hash</span>)(<span class="ident">input</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">actor</span>) <span class="op">=</span> <span class="ident">parse::actor_id</span>(<span class="ident">i</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">seq</span>) <span class="op">=</span> <span class="ident">parse::leb128_u64</span>(<span class="ident">i</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">start_op</span>) <span class="op">=</span> <span class="ident">parse::nonzero_leb128_u64</span>(<span class="ident">i</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">timestamp</span>) <span class="op">=</span> <span class="ident">parse::leb128_i64</span>(<span class="ident">i</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">message_len</span>) <span class="op">=</span> <span class="ident">parse::leb128_u64</span>(<span class="ident">i</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">message</span>) <span class="op">=</span> <span class="ident">parse::utf_8</span>(<span class="ident">message_len</span> <span class="kw">as</span> <span class="ident">usize</span>, <span class="ident">i</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">other_actors</span>) <span class="op">=</span> <span class="ident">parse::length_prefixed</span>(<span class="ident">parse::actor_id</span>)(<span class="ident">i</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">ops_meta</span>) <span class="op">=</span> <span class="ident">RawColumns::parse</span>(<span class="ident">i</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> (
-            <span class="ident">i</span>,
-            <span class="ident">parse::RangeOf</span> {
-                <span class="ident">range</span>: <span class="ident">ops_data</span>, ..
+    <span class="doccomment">/// Parse a change chunk. `input` should be the entire chunk, including the header bytes.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>parse_following_header(
+        input: parse::Input&lt;<span class="lifetime">&#39;a</span>&gt;,
+        header: Header,
+    ) -&gt; parse::ParseResult&lt;<span class="lifetime">&#39;_</span>, Change&lt;<span class="lifetime">&#39;a</span>, Unverified&gt;, ParseError&gt; {
+        <span class="kw">let </span>(i, deps) = parse::length_prefixed(parse::change_hash)(input)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(i, actor) = parse::actor_id(i)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(i, seq) = parse::leb128_u64(i)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(i, start_op) = parse::nonzero_leb128_u64(i)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(i, timestamp) = parse::leb128_i64(i)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(i, message_len) = parse::leb128_u64(i)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(i, message) = parse::utf_8(message_len <span class="kw">as </span>usize, i)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(i, other_actors) = parse::length_prefixed(parse::actor_id)(i)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(i, ops_meta) = RawColumns::parse(i)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(
+            i,
+            parse::RangeOf {
+                range: ops_data, ..
             },
-        ) <span class="op">=</span> <span class="ident">parse::range_of</span>(<span class="op">|</span><span class="ident">i</span><span class="op">|</span> <span class="ident">parse::take_n</span>(<span class="ident">ops_meta</span>.<span class="ident">total_column_len</span>(), <span class="ident">i</span>), <span class="ident">i</span>)<span class="question-mark">?</span>;
+        ) = parse::range_of(|i| parse::take_n(ops_meta.total_column_len(), i), i)<span class="question-mark">?</span>;
 
-        <span class="kw">let</span> (
-            <span class="ident">_i</span>,
-            <span class="ident">parse::RangeOf</span> {
-                <span class="ident">range</span>: <span class="ident">extra_bytes</span>, ..
+        <span class="kw">let </span>(
+            _i,
+            parse::RangeOf {
+                range: extra_bytes, ..
             },
-        ) <span class="op">=</span> <span class="ident">parse::range_of</span>(<span class="ident">parse::take_rest</span>, <span class="ident">i</span>)<span class="question-mark">?</span>;
+        ) = parse::range_of(parse::take_rest, i)<span class="question-mark">?</span>;
 
-        <span class="kw">let</span> <span class="ident">ops_meta</span> <span class="op">=</span> <span class="ident">ops_meta</span>
-            .<span class="ident">uncompressed</span>()
-            .<span class="ident">ok_or</span>(<span class="ident">parse::ParseError::Error</span>(<span class="ident">ParseError::CompressedChangeCols</span>))<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">col_layout</span> <span class="op">=</span> <span class="ident">Columns::parse</span>(<span class="ident">ops_data</span>.<span class="ident">len</span>(), <span class="ident">ops_meta</span>.<span class="ident">iter</span>())
-            .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">parse::ParseError::Error</span>(<span class="ident">ParseError::InvalidColumns</span>(<span class="ident">Box::new</span>(<span class="ident">e</span>))))<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">ops_meta</span> <span class="op">=</span> <span class="ident">ChangeOpsColumns::try_from</span>(<span class="ident">col_layout</span>)
-            .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">parse::ParseError::Error</span>(<span class="ident">ParseError::InvalidColumns</span>(<span class="ident">Box::new</span>(<span class="ident">e</span>))))<span class="question-mark">?</span>;
+        <span class="kw">let </span>ops_meta = ops_meta
+            .uncompressed()
+            .ok_or(parse::ParseError::Error(ParseError::CompressedChangeCols))<span class="question-mark">?</span>;
+        <span class="kw">let </span>col_layout = Columns::parse(ops_data.len(), ops_meta.iter())
+            .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))<span class="question-mark">?</span>;
+        <span class="kw">let </span>ops_meta = ChangeOpsColumns::try_from(col_layout)
+            .map_err(|e| parse::ParseError::Error(ParseError::InvalidColumns(Box::new(e))))<span class="question-mark">?</span>;
 
         <span class="prelude-val">Ok</span>((
-            <span class="ident">parse::Input::empty</span>(),
-            <span class="ident">Change</span> {
-                <span class="ident">bytes</span>: <span class="ident">input</span>.<span class="ident">bytes</span>().<span class="ident">into</span>(),
-                <span class="ident">header</span>,
-                <span class="ident">dependencies</span>: <span class="ident">deps</span>,
-                <span class="ident">actor</span>,
-                <span class="ident">other_actors</span>,
-                <span class="ident">seq</span>,
-                <span class="ident">start_op</span>,
-                <span class="ident">timestamp</span>,
-                <span class="ident">message</span>: <span class="kw">if</span> <span class="ident">message</span>.<span class="ident">is_empty</span>() {
-                    <span class="prelude-val">None</span>
-                } <span class="kw">else</span> {
-                    <span class="prelude-val">Some</span>(<span class="ident">message</span>)
+            parse::Input::empty(),
+            Change {
+                bytes: input.bytes().into(),
+                header,
+                dependencies: deps,
+                actor,
+                other_actors,
+                seq,
+                start_op,
+                timestamp,
+                message: <span class="kw">if </span>message.is_empty() {
+                    <span class="prelude-val">None
+                </span>} <span class="kw">else </span>{
+                    <span class="prelude-val">Some</span>(message)
                 },
-                <span class="ident">ops_meta</span>,
-                <span class="ident">ops_data</span>,
-                <span class="ident">extra_bytes</span>,
-                <span class="ident">_phantom</span>: <span class="ident">PhantomData</span>,
+                ops_meta,
+                ops_data,
+                extra_bytes,
+                _phantom: PhantomData,
             },
         ))
     }
 
-    <span class="doccomment">/// Iterate over the ops in this chunk. The iterator will return an error if any of the ops are</span>
-    <span class="doccomment">/// malformed.</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">iter_ops</span>(
-        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="self">self</span>,
-    ) -&gt; <span class="kw">impl</span> <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">ChangeOp</span>, <span class="ident">ReadChangeOpError</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span> <span class="op">+</span> <span class="lifetime">&#39;a</span> {
-        <span class="self">self</span>.<span class="ident">ops_meta</span>.<span class="ident">iter</span>(<span class="self">self</span>.<span class="ident">ops_data</span>())
+    <span class="doccomment">/// Iterate over the ops in this chunk. The iterator will return an error if any of the ops are
+    /// malformed.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>iter_ops(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
+    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="prelude-ty">Result</span>&lt;ChangeOp, ReadChangeOpError&gt;&gt; + Clone + <span class="lifetime">&#39;a </span>{
+        <span class="self">self</span>.ops_meta.iter(<span class="self">self</span>.ops_data())
     }
 
-    <span class="doccomment">/// Verify all the ops in this change executing `f` for each one</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// `f` will be called for each op in this change, allowing callers to collect additional</span>
-    <span class="doccomment">/// information about the ops (e.g. all the actor IDs in the change, or the number of ops)</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// # Errors</span>
-    <span class="doccomment">/// * If there is an error reading an operation</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">verify_ops</span><span class="op">&lt;</span><span class="ident">F</span>: <span class="ident">FnMut</span>(<span class="ident">ChangeOp</span>)<span class="op">&gt;</span>(
+    <span class="doccomment">/// Verify all the ops in this change executing `f` for each one
+    ///
+    /// `f` will be called for each op in this change, allowing callers to collect additional
+    /// information about the ops (e.g. all the actor IDs in the change, or the number of ops)
+    ///
+    /// # Errors
+    /// * If there is an error reading an operation
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>verify_ops&lt;F: FnMut(ChangeOp)&gt;(
         <span class="self">self</span>,
-        <span class="kw-2">mut</span> <span class="ident">f</span>: <span class="ident">F</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Change</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Verified</span><span class="op">&gt;</span>, <span class="ident">ReadChangeOpError</span><span class="op">&gt;</span> {
-        <span class="kw">for</span> <span class="ident">op</span> <span class="kw">in</span> <span class="self">self</span>.<span class="ident">iter_ops</span>() {
-            <span class="ident">f</span>(<span class="ident">op</span><span class="question-mark">?</span>);
+        <span class="kw-2">mut </span>f: F,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Change&lt;<span class="lifetime">&#39;a</span>, Verified&gt;, ReadChangeOpError&gt; {
+        <span class="kw">for </span>op <span class="kw">in </span><span class="self">self</span>.iter_ops() {
+            f(op<span class="question-mark">?</span>);
         }
-        <span class="prelude-val">Ok</span>(<span class="ident">Change</span> {
-            <span class="ident">bytes</span>: <span class="self">self</span>.<span class="ident">bytes</span>,
-            <span class="ident">header</span>: <span class="self">self</span>.<span class="ident">header</span>,
-            <span class="ident">dependencies</span>: <span class="self">self</span>.<span class="ident">dependencies</span>,
-            <span class="ident">actor</span>: <span class="self">self</span>.<span class="ident">actor</span>,
-            <span class="ident">other_actors</span>: <span class="self">self</span>.<span class="ident">other_actors</span>,
-            <span class="ident">seq</span>: <span class="self">self</span>.<span class="ident">seq</span>,
-            <span class="ident">start_op</span>: <span class="self">self</span>.<span class="ident">start_op</span>,
-            <span class="ident">timestamp</span>: <span class="self">self</span>.<span class="ident">timestamp</span>,
-            <span class="ident">message</span>: <span class="self">self</span>.<span class="ident">message</span>,
-            <span class="ident">ops_meta</span>: <span class="self">self</span>.<span class="ident">ops_meta</span>,
-            <span class="ident">ops_data</span>: <span class="self">self</span>.<span class="ident">ops_data</span>,
-            <span class="ident">extra_bytes</span>: <span class="self">self</span>.<span class="ident">extra_bytes</span>,
-            <span class="ident">_phantom</span>: <span class="ident">PhantomData</span>,
+        <span class="prelude-val">Ok</span>(Change {
+            bytes: <span class="self">self</span>.bytes,
+            header: <span class="self">self</span>.header,
+            dependencies: <span class="self">self</span>.dependencies,
+            actor: <span class="self">self</span>.actor,
+            other_actors: <span class="self">self</span>.other_actors,
+            seq: <span class="self">self</span>.seq,
+            start_op: <span class="self">self</span>.start_op,
+            timestamp: <span class="self">self</span>.timestamp,
+            message: <span class="self">self</span>.message,
+            ops_meta: <span class="self">self</span>.ops_meta,
+            ops_data: <span class="self">self</span>.ops_data,
+            extra_bytes: <span class="self">self</span>.extra_bytes,
+            _phantom: PhantomData,
         })
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Change</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Verified</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">builder</span>() -&gt; <span class="ident">ChangeBuilder</span><span class="op">&lt;</span><span class="ident">Unset</span>, <span class="ident">Unset</span>, <span class="ident">Unset</span>, <span class="ident">Unset</span><span class="op">&gt;</span> {
-        <span class="ident">ChangeBuilder::new</span>()
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Change&lt;<span class="lifetime">&#39;a</span>, Verified&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>builder() -&gt; ChangeBuilder&lt;Unset, Unset, Unset, Unset&gt; {
+        ChangeBuilder::new()
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">iter_ops</span>(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="self">self</span>) -&gt; <span class="kw">impl</span> <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">ChangeOp</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span> <span class="op">+</span> <span class="lifetime">&#39;a</span> {
-        <span class="comment">// SAFETY: This unwrap is okay because a `Change&lt;&#39;_, Verified&gt;` can only be constructed</span>
-        <span class="comment">// using either `verify_ops` or `Builder::build`, so we know the ops columns are valid.</span>
-        <span class="self">self</span>.<span class="ident">ops_meta</span>.<span class="ident">iter</span>(<span class="self">self</span>.<span class="ident">ops_data</span>()).<span class="ident">map</span>(<span class="op">|</span><span class="ident">o</span><span class="op">|</span> <span class="ident">o</span>.<span class="ident">unwrap</span>())
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>iter_ops(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = ChangeOp&gt; + Clone + <span class="lifetime">&#39;a </span>{
+        <span class="comment">// SAFETY: This unwrap is okay because a `Change&lt;&#39;_, Verified&gt;` can only be constructed
+        // using either `verify_ops` or `Builder::build`, so we know the ops columns are valid.
+        </span><span class="self">self</span>.ops_meta.iter(<span class="self">self</span>.ops_data()).map(|o| o.unwrap())
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">O</span>: <span class="ident">OpReadState</span><span class="op">&gt;</span> <span class="ident">Change</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">O</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">checksum</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">CheckSum</span> {
-        <span class="self">self</span>.<span class="ident">header</span>.<span class="ident">checksum</span>()
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, O: OpReadState&gt; Change&lt;<span class="lifetime">&#39;a</span>, O&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>checksum(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; CheckSum {
+        <span class="self">self</span>.header.checksum()
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">actor</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">ActorId</span> {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">actor</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>actor(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>ActorId {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.actor
     }
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">other_actors</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">ActorId</span>] {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">other_actors</span>
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">start_op</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">NonZeroU64</span> {
-        <span class="self">self</span>.<span class="ident">start_op</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>other_actors(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[ActorId] {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.other_actors
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">message</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span> {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">message</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>start_op(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; NonZeroU64 {
+        <span class="self">self</span>.start_op
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">dependencies</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>] {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">dependencies</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>message(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;String&gt; {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.message
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">seq</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u64</span> {
-        <span class="self">self</span>.<span class="ident">seq</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>dependencies(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[ChangeHash] {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.dependencies
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">timestamp</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">i64</span> {
-        <span class="self">self</span>.<span class="ident">timestamp</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>seq(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
+        <span class="self">self</span>.seq
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">extra_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">bytes</span>[<span class="self">self</span>.<span class="ident">extra_bytes</span>.<span class="ident">clone</span>()]
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>timestamp(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; i64 {
+        <span class="self">self</span>.timestamp
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">checksum_valid</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="ident">header</span>.<span class="ident">checksum_valid</span>()
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>extra_bytes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[u8] {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.bytes[<span class="self">self</span>.extra_bytes.clone()]
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">body_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">bytes</span>[<span class="self">self</span>.<span class="ident">header</span>.<span class="ident">len</span>()..]
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>checksum_valid(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="self">self</span>.header.checksum_valid()
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">bytes</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>body_bytes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[u8] {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.bytes[<span class="self">self</span>.header.len()..]
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">hash</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">ChangeHash</span> {
-        <span class="self">self</span>.<span class="ident">header</span>.<span class="ident">hash</span>()
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>bytes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[u8] {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.bytes
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">ops_data</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">bytes</span>[<span class="self">self</span>.<span class="ident">ops_data</span>.<span class="ident">clone</span>()]
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>hash(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ChangeHash {
+        <span class="self">self</span>.header.hash()
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">into_owned</span>(<span class="self">self</span>) -&gt; <span class="ident">Change</span><span class="op">&lt;</span><span class="lifetime">&#39;static</span>, <span class="ident">O</span><span class="op">&gt;</span> {
-        <span class="ident">Change</span> {
-            <span class="ident">dependencies</span>: <span class="self">self</span>.<span class="ident">dependencies</span>,
-            <span class="ident">bytes</span>: <span class="ident">Cow::Owned</span>(<span class="self">self</span>.<span class="ident">bytes</span>.<span class="ident">into_owned</span>()),
-            <span class="ident">header</span>: <span class="self">self</span>.<span class="ident">header</span>,
-            <span class="ident">actor</span>: <span class="self">self</span>.<span class="ident">actor</span>,
-            <span class="ident">other_actors</span>: <span class="self">self</span>.<span class="ident">other_actors</span>,
-            <span class="ident">seq</span>: <span class="self">self</span>.<span class="ident">seq</span>,
-            <span class="ident">start_op</span>: <span class="self">self</span>.<span class="ident">start_op</span>,
-            <span class="ident">timestamp</span>: <span class="self">self</span>.<span class="ident">timestamp</span>,
-            <span class="ident">message</span>: <span class="self">self</span>.<span class="ident">message</span>,
-            <span class="ident">ops_meta</span>: <span class="self">self</span>.<span class="ident">ops_meta</span>,
-            <span class="ident">ops_data</span>: <span class="self">self</span>.<span class="ident">ops_data</span>,
-            <span class="ident">extra_bytes</span>: <span class="self">self</span>.<span class="ident">extra_bytes</span>,
-            <span class="ident">_phantom</span>: <span class="ident">PhantomData</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>ops_data(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[u8] {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.bytes[<span class="self">self</span>.ops_data.clone()]
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>into_owned(<span class="self">self</span>) -&gt; Change&lt;<span class="lifetime">&#39;static</span>, O&gt; {
+        Change {
+            dependencies: <span class="self">self</span>.dependencies,
+            bytes: Cow::Owned(<span class="self">self</span>.bytes.into_owned()),
+            header: <span class="self">self</span>.header,
+            actor: <span class="self">self</span>.actor,
+            other_actors: <span class="self">self</span>.other_actors,
+            seq: <span class="self">self</span>.seq,
+            start_op: <span class="self">self</span>.start_op,
+            timestamp: <span class="self">self</span>.timestamp,
+            message: <span class="self">self</span>.message,
+            ops_meta: <span class="self">self</span>.ops_meta,
+            ops_data: <span class="self">self</span>.ops_data,
+            extra_bytes: <span class="self">self</span>.extra_bytes,
+            _phantom: PhantomData,
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">compress</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Compressed</span><span class="op">&lt;</span><span class="lifetime">&#39;static</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">bytes</span>.<span class="ident">len</span>() <span class="op">&gt;</span> <span class="ident">DEFLATE_MIN_SIZE</span> {
-            <span class="prelude-val">Some</span>(<span class="ident">Compressed::compress</span>(<span class="self">self</span>))
-        } <span class="kw">else</span> {
-            <span class="prelude-val">None</span>
-        }
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>compress(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Compressed&lt;<span class="lifetime">&#39;static</span>&gt;&gt; {
+        <span class="kw">if </span><span class="self">self</span>.bytes.len() &gt; DEFLATE_MIN_SIZE {
+            <span class="prelude-val">Some</span>(Compressed::compress(<span class="self">self</span>))
+        } <span class="kw">else </span>{
+            <span class="prelude-val">None
+        </span>}
     }
 }
 
-<span class="kw">fn</span> <span class="ident">length_prefixed_bytes</span><span class="op">&lt;</span><span class="ident">B</span>: <span class="ident">AsRef</span><span class="op">&lt;</span>[<span class="ident">u8</span>]<span class="op">&gt;</span><span class="op">&gt;</span>(<span class="ident">b</span>: <span class="ident">B</span>, <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) -&gt; <span class="ident">usize</span> {
-    <span class="kw">let</span> <span class="ident">prefix_len</span> <span class="op">=</span> <span class="ident">leb128::write::unsigned</span>(<span class="ident">out</span>, <span class="ident">b</span>.<span class="ident">as_ref</span>().<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>).<span class="ident">unwrap</span>();
-    <span class="ident">out</span>.<span class="ident">write_all</span>(<span class="ident">b</span>.<span class="ident">as_ref</span>()).<span class="ident">unwrap</span>();
-    <span class="ident">prefix_len</span> <span class="op">+</span> <span class="ident">b</span>.<span class="ident">as_ref</span>().<span class="ident">len</span>()
+<span class="kw">fn </span>length_prefixed_bytes&lt;B: AsRef&lt;[u8]&gt;&gt;(b: B, out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;) -&gt; usize {
+    <span class="kw">let </span>prefix_len = leb128::write::unsigned(out, b.as_ref().len() <span class="kw">as </span>u64).unwrap();
+    out.write_all(b.as_ref()).unwrap();
+    prefix_len + b.as_ref().len()
 }
 
-<span class="comment">// Bunch of type safe builder boilerplate</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">Unset</span>;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">Set</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
-    <span class="ident">value</span>: <span class="ident">T</span>,
+<span class="comment">// Bunch of type safe builder boilerplate
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Unset;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Set&lt;T&gt; {
+    value: T,
 }
 
-<span class="attribute">#[<span class="ident">allow</span>(<span class="ident">non_camel_case_types</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">ChangeBuilder</span><span class="op">&lt;</span><span class="ident">START_OP</span>, <span class="ident">ACTOR</span>, <span class="ident">SEQ</span>, <span class="ident">TIME</span><span class="op">&gt;</span> {
-    <span class="ident">dependencies</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>,
-    <span class="ident">actor</span>: <span class="ident">ACTOR</span>,
-    <span class="ident">seq</span>: <span class="ident">SEQ</span>,
-    <span class="ident">start_op</span>: <span class="ident">START_OP</span>,
-    <span class="ident">timestamp</span>: <span class="ident">TIME</span>,
-    <span class="ident">message</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>,
-    <span class="ident">extra_bytes</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+<span class="attribute">#[allow(non_camel_case_types)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ChangeBuilder&lt;START_OP, ACTOR, SEQ, TIME&gt; {
+    dependencies: Vec&lt;ChangeHash&gt;,
+    actor: ACTOR,
+    seq: SEQ,
+    start_op: START_OP,
+    timestamp: TIME,
+    message: <span class="prelude-ty">Option</span>&lt;String&gt;,
+    extra_bytes: <span class="prelude-ty">Option</span>&lt;Vec&lt;u8&gt;&gt;,
 }
 
-<span class="kw">impl</span> <span class="ident">ChangeBuilder</span><span class="op">&lt;</span><span class="ident">Unset</span>, <span class="ident">Unset</span>, <span class="ident">Unset</span>, <span class="ident">Unset</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>() -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span> {
-            <span class="ident">dependencies</span>: <span class="macro">vec!</span>[],
-            <span class="ident">actor</span>: <span class="ident">Unset</span>,
-            <span class="ident">seq</span>: <span class="ident">Unset</span>,
-            <span class="ident">start_op</span>: <span class="ident">Unset</span>,
-            <span class="ident">timestamp</span>: <span class="ident">Unset</span>,
-            <span class="ident">message</span>: <span class="prelude-val">None</span>,
-            <span class="ident">extra_bytes</span>: <span class="prelude-val">None</span>,
-        }
-    }
-}
-
-<span class="attribute">#[<span class="ident">allow</span>(<span class="ident">non_camel_case_types</span>)]</span>
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">START_OP</span>, <span class="ident">ACTOR</span>, <span class="ident">SEQ</span>, <span class="ident">TIME</span><span class="op">&gt;</span> <span class="ident">ChangeBuilder</span><span class="op">&lt;</span><span class="ident">START_OP</span>, <span class="ident">ACTOR</span>, <span class="ident">SEQ</span>, <span class="ident">TIME</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">with_dependencies</span>(<span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">dependencies</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">dependencies</span>.<span class="ident">sort_unstable</span>();
-        <span class="self">Self</span> {
-            <span class="ident">dependencies</span>,
-            ..<span class="self">self</span>
-        }
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">with_message</span>(<span class="self">self</span>, <span class="ident">message</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span> { <span class="ident">message</span>, ..<span class="self">self</span> }
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">with_extra_bytes</span>(<span class="self">self</span>, <span class="ident">extra_bytes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span> {
-            <span class="ident">extra_bytes</span>: <span class="prelude-val">Some</span>(<span class="ident">extra_bytes</span>),
-            ..<span class="self">self</span>
+<span class="kw">impl </span>ChangeBuilder&lt;Unset, Unset, Unset, Unset&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new() -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            dependencies: <span class="macro">vec!</span>[],
+            actor: Unset,
+            seq: Unset,
+            start_op: Unset,
+            timestamp: Unset,
+            message: <span class="prelude-val">None</span>,
+            extra_bytes: <span class="prelude-val">None</span>,
         }
     }
 }
 
-<span class="attribute">#[<span class="ident">allow</span>(<span class="ident">non_camel_case_types</span>)]</span>
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">START_OP</span>, <span class="ident">ACTOR</span>, <span class="ident">TIME</span><span class="op">&gt;</span> <span class="ident">ChangeBuilder</span><span class="op">&lt;</span><span class="ident">START_OP</span>, <span class="ident">ACTOR</span>, <span class="ident">Unset</span>, <span class="ident">TIME</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">with_seq</span>(<span class="self">self</span>, <span class="ident">seq</span>: <span class="ident">u64</span>) -&gt; <span class="ident">ChangeBuilder</span><span class="op">&lt;</span><span class="ident">START_OP</span>, <span class="ident">ACTOR</span>, <span class="ident">Set</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>, <span class="ident">TIME</span><span class="op">&gt;</span> {
-        <span class="ident">ChangeBuilder</span> {
-            <span class="ident">dependencies</span>: <span class="self">self</span>.<span class="ident">dependencies</span>,
-            <span class="ident">actor</span>: <span class="self">self</span>.<span class="ident">actor</span>,
-            <span class="ident">seq</span>: <span class="ident">Set</span> { <span class="ident">value</span>: <span class="ident">seq</span> },
-            <span class="ident">start_op</span>: <span class="self">self</span>.<span class="ident">start_op</span>,
-            <span class="ident">timestamp</span>: <span class="self">self</span>.<span class="ident">timestamp</span>,
-            <span class="ident">message</span>: <span class="self">self</span>.<span class="ident">message</span>,
-            <span class="ident">extra_bytes</span>: <span class="self">self</span>.<span class="ident">extra_bytes</span>,
+<span class="attribute">#[allow(non_camel_case_types)]
+</span><span class="kw">impl</span>&lt;START_OP, ACTOR, SEQ, TIME&gt; ChangeBuilder&lt;START_OP, ACTOR, SEQ, TIME&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>with_dependencies(<span class="self">self</span>, <span class="kw-2">mut </span>dependencies: Vec&lt;ChangeHash&gt;) -&gt; <span class="self">Self </span>{
+        dependencies.sort_unstable();
+        <span class="self">Self </span>{
+            dependencies,
+            ..<span class="self">self
+        </span>}
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>with_message(<span class="self">self</span>, message: <span class="prelude-ty">Option</span>&lt;String&gt;) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{ message, ..<span class="self">self </span>}
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>with_extra_bytes(<span class="self">self</span>, extra_bytes: Vec&lt;u8&gt;) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            extra_bytes: <span class="prelude-val">Some</span>(extra_bytes),
+            ..<span class="self">self
+        </span>}
+    }
+}
+
+<span class="attribute">#[allow(non_camel_case_types)]
+</span><span class="kw">impl</span>&lt;START_OP, ACTOR, TIME&gt; ChangeBuilder&lt;START_OP, ACTOR, Unset, TIME&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>with_seq(<span class="self">self</span>, seq: u64) -&gt; ChangeBuilder&lt;START_OP, ACTOR, Set&lt;u64&gt;, TIME&gt; {
+        ChangeBuilder {
+            dependencies: <span class="self">self</span>.dependencies,
+            actor: <span class="self">self</span>.actor,
+            seq: Set { value: seq },
+            start_op: <span class="self">self</span>.start_op,
+            timestamp: <span class="self">self</span>.timestamp,
+            message: <span class="self">self</span>.message,
+            extra_bytes: <span class="self">self</span>.extra_bytes,
         }
     }
 }
 
-<span class="attribute">#[<span class="ident">allow</span>(<span class="ident">non_camel_case_types</span>)]</span>
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">START_OP</span>, <span class="ident">SEQ</span>, <span class="ident">TIME</span><span class="op">&gt;</span> <span class="ident">ChangeBuilder</span><span class="op">&lt;</span><span class="ident">START_OP</span>, <span class="ident">Unset</span>, <span class="ident">SEQ</span>, <span class="ident">TIME</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">with_actor</span>(
+<span class="attribute">#[allow(non_camel_case_types)]
+</span><span class="kw">impl</span>&lt;START_OP, SEQ, TIME&gt; ChangeBuilder&lt;START_OP, Unset, SEQ, TIME&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>with_actor(
         <span class="self">self</span>,
-        <span class="ident">actor</span>: <span class="ident">ActorId</span>,
-    ) -&gt; <span class="ident">ChangeBuilder</span><span class="op">&lt;</span><span class="ident">START_OP</span>, <span class="ident">Set</span><span class="op">&lt;</span><span class="ident">ActorId</span><span class="op">&gt;</span>, <span class="ident">SEQ</span>, <span class="ident">TIME</span><span class="op">&gt;</span> {
-        <span class="ident">ChangeBuilder</span> {
-            <span class="ident">dependencies</span>: <span class="self">self</span>.<span class="ident">dependencies</span>,
-            <span class="ident">actor</span>: <span class="ident">Set</span> { <span class="ident">value</span>: <span class="ident">actor</span> },
-            <span class="ident">seq</span>: <span class="self">self</span>.<span class="ident">seq</span>,
-            <span class="ident">start_op</span>: <span class="self">self</span>.<span class="ident">start_op</span>,
-            <span class="ident">timestamp</span>: <span class="self">self</span>.<span class="ident">timestamp</span>,
-            <span class="ident">message</span>: <span class="self">self</span>.<span class="ident">message</span>,
-            <span class="ident">extra_bytes</span>: <span class="self">self</span>.<span class="ident">extra_bytes</span>,
+        actor: ActorId,
+    ) -&gt; ChangeBuilder&lt;START_OP, Set&lt;ActorId&gt;, SEQ, TIME&gt; {
+        ChangeBuilder {
+            dependencies: <span class="self">self</span>.dependencies,
+            actor: Set { value: actor },
+            seq: <span class="self">self</span>.seq,
+            start_op: <span class="self">self</span>.start_op,
+            timestamp: <span class="self">self</span>.timestamp,
+            message: <span class="self">self</span>.message,
+            extra_bytes: <span class="self">self</span>.extra_bytes,
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">ACTOR</span>, <span class="ident">SEQ</span>, <span class="ident">TIME</span><span class="op">&gt;</span> <span class="ident">ChangeBuilder</span><span class="op">&lt;</span><span class="ident">Unset</span>, <span class="ident">ACTOR</span>, <span class="ident">SEQ</span>, <span class="ident">TIME</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">with_start_op</span>(
+<span class="kw">impl</span>&lt;ACTOR, SEQ, TIME&gt; ChangeBuilder&lt;Unset, ACTOR, SEQ, TIME&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>with_start_op(
         <span class="self">self</span>,
-        <span class="ident">start_op</span>: <span class="ident">NonZeroU64</span>,
-    ) -&gt; <span class="ident">ChangeBuilder</span><span class="op">&lt;</span><span class="ident">Set</span><span class="op">&lt;</span><span class="ident">NonZeroU64</span><span class="op">&gt;</span>, <span class="ident">ACTOR</span>, <span class="ident">SEQ</span>, <span class="ident">TIME</span><span class="op">&gt;</span> {
-        <span class="ident">ChangeBuilder</span> {
-            <span class="ident">dependencies</span>: <span class="self">self</span>.<span class="ident">dependencies</span>,
-            <span class="ident">actor</span>: <span class="self">self</span>.<span class="ident">actor</span>,
-            <span class="ident">seq</span>: <span class="self">self</span>.<span class="ident">seq</span>,
-            <span class="ident">start_op</span>: <span class="ident">Set</span> { <span class="ident">value</span>: <span class="ident">start_op</span> },
-            <span class="ident">timestamp</span>: <span class="self">self</span>.<span class="ident">timestamp</span>,
-            <span class="ident">message</span>: <span class="self">self</span>.<span class="ident">message</span>,
-            <span class="ident">extra_bytes</span>: <span class="self">self</span>.<span class="ident">extra_bytes</span>,
+        start_op: NonZeroU64,
+    ) -&gt; ChangeBuilder&lt;Set&lt;NonZeroU64&gt;, ACTOR, SEQ, TIME&gt; {
+        ChangeBuilder {
+            dependencies: <span class="self">self</span>.dependencies,
+            actor: <span class="self">self</span>.actor,
+            seq: <span class="self">self</span>.seq,
+            start_op: Set { value: start_op },
+            timestamp: <span class="self">self</span>.timestamp,
+            message: <span class="self">self</span>.message,
+            extra_bytes: <span class="self">self</span>.extra_bytes,
         }
     }
 }
 
-<span class="attribute">#[<span class="ident">allow</span>(<span class="ident">non_camel_case_types</span>)]</span>
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">START_OP</span>, <span class="ident">ACTOR</span>, <span class="ident">SEQ</span><span class="op">&gt;</span> <span class="ident">ChangeBuilder</span><span class="op">&lt;</span><span class="ident">START_OP</span>, <span class="ident">ACTOR</span>, <span class="ident">SEQ</span>, <span class="ident">Unset</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">with_timestamp</span>(<span class="self">self</span>, <span class="ident">time</span>: <span class="ident">i64</span>) -&gt; <span class="ident">ChangeBuilder</span><span class="op">&lt;</span><span class="ident">START_OP</span>, <span class="ident">ACTOR</span>, <span class="ident">SEQ</span>, <span class="ident">Set</span><span class="op">&lt;</span><span class="ident">i64</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-        <span class="ident">ChangeBuilder</span> {
-            <span class="ident">dependencies</span>: <span class="self">self</span>.<span class="ident">dependencies</span>,
-            <span class="ident">actor</span>: <span class="self">self</span>.<span class="ident">actor</span>,
-            <span class="ident">seq</span>: <span class="self">self</span>.<span class="ident">seq</span>,
-            <span class="ident">start_op</span>: <span class="self">self</span>.<span class="ident">start_op</span>,
-            <span class="ident">timestamp</span>: <span class="ident">Set</span> { <span class="ident">value</span>: <span class="ident">time</span> },
-            <span class="ident">message</span>: <span class="self">self</span>.<span class="ident">message</span>,
-            <span class="ident">extra_bytes</span>: <span class="self">self</span>.<span class="ident">extra_bytes</span>,
+<span class="attribute">#[allow(non_camel_case_types)]
+</span><span class="kw">impl</span>&lt;START_OP, ACTOR, SEQ&gt; ChangeBuilder&lt;START_OP, ACTOR, SEQ, Unset&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>with_timestamp(<span class="self">self</span>, time: i64) -&gt; ChangeBuilder&lt;START_OP, ACTOR, SEQ, Set&lt;i64&gt;&gt; {
+        ChangeBuilder {
+            dependencies: <span class="self">self</span>.dependencies,
+            actor: <span class="self">self</span>.actor,
+            seq: <span class="self">self</span>.seq,
+            start_op: <span class="self">self</span>.start_op,
+            timestamp: Set { value: time },
+            message: <span class="self">self</span>.message,
+            extra_bytes: <span class="self">self</span>.extra_bytes,
         }
     }
 }
 
-<span class="doccomment">/// A row to be encoded as a change op</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// The lifetime `&#39;a` is the lifetime of the value and key data types. For types which cannot</span>
-<span class="doccomment">/// provide a reference (e.g. because they are decoding from some columnar storage on each</span>
-<span class="doccomment">/// iteration) this should be `&#39;static`.</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">trait</span> <span class="ident">AsChangeOp</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// The type of the Actor ID component of the op IDs for this impl. This is typically either</span>
-    <span class="doccomment">/// `&amp;&#39;a ActorID` or `usize`</span>
-    <span class="kw">type</span> <span class="ident">ActorId</span>;
-    <span class="doccomment">/// The type of the op IDs this impl produces.</span>
-    <span class="kw">type</span> <span class="ident">OpId</span>: <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::ActorId</span><span class="op">&gt;</span>;
-    <span class="doccomment">/// The type of the predecessor iterator returned by `Self::pred`. This can often be omitted</span>
-    <span class="kw">type</span> <span class="ident">PredIter</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident"><span class="self">Self</span>::OpId</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">ExactSizeIterator</span>;
+<span class="doccomment">/// A row to be encoded as a change op
+///
+/// The lifetime `&#39;a` is the lifetime of the value and key data types. For types which cannot
+/// provide a reference (e.g. because they are decoding from some columnar storage on each
+/// iteration) this should be `&#39;static`.
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">trait </span>AsChangeOp&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="doccomment">/// The type of the Actor ID component of the op IDs for this impl. This is typically either
+    /// `&amp;&#39;a ActorID` or `usize`
+    </span><span class="kw">type </span>ActorId;
+    <span class="doccomment">/// The type of the op IDs this impl produces.
+    </span><span class="kw">type </span>OpId: convert::OpId&lt;<span class="self">Self</span>::ActorId&gt;;
+    <span class="doccomment">/// The type of the predecessor iterator returned by `Self::pred`. This can often be omitted
+    </span><span class="kw">type </span>PredIter: Iterator&lt;Item = <span class="self">Self</span>::OpId&gt; + ExactSizeIterator;
 
-    <span class="kw">fn</span> <span class="ident">obj</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">convert::ObjId</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::OpId</span><span class="op">&gt;</span>;
-    <span class="kw">fn</span> <span class="ident">key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">convert::Key</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident"><span class="self">Self</span>::OpId</span><span class="op">&gt;</span>;
-    <span class="kw">fn</span> <span class="ident">insert</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span>;
-    <span class="kw">fn</span> <span class="ident">action</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u64</span>;
-    <span class="kw">fn</span> <span class="ident">val</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">ScalarValue</span><span class="op">&gt;</span>;
-    <span class="kw">fn</span> <span class="ident">pred</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident"><span class="self">Self</span>::PredIter</span>;
+    <span class="kw">fn </span>obj(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; convert::ObjId&lt;<span class="self">Self</span>::OpId&gt;;
+    <span class="kw">fn </span>key(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; convert::Key&lt;<span class="lifetime">&#39;a</span>, <span class="self">Self</span>::OpId&gt;;
+    <span class="kw">fn </span>insert(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool;
+    <span class="kw">fn </span>action(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64;
+    <span class="kw">fn </span>val(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Cow&lt;<span class="lifetime">&#39;a</span>, ScalarValue&gt;;
+    <span class="kw">fn </span>pred(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::PredIter;
 }
 
-<span class="kw">impl</span> <span class="ident">ChangeBuilder</span><span class="op">&lt;</span><span class="ident">Set</span><span class="op">&lt;</span><span class="ident">NonZeroU64</span><span class="op">&gt;</span>, <span class="ident">Set</span><span class="op">&lt;</span><span class="ident">ActorId</span><span class="op">&gt;</span>, <span class="ident">Set</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>, <span class="ident">Set</span><span class="op">&lt;</span><span class="ident">i64</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">build</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">A</span>, <span class="ident">I</span>, <span class="ident">O</span><span class="op">&gt;</span>(
+<span class="kw">impl </span>ChangeBuilder&lt;Set&lt;NonZeroU64&gt;, Set&lt;ActorId&gt;, Set&lt;u64&gt;, Set&lt;i64&gt;&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>build&lt;<span class="lifetime">&#39;a</span>, A, I, O&gt;(
         <span class="self">self</span>,
-        <span class="ident">ops</span>: <span class="ident">I</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Change</span><span class="op">&lt;</span><span class="lifetime">&#39;static</span>, <span class="ident">Verified</span><span class="op">&gt;</span>, <span class="ident">PredOutOfOrder</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">A</span>: <span class="ident">AsChangeOp</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">OpId</span> <span class="op">=</span> <span class="ident">O</span><span class="op">&gt;</span> <span class="op">+</span> <span class="lifetime">&#39;a</span>,
-        <span class="ident">O</span>: <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">ActorId</span><span class="op">&gt;</span> <span class="op">+</span> <span class="lifetime">&#39;a</span>,
-        <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">A</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span> <span class="op">+</span> <span class="lifetime">&#39;a</span>,
+        ops: I,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Change&lt;<span class="lifetime">&#39;static</span>, Verified&gt;, PredOutOfOrder&gt;
+    <span class="kw">where
+        </span>A: AsChangeOp&lt;<span class="lifetime">&#39;a</span>, OpId = O&gt; + <span class="lifetime">&#39;a</span>,
+        O: convert::OpId&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ActorId&gt; + <span class="lifetime">&#39;a</span>,
+        I: Iterator&lt;Item = A&gt; + Clone + <span class="lifetime">&#39;a</span>,
     {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">col_data</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
-        <span class="kw">let</span> <span class="ident">actors</span> <span class="op">=</span> <span class="ident">change_actors::ChangeActors::new</span>(<span class="self">self</span>.<span class="ident">actor</span>.<span class="ident">value</span>, <span class="ident">ops</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">cols</span> <span class="op">=</span> <span class="ident">ChangeOpsColumns::encode</span>(<span class="ident">actors</span>.<span class="ident">iter</span>(), <span class="kw-2">&amp;mut</span> <span class="ident">col_data</span>);
+        <span class="kw">let </span><span class="kw-2">mut </span>col_data = Vec::new();
+        <span class="kw">let </span>actors = change_actors::ChangeActors::new(<span class="self">self</span>.actor.value, ops)<span class="question-mark">?</span>;
+        <span class="kw">let </span>cols = ChangeOpsColumns::encode(actors.iter(), <span class="kw-2">&amp;mut </span>col_data);
 
-        <span class="kw">let</span> (<span class="ident">actor</span>, <span class="ident">other_actors</span>) <span class="op">=</span> <span class="ident">actors</span>.<span class="ident">done</span>();
+        <span class="kw">let </span>(actor, other_actors) = actors.done();
 
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">data</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">col_data</span>.<span class="ident">len</span>());
-        <span class="ident">leb128::write::unsigned</span>(<span class="kw-2">&amp;mut</span> <span class="ident">data</span>, <span class="self">self</span>.<span class="ident">dependencies</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>).<span class="ident">unwrap</span>();
-        <span class="kw">for</span> <span class="ident">dep</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">dependencies</span> {
-            <span class="ident">data</span>.<span class="ident">write_all</span>(<span class="ident">dep</span>.<span class="ident">as_bytes</span>()).<span class="ident">unwrap</span>();
+        <span class="kw">let </span><span class="kw-2">mut </span>data = Vec::with_capacity(col_data.len());
+        leb128::write::unsigned(<span class="kw-2">&amp;mut </span>data, <span class="self">self</span>.dependencies.len() <span class="kw">as </span>u64).unwrap();
+        <span class="kw">for </span>dep <span class="kw">in </span><span class="kw-2">&amp;</span><span class="self">self</span>.dependencies {
+            data.write_all(dep.as_bytes()).unwrap();
         }
-        <span class="ident">length_prefixed_bytes</span>(<span class="kw-2">&amp;</span><span class="ident">actor</span>, <span class="kw-2">&amp;mut</span> <span class="ident">data</span>);
-        <span class="ident">leb128::write::unsigned</span>(<span class="kw-2">&amp;mut</span> <span class="ident">data</span>, <span class="self">self</span>.<span class="ident">seq</span>.<span class="ident">value</span>).<span class="ident">unwrap</span>();
-        <span class="ident">leb128::write::unsigned</span>(<span class="kw-2">&amp;mut</span> <span class="ident">data</span>, <span class="self">self</span>.<span class="ident">start_op</span>.<span class="ident">value</span>.<span class="ident">into</span>()).<span class="ident">unwrap</span>();
-        <span class="ident">leb128::write::signed</span>(<span class="kw-2">&amp;mut</span> <span class="ident">data</span>, <span class="self">self</span>.<span class="ident">timestamp</span>.<span class="ident">value</span>).<span class="ident">unwrap</span>();
-        <span class="ident">length_prefixed_bytes</span>(
-            <span class="self">self</span>.<span class="ident">message</span>.<span class="ident">as_ref</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">m</span><span class="op">|</span> <span class="ident">m</span>.<span class="ident">as_bytes</span>()).<span class="ident">unwrap_or</span>(<span class="kw-2">&amp;</span>[]),
-            <span class="kw-2">&amp;mut</span> <span class="ident">data</span>,
+        length_prefixed_bytes(<span class="kw-2">&amp;</span>actor, <span class="kw-2">&amp;mut </span>data);
+        leb128::write::unsigned(<span class="kw-2">&amp;mut </span>data, <span class="self">self</span>.seq.value).unwrap();
+        leb128::write::unsigned(<span class="kw-2">&amp;mut </span>data, <span class="self">self</span>.start_op.value.into()).unwrap();
+        leb128::write::signed(<span class="kw-2">&amp;mut </span>data, <span class="self">self</span>.timestamp.value).unwrap();
+        length_prefixed_bytes(
+            <span class="self">self</span>.message.as_ref().map(|m| m.as_bytes()).unwrap_or(<span class="kw-2">&amp;</span>[]),
+            <span class="kw-2">&amp;mut </span>data,
         );
-        <span class="ident">leb128::write::unsigned</span>(<span class="kw-2">&amp;mut</span> <span class="ident">data</span>, <span class="ident">other_actors</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>).<span class="ident">unwrap</span>();
-        <span class="kw">for</span> <span class="ident">actor</span> <span class="kw">in</span> <span class="ident">other_actors</span>.<span class="ident">iter</span>() {
-            <span class="ident">length_prefixed_bytes</span>(<span class="kw-2">&amp;</span><span class="ident">actor</span>, <span class="kw-2">&amp;mut</span> <span class="ident">data</span>);
+        leb128::write::unsigned(<span class="kw-2">&amp;mut </span>data, other_actors.len() <span class="kw">as </span>u64).unwrap();
+        <span class="kw">for </span>actor <span class="kw">in </span>other_actors.iter() {
+            length_prefixed_bytes(<span class="kw-2">&amp;</span>actor, <span class="kw-2">&amp;mut </span>data);
         }
-        <span class="ident">cols</span>.<span class="ident">raw_columns</span>().<span class="ident">write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">data</span>);
-        <span class="kw">let</span> <span class="ident">ops_data_start</span> <span class="op">=</span> <span class="ident">data</span>.<span class="ident">len</span>();
-        <span class="kw">let</span> <span class="ident">ops_data</span> <span class="op">=</span> <span class="ident">ops_data_start</span>..(<span class="ident">ops_data_start</span> <span class="op">+</span> <span class="ident">col_data</span>.<span class="ident">len</span>());
+        cols.raw_columns().write(<span class="kw-2">&amp;mut </span>data);
+        <span class="kw">let </span>ops_data_start = data.len();
+        <span class="kw">let </span>ops_data = ops_data_start..(ops_data_start + col_data.len());
 
-        <span class="ident">data</span>.<span class="ident">extend</span>(<span class="ident">col_data</span>);
-        <span class="kw">let</span> <span class="ident">extra_bytes</span> <span class="op">=</span>
-            <span class="ident">data</span>.<span class="ident">len</span>()..(<span class="ident">data</span>.<span class="ident">len</span>() <span class="op">+</span> <span class="self">self</span>.<span class="ident">extra_bytes</span>.<span class="ident">as_ref</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">len</span>()).<span class="ident">unwrap_or</span>(<span class="number">0</span>));
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">extra</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">extra_bytes</span> {
-            <span class="ident">data</span>.<span class="ident">extend</span>(<span class="ident">extra</span>);
+        data.extend(col_data);
+        <span class="kw">let </span>extra_bytes =
+            data.len()..(data.len() + <span class="self">self</span>.extra_bytes.as_ref().map(|e| e.len()).unwrap_or(<span class="number">0</span>));
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(extra) = <span class="self">self</span>.extra_bytes {
+            data.extend(extra);
         }
 
-        <span class="kw">let</span> <span class="ident">header</span> <span class="op">=</span> <span class="ident">Header::new</span>(<span class="ident">ChunkType::Change</span>, <span class="kw-2">&amp;</span><span class="ident">data</span>);
+        <span class="kw">let </span>header = Header::new(ChunkType::Change, <span class="kw-2">&amp;</span>data);
 
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">bytes</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">header</span>.<span class="ident">len</span>() <span class="op">+</span> <span class="ident">data</span>.<span class="ident">len</span>());
-        <span class="ident">header</span>.<span class="ident">write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">bytes</span>);
-        <span class="ident">bytes</span>.<span class="ident">extend</span>(<span class="ident">data</span>);
+        <span class="kw">let </span><span class="kw-2">mut </span>bytes = Vec::with_capacity(header.len() + data.len());
+        header.write(<span class="kw-2">&amp;mut </span>bytes);
+        bytes.extend(data);
 
-        <span class="kw">let</span> <span class="ident">ops_data</span> <span class="op">=</span> <span class="ident">shift_range</span>(<span class="ident">ops_data</span>, <span class="ident">header</span>.<span class="ident">len</span>());
-        <span class="kw">let</span> <span class="ident">extra_bytes</span> <span class="op">=</span> <span class="ident">shift_range</span>(<span class="ident">extra_bytes</span>, <span class="ident">header</span>.<span class="ident">len</span>());
+        <span class="kw">let </span>ops_data = shift_range(ops_data, header.len());
+        <span class="kw">let </span>extra_bytes = shift_range(extra_bytes, header.len());
 
-        <span class="prelude-val">Ok</span>(<span class="ident">Change</span> {
-            <span class="ident">bytes</span>: <span class="ident">Cow::Owned</span>(<span class="ident">bytes</span>),
-            <span class="ident">header</span>,
-            <span class="ident">dependencies</span>: <span class="self">self</span>.<span class="ident">dependencies</span>,
-            <span class="ident">actor</span>,
-            <span class="ident">other_actors</span>,
-            <span class="ident">seq</span>: <span class="self">self</span>.<span class="ident">seq</span>.<span class="ident">value</span>,
-            <span class="ident">start_op</span>: <span class="self">self</span>.<span class="ident">start_op</span>.<span class="ident">value</span>,
-            <span class="ident">timestamp</span>: <span class="self">self</span>.<span class="ident">timestamp</span>.<span class="ident">value</span>,
-            <span class="ident">message</span>: <span class="self">self</span>.<span class="ident">message</span>,
-            <span class="ident">ops_meta</span>: <span class="ident">cols</span>,
-            <span class="ident">ops_data</span>,
-            <span class="ident">extra_bytes</span>,
-            <span class="ident">_phantom</span>: <span class="ident">PhantomData</span>,
+        <span class="prelude-val">Ok</span>(Change {
+            bytes: Cow::Owned(bytes),
+            header,
+            dependencies: <span class="self">self</span>.dependencies,
+            actor,
+            other_actors,
+            seq: <span class="self">self</span>.seq.value,
+            start_op: <span class="self">self</span>.start_op.value,
+            timestamp: <span class="self">self</span>.timestamp.value,
+            message: <span class="self">self</span>.message,
+            ops_meta: cols,
+            ops_data,
+            extra_bytes,
+            _phantom: PhantomData,
         })
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

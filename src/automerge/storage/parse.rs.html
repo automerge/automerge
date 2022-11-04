@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/parse.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>parse.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/parse.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>parse.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -594,599 +594,599 @@
 <span id="592">592</span>
 <span id="593">593</span>
 <span id="594">594</span>
-</pre><pre class="rust"><code><span class="doccomment">//! A small parser combinator library inspired by [`nom`](https://docs.rs/crate/nom/5.0.0).</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! The primary reason for using this rather than `nom` is that this is only a few hundred lines of</span>
-<span class="doccomment">//! code because we don&#39;t need a fully fledged combinator library - automerge is a low level</span>
-<span class="doccomment">//! library so it&#39;s good to avoid dependencies where we can.</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! # Basic Usage</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! The basic components of this library are [`Parser`]s, which parse [`Input`]s and produce</span>
-<span class="doccomment">//! [`ParseResult`]s. `Input` is a combination of an `&amp;[u8]` which is the incoming data along with</span>
-<span class="doccomment">//! the position it has read up to in the data. `Parser` is a trait but has a blanket `impl` for</span>
-<span class="doccomment">//! `FnMut(Input&lt;&#39;a&gt;) -&gt; ParseResult&lt;&#39;a, O, E&gt;` so in practice you can think of parsers as a</span>
-<span class="doccomment">//! function which takes some input and returns a result plus any remaining input. This final part</span>
-<span class="doccomment">//! is encapsulated by the `ParseResult` which is a type alias for a `Result`. This means that</span>
-<span class="doccomment">//! typical usage will look something like this:</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! ```rust,ignore</span>
-<span class="doccomment">//! use automerge::storage::parse::{ParseResult, take_1};</span>
-<span class="doccomment">//! fn do_something&lt;&#39;a&gt;(input: Input&lt;&#39;a&gt;) -&gt; ParseResult&lt;&#39;a, [u8; 3], ()&gt; {</span>
-<span class="doccomment">//!     let (i, a) = take_1::&lt;()&gt;(input)?;</span>
-<span class="doccomment">//!     let (i, b) = take_1::&lt;()&gt;(i)?;</span>
-<span class="doccomment">//!     let (i, c) = take_1::&lt;()&gt;(i)?;</span>
-<span class="doccomment">//!     let result = [a, b, c];</span>
-<span class="doccomment">//!     Ok((i, result))</span>
-<span class="doccomment">//! }</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! let input = Input::new(&amp;[b&quot;12345&quot;]);</span>
-<span class="doccomment">//! let result = do_something(input);</span>
-<span class="doccomment">//! if let Ok((_, result)) = result {</span>
-<span class="doccomment">//!     assert_eq!(&amp;result, &amp;[&#39;1&#39;, &#39;2&#39;, &#39;3&#39;]);</span>
-<span class="doccomment">//! } else {</span>
-<span class="doccomment">//!     panic!();</span>
-<span class="doccomment">//! }</span>
-<span class="doccomment">//! ```</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! Three things to note here:</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! 1. The rebinding of the input (in `i`) after each call to `take_1`, this is how parser state is passed from</span>
-<span class="doccomment">//!    one call to the next</span>
-<span class="doccomment">//! 2. We return a tuple containing the remaining input plus the result</span>
-<span class="doccomment">//! 3. `take_1` has a type parameter we must pass to it representing the error type. Generally you</span>
-<span class="doccomment">//!    don&#39;t need to do that as type inference is often good enough.</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! # Errors</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! The error branch of `ParseError` is an enum containing either `ParseError::Incomplete`</span>
-<span class="doccomment">//! indicating that with more input we might be able to succeed, or a `ParseError::Error`. The</span>
-<span class="doccomment">//! latter branch is where parser specific errors (e.g. &quot;this u8 is not a valid chunk type&quot;) are</span>
-<span class="doccomment">//! passed. This has implications for returning and handling errors.</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! ## Returning Errors</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! If you want to return an error from a parser you will need to wrap the error in</span>
-<span class="doccomment">//! `ParseError::Error`.</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! ```rust,ignore</span>
-<span class="doccomment">//! struct MyError;</span>
-<span class="doccomment">//! fn my_bad_parser() -&gt; ParseResult&lt;(), MyError&gt; {</span>
-<span class="doccomment">//!     Err(ParseError::Error(MyError))</span>
-<span class="doccomment">//! }</span>
-<span class="doccomment">//! ```</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! ## Handling Errors</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! Handling errors is generally important when you want to compose parsers with different error</span>
-<span class="doccomment">//! types. In this case you will often have an error type you want to map each of the underlying</span>
-<span class="doccomment">//! errors into. For this purpose you can use `ParseError::lift`</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! ```rust,ignore</span>
-<span class="doccomment">//! # use automerge::parse::{ParseResult, Input};</span>
-<span class="doccomment">//! #[derive(thiserror::Error, Debug)]</span>
-<span class="doccomment">//! #[error(&quot;this is a bad string&quot;)]</span>
-<span class="doccomment">//! struct BadString;</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! #[derive(thiserror::Error, Debug)]</span>
-<span class="doccomment">//! #[error(&quot;this is a bad number&quot;)]</span>
-<span class="doccomment">//! struct BadNumber;</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! fn parse_string&lt;&#39;a&gt;(input: Input&lt;&#39;a&gt;) -&gt; ParseResult&lt;&#39;a, String, BadString&gt; {</span>
-<span class="doccomment">//!     Err(ParseError::Error(BadString))</span>
-<span class="doccomment">//! }</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! fn parse_number&lt;&#39;a&gt;(input: Input&lt;&#39;a&gt;) -&gt; ParseResult&lt;&#39;a, u32, BadNumber&gt; {</span>
-<span class="doccomment">//!     Err(ParseError::Error(BadNumber))</span>
-<span class="doccomment">//! }</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! #[derive(thiserror::Error, Debug)]</span>
-<span class="doccomment">//! struct CombinedError{</span>
-<span class="doccomment">//!     #[error(transparent)]</span>
-<span class="doccomment">//!     String(#[from] BadString),</span>
-<span class="doccomment">//!     #[error(transparent)]</span>
-<span class="doccomment">//!     Number(#[from] BadNumber),</span>
-<span class="doccomment">//! }</span>
-<span class="doccomment">//!</span>
-<span class="doccomment">//! fn parse_string_then_number&lt;&#39;a&gt;(input: Input&lt;&#39;a&gt;) -&gt; ParseResult&lt;&#39;a, (String, u32), CombinedError&gt; {</span>
-<span class="doccomment">//!     // Note the `e.lift()` here, this works because of the `From&lt;BadString&gt;` impl generated by</span>
-<span class="doccomment">//!     // `thiserror::Error`</span>
-<span class="doccomment">//!     let (i, thestring) = parse_string(input).map_err(|e| e.lift())?;</span>
-<span class="doccomment">//!     let (i, thenumber) = parse_number(i).map_err(|e| e.lift())?;</span>
-<span class="doccomment">//!     Ok((i, (thestring, thenumber)))</span>
-<span class="doccomment">//! }</span>
-<span class="doccomment">//! ```</span>
+</pre><pre class="rust"><code><span class="doccomment">//! A small parser combinator library inspired by [`nom`](https://docs.rs/crate/nom/5.0.0).
+//!
+//! The primary reason for using this rather than `nom` is that this is only a few hundred lines of
+//! code because we don&#39;t need a fully fledged combinator library - automerge is a low level
+//! library so it&#39;s good to avoid dependencies where we can.
+//!
+//! # Basic Usage
+//!
+//! The basic components of this library are [`Parser`]s, which parse [`Input`]s and produce
+//! [`ParseResult`]s. `Input` is a combination of an `&amp;[u8]` which is the incoming data along with
+//! the position it has read up to in the data. `Parser` is a trait but has a blanket `impl` for
+//! `FnMut(Input&lt;&#39;a&gt;) -&gt; ParseResult&lt;&#39;a, O, E&gt;` so in practice you can think of parsers as a
+//! function which takes some input and returns a result plus any remaining input. This final part
+//! is encapsulated by the `ParseResult` which is a type alias for a `Result`. This means that
+//! typical usage will look something like this:
+//!
+//! ```rust,ignore
+//! use automerge::storage::parse::{ParseResult, take_1};
+//! fn do_something&lt;&#39;a&gt;(input: Input&lt;&#39;a&gt;) -&gt; ParseResult&lt;&#39;a, [u8; 3], ()&gt; {
+//!     let (i, a) = take_1::&lt;()&gt;(input)?;
+//!     let (i, b) = take_1::&lt;()&gt;(i)?;
+//!     let (i, c) = take_1::&lt;()&gt;(i)?;
+//!     let result = [a, b, c];
+//!     Ok((i, result))
+//! }
+//!
+//! let input = Input::new(&amp;[b&quot;12345&quot;]);
+//! let result = do_something(input);
+//! if let Ok((_, result)) = result {
+//!     assert_eq!(&amp;result, &amp;[&#39;1&#39;, &#39;2&#39;, &#39;3&#39;]);
+//! } else {
+//!     panic!();
+//! }
+//! ```
+//!
+//! Three things to note here:
+//!
+//! 1. The rebinding of the input (in `i`) after each call to `take_1`, this is how parser state is passed from
+//!    one call to the next
+//! 2. We return a tuple containing the remaining input plus the result
+//! 3. `take_1` has a type parameter we must pass to it representing the error type. Generally you
+//!    don&#39;t need to do that as type inference is often good enough.
+//!
+//! # Errors
+//!
+//! The error branch of `ParseError` is an enum containing either `ParseError::Incomplete`
+//! indicating that with more input we might be able to succeed, or a `ParseError::Error`. The
+//! latter branch is where parser specific errors (e.g. &quot;this u8 is not a valid chunk type&quot;) are
+//! passed. This has implications for returning and handling errors.
+//!
+//! ## Returning Errors
+//!
+//! If you want to return an error from a parser you will need to wrap the error in
+//! `ParseError::Error`.
+//!
+//! ```rust,ignore
+//! struct MyError;
+//! fn my_bad_parser() -&gt; ParseResult&lt;(), MyError&gt; {
+//!     Err(ParseError::Error(MyError))
+//! }
+//! ```
+//!
+//! ## Handling Errors
+//!
+//! Handling errors is generally important when you want to compose parsers with different error
+//! types. In this case you will often have an error type you want to map each of the underlying
+//! errors into. For this purpose you can use `ParseError::lift`
+//!
+//! ```rust,ignore
+//! # use automerge::parse::{ParseResult, Input};
+//! #[derive(thiserror::Error, Debug)]
+//! #[error(&quot;this is a bad string&quot;)]
+//! struct BadString;
+//!
+//! #[derive(thiserror::Error, Debug)]
+//! #[error(&quot;this is a bad number&quot;)]
+//! struct BadNumber;
+//!
+//! fn parse_string&lt;&#39;a&gt;(input: Input&lt;&#39;a&gt;) -&gt; ParseResult&lt;&#39;a, String, BadString&gt; {
+//!     Err(ParseError::Error(BadString))
+//! }
+//!
+//! fn parse_number&lt;&#39;a&gt;(input: Input&lt;&#39;a&gt;) -&gt; ParseResult&lt;&#39;a, u32, BadNumber&gt; {
+//!     Err(ParseError::Error(BadNumber))
+//! }
+//!
+//! #[derive(thiserror::Error, Debug)]
+//! struct CombinedError{
+//!     #[error(transparent)]
+//!     String(#[from] BadString),
+//!     #[error(transparent)]
+//!     Number(#[from] BadNumber),
+//! }
+//!
+//! fn parse_string_then_number&lt;&#39;a&gt;(input: Input&lt;&#39;a&gt;) -&gt; ParseResult&lt;&#39;a, (String, u32), CombinedError&gt; {
+//!     // Note the `e.lift()` here, this works because of the `From&lt;BadString&gt;` impl generated by
+//!     // `thiserror::Error`
+//!     let (i, thestring) = parse_string(input).map_err(|e| e.lift())?;
+//!     let (i, thenumber) = parse_number(i).map_err(|e| e.lift())?;
+//!     Ok((i, (thestring, thenumber)))
+//! }
+//! ```
 
-<span class="kw">use</span> <span class="ident">core::num::NonZeroUsize</span>;
-<span class="kw">use</span> <span class="ident">std::convert::TryInto</span>;
+</span><span class="kw">use </span>core::num::NonZeroUsize;
+<span class="kw">use </span>std::convert::TryInto;
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod</span> <span class="ident">leb128</span>;
-<span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">ActorId</span>, <span class="ident">ChangeHash</span>};
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>leb128;
+<span class="kw">use crate</span>::{ActorId, ChangeHash};
 
-<span class="kw">const</span> <span class="ident">HASH_SIZE</span>: <span class="ident">usize</span> <span class="op">=</span> <span class="number">32</span>; <span class="comment">// 256 bits = 32 bytes</span>
+<span class="kw">const </span>HASH_SIZE: usize = <span class="number">32</span>; <span class="comment">// 256 bits = 32 bytes
 
-<span class="attribute">#[<span class="ident">allow</span>(<span class="ident">unused_imports</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident"><span class="self">self</span>::leb128</span>::{<span class="ident">leb128_i32</span>, <span class="ident">leb128_i64</span>, <span class="ident">leb128_u32</span>, <span class="ident">leb128_u64</span>, <span class="ident">nonzero_leb128_u64</span>};
+</span><span class="attribute">#[allow(unused_imports)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="self">self</span>::leb128::{leb128_i32, leb128_i64, leb128_u32, leb128_u64, nonzero_leb128_u64};
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">type</span> <span class="ident">ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">O</span>, <span class="ident">E</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(<span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>, <span class="ident">O</span>), <span class="ident">ParseError</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span><span class="op">&gt;</span>;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">type </span>ParseResult&lt;<span class="lifetime">&#39;a</span>, O, E&gt; = <span class="prelude-ty">Result</span>&lt;(Input&lt;<span class="lifetime">&#39;a</span>&gt;, O), ParseError&lt;E&gt;&gt;;
 
-<span class="doccomment">/// The input to be parsed. This is a combination of an underlying slice, plus an offset into that</span>
-<span class="doccomment">/// slice. Consequently it is very cheap to copy.</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">PartialEq</span>, <span class="ident">Clone</span>, <span class="ident">Copy</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">bytes</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>],
-    <span class="ident">position</span>: <span class="ident">usize</span>,
-    <span class="ident">original</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>],
+<span class="doccomment">/// The input to be parsed. This is a combination of an underlying slice, plus an offset into that
+/// slice. Consequently it is very cheap to copy.
+</span><span class="attribute">#[derive(PartialEq, Clone, Copy)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Input&lt;<span class="lifetime">&#39;a</span>&gt; {
+    bytes: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8],
+    position: usize,
+    original: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8],
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">std::fmt::Debug</span> <span class="kw">for</span> <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">std::fmt::Result</span> {
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; std::fmt::Debug <span class="kw">for </span>Input&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; std::fmt::Result {
         <span class="macro">write!</span>(
-            <span class="ident">f</span>,
+            f,
             <span class="string">&quot;Input(len: {}, position: {}, original_len: {})&quot;</span>,
-            <span class="self">self</span>.<span class="ident">bytes</span>.<span class="ident">len</span>(),
-            <span class="self">self</span>.<span class="ident">position</span>,
-            <span class="self">self</span>.<span class="ident">original</span>.<span class="ident">len</span>()
+            <span class="self">self</span>.bytes.len(),
+            <span class="self">self</span>.position,
+            <span class="self">self</span>.original.len()
         )
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>]) -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span> {
-            <span class="ident">bytes</span>,
-            <span class="ident">position</span>: <span class="number">0</span>,
-            <span class="ident">original</span>: <span class="ident">bytes</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Input&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(bytes: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8]) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            bytes,
+            position: <span class="number">0</span>,
+            original: bytes,
         }
     }
 
-    <span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
-    <span class="kw">pub</span>(<span class="kw">in</span> <span class="ident"><span class="kw">crate</span>::storage::parse</span>) <span class="kw">fn</span> <span class="ident">with_position</span>(<span class="ident">bytes</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>], <span class="ident">position</span>: <span class="ident">usize</span>) -&gt; <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">remaining</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">bytes</span>[<span class="ident">position</span>..];
-        <span class="self">Self</span> {
-            <span class="ident">bytes</span>: <span class="ident">remaining</span>,
-            <span class="ident">position</span>,
-            <span class="ident">original</span>: <span class="ident">bytes</span>,
+    <span class="attribute">#[cfg(test)]
+    </span><span class="kw">pub</span>(<span class="kw">in </span><span class="kw">crate</span>::storage::parse) <span class="kw">fn </span>with_position(bytes: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8], position: usize) -&gt; Input&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <span class="kw">let </span>remaining = <span class="kw-2">&amp;</span>bytes[position..];
+        <span class="self">Self </span>{
+            bytes: remaining,
+            position,
+            original: bytes,
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">empty</span>() -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span> {
-            <span class="ident">bytes</span>: <span class="kw-2">&amp;</span>[],
-            <span class="ident">position</span>: <span class="number">0</span>,
-            <span class="ident">original</span>: <span class="kw-2">&amp;</span>[],
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>empty() -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            bytes: <span class="kw-2">&amp;</span>[],
+            position: <span class="number">0</span>,
+            original: <span class="kw-2">&amp;</span>[],
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">take_1</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">u8</span>, <span class="ident">E</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">need</span>) <span class="op">=</span> <span class="ident">NonZeroUsize::new</span>(<span class="number">1_usize</span>.<span class="ident">saturating_sub</span>(<span class="self">self</span>.<span class="ident">bytes</span>.<span class="ident">len</span>())) {
-            <span class="prelude-val">Err</span>(<span class="ident">ParseError::Incomplete</span>(<span class="ident">Needed::Size</span>(<span class="ident">need</span>)))
-        } <span class="kw">else</span> {
-            <span class="kw">let</span> (<span class="ident">result</span>, <span class="ident">remaining</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">bytes</span>.<span class="ident">split_at</span>(<span class="number">1</span>);
-            <span class="kw">let</span> <span class="ident">new_input</span> <span class="op">=</span> <span class="ident">Input</span> {
-                <span class="ident">bytes</span>: <span class="ident">remaining</span>,
-                <span class="ident">original</span>: <span class="self">self</span>.<span class="ident">original</span>,
-                <span class="ident">position</span>: <span class="self">self</span>.<span class="ident">position</span> <span class="op">+</span> <span class="number">1</span>,
+    <span class="kw">fn </span>take_1&lt;E&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ParseResult&lt;<span class="lifetime">&#39;a</span>, u8, E&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(need) = NonZeroUsize::new(<span class="number">1_usize</span>.saturating_sub(<span class="self">self</span>.bytes.len())) {
+            <span class="prelude-val">Err</span>(ParseError::Incomplete(Needed::Size(need)))
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>(result, remaining) = <span class="self">self</span>.bytes.split_at(<span class="number">1</span>);
+            <span class="kw">let </span>new_input = Input {
+                bytes: remaining,
+                original: <span class="self">self</span>.original,
+                position: <span class="self">self</span>.position + <span class="number">1</span>,
             };
-            <span class="prelude-val">Ok</span>((<span class="ident">new_input</span>, <span class="ident">result</span>[<span class="number">0</span>]))
+            <span class="prelude-val">Ok</span>((new_input, result[<span class="number">0</span>]))
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">take_n</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">n</span>: <span class="ident">usize</span>) -&gt; <span class="ident">ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>], <span class="ident">E</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">need</span>) <span class="op">=</span> <span class="ident">NonZeroUsize::new</span>(<span class="ident">n</span>.<span class="ident">saturating_sub</span>(<span class="self">self</span>.<span class="ident">bytes</span>.<span class="ident">len</span>())) {
-            <span class="prelude-val">Err</span>(<span class="ident">ParseError::Incomplete</span>(<span class="ident">Needed::Size</span>(<span class="ident">need</span>)))
-        } <span class="kw">else</span> {
-            <span class="kw">let</span> (<span class="ident">result</span>, <span class="ident">remaining</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">bytes</span>.<span class="ident">split_at</span>(<span class="ident">n</span>);
-            <span class="kw">let</span> <span class="ident">new_input</span> <span class="op">=</span> <span class="ident">Input</span> {
-                <span class="ident">bytes</span>: <span class="ident">remaining</span>,
-                <span class="ident">original</span>: <span class="self">self</span>.<span class="ident">original</span>,
-                <span class="ident">position</span>: <span class="self">self</span>.<span class="ident">position</span> <span class="op">+</span> <span class="ident">n</span>,
+    <span class="kw">fn </span>take_n&lt;E&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, n: usize) -&gt; ParseResult&lt;<span class="lifetime">&#39;a</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8], E&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(need) = NonZeroUsize::new(n.saturating_sub(<span class="self">self</span>.bytes.len())) {
+            <span class="prelude-val">Err</span>(ParseError::Incomplete(Needed::Size(need)))
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>(result, remaining) = <span class="self">self</span>.bytes.split_at(n);
+            <span class="kw">let </span>new_input = Input {
+                bytes: remaining,
+                original: <span class="self">self</span>.original,
+                position: <span class="self">self</span>.position + n,
             };
-            <span class="prelude-val">Ok</span>((<span class="ident">new_input</span>, <span class="ident">result</span>))
+            <span class="prelude-val">Ok</span>((new_input, result))
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">take_4</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, [<span class="ident">u8</span>; <span class="number">4</span>], <span class="ident">E</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">need</span>) <span class="op">=</span> <span class="ident">NonZeroUsize::new</span>(<span class="number">4_usize</span>.<span class="ident">saturating_sub</span>(<span class="self">self</span>.<span class="ident">bytes</span>.<span class="ident">len</span>())) {
-            <span class="prelude-val">Err</span>(<span class="ident">ParseError::Incomplete</span>(<span class="ident">Needed::Size</span>(<span class="ident">need</span>)))
-        } <span class="kw">else</span> {
-            <span class="kw">let</span> (<span class="ident">result</span>, <span class="ident">remaining</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">bytes</span>.<span class="ident">split_at</span>(<span class="number">4</span>);
-            <span class="kw">let</span> <span class="ident">new_input</span> <span class="op">=</span> <span class="ident">Input</span> {
-                <span class="ident">bytes</span>: <span class="ident">remaining</span>,
-                <span class="ident">original</span>: <span class="self">self</span>.<span class="ident">original</span>,
-                <span class="ident">position</span>: <span class="self">self</span>.<span class="ident">position</span> <span class="op">+</span> <span class="number">4</span>,
+    <span class="kw">fn </span>take_4&lt;E&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ParseResult&lt;<span class="lifetime">&#39;a</span>, [u8; <span class="number">4</span>], E&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(need) = NonZeroUsize::new(<span class="number">4_usize</span>.saturating_sub(<span class="self">self</span>.bytes.len())) {
+            <span class="prelude-val">Err</span>(ParseError::Incomplete(Needed::Size(need)))
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>(result, remaining) = <span class="self">self</span>.bytes.split_at(<span class="number">4</span>);
+            <span class="kw">let </span>new_input = Input {
+                bytes: remaining,
+                original: <span class="self">self</span>.original,
+                position: <span class="self">self</span>.position + <span class="number">4</span>,
             };
-            <span class="prelude-val">Ok</span>((<span class="ident">new_input</span>, <span class="ident">result</span>.<span class="ident">try_into</span>().<span class="ident">expect</span>(<span class="string">&quot;we checked the length&quot;</span>)))
+            <span class="prelude-val">Ok</span>((new_input, result.try_into().expect(<span class="string">&quot;we checked the length&quot;</span>)))
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">range_of</span><span class="op">&lt;</span><span class="ident">P</span>, <span class="ident">R</span>, <span class="ident">E</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">parser</span>: <span class="ident">P</span>) -&gt; <span class="ident">ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">RangeOf</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>, <span class="ident">E</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">P</span>: <span class="ident">Parser</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">R</span>, <span class="ident">E</span><span class="op">&gt;</span>,
+    <span class="kw">fn </span>range_of&lt;P, R, E&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw-2">mut </span>parser: P) -&gt; ParseResult&lt;<span class="lifetime">&#39;a</span>, RangeOf&lt;R&gt;, E&gt;
+    <span class="kw">where
+        </span>P: Parser&lt;<span class="lifetime">&#39;a</span>, R, E&gt;,
     {
-        <span class="kw">let</span> (<span class="ident">new_input</span>, <span class="ident">value</span>) <span class="op">=</span> <span class="ident">parser</span>.<span class="ident">parse</span>(<span class="kw-2">*</span><span class="self">self</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">range</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">position</span>..<span class="ident">new_input</span>.<span class="ident">position</span>;
-        <span class="prelude-val">Ok</span>((<span class="ident">new_input</span>, <span class="ident">RangeOf</span> { <span class="ident">range</span>, <span class="ident">value</span> }))
+        <span class="kw">let </span>(new_input, value) = parser.parse(<span class="kw-2">*</span><span class="self">self</span>)<span class="question-mark">?</span>;
+        <span class="kw">let </span>range = <span class="self">self</span>.position..new_input.position;
+        <span class="prelude-val">Ok</span>((new_input, RangeOf { range, value }))
     }
 
-    <span class="kw">fn</span> <span class="ident">rest</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>], <span class="ident">E</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">position</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">position</span> <span class="op">+</span> <span class="self">self</span>.<span class="ident">bytes</span>.<span class="ident">len</span>();
-        <span class="kw">let</span> <span class="ident">new_input</span> <span class="op">=</span> <span class="self">Self</span> {
-            <span class="ident">position</span>,
-            <span class="ident">original</span>: <span class="self">self</span>.<span class="ident">original</span>,
-            <span class="ident">bytes</span>: <span class="kw-2">&amp;</span>[],
+    <span class="kw">fn </span>rest&lt;E&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ParseResult&lt;<span class="lifetime">&#39;a</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8], E&gt; {
+        <span class="kw">let </span>position = <span class="self">self</span>.position + <span class="self">self</span>.bytes.len();
+        <span class="kw">let </span>new_input = <span class="self">Self </span>{
+            position,
+            original: <span class="self">self</span>.original,
+            bytes: <span class="kw-2">&amp;</span>[],
         };
-        <span class="prelude-val">Ok</span>((<span class="ident">new_input</span>, <span class="self">self</span>.<span class="ident">bytes</span>))
+        <span class="prelude-val">Ok</span>((new_input, <span class="self">self</span>.bytes))
     }
 
-    <span class="kw">fn</span> <span class="ident">truncate</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">length</span>: <span class="ident">usize</span>) -&gt; <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">length</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">length</span> <span class="op">&gt;</span> <span class="self">self</span>.<span class="ident">bytes</span>.<span class="ident">len</span>() {
-            <span class="self">self</span>.<span class="ident">bytes</span>.<span class="ident">len</span>()
-        } <span class="kw">else</span> {
-            <span class="ident">length</span>
+    <span class="kw">fn </span>truncate(<span class="kw-2">&amp;</span><span class="self">self</span>, length: usize) -&gt; Input&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <span class="kw">let </span>length = <span class="kw">if </span>length &gt; <span class="self">self</span>.bytes.len() {
+            <span class="self">self</span>.bytes.len()
+        } <span class="kw">else </span>{
+            length
         };
-        <span class="ident">Input</span> {
-            <span class="ident">bytes</span>: <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">bytes</span>[..<span class="ident">length</span>],
-            <span class="ident">position</span>: <span class="self">self</span>.<span class="ident">position</span>,
-            <span class="ident">original</span>: <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">original</span>[..(<span class="self">self</span>.<span class="ident">position</span> <span class="op">+</span> <span class="ident">length</span>)],
+        Input {
+            bytes: <span class="kw-2">&amp;</span><span class="self">self</span>.bytes[..length],
+            position: <span class="self">self</span>.position,
+            original: <span class="kw-2">&amp;</span><span class="self">self</span>.original[..(<span class="self">self</span>.position + length)],
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">skip</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">length</span>: <span class="ident">usize</span>) -&gt; <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="ident">length</span> <span class="op">&gt;</span> <span class="self">self</span>.<span class="ident">bytes</span>.<span class="ident">len</span>() {
-            <span class="ident">Input</span> {
-                <span class="ident">bytes</span>: <span class="kw-2">&amp;</span>[],
-                <span class="ident">position</span>: <span class="self">self</span>.<span class="ident">bytes</span>.<span class="ident">len</span>(),
-                <span class="ident">original</span>: <span class="self">self</span>.<span class="ident">original</span>,
+    <span class="kw">fn </span>skip(<span class="kw-2">&amp;</span><span class="self">self</span>, length: usize) -&gt; Input&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <span class="kw">if </span>length &gt; <span class="self">self</span>.bytes.len() {
+            Input {
+                bytes: <span class="kw-2">&amp;</span>[],
+                position: <span class="self">self</span>.bytes.len(),
+                original: <span class="self">self</span>.original,
             }
-        } <span class="kw">else</span> {
-            <span class="ident">Input</span> {
-                <span class="ident">bytes</span>: <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">bytes</span>[<span class="ident">length</span>..],
-                <span class="ident">position</span>: <span class="self">self</span>.<span class="ident">position</span> <span class="op">+</span> <span class="ident">length</span>,
-                <span class="ident">original</span>: <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">original</span>[(<span class="self">self</span>.<span class="ident">position</span> <span class="op">+</span> <span class="ident">length</span>)..],
+        } <span class="kw">else </span>{
+            Input {
+                bytes: <span class="kw-2">&amp;</span><span class="self">self</span>.bytes[length..],
+                position: <span class="self">self</span>.position + length,
+                original: <span class="kw-2">&amp;</span><span class="self">self</span>.original[(<span class="self">self</span>.position + length)..],
             }
         }
     }
 
-    <span class="doccomment">/// Split this input into two separate inputs, the first is the same as the current input but</span>
-    <span class="doccomment">/// with the remaining unconsumed_bytes set to at most length. The remaining `Input` is the bytes</span>
-    <span class="doccomment">/// after `length`.</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// This is useful if you are parsing input which contains length delimited chunks. In this</span>
-    <span class="doccomment">/// case you may have a single input where you parse a header, then you want to parse the</span>
-    <span class="doccomment">/// current input up until the length and then parse the next chunk from the remainign input.</span>
-    <span class="doccomment">/// For example:</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// ```rust,ignore</span>
-    <span class="doccomment">/// # use automerge::storage::parse::{Input, ParseResult};</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// fn parse_chunk(input: Input&lt;&#39;_&gt;) -&gt; ParseResult&lt;(), ()&gt; {</span>
-    <span class="doccomment">///     Ok(())</span>
-    <span class="doccomment">/// }</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// # fn main() -&gt; ParseResult&lt;(), ()&gt; {</span>
-    <span class="doccomment">/// let incoming_bytes: &amp;[u8] = todo!();</span>
-    <span class="doccomment">/// let mut input = Input::new(incoming_bytes);</span>
-    <span class="doccomment">/// let mut chunks = Vec::new();</span>
-    <span class="doccomment">/// while !input.is_empty() {</span>
-    <span class="doccomment">///     let (i, chunk_len) = leb128_u64(input)?;</span>
-    <span class="doccomment">///     let Split{first: i, remaining} = i.split(chunk_len);</span>
-    <span class="doccomment">///     // Note that here, the `i` we pass into `parse_chunk` has already parsed the header,</span>
-    <span class="doccomment">///     // so the logic of the `parse_chunk` function doesn&#39;t need to reimplement the header</span>
-    <span class="doccomment">///     // parsing</span>
-    <span class="doccomment">///     let (i, chunk) = parse_chunk(i)?;</span>
-    <span class="doccomment">///     let input = remaining;</span>
-    <span class="doccomment">/// }</span>
-    <span class="doccomment">/// parse_chunk(i);</span>
-    <span class="doccomment">/// # }</span>
-    <span class="doccomment">/// ```</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">split</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">length</span>: <span class="ident">usize</span>) -&gt; <span class="ident">Split</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="ident">Split</span> {
-            <span class="ident">first</span>: <span class="self">self</span>.<span class="ident">truncate</span>(<span class="ident">length</span>),
-            <span class="ident">remaining</span>: <span class="self">self</span>.<span class="ident">skip</span>(<span class="ident">length</span>),
+    <span class="doccomment">/// Split this input into two separate inputs, the first is the same as the current input but
+    /// with the remaining unconsumed_bytes set to at most length. The remaining `Input` is the bytes
+    /// after `length`.
+    ///
+    /// This is useful if you are parsing input which contains length delimited chunks. In this
+    /// case you may have a single input where you parse a header, then you want to parse the
+    /// current input up until the length and then parse the next chunk from the remainign input.
+    /// For example:
+    ///
+    /// ```rust,ignore
+    /// # use automerge::storage::parse::{Input, ParseResult};
+    ///
+    /// fn parse_chunk(input: Input&lt;&#39;_&gt;) -&gt; ParseResult&lt;(), ()&gt; {
+    ///     Ok(())
+    /// }
+    ///
+    /// # fn main() -&gt; ParseResult&lt;(), ()&gt; {
+    /// let incoming_bytes: &amp;[u8] = todo!();
+    /// let mut input = Input::new(incoming_bytes);
+    /// let mut chunks = Vec::new();
+    /// while !input.is_empty() {
+    ///     let (i, chunk_len) = leb128_u64(input)?;
+    ///     let Split{first: i, remaining} = i.split(chunk_len);
+    ///     // Note that here, the `i` we pass into `parse_chunk` has already parsed the header,
+    ///     // so the logic of the `parse_chunk` function doesn&#39;t need to reimplement the header
+    ///     // parsing
+    ///     let (i, chunk) = parse_chunk(i)?;
+    ///     let input = remaining;
+    /// }
+    /// parse_chunk(i);
+    /// # }
+    /// ```
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>split(<span class="kw-2">&amp;</span><span class="self">self</span>, length: usize) -&gt; Split&lt;<span class="lifetime">&#39;a</span>&gt; {
+        Split {
+            first: <span class="self">self</span>.truncate(length),
+            remaining: <span class="self">self</span>.skip(length),
         }
     }
 
-    <span class="doccomment">/// Return a new `Input` which forgets about the consumed input. The new `Input` will have it&#39;s</span>
-    <span class="doccomment">/// position set to 0. This is equivalent to `Input::new(self.bytes())`</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">reset</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="ident">Input::new</span>(<span class="self">self</span>.<span class="ident">bytes</span>)
+    <span class="doccomment">/// Return a new `Input` which forgets about the consumed input. The new `Input` will have it&#39;s
+    /// position set to 0. This is equivalent to `Input::new(self.bytes())`
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>reset(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Input&lt;<span class="lifetime">&#39;a</span>&gt; {
+        Input::new(<span class="self">self</span>.bytes)
     }
 
-    <span class="doccomment">/// Check if there are any more bytes left to consume</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">is_empty</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="ident">bytes</span>.<span class="ident">is_empty</span>()
+    <span class="doccomment">/// Check if there are any more bytes left to consume
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>is_empty(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="self">self</span>.bytes.is_empty()
     }
 
-    <span class="doccomment">/// The bytes which have not yet been consumed</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">unconsumed_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>] {
-        <span class="self">self</span>.<span class="ident">bytes</span>
+    <span class="doccomment">/// The bytes which have not yet been consumed
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>unconsumed_bytes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8] {
+        <span class="self">self</span>.bytes
     }
 
-    <span class="doccomment">/// The bytes behind this input - including bytes which have been consumed</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>] {
-        <span class="self">self</span>.<span class="ident">original</span>
+    <span class="doccomment">/// The bytes behind this input - including bytes which have been consumed
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>bytes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8] {
+        <span class="self">self</span>.original
     }
 }
 
-<span class="doccomment">/// Returned by [`Input::split`]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">Split</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// The input up to the length passed to `split`. This is identical to the original input</span>
-    <span class="doccomment">/// except that [`Input::bytes`] and [`Input::unconsumed_bytes`] will only return the original</span>
-    <span class="doccomment">/// input up to `length` bytes from the point at which `split` was called.</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">first</span>: <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// The remaining input after the length passed to `split`. This is equivalent to</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// ```rust,ignore</span>
-    <span class="doccomment">/// # use automerge::storage::parse::Input;</span>
-    <span class="doccomment">/// # let split_length = 1;</span>
-    <span class="doccomment">/// let original_input = todo!();</span>
-    <span class="doccomment">/// Input::new(original_input.bytes()[split_length..])</span>
-    <span class="doccomment">/// ```</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">remaining</span>: <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
+<span class="doccomment">/// Returned by [`Input::split`]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Split&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="doccomment">/// The input up to the length passed to `split`. This is identical to the original input
+    /// except that [`Input::bytes`] and [`Input::unconsumed_bytes`] will only return the original
+    /// input up to `length` bytes from the point at which `split` was called.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) first: Input&lt;<span class="lifetime">&#39;a</span>&gt;,
+    <span class="doccomment">/// The remaining input after the length passed to `split`. This is equivalent to
+    ///
+    /// ```rust,ignore
+    /// # use automerge::storage::parse::Input;
+    /// # let split_length = 1;
+    /// let original_input = todo!();
+    /// Input::new(original_input.bytes()[split_length..])
+    /// ```
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) remaining: Input&lt;<span class="lifetime">&#39;a</span>&gt;,
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">trait</span> <span class="ident">Parser</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">O</span>, <span class="ident">E</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">parse</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">input</span>: <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>) -&gt; <span class="ident">ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">O</span>, <span class="ident">E</span><span class="op">&gt;</span>;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">trait </span>Parser&lt;<span class="lifetime">&#39;a</span>, O, E&gt; {
+    <span class="kw">fn </span>parse(<span class="kw-2">&amp;mut </span><span class="self">self</span>, input: Input&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; ParseResult&lt;<span class="lifetime">&#39;a</span>, O, E&gt;;
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">O</span>, <span class="ident">F</span>, <span class="ident">E</span><span class="op">&gt;</span> <span class="ident">Parser</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">O</span>, <span class="ident">E</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">F</span>
-<span class="kw">where</span>
-    <span class="ident">F</span>: <span class="ident">FnMut</span>(<span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>) -&gt; <span class="ident">ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">O</span>, <span class="ident">E</span><span class="op">&gt;</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, O, F, E&gt; Parser&lt;<span class="lifetime">&#39;a</span>, O, E&gt; <span class="kw">for </span>F
+<span class="kw">where
+    </span>F: FnMut(Input&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; ParseResult&lt;<span class="lifetime">&#39;a</span>, O, E&gt;,
 {
-    <span class="kw">fn</span> <span class="ident">parse</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">input</span>: <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>) -&gt; <span class="ident">ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">O</span>, <span class="ident">E</span><span class="op">&gt;</span> {
-        (<span class="self">self</span>)(<span class="ident">input</span>)
+    <span class="kw">fn </span>parse(<span class="kw-2">&amp;mut </span><span class="self">self</span>, input: Input&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; ParseResult&lt;<span class="lifetime">&#39;a</span>, O, E&gt; {
+        (<span class="self">self</span>)(input)
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">ParseError</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// Some application specific error occurred</span>
-    <span class="ident">Error</span>(<span class="ident">E</span>),
-    <span class="doccomment">/// A combinator requested more data than we have available</span>
-    <span class="ident">Incomplete</span>(<span class="ident">Needed</span>),
+<span class="attribute">#[derive(Clone, Debug, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>ParseError&lt;E&gt; {
+    <span class="doccomment">/// Some application specific error occurred
+    </span>Error(E),
+    <span class="doccomment">/// A combinator requested more data than we have available
+    </span>Incomplete(Needed),
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span> <span class="ident">ParseError</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// Convert any underlying `E` into `F`. This is useful when you are composing parsers</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">lift</span><span class="op">&lt;</span><span class="ident">F</span><span class="op">&gt;</span>(<span class="self">self</span>) -&gt; <span class="ident">ParseError</span><span class="op">&lt;</span><span class="ident">F</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">F</span>: <span class="ident">From</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span>,
+<span class="kw">impl</span>&lt;E&gt; ParseError&lt;E&gt; {
+    <span class="doccomment">/// Convert any underlying `E` into `F`. This is useful when you are composing parsers
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>lift&lt;F&gt;(<span class="self">self</span>) -&gt; ParseError&lt;F&gt;
+    <span class="kw">where
+        </span>F: From&lt;E&gt;,
     {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident"><span class="self">Self</span>::Error</span>(<span class="ident">e</span>) =&gt; <span class="ident">ParseError::Error</span>(<span class="ident">F::from</span>(<span class="ident">e</span>)),
-            <span class="ident"><span class="self">Self</span>::Incomplete</span>(<span class="ident">n</span>) =&gt; <span class="ident">ParseError::Incomplete</span>(<span class="ident">n</span>),
+        <span class="kw">match </span><span class="self">self </span>{
+            <span class="self">Self</span>::Error(e) =&gt; ParseError::Error(F::from(e)),
+            <span class="self">Self</span>::Incomplete(n) =&gt; ParseError::Incomplete(n),
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">E</span>: <span class="ident">std::fmt::Display</span><span class="op">&gt;</span> <span class="ident">std::fmt::Display</span> <span class="kw">for</span> <span class="ident">ParseError</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">std::fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">std::fmt::Result</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident"><span class="self">Self</span>::Error</span>(<span class="ident">e</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="ident">e</span>),
-            <span class="ident"><span class="self">Self</span>::Incomplete</span>(<span class="kw">_</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;not enough data&quot;</span>),
+<span class="kw">impl</span>&lt;E: std::fmt::Display&gt; std::fmt::Display <span class="kw">for </span>ParseError&lt;E&gt; {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; std::fmt::Result {
+        <span class="kw">match </span><span class="self">self </span>{
+            <span class="self">Self</span>::Error(e) =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;{}&quot;</span>, e),
+            <span class="self">Self</span>::Incomplete(<span class="kw">_</span>) =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;not enough data&quot;</span>),
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">E</span>: <span class="ident">std::fmt::Display</span> <span class="op">+</span> <span class="ident">std::fmt::Debug</span><span class="op">&gt;</span> <span class="ident">std::error::Error</span> <span class="kw">for</span> <span class="ident">ParseError</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span> {}
+<span class="kw">impl</span>&lt;E: std::fmt::Display + std::fmt::Debug&gt; std::error::Error <span class="kw">for </span>ParseError&lt;E&gt; {}
 
-<span class="doccomment">/// How much more input we need</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">Needed</span> {
-    <span class="doccomment">/// We don&#39;t know how much more</span>
-    <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">dead_code</span>)]</span>
-    <span class="ident">Unknown</span>,
-    <span class="doccomment">/// We need _at least_ this much more</span>
-    <span class="ident">Size</span>(<span class="ident">NonZeroUsize</span>),
+<span class="doccomment">/// How much more input we need
+</span><span class="attribute">#[derive(Clone, Debug, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>Needed {
+    <span class="doccomment">/// We don&#39;t know how much more
+    </span><span class="attribute">#[allow(dead_code)]
+    </span>Unknown,
+    <span class="doccomment">/// We need _at least_ this much more
+    </span>Size(NonZeroUsize),
 }
 
-<span class="doccomment">/// Map the function `f` over the result of `parser` returning a new parser</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">map</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">O1</span>, <span class="ident">O2</span>, <span class="ident">F</span>, <span class="ident">G</span>, <span class="ident">Er</span><span class="op">&gt;</span>(
-    <span class="kw-2">mut</span> <span class="ident">parser</span>: <span class="ident">F</span>,
-    <span class="kw-2">mut</span> <span class="ident">f</span>: <span class="ident">G</span>,
-) -&gt; <span class="kw">impl</span> <span class="ident">FnMut</span>(<span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>) -&gt; <span class="ident">ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">O2</span>, <span class="ident">Er</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">F</span>: <span class="ident">Parser</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">O1</span>, <span class="ident">Er</span><span class="op">&gt;</span>,
-    <span class="ident">G</span>: <span class="ident">FnMut</span>(<span class="ident">O1</span>) -&gt; <span class="ident">O2</span>,
+<span class="doccomment">/// Map the function `f` over the result of `parser` returning a new parser
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>map&lt;<span class="lifetime">&#39;a</span>, O1, O2, F, G, Er&gt;(
+    <span class="kw-2">mut </span>parser: F,
+    <span class="kw-2">mut </span>f: G,
+) -&gt; <span class="kw">impl </span>FnMut(Input&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; ParseResult&lt;<span class="lifetime">&#39;a</span>, O2, Er&gt;
+<span class="kw">where
+    </span>F: Parser&lt;<span class="lifetime">&#39;a</span>, O1, Er&gt;,
+    G: FnMut(O1) -&gt; O2,
 {
-    <span class="kw">move</span> <span class="op">|</span><span class="ident">input</span>: <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span><span class="op">|</span> {
-        <span class="kw">let</span> (<span class="ident">input</span>, <span class="ident">o1</span>) <span class="op">=</span> <span class="ident">parser</span>.<span class="ident">parse</span>(<span class="ident">input</span>)<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>((<span class="ident">input</span>, <span class="ident">f</span>(<span class="ident">o1</span>)))
+    <span class="kw">move </span>|input: Input&lt;<span class="lifetime">&#39;a</span>&gt;| {
+        <span class="kw">let </span>(input, o1) = parser.parse(input)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>((input, f(o1)))
     }
 }
 
-<span class="doccomment">/// Pull one byte from the input</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">take1</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span>(<span class="ident">input</span>: <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">u8</span>, <span class="ident">E</span><span class="op">&gt;</span> {
-    <span class="ident">input</span>.<span class="ident">take_1</span>()
+<span class="doccomment">/// Pull one byte from the input
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>take1&lt;E&gt;(input: Input&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; ParseResult&lt;<span class="lifetime">&#39;_</span>, u8, E&gt; {
+    input.take_1()
 }
 
-<span class="doccomment">/// Parse an array of four bytes from the input</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">take4</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span>(<span class="ident">input</span>: <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, [<span class="ident">u8</span>; <span class="number">4</span>], <span class="ident">E</span><span class="op">&gt;</span> {
-    <span class="ident">input</span>.<span class="ident">take_4</span>()
+<span class="doccomment">/// Parse an array of four bytes from the input
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>take4&lt;E&gt;(input: Input&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; ParseResult&lt;<span class="lifetime">&#39;_</span>, [u8; <span class="number">4</span>], E&gt; {
+    input.take_4()
 }
 
-<span class="doccomment">/// Parse a slice of length `n` from `input`</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">take_n</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span>(<span class="ident">n</span>: <span class="ident">usize</span>, <span class="ident">input</span>: <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="kw-2">&amp;</span>[<span class="ident">u8</span>], <span class="ident">E</span><span class="op">&gt;</span> {
-    <span class="ident">input</span>.<span class="ident">take_n</span>(<span class="ident">n</span>)
+<span class="doccomment">/// Parse a slice of length `n` from `input`
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>take_n&lt;E&gt;(n: usize, input: Input&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; ParseResult&lt;<span class="lifetime">&#39;_</span>, <span class="kw-2">&amp;</span>[u8], E&gt; {
+    input.take_n(n)
 }
 
-<span class="doccomment">/// Parse a length prefixed collection of `g`</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// This first parses a LEB128 encoded `u64` from the input, then applies the parser `g` this many</span>
-<span class="doccomment">/// times, returning the result in a `Vec`.</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">length_prefixed</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">G</span>, <span class="ident">O</span>, <span class="ident">Er</span><span class="op">&gt;</span>(
-    <span class="kw-2">mut</span> <span class="ident">g</span>: <span class="ident">G</span>,
-) -&gt; <span class="kw">impl</span> <span class="ident">FnMut</span>(<span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>) -&gt; <span class="ident">ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">O</span><span class="op">&gt;</span>, <span class="ident">Er</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">G</span>: <span class="ident">Parser</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">O</span>, <span class="ident">Er</span><span class="op">&gt;</span>,
-    <span class="ident">Er</span>: <span class="ident">From</span><span class="op">&lt;</span><span class="ident">leb128::Error</span><span class="op">&gt;</span>,
+<span class="doccomment">/// Parse a length prefixed collection of `g`
+///
+/// This first parses a LEB128 encoded `u64` from the input, then applies the parser `g` this many
+/// times, returning the result in a `Vec`.
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>length_prefixed&lt;<span class="lifetime">&#39;a</span>, G, O, Er&gt;(
+    <span class="kw-2">mut </span>g: G,
+) -&gt; <span class="kw">impl </span>FnMut(Input&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; ParseResult&lt;<span class="lifetime">&#39;a</span>, Vec&lt;O&gt;, Er&gt;
+<span class="kw">where
+    </span>G: Parser&lt;<span class="lifetime">&#39;a</span>, O, Er&gt;,
+    Er: From&lt;leb128::Error&gt;,
 {
-    <span class="kw">move</span> <span class="op">|</span><span class="ident">input</span>: <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span><span class="op">|</span> {
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">count</span>) <span class="op">=</span> <span class="ident">leb128_u64</span>(<span class="ident">input</span>).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">lift</span>())<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">res</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">input</span> <span class="op">=</span> <span class="ident">i</span>;
-        <span class="kw">for</span> <span class="kw">_</span> <span class="kw">in</span> <span class="number">0</span>..<span class="ident">count</span> {
-            <span class="kw">match</span> <span class="ident">g</span>.<span class="ident">parse</span>(<span class="ident">input</span>) {
-                <span class="prelude-val">Ok</span>((<span class="ident">i</span>, <span class="ident">e</span>)) =&gt; {
-                    <span class="ident">input</span> <span class="op">=</span> <span class="ident">i</span>;
-                    <span class="ident">res</span>.<span class="ident">push</span>(<span class="ident">e</span>);
+    <span class="kw">move </span>|input: Input&lt;<span class="lifetime">&#39;a</span>&gt;| {
+        <span class="kw">let </span>(i, count) = leb128_u64(input).map_err(|e| e.lift())<span class="question-mark">?</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>res = Vec::new();
+        <span class="kw">let </span><span class="kw-2">mut </span>input = i;
+        <span class="kw">for _ in </span><span class="number">0</span>..count {
+            <span class="kw">match </span>g.parse(input) {
+                <span class="prelude-val">Ok</span>((i, e)) =&gt; {
+                    input = i;
+                    res.push(e);
                 }
-                <span class="prelude-val">Err</span>(<span class="ident">e</span>) =&gt; {
-                    <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">e</span>);
+                <span class="prelude-val">Err</span>(e) =&gt; {
+                    <span class="kw">return </span><span class="prelude-val">Err</span>(e);
                 }
             }
         }
-        <span class="prelude-val">Ok</span>((<span class="ident">input</span>, <span class="ident">res</span>))
+        <span class="prelude-val">Ok</span>((input, res))
     }
 }
 
-<span class="doccomment">/// Parse a length prefixed array of bytes from the input</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// This first parses a LEB128 encoded `u64` from the input, then parses this many bytes from the</span>
-<span class="doccomment">/// underlying input.</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">length_prefixed_bytes</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span>(<span class="ident">input</span>: <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="kw-2">&amp;</span>[<span class="ident">u8</span>], <span class="ident">E</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">E</span>: <span class="ident">From</span><span class="op">&lt;</span><span class="ident">leb128::Error</span><span class="op">&gt;</span>,
+<span class="doccomment">/// Parse a length prefixed array of bytes from the input
+///
+/// This first parses a LEB128 encoded `u64` from the input, then parses this many bytes from the
+/// underlying input.
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>length_prefixed_bytes&lt;E&gt;(input: Input&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; ParseResult&lt;<span class="lifetime">&#39;_</span>, <span class="kw-2">&amp;</span>[u8], E&gt;
+<span class="kw">where
+    </span>E: From&lt;leb128::Error&gt;,
 {
-    <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">len</span>) <span class="op">=</span> <span class="ident">leb128_u64</span>(<span class="ident">input</span>).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">lift</span>())<span class="question-mark">?</span>;
-    <span class="ident">take_n</span>(<span class="ident">len</span> <span class="kw">as</span> <span class="ident">usize</span>, <span class="ident">i</span>)
+    <span class="kw">let </span>(i, len) = leb128_u64(input).map_err(|e| e.lift())<span class="question-mark">?</span>;
+    take_n(len <span class="kw">as </span>usize, i)
 }
 
-<span class="doccomment">/// Apply two parsers, returning the result in a 2 tuple</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// This first applies `f`, then `g` and returns the result as `(f, g)`.</span>
-<span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn</span> <span class="ident">tuple2</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">F</span>, <span class="ident">E</span>, <span class="ident">G</span>, <span class="ident">H</span>, <span class="ident">Er</span><span class="op">&gt;</span>(
-    <span class="kw-2">mut</span> <span class="ident">f</span>: <span class="ident">F</span>,
-    <span class="kw-2">mut</span> <span class="ident">g</span>: <span class="ident">G</span>,
-) -&gt; <span class="kw">impl</span> <span class="ident">FnMut</span>(<span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>) -&gt; <span class="ident">ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, (<span class="ident">E</span>, <span class="ident">H</span>), <span class="ident">Er</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">F</span>: <span class="ident">Parser</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">E</span>, <span class="ident">Er</span><span class="op">&gt;</span>,
-    <span class="ident">G</span>: <span class="ident">Parser</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">H</span>, <span class="ident">Er</span><span class="op">&gt;</span>,
+<span class="doccomment">/// Apply two parsers, returning the result in a 2 tuple
+///
+/// This first applies `f`, then `g` and returns the result as `(f, g)`.
+</span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>tuple2&lt;<span class="lifetime">&#39;a</span>, F, E, G, H, Er&gt;(
+    <span class="kw-2">mut </span>f: F,
+    <span class="kw-2">mut </span>g: G,
+) -&gt; <span class="kw">impl </span>FnMut(Input&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; ParseResult&lt;<span class="lifetime">&#39;_</span>, (E, H), Er&gt;
+<span class="kw">where
+    </span>F: Parser&lt;<span class="lifetime">&#39;a</span>, E, Er&gt;,
+    G: Parser&lt;<span class="lifetime">&#39;a</span>, H, Er&gt;,
 {
-    <span class="kw">move</span> <span class="op">|</span><span class="ident">input</span>: <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span><span class="op">|</span> {
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">one</span>) <span class="op">=</span> <span class="ident">f</span>.<span class="ident">parse</span>(<span class="ident">input</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">two</span>) <span class="op">=</span> <span class="ident">g</span>.<span class="ident">parse</span>(<span class="ident">i</span>)<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>((<span class="ident">i</span>, (<span class="ident">one</span>, <span class="ident">two</span>)))
+    <span class="kw">move </span>|input: Input&lt;<span class="lifetime">&#39;a</span>&gt;| {
+        <span class="kw">let </span>(i, one) = f.parse(input)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(i, two) = g.parse(i)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>((i, (one, two)))
     }
 }
 
-<span class="doccomment">/// Apply the parser `f` `n` times and reutrn the result in a `Vec`</span>
-<span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn</span> <span class="ident">apply_n</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">F</span>, <span class="ident">E</span>, <span class="ident">Er</span><span class="op">&gt;</span>(
-    <span class="ident">n</span>: <span class="ident">usize</span>,
-    <span class="kw-2">mut</span> <span class="ident">f</span>: <span class="ident">F</span>,
-) -&gt; <span class="kw">impl</span> <span class="ident">FnMut</span>(<span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>) -&gt; <span class="ident">ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span>, <span class="ident">Er</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">F</span>: <span class="ident">Parser</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">E</span>, <span class="ident">Er</span><span class="op">&gt;</span>,
+<span class="doccomment">/// Apply the parser `f` `n` times and reutrn the result in a `Vec`
+</span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>apply_n&lt;<span class="lifetime">&#39;a</span>, F, E, Er&gt;(
+    n: usize,
+    <span class="kw-2">mut </span>f: F,
+) -&gt; <span class="kw">impl </span>FnMut(Input&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; ParseResult&lt;<span class="lifetime">&#39;_</span>, Vec&lt;E&gt;, Er&gt;
+<span class="kw">where
+    </span>F: Parser&lt;<span class="lifetime">&#39;a</span>, E, Er&gt;,
 {
-    <span class="kw">move</span> <span class="op">|</span><span class="ident">input</span>: <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span><span class="op">|</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">i</span> <span class="op">=</span> <span class="ident">input</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
-        <span class="kw">for</span> <span class="kw">_</span> <span class="kw">in</span> <span class="number">0</span>..<span class="ident">n</span> {
-            <span class="kw">let</span> (<span class="ident">new_i</span>, <span class="ident">e</span>) <span class="op">=</span> <span class="ident">f</span>.<span class="ident">parse</span>(<span class="ident">i</span>)<span class="question-mark">?</span>;
-            <span class="ident">result</span>.<span class="ident">push</span>(<span class="ident">e</span>);
-            <span class="ident">i</span> <span class="op">=</span> <span class="ident">new_i</span>;
+    <span class="kw">move </span>|input: Input&lt;<span class="lifetime">&#39;a</span>&gt;| {
+        <span class="kw">let </span><span class="kw-2">mut </span>i = input;
+        <span class="kw">let </span><span class="kw-2">mut </span>result = Vec::new();
+        <span class="kw">for _ in </span><span class="number">0</span>..n {
+            <span class="kw">let </span>(new_i, e) = f.parse(i)<span class="question-mark">?</span>;
+            result.push(e);
+            i = new_i;
         }
-        <span class="prelude-val">Ok</span>((<span class="ident">i</span>, <span class="ident">result</span>))
+        <span class="prelude-val">Ok</span>((i, result))
     }
 }
 
-<span class="doccomment">/// Parse a length prefixed actor ID</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// This first parses a LEB128 encoded u64 from the input, then the corresponding number of bytes</span>
-<span class="doccomment">/// which are returned wrapped in an `ActorId`</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">actor_id</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span>(<span class="ident">input</span>: <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">ActorId</span>, <span class="ident">E</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">E</span>: <span class="ident">From</span><span class="op">&lt;</span><span class="ident">leb128::Error</span><span class="op">&gt;</span>,
+<span class="doccomment">/// Parse a length prefixed actor ID
+///
+/// This first parses a LEB128 encoded u64 from the input, then the corresponding number of bytes
+/// which are returned wrapped in an `ActorId`
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>actor_id&lt;E&gt;(input: Input&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; ParseResult&lt;<span class="lifetime">&#39;_</span>, ActorId, E&gt;
+<span class="kw">where
+    </span>E: From&lt;leb128::Error&gt;,
 {
-    <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">length</span>) <span class="op">=</span> <span class="ident">leb128_u64</span>(<span class="ident">input</span>).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">lift</span>())<span class="question-mark">?</span>;
-    <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">bytes</span>) <span class="op">=</span> <span class="ident">take_n</span>(<span class="ident">length</span> <span class="kw">as</span> <span class="ident">usize</span>, <span class="ident">i</span>)<span class="question-mark">?</span>;
-    <span class="prelude-val">Ok</span>((<span class="ident">i</span>, <span class="ident">bytes</span>.<span class="ident">into</span>()))
+    <span class="kw">let </span>(i, length) = leb128_u64(input).map_err(|e| e.lift())<span class="question-mark">?</span>;
+    <span class="kw">let </span>(i, bytes) = take_n(length <span class="kw">as </span>usize, i)<span class="question-mark">?</span>;
+    <span class="prelude-val">Ok</span>((i, bytes.into()))
 }
 
-<span class="doccomment">/// Parse a change hash.</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// This is just a nice wrapper around `take_4`</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">change_hash</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span>(<span class="ident">input</span>: <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">ChangeHash</span>, <span class="ident">E</span><span class="op">&gt;</span> {
-    <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">bytes</span>) <span class="op">=</span> <span class="ident">take_n</span>(<span class="ident">HASH_SIZE</span>, <span class="ident">input</span>)<span class="question-mark">?</span>;
-    <span class="kw">let</span> <span class="ident">byte_arr</span>: <span class="ident">ChangeHash</span> <span class="op">=</span> <span class="ident">bytes</span>.<span class="ident">try_into</span>().<span class="ident">expect</span>(<span class="string">&quot;we checked the length above&quot;</span>);
-    <span class="prelude-val">Ok</span>((<span class="ident">i</span>, <span class="ident">byte_arr</span>))
+<span class="doccomment">/// Parse a change hash.
+///
+/// This is just a nice wrapper around `take_4`
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>change_hash&lt;E&gt;(input: Input&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; ParseResult&lt;<span class="lifetime">&#39;_</span>, ChangeHash, E&gt; {
+    <span class="kw">let </span>(i, bytes) = take_n(HASH_SIZE, input)<span class="question-mark">?</span>;
+    <span class="kw">let </span>byte_arr: ChangeHash = bytes.try_into().expect(<span class="string">&quot;we checked the length above&quot;</span>);
+    <span class="prelude-val">Ok</span>((i, byte_arr))
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">thiserror::Error</span>, <span class="ident">Debug</span>)]</span>
-<span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;invalid UTF-8&quot;</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">InvalidUtf8</span>;
+<span class="attribute">#[derive(thiserror::Error, Debug)]
+#[error(<span class="string">&quot;invalid UTF-8&quot;</span>)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>InvalidUtf8;
 
-<span class="doccomment">/// Parse a length prefixed UTF-8 string</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// This first parses a LEB128 encode `u64` from the input, then parses this many bytes from the</span>
-<span class="doccomment">/// input before attempting to convert these bytes into a `String`, returning</span>
-<span class="doccomment">/// `ParseError::Error(InvalidUtf8)` if that fails.</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">utf_8</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span>(<span class="ident">len</span>: <span class="ident">usize</span>, <span class="ident">input</span>: <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">String</span>, <span class="ident">E</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">E</span>: <span class="ident">From</span><span class="op">&lt;</span><span class="ident">InvalidUtf8</span><span class="op">&gt;</span>,
+<span class="doccomment">/// Parse a length prefixed UTF-8 string
+///
+/// This first parses a LEB128 encode `u64` from the input, then parses this many bytes from the
+/// input before attempting to convert these bytes into a `String`, returning
+/// `ParseError::Error(InvalidUtf8)` if that fails.
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>utf_8&lt;E&gt;(len: usize, input: Input&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; ParseResult&lt;<span class="lifetime">&#39;_</span>, String, E&gt;
+<span class="kw">where
+    </span>E: From&lt;InvalidUtf8&gt;,
 {
-    <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">bytes</span>) <span class="op">=</span> <span class="ident">take_n</span>(<span class="ident">len</span>, <span class="ident">input</span>)<span class="question-mark">?</span>;
-    <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">String::from_utf8</span>(<span class="ident">bytes</span>.<span class="ident">to_vec</span>())
-        .<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">ParseError::Error</span>(<span class="ident">InvalidUtf8</span>))
-        .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">lift</span>())<span class="question-mark">?</span>;
-    <span class="prelude-val">Ok</span>((<span class="ident">i</span>, <span class="ident">result</span>))
+    <span class="kw">let </span>(i, bytes) = take_n(len, input)<span class="question-mark">?</span>;
+    <span class="kw">let </span>result = String::from_utf8(bytes.to_vec())
+        .map_err(|<span class="kw">_</span>| ParseError::Error(InvalidUtf8))
+        .map_err(|e| e.lift())<span class="question-mark">?</span>;
+    <span class="prelude-val">Ok</span>((i, result))
 }
 
-<span class="doccomment">/// Returned from `range_of`</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">RangeOf</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// The range in the input where we parsed from</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">range</span>: <span class="ident">std::ops::Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// The value we parsed</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">value</span>: <span class="ident">T</span>,
+<span class="doccomment">/// Returned from `range_of`
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>RangeOf&lt;T&gt; {
+    <span class="doccomment">/// The range in the input where we parsed from
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) range: std::ops::Range&lt;usize&gt;,
+    <span class="doccomment">/// The value we parsed
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) value: T,
 }
 
-<span class="doccomment">/// Evaluate `parser` and then return the value parsed, as well as the range in the input which we</span>
-<span class="doccomment">/// just parsed.</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// This is useful when you want to parse some data from an input in order to check that is valid,</span>
-<span class="doccomment">/// but you will also be holding on to the input data and want to know where in the input data the</span>
-<span class="doccomment">/// valid data was parsed from.</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// # Example</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// Imagine that we are parsing records of some kind from a file, as well as parsing the record we</span>
-<span class="doccomment">/// want to record the offset in the file where the record is so we can update it in place.</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// ```rust,ignore</span>
-<span class="doccomment">/// # use automerge::storage::parse::{ParseResult, Input};</span>
-<span class="doccomment">/// struct Message;</span>
-<span class="doccomment">/// struct Record {</span>
-<span class="doccomment">///     message: Message,</span>
-<span class="doccomment">///     location: std::ops::Range&lt;usize&gt;</span>
-<span class="doccomment">/// }</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// fn parse_message&lt;&#39;a&gt;(input: Input&lt;&#39;a&gt;) -&gt; ParseResult&lt;&#39;a, Message, ()&gt; {</span>
-<span class="doccomment">///     unimplemented!()</span>
-<span class="doccomment">/// }</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// fn parse_record&lt;&#39;a&gt;(input: Input&lt;&#39;a&gt;) -&gt; ParseResult&lt;&#39;a, Record, ()&gt; {</span>
-<span class="doccomment">///     let (i, RangeOf{range: location, value: message}) = range_of(|i| parse_message(i), i)?;</span>
-<span class="doccomment">///     Ok((i, Record {</span>
-<span class="doccomment">///         location, // &lt;- this is the location in the input where the message was parsed from</span>
-<span class="doccomment">///         message,</span>
-<span class="doccomment">///     }))</span>
-<span class="doccomment">/// }</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// let file_contents: Vec&lt;u8&gt; = unimplemented!();</span>
-<span class="doccomment">/// let input = Input::new(&amp;file_contents);</span>
-<span class="doccomment">/// let record = parse_record(input).unwrap().1;</span>
-<span class="doccomment">/// ```</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">range_of</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">P</span>, <span class="ident">R</span>, <span class="ident">E</span><span class="op">&gt;</span>(<span class="ident">parser</span>: <span class="ident">P</span>, <span class="ident">input</span>: <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>) -&gt; <span class="ident">ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">RangeOf</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span>, <span class="ident">E</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">P</span>: <span class="ident">Parser</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">R</span>, <span class="ident">E</span><span class="op">&gt;</span>,
+<span class="doccomment">/// Evaluate `parser` and then return the value parsed, as well as the range in the input which we
+/// just parsed.
+///
+/// This is useful when you want to parse some data from an input in order to check that is valid,
+/// but you will also be holding on to the input data and want to know where in the input data the
+/// valid data was parsed from.
+///
+/// # Example
+///
+/// Imagine that we are parsing records of some kind from a file, as well as parsing the record we
+/// want to record the offset in the file where the record is so we can update it in place.
+///
+/// ```rust,ignore
+/// # use automerge::storage::parse::{ParseResult, Input};
+/// struct Message;
+/// struct Record {
+///     message: Message,
+///     location: std::ops::Range&lt;usize&gt;
+/// }
+///
+/// fn parse_message&lt;&#39;a&gt;(input: Input&lt;&#39;a&gt;) -&gt; ParseResult&lt;&#39;a, Message, ()&gt; {
+///     unimplemented!()
+/// }
+///
+/// fn parse_record&lt;&#39;a&gt;(input: Input&lt;&#39;a&gt;) -&gt; ParseResult&lt;&#39;a, Record, ()&gt; {
+///     let (i, RangeOf{range: location, value: message}) = range_of(|i| parse_message(i), i)?;
+///     Ok((i, Record {
+///         location, // &lt;- this is the location in the input where the message was parsed from
+///         message,
+///     }))
+/// }
+///
+/// let file_contents: Vec&lt;u8&gt; = unimplemented!();
+/// let input = Input::new(&amp;file_contents);
+/// let record = parse_record(input).unwrap().1;
+/// ```
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>range_of&lt;<span class="lifetime">&#39;a</span>, P, R, E&gt;(parser: P, input: Input&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; ParseResult&lt;<span class="lifetime">&#39;a</span>, RangeOf&lt;R&gt;, E&gt;
+<span class="kw">where
+    </span>P: Parser&lt;<span class="lifetime">&#39;a</span>, R, E&gt;,
 {
-    <span class="ident">input</span>.<span class="ident">range_of</span>(<span class="ident">parser</span>)
+    input.range_of(parser)
 }
 
-<span class="doccomment">/// Parse all the remaining input from the parser. This can never fail</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">take_rest</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span>(<span class="ident">input</span>: <span class="ident">Input</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;_</span> [<span class="ident">u8</span>], <span class="ident">E</span><span class="op">&gt;</span> {
-    <span class="ident">input</span>.<span class="ident">rest</span>()
+<span class="doccomment">/// Parse all the remaining input from the parser. This can never fail
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>take_rest&lt;E&gt;(input: Input&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; ParseResult&lt;<span class="lifetime">&#39;_</span>, <span class="kw-2">&amp;</span><span class="lifetime">&#39;_ </span>[u8], E&gt; {
+    input.rest()
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

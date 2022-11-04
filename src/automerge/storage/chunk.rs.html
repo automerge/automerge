@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/chunk.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>chunk.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/chunk.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>chunk.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -293,298 +293,298 @@
 <span id="291">291</span>
 <span id="292">292</span>
 <span id="293">293</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std</span>::{
-    <span class="ident">borrow::Cow</span>,
-    <span class="ident">convert</span>::{<span class="ident">TryFrom</span>, <span class="ident">TryInto</span>},
-    <span class="ident">io::Read</span>,
-    <span class="ident">ops::Range</span>,
+</pre><pre class="rust"><code><span class="kw">use </span>std::{
+    borrow::Cow,
+    convert::{TryFrom, TryInto},
+    io::Read,
+    ops::Range,
 };
 
-<span class="kw">use</span> <span class="ident">sha2</span>::{<span class="ident">Digest</span>, <span class="ident">Sha256</span>};
+<span class="kw">use </span>sha2::{Digest, Sha256};
 
-<span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">change::Unverified</span>, <span class="ident">parse</span>, <span class="ident">Change</span>, <span class="ident">Compressed</span>, <span class="ident">Document</span>, <span class="ident">MAGIC_BYTES</span>};
-<span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">columnar::encoding::leb128::ulebsize</span>, <span class="ident">ChangeHash</span>};
+<span class="kw">use super</span>::{change::Unverified, parse, Change, Compressed, Document, MAGIC_BYTES};
+<span class="kw">use crate</span>::{columnar::encoding::leb128::ulebsize, ChangeHash};
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">Chunk</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">Document</span>(<span class="ident">Document</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>),
-    <span class="ident">Change</span>(<span class="ident">Change</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Unverified</span><span class="op">&gt;</span>),
-    <span class="ident">CompressedChange</span>(<span class="ident">Change</span><span class="op">&lt;</span><span class="lifetime">&#39;static</span>, <span class="ident">Unverified</span><span class="op">&gt;</span>, <span class="ident">Compressed</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>),
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>Chunk&lt;<span class="lifetime">&#39;a</span>&gt; {
+    Document(Document&lt;<span class="lifetime">&#39;a</span>&gt;),
+    Change(Change&lt;<span class="lifetime">&#39;a</span>, Unverified&gt;),
+    CompressedChange(Change&lt;<span class="lifetime">&#39;static</span>, Unverified&gt;, Compressed&lt;<span class="lifetime">&#39;a</span>&gt;),
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod</span> <span class="ident">error</span> {
-    <span class="kw">use</span> <span class="ident"><span class="kw">super</span>::parse</span>;
-    <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::storage</span>::{<span class="ident">change</span>, <span class="ident">document</span>};
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>error {
+    <span class="kw">use </span><span class="kw">super</span>::parse;
+    <span class="kw">use </span><span class="kw">crate</span>::storage::{change, document};
 
-    <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">thiserror::Error</span>, <span class="ident">Debug</span>)]</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">Chunk</span> {
-        <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;there was data in a chunk leftover after parsing&quot;</span>)]</span>
-        <span class="ident">LeftoverData</span>,
-        <span class="attribute">#[<span class="ident">error</span>(<span class="ident">transparent</span>)]</span>
-        <span class="ident">Leb128</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident">parse::leb128::Error</span>),
-        <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;failed to parse header: {0}&quot;</span>)]</span>
-        <span class="ident">Header</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident">Header</span>),
-        <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;bad change chunk: {0}&quot;</span>)]</span>
-        <span class="ident">Change</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident">change::ParseError</span>),
-        <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;bad document chunk: {0}&quot;</span>)]</span>
-        <span class="ident">Document</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident">document::ParseError</span>),
-        <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;unable to decompresse compressed chunk&quot;</span>)]</span>
-        <span class="ident">Deflate</span>,
+    <span class="attribute">#[derive(thiserror::Error, Debug)]
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>Chunk {
+        <span class="attribute">#[error(<span class="string">&quot;there was data in a chunk leftover after parsing&quot;</span>)]
+        </span>LeftoverData,
+        <span class="attribute">#[error(transparent)]
+        </span>Leb128(<span class="attribute">#[from] </span>parse::leb128::Error),
+        <span class="attribute">#[error(<span class="string">&quot;failed to parse header: {0}&quot;</span>)]
+        </span>Header(<span class="attribute">#[from] </span>Header),
+        <span class="attribute">#[error(<span class="string">&quot;bad change chunk: {0}&quot;</span>)]
+        </span>Change(<span class="attribute">#[from] </span>change::ParseError),
+        <span class="attribute">#[error(<span class="string">&quot;bad document chunk: {0}&quot;</span>)]
+        </span>Document(<span class="attribute">#[from] </span>document::ParseError),
+        <span class="attribute">#[error(<span class="string">&quot;unable to decompresse compressed chunk&quot;</span>)]
+        </span>Deflate,
     }
 
-    <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">thiserror::Error</span>, <span class="ident">Debug</span>)]</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">Header</span> {
-        <span class="attribute">#[<span class="ident">error</span>(<span class="ident">transparent</span>)]</span>
-        <span class="ident">Leb128</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident">parse::leb128::Error</span>),
-        <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;unknown chunk type: {0}&quot;</span>)]</span>
-        <span class="ident">UnknownChunkType</span>(<span class="ident">u8</span>),
-        <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;Invalid magic bytes&quot;</span>)]</span>
-        <span class="ident">InvalidMagicBytes</span>,
+    <span class="attribute">#[derive(thiserror::Error, Debug)]
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>Header {
+        <span class="attribute">#[error(transparent)]
+        </span>Leb128(<span class="attribute">#[from] </span>parse::leb128::Error),
+        <span class="attribute">#[error(<span class="string">&quot;unknown chunk type: {0}&quot;</span>)]
+        </span>UnknownChunkType(u8),
+        <span class="attribute">#[error(<span class="string">&quot;Invalid magic bytes&quot;</span>)]
+        </span>InvalidMagicBytes,
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Chunk</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">parse</span>(
-        <span class="ident">input</span>: <span class="ident">parse::Input</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="ident">parse::ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Chunk</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>, <span class="ident">error::Chunk</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">header</span>) <span class="op">=</span> <span class="ident">Header::parse</span>::<span class="op">&lt;</span><span class="ident">error::Chunk</span><span class="op">&gt;</span>(<span class="ident">input</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">parse::Split</span> {
-            <span class="ident">first</span>: <span class="ident">chunk_input</span>,
-            <span class="ident">remaining</span>,
-        } <span class="op">=</span> <span class="ident">i</span>.<span class="ident">split</span>(<span class="ident">header</span>.<span class="ident">data_bytes</span>().<span class="ident">len</span>());
-        <span class="macro">tracing::trace!</span>(<span class="question-mark">?</span><span class="ident">header</span>, <span class="string">&quot;parsed chunk header&quot;</span>);
-        <span class="kw">let</span> <span class="ident">chunk</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">header</span>.<span class="ident">chunk_type</span> {
-            <span class="ident">ChunkType::Change</span> =&gt; {
-                <span class="kw">let</span> (<span class="ident">remaining</span>, <span class="ident">change</span>) <span class="op">=</span>
-                    <span class="ident">Change::parse_following_header</span>(<span class="ident">chunk_input</span>, <span class="ident">header</span>).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">lift</span>())<span class="question-mark">?</span>;
-                <span class="kw">if</span> <span class="op">!</span><span class="ident">remaining</span>.<span class="ident">is_empty</span>() {
-                    <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">parse::ParseError::Error</span>(<span class="ident">error::Chunk::LeftoverData</span>));
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Chunk&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>parse(
+        input: parse::Input&lt;<span class="lifetime">&#39;a</span>&gt;,
+    ) -&gt; parse::ParseResult&lt;<span class="lifetime">&#39;a</span>, Chunk&lt;<span class="lifetime">&#39;a</span>&gt;, error::Chunk&gt; {
+        <span class="kw">let </span>(i, header) = Header::parse::&lt;error::Chunk&gt;(input)<span class="question-mark">?</span>;
+        <span class="kw">let </span>parse::Split {
+            first: chunk_input,
+            remaining,
+        } = i.split(header.data_bytes().len());
+        <span class="macro">tracing::trace!</span>(<span class="question-mark">?</span>header, <span class="string">&quot;parsed chunk header&quot;</span>);
+        <span class="kw">let </span>chunk = <span class="kw">match </span>header.chunk_type {
+            ChunkType::Change =&gt; {
+                <span class="kw">let </span>(remaining, change) =
+                    Change::parse_following_header(chunk_input, header).map_err(|e| e.lift())<span class="question-mark">?</span>;
+                <span class="kw">if </span>!remaining.is_empty() {
+                    <span class="kw">return </span><span class="prelude-val">Err</span>(parse::ParseError::Error(error::Chunk::LeftoverData));
                 }
-                <span class="ident">Chunk::Change</span>(<span class="ident">change</span>)
+                Chunk::Change(change)
             }
-            <span class="ident">ChunkType::Document</span> =&gt; {
-                <span class="kw">let</span> (<span class="ident">remaining</span>, <span class="ident">doc</span>) <span class="op">=</span>
-                    <span class="ident">Document::parse</span>(<span class="ident">chunk_input</span>, <span class="ident">header</span>).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">lift</span>())<span class="question-mark">?</span>;
-                <span class="kw">if</span> <span class="op">!</span><span class="ident">remaining</span>.<span class="ident">is_empty</span>() {
-                    <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">parse::ParseError::Error</span>(<span class="ident">error::Chunk::LeftoverData</span>));
+            ChunkType::Document =&gt; {
+                <span class="kw">let </span>(remaining, doc) =
+                    Document::parse(chunk_input, header).map_err(|e| e.lift())<span class="question-mark">?</span>;
+                <span class="kw">if </span>!remaining.is_empty() {
+                    <span class="kw">return </span><span class="prelude-val">Err</span>(parse::ParseError::Error(error::Chunk::LeftoverData));
                 }
-                <span class="ident">Chunk::Document</span>(<span class="ident">doc</span>)
+                Chunk::Document(doc)
             }
-            <span class="ident">ChunkType::Compressed</span> =&gt; {
-                <span class="kw">let</span> <span class="ident">compressed</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">input</span>.<span class="ident">unconsumed_bytes</span>()[<span class="ident">header</span>.<span class="ident">data_bytes</span>()];
-                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">decoder</span> <span class="op">=</span> <span class="ident">flate2::bufread::DeflateDecoder::new</span>(<span class="ident">compressed</span>);
-                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">decompressed</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
-                <span class="ident">decoder</span>
-                    .<span class="ident">read_to_end</span>(<span class="kw-2">&amp;mut</span> <span class="ident">decompressed</span>)
-                    .<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">parse::ParseError::Error</span>(<span class="ident">error::Chunk::Deflate</span>))<span class="question-mark">?</span>;
-                <span class="kw">let</span> <span class="ident">inner_header</span> <span class="op">=</span> <span class="ident">header</span>.<span class="ident">with_data</span>(<span class="ident">ChunkType::Change</span>, <span class="kw-2">&amp;</span><span class="ident">decompressed</span>);
-                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">inner_chunk</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">inner_header</span>.<span class="ident">len</span>() <span class="op">+</span> <span class="ident">decompressed</span>.<span class="ident">len</span>());
-                <span class="ident">inner_header</span>.<span class="ident">write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">inner_chunk</span>);
-                <span class="ident">inner_chunk</span>.<span class="ident">extend</span>(<span class="kw-2">&amp;</span><span class="ident">decompressed</span>);
-                <span class="kw">let</span> (<span class="ident">remaining</span>, <span class="ident">change</span>) <span class="op">=</span>
-                    <span class="ident">Change::parse</span>(<span class="ident">parse::Input::new</span>(<span class="kw-2">&amp;</span><span class="ident">inner_chunk</span>)).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">lift</span>())<span class="question-mark">?</span>;
-                <span class="kw">if</span> <span class="op">!</span><span class="ident">remaining</span>.<span class="ident">is_empty</span>() {
-                    <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">parse::ParseError::Error</span>(<span class="ident">error::Chunk::LeftoverData</span>));
+            ChunkType::Compressed =&gt; {
+                <span class="kw">let </span>compressed = <span class="kw-2">&amp;</span>input.unconsumed_bytes()[header.data_bytes()];
+                <span class="kw">let </span><span class="kw-2">mut </span>decoder = flate2::bufread::DeflateDecoder::new(compressed);
+                <span class="kw">let </span><span class="kw-2">mut </span>decompressed = Vec::new();
+                decoder
+                    .read_to_end(<span class="kw-2">&amp;mut </span>decompressed)
+                    .map_err(|<span class="kw">_</span>| parse::ParseError::Error(error::Chunk::Deflate))<span class="question-mark">?</span>;
+                <span class="kw">let </span>inner_header = header.with_data(ChunkType::Change, <span class="kw-2">&amp;</span>decompressed);
+                <span class="kw">let </span><span class="kw-2">mut </span>inner_chunk = Vec::with_capacity(inner_header.len() + decompressed.len());
+                inner_header.write(<span class="kw-2">&amp;mut </span>inner_chunk);
+                inner_chunk.extend(<span class="kw-2">&amp;</span>decompressed);
+                <span class="kw">let </span>(remaining, change) =
+                    Change::parse(parse::Input::new(<span class="kw-2">&amp;</span>inner_chunk)).map_err(|e| e.lift())<span class="question-mark">?</span>;
+                <span class="kw">if </span>!remaining.is_empty() {
+                    <span class="kw">return </span><span class="prelude-val">Err</span>(parse::ParseError::Error(error::Chunk::LeftoverData));
                 }
-                <span class="ident">Chunk::CompressedChange</span>(
-                    <span class="ident">change</span>.<span class="ident">into_owned</span>(),
-                    <span class="ident">Compressed::new</span>(<span class="ident">header</span>.<span class="ident">checksum</span>, <span class="ident">Cow::Borrowed</span>(<span class="ident">chunk_input</span>.<span class="ident">bytes</span>())),
+                Chunk::CompressedChange(
+                    change.into_owned(),
+                    Compressed::new(header.checksum, Cow::Borrowed(chunk_input.bytes())),
                 )
             }
         };
-        <span class="prelude-val">Ok</span>((<span class="ident">remaining</span>, <span class="ident">chunk</span>))
+        <span class="prelude-val">Ok</span>((remaining, chunk))
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">checksum_valid</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident"><span class="self">Self</span>::Document</span>(<span class="ident">d</span>) =&gt; <span class="ident">d</span>.<span class="ident">checksum_valid</span>(),
-            <span class="ident"><span class="self">Self</span>::Change</span>(<span class="ident">c</span>) =&gt; <span class="ident">c</span>.<span class="ident">checksum_valid</span>(),
-            <span class="ident"><span class="self">Self</span>::CompressedChange</span>(<span class="ident">change</span>, <span class="ident">compressed</span>) =&gt; {
-                <span class="ident">compressed</span>.<span class="ident">checksum</span>() <span class="op">==</span> <span class="ident">change</span>.<span class="ident">checksum</span>() <span class="op">&amp;&amp;</span> <span class="ident">change</span>.<span class="ident">checksum_valid</span>()
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>checksum_valid(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="kw">match </span><span class="self">self </span>{
+            <span class="self">Self</span>::Document(d) =&gt; d.checksum_valid(),
+            <span class="self">Self</span>::Change(c) =&gt; c.checksum_valid(),
+            <span class="self">Self</span>::CompressedChange(change, compressed) =&gt; {
+                compressed.checksum() == change.checksum() &amp;&amp; change.checksum_valid()
             }
         }
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Copy</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">ChunkType</span> {
-    <span class="ident">Document</span>,
-    <span class="ident">Change</span>,
-    <span class="ident">Compressed</span>,
+<span class="attribute">#[derive(Clone, Copy, Debug, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>ChunkType {
+    Document,
+    Change,
+    Compressed,
 }
 
-<span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ChunkType</span> {
-    <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">u8</span>;
+<span class="kw">impl </span>TryFrom&lt;u8&gt; <span class="kw">for </span>ChunkType {
+    <span class="kw">type </span>Error = u8;
 
-    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">value</span>: <span class="ident">u8</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="ident">value</span> {
-            <span class="number">0</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident"><span class="self">Self</span>::Document</span>),
-            <span class="number">1</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident"><span class="self">Self</span>::Change</span>),
-            <span class="number">2</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident"><span class="self">Self</span>::Compressed</span>),
-            <span class="ident">other</span> =&gt; <span class="prelude-val">Err</span>(<span class="ident">other</span>),
+    <span class="kw">fn </span>try_from(value: u8) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, <span class="self">Self</span>::Error&gt; {
+        <span class="kw">match </span>value {
+            <span class="number">0 </span>=&gt; <span class="prelude-val">Ok</span>(<span class="self">Self</span>::Document),
+            <span class="number">1 </span>=&gt; <span class="prelude-val">Ok</span>(<span class="self">Self</span>::Change),
+            <span class="number">2 </span>=&gt; <span class="prelude-val">Ok</span>(<span class="self">Self</span>::Compressed),
+            other =&gt; <span class="prelude-val">Err</span>(other),
         }
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">ChunkType</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">u8</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">ct</span>: <span class="ident">ChunkType</span>) -&gt; <span class="self">Self</span> {
-        <span class="kw">match</span> <span class="ident">ct</span> {
-            <span class="ident">ChunkType::Document</span> =&gt; <span class="number">0</span>,
-            <span class="ident">ChunkType::Change</span> =&gt; <span class="number">1</span>,
-            <span class="ident">ChunkType::Compressed</span> =&gt; <span class="number">2</span>,
+<span class="kw">impl </span>From&lt;ChunkType&gt; <span class="kw">for </span>u8 {
+    <span class="kw">fn </span>from(ct: ChunkType) -&gt; <span class="self">Self </span>{
+        <span class="kw">match </span>ct {
+            ChunkType::Document =&gt; <span class="number">0</span>,
+            ChunkType::Change =&gt; <span class="number">1</span>,
+            ChunkType::Compressed =&gt; <span class="number">2</span>,
         }
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Copy</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">CheckSum</span>([<span class="ident">u8</span>; <span class="number">4</span>]);
+<span class="attribute">#[derive(Clone, Copy, Debug, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>CheckSum([u8; <span class="number">4</span>]);
 
-<span class="kw">impl</span> <span class="ident">CheckSum</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; [<span class="ident">u8</span>; <span class="number">4</span>] {
-        <span class="self">self</span>.<span class="number">0</span>
+<span class="kw">impl </span>CheckSum {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>bytes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; [u8; <span class="number">4</span>] {
+        <span class="self">self</span>.<span class="number">0
+    </span>}
+}
+
+<span class="kw">impl </span>From&lt;[u8; <span class="number">4</span>]&gt; <span class="kw">for </span>CheckSum {
+    <span class="kw">fn </span>from(raw: [u8; <span class="number">4</span>]) -&gt; <span class="self">Self </span>{
+        CheckSum(raw)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span>[<span class="ident">u8</span>; <span class="number">4</span>]<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">CheckSum</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">raw</span>: [<span class="ident">u8</span>; <span class="number">4</span>]) -&gt; <span class="self">Self</span> {
-        <span class="ident">CheckSum</span>(<span class="ident">raw</span>)
+<span class="kw">impl </span>AsRef&lt;[u8]&gt; <span class="kw">for </span>CheckSum {
+    <span class="kw">fn </span>as_ref(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[u8] {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0
+    </span>}
+}
+
+<span class="kw">impl </span>From&lt;ChangeHash&gt; <span class="kw">for </span>CheckSum {
+    <span class="kw">fn </span>from(h: ChangeHash) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>bytes = h.as_bytes();
+        [bytes[<span class="number">0</span>], bytes[<span class="number">1</span>], bytes[<span class="number">2</span>], bytes[<span class="number">3</span>]].into()
     }
 }
 
-<span class="kw">impl</span> <span class="ident">AsRef</span><span class="op">&lt;</span>[<span class="ident">u8</span>]<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">CheckSum</span> {
-    <span class="kw">fn</span> <span class="ident">as_ref</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>
-    }
+<span class="attribute">#[derive(Debug, Clone, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Header {
+    checksum: CheckSum,
+    chunk_type: ChunkType,
+    data_len: usize,
+    header_size: usize,
+    hash: ChangeHash,
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">CheckSum</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">h</span>: <span class="ident">ChangeHash</span>) -&gt; <span class="self">Self</span> {
-        <span class="kw">let</span> <span class="ident">bytes</span> <span class="op">=</span> <span class="ident">h</span>.<span class="ident">as_bytes</span>();
-        [<span class="ident">bytes</span>[<span class="number">0</span>], <span class="ident">bytes</span>[<span class="number">1</span>], <span class="ident">bytes</span>[<span class="number">2</span>], <span class="ident">bytes</span>[<span class="number">3</span>]].<span class="ident">into</span>()
-    }
-}
-
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">Header</span> {
-    <span class="ident">checksum</span>: <span class="ident">CheckSum</span>,
-    <span class="ident">chunk_type</span>: <span class="ident">ChunkType</span>,
-    <span class="ident">data_len</span>: <span class="ident">usize</span>,
-    <span class="ident">header_size</span>: <span class="ident">usize</span>,
-    <span class="ident">hash</span>: <span class="ident">ChangeHash</span>,
-}
-
-<span class="kw">impl</span> <span class="ident">Header</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">chunk_type</span>: <span class="ident">ChunkType</span>, <span class="ident">data</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; <span class="self">Self</span> {
-        <span class="kw">let</span> <span class="ident">hash</span> <span class="op">=</span> <span class="ident">hash</span>(<span class="ident">chunk_type</span>, <span class="ident">data</span>);
-        <span class="self">Self</span> {
-            <span class="ident">hash</span>,
-            <span class="ident">checksum</span>: <span class="ident">hash</span>.<span class="ident">checksum</span>().<span class="ident">into</span>(),
-            <span class="ident">data_len</span>: <span class="ident">data</span>.<span class="ident">len</span>(),
-            <span class="ident">header_size</span>: <span class="ident">MAGIC_BYTES</span>.<span class="ident">len</span>()
-                <span class="op">+</span> <span class="number">4</span> <span class="comment">// checksum</span>
-                <span class="op">+</span> <span class="number">1</span> <span class="comment">// chunk type</span>
-                <span class="op">+</span> (<span class="ident">ulebsize</span>(<span class="ident">data</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>) <span class="kw">as</span> <span class="ident">usize</span>),
-            <span class="ident">chunk_type</span>,
+<span class="kw">impl </span>Header {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(chunk_type: ChunkType, data: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>hash = hash(chunk_type, data);
+        <span class="self">Self </span>{
+            hash,
+            checksum: hash.checksum().into(),
+            data_len: data.len(),
+            header_size: MAGIC_BYTES.len()
+                + <span class="number">4 </span><span class="comment">// checksum
+                </span>+ <span class="number">1 </span><span class="comment">// chunk type
+                </span>+ (ulebsize(data.len() <span class="kw">as </span>u64) <span class="kw">as </span>usize),
+            chunk_type,
         }
     }
 
-    <span class="doccomment">/// Returns a header with the same checksum but with a different chunk type and data length.</span>
-    <span class="doccomment">/// This is primarily useful when processing compressed chunks, where the checksum is actually</span>
-    <span class="doccomment">/// derived from the uncompressed data.</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">with_data</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">chunk_type</span>: <span class="ident">ChunkType</span>, <span class="ident">data</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; <span class="ident">Header</span> {
-        <span class="kw">let</span> <span class="ident">hash</span> <span class="op">=</span> <span class="ident">hash</span>(<span class="ident">chunk_type</span>, <span class="ident">data</span>);
-        <span class="self">Self</span> {
-            <span class="ident">hash</span>,
-            <span class="ident">checksum</span>: <span class="self">self</span>.<span class="ident">checksum</span>,
-            <span class="ident">data_len</span>: <span class="ident">data</span>.<span class="ident">len</span>(),
-            <span class="ident">header_size</span>: <span class="ident">MAGIC_BYTES</span>.<span class="ident">len</span>()
-                <span class="op">+</span> <span class="number">4</span> <span class="comment">// checksum</span>
-                <span class="op">+</span> <span class="number">1</span> <span class="comment">// chunk type</span>
-                <span class="op">+</span> (<span class="ident">ulebsize</span>(<span class="ident">data</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>) <span class="kw">as</span> <span class="ident">usize</span>),
-            <span class="ident">chunk_type</span>,
+    <span class="doccomment">/// Returns a header with the same checksum but with a different chunk type and data length.
+    /// This is primarily useful when processing compressed chunks, where the checksum is actually
+    /// derived from the uncompressed data.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>with_data(<span class="kw-2">&amp;</span><span class="self">self</span>, chunk_type: ChunkType, data: <span class="kw-2">&amp;</span>[u8]) -&gt; Header {
+        <span class="kw">let </span>hash = hash(chunk_type, data);
+        <span class="self">Self </span>{
+            hash,
+            checksum: <span class="self">self</span>.checksum,
+            data_len: data.len(),
+            header_size: MAGIC_BYTES.len()
+                + <span class="number">4 </span><span class="comment">// checksum
+                </span>+ <span class="number">1 </span><span class="comment">// chunk type
+                </span>+ (ulebsize(data.len() <span class="kw">as </span>u64) <span class="kw">as </span>usize),
+            chunk_type,
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">len</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
-        <span class="self">self</span>.<span class="ident">header_size</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.header_size
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">write</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
-        <span class="ident">out</span>.<span class="ident">extend</span>(<span class="ident">MAGIC_BYTES</span>);
-        <span class="ident">out</span>.<span class="ident">extend</span>(<span class="self">self</span>.<span class="ident">checksum</span>.<span class="ident">bytes</span>());
-        <span class="ident">out</span>.<span class="ident">push</span>(<span class="ident">u8::from</span>(<span class="self">self</span>.<span class="ident">chunk_type</span>));
-        <span class="ident">leb128::write::unsigned</span>(<span class="ident">out</span>, <span class="self">self</span>.<span class="ident">data_len</span> <span class="kw">as</span> <span class="ident">u64</span>).<span class="ident">unwrap</span>();
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>write(<span class="kw-2">&amp;</span><span class="self">self</span>, out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;) {
+        out.extend(MAGIC_BYTES);
+        out.extend(<span class="self">self</span>.checksum.bytes());
+        out.push(u8::from(<span class="self">self</span>.chunk_type));
+        leb128::write::unsigned(out, <span class="self">self</span>.data_len <span class="kw">as </span>u64).unwrap();
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">parse</span><span class="op">&lt;</span><span class="ident">E</span><span class="op">&gt;</span>(<span class="ident">input</span>: <span class="ident">parse::Input</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">parse::ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">Header</span>, <span class="ident">E</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">E</span>: <span class="ident">From</span><span class="op">&lt;</span><span class="ident">error::Header</span><span class="op">&gt;</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>parse&lt;E&gt;(input: parse::Input&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; parse::ParseResult&lt;<span class="lifetime">&#39;_</span>, Header, E&gt;
+    <span class="kw">where
+        </span>E: From&lt;error::Header&gt;,
     {
-        <span class="kw">let</span> (
-            <span class="ident">i</span>,
-            <span class="ident">parse::RangeOf</span> {
-                <span class="ident">range</span>: <span class="ident">header</span>,
-                <span class="ident">value</span>: (<span class="ident">checksum_bytes</span>, <span class="ident">chunk_type</span>, <span class="ident">chunk_len</span>),
+        <span class="kw">let </span>(
+            i,
+            parse::RangeOf {
+                range: header,
+                value: (checksum_bytes, chunk_type, chunk_len),
             },
-        ) <span class="op">=</span> <span class="ident">parse::range_of</span>(
-            <span class="op">|</span><span class="ident">i</span><span class="op">|</span> {
-                <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">magic</span>) <span class="op">=</span> <span class="ident">parse::take4</span>(<span class="ident">i</span>)<span class="question-mark">?</span>;
-                <span class="kw">if</span> <span class="ident">magic</span> <span class="op">!</span><span class="op">=</span> <span class="ident">MAGIC_BYTES</span> {
-                    <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">parse::ParseError::Error</span>(<span class="ident">E::from</span>(
-                        <span class="ident">error::Header::InvalidMagicBytes</span>,
+        ) = parse::range_of(
+            |i| {
+                <span class="kw">let </span>(i, magic) = parse::take4(i)<span class="question-mark">?</span>;
+                <span class="kw">if </span>magic != MAGIC_BYTES {
+                    <span class="kw">return </span><span class="prelude-val">Err</span>(parse::ParseError::Error(E::from(
+                        error::Header::InvalidMagicBytes,
                     )));
                 }
-                <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">checksum_bytes</span>) <span class="op">=</span> <span class="ident">parse::take4</span>(<span class="ident">i</span>)<span class="question-mark">?</span>;
-                <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">raw_chunk_type</span>) <span class="op">=</span> <span class="ident">parse::take1</span>(<span class="ident">i</span>)<span class="question-mark">?</span>;
-                <span class="kw">let</span> <span class="ident">chunk_type</span>: <span class="ident">ChunkType</span> <span class="op">=</span> <span class="ident">raw_chunk_type</span>.<span class="ident">try_into</span>().<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> {
-                    <span class="ident">parse::ParseError::Error</span>(<span class="ident">E::from</span>(<span class="ident">error::Header::UnknownChunkType</span>(
-                        <span class="ident">raw_chunk_type</span>,
+                <span class="kw">let </span>(i, checksum_bytes) = parse::take4(i)<span class="question-mark">?</span>;
+                <span class="kw">let </span>(i, raw_chunk_type) = parse::take1(i)<span class="question-mark">?</span>;
+                <span class="kw">let </span>chunk_type: ChunkType = raw_chunk_type.try_into().map_err(|<span class="kw">_</span>| {
+                    parse::ParseError::Error(E::from(error::Header::UnknownChunkType(
+                        raw_chunk_type,
                     )))
                 })<span class="question-mark">?</span>;
-                <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">chunk_len</span>) <span class="op">=</span> <span class="ident">parse::leb128_u64</span>(<span class="ident">i</span>).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">lift</span>())<span class="question-mark">?</span>;
-                <span class="prelude-val">Ok</span>((<span class="ident">i</span>, (<span class="ident">checksum_bytes</span>, <span class="ident">chunk_type</span>, <span class="ident">chunk_len</span>)))
+                <span class="kw">let </span>(i, chunk_len) = parse::leb128_u64(i).map_err(|e| e.lift())<span class="question-mark">?</span>;
+                <span class="prelude-val">Ok</span>((i, (checksum_bytes, chunk_type, chunk_len)))
             },
-            <span class="ident">input</span>,
+            input,
         )<span class="question-mark">?</span>;
 
-        <span class="kw">let</span> (<span class="kw">_</span>, <span class="ident">data</span>) <span class="op">=</span> <span class="ident">parse::take_n</span>(<span class="ident">chunk_len</span> <span class="kw">as</span> <span class="ident">usize</span>, <span class="ident">i</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">hash</span> <span class="op">=</span> <span class="ident">hash</span>(<span class="ident">chunk_type</span>, <span class="ident">data</span>);
+        <span class="kw">let </span>(<span class="kw">_</span>, data) = parse::take_n(chunk_len <span class="kw">as </span>usize, i)<span class="question-mark">?</span>;
+        <span class="kw">let </span>hash = hash(chunk_type, data);
         <span class="prelude-val">Ok</span>((
-            <span class="ident">i</span>,
-            <span class="ident">Header</span> {
-                <span class="ident">checksum</span>: <span class="ident">checksum_bytes</span>.<span class="ident">into</span>(),
-                <span class="ident">chunk_type</span>,
-                <span class="ident">data_len</span>: <span class="ident">data</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">usize</span>,
-                <span class="ident">header_size</span>: <span class="ident">header</span>.<span class="ident">len</span>(),
-                <span class="ident">hash</span>,
+            i,
+            Header {
+                checksum: checksum_bytes.into(),
+                chunk_type,
+                data_len: data.len() <span class="kw">as </span>usize,
+                header_size: header.len(),
+                hash,
             },
         ))
     }
 
-    <span class="doccomment">/// The range of the input which corresponds to the data specified by this header</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">data_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">header_size</span>..(<span class="self">self</span>.<span class="ident">header_size</span> <span class="op">+</span> <span class="self">self</span>.<span class="ident">data_len</span>)
+    <span class="doccomment">/// The range of the input which corresponds to the data specified by this header
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>data_bytes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Range&lt;usize&gt; {
+        <span class="self">self</span>.header_size..(<span class="self">self</span>.header_size + <span class="self">self</span>.data_len)
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">hash</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">ChangeHash</span> {
-        <span class="self">self</span>.<span class="ident">hash</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>hash(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ChangeHash {
+        <span class="self">self</span>.hash
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">checksum_valid</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="ident">CheckSum</span>(<span class="self">self</span>.<span class="ident">hash</span>.<span class="ident">checksum</span>()) <span class="op">==</span> <span class="self">self</span>.<span class="ident">checksum</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>checksum_valid(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        CheckSum(<span class="self">self</span>.hash.checksum()) == <span class="self">self</span>.checksum
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">checksum</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">CheckSum</span> {
-        <span class="self">self</span>.<span class="ident">checksum</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>checksum(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; CheckSum {
+        <span class="self">self</span>.checksum
     }
 }
 
-<span class="kw">fn</span> <span class="ident">hash</span>(<span class="ident">typ</span>: <span class="ident">ChunkType</span>, <span class="ident">data</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; <span class="ident">ChangeHash</span> {
-    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">out</span> <span class="op">=</span> <span class="macro">vec!</span>[<span class="ident">u8::from</span>(<span class="ident">typ</span>)];
-    <span class="ident">leb128::write::unsigned</span>(<span class="kw-2">&amp;mut</span> <span class="ident">out</span>, <span class="ident">data</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>).<span class="ident">unwrap</span>();
-    <span class="ident">out</span>.<span class="ident">extend</span>(<span class="ident">data</span>.<span class="ident">as_ref</span>());
-    <span class="kw">let</span> <span class="ident">hash_result</span> <span class="op">=</span> <span class="ident">Sha256::digest</span>(<span class="ident">out</span>);
-    <span class="kw">let</span> <span class="ident">array</span>: [<span class="ident">u8</span>; <span class="number">32</span>] <span class="op">=</span> <span class="ident">hash_result</span>.<span class="ident">into</span>();
-    <span class="ident">ChangeHash</span>(<span class="ident">array</span>)
+<span class="kw">fn </span>hash(typ: ChunkType, data: <span class="kw-2">&amp;</span>[u8]) -&gt; ChangeHash {
+    <span class="kw">let </span><span class="kw-2">mut </span>out = <span class="macro">vec!</span>[u8::from(typ)];
+    leb128::write::unsigned(<span class="kw-2">&amp;mut </span>out, data.len() <span class="kw">as </span>u64).unwrap();
+    out.extend(data.as_ref());
+    <span class="kw">let </span>hash_result = Sha256::digest(out);
+    <span class="kw">let </span>array: [u8; <span class="number">32</span>] = hash_result.into();
+    ChangeHash(array)
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

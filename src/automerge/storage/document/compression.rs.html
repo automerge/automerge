@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/document/compression.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>compression.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/document/compression.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>compression.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -338,343 +338,343 @@
 <span id="336">336</span>
 <span id="337">337</span>
 <span id="338">338</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std</span>::{<span class="ident">borrow::Cow</span>, <span class="ident">ops::Range</span>};
+</pre><pre class="rust"><code><span class="kw">use </span>std::{borrow::Cow, ops::Range};
 
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::storage</span>::{<span class="ident">columns::compression</span>, <span class="ident">shift_range</span>, <span class="ident">ChunkType</span>, <span class="ident">Header</span>, <span class="ident">RawColumns</span>};
+<span class="kw">use </span><span class="kw">crate</span>::storage::{columns::compression, shift_range, ChunkType, Header, RawColumns};
 
-<span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct</span> <span class="ident">Args</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">T</span>: <span class="ident">compression::ColumnCompression</span>, <span class="ident">DirArgs</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// The original data of the entire document chunk (compressed or uncompressed)</span>
-    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="ident">original</span>: <span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, [<span class="ident">u8</span>]<span class="op">&gt;</span>,
-    <span class="doccomment">/// The number of bytes in the original before the beginning of the change column metadata</span>
-    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="ident">prefix</span>: <span class="ident">usize</span>,
-    <span class="doccomment">/// The offset in the original after the end of the ops column data</span>
-    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="ident">suffix</span>: <span class="ident">usize</span>,
-    <span class="doccomment">/// The column data for the changes</span>
-    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="ident">changes</span>: <span class="ident">Cols</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// The column data for the ops</span>
-    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="ident">ops</span>: <span class="ident">Cols</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// Additional arguments specific to the direction (compression or uncompression)</span>
-    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="ident">extra_args</span>: <span class="ident">DirArgs</span>,
+<span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct </span>Args&lt;<span class="lifetime">&#39;a</span>, T: compression::ColumnCompression, DirArgs&gt; {
+    <span class="doccomment">/// The original data of the entire document chunk (compressed or uncompressed)
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) original: Cow&lt;<span class="lifetime">&#39;a</span>, [u8]&gt;,
+    <span class="doccomment">/// The number of bytes in the original before the beginning of the change column metadata
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) prefix: usize,
+    <span class="doccomment">/// The offset in the original after the end of the ops column data
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) suffix: usize,
+    <span class="doccomment">/// The column data for the changes
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) changes: Cols&lt;T&gt;,
+    <span class="doccomment">/// The column data for the ops
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) ops: Cols&lt;T&gt;,
+    <span class="doccomment">/// Additional arguments specific to the direction (compression or uncompression)
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) extra_args: DirArgs,
 }
 
-<span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct</span> <span class="ident">CompressArgs</span> {
-    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="ident">threshold</span>: <span class="ident">usize</span>,
-    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="ident">original_header_len</span>: <span class="ident">usize</span>,
+<span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct </span>CompressArgs {
+    <span class="kw">pub</span>(<span class="kw">super</span>) threshold: usize,
+    <span class="kw">pub</span>(<span class="kw">super</span>) original_header_len: usize,
 }
 
-<span class="doccomment">/// Compress a document chunk returning the compressed bytes</span>
-<span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn</span> <span class="ident">compress</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(<span class="ident">args</span>: <span class="ident">Args</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">compression::Uncompressed</span>, <span class="ident">CompressArgs</span><span class="op">&gt;</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-    <span class="kw">let</span> <span class="ident">header_len</span> <span class="op">=</span> <span class="ident">args</span>.<span class="ident">extra_args</span>.<span class="ident">original_header_len</span>;
-    <span class="kw">let</span> <span class="ident">threshold</span> <span class="op">=</span> <span class="ident">args</span>.<span class="ident">extra_args</span>.<span class="ident">threshold</span>;
-    <span class="ident">Compression</span>::<span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Compressing</span>, <span class="kw">_</span><span class="op">&gt;</span><span class="ident">::new</span>(
-        <span class="ident">args</span>,
-        <span class="ident">Compressing</span> {
-            <span class="ident">threshold</span>,
-            <span class="ident">header_len</span>,
+<span class="doccomment">/// Compress a document chunk returning the compressed bytes
+</span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>compress&lt;<span class="lifetime">&#39;a</span>&gt;(args: Args&lt;<span class="lifetime">&#39;a</span>, compression::Uncompressed, CompressArgs&gt;) -&gt; Vec&lt;u8&gt; {
+    <span class="kw">let </span>header_len = args.extra_args.original_header_len;
+    <span class="kw">let </span>threshold = args.extra_args.threshold;
+    Compression::&lt;<span class="lifetime">&#39;a</span>, Compressing, <span class="kw">_</span>&gt;::new(
+        args,
+        Compressing {
+            threshold,
+            header_len,
         },
     )
-    .<span class="ident">changes</span>()
-    .<span class="ident">ops</span>()
-    .<span class="ident">write_data</span>()
-    .<span class="ident">finish</span>()
+    .changes()
+    .ops()
+    .write_data()
+    .finish()
 }
 
-<span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn</span> <span class="ident">decompress</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(<span class="ident">args</span>: <span class="ident">Args</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">compression::Unknown</span>, ()<span class="op">&gt;</span>) -&gt; <span class="ident">Decompressed</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">match</span> (
-        <span class="ident">args</span>.<span class="ident">changes</span>.<span class="ident">raw_columns</span>.<span class="ident">uncompressed</span>(),
-        <span class="ident">args</span>.<span class="ident">ops</span>.<span class="ident">raw_columns</span>.<span class="ident">uncompressed</span>(),
+<span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>decompress&lt;<span class="lifetime">&#39;a</span>&gt;(args: Args&lt;<span class="lifetime">&#39;a</span>, compression::Unknown, ()&gt;) -&gt; Decompressed&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">match </span>(
+        args.changes.raw_columns.uncompressed(),
+        args.ops.raw_columns.uncompressed(),
     ) {
-        (<span class="prelude-val">Some</span>(<span class="ident">changes</span>), <span class="prelude-val">Some</span>(<span class="ident">ops</span>)) =&gt; <span class="ident">Decompressed</span> {
-            <span class="ident">changes</span>,
-            <span class="ident">ops</span>,
-            <span class="ident">compressed</span>: <span class="prelude-val">None</span>,
-            <span class="ident">uncompressed</span>: <span class="ident">args</span>.<span class="ident">original</span>,
-            <span class="ident">change_bytes</span>: <span class="ident">args</span>.<span class="ident">changes</span>.<span class="ident">data</span>,
-            <span class="ident">op_bytes</span>: <span class="ident">args</span>.<span class="ident">ops</span>.<span class="ident">data</span>,
+        (<span class="prelude-val">Some</span>(changes), <span class="prelude-val">Some</span>(ops)) =&gt; Decompressed {
+            changes,
+            ops,
+            compressed: <span class="prelude-val">None</span>,
+            uncompressed: args.original,
+            change_bytes: args.changes.data,
+            op_bytes: args.ops.data,
         },
-        <span class="kw">_</span> =&gt; <span class="ident">Compression</span>::<span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Decompressing</span>, <span class="kw">_</span><span class="op">&gt;</span><span class="ident">::new</span>(<span class="ident">args</span>, <span class="ident">Decompressing</span>)
-            .<span class="ident">changes</span>()
-            .<span class="ident">ops</span>()
-            .<span class="ident">write_data</span>()
-            .<span class="ident">finish</span>(),
+        <span class="kw">_ </span>=&gt; Compression::&lt;<span class="lifetime">&#39;a</span>, Decompressing, <span class="kw">_</span>&gt;::new(args, Decompressing)
+            .changes()
+            .ops()
+            .write_data()
+            .finish(),
     }
 }
 
-<span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct</span> <span class="ident">Decompressed</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// The original compressed data, if there was any</span>
-    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="ident">compressed</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, [<span class="ident">u8</span>]<span class="op">&gt;</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// The final uncompressed data</span>
-    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="ident">uncompressed</span>: <span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, [<span class="ident">u8</span>]<span class="op">&gt;</span>,
-    <span class="doccomment">/// The ops column metadata</span>
-    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="ident">ops</span>: <span class="ident">RawColumns</span><span class="op">&lt;</span><span class="ident">compression::Uncompressed</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// The change column metadata</span>
-    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="ident">changes</span>: <span class="ident">RawColumns</span><span class="op">&lt;</span><span class="ident">compression::Uncompressed</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// The location of the change column data in the uncompressed data</span>
-    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="ident">change_bytes</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// The location of the op column data in the uncompressed data</span>
-    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="ident">op_bytes</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
+<span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct </span>Decompressed&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="doccomment">/// The original compressed data, if there was any
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) compressed: <span class="prelude-ty">Option</span>&lt;Cow&lt;<span class="lifetime">&#39;a</span>, [u8]&gt;&gt;,
+    <span class="doccomment">/// The final uncompressed data
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) uncompressed: Cow&lt;<span class="lifetime">&#39;a</span>, [u8]&gt;,
+    <span class="doccomment">/// The ops column metadata
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) ops: RawColumns&lt;compression::Uncompressed&gt;,
+    <span class="doccomment">/// The change column metadata
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) changes: RawColumns&lt;compression::Uncompressed&gt;,
+    <span class="doccomment">/// The location of the change column data in the uncompressed data
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) change_bytes: Range&lt;usize&gt;,
+    <span class="doccomment">/// The location of the op column data in the uncompressed data
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) op_bytes: Range&lt;usize&gt;,
 }
 
-<span class="kw">struct</span> <span class="ident">Compression</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">D</span>: <span class="ident">Direction</span>, <span class="ident">S</span>: <span class="ident">CompressionState</span><span class="op">&gt;</span> {
-    <span class="ident">args</span>: <span class="ident">Args</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">D::In</span>, <span class="ident">D::Args</span><span class="op">&gt;</span>,
-    <span class="ident">state</span>: <span class="ident">S</span>,
-    <span class="ident">direction</span>: <span class="ident">D</span>,
+<span class="kw">struct </span>Compression&lt;<span class="lifetime">&#39;a</span>, D: Direction, S: CompressionState&gt; {
+    args: Args&lt;<span class="lifetime">&#39;a</span>, D::In, D::Args&gt;,
+    state: S,
+    direction: D,
 }
 
-<span class="doccomment">/// Some columns in the original data</span>
-<span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct</span> <span class="ident">Cols</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">compression::ColumnCompression</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// The metadata for these columns</span>
-    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="ident">raw_columns</span>: <span class="ident">RawColumns</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// The location in the original chunk of the data for these columns</span>
-    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="ident">data</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
+<span class="doccomment">/// Some columns in the original data
+</span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct </span>Cols&lt;T: compression::ColumnCompression&gt; {
+    <span class="doccomment">/// The metadata for these columns
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) raw_columns: RawColumns&lt;T&gt;,
+    <span class="doccomment">/// The location in the original chunk of the data for these columns
+    </span><span class="kw">pub</span>(<span class="kw">super</span>) data: Range&lt;usize&gt;,
 }
 
-<span class="comment">// Compression and decompression involve almost the same steps in either direction. This trait</span>
-<span class="comment">// encapsulates that.</span>
-<span class="kw">trait</span> <span class="ident">Direction</span>: <span class="ident">std::fmt::Debug</span> {
-    <span class="kw">type</span> <span class="ident">Out</span>: <span class="ident">compression::ColumnCompression</span>;
-    <span class="kw">type</span> <span class="ident">In</span>: <span class="ident">compression::ColumnCompression</span>;
-    <span class="kw">type</span> <span class="ident">Args</span>;
+<span class="comment">// Compression and decompression involve almost the same steps in either direction. This trait
+// encapsulates that.
+</span><span class="kw">trait </span>Direction: std::fmt::Debug {
+    <span class="kw">type </span>Out: compression::ColumnCompression;
+    <span class="kw">type </span>In: compression::ColumnCompression;
+    <span class="kw">type </span>Args;
 
-    <span class="doccomment">/// This method represents the (de)compression process for a direction. The arguments are:</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// * cols - The columns we are processing</span>
-    <span class="doccomment">/// * input - the entire document chunk</span>
-    <span class="doccomment">/// * out - the vector to place the processed columns in</span>
-    <span class="doccomment">/// * meta_out - the vector to place processed column metadata in</span>
-    <span class="kw">fn</span> <span class="ident">process</span>(
+    <span class="doccomment">/// This method represents the (de)compression process for a direction. The arguments are:
+    ///
+    /// * cols - The columns we are processing
+    /// * input - the entire document chunk
+    /// * out - the vector to place the processed columns in
+    /// * meta_out - the vector to place processed column metadata in
+    </span><span class="kw">fn </span>process(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">cols</span>: <span class="kw-2">&amp;</span><span class="ident">Cols</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::In</span><span class="op">&gt;</span>,
-        <span class="ident">input</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
-        <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
-        <span class="ident">meta_out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="ident">Cols</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Out</span><span class="op">&gt;</span>;
+        cols: <span class="kw-2">&amp;</span>Cols&lt;<span class="self">Self</span>::In&gt;,
+        input: <span class="kw-2">&amp;</span>[u8],
+        out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
+        meta_out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
+    ) -&gt; Cols&lt;<span class="self">Self</span>::Out&gt;;
 }
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
-<span class="kw">struct</span> <span class="ident">Compressing</span> {
-    <span class="ident">threshold</span>: <span class="ident">usize</span>,
-    <span class="ident">header_len</span>: <span class="ident">usize</span>,
+<span class="attribute">#[derive(Debug)]
+</span><span class="kw">struct </span>Compressing {
+    threshold: usize,
+    header_len: usize,
 }
 
-<span class="kw">impl</span> <span class="ident">Direction</span> <span class="kw">for</span> <span class="ident">Compressing</span> {
-    <span class="kw">type</span> <span class="ident">Out</span> <span class="op">=</span> <span class="ident">compression::Unknown</span>;
-    <span class="kw">type</span> <span class="ident">In</span> <span class="op">=</span> <span class="ident">compression::Uncompressed</span>;
-    <span class="kw">type</span> <span class="ident">Args</span> <span class="op">=</span> <span class="ident">CompressArgs</span>;
+<span class="kw">impl </span>Direction <span class="kw">for </span>Compressing {
+    <span class="kw">type </span>Out = compression::Unknown;
+    <span class="kw">type </span>In = compression::Uncompressed;
+    <span class="kw">type </span>Args = CompressArgs;
 
-    <span class="kw">fn</span> <span class="ident">process</span>(
+    <span class="kw">fn </span>process(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">cols</span>: <span class="kw-2">&amp;</span><span class="ident">Cols</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::In</span><span class="op">&gt;</span>,
-        <span class="ident">input</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
-        <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
-        <span class="ident">meta_out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="ident">Cols</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Out</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">start</span> <span class="op">=</span> <span class="ident">out</span>.<span class="ident">len</span>();
-        <span class="kw">let</span> <span class="ident">raw_columns</span> <span class="op">=</span> <span class="ident">cols</span>
-            .<span class="ident">raw_columns</span>
-            .<span class="ident">compress</span>(<span class="kw-2">&amp;</span><span class="ident">input</span>[<span class="ident">cols</span>.<span class="ident">data</span>.<span class="ident">clone</span>()], <span class="ident">out</span>, <span class="self">self</span>.<span class="ident">threshold</span>);
-        <span class="ident">raw_columns</span>.<span class="ident">write</span>(<span class="ident">meta_out</span>);
-        <span class="ident">Cols</span> {
-            <span class="ident">data</span>: <span class="ident">start</span>..<span class="ident">out</span>.<span class="ident">len</span>(),
-            <span class="ident">raw_columns</span>,
+        cols: <span class="kw-2">&amp;</span>Cols&lt;<span class="self">Self</span>::In&gt;,
+        input: <span class="kw-2">&amp;</span>[u8],
+        out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
+        meta_out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
+    ) -&gt; Cols&lt;<span class="self">Self</span>::Out&gt; {
+        <span class="kw">let </span>start = out.len();
+        <span class="kw">let </span>raw_columns = cols
+            .raw_columns
+            .compress(<span class="kw-2">&amp;</span>input[cols.data.clone()], out, <span class="self">self</span>.threshold);
+        raw_columns.write(meta_out);
+        Cols {
+            data: start..out.len(),
+            raw_columns,
         }
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
-<span class="kw">struct</span> <span class="ident">Decompressing</span>;
+<span class="attribute">#[derive(Debug)]
+</span><span class="kw">struct </span>Decompressing;
 
-<span class="kw">impl</span> <span class="ident">Direction</span> <span class="kw">for</span> <span class="ident">Decompressing</span> {
-    <span class="kw">type</span> <span class="ident">Out</span> <span class="op">=</span> <span class="ident">compression::Uncompressed</span>;
-    <span class="kw">type</span> <span class="ident">In</span> <span class="op">=</span> <span class="ident">compression::Unknown</span>;
-    <span class="kw">type</span> <span class="ident">Args</span> <span class="op">=</span> ();
+<span class="kw">impl </span>Direction <span class="kw">for </span>Decompressing {
+    <span class="kw">type </span>Out = compression::Uncompressed;
+    <span class="kw">type </span>In = compression::Unknown;
+    <span class="kw">type </span>Args = ();
 
-    <span class="kw">fn</span> <span class="ident">process</span>(
+    <span class="kw">fn </span>process(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">cols</span>: <span class="kw-2">&amp;</span><span class="ident">Cols</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::In</span><span class="op">&gt;</span>,
-        <span class="ident">input</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
-        <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
-        <span class="ident">meta_out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="ident">Cols</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Out</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">start</span> <span class="op">=</span> <span class="ident">out</span>.<span class="ident">len</span>();
-        <span class="kw">let</span> <span class="ident">raw_columns</span> <span class="op">=</span> <span class="ident">cols</span>.<span class="ident">raw_columns</span>.<span class="ident">uncompress</span>(<span class="kw-2">&amp;</span><span class="ident">input</span>[<span class="ident">cols</span>.<span class="ident">data</span>.<span class="ident">clone</span>()], <span class="ident">out</span>);
-        <span class="ident">raw_columns</span>.<span class="ident">write</span>(<span class="ident">meta_out</span>);
-        <span class="ident">Cols</span> {
-            <span class="ident">data</span>: <span class="ident">start</span>..<span class="ident">out</span>.<span class="ident">len</span>(),
-            <span class="ident">raw_columns</span>,
+        cols: <span class="kw-2">&amp;</span>Cols&lt;<span class="self">Self</span>::In&gt;,
+        input: <span class="kw-2">&amp;</span>[u8],
+        out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
+        meta_out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
+    ) -&gt; Cols&lt;<span class="self">Self</span>::Out&gt; {
+        <span class="kw">let </span>start = out.len();
+        <span class="kw">let </span>raw_columns = cols.raw_columns.uncompress(<span class="kw-2">&amp;</span>input[cols.data.clone()], out);
+        raw_columns.write(meta_out);
+        Cols {
+            data: start..out.len(),
+            raw_columns,
         }
     }
 }
 
-<span class="comment">// Somewhat absurdly I (alex) kept getting the order of writing ops and changes wrong as well as</span>
-<span class="comment">// the order that column metadata vs data should be written in. This is a type state to get the</span>
-<span class="comment">// compiler to enforce that things are done in the right order.</span>
-<span class="kw">trait</span> <span class="ident">CompressionState</span> {}
-<span class="kw">impl</span> <span class="ident">CompressionState</span> <span class="kw">for</span> <span class="ident">Starting</span> {}
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">D</span>: <span class="ident">Direction</span><span class="op">&gt;</span> <span class="ident">CompressionState</span> <span class="kw">for</span> <span class="ident">Changes</span><span class="op">&lt;</span><span class="ident">D</span><span class="op">&gt;</span> {}
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">D</span>: <span class="ident">Direction</span><span class="op">&gt;</span> <span class="ident">CompressionState</span> <span class="kw">for</span> <span class="ident">ChangesAndOps</span><span class="op">&lt;</span><span class="ident">D</span><span class="op">&gt;</span> {}
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">D</span>: <span class="ident">Direction</span><span class="op">&gt;</span> <span class="ident">CompressionState</span> <span class="kw">for</span> <span class="ident">Finished</span><span class="op">&lt;</span><span class="ident">D</span><span class="op">&gt;</span> {}
+<span class="comment">// Somewhat absurdly I (alex) kept getting the order of writing ops and changes wrong as well as
+// the order that column metadata vs data should be written in. This is a type state to get the
+// compiler to enforce that things are done in the right order.
+</span><span class="kw">trait </span>CompressionState {}
+<span class="kw">impl </span>CompressionState <span class="kw">for </span>Starting {}
+<span class="kw">impl</span>&lt;D: Direction&gt; CompressionState <span class="kw">for </span>Changes&lt;D&gt; {}
+<span class="kw">impl</span>&lt;D: Direction&gt; CompressionState <span class="kw">for </span>ChangesAndOps&lt;D&gt; {}
+<span class="kw">impl</span>&lt;D: Direction&gt; CompressionState <span class="kw">for </span>Finished&lt;D&gt; {}
 
-<span class="doccomment">/// We haven&#39;t done any processing yet</span>
-<span class="kw">struct</span> <span class="ident">Starting</span> {
-    <span class="doccomment">/// The vector to write column data to</span>
-    <span class="ident">data_out</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// The vector to write column metadata to</span>
-    <span class="ident">meta_out</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
+<span class="doccomment">/// We haven&#39;t done any processing yet
+</span><span class="kw">struct </span>Starting {
+    <span class="doccomment">/// The vector to write column data to
+    </span>data_out: Vec&lt;u8&gt;,
+    <span class="doccomment">/// The vector to write column metadata to
+    </span>meta_out: Vec&lt;u8&gt;,
 }
 
-<span class="doccomment">/// We&#39;ve processed the changes columns</span>
-<span class="kw">struct</span> <span class="ident">Changes</span><span class="op">&lt;</span><span class="ident">D</span>: <span class="ident">Direction</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// The `Cols` for the processed change columns</span>
-    <span class="ident">change_cols</span>: <span class="ident">Cols</span><span class="op">&lt;</span><span class="ident">D::Out</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// The vector to write column metadata to</span>
-    <span class="ident">meta_out</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// The vector to write column data to</span>
-    <span class="ident">data_out</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
+<span class="doccomment">/// We&#39;ve processed the changes columns
+</span><span class="kw">struct </span>Changes&lt;D: Direction&gt; {
+    <span class="doccomment">/// The `Cols` for the processed change columns
+    </span>change_cols: Cols&lt;D::Out&gt;,
+    <span class="doccomment">/// The vector to write column metadata to
+    </span>meta_out: Vec&lt;u8&gt;,
+    <span class="doccomment">/// The vector to write column data to
+    </span>data_out: Vec&lt;u8&gt;,
 }
 
-<span class="doccomment">/// We&#39;ve processed the ops columns</span>
-<span class="kw">struct</span> <span class="ident">ChangesAndOps</span><span class="op">&lt;</span><span class="ident">D</span>: <span class="ident">Direction</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// The `Cols` for the processed change columns</span>
-    <span class="ident">change_cols</span>: <span class="ident">Cols</span><span class="op">&lt;</span><span class="ident">D::Out</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// The `Cols` for the processed op columns</span>
-    <span class="ident">ops_cols</span>: <span class="ident">Cols</span><span class="op">&lt;</span><span class="ident">D::Out</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// The vector to write column metadata to</span>
-    <span class="ident">meta_out</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// The vector to write column data to</span>
-    <span class="ident">data_out</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
+<span class="doccomment">/// We&#39;ve processed the ops columns
+</span><span class="kw">struct </span>ChangesAndOps&lt;D: Direction&gt; {
+    <span class="doccomment">/// The `Cols` for the processed change columns
+    </span>change_cols: Cols&lt;D::Out&gt;,
+    <span class="doccomment">/// The `Cols` for the processed op columns
+    </span>ops_cols: Cols&lt;D::Out&gt;,
+    <span class="doccomment">/// The vector to write column metadata to
+    </span>meta_out: Vec&lt;u8&gt;,
+    <span class="doccomment">/// The vector to write column data to
+    </span>data_out: Vec&lt;u8&gt;,
 }
 
-<span class="doccomment">/// We&#39;ve written the column metadata and the op metadata for changes and ops to the output buffer</span>
-<span class="doccomment">/// and added the prefix and suffix from the args.</span>
-<span class="kw">struct</span> <span class="ident">Finished</span><span class="op">&lt;</span><span class="ident">D</span>: <span class="ident">Direction</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// The `Cols` for the processed change columns</span>
-    <span class="ident">change_cols</span>: <span class="ident">Cols</span><span class="op">&lt;</span><span class="ident">D::Out</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// The `Cols` for the processed op columns</span>
-    <span class="ident">ops_cols</span>: <span class="ident">Cols</span><span class="op">&lt;</span><span class="ident">D::Out</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// The start of the change column metadata in the processed chunk</span>
-    <span class="ident">data_start</span>: <span class="ident">usize</span>,
-    <span class="doccomment">/// The processed chunk</span>
-    <span class="ident">out</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
+<span class="doccomment">/// We&#39;ve written the column metadata and the op metadata for changes and ops to the output buffer
+/// and added the prefix and suffix from the args.
+</span><span class="kw">struct </span>Finished&lt;D: Direction&gt; {
+    <span class="doccomment">/// The `Cols` for the processed change columns
+    </span>change_cols: Cols&lt;D::Out&gt;,
+    <span class="doccomment">/// The `Cols` for the processed op columns
+    </span>ops_cols: Cols&lt;D::Out&gt;,
+    <span class="doccomment">/// The start of the change column metadata in the processed chunk
+    </span>data_start: usize,
+    <span class="doccomment">/// The processed chunk
+    </span>out: Vec&lt;u8&gt;,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">D</span>: <span class="ident">Direction</span><span class="op">&gt;</span> <span class="ident">Compression</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">D</span>, <span class="ident">Starting</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">args</span>: <span class="ident">Args</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">D::In</span>, <span class="ident">D::Args</span><span class="op">&gt;</span>, <span class="ident">direction</span>: <span class="ident">D</span>) -&gt; <span class="ident">Compression</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">D</span>, <span class="ident">Starting</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">meta_out</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">args</span>.<span class="ident">original</span>.<span class="ident">len</span>() <span class="op">*</span> <span class="number">2</span>);
-        <span class="ident">meta_out</span>.<span class="ident">extend</span>(<span class="kw-2">&amp;</span><span class="ident">args</span>.<span class="ident">original</span>[..<span class="ident">args</span>.<span class="ident">prefix</span>]);
-        <span class="ident">Compression</span> {
-            <span class="ident">args</span>,
-            <span class="ident">direction</span>,
-            <span class="ident">state</span>: <span class="ident">Starting</span> {
-                <span class="ident">meta_out</span>,
-                <span class="ident">data_out</span>: <span class="ident">Vec::new</span>(),
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, D: Direction&gt; Compression&lt;<span class="lifetime">&#39;a</span>, D, Starting&gt; {
+    <span class="kw">fn </span>new(args: Args&lt;<span class="lifetime">&#39;a</span>, D::In, D::Args&gt;, direction: D) -&gt; Compression&lt;<span class="lifetime">&#39;a</span>, D, Starting&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>meta_out = Vec::with_capacity(args.original.len() * <span class="number">2</span>);
+        meta_out.extend(<span class="kw-2">&amp;</span>args.original[..args.prefix]);
+        Compression {
+            args,
+            direction,
+            state: Starting {
+                meta_out,
+                data_out: Vec::new(),
             },
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">D</span>: <span class="ident">Direction</span><span class="op">&gt;</span> <span class="ident">Compression</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">D</span>, <span class="ident">Starting</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">changes</span>(<span class="self">self</span>) -&gt; <span class="ident">Compression</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">D</span>, <span class="ident">Changes</span><span class="op">&lt;</span><span class="ident">D</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">Starting</span> {
-            <span class="kw-2">mut</span> <span class="ident">data_out</span>,
-            <span class="kw-2">mut</span> <span class="ident">meta_out</span>,
-        } <span class="op">=</span> <span class="self">self</span>.<span class="ident">state</span>;
-        <span class="kw">let</span> <span class="ident">change_cols</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">direction</span>.<span class="ident">process</span>(
-            <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">args</span>.<span class="ident">changes</span>,
-            <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">args</span>.<span class="ident">original</span>,
-            <span class="kw-2">&amp;mut</span> <span class="ident">data_out</span>,
-            <span class="kw-2">&amp;mut</span> <span class="ident">meta_out</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, D: Direction&gt; Compression&lt;<span class="lifetime">&#39;a</span>, D, Starting&gt; {
+    <span class="kw">fn </span>changes(<span class="self">self</span>) -&gt; Compression&lt;<span class="lifetime">&#39;a</span>, D, Changes&lt;D&gt;&gt; {
+        <span class="kw">let </span>Starting {
+            <span class="kw-2">mut </span>data_out,
+            <span class="kw-2">mut </span>meta_out,
+        } = <span class="self">self</span>.state;
+        <span class="kw">let </span>change_cols = <span class="self">self</span>.direction.process(
+            <span class="kw-2">&amp;</span><span class="self">self</span>.args.changes,
+            <span class="kw-2">&amp;</span><span class="self">self</span>.args.original,
+            <span class="kw-2">&amp;mut </span>data_out,
+            <span class="kw-2">&amp;mut </span>meta_out,
         );
-        <span class="ident">Compression</span> {
-            <span class="ident">args</span>: <span class="self">self</span>.<span class="ident">args</span>,
-            <span class="ident">direction</span>: <span class="self">self</span>.<span class="ident">direction</span>,
-            <span class="ident">state</span>: <span class="ident">Changes</span> {
-                <span class="ident">change_cols</span>,
-                <span class="ident">meta_out</span>,
-                <span class="ident">data_out</span>,
+        Compression {
+            args: <span class="self">self</span>.args,
+            direction: <span class="self">self</span>.direction,
+            state: Changes {
+                change_cols,
+                meta_out,
+                data_out,
             },
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">D</span>: <span class="ident">Direction</span><span class="op">&gt;</span> <span class="ident">Compression</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">D</span>, <span class="ident">Changes</span><span class="op">&lt;</span><span class="ident">D</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">ops</span>(<span class="self">self</span>) -&gt; <span class="ident">Compression</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">D</span>, <span class="ident">ChangesAndOps</span><span class="op">&lt;</span><span class="ident">D</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">Changes</span> {
-            <span class="ident">change_cols</span>,
-            <span class="kw-2">mut</span> <span class="ident">meta_out</span>,
-            <span class="kw-2">mut</span> <span class="ident">data_out</span>,
-        } <span class="op">=</span> <span class="self">self</span>.<span class="ident">state</span>;
-        <span class="kw">let</span> <span class="ident">ops_cols</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">direction</span>.<span class="ident">process</span>(
-            <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">args</span>.<span class="ident">ops</span>,
-            <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">args</span>.<span class="ident">original</span>,
-            <span class="kw-2">&amp;mut</span> <span class="ident">data_out</span>,
-            <span class="kw-2">&amp;mut</span> <span class="ident">meta_out</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, D: Direction&gt; Compression&lt;<span class="lifetime">&#39;a</span>, D, Changes&lt;D&gt;&gt; {
+    <span class="kw">fn </span>ops(<span class="self">self</span>) -&gt; Compression&lt;<span class="lifetime">&#39;a</span>, D, ChangesAndOps&lt;D&gt;&gt; {
+        <span class="kw">let </span>Changes {
+            change_cols,
+            <span class="kw-2">mut </span>meta_out,
+            <span class="kw-2">mut </span>data_out,
+        } = <span class="self">self</span>.state;
+        <span class="kw">let </span>ops_cols = <span class="self">self</span>.direction.process(
+            <span class="kw-2">&amp;</span><span class="self">self</span>.args.ops,
+            <span class="kw-2">&amp;</span><span class="self">self</span>.args.original,
+            <span class="kw-2">&amp;mut </span>data_out,
+            <span class="kw-2">&amp;mut </span>meta_out,
         );
-        <span class="ident">Compression</span> {
-            <span class="ident">args</span>: <span class="self">self</span>.<span class="ident">args</span>,
-            <span class="ident">direction</span>: <span class="self">self</span>.<span class="ident">direction</span>,
-            <span class="ident">state</span>: <span class="ident">ChangesAndOps</span> {
-                <span class="ident">change_cols</span>,
-                <span class="ident">ops_cols</span>,
-                <span class="ident">meta_out</span>,
-                <span class="ident">data_out</span>,
+        Compression {
+            args: <span class="self">self</span>.args,
+            direction: <span class="self">self</span>.direction,
+            state: ChangesAndOps {
+                change_cols,
+                ops_cols,
+                meta_out,
+                data_out,
             },
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">D</span>: <span class="ident">Direction</span><span class="op">&gt;</span> <span class="ident">Compression</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">D</span>, <span class="ident">ChangesAndOps</span><span class="op">&lt;</span><span class="ident">D</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">write_data</span>(<span class="self">self</span>) -&gt; <span class="ident">Compression</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">D</span>, <span class="ident">Finished</span><span class="op">&lt;</span><span class="ident">D</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">ChangesAndOps</span> {
-            <span class="ident">data_out</span>,
-            <span class="kw-2">mut</span> <span class="ident">meta_out</span>,
-            <span class="ident">change_cols</span>,
-            <span class="ident">ops_cols</span>,
-        } <span class="op">=</span> <span class="self">self</span>.<span class="ident">state</span>;
-        <span class="kw">let</span> <span class="ident">data_start</span> <span class="op">=</span> <span class="ident">meta_out</span>.<span class="ident">len</span>();
-        <span class="ident">meta_out</span>.<span class="ident">extend</span>(<span class="kw-2">&amp;</span><span class="ident">data_out</span>);
-        <span class="ident">meta_out</span>.<span class="ident">extend</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">args</span>.<span class="ident">original</span>[<span class="self">self</span>.<span class="ident">args</span>.<span class="ident">suffix</span>..]);
-        <span class="ident">Compression</span> {
-            <span class="ident">args</span>: <span class="self">self</span>.<span class="ident">args</span>,
-            <span class="ident">direction</span>: <span class="self">self</span>.<span class="ident">direction</span>,
-            <span class="ident">state</span>: <span class="ident">Finished</span> {
-                <span class="ident">ops_cols</span>,
-                <span class="ident">change_cols</span>,
-                <span class="ident">out</span>: <span class="ident">meta_out</span>,
-                <span class="ident">data_start</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, D: Direction&gt; Compression&lt;<span class="lifetime">&#39;a</span>, D, ChangesAndOps&lt;D&gt;&gt; {
+    <span class="kw">fn </span>write_data(<span class="self">self</span>) -&gt; Compression&lt;<span class="lifetime">&#39;a</span>, D, Finished&lt;D&gt;&gt; {
+        <span class="kw">let </span>ChangesAndOps {
+            data_out,
+            <span class="kw-2">mut </span>meta_out,
+            change_cols,
+            ops_cols,
+        } = <span class="self">self</span>.state;
+        <span class="kw">let </span>data_start = meta_out.len();
+        meta_out.extend(<span class="kw-2">&amp;</span>data_out);
+        meta_out.extend(<span class="kw-2">&amp;</span><span class="self">self</span>.args.original[<span class="self">self</span>.args.suffix..]);
+        Compression {
+            args: <span class="self">self</span>.args,
+            direction: <span class="self">self</span>.direction,
+            state: Finished {
+                ops_cols,
+                change_cols,
+                out: meta_out,
+                data_start,
             },
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Compression</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Decompressing</span>, <span class="ident">Finished</span><span class="op">&lt;</span><span class="ident">Decompressing</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">finish</span>(<span class="self">self</span>) -&gt; <span class="ident">Decompressed</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">Finished</span> {
-            <span class="ident">change_cols</span>,
-            <span class="ident">ops_cols</span>,
-            <span class="ident">data_start</span>,
-            <span class="ident">out</span>,
-        } <span class="op">=</span> <span class="self">self</span>.<span class="ident">state</span>;
-        <span class="ident">Decompressed</span> {
-            <span class="ident">ops</span>: <span class="ident">ops_cols</span>.<span class="ident">raw_columns</span>,
-            <span class="ident">changes</span>: <span class="ident">change_cols</span>.<span class="ident">raw_columns</span>,
-            <span class="ident">uncompressed</span>: <span class="ident">Cow::Owned</span>(<span class="ident">out</span>),
-            <span class="ident">compressed</span>: <span class="prelude-val">Some</span>(<span class="self">self</span>.<span class="ident">args</span>.<span class="ident">original</span>),
-            <span class="ident">change_bytes</span>: <span class="ident">shift_range</span>(<span class="ident">change_cols</span>.<span class="ident">data</span>, <span class="ident">data_start</span>),
-            <span class="ident">op_bytes</span>: <span class="ident">shift_range</span>(<span class="ident">ops_cols</span>.<span class="ident">data</span>, <span class="ident">data_start</span>),
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Compression&lt;<span class="lifetime">&#39;a</span>, Decompressing, Finished&lt;Decompressing&gt;&gt; {
+    <span class="kw">fn </span>finish(<span class="self">self</span>) -&gt; Decompressed&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <span class="kw">let </span>Finished {
+            change_cols,
+            ops_cols,
+            data_start,
+            out,
+        } = <span class="self">self</span>.state;
+        Decompressed {
+            ops: ops_cols.raw_columns,
+            changes: change_cols.raw_columns,
+            uncompressed: Cow::Owned(out),
+            compressed: <span class="prelude-val">Some</span>(<span class="self">self</span>.args.original),
+            change_bytes: shift_range(change_cols.data, data_start),
+            op_bytes: shift_range(ops_cols.data, data_start),
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Compression</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Compressing</span>, <span class="ident">Finished</span><span class="op">&lt;</span><span class="ident">Compressing</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">finish</span>(<span class="self">self</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">Finished</span> { <span class="ident">out</span>, .. } <span class="op">=</span> <span class="self">self</span>.<span class="ident">state</span>;
-        <span class="kw">let</span> <span class="ident">headerless</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">out</span>[<span class="self">self</span>.<span class="ident">direction</span>.<span class="ident">header_len</span>..];
-        <span class="kw">let</span> <span class="ident">header</span> <span class="op">=</span> <span class="ident">Header::new</span>(<span class="ident">ChunkType::Document</span>, <span class="ident">headerless</span>);
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">header</span>.<span class="ident">len</span>() <span class="op">+</span> <span class="ident">out</span>.<span class="ident">len</span>());
-        <span class="ident">header</span>.<span class="ident">write</span>(<span class="kw-2">&amp;mut</span> <span class="ident">result</span>);
-        <span class="ident">result</span>.<span class="ident">extend</span>(<span class="ident">headerless</span>);
-        <span class="ident">result</span>
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Compression&lt;<span class="lifetime">&#39;a</span>, Compressing, Finished&lt;Compressing&gt;&gt; {
+    <span class="kw">fn </span>finish(<span class="self">self</span>) -&gt; Vec&lt;u8&gt; {
+        <span class="kw">let </span>Finished { out, .. } = <span class="self">self</span>.state;
+        <span class="kw">let </span>headerless = <span class="kw-2">&amp;</span>out[<span class="self">self</span>.direction.header_len..];
+        <span class="kw">let </span>header = Header::new(ChunkType::Document, headerless);
+        <span class="kw">let </span><span class="kw-2">mut </span>result = Vec::with_capacity(header.len() + out.len());
+        header.write(<span class="kw-2">&amp;mut </span>result);
+        result.extend(headerless);
+        result
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

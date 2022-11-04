@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/lib.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>lib.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/lib.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>lib.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -112,117 +112,117 @@
 <span id="110">110</span>
 <span id="111">111</span>
 <span id="112">112</span>
-</pre><pre class="rust"><code><span class="attribute">#![<span class="ident">doc</span>(
-    <span class="ident">html_logo_url</span> <span class="op">=</span> <span class="string">&quot;https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg&quot;</span>,
-    <span class="ident">html_favicon_url</span> <span class="op">=</span> <span class="string">&quot;https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico&quot;</span>
-)]</span>
-<span class="attribute">#![<span class="ident">warn</span>(
-    <span class="ident">missing_debug_implementations</span>,
-    <span class="comment">// missing_docs, // TODO: add documentation!</span>
-    <span class="ident">rust_2018_idioms</span>,
-    <span class="ident">unreachable_pub</span>,
-    <span class="ident">bad_style</span>,
-    <span class="ident">const_err</span>,
-    <span class="ident">dead_code</span>,
-    <span class="ident">improper_ctypes</span>,
-    <span class="ident">non_shorthand_field_patterns</span>,
-    <span class="ident">no_mangle_generic_items</span>,
-    <span class="ident">overflowing_literals</span>,
-    <span class="ident">path_statements</span>,
-    <span class="ident">patterns_in_fns_without_body</span>,
-    <span class="ident">private_in_public</span>,
-    <span class="ident">unconditional_recursion</span>,
-    <span class="ident">unused</span>,
-    <span class="ident">unused_allocation</span>,
-    <span class="ident">unused_comparisons</span>,
-    <span class="ident">unused_parens</span>,
-    <span class="ident">while_true</span>
-)]</span>
+</pre><pre class="rust"><code><span class="attribute">#![doc(
+    html_logo_url = <span class="string">&quot;https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg&quot;</span>,
+    html_favicon_url = <span class="string">&quot;https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico&quot;
+</span>)]
+#![warn(
+    missing_debug_implementations,
+    <span class="comment">// missing_docs, // TODO: add documentation!
+    </span>rust_2018_idioms,
+    unreachable_pub,
+    bad_style,
+    const_err,
+    dead_code,
+    improper_ctypes,
+    non_shorthand_field_patterns,
+    no_mangle_generic_items,
+    overflowing_literals,
+    path_statements,
+    patterns_in_fns_without_body,
+    private_in_public,
+    unconditional_recursion,
+    unused,
+    unused_allocation,
+    unused_comparisons,
+    unused_parens,
+    while_true
+)]
 
-<span class="attribute">#[<span class="ident">doc</span>(<span class="ident">hidden</span>)]</span>
-<span class="attribute">#[<span class="ident">macro_export</span>]</span>
-<span class="macro">macro_rules!</span> <span class="ident">log</span> {
-     ( $( <span class="macro-nonterminal">$</span><span class="macro-nonterminal">t</span>:<span class="ident">tt</span> )<span class="op">*</span> ) =&gt; {
+#[doc(hidden)]
+#[macro_export]
+</span><span class="macro">macro_rules! </span>log {
+     ( $( <span class="macro-nonterminal">$t</span>:tt )* ) =&gt; {
           {
-            <span class="kw">use</span> <span class="macro-nonterminal">$</span><span class="macro-nonterminal">crate::__log</span>;
-            <span class="macro">__log!</span>( $( <span class="macro-nonterminal">$</span><span class="macro-nonterminal">t</span> )<span class="op">*</span> );
+            <span class="kw">use </span><span class="macro-nonterminal">$crate::__log</span>;
+            <span class="macro">__log!</span>( $( <span class="macro-nonterminal">$t </span>)* );
           }
      }
  }
 
-<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">all</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;wasm&quot;</span>, <span class="ident">target_family</span> <span class="op">=</span> <span class="string">&quot;wasm&quot;</span>))]</span>
-<span class="attribute">#[<span class="ident">doc</span>(<span class="ident">hidden</span>)]</span>
-<span class="attribute">#[<span class="ident">macro_export</span>]</span>
-<span class="macro">macro_rules!</span> <span class="ident">__log</span> {
-     ( $( <span class="macro-nonterminal">$</span><span class="macro-nonterminal">t</span>:<span class="ident">tt</span> )<span class="op">*</span> ) =&gt; {
-         <span class="ident">web_sys::console::log_1</span>(<span class="kw-2">&amp;</span><span class="macro">format!</span>( $( <span class="macro-nonterminal">$</span><span class="macro-nonterminal">t</span> )<span class="op">*</span> ).<span class="ident">into</span>());
+<span class="attribute">#[cfg(all(feature = <span class="string">&quot;wasm&quot;</span>, target_family = <span class="string">&quot;wasm&quot;</span>))]
+#[doc(hidden)]
+#[macro_export]
+</span><span class="macro">macro_rules! </span>__log {
+     ( $( <span class="macro-nonterminal">$t</span>:tt )* ) =&gt; {
+         web_sys::console::log_1(<span class="kw-2">&amp;</span><span class="macro">format!</span>( $( <span class="macro-nonterminal">$t </span>)* ).into());
      }
  }
 
-<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">not</span>(<span class="ident">all</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;wasm&quot;</span>, <span class="ident">target_family</span> <span class="op">=</span> <span class="string">&quot;wasm&quot;</span>)))]</span>
-<span class="attribute">#[<span class="ident">doc</span>(<span class="ident">hidden</span>)]</span>
-<span class="attribute">#[<span class="ident">macro_export</span>]</span>
-<span class="macro">macro_rules!</span> <span class="ident">__log</span> {
-     ( $( <span class="macro-nonterminal">$</span><span class="macro-nonterminal">t</span>:<span class="ident">tt</span> )<span class="op">*</span> ) =&gt; {
-         <span class="macro">println!</span>( $( <span class="macro-nonterminal">$</span><span class="macro-nonterminal">t</span> )<span class="op">*</span> );
+<span class="attribute">#[cfg(not(all(feature = <span class="string">&quot;wasm&quot;</span>, target_family = <span class="string">&quot;wasm&quot;</span>)))]
+#[doc(hidden)]
+#[macro_export]
+</span><span class="macro">macro_rules! </span>__log {
+     ( $( <span class="macro-nonterminal">$t</span>:tt )* ) =&gt; {
+         <span class="macro">println!</span>( $( <span class="macro-nonterminal">$t </span>)* );
      }
  }
 
-<span class="kw">mod</span> <span class="ident">autocommit</span>;
-<span class="kw">mod</span> <span class="ident">automerge</span>;
-<span class="kw">mod</span> <span class="ident">autoserde</span>;
-<span class="kw">mod</span> <span class="ident">change</span>;
-<span class="kw">mod</span> <span class="ident">clock</span>;
-<span class="kw">mod</span> <span class="ident">clocks</span>;
-<span class="kw">mod</span> <span class="ident">columnar</span>;
-<span class="kw">mod</span> <span class="ident">convert</span>;
-<span class="kw">mod</span> <span class="ident">error</span>;
-<span class="kw">mod</span> <span class="ident">exid</span>;
-<span class="kw">mod</span> <span class="ident">indexed_cache</span>;
-<span class="kw">mod</span> <span class="ident">keys</span>;
-<span class="kw">mod</span> <span class="ident">keys_at</span>;
-<span class="kw">mod</span> <span class="ident">legacy</span>;
-<span class="kw">mod</span> <span class="ident">list_range</span>;
-<span class="kw">mod</span> <span class="ident">list_range_at</span>;
-<span class="kw">mod</span> <span class="ident">map_range</span>;
-<span class="kw">mod</span> <span class="ident">map_range_at</span>;
-<span class="kw">mod</span> <span class="ident">op_observer</span>;
-<span class="kw">mod</span> <span class="ident">op_set</span>;
-<span class="kw">mod</span> <span class="ident">op_tree</span>;
-<span class="kw">mod</span> <span class="ident">parents</span>;
-<span class="kw">mod</span> <span class="ident">query</span>;
-<span class="kw">mod</span> <span class="ident">storage</span>;
-<span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">sync</span>;
-<span class="kw">pub</span> <span class="kw">mod</span> <span class="ident">transaction</span>;
-<span class="kw">mod</span> <span class="ident">types</span>;
-<span class="kw">mod</span> <span class="ident">value</span>;
-<span class="kw">mod</span> <span class="ident">values</span>;
-<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;optree-visualisation&quot;</span>)]</span>
-<span class="kw">mod</span> <span class="ident">visualisation</span>;
+<span class="kw">mod </span>autocommit;
+<span class="kw">mod </span>automerge;
+<span class="kw">mod </span>autoserde;
+<span class="kw">mod </span>change;
+<span class="kw">mod </span>clock;
+<span class="kw">mod </span>clocks;
+<span class="kw">mod </span>columnar;
+<span class="kw">mod </span>convert;
+<span class="kw">mod </span>error;
+<span class="kw">mod </span>exid;
+<span class="kw">mod </span>indexed_cache;
+<span class="kw">mod </span>keys;
+<span class="kw">mod </span>keys_at;
+<span class="kw">mod </span>legacy;
+<span class="kw">mod </span>list_range;
+<span class="kw">mod </span>list_range_at;
+<span class="kw">mod </span>map_range;
+<span class="kw">mod </span>map_range_at;
+<span class="kw">mod </span>op_observer;
+<span class="kw">mod </span>op_set;
+<span class="kw">mod </span>op_tree;
+<span class="kw">mod </span>parents;
+<span class="kw">mod </span>query;
+<span class="kw">mod </span>storage;
+<span class="kw">pub mod </span>sync;
+<span class="kw">pub mod </span>transaction;
+<span class="kw">mod </span>types;
+<span class="kw">mod </span>value;
+<span class="kw">mod </span>values;
+<span class="attribute">#[cfg(feature = <span class="string">&quot;optree-visualisation&quot;</span>)]
+</span><span class="kw">mod </span>visualisation;
 
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::automerge::Automerge</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">autocommit</span>::{<span class="ident">AutoCommit</span>, <span class="ident">AutoCommitWithObs</span>};
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">autoserde::AutoSerde</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">change</span>::{<span class="ident">Change</span>, <span class="ident">LoadError</span> <span class="kw">as</span> <span class="ident">LoadChangeError</span>};
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">error::AutomergeError</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">error::InvalidActorId</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">error::InvalidChangeHashSlice</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">exid::ExId</span> <span class="kw">as</span> <span class="ident">ObjId</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">keys::Keys</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">keys_at::KeysAt</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">legacy::Change</span> <span class="kw">as</span> <span class="ident">ExpandedChange</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">list_range::ListRange</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">list_range_at::ListRangeAt</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">map_range::MapRange</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">map_range_at::MapRangeAt</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">op_observer::OpObserver</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">op_observer::Patch</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">op_observer::VecOpObserver</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">parents::Parents</span>;
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">types</span>::{<span class="ident">ActorId</span>, <span class="ident">ChangeHash</span>, <span class="ident">ObjType</span>, <span class="ident">OpType</span>, <span class="ident">Prop</span>};
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">value</span>::{<span class="ident">ScalarValue</span>, <span class="ident">Value</span>};
-<span class="kw">pub</span> <span class="kw">use</span> <span class="ident">values::Values</span>;
+<span class="kw">pub use </span><span class="kw">crate</span>::automerge::Automerge;
+<span class="kw">pub use </span>autocommit::{AutoCommit, AutoCommitWithObs};
+<span class="kw">pub use </span>autoserde::AutoSerde;
+<span class="kw">pub use </span>change::{Change, LoadError <span class="kw">as </span>LoadChangeError};
+<span class="kw">pub use </span>error::AutomergeError;
+<span class="kw">pub use </span>error::InvalidActorId;
+<span class="kw">pub use </span>error::InvalidChangeHashSlice;
+<span class="kw">pub use </span>exid::ExId <span class="kw">as </span>ObjId;
+<span class="kw">pub use </span>keys::Keys;
+<span class="kw">pub use </span>keys_at::KeysAt;
+<span class="kw">pub use </span>legacy::Change <span class="kw">as </span>ExpandedChange;
+<span class="kw">pub use </span>list_range::ListRange;
+<span class="kw">pub use </span>list_range_at::ListRangeAt;
+<span class="kw">pub use </span>map_range::MapRange;
+<span class="kw">pub use </span>map_range_at::MapRangeAt;
+<span class="kw">pub use </span>op_observer::OpObserver;
+<span class="kw">pub use </span>op_observer::Patch;
+<span class="kw">pub use </span>op_observer::VecOpObserver;
+<span class="kw">pub use </span>parents::Parents;
+<span class="kw">pub use </span>types::{ActorId, ChangeHash, ObjType, OpType, Prop};
+<span class="kw">pub use </span>value::{ScalarValue, Value};
+<span class="kw">pub use </span>values::Values;
 
-<span class="kw">pub</span> <span class="kw">const</span> <span class="ident">ROOT</span>: <span class="ident">ObjId</span> <span class="op">=</span> <span class="ident">ObjId::Root</span>;
+<span class="kw">pub const </span>ROOT: ObjId = ObjId::Root;
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

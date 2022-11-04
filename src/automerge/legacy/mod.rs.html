@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/legacy/mod.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>mod.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/legacy/mod.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>mod.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -276,281 +276,281 @@
 <span id="274">274</span>
 <span id="275">275</span>
 <span id="276">276</span>
-</pre><pre class="rust"><code><span class="kw">mod</span> <span class="ident">serde_impls</span>;
-<span class="kw">mod</span> <span class="ident">utility_impls</span>;
+</pre><pre class="rust"><code><span class="kw">mod </span>serde_impls;
+<span class="kw">mod </span>utility_impls;
 
-<span class="kw">use</span> <span class="ident">std::num::NonZeroU64</span>;
+<span class="kw">use </span>std::num::NonZeroU64;
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::types</span>::{<span class="ident">ActorId</span>, <span class="ident">ChangeHash</span>, <span class="ident">ObjType</span>, <span class="ident">OpType</span>, <span class="ident">ScalarValue</span>};
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::value::DataType</span>;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="kw">crate</span>::types::{ActorId, ChangeHash, ObjType, OpType, ScalarValue};
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="kw">crate</span>::value::DataType;
 
-<span class="kw">use</span> <span class="ident">serde</span>::{<span class="ident">Deserialize</span>, <span class="ident">Serialize</span>};
-<span class="kw">use</span> <span class="ident">smol_str::SmolStr</span>;
+<span class="kw">use </span>serde::{Deserialize, Serialize};
+<span class="kw">use </span>smol_str::SmolStr;
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Deserialize</span>, <span class="ident">Serialize</span>, <span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>, <span class="ident">Copy</span>, <span class="ident">Hash</span>)]</span>
-<span class="attribute">#[<span class="ident">cfg_attr</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;derive-arbitrary&quot;</span>, <span class="ident">derive</span>(<span class="ident">arbitrary::Arbitrary</span>))]</span>
-<span class="attribute">#[<span class="ident">serde</span>(<span class="ident">rename_all</span> <span class="op">=</span> <span class="string">&quot;camelCase&quot;</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">MapType</span> {
-    <span class="ident">Map</span>,
-    <span class="ident">Table</span>,
+<span class="attribute">#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
+#[cfg_attr(feature = <span class="string">&quot;derive-arbitrary&quot;</span>, derive(arbitrary::Arbitrary))]
+#[serde(rename_all = <span class="string">&quot;camelCase&quot;</span>)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>MapType {
+    Map,
+    Table,
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Deserialize</span>, <span class="ident">Serialize</span>, <span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>, <span class="ident">Copy</span>, <span class="ident">Hash</span>)]</span>
-<span class="attribute">#[<span class="ident">serde</span>(<span class="ident">rename_all</span> <span class="op">=</span> <span class="string">&quot;camelCase&quot;</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">SequenceType</span> {
-    <span class="ident">List</span>,
-    <span class="ident">Text</span>,
+<span class="attribute">#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
+#[serde(rename_all = <span class="string">&quot;camelCase&quot;</span>)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>SequenceType {
+    List,
+    Text,
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Eq</span>, <span class="ident">PartialEq</span>, <span class="ident">Hash</span>, <span class="ident">Clone</span>)]</span>
-<span class="attribute">#[<span class="ident">cfg_attr</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;derive-arbitrary&quot;</span>, <span class="ident">derive</span>(<span class="ident">arbitrary::Arbitrary</span>))]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">OpId</span>(<span class="kw">pub</span> <span class="ident">u64</span>, <span class="kw">pub</span> <span class="ident">ActorId</span>);
+<span class="attribute">#[derive(Eq, PartialEq, Hash, Clone)]
+#[cfg_attr(feature = <span class="string">&quot;derive-arbitrary&quot;</span>, derive(arbitrary::Arbitrary))]
+</span><span class="kw">pub struct </span>OpId(<span class="kw">pub </span>u64, <span class="kw">pub </span>ActorId);
 
-<span class="kw">impl</span> <span class="ident">OpId</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">seq</span>: <span class="ident">u64</span>, <span class="ident">actor</span>: <span class="kw-2">&amp;</span><span class="ident">ActorId</span>) -&gt; <span class="ident">OpId</span> {
-        <span class="ident">OpId</span>(<span class="ident">seq</span>, <span class="ident">actor</span>.<span class="ident">clone</span>())
+<span class="kw">impl </span>OpId {
+    <span class="kw">pub fn </span>new(seq: u64, actor: <span class="kw-2">&amp;</span>ActorId) -&gt; OpId {
+        OpId(seq, actor.clone())
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">actor</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">ActorId</span> {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">1</span>
+    <span class="kw">pub fn </span>actor(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>ActorId {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">1
+    </span>}
+
+    <span class="kw">pub fn </span>counter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
+        <span class="self">self</span>.<span class="number">0
+    </span>}
+
+    <span class="kw">pub fn </span>increment_by(<span class="kw-2">&amp;</span><span class="self">self</span>, by: u64) -&gt; OpId {
+        OpId(<span class="self">self</span>.<span class="number">0 </span>+ by, <span class="self">self</span>.<span class="number">1</span>.clone())
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">counter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u64</span> {
-        <span class="self">self</span>.<span class="number">0</span>
-    }
-
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">increment_by</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">by</span>: <span class="ident">u64</span>) -&gt; <span class="ident">OpId</span> {
-        <span class="ident">OpId</span>(<span class="self">self</span>.<span class="number">0</span> <span class="op">+</span> <span class="ident">by</span>, <span class="self">self</span>.<span class="number">1</span>.<span class="ident">clone</span>())
-    }
-
-    <span class="doccomment">/// Returns true if `other` has the same actor ID, and their counter is `delta` greater than</span>
-    <span class="doccomment">/// ours.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">delta</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>, <span class="ident">delta</span>: <span class="ident">u64</span>) -&gt; <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="number">1</span> <span class="op">==</span> <span class="ident">other</span>.<span class="number">1</span> <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="number">0</span> <span class="op">+</span> <span class="ident">delta</span> <span class="op">==</span> <span class="ident">other</span>.<span class="number">0</span>
-    }
+    <span class="doccomment">/// Returns true if `other` has the same actor ID, and their counter is `delta` greater than
+    /// ours.
+    </span><span class="kw">pub fn </span>delta(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>, delta: u64) -&gt; bool {
+        <span class="self">self</span>.<span class="number">1 </span>== other.<span class="number">1 </span>&amp;&amp; <span class="self">self</span>.<span class="number">0 </span>+ delta == other.<span class="number">0
+    </span>}
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Eq</span>, <span class="ident">PartialEq</span>, <span class="ident">Debug</span>, <span class="ident">Hash</span>, <span class="ident">Clone</span>)]</span>
-<span class="attribute">#[<span class="ident">cfg_attr</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;derive-arbitrary&quot;</span>, <span class="ident">derive</span>(<span class="ident">arbitrary::Arbitrary</span>))]</span>
-<span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">ObjectId</span> {
-    <span class="ident">Id</span>(<span class="ident">OpId</span>),
-    <span class="ident">Root</span>,
+<span class="attribute">#[derive(Eq, PartialEq, Debug, Hash, Clone)]
+#[cfg_attr(feature = <span class="string">&quot;derive-arbitrary&quot;</span>, derive(arbitrary::Arbitrary))]
+</span><span class="kw">pub enum </span>ObjectId {
+    Id(OpId),
+    Root,
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">PartialEq</span>, <span class="ident">Eq</span>, <span class="ident">Debug</span>, <span class="ident">Hash</span>, <span class="ident">Clone</span>)]</span>
-<span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">ElementId</span> {
-    <span class="ident">Head</span>,
-    <span class="ident">Id</span>(<span class="ident">OpId</span>),
+<span class="attribute">#[derive(PartialEq, Eq, Debug, Hash, Clone)]
+</span><span class="kw">pub enum </span>ElementId {
+    Head,
+    Id(OpId),
 }
 
-<span class="kw">impl</span> <span class="ident">ElementId</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">as_opid</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">OpId</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">ElementId::Head</span> =&gt; <span class="prelude-val">None</span>,
-            <span class="ident">ElementId::Id</span>(<span class="ident">opid</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">opid</span>),
+<span class="kw">impl </span>ElementId {
+    <span class="kw">pub fn </span>as_opid(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>OpId&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            ElementId::Head =&gt; <span class="prelude-val">None</span>,
+            ElementId::Id(opid) =&gt; <span class="prelude-val">Some</span>(opid),
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">into_key</span>(<span class="self">self</span>) -&gt; <span class="ident">Key</span> {
-        <span class="ident">Key::Seq</span>(<span class="self">self</span>)
+    <span class="kw">pub fn </span>into_key(<span class="self">self</span>) -&gt; Key {
+        Key::Seq(<span class="self">self</span>)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">not_head</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">ElementId::Head</span> =&gt; <span class="bool-val">false</span>,
-            <span class="ident">ElementId::Id</span>(<span class="kw">_</span>) =&gt; <span class="bool-val">true</span>,
+    <span class="kw">pub fn </span>not_head(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="kw">match </span><span class="self">self </span>{
+            ElementId::Head =&gt; <span class="bool-val">false</span>,
+            ElementId::Id(<span class="kw">_</span>) =&gt; <span class="bool-val">true</span>,
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">increment_by</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">by</span>: <span class="ident">u64</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">ElementId::Head</span> =&gt; <span class="prelude-val">None</span>,
-            <span class="ident">ElementId::Id</span>(<span class="ident">id</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">ElementId::Id</span>(<span class="ident">id</span>.<span class="ident">increment_by</span>(<span class="ident">by</span>))),
-        }
-    }
-}
-
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Serialize</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>, <span class="ident">Debug</span>, <span class="ident">Hash</span>, <span class="ident">Clone</span>)]</span>
-<span class="attribute">#[<span class="ident">serde</span>(<span class="ident">untagged</span>)]</span>
-<span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">Key</span> {
-    <span class="ident">Map</span>(<span class="ident">SmolStr</span>),
-    <span class="ident">Seq</span>(<span class="ident">ElementId</span>),
-}
-
-<span class="kw">impl</span> <span class="ident">Key</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">head</span>() -&gt; <span class="ident">Key</span> {
-        <span class="ident">Key::Seq</span>(<span class="ident">ElementId::Head</span>)
-    }
-
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_map_key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Key::Map</span>(<span class="kw">_</span>) =&gt; <span class="bool-val">true</span>,
-            <span class="ident">Key::Seq</span>(<span class="kw">_</span>) =&gt; <span class="bool-val">false</span>,
-        }
-    }
-
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">as_element_id</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ElementId</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Key::Map</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
-            <span class="ident">Key::Seq</span>(<span class="ident">eid</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">eid</span>.<span class="ident">clone</span>()),
-        }
-    }
-
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_opid</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">OpId</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span>.<span class="ident">as_element_id</span>()<span class="question-mark">?</span> {
-            <span class="ident">ElementId::Id</span>(<span class="ident">id</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">id</span>),
-            <span class="ident">ElementId::Head</span> =&gt; <span class="prelude-val">None</span>,
-        }
-    }
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">increment_by</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">by</span>: <span class="ident">u64</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Key::Map</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
-            <span class="ident">Key::Seq</span>(<span class="ident">eid</span>) =&gt; <span class="ident">eid</span>.<span class="ident">increment_by</span>(<span class="ident">by</span>).<span class="ident">map</span>(<span class="ident">Key::Seq</span>),
+    <span class="kw">pub fn </span>increment_by(<span class="kw-2">&amp;</span><span class="self">self</span>, by: u64) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            ElementId::Head =&gt; <span class="prelude-val">None</span>,
+            ElementId::Id(id) =&gt; <span class="prelude-val">Some</span>(ElementId::Id(id.increment_by(by))),
         }
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Default</span>, <span class="ident">Clone</span>, <span class="ident">Eq</span>, <span class="ident">PartialEq</span>, <span class="ident">Serialize</span>)]</span>
-<span class="attribute">#[<span class="ident">serde</span>(<span class="ident">transparent</span>)]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">SortedVec</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>(<span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>);
+<span class="attribute">#[derive(Serialize, PartialEq, Eq, Debug, Hash, Clone)]
+#[serde(untagged)]
+</span><span class="kw">pub enum </span>Key {
+    Map(SmolStr),
+    Seq(ElementId),
+}
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> <span class="ident">SortedVec</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>() -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span>(<span class="ident">Vec::new</span>())
+<span class="kw">impl </span>Key {
+    <span class="kw">pub fn </span>head() -&gt; Key {
+        Key::Seq(ElementId::Head)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">len</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">len</span>()
+    <span class="kw">pub fn </span>is_map_key(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="kw">match </span><span class="self">self </span>{
+            Key::Map(<span class="kw">_</span>) =&gt; <span class="bool-val">true</span>,
+            Key::Seq(<span class="kw">_</span>) =&gt; <span class="bool-val">false</span>,
+        }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_empty</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="ident">len</span>() <span class="op">==</span> <span class="number">0</span>
+    <span class="kw">pub fn </span>as_element_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;ElementId&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            Key::Map(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+            Key::Seq(eid) =&gt; <span class="prelude-val">Some</span>(eid.clone()),
+        }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">index</span>: <span class="ident">usize</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">T</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">get</span>(<span class="ident">index</span>)
+    <span class="kw">pub fn </span>to_opid(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;OpId&gt; {
+        <span class="kw">match </span><span class="self">self</span>.as_element_id()<span class="question-mark">? </span>{
+            ElementId::Id(id) =&gt; <span class="prelude-val">Some</span>(id),
+            ElementId::Head =&gt; <span class="prelude-val">None</span>,
+        }
     }
-
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_mut</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">index</span>: <span class="ident">usize</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;mut</span> <span class="ident">T</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">get_mut</span>(<span class="ident">index</span>)
-    }
-
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">iter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">std::slice::Iter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">T</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">iter</span>()
+    <span class="kw">pub fn </span>increment_by(<span class="kw-2">&amp;</span><span class="self">self</span>, by: u64) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            Key::Map(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+            Key::Seq(eid) =&gt; eid.increment_by(by).map(Key::Seq),
+        }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">Ord</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">SortedVec</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="kw-2">mut</span> <span class="ident">other</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">other</span>.<span class="ident">sort_unstable</span>();
-        <span class="self">Self</span>(<span class="ident">other</span>)
+<span class="attribute">#[derive(Debug, Default, Clone, Eq, PartialEq, Serialize)]
+#[serde(transparent)]
+</span><span class="kw">pub struct </span>SortedVec&lt;T&gt;(Vec&lt;T&gt;);
+
+<span class="kw">impl</span>&lt;T&gt; SortedVec&lt;T&gt; {
+    <span class="kw">pub fn </span>new() -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>(Vec::new())
+    }
+
+    <span class="kw">pub fn </span>len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.<span class="number">0</span>.len()
+    }
+
+    <span class="kw">pub fn </span>is_empty(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="self">self</span>.len() == <span class="number">0
+    </span>}
+
+    <span class="kw">pub fn </span>get(<span class="kw-2">&amp;</span><span class="self">self</span>, index: usize) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>T&gt; {
+        <span class="self">self</span>.<span class="number">0</span>.get(index)
+    }
+
+    <span class="kw">pub fn </span>get_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: usize) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span>T&gt; {
+        <span class="self">self</span>.<span class="number">0</span>.get_mut(index)
+    }
+
+    <span class="kw">pub fn </span>iter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; std::slice::Iter&lt;<span class="lifetime">&#39;_</span>, T&gt; {
+        <span class="self">self</span>.<span class="number">0</span>.iter()
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">Ord</span><span class="op">&gt;</span> <span class="ident">FromIterator</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">SortedVec</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from_iter</span><span class="op">&lt;</span><span class="ident">I</span><span class="op">&gt;</span>(<span class="ident">iter</span>: <span class="ident">I</span>) -&gt; <span class="self">Self</span>
-    <span class="kw">where</span>
-        <span class="ident">I</span>: <span class="ident">std::iter::IntoIterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">T</span><span class="op">&gt;</span>,
+<span class="kw">impl</span>&lt;T: Ord&gt; From&lt;Vec&lt;T&gt;&gt; <span class="kw">for </span>SortedVec&lt;T&gt; {
+    <span class="kw">fn </span>from(<span class="kw-2">mut </span>other: Vec&lt;T&gt;) -&gt; <span class="self">Self </span>{
+        other.sort_unstable();
+        <span class="self">Self</span>(other)
+    }
+}
+
+<span class="kw">impl</span>&lt;T: Ord&gt; FromIterator&lt;T&gt; <span class="kw">for </span>SortedVec&lt;T&gt; {
+    <span class="kw">fn </span>from_iter&lt;I&gt;(iter: I) -&gt; <span class="self">Self
+    </span><span class="kw">where
+        </span>I: std::iter::IntoIterator&lt;Item = T&gt;,
     {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">inner</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">iter</span>.<span class="ident">into_iter</span>().<span class="ident">collect</span>();
-        <span class="ident">inner</span>.<span class="ident">sort_unstable</span>();
-        <span class="self">Self</span>(<span class="ident">inner</span>)
+        <span class="kw">let </span><span class="kw-2">mut </span>inner: Vec&lt;T&gt; = iter.into_iter().collect();
+        inner.sort_unstable();
+        <span class="self">Self</span>(inner)
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> <span class="ident">IntoIterator</span> <span class="kw">for</span> <span class="ident">SortedVec</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="ident">T</span>;
+<span class="kw">impl</span>&lt;T&gt; IntoIterator <span class="kw">for </span>SortedVec&lt;T&gt; {
+    <span class="kw">type </span>Item = T;
 
-    <span class="kw">type</span> <span class="ident">IntoIter</span> <span class="op">=</span> <span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> <span class="kw">as</span> <span class="ident">IntoIterator</span><span class="op">&gt;</span><span class="ident">::IntoIter</span>;
+    <span class="kw">type </span>IntoIter = &lt;Vec&lt;T&gt; <span class="kw">as </span>IntoIterator&gt;::IntoIter;
 
-    <span class="kw">fn</span> <span class="ident">into_iter</span>(<span class="self">self</span>) -&gt; <span class="ident"><span class="self">Self</span>::IntoIter</span> {
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">into_iter</span>()
+    <span class="kw">fn </span>into_iter(<span class="self">self</span>) -&gt; <span class="self">Self</span>::IntoIter {
+        <span class="self">self</span>.<span class="number">0</span>.into_iter()
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;de</span>, <span class="ident">T</span><span class="op">&gt;</span> <span class="ident">serde::Deserialize</span><span class="op">&lt;</span><span class="lifetime">&#39;de</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">SortedVec</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">T</span>: <span class="ident">serde::Deserialize</span><span class="op">&lt;</span><span class="lifetime">&#39;de</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Ord</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;de</span>, T&gt; serde::Deserialize&lt;<span class="lifetime">&#39;de</span>&gt; <span class="kw">for </span>SortedVec&lt;T&gt;
+<span class="kw">where
+    </span>T: serde::Deserialize&lt;<span class="lifetime">&#39;de</span>&gt; + Ord,
 {
-    <span class="kw">fn</span> <span class="ident">deserialize</span><span class="op">&lt;</span><span class="ident">D</span><span class="op">&gt;</span>(<span class="ident">deserializer</span>: <span class="ident">D</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">D::Error</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">D</span>: <span class="ident">serde::Deserializer</span><span class="op">&lt;</span><span class="lifetime">&#39;de</span><span class="op">&gt;</span>,
+    <span class="kw">fn </span>deserialize&lt;D&gt;(deserializer: D) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, D::Error&gt;
+    <span class="kw">where
+        </span>D: serde::Deserializer&lt;<span class="lifetime">&#39;de</span>&gt;,
     {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">v</span> <span class="op">=</span> <span class="ident">Vec::deserialize</span>(<span class="ident">deserializer</span>)<span class="question-mark">?</span>;
-        <span class="ident">v</span>.<span class="ident">sort_unstable</span>();
-        <span class="prelude-val">Ok</span>(<span class="self">Self</span>(<span class="ident">v</span>))
+        <span class="kw">let </span><span class="kw-2">mut </span>v = Vec::deserialize(deserializer)<span class="question-mark">?</span>;
+        v.sort_unstable();
+        <span class="prelude-val">Ok</span>(<span class="self">Self</span>(v))
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">PartialEq</span>, <span class="ident">Debug</span>, <span class="ident">Clone</span>)]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Op</span> {
-    <span class="kw">pub</span> <span class="ident">action</span>: <span class="ident">OpType</span>,
-    <span class="kw">pub</span> <span class="ident">obj</span>: <span class="ident">ObjectId</span>,
-    <span class="kw">pub</span> <span class="ident">key</span>: <span class="ident">Key</span>,
-    <span class="kw">pub</span> <span class="ident">pred</span>: <span class="ident">SortedVec</span><span class="op">&lt;</span><span class="ident">OpId</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span> <span class="ident">insert</span>: <span class="ident">bool</span>,
+<span class="attribute">#[derive(PartialEq, Debug, Clone)]
+</span><span class="kw">pub struct </span>Op {
+    <span class="kw">pub </span>action: OpType,
+    <span class="kw">pub </span>obj: ObjectId,
+    <span class="kw">pub </span>key: Key,
+    <span class="kw">pub </span>pred: SortedVec&lt;OpId&gt;,
+    <span class="kw">pub </span>insert: bool,
 }
 
-<span class="kw">impl</span> <span class="ident">Op</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">primitive_value</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ScalarValue</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">action</span> {
-            <span class="ident">OpType::Put</span>(<span class="ident">v</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">v</span>.<span class="ident">clone</span>()),
-            <span class="ident">OpType::Increment</span>(<span class="ident">i</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">ScalarValue::Int</span>(<span class="kw-2">*</span><span class="ident">i</span>)),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">None</span>,
+<span class="kw">impl </span>Op {
+    <span class="kw">pub fn </span>primitive_value(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;ScalarValue&gt; {
+        <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.action {
+            OpType::Put(v) =&gt; <span class="prelude-val">Some</span>(v.clone()),
+            OpType::Increment(i) =&gt; <span class="prelude-val">Some</span>(ScalarValue::Int(<span class="kw-2">*</span>i)),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">obj_type</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ObjType</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span>.<span class="ident">action</span> {
-            <span class="ident">OpType::Make</span>(<span class="ident">o</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">o</span>),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">None</span>,
+    <span class="kw">pub fn </span>obj_type(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;ObjType&gt; {
+        <span class="kw">match </span><span class="self">self</span>.action {
+            OpType::Make(o) =&gt; <span class="prelude-val">Some</span>(o),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_i64</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">i64</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">primitive_value</span>().<span class="ident">as_ref</span>().<span class="ident">and_then</span>(<span class="op">|</span><span class="ident">v</span><span class="op">|</span> <span class="ident">v</span>.<span class="ident">to_i64</span>())
+    <span class="kw">pub fn </span>to_i64(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;i64&gt; {
+        <span class="self">self</span>.primitive_value().as_ref().and_then(|v| v.to_i64())
     }
 }
 
-<span class="doccomment">/// A change represents a group of operations performed by an actor.</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Deserialize</span>, <span class="ident">Serialize</span>, <span class="ident">Debug</span>, <span class="ident">Clone</span>)]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Change</span> {
-    <span class="doccomment">/// The operations performed in this change.</span>
-    <span class="attribute">#[<span class="ident">serde</span>(<span class="ident">rename</span> <span class="op">=</span> <span class="string">&quot;ops&quot;</span>)]</span>
-    <span class="kw">pub</span> <span class="ident">operations</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Op</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// The actor that performed this change.</span>
-    <span class="attribute">#[<span class="ident">serde</span>(<span class="ident">rename</span> <span class="op">=</span> <span class="string">&quot;actor&quot;</span>)]</span>
-    <span class="kw">pub</span> <span class="ident">actor_id</span>: <span class="ident">ActorId</span>,
-    <span class="doccomment">/// The hash of this change.</span>
-    <span class="attribute">#[<span class="ident">serde</span>(<span class="ident">skip_serializing_if</span> <span class="op">=</span> <span class="string">&quot;Option::is_none&quot;</span>, <span class="ident">default</span>)]</span>
-    <span class="kw">pub</span> <span class="ident">hash</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// The index of this change in the changes from this actor.</span>
-    <span class="kw">pub</span> <span class="ident">seq</span>: <span class="ident">u64</span>,
-    <span class="doccomment">/// The start operation index. Starts at 1.</span>
-    <span class="attribute">#[<span class="ident">serde</span>(<span class="ident">rename</span> <span class="op">=</span> <span class="string">&quot;startOp&quot;</span>)]</span>
-    <span class="kw">pub</span> <span class="ident">start_op</span>: <span class="ident">NonZeroU64</span>,
-    <span class="doccomment">/// The time that this change was committed.</span>
-    <span class="kw">pub</span> <span class="ident">time</span>: <span class="ident">i64</span>,
-    <span class="doccomment">/// The message of this change.</span>
-    <span class="kw">pub</span> <span class="ident">message</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// The dependencies of this change.</span>
-    <span class="kw">pub</span> <span class="ident">deps</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>,
-    <span class="attribute">#[<span class="ident">serde</span>(<span class="ident">skip_serializing_if</span> <span class="op">=</span> <span class="string">&quot;Vec::is_empty&quot;</span>, <span class="ident">default</span> <span class="op">=</span> <span class="string">&quot;Default::default&quot;</span>)]</span>
-    <span class="kw">pub</span> <span class="ident">extra_bytes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
+<span class="doccomment">/// A change represents a group of operations performed by an actor.
+</span><span class="attribute">#[derive(Deserialize, Serialize, Debug, Clone)]
+</span><span class="kw">pub struct </span>Change {
+    <span class="doccomment">/// The operations performed in this change.
+    </span><span class="attribute">#[serde(rename = <span class="string">&quot;ops&quot;</span>)]
+    </span><span class="kw">pub </span>operations: Vec&lt;Op&gt;,
+    <span class="doccomment">/// The actor that performed this change.
+    </span><span class="attribute">#[serde(rename = <span class="string">&quot;actor&quot;</span>)]
+    </span><span class="kw">pub </span>actor_id: ActorId,
+    <span class="doccomment">/// The hash of this change.
+    </span><span class="attribute">#[serde(skip_serializing_if = <span class="string">&quot;Option::is_none&quot;</span>, default)]
+    </span><span class="kw">pub </span>hash: <span class="prelude-ty">Option</span>&lt;ChangeHash&gt;,
+    <span class="doccomment">/// The index of this change in the changes from this actor.
+    </span><span class="kw">pub </span>seq: u64,
+    <span class="doccomment">/// The start operation index. Starts at 1.
+    </span><span class="attribute">#[serde(rename = <span class="string">&quot;startOp&quot;</span>)]
+    </span><span class="kw">pub </span>start_op: NonZeroU64,
+    <span class="doccomment">/// The time that this change was committed.
+    </span><span class="kw">pub </span>time: i64,
+    <span class="doccomment">/// The message of this change.
+    </span><span class="kw">pub </span>message: <span class="prelude-ty">Option</span>&lt;String&gt;,
+    <span class="doccomment">/// The dependencies of this change.
+    </span><span class="kw">pub </span>deps: Vec&lt;ChangeHash&gt;,
+    <span class="attribute">#[serde(skip_serializing_if = <span class="string">&quot;Vec::is_empty&quot;</span>, default = <span class="string">&quot;Default::default&quot;</span>)]
+    </span><span class="kw">pub </span>extra_bytes: Vec&lt;u8&gt;,
 }
 
-<span class="kw">impl</span> <span class="ident">PartialEq</span> <span class="kw">for</span> <span class="ident">Change</span> {
-    <span class="comment">// everything but hash (its computed and not always present)</span>
-    <span class="kw">fn</span> <span class="ident">eq</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="ident">operations</span> <span class="op">==</span> <span class="ident">other</span>.<span class="ident">operations</span>
-            <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">actor_id</span> <span class="op">==</span> <span class="ident">other</span>.<span class="ident">actor_id</span>
-            <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">seq</span> <span class="op">==</span> <span class="ident">other</span>.<span class="ident">seq</span>
-            <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">start_op</span> <span class="op">==</span> <span class="ident">other</span>.<span class="ident">start_op</span>
-            <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">time</span> <span class="op">==</span> <span class="ident">other</span>.<span class="ident">time</span>
-            <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">message</span> <span class="op">==</span> <span class="ident">other</span>.<span class="ident">message</span>
-            <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">deps</span> <span class="op">==</span> <span class="ident">other</span>.<span class="ident">deps</span>
-            <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">extra_bytes</span> <span class="op">==</span> <span class="ident">other</span>.<span class="ident">extra_bytes</span>
+<span class="kw">impl </span>PartialEq <span class="kw">for </span>Change {
+    <span class="comment">// everything but hash (its computed and not always present)
+    </span><span class="kw">fn </span>eq(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; bool {
+        <span class="self">self</span>.operations == other.operations
+            &amp;&amp; <span class="self">self</span>.actor_id == other.actor_id
+            &amp;&amp; <span class="self">self</span>.seq == other.seq
+            &amp;&amp; <span class="self">self</span>.start_op == other.start_op
+            &amp;&amp; <span class="self">self</span>.time == other.time
+            &amp;&amp; <span class="self">self</span>.message == other.message
+            &amp;&amp; <span class="self">self</span>.deps == other.deps
+            &amp;&amp; <span class="self">self</span>.extra_bytes == other.extra_bytes
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/columnar/column_range/rle.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>rle.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/columnar/column_range/rle.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>rle.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -216,221 +216,221 @@
 <span id="214">214</span>
 <span id="215">215</span>
 <span id="216">216</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std</span>::{
-    <span class="ident">borrow</span>::{<span class="ident">Borrow</span>, <span class="ident">Cow</span>},
-    <span class="ident">fmt::Debug</span>,
-    <span class="ident">marker::PhantomData</span>,
-    <span class="ident">ops::Range</span>,
+</pre><pre class="rust"><code><span class="kw">use </span>std::{
+    borrow::{Borrow, Cow},
+    fmt::Debug,
+    marker::PhantomData,
+    ops::Range,
 };
 
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::columnar</span>::{
-    <span class="ident">encoding</span>::{<span class="ident">raw</span>, <span class="ident">Decodable</span>, <span class="ident">Encodable</span>, <span class="ident">RleDecoder</span>, <span class="ident">RleEncoder</span>, <span class="ident">Sink</span>},
-    <span class="ident">SpliceError</span>,
+<span class="kw">use </span><span class="kw">crate</span>::columnar::{
+    encoding::{raw, Decodable, Encodable, RleDecoder, RleEncoder, Sink},
+    SpliceError,
 };
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
-    <span class="ident">range</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-    <span class="ident">_phantom</span>: <span class="ident">PhantomData</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>,
+<span class="attribute">#[derive(Clone, Debug, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>RleRange&lt;T&gt; {
+    range: Range&lt;usize&gt;,
+    _phantom: PhantomData&lt;T&gt;,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">decoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>]) -&gt; <span class="ident">RleDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">T</span><span class="op">&gt;</span> {
-        <span class="ident">RleDecoder::from</span>(<span class="ident">Cow::Borrowed</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>[<span class="self">self</span>.<span class="ident">range</span>.<span class="ident">clone</span>()]))
+<span class="kw">impl</span>&lt;T&gt; RleRange&lt;T&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>decoder&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, data: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8]) -&gt; RleDecoder&lt;<span class="lifetime">&#39;a</span>, T&gt; {
+        RleDecoder::from(Cow::Borrowed(<span class="kw-2">&amp;</span>data[<span class="self">self</span>.range.clone()]))
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">is_empty</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="ident">range</span>.<span class="ident">is_empty</span>()
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>is_empty(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="self">self</span>.range.is_empty()
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">start</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
-        <span class="self">self</span>.<span class="ident">range</span>.<span class="ident">start</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>start(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.range.start
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">end</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
-        <span class="self">self</span>.<span class="ident">range</span>.<span class="ident">end</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>end(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.range.end
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Decodable</span> <span class="op">+</span> <span class="ident">Encodable</span> <span class="op">+</span> <span class="ident">PartialEq</span> <span class="op">+</span> <span class="ident">Eq</span> <span class="op">+</span> <span class="ident">Debug</span><span class="op">&gt;</span> <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// The semantics of this are similar to `Vec::splice`</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// # Arguments</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// * `data` - The buffer containing the original rows</span>
-    <span class="doccomment">/// * `replace` - The range of elements in the original collection to replace</span>
-    <span class="doccomment">/// * `replace_with` - An iterator to insert in place of the original elements.</span>
-    <span class="doccomment">/// * `out` - The buffer to encode the resulting collection into</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">splice</span><span class="op">&lt;</span>
+<span class="kw">impl</span>&lt;T: Clone + Decodable + Encodable + PartialEq + Eq + Debug&gt; RleRange&lt;T&gt; {
+    <span class="doccomment">/// The semantics of this are similar to `Vec::splice`
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - The buffer containing the original rows
+    /// * `replace` - The range of elements in the original collection to replace
+    /// * `replace_with` - An iterator to insert in place of the original elements.
+    /// * `out` - The buffer to encode the resulting collection into
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>splice&lt;
         <span class="lifetime">&#39;a</span>,
-        <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">TB</span><span class="op">&gt;</span>, <span class="ident">E</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-        <span class="ident">TB</span>: <span class="ident">Borrow</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> <span class="op">+</span> <span class="lifetime">&#39;a</span>,
-        <span class="ident">E</span>: <span class="ident">std::error::Error</span>,
-    <span class="op">&gt;</span>(
+        I: Iterator&lt;Item = <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;TB&gt;, E&gt;&gt;,
+        TB: Borrow&lt;T&gt; + <span class="lifetime">&#39;a</span>,
+        E: std::error::Error,
+    &gt;(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">data</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
-        <span class="ident">replace</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-        <span class="kw-2">mut</span> <span class="ident">replace_with</span>: <span class="ident">I</span>,
-        <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SpliceError</span><span class="op">&lt;</span><span class="ident">raw::Error</span>, <span class="ident">E</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">start</span> <span class="op">=</span> <span class="ident">out</span>.<span class="ident">len</span>();
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">encoder</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">encoder</span>(<span class="ident">out</span>);
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">decoder</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">decoder</span>(<span class="ident">data</span>);
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">idx</span> <span class="op">=</span> <span class="number">0</span>;
-        <span class="kw">while</span> <span class="ident">idx</span> <span class="op">&lt;</span> <span class="ident">replace</span>.<span class="ident">start</span> {
-            <span class="kw">match</span> <span class="ident">decoder</span>
-                .<span class="ident">next</span>()
-                .<span class="ident">transpose</span>()
-                .<span class="ident">map_err</span>(<span class="ident">SpliceError::ReadExisting</span>)<span class="question-mark">?</span>
-            {
-                <span class="prelude-val">Some</span>(<span class="ident">elem</span>) =&gt; <span class="ident">encoder</span>.<span class="ident">append</span>(<span class="ident">elem</span>.<span class="ident">as_ref</span>()),
-                <span class="prelude-val">None</span> =&gt; <span class="macro">panic!</span>(<span class="string">&quot;out of bounds&quot;</span>),
+        data: <span class="kw-2">&amp;</span>[u8],
+        replace: Range&lt;usize&gt;,
+        <span class="kw-2">mut </span>replace_with: I,
+        out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, SpliceError&lt;raw::Error, E&gt;&gt; {
+        <span class="kw">let </span>start = out.len();
+        <span class="kw">let </span><span class="kw-2">mut </span>encoder = <span class="self">self</span>.encoder(out);
+        <span class="kw">let </span><span class="kw-2">mut </span>decoder = <span class="self">self</span>.decoder(data);
+        <span class="kw">let </span><span class="kw-2">mut </span>idx = <span class="number">0</span>;
+        <span class="kw">while </span>idx &lt; replace.start {
+            <span class="kw">match </span>decoder
+                .next()
+                .transpose()
+                .map_err(SpliceError::ReadExisting)<span class="question-mark">?
+            </span>{
+                <span class="prelude-val">Some</span>(elem) =&gt; encoder.append(elem.as_ref()),
+                <span class="prelude-val">None </span>=&gt; <span class="macro">panic!</span>(<span class="string">&quot;out of bounds&quot;</span>),
             }
-            <span class="ident">idx</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
+            idx += <span class="number">1</span>;
         }
-        <span class="kw">for</span> <span class="kw">_</span> <span class="kw">in</span> <span class="number">0</span>..<span class="ident">replace</span>.<span class="ident">len</span>() {
-            <span class="ident">decoder</span>.<span class="ident">next</span>();
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">next</span>) <span class="op">=</span> <span class="ident">replace_with</span>
-                .<span class="ident">next</span>()
-                .<span class="ident">transpose</span>()
-                .<span class="ident">map_err</span>(<span class="ident">SpliceError::ReadReplace</span>)<span class="question-mark">?</span>
-            {
-                <span class="ident">encoder</span>.<span class="ident">append</span>(<span class="ident">next</span>.<span class="ident">as_ref</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">n</span><span class="op">|</span> <span class="ident">n</span>.<span class="ident">borrow</span>()));
+        <span class="kw">for _ in </span><span class="number">0</span>..replace.len() {
+            decoder.next();
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(next) = replace_with
+                .next()
+                .transpose()
+                .map_err(SpliceError::ReadReplace)<span class="question-mark">?
+            </span>{
+                encoder.append(next.as_ref().map(|n| n.borrow()));
             }
         }
-        <span class="kw">for</span> <span class="ident">next</span> <span class="kw">in</span> <span class="ident">replace_with</span> {
-            <span class="kw">let</span> <span class="ident">next</span> <span class="op">=</span> <span class="ident">next</span>.<span class="ident">map_err</span>(<span class="ident">SpliceError::ReadReplace</span>)<span class="question-mark">?</span>;
-            <span class="ident">encoder</span>.<span class="ident">append</span>(<span class="ident">next</span>.<span class="ident">as_ref</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">n</span><span class="op">|</span> <span class="ident">n</span>.<span class="ident">borrow</span>()));
+        <span class="kw">for </span>next <span class="kw">in </span>replace_with {
+            <span class="kw">let </span>next = next.map_err(SpliceError::ReadReplace)<span class="question-mark">?</span>;
+            encoder.append(next.as_ref().map(|n| n.borrow()));
         }
-        <span class="kw">for</span> <span class="ident">next</span> <span class="kw">in</span> <span class="ident">decoder</span> {
-            <span class="kw">let</span> <span class="ident">next</span> <span class="op">=</span> <span class="ident">next</span>.<span class="ident">map_err</span>(<span class="ident">SpliceError::ReadExisting</span>)<span class="question-mark">?</span>;
-            <span class="ident">encoder</span>.<span class="ident">append</span>(<span class="ident">next</span>.<span class="ident">as_ref</span>());
+        <span class="kw">for </span>next <span class="kw">in </span>decoder {
+            <span class="kw">let </span>next = next.map_err(SpliceError::ReadExisting)<span class="question-mark">?</span>;
+            encoder.append(next.as_ref());
         }
-        <span class="kw">let</span> (<span class="kw">_</span>, <span class="ident">len</span>) <span class="op">=</span> <span class="ident">encoder</span>.<span class="ident">finish</span>();
-        <span class="kw">let</span> <span class="ident">range</span> <span class="op">=</span> <span class="ident">start</span>..(<span class="ident">start</span> <span class="op">+</span> <span class="ident">len</span>);
-        <span class="prelude-val">Ok</span>(<span class="ident">range</span>.<span class="ident">into</span>())
+        <span class="kw">let </span>(<span class="kw">_</span>, len) = encoder.finish();
+        <span class="kw">let </span>range = start..(start + len);
+        <span class="prelude-val">Ok</span>(range.into())
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">T</span>: <span class="ident">Encodable</span> <span class="op">+</span> <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">PartialEq</span> <span class="op">+</span> <span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">encoder</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">output</span>: <span class="ident">S</span>) -&gt; <span class="ident">RleEncoder</span><span class="op">&lt;</span><span class="ident">S</span>, <span class="ident">T</span><span class="op">&gt;</span> {
-        <span class="ident">RleEncoder::from</span>(<span class="ident">output</span>)
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, T: Encodable + Clone + PartialEq + <span class="lifetime">&#39;a</span>&gt; RleRange&lt;T&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>encoder&lt;S: Sink&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, output: S) -&gt; RleEncoder&lt;S, T&gt; {
+        RleEncoder::from(output)
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="ident">BT</span>: <span class="ident">Borrow</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>, <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">BT</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span>(
-        <span class="ident">items</span>: <span class="ident">I</span>,
-        <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="self">Self</span> {
-        <span class="kw">let</span> <span class="ident">start</span> <span class="op">=</span> <span class="ident">out</span>.<span class="ident">len</span>();
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">encoder</span> <span class="op">=</span> <span class="ident">RleEncoder::new</span>(<span class="ident">out</span>);
-        <span class="kw">for</span> <span class="ident">item</span> <span class="kw">in</span> <span class="ident">items</span> {
-            <span class="ident">encoder</span>.<span class="ident">append</span>(<span class="ident">item</span>);
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>encode&lt;BT: Borrow&lt;T&gt;, I: Iterator&lt;Item = <span class="prelude-ty">Option</span>&lt;BT&gt;&gt;&gt;(
+        items: I,
+        out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>start = out.len();
+        <span class="kw">let </span><span class="kw-2">mut </span>encoder = RleEncoder::new(out);
+        <span class="kw">for </span>item <span class="kw">in </span>items {
+            encoder.append(item);
         }
-        <span class="kw">let</span> (<span class="kw">_</span>, <span class="ident">len</span>) <span class="op">=</span> <span class="ident">encoder</span>.<span class="ident">finish</span>();
-        (<span class="ident">start</span>..(<span class="ident">start</span> <span class="op">+</span> <span class="ident">len</span>)).<span class="ident">into</span>()
+        <span class="kw">let </span>(<span class="kw">_</span>, len) = encoder.finish();
+        (start..(start + len)).into()
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">as_ref</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">range</span>
+<span class="kw">impl</span>&lt;T&gt; AsRef&lt;Range&lt;usize&gt;&gt; <span class="kw">for </span>RleRange&lt;T&gt; {
+    <span class="kw">fn </span>as_ref(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>Range&lt;usize&gt; {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.range
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">r</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>) -&gt; <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
-        <span class="ident">RleRange</span> {
-            <span class="ident">range</span>: <span class="ident">r</span>,
-            <span class="ident">_phantom</span>: <span class="ident">PhantomData</span>,
+<span class="kw">impl</span>&lt;T&gt; From&lt;Range&lt;usize&gt;&gt; <span class="kw">for </span>RleRange&lt;T&gt; {
+    <span class="kw">fn </span>from(r: Range&lt;usize&gt;) -&gt; RleRange&lt;T&gt; {
+        RleRange {
+            range: r,
+            _phantom: PhantomData,
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">r</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>) -&gt; <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
-        <span class="ident">r</span>.<span class="ident">range</span>
+<span class="kw">impl</span>&lt;T&gt; From&lt;RleRange&lt;T&gt;&gt; <span class="kw">for </span>Range&lt;usize&gt; {
+    <span class="kw">fn </span>from(r: RleRange&lt;T&gt;) -&gt; Range&lt;usize&gt; {
+        r.range
     }
 }
 
-<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
-<span class="kw">mod</span> <span class="ident">tests</span> {
-    <span class="kw">use</span> <span class="kw">super</span>::<span class="kw-2">*</span>;
-    <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::columnar::encoding::properties::option_splice_scenario</span>;
-    <span class="kw">use</span> <span class="ident">proptest::prelude</span>::<span class="kw-2">*</span>;
-    <span class="kw">use</span> <span class="ident">std</span>::{<span class="ident">borrow::Cow</span>, <span class="ident">convert::Infallible</span>};
+<span class="attribute">#[cfg(test)]
+</span><span class="kw">mod </span>tests {
+    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+    <span class="kw">use </span><span class="kw">crate</span>::columnar::encoding::properties::option_splice_scenario;
+    <span class="kw">use </span>proptest::prelude::<span class="kw-2">*</span>;
+    <span class="kw">use </span>std::{borrow::Cow, convert::Infallible};
 
-    <span class="attribute">#[<span class="ident">test</span>]</span>
-    <span class="kw">fn</span> <span class="ident">rle_int_round_trip</span>() {
-        <span class="kw">let</span> <span class="ident">vals</span> <span class="op">=</span> [<span class="number">1</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">1</span>, <span class="number">3</span>];
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">buf</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">vals</span>.<span class="ident">len</span>() <span class="op">*</span> <span class="number">3</span>);
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">encoder</span>: <span class="ident">RleEncoder</span><span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">u64</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">RleEncoder::new</span>(<span class="kw-2">&amp;mut</span> <span class="ident">buf</span>);
-        <span class="kw">for</span> <span class="ident">val</span> <span class="kw">in</span> <span class="ident">vals</span> {
-            <span class="ident">encoder</span>.<span class="ident">append_value</span>(<span class="kw-2">&amp;</span><span class="ident">val</span>)
+    <span class="attribute">#[test]
+    </span><span class="kw">fn </span>rle_int_round_trip() {
+        <span class="kw">let </span>vals = [<span class="number">1</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">1</span>, <span class="number">3</span>];
+        <span class="kw">let </span><span class="kw-2">mut </span>buf = Vec::with_capacity(vals.len() * <span class="number">3</span>);
+        <span class="kw">let </span><span class="kw-2">mut </span>encoder: RleEncoder&lt;<span class="kw">_</span>, u64&gt; = RleEncoder::new(<span class="kw-2">&amp;mut </span>buf);
+        <span class="kw">for </span>val <span class="kw">in </span>vals {
+            encoder.append_value(<span class="kw-2">&amp;</span>val)
         }
-        <span class="kw">let</span> (<span class="kw">_</span>, <span class="ident">total_slice_len</span>) <span class="op">=</span> <span class="ident">encoder</span>.<span class="ident">finish</span>();
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">decoder</span>: <span class="ident">RleDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">u64</span><span class="op">&gt;</span> <span class="op">=</span>
-            <span class="ident">RleDecoder::from</span>(<span class="ident">Cow::Borrowed</span>(<span class="kw-2">&amp;</span><span class="ident">buf</span>[<span class="number">0</span>..<span class="ident">total_slice_len</span>]));
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
-        <span class="kw">while</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(<span class="ident">val</span>)) <span class="op">=</span> <span class="ident">decoder</span>.<span class="ident">next</span>().<span class="ident">transpose</span>().<span class="ident">unwrap</span>() {
-            <span class="ident">result</span>.<span class="ident">push</span>(<span class="ident">val</span>);
+        <span class="kw">let </span>(<span class="kw">_</span>, total_slice_len) = encoder.finish();
+        <span class="kw">let </span><span class="kw-2">mut </span>decoder: RleDecoder&lt;<span class="lifetime">&#39;_</span>, u64&gt; =
+            RleDecoder::from(Cow::Borrowed(<span class="kw-2">&amp;</span>buf[<span class="number">0</span>..total_slice_len]));
+        <span class="kw">let </span><span class="kw-2">mut </span>result = Vec::new();
+        <span class="kw">while let </span><span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(val)) = decoder.next().transpose().unwrap() {
+            result.push(val);
         }
-        <span class="macro">assert_eq!</span>(<span class="ident">result</span>, <span class="ident">vals</span>);
+        <span class="macro">assert_eq!</span>(result, vals);
     }
 
-    <span class="attribute">#[<span class="ident">test</span>]</span>
-    <span class="kw">fn</span> <span class="ident">rle_int_insert</span>() {
-        <span class="kw">let</span> <span class="ident">vals</span> <span class="op">=</span> [<span class="number">1</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">1</span>, <span class="number">3</span>];
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">buf</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">vals</span>.<span class="ident">len</span>() <span class="op">*</span> <span class="number">3</span>);
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">encoder</span>: <span class="ident">RleEncoder</span><span class="op">&lt;</span><span class="kw">_</span>, <span class="ident">u64</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">RleEncoder::new</span>(<span class="kw-2">&amp;mut</span> <span class="ident">buf</span>);
-        <span class="kw">for</span> <span class="ident">val</span> <span class="kw">in</span> <span class="ident">vals</span>.<span class="ident">iter</span>().<span class="ident">take</span>(<span class="number">4</span>) {
-            <span class="ident">encoder</span>.<span class="ident">append_value</span>(<span class="ident">val</span>)
+    <span class="attribute">#[test]
+    </span><span class="kw">fn </span>rle_int_insert() {
+        <span class="kw">let </span>vals = [<span class="number">1</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">1</span>, <span class="number">3</span>];
+        <span class="kw">let </span><span class="kw-2">mut </span>buf = Vec::with_capacity(vals.len() * <span class="number">3</span>);
+        <span class="kw">let </span><span class="kw-2">mut </span>encoder: RleEncoder&lt;<span class="kw">_</span>, u64&gt; = RleEncoder::new(<span class="kw-2">&amp;mut </span>buf);
+        <span class="kw">for </span>val <span class="kw">in </span>vals.iter().take(<span class="number">4</span>) {
+            encoder.append_value(val)
         }
-        <span class="ident">encoder</span>.<span class="ident">append_value</span>(<span class="kw-2">&amp;</span><span class="number">5</span>);
-        <span class="kw">for</span> <span class="ident">val</span> <span class="kw">in</span> <span class="ident">vals</span>.<span class="ident">iter</span>().<span class="ident">skip</span>(<span class="number">4</span>) {
-            <span class="ident">encoder</span>.<span class="ident">append_value</span>(<span class="ident">val</span>);
+        encoder.append_value(<span class="kw-2">&amp;</span><span class="number">5</span>);
+        <span class="kw">for </span>val <span class="kw">in </span>vals.iter().skip(<span class="number">4</span>) {
+            encoder.append_value(val);
         }
-        <span class="kw">let</span> (<span class="kw">_</span>, <span class="ident">total_slice_len</span>) <span class="op">=</span> <span class="ident">encoder</span>.<span class="ident">finish</span>();
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">decoder</span>: <span class="ident">RleDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">u64</span><span class="op">&gt;</span> <span class="op">=</span>
-            <span class="ident">RleDecoder::from</span>(<span class="ident">Cow::Borrowed</span>(<span class="kw-2">&amp;</span><span class="ident">buf</span>[<span class="number">0</span>..<span class="ident">total_slice_len</span>]));
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
-        <span class="kw">while</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(<span class="ident">val</span>)) <span class="op">=</span> <span class="ident">decoder</span>.<span class="ident">next</span>().<span class="ident">transpose</span>().<span class="ident">unwrap</span>() {
-            <span class="ident">result</span>.<span class="ident">push</span>(<span class="ident">val</span>);
+        <span class="kw">let </span>(<span class="kw">_</span>, total_slice_len) = encoder.finish();
+        <span class="kw">let </span><span class="kw-2">mut </span>decoder: RleDecoder&lt;<span class="lifetime">&#39;_</span>, u64&gt; =
+            RleDecoder::from(Cow::Borrowed(<span class="kw-2">&amp;</span>buf[<span class="number">0</span>..total_slice_len]));
+        <span class="kw">let </span><span class="kw-2">mut </span>result = Vec::new();
+        <span class="kw">while let </span><span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(val)) = decoder.next().transpose().unwrap() {
+            result.push(val);
         }
-        <span class="kw">let</span> <span class="ident">expected</span> <span class="op">=</span> [<span class="number">1</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">2</span>, <span class="number">5</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">1</span>, <span class="number">3</span>];
-        <span class="macro">assert_eq!</span>(<span class="ident">result</span>, <span class="ident">expected</span>);
+        <span class="kw">let </span>expected = [<span class="number">1</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">2</span>, <span class="number">5</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">1</span>, <span class="number">3</span>];
+        <span class="macro">assert_eq!</span>(result, expected);
     }
 
-    <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Encodable</span> <span class="op">+</span> <span class="ident">PartialEq</span><span class="op">&gt;</span>(<span class="ident">vals</span>: <span class="kw-2">&amp;</span>[<span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>]) -&gt; (<span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">buf</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">vals</span>.<span class="ident">len</span>() <span class="op">*</span> <span class="number">3</span>);
-        <span class="kw">let</span> <span class="ident">range</span> <span class="op">=</span> <span class="ident">RleRange</span>::<span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span><span class="ident">::encode</span>(<span class="ident">vals</span>.<span class="ident">iter</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">v</span><span class="op">|</span> <span class="ident">v</span>.<span class="ident">as_ref</span>()), <span class="kw-2">&amp;mut</span> <span class="ident">buf</span>);
-        (<span class="ident">range</span>, <span class="ident">buf</span>)
+    <span class="kw">fn </span>encode&lt;T: Clone + Encodable + PartialEq&gt;(vals: <span class="kw-2">&amp;</span>[<span class="prelude-ty">Option</span>&lt;T&gt;]) -&gt; (RleRange&lt;T&gt;, Vec&lt;u8&gt;) {
+        <span class="kw">let </span><span class="kw-2">mut </span>buf = Vec::with_capacity(vals.len() * <span class="number">3</span>);
+        <span class="kw">let </span>range = RleRange::&lt;T&gt;::encode(vals.iter().map(|v| v.as_ref()), <span class="kw-2">&amp;mut </span>buf);
+        (range, buf)
     }
 
-    <span class="kw">fn</span> <span class="ident">decode</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Decodable</span> <span class="op">+</span> <span class="ident">Debug</span><span class="op">&gt;</span>(<span class="ident">range</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>, <span class="ident">buf</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-        <span class="ident">range</span>.<span class="ident">decoder</span>(<span class="ident">buf</span>).<span class="ident">collect</span>::<span class="op">&lt;</span><span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span>, <span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>().<span class="ident">unwrap</span>()
+    <span class="kw">fn </span>decode&lt;T: Clone + Decodable + Debug&gt;(range: RleRange&lt;T&gt;, buf: <span class="kw-2">&amp;</span>[u8]) -&gt; Vec&lt;<span class="prelude-ty">Option</span>&lt;T&gt;&gt; {
+        range.decoder(buf).collect::&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw">_</span>&gt;, <span class="kw">_</span>&gt;&gt;().unwrap()
     }
 
-    <span class="macro">proptest!</span> {
-        <span class="attribute">#[<span class="ident">test</span>]</span>
-        <span class="kw">fn</span> <span class="ident">splice_ints</span>(<span class="ident">scenario</span> <span class="kw">in</span> <span class="ident">option_splice_scenario</span>(<span class="ident">any</span>::<span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">i32</span><span class="op">&gt;</span><span class="op">&gt;</span>())) {
-            <span class="kw">let</span> (<span class="ident">range</span>, <span class="ident">buf</span>) <span class="op">=</span> <span class="ident">encode</span>(<span class="kw-2">&amp;</span><span class="ident">scenario</span>.<span class="ident">initial_values</span>);
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">out</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
-            <span class="kw">let</span> <span class="ident">replacements</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">i32</span><span class="op">&gt;</span>, <span class="ident">Infallible</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">scenario</span>.<span class="ident">replacements</span>.<span class="ident">iter</span>().<span class="ident">cloned</span>().<span class="ident">map</span>(<span class="prelude-val">Ok</span>).<span class="ident">collect</span>();
-            <span class="kw">let</span> <span class="ident">new_range</span> <span class="op">=</span> <span class="ident">range</span>.<span class="ident">splice</span>(<span class="kw-2">&amp;</span><span class="ident">buf</span>, <span class="ident">scenario</span>.<span class="ident">replace_range</span>.<span class="ident">clone</span>(), <span class="ident">replacements</span>.<span class="ident">into_iter</span>(), <span class="kw-2">&amp;mut</span> <span class="ident">out</span>).<span class="ident">unwrap</span>();
-            <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">decode</span>::<span class="op">&lt;</span><span class="ident">i32</span><span class="op">&gt;</span>(<span class="ident">new_range</span>, <span class="kw-2">&amp;</span><span class="ident">out</span>);
-            <span class="ident">scenario</span>.<span class="ident">check_optional</span>(<span class="ident">result</span>)
+    <span class="macro">proptest! </span>{
+        <span class="attribute">#[test]
+        </span><span class="kw">fn </span>splice_ints(scenario <span class="kw">in </span>option_splice_scenario(any::&lt;<span class="prelude-ty">Option</span>&lt;i32&gt;&gt;())) {
+            <span class="kw">let </span>(range, buf) = encode(<span class="kw-2">&amp;</span>scenario.initial_values);
+            <span class="kw">let </span><span class="kw-2">mut </span>out = Vec::new();
+            <span class="kw">let </span>replacements: Vec&lt;<span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;i32&gt;, Infallible&gt;&gt; = scenario.replacements.iter().cloned().map(<span class="prelude-val">Ok</span>).collect();
+            <span class="kw">let </span>new_range = range.splice(<span class="kw-2">&amp;</span>buf, scenario.replace_range.clone(), replacements.into_iter(), <span class="kw-2">&amp;mut </span>out).unwrap();
+            <span class="kw">let </span>result = decode::&lt;i32&gt;(new_range, <span class="kw-2">&amp;</span>out);
+            scenario.check_optional(result)
         }
 
-        <span class="attribute">#[<span class="ident">test</span>]</span>
-        <span class="kw">fn</span> <span class="ident">splice_strings</span>(<span class="ident">scenario</span> <span class="kw">in</span> <span class="ident">option_splice_scenario</span>(<span class="ident">any</span>::<span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span><span class="op">&gt;</span>())) {
-            <span class="kw">let</span> (<span class="ident">range</span>, <span class="ident">buf</span>) <span class="op">=</span> <span class="ident">encode</span>(<span class="kw-2">&amp;</span><span class="ident">scenario</span>.<span class="ident">initial_values</span>);
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">out</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
-            <span class="kw">let</span> <span class="ident">replacements</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>, <span class="ident">Infallible</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">scenario</span>.<span class="ident">replacements</span>.<span class="ident">iter</span>().<span class="ident">cloned</span>().<span class="ident">map</span>(<span class="prelude-val">Ok</span>).<span class="ident">collect</span>();
-            <span class="kw">let</span> <span class="ident">new_range</span> <span class="op">=</span> <span class="ident">range</span>.<span class="ident">splice</span>(<span class="kw-2">&amp;</span><span class="ident">buf</span>, <span class="ident">scenario</span>.<span class="ident">replace_range</span>.<span class="ident">clone</span>(), <span class="ident">replacements</span>.<span class="ident">into_iter</span>(), <span class="kw-2">&amp;mut</span> <span class="ident">out</span>).<span class="ident">unwrap</span>();
-            <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">decode</span>::<span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>(<span class="ident">new_range</span>, <span class="kw-2">&amp;</span><span class="ident">out</span>);
-            <span class="ident">scenario</span>.<span class="ident">check_optional</span>(<span class="ident">result</span>)
+        <span class="attribute">#[test]
+        </span><span class="kw">fn </span>splice_strings(scenario <span class="kw">in </span>option_splice_scenario(any::&lt;<span class="prelude-ty">Option</span>&lt;String&gt;&gt;())) {
+            <span class="kw">let </span>(range, buf) = encode(<span class="kw-2">&amp;</span>scenario.initial_values);
+            <span class="kw">let </span><span class="kw-2">mut </span>out = Vec::new();
+            <span class="kw">let </span>replacements: Vec&lt;<span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;String&gt;, Infallible&gt;&gt; = scenario.replacements.iter().cloned().map(<span class="prelude-val">Ok</span>).collect();
+            <span class="kw">let </span>new_range = range.splice(<span class="kw-2">&amp;</span>buf, scenario.replace_range.clone(), replacements.into_iter(), <span class="kw-2">&amp;mut </span>out).unwrap();
+            <span class="kw">let </span>result = decode::&lt;String&gt;(new_range, <span class="kw-2">&amp;</span>out);
+            scenario.check_optional(result)
         }
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

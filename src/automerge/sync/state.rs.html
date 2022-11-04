@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/sync/state.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>state.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/sync/state.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>state.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -90,95 +90,95 @@
 <span id="88">88</span>
 <span id="89">89</span>
 <span id="90">90</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::collections::BTreeSet</span>;
+</pre><pre class="rust"><code><span class="kw">use </span>std::collections::BTreeSet;
 
-<span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">encode_hashes</span>, <span class="ident">BloomFilter</span>};
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::storage::parse</span>;
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::ChangeHash</span>;
+<span class="kw">use super</span>::{encode_hashes, BloomFilter};
+<span class="kw">use </span><span class="kw">crate</span>::storage::parse;
+<span class="kw">use </span><span class="kw">crate</span>::ChangeHash;
 
-<span class="kw">const</span> <span class="ident">SYNC_STATE_TYPE</span>: <span class="ident">u8</span> <span class="op">=</span> <span class="number">0x43</span>; <span class="comment">// first byte of an encoded sync state, for identification</span>
+<span class="kw">const </span>SYNC_STATE_TYPE: u8 = <span class="number">0x43</span>; <span class="comment">// first byte of an encoded sync state, for identification
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">thiserror::Error</span>)]</span>
-<span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">DecodeError</span> {
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;{0:?}&quot;</span>)]</span>
-    <span class="ident">Parse</span>(<span class="ident">String</span>),
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;wrong type: expected one of {expected_one_of:?} but found {found}&quot;</span>)]</span>
-    <span class="ident">WrongType</span> { <span class="ident">expected_one_of</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>, <span class="ident">found</span>: <span class="ident">u8</span> },
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;not enough input&quot;</span>)]</span>
-    <span class="ident">NotEnoughInput</span>,
+</span><span class="attribute">#[derive(Debug, thiserror::Error)]
+</span><span class="kw">pub enum </span>DecodeError {
+    <span class="attribute">#[error(<span class="string">&quot;{0:?}&quot;</span>)]
+    </span>Parse(String),
+    <span class="attribute">#[error(<span class="string">&quot;wrong type: expected one of {expected_one_of:?} but found {found}&quot;</span>)]
+    </span>WrongType { expected_one_of: Vec&lt;u8&gt;, found: u8 },
+    <span class="attribute">#[error(<span class="string">&quot;not enough input&quot;</span>)]
+    </span>NotEnoughInput,
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">parse::leb128::Error</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">DecodeError</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="kw">_</span>: <span class="ident">parse::leb128::Error</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident"><span class="self">Self</span>::Parse</span>(<span class="string">&quot;bad leb128 encoding&quot;</span>.<span class="ident">to_string</span>())
+<span class="kw">impl </span>From&lt;parse::leb128::Error&gt; <span class="kw">for </span>DecodeError {
+    <span class="kw">fn </span>from(<span class="kw">_</span>: parse::leb128::Error) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>::Parse(<span class="string">&quot;bad leb128 encoding&quot;</span>.to_string())
     }
 }
 
-<span class="doccomment">/// The state of synchronisation with a peer.</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">Default</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>, <span class="ident">Hash</span>)]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">State</span> {
-    <span class="kw">pub</span> <span class="ident">shared_heads</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span> <span class="ident">last_sent_heads</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span> <span class="ident">their_heads</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span> <span class="ident">their_need</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span> <span class="ident">their_have</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Have</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span> <span class="ident">sent_hashes</span>: <span class="ident">BTreeSet</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>,
+<span class="doccomment">/// The state of synchronisation with a peer.
+</span><span class="attribute">#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+</span><span class="kw">pub struct </span>State {
+    <span class="kw">pub </span>shared_heads: Vec&lt;ChangeHash&gt;,
+    <span class="kw">pub </span>last_sent_heads: Vec&lt;ChangeHash&gt;,
+    <span class="kw">pub </span>their_heads: <span class="prelude-ty">Option</span>&lt;Vec&lt;ChangeHash&gt;&gt;,
+    <span class="kw">pub </span>their_need: <span class="prelude-ty">Option</span>&lt;Vec&lt;ChangeHash&gt;&gt;,
+    <span class="kw">pub </span>their_have: <span class="prelude-ty">Option</span>&lt;Vec&lt;Have&gt;&gt;,
+    <span class="kw">pub </span>sent_hashes: BTreeSet&lt;ChangeHash&gt;,
 }
 
-<span class="doccomment">/// A summary of the changes that the sender of the message already has.</span>
-<span class="doccomment">/// This is implicitly a request to the recipient to send all changes that the</span>
-<span class="doccomment">/// sender does not already have.</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">Default</span>, <span class="ident">PartialEq</span>, <span class="ident">Eq</span>, <span class="ident">Hash</span>, <span class="ident">serde::Serialize</span>)]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Have</span> {
-    <span class="doccomment">/// The heads at the time of the last successful sync with this recipient.</span>
-    <span class="kw">pub</span> <span class="ident">last_sync</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>,
-    <span class="doccomment">/// A bloom filter summarising all of the changes that the sender of the message has added</span>
-    <span class="doccomment">/// since the last sync.</span>
-    <span class="kw">pub</span> <span class="ident">bloom</span>: <span class="ident">BloomFilter</span>,
+<span class="doccomment">/// A summary of the changes that the sender of the message already has.
+/// This is implicitly a request to the recipient to send all changes that the
+/// sender does not already have.
+</span><span class="attribute">#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize)]
+</span><span class="kw">pub struct </span>Have {
+    <span class="doccomment">/// The heads at the time of the last successful sync with this recipient.
+    </span><span class="kw">pub </span>last_sync: Vec&lt;ChangeHash&gt;,
+    <span class="doccomment">/// A bloom filter summarising all of the changes that the sender of the message has added
+    /// since the last sync.
+    </span><span class="kw">pub </span>bloom: BloomFilter,
 }
 
-<span class="kw">impl</span> <span class="ident">State</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>() -&gt; <span class="self">Self</span> {
-        <span class="ident">Default::default</span>()
+<span class="kw">impl </span>State {
+    <span class="kw">pub fn </span>new() -&gt; <span class="self">Self </span>{
+        Default::default()
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">encode</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">buf</span> <span class="op">=</span> <span class="macro">vec!</span>[<span class="ident">SYNC_STATE_TYPE</span>];
-        <span class="ident">encode_hashes</span>(<span class="kw-2">&amp;mut</span> <span class="ident">buf</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">shared_heads</span>);
-        <span class="ident">buf</span>
+    <span class="kw">pub fn </span>encode(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;u8&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>buf = <span class="macro">vec!</span>[SYNC_STATE_TYPE];
+        encode_hashes(<span class="kw-2">&amp;mut </span>buf, <span class="kw-2">&amp;</span><span class="self">self</span>.shared_heads);
+        buf
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">decode</span>(<span class="ident">input</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">DecodeError</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">input</span> <span class="op">=</span> <span class="ident">parse::Input::new</span>(<span class="ident">input</span>);
-        <span class="kw">match</span> <span class="ident"><span class="self">Self</span>::parse</span>(<span class="ident">input</span>) {
-            <span class="prelude-val">Ok</span>((<span class="kw">_</span>, <span class="ident">state</span>)) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">state</span>),
-            <span class="prelude-val">Err</span>(<span class="ident">parse::ParseError::Incomplete</span>(<span class="kw">_</span>)) =&gt; <span class="prelude-val">Err</span>(<span class="ident">DecodeError::NotEnoughInput</span>),
-            <span class="prelude-val">Err</span>(<span class="ident">parse::ParseError::Error</span>(<span class="ident">e</span>)) =&gt; <span class="prelude-val">Err</span>(<span class="ident">e</span>),
+    <span class="kw">pub fn </span>decode(input: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, DecodeError&gt; {
+        <span class="kw">let </span>input = parse::Input::new(input);
+        <span class="kw">match </span><span class="self">Self</span>::parse(input) {
+            <span class="prelude-val">Ok</span>((<span class="kw">_</span>, state)) =&gt; <span class="prelude-val">Ok</span>(state),
+            <span class="prelude-val">Err</span>(parse::ParseError::Incomplete(<span class="kw">_</span>)) =&gt; <span class="prelude-val">Err</span>(DecodeError::NotEnoughInput),
+            <span class="prelude-val">Err</span>(parse::ParseError::Error(e)) =&gt; <span class="prelude-val">Err</span>(e),
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">parse</span>(<span class="ident">input</span>: <span class="ident">parse::Input</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">parse::ParseResult</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="self">Self</span>, <span class="ident">DecodeError</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">record_type</span>) <span class="op">=</span> <span class="ident">parse::take1</span>(<span class="ident">input</span>)<span class="question-mark">?</span>;
-        <span class="kw">if</span> <span class="ident">record_type</span> <span class="op">!</span><span class="op">=</span> <span class="ident">SYNC_STATE_TYPE</span> {
-            <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">parse::ParseError::Error</span>(<span class="ident">DecodeError::WrongType</span> {
-                <span class="ident">expected_one_of</span>: <span class="macro">vec!</span>[<span class="ident">SYNC_STATE_TYPE</span>],
-                <span class="ident">found</span>: <span class="ident">record_type</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>parse(input: parse::Input&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; parse::ParseResult&lt;<span class="lifetime">&#39;_</span>, <span class="self">Self</span>, DecodeError&gt; {
+        <span class="kw">let </span>(i, record_type) = parse::take1(input)<span class="question-mark">?</span>;
+        <span class="kw">if </span>record_type != SYNC_STATE_TYPE {
+            <span class="kw">return </span><span class="prelude-val">Err</span>(parse::ParseError::Error(DecodeError::WrongType {
+                expected_one_of: <span class="macro">vec!</span>[SYNC_STATE_TYPE],
+                found: record_type,
             }));
         }
 
-        <span class="kw">let</span> (<span class="ident">i</span>, <span class="ident">shared_heads</span>) <span class="op">=</span> <span class="ident">parse::length_prefixed</span>(<span class="ident">parse::change_hash</span>)(<span class="ident">i</span>)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(i, shared_heads) = parse::length_prefixed(parse::change_hash)(i)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>((
-            <span class="ident">i</span>,
-            <span class="self">Self</span> {
-                <span class="ident">shared_heads</span>,
-                <span class="ident">last_sent_heads</span>: <span class="ident">Vec::new</span>(),
-                <span class="ident">their_heads</span>: <span class="prelude-val">None</span>,
-                <span class="ident">their_need</span>: <span class="prelude-val">None</span>,
-                <span class="ident">their_have</span>: <span class="prelude-val">Some</span>(<span class="ident">Vec::new</span>()),
-                <span class="ident">sent_hashes</span>: <span class="ident">BTreeSet::new</span>(),
+            i,
+            <span class="self">Self </span>{
+                shared_heads,
+                last_sent_heads: Vec::new(),
+                their_heads: <span class="prelude-val">None</span>,
+                their_need: <span class="prelude-val">None</span>,
+                their_have: <span class="prelude-val">Some</span>(Vec::new()),
+                sent_hashes: BTreeSet::new(),
             },
         ))
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge-wasm/src/interop.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>interop.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../automerge_wasm/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../automerge_wasm/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge-wasm/src/interop.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>interop.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../automerge_wasm/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../automerge_wasm/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../automerge_wasm/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -725,730 +725,730 @@
 <span id="723">723</span>
 <span id="724">724</span>
 <span id="725">725</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::value::Datatype</span>;
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::Automerge</span>;
-<span class="kw">use</span> <span class="ident">automerge</span> <span class="kw">as</span> <span class="ident">am</span>;
-<span class="kw">use</span> <span class="ident">automerge::transaction::Transactable</span>;
-<span class="kw">use</span> <span class="ident">automerge</span>::{<span class="ident">Change</span>, <span class="ident">ChangeHash</span>, <span class="ident">ObjType</span>, <span class="ident">Prop</span>};
-<span class="kw">use</span> <span class="ident">js_sys</span>::{<span class="ident">Array</span>, <span class="ident">Function</span>, <span class="ident">Object</span>, <span class="ident">Reflect</span>, <span class="ident">Symbol</span>, <span class="ident">Uint8Array</span>};
-<span class="kw">use</span> <span class="ident">std::collections</span>::{<span class="ident">BTreeSet</span>, <span class="ident">HashSet</span>};
-<span class="kw">use</span> <span class="ident">std::fmt::Display</span>;
-<span class="kw">use</span> <span class="ident">wasm_bindgen::prelude</span>::<span class="kw-2">*</span>;
-<span class="kw">use</span> <span class="ident">wasm_bindgen::JsCast</span>;
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::value::Datatype;
+<span class="kw">use </span><span class="kw">crate</span>::Automerge;
+<span class="kw">use </span>automerge <span class="kw">as </span>am;
+<span class="kw">use </span>automerge::transaction::Transactable;
+<span class="kw">use </span>automerge::{Change, ChangeHash, ObjType, Prop};
+<span class="kw">use </span>js_sys::{Array, Function, Object, Reflect, Symbol, Uint8Array};
+<span class="kw">use </span>std::collections::{BTreeSet, HashSet};
+<span class="kw">use </span>std::fmt::Display;
+<span class="kw">use </span>wasm_bindgen::prelude::<span class="kw-2">*</span>;
+<span class="kw">use </span>wasm_bindgen::JsCast;
 
-<span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">observer::Patch</span>, <span class="ident">ObjId</span>, <span class="ident">Value</span>};
+<span class="kw">use crate</span>::{observer::Patch, ObjId, Value};
 
-<span class="kw">const</span> <span class="ident">RAW_DATA_SYMBOL</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;_am_raw_value_&quot;</span>;
-<span class="kw">const</span> <span class="ident">DATATYPE_SYMBOL</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;_am_datatype_&quot;</span>;
-<span class="kw">const</span> <span class="ident">RAW_OBJECT_SYMBOL</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;_am_objectId&quot;</span>;
-<span class="kw">const</span> <span class="ident">META_SYMBOL</span>: <span class="kw-2">&amp;</span><span class="ident">str</span> <span class="op">=</span> <span class="string">&quot;_am_meta&quot;</span>;
+<span class="kw">const </span>RAW_DATA_SYMBOL: <span class="kw-2">&amp;</span>str = <span class="string">&quot;_am_raw_value_&quot;</span>;
+<span class="kw">const </span>DATATYPE_SYMBOL: <span class="kw-2">&amp;</span>str = <span class="string">&quot;_am_datatype_&quot;</span>;
+<span class="kw">const </span>RAW_OBJECT_SYMBOL: <span class="kw-2">&amp;</span>str = <span class="string">&quot;_am_objectId&quot;</span>;
+<span class="kw">const </span>META_SYMBOL: <span class="kw-2">&amp;</span>str = <span class="string">&quot;_am_meta&quot;</span>;
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">JS</span>(<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">JsValue</span>);
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">AR</span>(<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">Array</span>);
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>JS(<span class="kw">pub</span>(<span class="kw">crate</span>) JsValue);
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>AR(<span class="kw">pub</span>(<span class="kw">crate</span>) Array);
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">AR</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">JsValue</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">ar</span>: <span class="ident">AR</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">ar</span>.<span class="number">0</span>.<span class="ident">into</span>()
+<span class="kw">impl </span>From&lt;AR&gt; <span class="kw">for </span>JsValue {
+    <span class="kw">fn </span>from(ar: AR) -&gt; <span class="self">Self </span>{
+        ar.<span class="number">0</span>.into()
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">JS</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">JsValue</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">js</span>: <span class="ident">JS</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">js</span>.<span class="number">0</span>
-    }
+<span class="kw">impl </span>From&lt;JS&gt; <span class="kw">for </span>JsValue {
+    <span class="kw">fn </span>from(js: JS) -&gt; <span class="self">Self </span>{
+        js.<span class="number">0
+    </span>}
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">am::sync::State</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">JS</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">state</span>: <span class="ident">am::sync::State</span>) -&gt; <span class="self">Self</span> {
-        <span class="kw">let</span> <span class="ident">shared_heads</span>: <span class="ident">JS</span> <span class="op">=</span> <span class="ident">state</span>.<span class="ident">shared_heads</span>.<span class="ident">into</span>();
-        <span class="kw">let</span> <span class="ident">last_sent_heads</span>: <span class="ident">JS</span> <span class="op">=</span> <span class="ident">state</span>.<span class="ident">last_sent_heads</span>.<span class="ident">into</span>();
-        <span class="kw">let</span> <span class="ident">their_heads</span>: <span class="ident">JS</span> <span class="op">=</span> <span class="ident">state</span>.<span class="ident">their_heads</span>.<span class="ident">into</span>();
-        <span class="kw">let</span> <span class="ident">their_need</span>: <span class="ident">JS</span> <span class="op">=</span> <span class="ident">state</span>.<span class="ident">their_need</span>.<span class="ident">into</span>();
-        <span class="kw">let</span> <span class="ident">sent_hashes</span>: <span class="ident">JS</span> <span class="op">=</span> <span class="ident">state</span>.<span class="ident">sent_hashes</span>.<span class="ident">into</span>();
-        <span class="kw">let</span> <span class="ident">their_have</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">have</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">state</span>.<span class="ident">their_have</span> {
-            <span class="ident">JsValue::from</span>(<span class="ident">AR::from</span>(<span class="ident">have</span>.<span class="ident">as_slice</span>()).<span class="number">0</span>)
-        } <span class="kw">else</span> {
-            <span class="ident">JsValue::null</span>()
+<span class="kw">impl </span>From&lt;am::sync::State&gt; <span class="kw">for </span>JS {
+    <span class="kw">fn </span>from(state: am::sync::State) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>shared_heads: JS = state.shared_heads.into();
+        <span class="kw">let </span>last_sent_heads: JS = state.last_sent_heads.into();
+        <span class="kw">let </span>their_heads: JS = state.their_heads.into();
+        <span class="kw">let </span>their_need: JS = state.their_need.into();
+        <span class="kw">let </span>sent_hashes: JS = state.sent_hashes.into();
+        <span class="kw">let </span>their_have = <span class="kw">if let </span><span class="prelude-val">Some</span>(have) = <span class="kw-2">&amp;</span>state.their_have {
+            JsValue::from(AR::from(have.as_slice()).<span class="number">0</span>)
+        } <span class="kw">else </span>{
+            JsValue::null()
         };
-        <span class="kw">let</span> <span class="ident">result</span>: <span class="ident">JsValue</span> <span class="op">=</span> <span class="ident">Object::new</span>().<span class="ident">into</span>();
-        <span class="comment">// we can unwrap here b/c we made the object and know its not frozen</span>
-        <span class="ident">Reflect::set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="kw-2">&amp;</span><span class="string">&quot;sharedHeads&quot;</span>.<span class="ident">into</span>(), <span class="kw-2">&amp;</span><span class="ident">shared_heads</span>.<span class="number">0</span>).<span class="ident">unwrap</span>();
-        <span class="ident">Reflect::set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="kw-2">&amp;</span><span class="string">&quot;lastSentHeads&quot;</span>.<span class="ident">into</span>(), <span class="kw-2">&amp;</span><span class="ident">last_sent_heads</span>.<span class="number">0</span>).<span class="ident">unwrap</span>();
-        <span class="ident">Reflect::set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="kw-2">&amp;</span><span class="string">&quot;theirHeads&quot;</span>.<span class="ident">into</span>(), <span class="kw-2">&amp;</span><span class="ident">their_heads</span>.<span class="number">0</span>).<span class="ident">unwrap</span>();
-        <span class="ident">Reflect::set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="kw-2">&amp;</span><span class="string">&quot;theirNeed&quot;</span>.<span class="ident">into</span>(), <span class="kw-2">&amp;</span><span class="ident">their_need</span>.<span class="number">0</span>).<span class="ident">unwrap</span>();
-        <span class="ident">Reflect::set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="kw-2">&amp;</span><span class="string">&quot;theirHave&quot;</span>.<span class="ident">into</span>(), <span class="kw-2">&amp;</span><span class="ident">their_have</span>).<span class="ident">unwrap</span>();
-        <span class="ident">Reflect::set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="kw-2">&amp;</span><span class="string">&quot;sentHashes&quot;</span>.<span class="ident">into</span>(), <span class="kw-2">&amp;</span><span class="ident">sent_hashes</span>.<span class="number">0</span>).<span class="ident">unwrap</span>();
-        <span class="ident">JS</span>(<span class="ident">result</span>)
+        <span class="kw">let </span>result: JsValue = Object::new().into();
+        <span class="comment">// we can unwrap here b/c we made the object and know its not frozen
+        </span>Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span><span class="string">&quot;sharedHeads&quot;</span>.into(), <span class="kw-2">&amp;</span>shared_heads.<span class="number">0</span>).unwrap();
+        Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span><span class="string">&quot;lastSentHeads&quot;</span>.into(), <span class="kw-2">&amp;</span>last_sent_heads.<span class="number">0</span>).unwrap();
+        Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span><span class="string">&quot;theirHeads&quot;</span>.into(), <span class="kw-2">&amp;</span>their_heads.<span class="number">0</span>).unwrap();
+        Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span><span class="string">&quot;theirNeed&quot;</span>.into(), <span class="kw-2">&amp;</span>their_need.<span class="number">0</span>).unwrap();
+        Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span><span class="string">&quot;theirHave&quot;</span>.into(), <span class="kw-2">&amp;</span>their_have).unwrap();
+        Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span><span class="string">&quot;sentHashes&quot;</span>.into(), <span class="kw-2">&amp;</span>sent_hashes.<span class="number">0</span>).unwrap();
+        JS(result)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">JS</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">heads</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">JS</span>(<span class="ident">heads</span>
-            .<span class="ident">iter</span>()
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">h</span><span class="op">|</span> <span class="ident">JsValue::from_str</span>(<span class="kw-2">&amp;</span><span class="ident">h</span>.<span class="ident">to_string</span>()))
-            .<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Array</span><span class="op">&gt;</span>()
-            .<span class="ident">into</span>())
+<span class="kw">impl </span>From&lt;Vec&lt;ChangeHash&gt;&gt; <span class="kw">for </span>JS {
+    <span class="kw">fn </span>from(heads: Vec&lt;ChangeHash&gt;) -&gt; <span class="self">Self </span>{
+        JS(heads
+            .iter()
+            .map(|h| JsValue::from_str(<span class="kw-2">&amp;</span>h.to_string()))
+            .collect::&lt;Array&gt;()
+            .into())
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">HashSet</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">JS</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">heads</span>: <span class="ident">HashSet</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
-        <span class="kw">let</span> <span class="ident">result</span>: <span class="ident">JsValue</span> <span class="op">=</span> <span class="ident">Object::new</span>().<span class="ident">into</span>();
-        <span class="kw">for</span> <span class="ident">key</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">heads</span> {
-            <span class="ident">Reflect::set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="kw-2">&amp;</span><span class="ident">key</span>.<span class="ident">to_string</span>().<span class="ident">into</span>(), <span class="kw-2">&amp;</span><span class="bool-val">true</span>.<span class="ident">into</span>()).<span class="ident">unwrap</span>();
+<span class="kw">impl </span>From&lt;HashSet&lt;ChangeHash&gt;&gt; <span class="kw">for </span>JS {
+    <span class="kw">fn </span>from(heads: HashSet&lt;ChangeHash&gt;) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>result: JsValue = Object::new().into();
+        <span class="kw">for </span>key <span class="kw">in </span><span class="kw-2">&amp;</span>heads {
+            Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span>key.to_string().into(), <span class="kw-2">&amp;</span><span class="bool-val">true</span>.into()).unwrap();
         }
-        <span class="ident">JS</span>(<span class="ident">result</span>)
+        JS(result)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">BTreeSet</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">JS</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">heads</span>: <span class="ident">BTreeSet</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
-        <span class="kw">let</span> <span class="ident">result</span>: <span class="ident">JsValue</span> <span class="op">=</span> <span class="ident">Object::new</span>().<span class="ident">into</span>();
-        <span class="kw">for</span> <span class="ident">key</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">heads</span> {
-            <span class="ident">Reflect::set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="kw-2">&amp;</span><span class="ident">key</span>.<span class="ident">to_string</span>().<span class="ident">into</span>(), <span class="kw-2">&amp;</span><span class="bool-val">true</span>.<span class="ident">into</span>()).<span class="ident">unwrap</span>();
+<span class="kw">impl </span>From&lt;BTreeSet&lt;ChangeHash&gt;&gt; <span class="kw">for </span>JS {
+    <span class="kw">fn </span>from(heads: BTreeSet&lt;ChangeHash&gt;) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>result: JsValue = Object::new().into();
+        <span class="kw">for </span>key <span class="kw">in </span><span class="kw-2">&amp;</span>heads {
+            Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span>key.to_string().into(), <span class="kw-2">&amp;</span><span class="bool-val">true</span>.into()).unwrap();
         }
-        <span class="ident">JS</span>(<span class="ident">result</span>)
+        JS(result)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">JS</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">heads</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">v</span>) <span class="op">=</span> <span class="ident">heads</span> {
-            <span class="kw">let</span> <span class="ident">v</span>: <span class="ident">Array</span> <span class="op">=</span> <span class="ident">v</span>
-                .<span class="ident">iter</span>()
-                .<span class="ident">map</span>(<span class="op">|</span><span class="ident">h</span><span class="op">|</span> <span class="ident">JsValue::from_str</span>(<span class="kw-2">&amp;</span><span class="ident">h</span>.<span class="ident">to_string</span>()))
-                .<span class="ident">collect</span>();
-            <span class="ident">JS</span>(<span class="ident">v</span>.<span class="ident">into</span>())
-        } <span class="kw">else</span> {
-            <span class="ident">JS</span>(<span class="ident">JsValue::null</span>())
+<span class="kw">impl </span>From&lt;<span class="prelude-ty">Option</span>&lt;Vec&lt;ChangeHash&gt;&gt;&gt; <span class="kw">for </span>JS {
+    <span class="kw">fn </span>from(heads: <span class="prelude-ty">Option</span>&lt;Vec&lt;ChangeHash&gt;&gt;) -&gt; <span class="self">Self </span>{
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(v) = heads {
+            <span class="kw">let </span>v: Array = v
+                .iter()
+                .map(|h| JsValue::from_str(<span class="kw-2">&amp;</span>h.to_string()))
+                .collect();
+            JS(v.into())
+        } <span class="kw">else </span>{
+            JS(JsValue::null())
         }
     }
 }
 
-<span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span><span class="ident">JS</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">HashSet</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">JsValue</span>;
+<span class="kw">impl </span>TryFrom&lt;JS&gt; <span class="kw">for </span>HashSet&lt;ChangeHash&gt; {
+    <span class="kw">type </span>Error = JsValue;
 
-    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">value</span>: <span class="ident">JS</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">HashSet::new</span>();
-        <span class="kw">for</span> <span class="ident">key</span> <span class="kw">in</span> <span class="ident">Reflect::own_keys</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>.<span class="number">0</span>)<span class="question-mark">?</span>.<span class="ident">iter</span>() {
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="bool-val">true</span>) <span class="op">=</span> <span class="ident">Reflect::get</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>.<span class="number">0</span>, <span class="kw-2">&amp;</span><span class="ident">key</span>)<span class="question-mark">?</span>.<span class="ident">as_bool</span>() {
-                <span class="ident">result</span>.<span class="ident">insert</span>(<span class="ident">serde_wasm_bindgen::from_value</span>(<span class="ident">key</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>);
+    <span class="kw">fn </span>try_from(value: JS) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, <span class="self">Self</span>::Error&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>result = HashSet::new();
+        <span class="kw">for </span>key <span class="kw">in </span>Reflect::own_keys(<span class="kw-2">&amp;</span>value.<span class="number">0</span>)<span class="question-mark">?</span>.iter() {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="bool-val">true</span>) = Reflect::get(<span class="kw-2">&amp;</span>value.<span class="number">0</span>, <span class="kw-2">&amp;</span>key)<span class="question-mark">?</span>.as_bool() {
+                result.insert(serde_wasm_bindgen::from_value(key).map_err(to_js_err)<span class="question-mark">?</span>);
             }
         }
-        <span class="prelude-val">Ok</span>(<span class="ident">result</span>)
+        <span class="prelude-val">Ok</span>(result)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span><span class="ident">JS</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">BTreeSet</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">JsValue</span>;
+<span class="kw">impl </span>TryFrom&lt;JS&gt; <span class="kw">for </span>BTreeSet&lt;ChangeHash&gt; {
+    <span class="kw">type </span>Error = JsValue;
 
-    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">value</span>: <span class="ident">JS</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">BTreeSet::new</span>();
-        <span class="kw">for</span> <span class="ident">key</span> <span class="kw">in</span> <span class="ident">Reflect::own_keys</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>.<span class="number">0</span>)<span class="question-mark">?</span>.<span class="ident">iter</span>() {
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="bool-val">true</span>) <span class="op">=</span> <span class="ident">Reflect::get</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>.<span class="number">0</span>, <span class="kw-2">&amp;</span><span class="ident">key</span>)<span class="question-mark">?</span>.<span class="ident">as_bool</span>() {
-                <span class="ident">result</span>.<span class="ident">insert</span>(<span class="ident">serde_wasm_bindgen::from_value</span>(<span class="ident">key</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>);
+    <span class="kw">fn </span>try_from(value: JS) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, <span class="self">Self</span>::Error&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>result = BTreeSet::new();
+        <span class="kw">for </span>key <span class="kw">in </span>Reflect::own_keys(<span class="kw-2">&amp;</span>value.<span class="number">0</span>)<span class="question-mark">?</span>.iter() {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="bool-val">true</span>) = Reflect::get(<span class="kw-2">&amp;</span>value.<span class="number">0</span>, <span class="kw-2">&amp;</span>key)<span class="question-mark">?</span>.as_bool() {
+                result.insert(serde_wasm_bindgen::from_value(key).map_err(to_js_err)<span class="question-mark">?</span>);
             }
         }
-        <span class="prelude-val">Ok</span>(<span class="ident">result</span>)
+        <span class="prelude-val">Ok</span>(result)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span><span class="ident">JS</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">JsValue</span>;
+<span class="kw">impl </span>TryFrom&lt;JS&gt; <span class="kw">for </span>Vec&lt;ChangeHash&gt; {
+    <span class="kw">type </span>Error = JsValue;
 
-    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">value</span>: <span class="ident">JS</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="ident">value</span>.<span class="number">0</span>.<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">Array</span><span class="op">&gt;</span>()<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">value</span>: <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>, <span class="kw">_</span><span class="op">&gt;</span> <span class="op">=</span>
-            <span class="ident">value</span>.<span class="ident">iter</span>().<span class="ident">map</span>(<span class="ident">serde_wasm_bindgen::from_value</span>).<span class="ident">collect</span>();
-        <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="ident">value</span>.<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(<span class="ident">value</span>)
+    <span class="kw">fn </span>try_from(value: JS) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, <span class="self">Self</span>::Error&gt; {
+        <span class="kw">let </span>value = value.<span class="number">0</span>.dyn_into::&lt;Array&gt;()<span class="question-mark">?</span>;
+        <span class="kw">let </span>value: <span class="prelude-ty">Result</span>&lt;Vec&lt;ChangeHash&gt;, <span class="kw">_</span>&gt; =
+            value.iter().map(serde_wasm_bindgen::from_value).collect();
+        <span class="kw">let </span>value = value.map_err(to_js_err)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(value)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">JS</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">value</span>: <span class="ident">JS</span>) -&gt; <span class="self">Self</span> {
-        <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="ident">value</span>.<span class="number">0</span>.<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">Array</span><span class="op">&gt;</span>().<span class="ident">ok</span>()<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">value</span>: <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>, <span class="kw">_</span><span class="op">&gt;</span> <span class="op">=</span>
-            <span class="ident">value</span>.<span class="ident">iter</span>().<span class="ident">map</span>(<span class="ident">serde_wasm_bindgen::from_value</span>).<span class="ident">collect</span>();
-        <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="ident">value</span>.<span class="ident">ok</span>()<span class="question-mark">?</span>;
-        <span class="prelude-val">Some</span>(<span class="ident">value</span>)
+<span class="kw">impl </span>From&lt;JS&gt; <span class="kw">for </span><span class="prelude-ty">Option</span>&lt;Vec&lt;ChangeHash&gt;&gt; {
+    <span class="kw">fn </span>from(value: JS) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>value = value.<span class="number">0</span>.dyn_into::&lt;Array&gt;().ok()<span class="question-mark">?</span>;
+        <span class="kw">let </span>value: <span class="prelude-ty">Result</span>&lt;Vec&lt;ChangeHash&gt;, <span class="kw">_</span>&gt; =
+            value.iter().map(serde_wasm_bindgen::from_value).collect();
+        <span class="kw">let </span>value = value.ok()<span class="question-mark">?</span>;
+        <span class="prelude-val">Some</span>(value)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span><span class="ident">JS</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Change</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">JsValue</span>;
+<span class="kw">impl </span>TryFrom&lt;JS&gt; <span class="kw">for </span>Vec&lt;Change&gt; {
+    <span class="kw">type </span>Error = JsValue;
 
-    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">value</span>: <span class="ident">JS</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="ident">value</span>.<span class="number">0</span>.<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">Array</span><span class="op">&gt;</span>()<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">changes</span>: <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Uint8Array</span><span class="op">&gt;</span>, <span class="kw">_</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">value</span>.<span class="ident">iter</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">j</span><span class="op">|</span> <span class="ident">j</span>.<span class="ident">dyn_into</span>()).<span class="ident">collect</span>();
-        <span class="kw">let</span> <span class="ident">changes</span> <span class="op">=</span> <span class="ident">changes</span><span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">changes</span> <span class="op">=</span> <span class="ident">changes</span>.<span class="ident">iter</span>().<span class="ident">try_fold</span>(<span class="ident">Vec::new</span>(), <span class="op">|</span><span class="kw-2">mut</span> <span class="ident">acc</span>, <span class="ident">arr</span><span class="op">|</span> {
-            <span class="kw">match</span> <span class="ident">automerge::Change::try_from</span>(<span class="ident">arr</span>.<span class="ident">to_vec</span>().<span class="ident">as_slice</span>()) {
-                <span class="prelude-val">Ok</span>(<span class="ident">c</span>) =&gt; <span class="ident">acc</span>.<span class="ident">push</span>(<span class="ident">c</span>),
-                <span class="prelude-val">Err</span>(<span class="ident">e</span>) =&gt; <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">to_js_err</span>(<span class="ident">e</span>)),
+    <span class="kw">fn </span>try_from(value: JS) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, <span class="self">Self</span>::Error&gt; {
+        <span class="kw">let </span>value = value.<span class="number">0</span>.dyn_into::&lt;Array&gt;()<span class="question-mark">?</span>;
+        <span class="kw">let </span>changes: <span class="prelude-ty">Result</span>&lt;Vec&lt;Uint8Array&gt;, <span class="kw">_</span>&gt; = value.iter().map(|j| j.dyn_into()).collect();
+        <span class="kw">let </span>changes = changes<span class="question-mark">?</span>;
+        <span class="kw">let </span>changes = changes.iter().try_fold(Vec::new(), |<span class="kw-2">mut </span>acc, arr| {
+            <span class="kw">match </span>automerge::Change::try_from(arr.to_vec().as_slice()) {
+                <span class="prelude-val">Ok</span>(c) =&gt; acc.push(c),
+                <span class="prelude-val">Err</span>(e) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(to_js_err(e)),
             }
-            <span class="prelude-val">Ok</span>(<span class="ident">acc</span>)
+            <span class="prelude-val">Ok</span>(acc)
         })<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(<span class="ident">changes</span>)
+        <span class="prelude-val">Ok</span>(changes)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span><span class="ident">JS</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">am::sync::State</span> {
-    <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">JsValue</span>;
+<span class="kw">impl </span>TryFrom&lt;JS&gt; <span class="kw">for </span>am::sync::State {
+    <span class="kw">type </span>Error = JsValue;
 
-    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">value</span>: <span class="ident">JS</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="ident">value</span>.<span class="number">0</span>;
-        <span class="kw">let</span> <span class="ident">shared_heads</span> <span class="op">=</span> <span class="ident">js_get</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>, <span class="string">&quot;sharedHeads&quot;</span>)<span class="question-mark">?</span>.<span class="ident">try_into</span>()<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">last_sent_heads</span> <span class="op">=</span> <span class="ident">js_get</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>, <span class="string">&quot;lastSentHeads&quot;</span>)<span class="question-mark">?</span>.<span class="ident">try_into</span>()<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">their_heads</span> <span class="op">=</span> <span class="ident">js_get</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>, <span class="string">&quot;theirHeads&quot;</span>)<span class="question-mark">?</span>.<span class="ident">into</span>();
-        <span class="kw">let</span> <span class="ident">their_need</span> <span class="op">=</span> <span class="ident">js_get</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>, <span class="string">&quot;theirNeed&quot;</span>)<span class="question-mark">?</span>.<span class="ident">into</span>();
-        <span class="kw">let</span> <span class="ident">their_have</span> <span class="op">=</span> <span class="ident">js_get</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>, <span class="string">&quot;theirHave&quot;</span>)<span class="question-mark">?</span>.<span class="ident">try_into</span>()<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">sent_hashes</span> <span class="op">=</span> <span class="ident">js_get</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>, <span class="string">&quot;sentHashes&quot;</span>)<span class="question-mark">?</span>.<span class="ident">try_into</span>()<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(<span class="ident">am::sync::State</span> {
-            <span class="ident">shared_heads</span>,
-            <span class="ident">last_sent_heads</span>,
-            <span class="ident">their_heads</span>,
-            <span class="ident">their_need</span>,
-            <span class="ident">their_have</span>,
-            <span class="ident">sent_hashes</span>,
+    <span class="kw">fn </span>try_from(value: JS) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, <span class="self">Self</span>::Error&gt; {
+        <span class="kw">let </span>value = value.<span class="number">0</span>;
+        <span class="kw">let </span>shared_heads = js_get(<span class="kw-2">&amp;</span>value, <span class="string">&quot;sharedHeads&quot;</span>)<span class="question-mark">?</span>.try_into()<span class="question-mark">?</span>;
+        <span class="kw">let </span>last_sent_heads = js_get(<span class="kw-2">&amp;</span>value, <span class="string">&quot;lastSentHeads&quot;</span>)<span class="question-mark">?</span>.try_into()<span class="question-mark">?</span>;
+        <span class="kw">let </span>their_heads = js_get(<span class="kw-2">&amp;</span>value, <span class="string">&quot;theirHeads&quot;</span>)<span class="question-mark">?</span>.into();
+        <span class="kw">let </span>their_need = js_get(<span class="kw-2">&amp;</span>value, <span class="string">&quot;theirNeed&quot;</span>)<span class="question-mark">?</span>.into();
+        <span class="kw">let </span>their_have = js_get(<span class="kw-2">&amp;</span>value, <span class="string">&quot;theirHave&quot;</span>)<span class="question-mark">?</span>.try_into()<span class="question-mark">?</span>;
+        <span class="kw">let </span>sent_hashes = js_get(<span class="kw-2">&amp;</span>value, <span class="string">&quot;sentHashes&quot;</span>)<span class="question-mark">?</span>.try_into()<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(am::sync::State {
+            shared_heads,
+            last_sent_heads,
+            their_heads,
+            their_need,
+            their_have,
+            sent_hashes,
         })
     }
 }
 
-<span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span><span class="ident">JS</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">am::sync::Have</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">JsValue</span>;
+<span class="kw">impl </span>TryFrom&lt;JS&gt; <span class="kw">for </span><span class="prelude-ty">Option</span>&lt;Vec&lt;am::sync::Have&gt;&gt; {
+    <span class="kw">type </span>Error = JsValue;
 
-    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">value</span>: <span class="ident">JS</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="ident">value</span>.<span class="number">0</span>.<span class="ident">is_null</span>() {
+    <span class="kw">fn </span>try_from(value: JS) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, <span class="self">Self</span>::Error&gt; {
+        <span class="kw">if </span>value.<span class="number">0</span>.is_null() {
             <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>)
-        } <span class="kw">else</span> {
-            <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="ident">value</span>.<span class="ident">try_into</span>()<span class="question-mark">?</span>))
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(value.try_into()<span class="question-mark">?</span>))
         }
     }
 }
 
-<span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span><span class="ident">JS</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">am::sync::Have</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">JsValue</span>;
+<span class="kw">impl </span>TryFrom&lt;JS&gt; <span class="kw">for </span>Vec&lt;am::sync::Have&gt; {
+    <span class="kw">type </span>Error = JsValue;
 
-    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">value</span>: <span class="ident">JS</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="ident">value</span>.<span class="number">0</span>.<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">Array</span><span class="op">&gt;</span>()<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">have</span>: <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">am::sync::Have</span><span class="op">&gt;</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">value</span>
-            .<span class="ident">iter</span>()
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">s</span><span class="op">|</span> {
-                <span class="kw">let</span> <span class="ident">last_sync</span> <span class="op">=</span> <span class="ident">js_get</span>(<span class="kw-2">&amp;</span><span class="ident">s</span>, <span class="string">&quot;lastSync&quot;</span>)<span class="question-mark">?</span>.<span class="ident">try_into</span>()<span class="question-mark">?</span>;
-                <span class="kw">let</span> <span class="ident">bloom</span> <span class="op">=</span> <span class="ident">js_get</span>(<span class="kw-2">&amp;</span><span class="ident">s</span>, <span class="string">&quot;bloom&quot;</span>)<span class="question-mark">?</span>.<span class="ident">try_into</span>()<span class="question-mark">?</span>;
-                <span class="prelude-val">Ok</span>(<span class="ident">am::sync::Have</span> { <span class="ident">last_sync</span>, <span class="ident">bloom</span> })
+    <span class="kw">fn </span>try_from(value: JS) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, <span class="self">Self</span>::Error&gt; {
+        <span class="kw">let </span>value = value.<span class="number">0</span>.dyn_into::&lt;Array&gt;()<span class="question-mark">?</span>;
+        <span class="kw">let </span>have: <span class="prelude-ty">Result</span>&lt;Vec&lt;am::sync::Have&gt;, JsValue&gt; = value
+            .iter()
+            .map(|s| {
+                <span class="kw">let </span>last_sync = js_get(<span class="kw-2">&amp;</span>s, <span class="string">&quot;lastSync&quot;</span>)<span class="question-mark">?</span>.try_into()<span class="question-mark">?</span>;
+                <span class="kw">let </span>bloom = js_get(<span class="kw-2">&amp;</span>s, <span class="string">&quot;bloom&quot;</span>)<span class="question-mark">?</span>.try_into()<span class="question-mark">?</span>;
+                <span class="prelude-val">Ok</span>(am::sync::Have { last_sync, bloom })
             })
-            .<span class="ident">collect</span>();
-        <span class="kw">let</span> <span class="ident">have</span> <span class="op">=</span> <span class="ident">have</span><span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(<span class="ident">have</span>)
+            .collect();
+        <span class="kw">let </span>have = have<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(have)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span><span class="ident">JS</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">am::sync::BloomFilter</span> {
-    <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">JsValue</span>;
+<span class="kw">impl </span>TryFrom&lt;JS&gt; <span class="kw">for </span>am::sync::BloomFilter {
+    <span class="kw">type </span>Error = JsValue;
 
-    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">value</span>: <span class="ident">JS</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">value</span>: <span class="ident">Uint8Array</span> <span class="op">=</span> <span class="ident">value</span>.<span class="number">0</span>.<span class="ident">dyn_into</span>()<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="ident">value</span>.<span class="ident">to_vec</span>();
-        <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="ident">value</span>.<span class="ident">as_slice</span>().<span class="ident">try_into</span>().<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(<span class="ident">value</span>)
+    <span class="kw">fn </span>try_from(value: JS) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, <span class="self">Self</span>::Error&gt; {
+        <span class="kw">let </span>value: Uint8Array = value.<span class="number">0</span>.dyn_into()<span class="question-mark">?</span>;
+        <span class="kw">let </span>value = value.to_vec();
+        <span class="kw">let </span>value = value.as_slice().try_into().map_err(to_js_err)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(value)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>]<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">AR</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">value</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>]) -&gt; <span class="self">Self</span> {
-        <span class="ident">AR</span>(<span class="ident">value</span>
-            .<span class="ident">iter</span>()
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">h</span><span class="op">|</span> <span class="ident">JsValue::from_str</span>(<span class="kw-2">&amp;</span><span class="ident">hex::encode</span>(<span class="kw-2">&amp;</span><span class="ident">h</span>.<span class="number">0</span>)))
-            .<span class="ident">collect</span>())
+<span class="kw">impl </span>From&lt;<span class="kw-2">&amp;</span>[ChangeHash]&gt; <span class="kw">for </span>AR {
+    <span class="kw">fn </span>from(value: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; <span class="self">Self </span>{
+        AR(value
+            .iter()
+            .map(|h| JsValue::from_str(<span class="kw-2">&amp;</span>hex::encode(<span class="kw-2">&amp;</span>h.<span class="number">0</span>)))
+            .collect())
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="kw-2">&amp;</span>[<span class="ident">Change</span>]<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">AR</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">value</span>: <span class="kw-2">&amp;</span>[<span class="ident">Change</span>]) -&gt; <span class="self">Self</span> {
-        <span class="kw">let</span> <span class="ident">changes</span>: <span class="ident">Array</span> <span class="op">=</span> <span class="ident">value</span>
-            .<span class="ident">iter</span>()
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">c</span><span class="op">|</span> <span class="ident">Uint8Array::from</span>(<span class="ident">c</span>.<span class="ident">raw_bytes</span>()))
-            .<span class="ident">collect</span>();
-        <span class="ident">AR</span>(<span class="ident">changes</span>)
+<span class="kw">impl </span>From&lt;<span class="kw-2">&amp;</span>[Change]&gt; <span class="kw">for </span>AR {
+    <span class="kw">fn </span>from(value: <span class="kw-2">&amp;</span>[Change]) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span>changes: Array = value
+            .iter()
+            .map(|c| Uint8Array::from(c.raw_bytes()))
+            .collect();
+        AR(changes)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="kw-2">&amp;</span>[<span class="ident">am::sync::Have</span>]<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">AR</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">value</span>: <span class="kw-2">&amp;</span>[<span class="ident">am::sync::Have</span>]) -&gt; <span class="self">Self</span> {
-        <span class="ident">AR</span>(<span class="ident">value</span>
-            .<span class="ident">iter</span>()
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">have</span><span class="op">|</span> {
-                <span class="kw">let</span> <span class="ident">last_sync</span>: <span class="ident">Array</span> <span class="op">=</span> <span class="ident">have</span>
-                    .<span class="ident">last_sync</span>
-                    .<span class="ident">iter</span>()
-                    .<span class="ident">map</span>(<span class="op">|</span><span class="ident">h</span><span class="op">|</span> <span class="ident">JsValue::from_str</span>(<span class="kw-2">&amp;</span><span class="ident">hex::encode</span>(<span class="kw-2">&amp;</span><span class="ident">h</span>.<span class="number">0</span>)))
-                    .<span class="ident">collect</span>();
-                <span class="comment">// FIXME - the clone and the unwrap here shouldnt be needed - look at into_bytes()</span>
-                <span class="kw">let</span> <span class="ident">bloom</span> <span class="op">=</span> <span class="ident">Uint8Array::from</span>(<span class="ident">have</span>.<span class="ident">bloom</span>.<span class="ident">to_bytes</span>().<span class="ident">as_slice</span>());
-                <span class="kw">let</span> <span class="ident">obj</span>: <span class="ident">JsValue</span> <span class="op">=</span> <span class="ident">Object::new</span>().<span class="ident">into</span>();
-                <span class="comment">// we can unwrap here b/c we created the object and know its not frozen</span>
-                <span class="ident">Reflect::set</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="kw-2">&amp;</span><span class="string">&quot;lastSync&quot;</span>.<span class="ident">into</span>(), <span class="kw-2">&amp;</span><span class="ident">last_sync</span>.<span class="ident">into</span>()).<span class="ident">unwrap</span>();
-                <span class="ident">Reflect::set</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="kw-2">&amp;</span><span class="string">&quot;bloom&quot;</span>.<span class="ident">into</span>(), <span class="kw-2">&amp;</span><span class="ident">bloom</span>.<span class="ident">into</span>()).<span class="ident">unwrap</span>();
-                <span class="ident">obj</span>
+<span class="kw">impl </span>From&lt;<span class="kw-2">&amp;</span>[am::sync::Have]&gt; <span class="kw">for </span>AR {
+    <span class="kw">fn </span>from(value: <span class="kw-2">&amp;</span>[am::sync::Have]) -&gt; <span class="self">Self </span>{
+        AR(value
+            .iter()
+            .map(|have| {
+                <span class="kw">let </span>last_sync: Array = have
+                    .last_sync
+                    .iter()
+                    .map(|h| JsValue::from_str(<span class="kw-2">&amp;</span>hex::encode(<span class="kw-2">&amp;</span>h.<span class="number">0</span>)))
+                    .collect();
+                <span class="comment">// FIXME - the clone and the unwrap here shouldnt be needed - look at into_bytes()
+                </span><span class="kw">let </span>bloom = Uint8Array::from(have.bloom.to_bytes().as_slice());
+                <span class="kw">let </span>obj: JsValue = Object::new().into();
+                <span class="comment">// we can unwrap here b/c we created the object and know its not frozen
+                </span>Reflect::set(<span class="kw-2">&amp;</span>obj, <span class="kw-2">&amp;</span><span class="string">&quot;lastSync&quot;</span>.into(), <span class="kw-2">&amp;</span>last_sync.into()).unwrap();
+                Reflect::set(<span class="kw-2">&amp;</span>obj, <span class="kw-2">&amp;</span><span class="string">&quot;bloom&quot;</span>.into(), <span class="kw-2">&amp;</span>bloom.into()).unwrap();
+                obj
             })
-            .<span class="ident">collect</span>())
+            .collect())
     }
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">to_js_err</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">Display</span><span class="op">&gt;</span>(<span class="ident">err</span>: <span class="ident">T</span>) -&gt; <span class="ident">JsValue</span> {
-    <span class="ident">js_sys::Error::new</span>(<span class="kw-2">&amp;</span><span class="macro">std::format!</span>(<span class="string">&quot;{}&quot;</span>, <span class="ident">err</span>)).<span class="ident">into</span>()
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>to_js_err&lt;T: Display&gt;(err: T) -&gt; JsValue {
+    js_sys::Error::new(<span class="kw-2">&amp;</span><span class="macro">std::format!</span>(<span class="string">&quot;{}&quot;</span>, err)).into()
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">js_get</span><span class="op">&lt;</span><span class="ident">J</span>: <span class="ident">Into</span><span class="op">&lt;</span><span class="ident">JsValue</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="ident">obj</span>: <span class="ident">J</span>, <span class="ident">prop</span>: <span class="kw-2">&amp;</span><span class="ident">str</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JS</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-    <span class="prelude-val">Ok</span>(<span class="ident">JS</span>(<span class="ident">Reflect::get</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>.<span class="ident">into</span>(), <span class="kw-2">&amp;</span><span class="ident">prop</span>.<span class="ident">into</span>())<span class="question-mark">?</span>))
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>js_get&lt;J: Into&lt;JsValue&gt;&gt;(obj: J, prop: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;JS, JsValue&gt; {
+    <span class="prelude-val">Ok</span>(JS(Reflect::get(<span class="kw-2">&amp;</span>obj.into(), <span class="kw-2">&amp;</span>prop.into())<span class="question-mark">?</span>))
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">js_set</span><span class="op">&lt;</span><span class="ident">V</span>: <span class="ident">Into</span><span class="op">&lt;</span><span class="ident">JsValue</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="ident">obj</span>: <span class="kw-2">&amp;</span><span class="ident">JsValue</span>, <span class="ident">prop</span>: <span class="kw-2">&amp;</span><span class="ident">str</span>, <span class="ident">val</span>: <span class="ident">V</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">bool</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-    <span class="ident">Reflect::set</span>(<span class="ident">obj</span>, <span class="kw-2">&amp;</span><span class="ident">prop</span>.<span class="ident">into</span>(), <span class="kw-2">&amp;</span><span class="ident">val</span>.<span class="ident">into</span>())
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>js_set&lt;V: Into&lt;JsValue&gt;&gt;(obj: <span class="kw-2">&amp;</span>JsValue, prop: <span class="kw-2">&amp;</span>str, val: V) -&gt; <span class="prelude-ty">Result</span>&lt;bool, JsValue&gt; {
+    Reflect::set(obj, <span class="kw-2">&amp;</span>prop.into(), <span class="kw-2">&amp;</span>val.into())
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">to_prop</span>(<span class="ident">p</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Prop</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-    <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="ident">p</span>.<span class="ident">as_string</span>() {
-        <span class="prelude-val">Ok</span>(<span class="ident">Prop::Map</span>(<span class="ident">s</span>))
-    } <span class="kw">else</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">n</span>) <span class="op">=</span> <span class="ident">p</span>.<span class="ident">as_f64</span>() {
-        <span class="prelude-val">Ok</span>(<span class="ident">Prop::Seq</span>(<span class="ident">n</span> <span class="kw">as</span> <span class="ident">usize</span>))
-    } <span class="kw">else</span> {
-        <span class="prelude-val">Err</span>(<span class="ident">to_js_err</span>(<span class="string">&quot;prop must me a string or number&quot;</span>))
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>to_prop(p: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;Prop, JsValue&gt; {
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = p.as_string() {
+        <span class="prelude-val">Ok</span>(Prop::Map(s))
+    } <span class="kw">else if let </span><span class="prelude-val">Some</span>(n) = p.as_f64() {
+        <span class="prelude-val">Ok</span>(Prop::Seq(n <span class="kw">as </span>usize))
+    } <span class="kw">else </span>{
+        <span class="prelude-val">Err</span>(to_js_err(<span class="string">&quot;prop must me a string or number&quot;</span>))
     }
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">to_objtype</span>(
-    <span class="ident">value</span>: <span class="kw-2">&amp;</span><span class="ident">JsValue</span>,
-    <span class="ident">datatype</span>: <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>,
-) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">ObjType</span>, <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">Prop</span>, <span class="ident">JsValue</span>)<span class="op">&gt;</span>)<span class="op">&gt;</span> {
-    <span class="kw">match</span> <span class="ident">datatype</span>.<span class="ident">as_deref</span>() {
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>to_objtype(
+    value: <span class="kw-2">&amp;</span>JsValue,
+    datatype: <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;String&gt;,
+) -&gt; <span class="prelude-ty">Option</span>&lt;(ObjType, Vec&lt;(Prop, JsValue)&gt;)&gt; {
+    <span class="kw">match </span>datatype.as_deref() {
         <span class="prelude-val">Some</span>(<span class="string">&quot;map&quot;</span>) =&gt; {
-            <span class="kw">let</span> <span class="ident">map</span> <span class="op">=</span> <span class="ident">value</span>.<span class="ident">clone</span>().<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">js_sys::Object</span><span class="op">&gt;</span>().<span class="ident">ok</span>()<span class="question-mark">?</span>;
-            <span class="kw">let</span> <span class="ident">map</span> <span class="op">=</span> <span class="ident">js_sys::Object::keys</span>(<span class="kw-2">&amp;</span><span class="ident">map</span>)
-                .<span class="ident">iter</span>()
-                .<span class="ident">zip</span>(<span class="ident">js_sys::Object::values</span>(<span class="kw-2">&amp;</span><span class="ident">map</span>).<span class="ident">iter</span>())
-                .<span class="ident">map</span>(<span class="op">|</span>(<span class="ident">key</span>, <span class="ident">val</span>)<span class="op">|</span> (<span class="ident">key</span>.<span class="ident">as_string</span>().<span class="ident">unwrap</span>().<span class="ident">into</span>(), <span class="ident">val</span>))
-                .<span class="ident">collect</span>();
-            <span class="prelude-val">Some</span>((<span class="ident">ObjType::Map</span>, <span class="ident">map</span>))
+            <span class="kw">let </span>map = value.clone().dyn_into::&lt;js_sys::Object&gt;().ok()<span class="question-mark">?</span>;
+            <span class="kw">let </span>map = js_sys::Object::keys(<span class="kw-2">&amp;</span>map)
+                .iter()
+                .zip(js_sys::Object::values(<span class="kw-2">&amp;</span>map).iter())
+                .map(|(key, val)| (key.as_string().unwrap().into(), val))
+                .collect();
+            <span class="prelude-val">Some</span>((ObjType::Map, map))
         }
         <span class="prelude-val">Some</span>(<span class="string">&quot;list&quot;</span>) =&gt; {
-            <span class="kw">let</span> <span class="ident">list</span> <span class="op">=</span> <span class="ident">value</span>.<span class="ident">clone</span>().<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">js_sys::Array</span><span class="op">&gt;</span>().<span class="ident">ok</span>()<span class="question-mark">?</span>;
-            <span class="kw">let</span> <span class="ident">list</span> <span class="op">=</span> <span class="ident">list</span>
-                .<span class="ident">iter</span>()
-                .<span class="ident">enumerate</span>()
-                .<span class="ident">map</span>(<span class="op">|</span>(<span class="ident">i</span>, <span class="ident">e</span>)<span class="op">|</span> (<span class="ident">i</span>.<span class="ident">into</span>(), <span class="ident">e</span>))
-                .<span class="ident">collect</span>();
-            <span class="prelude-val">Some</span>((<span class="ident">ObjType::List</span>, <span class="ident">list</span>))
+            <span class="kw">let </span>list = value.clone().dyn_into::&lt;js_sys::Array&gt;().ok()<span class="question-mark">?</span>;
+            <span class="kw">let </span>list = list
+                .iter()
+                .enumerate()
+                .map(|(i, e)| (i.into(), e))
+                .collect();
+            <span class="prelude-val">Some</span>((ObjType::List, list))
         }
         <span class="prelude-val">Some</span>(<span class="string">&quot;text&quot;</span>) =&gt; {
-            <span class="kw">let</span> <span class="ident">text</span> <span class="op">=</span> <span class="ident">value</span>.<span class="ident">as_string</span>()<span class="question-mark">?</span>;
-            <span class="kw">let</span> <span class="ident">text</span> <span class="op">=</span> <span class="ident">text</span>
-                .<span class="ident">chars</span>()
-                .<span class="ident">enumerate</span>()
-                .<span class="ident">map</span>(<span class="op">|</span>(<span class="ident">i</span>, <span class="ident">ch</span>)<span class="op">|</span> (<span class="ident">i</span>.<span class="ident">into</span>(), <span class="ident">ch</span>.<span class="ident">to_string</span>().<span class="ident">into</span>()))
-                .<span class="ident">collect</span>();
-            <span class="prelude-val">Some</span>((<span class="ident">ObjType::Text</span>, <span class="ident">text</span>))
+            <span class="kw">let </span>text = value.as_string()<span class="question-mark">?</span>;
+            <span class="kw">let </span>text = text
+                .chars()
+                .enumerate()
+                .map(|(i, ch)| (i.into(), ch.to_string().into()))
+                .collect();
+            <span class="prelude-val">Some</span>((ObjType::Text, text))
         }
         <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
-        <span class="prelude-val">None</span> =&gt; {
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="ident">list</span>) <span class="op">=</span> <span class="ident">value</span>.<span class="ident">clone</span>().<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">js_sys::Array</span><span class="op">&gt;</span>() {
-                <span class="kw">let</span> <span class="ident">list</span> <span class="op">=</span> <span class="ident">list</span>
-                    .<span class="ident">iter</span>()
-                    .<span class="ident">enumerate</span>()
-                    .<span class="ident">map</span>(<span class="op">|</span>(<span class="ident">i</span>, <span class="ident">e</span>)<span class="op">|</span> (<span class="ident">i</span>.<span class="ident">into</span>(), <span class="ident">e</span>))
-                    .<span class="ident">collect</span>();
-                <span class="prelude-val">Some</span>((<span class="ident">ObjType::List</span>, <span class="ident">list</span>))
-            } <span class="kw">else</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="ident">map</span>) <span class="op">=</span> <span class="ident">value</span>.<span class="ident">clone</span>().<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">js_sys::Object</span><span class="op">&gt;</span>() {
-                <span class="comment">// FIXME unwrap</span>
-                <span class="kw">let</span> <span class="ident">map</span> <span class="op">=</span> <span class="ident">js_sys::Object::keys</span>(<span class="kw-2">&amp;</span><span class="ident">map</span>)
-                    .<span class="ident">iter</span>()
-                    .<span class="ident">zip</span>(<span class="ident">js_sys::Object::values</span>(<span class="kw-2">&amp;</span><span class="ident">map</span>).<span class="ident">iter</span>())
-                    .<span class="ident">map</span>(<span class="op">|</span>(<span class="ident">key</span>, <span class="ident">val</span>)<span class="op">|</span> (<span class="ident">key</span>.<span class="ident">as_string</span>().<span class="ident">unwrap</span>().<span class="ident">into</span>(), <span class="ident">val</span>))
-                    .<span class="ident">collect</span>();
-                <span class="prelude-val">Some</span>((<span class="ident">ObjType::Map</span>, <span class="ident">map</span>))
-            } <span class="kw">else</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">text</span>) <span class="op">=</span> <span class="ident">value</span>.<span class="ident">as_string</span>() {
-                <span class="kw">let</span> <span class="ident">text</span> <span class="op">=</span> <span class="ident">text</span>
-                    .<span class="ident">chars</span>()
-                    .<span class="ident">enumerate</span>()
-                    .<span class="ident">map</span>(<span class="op">|</span>(<span class="ident">i</span>, <span class="ident">ch</span>)<span class="op">|</span> (<span class="ident">i</span>.<span class="ident">into</span>(), <span class="ident">ch</span>.<span class="ident">to_string</span>().<span class="ident">into</span>()))
-                    .<span class="ident">collect</span>();
-                <span class="prelude-val">Some</span>((<span class="ident">ObjType::Text</span>, <span class="ident">text</span>))
-            } <span class="kw">else</span> {
-                <span class="prelude-val">None</span>
-            }
+        <span class="prelude-val">None </span>=&gt; {
+            <span class="kw">if let </span><span class="prelude-val">Ok</span>(list) = value.clone().dyn_into::&lt;js_sys::Array&gt;() {
+                <span class="kw">let </span>list = list
+                    .iter()
+                    .enumerate()
+                    .map(|(i, e)| (i.into(), e))
+                    .collect();
+                <span class="prelude-val">Some</span>((ObjType::List, list))
+            } <span class="kw">else if let </span><span class="prelude-val">Ok</span>(map) = value.clone().dyn_into::&lt;js_sys::Object&gt;() {
+                <span class="comment">// FIXME unwrap
+                </span><span class="kw">let </span>map = js_sys::Object::keys(<span class="kw-2">&amp;</span>map)
+                    .iter()
+                    .zip(js_sys::Object::values(<span class="kw-2">&amp;</span>map).iter())
+                    .map(|(key, val)| (key.as_string().unwrap().into(), val))
+                    .collect();
+                <span class="prelude-val">Some</span>((ObjType::Map, map))
+            } <span class="kw">else if let </span><span class="prelude-val">Some</span>(text) = value.as_string() {
+                <span class="kw">let </span>text = text
+                    .chars()
+                    .enumerate()
+                    .map(|(i, ch)| (i.into(), ch.to_string().into()))
+                    .collect();
+                <span class="prelude-val">Some</span>((ObjType::Text, text))
+            } <span class="kw">else </span>{
+                <span class="prelude-val">None
+            </span>}
         }
     }
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">get_heads</span>(<span class="ident">heads</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Array</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-    <span class="kw">let</span> <span class="ident">heads</span> <span class="op">=</span> <span class="ident">heads</span><span class="question-mark">?</span>;
-    <span class="kw">let</span> <span class="ident">heads</span>: <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span>, <span class="kw">_</span><span class="op">&gt;</span> <span class="op">=</span>
-        <span class="ident">heads</span>.<span class="ident">iter</span>().<span class="ident">map</span>(<span class="ident">serde_wasm_bindgen::from_value</span>).<span class="ident">collect</span>();
-    <span class="ident">heads</span>.<span class="ident">ok</span>()
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get_heads(heads: <span class="prelude-ty">Option</span>&lt;Array&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;ChangeHash&gt;&gt; {
+    <span class="kw">let </span>heads = heads<span class="question-mark">?</span>;
+    <span class="kw">let </span>heads: <span class="prelude-ty">Result</span>&lt;Vec&lt;ChangeHash&gt;, <span class="kw">_</span>&gt; =
+        heads.iter().map(serde_wasm_bindgen::from_value).collect();
+    heads.ok()
 }
 
-<span class="kw">impl</span> <span class="ident">Automerge</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">export_object</span>(
+<span class="kw">impl </span>Automerge {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>export_object(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="kw-2">&amp;</span><span class="ident">ObjId</span>,
-        <span class="ident">datatype</span>: <span class="ident">Datatype</span>,
-        <span class="ident">heads</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-        <span class="ident">meta</span>: <span class="kw-2">&amp;</span><span class="ident">JsValue</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">datatype</span>.<span class="ident">is_sequence</span>() {
-            <span class="self">self</span>.<span class="ident">wrap_object</span>(
-                <span class="self">self</span>.<span class="ident">export_list</span>(<span class="ident">obj</span>, <span class="ident">heads</span>, <span class="ident">meta</span>)<span class="question-mark">?</span>,
-                <span class="ident">datatype</span>,
-                <span class="kw-2">&amp;</span><span class="ident">obj</span>.<span class="ident">to_string</span>().<span class="ident">into</span>(),
-                <span class="ident">meta</span>,
-            )<span class="question-mark">?</span>
-        } <span class="kw">else</span> {
-            <span class="self">self</span>.<span class="ident">wrap_object</span>(
-                <span class="self">self</span>.<span class="ident">export_map</span>(<span class="ident">obj</span>, <span class="ident">heads</span>, <span class="ident">meta</span>)<span class="question-mark">?</span>,
-                <span class="ident">datatype</span>,
-                <span class="kw-2">&amp;</span><span class="ident">obj</span>.<span class="ident">to_string</span>().<span class="ident">into</span>(),
-                <span class="ident">meta</span>,
-            )<span class="question-mark">?</span>
-        };
-        <span class="prelude-val">Ok</span>(<span class="ident">result</span>.<span class="ident">into</span>())
+        obj: <span class="kw-2">&amp;</span>ObjId,
+        datatype: Datatype,
+        heads: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Vec&lt;ChangeHash&gt;&gt;,
+        meta: <span class="kw-2">&amp;</span>JsValue,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, JsValue&gt; {
+        <span class="kw">let </span>result = <span class="kw">if </span>datatype.is_sequence() {
+            <span class="self">self</span>.wrap_object(
+                <span class="self">self</span>.export_list(obj, heads, meta)<span class="question-mark">?</span>,
+                datatype,
+                <span class="kw-2">&amp;</span>obj.to_string().into(),
+                meta,
+            )<span class="question-mark">?
+        </span>} <span class="kw">else </span>{
+            <span class="self">self</span>.wrap_object(
+                <span class="self">self</span>.export_map(obj, heads, meta)<span class="question-mark">?</span>,
+                datatype,
+                <span class="kw-2">&amp;</span>obj.to_string().into(),
+                meta,
+            )<span class="question-mark">?
+        </span>};
+        <span class="prelude-val">Ok</span>(result.into())
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">export_map</span>(
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>export_map(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="kw-2">&amp;</span><span class="ident">ObjId</span>,
-        <span class="ident">heads</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-        <span class="ident">meta</span>: <span class="kw-2">&amp;</span><span class="ident">JsValue</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Object</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">keys</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">keys</span>(<span class="ident">obj</span>);
-        <span class="kw">let</span> <span class="ident">map</span> <span class="op">=</span> <span class="ident">Object::new</span>();
-        <span class="kw">for</span> <span class="ident">k</span> <span class="kw">in</span> <span class="ident">keys</span> {
-            <span class="kw">let</span> <span class="ident">val_and_id</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">heads</span>) <span class="op">=</span> <span class="ident">heads</span> {
-                <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_at</span>(<span class="ident">obj</span>, <span class="kw-2">&amp;</span><span class="ident">k</span>, <span class="ident">heads</span>)
-            } <span class="kw">else</span> {
-                <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get</span>(<span class="ident">obj</span>, <span class="kw-2">&amp;</span><span class="ident">k</span>)
+        obj: <span class="kw-2">&amp;</span>ObjId,
+        heads: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Vec&lt;ChangeHash&gt;&gt;,
+        meta: <span class="kw-2">&amp;</span>JsValue,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, JsValue&gt; {
+        <span class="kw">let </span>keys = <span class="self">self</span>.doc.keys(obj);
+        <span class="kw">let </span>map = Object::new();
+        <span class="kw">for </span>k <span class="kw">in </span>keys {
+            <span class="kw">let </span>val_and_id = <span class="kw">if let </span><span class="prelude-val">Some</span>(heads) = heads {
+                <span class="self">self</span>.doc.get_at(obj, <span class="kw-2">&amp;</span>k, heads)
+            } <span class="kw">else </span>{
+                <span class="self">self</span>.doc.get(obj, <span class="kw-2">&amp;</span>k)
             };
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>((<span class="ident">val</span>, <span class="ident">id</span>))) <span class="op">=</span> <span class="ident">val_and_id</span> {
-                <span class="kw">let</span> <span class="ident">subval</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">val</span> {
-                    <span class="ident">Value::Object</span>(<span class="ident">o</span>) =&gt; <span class="self">self</span>.<span class="ident">export_object</span>(<span class="kw-2">&amp;</span><span class="ident">id</span>, <span class="ident">o</span>.<span class="ident">into</span>(), <span class="ident">heads</span>, <span class="ident">meta</span>)<span class="question-mark">?</span>,
-                    <span class="ident">Value::Scalar</span>(<span class="kw">_</span>) =&gt; <span class="self">self</span>.<span class="ident">export_value</span>(<span class="ident">alloc</span>(<span class="kw-2">&amp;</span><span class="ident">val</span>))<span class="question-mark">?</span>,
+            <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>((val, id))) = val_and_id {
+                <span class="kw">let </span>subval = <span class="kw">match </span>val {
+                    Value::Object(o) =&gt; <span class="self">self</span>.export_object(<span class="kw-2">&amp;</span>id, o.into(), heads, meta)<span class="question-mark">?</span>,
+                    Value::Scalar(<span class="kw">_</span>) =&gt; <span class="self">self</span>.export_value(alloc(<span class="kw-2">&amp;</span>val))<span class="question-mark">?</span>,
                 };
-                <span class="ident">Reflect::set</span>(<span class="kw-2">&amp;</span><span class="ident">map</span>, <span class="kw-2">&amp;</span><span class="ident">k</span>.<span class="ident">into</span>(), <span class="kw-2">&amp;</span><span class="ident">subval</span>)<span class="question-mark">?</span>;
+                Reflect::set(<span class="kw-2">&amp;</span>map, <span class="kw-2">&amp;</span>k.into(), <span class="kw-2">&amp;</span>subval)<span class="question-mark">?</span>;
             };
         }
 
-        <span class="prelude-val">Ok</span>(<span class="ident">map</span>)
+        <span class="prelude-val">Ok</span>(map)
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">export_list</span>(
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>export_list(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="kw-2">&amp;</span><span class="ident">ObjId</span>,
-        <span class="ident">heads</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-        <span class="ident">meta</span>: <span class="kw-2">&amp;</span><span class="ident">JsValue</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Object</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">len</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">length</span>(<span class="ident">obj</span>);
-        <span class="kw">let</span> <span class="ident">array</span> <span class="op">=</span> <span class="ident">Array::new</span>();
-        <span class="kw">for</span> <span class="ident">i</span> <span class="kw">in</span> <span class="number">0</span>..<span class="ident">len</span> {
-            <span class="kw">let</span> <span class="ident">val_and_id</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">heads</span>) <span class="op">=</span> <span class="ident">heads</span> {
-                <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_at</span>(<span class="ident">obj</span>, <span class="ident">i</span> <span class="kw">as</span> <span class="ident">usize</span>, <span class="ident">heads</span>)
-            } <span class="kw">else</span> {
-                <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get</span>(<span class="ident">obj</span>, <span class="ident">i</span> <span class="kw">as</span> <span class="ident">usize</span>)
+        obj: <span class="kw-2">&amp;</span>ObjId,
+        heads: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Vec&lt;ChangeHash&gt;&gt;,
+        meta: <span class="kw-2">&amp;</span>JsValue,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, JsValue&gt; {
+        <span class="kw">let </span>len = <span class="self">self</span>.doc.length(obj);
+        <span class="kw">let </span>array = Array::new();
+        <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..len {
+            <span class="kw">let </span>val_and_id = <span class="kw">if let </span><span class="prelude-val">Some</span>(heads) = heads {
+                <span class="self">self</span>.doc.get_at(obj, i <span class="kw">as </span>usize, heads)
+            } <span class="kw">else </span>{
+                <span class="self">self</span>.doc.get(obj, i <span class="kw">as </span>usize)
             };
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>((<span class="ident">val</span>, <span class="ident">id</span>))) <span class="op">=</span> <span class="ident">val_and_id</span> {
-                <span class="kw">let</span> <span class="ident">subval</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">val</span> {
-                    <span class="ident">Value::Object</span>(<span class="ident">o</span>) =&gt; <span class="self">self</span>.<span class="ident">export_object</span>(<span class="kw-2">&amp;</span><span class="ident">id</span>, <span class="ident">o</span>.<span class="ident">into</span>(), <span class="ident">heads</span>, <span class="ident">meta</span>)<span class="question-mark">?</span>,
-                    <span class="ident">Value::Scalar</span>(<span class="kw">_</span>) =&gt; <span class="self">self</span>.<span class="ident">export_value</span>(<span class="ident">alloc</span>(<span class="kw-2">&amp;</span><span class="ident">val</span>))<span class="question-mark">?</span>,
+            <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>((val, id))) = val_and_id {
+                <span class="kw">let </span>subval = <span class="kw">match </span>val {
+                    Value::Object(o) =&gt; <span class="self">self</span>.export_object(<span class="kw-2">&amp;</span>id, o.into(), heads, meta)<span class="question-mark">?</span>,
+                    Value::Scalar(<span class="kw">_</span>) =&gt; <span class="self">self</span>.export_value(alloc(<span class="kw-2">&amp;</span>val))<span class="question-mark">?</span>,
                 };
-                <span class="ident">array</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">subval</span>);
+                array.push(<span class="kw-2">&amp;</span>subval);
             };
         }
 
-        <span class="prelude-val">Ok</span>(<span class="ident">array</span>.<span class="ident">into</span>())
+        <span class="prelude-val">Ok</span>(array.into())
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">export_value</span>(
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>export_value(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        (<span class="ident">datatype</span>, <span class="ident">raw_value</span>): (<span class="ident">Datatype</span>, <span class="ident">JsValue</span>),
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">function</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">external_types</span>.<span class="ident">get</span>(<span class="kw-2">&amp;</span><span class="ident">datatype</span>) {
-            <span class="kw">let</span> <span class="ident">wrapped_value</span> <span class="op">=</span> <span class="ident">function</span>.<span class="ident">call1</span>(<span class="kw-2">&amp;</span><span class="ident">JsValue::undefined</span>(), <span class="kw-2">&amp;</span><span class="ident">raw_value</span>)<span class="question-mark">?</span>;
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="ident">o</span>) <span class="op">=</span> <span class="ident">wrapped_value</span>.<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">Object</span><span class="op">&gt;</span>() {
-                <span class="kw">let</span> <span class="ident">key</span> <span class="op">=</span> <span class="ident">Symbol::for_</span>(<span class="ident">RAW_DATA_SYMBOL</span>);
-                <span class="ident">set_hidden_value</span>(<span class="kw-2">&amp;</span><span class="ident">o</span>, <span class="kw-2">&amp;</span><span class="ident">key</span>, <span class="kw-2">&amp;</span><span class="ident">raw_value</span>)<span class="question-mark">?</span>;
-                <span class="kw">let</span> <span class="ident">key</span> <span class="op">=</span> <span class="ident">Symbol::for_</span>(<span class="ident">DATATYPE_SYMBOL</span>);
-                <span class="ident">set_hidden_value</span>(<span class="kw-2">&amp;</span><span class="ident">o</span>, <span class="kw-2">&amp;</span><span class="ident">key</span>, <span class="ident">datatype</span>)<span class="question-mark">?</span>;
-                <span class="prelude-val">Ok</span>(<span class="ident">o</span>.<span class="ident">into</span>())
-            } <span class="kw">else</span> {
-                <span class="prelude-val">Err</span>(<span class="ident">to_js_err</span>(<span class="macro">format!</span>(
+        (datatype, raw_value): (Datatype, JsValue),
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, JsValue&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(function) = <span class="self">self</span>.external_types.get(<span class="kw-2">&amp;</span>datatype) {
+            <span class="kw">let </span>wrapped_value = function.call1(<span class="kw-2">&amp;</span>JsValue::undefined(), <span class="kw-2">&amp;</span>raw_value)<span class="question-mark">?</span>;
+            <span class="kw">if let </span><span class="prelude-val">Ok</span>(o) = wrapped_value.dyn_into::&lt;Object&gt;() {
+                <span class="kw">let </span>key = Symbol::for_(RAW_DATA_SYMBOL);
+                set_hidden_value(<span class="kw-2">&amp;</span>o, <span class="kw-2">&amp;</span>key, <span class="kw-2">&amp;</span>raw_value)<span class="question-mark">?</span>;
+                <span class="kw">let </span>key = Symbol::for_(DATATYPE_SYMBOL);
+                set_hidden_value(<span class="kw-2">&amp;</span>o, <span class="kw-2">&amp;</span>key, datatype)<span class="question-mark">?</span>;
+                <span class="prelude-val">Ok</span>(o.into())
+            } <span class="kw">else </span>{
+                <span class="prelude-val">Err</span>(to_js_err(<span class="macro">format!</span>(
                     <span class="string">&quot;data handler for type {} did not return a valid object&quot;</span>,
-                    <span class="ident">datatype</span>
+                    datatype
                 )))
             }
-        } <span class="kw">else</span> {
-            <span class="prelude-val">Ok</span>(<span class="ident">raw_value</span>)
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(raw_value)
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">unwrap_object</span>(
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>unwrap_object(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">ext_val</span>: <span class="kw-2">&amp;</span><span class="ident">Object</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(<span class="ident">Object</span>, <span class="ident">Datatype</span>, <span class="ident">JsValue</span>), <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">inner</span> <span class="op">=</span> <span class="ident">Reflect::get</span>(<span class="ident">ext_val</span>, <span class="kw-2">&amp;</span><span class="ident">Symbol::for_</span>(<span class="ident">RAW_DATA_SYMBOL</span>))<span class="question-mark">?</span>;
+        ext_val: <span class="kw-2">&amp;</span>Object,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(Object, Datatype, JsValue), JsValue&gt; {
+        <span class="kw">let </span>inner = Reflect::get(ext_val, <span class="kw-2">&amp;</span>Symbol::for_(RAW_DATA_SYMBOL))<span class="question-mark">?</span>;
 
-        <span class="kw">let</span> <span class="ident">datatype</span> <span class="op">=</span> <span class="ident">Reflect::get</span>(<span class="ident">ext_val</span>, <span class="kw-2">&amp;</span><span class="ident">Symbol::for_</span>(<span class="ident">DATATYPE_SYMBOL</span>))<span class="question-mark">?</span>.<span class="ident">try_into</span>();
+        <span class="kw">let </span>datatype = Reflect::get(ext_val, <span class="kw-2">&amp;</span>Symbol::for_(DATATYPE_SYMBOL))<span class="question-mark">?</span>.try_into();
 
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">id</span> <span class="op">=</span> <span class="ident">Reflect::get</span>(<span class="ident">ext_val</span>, <span class="kw-2">&amp;</span><span class="ident">Symbol::for_</span>(<span class="ident">RAW_OBJECT_SYMBOL</span>))<span class="question-mark">?</span>;
-        <span class="kw">if</span> <span class="ident">id</span>.<span class="ident">is_undefined</span>() {
-            <span class="ident">id</span> <span class="op">=</span> <span class="string">&quot;_root&quot;</span>.<span class="ident">into</span>();
+        <span class="kw">let </span><span class="kw-2">mut </span>id = Reflect::get(ext_val, <span class="kw-2">&amp;</span>Symbol::for_(RAW_OBJECT_SYMBOL))<span class="question-mark">?</span>;
+        <span class="kw">if </span>id.is_undefined() {
+            id = <span class="string">&quot;_root&quot;</span>.into();
         }
 
-        <span class="kw">let</span> <span class="ident">inner</span> <span class="op">=</span> <span class="ident">inner</span>
-            .<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">Object</span><span class="op">&gt;</span>()
-            .<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">ext_val</span>.<span class="ident">clone</span>());
-        <span class="kw">let</span> <span class="ident">datatype</span> <span class="op">=</span> <span class="ident">datatype</span>.<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> {
-            <span class="kw">if</span> <span class="ident">Array::is_array</span>(<span class="kw-2">&amp;</span><span class="ident">inner</span>) {
-                <span class="ident">Datatype::List</span>
-            } <span class="kw">else</span> {
-                <span class="ident">Datatype::Map</span>
+        <span class="kw">let </span>inner = inner
+            .dyn_into::&lt;Object&gt;()
+            .unwrap_or_else(|<span class="kw">_</span>| ext_val.clone());
+        <span class="kw">let </span>datatype = datatype.unwrap_or_else(|<span class="kw">_</span>| {
+            <span class="kw">if </span>Array::is_array(<span class="kw-2">&amp;</span>inner) {
+                Datatype::List
+            } <span class="kw">else </span>{
+                Datatype::Map
             }
         });
-        <span class="prelude-val">Ok</span>((<span class="ident">inner</span>, <span class="ident">datatype</span>, <span class="ident">id</span>))
+        <span class="prelude-val">Ok</span>((inner, datatype, id))
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">unwrap_scalar</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">ext_val</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">inner</span> <span class="op">=</span> <span class="ident">Reflect::get</span>(<span class="kw-2">&amp;</span><span class="ident">ext_val</span>, <span class="kw-2">&amp;</span><span class="ident">Symbol::for_</span>(<span class="ident">RAW_DATA_SYMBOL</span>))<span class="question-mark">?</span>;
-        <span class="kw">if</span> <span class="op">!</span><span class="ident">inner</span>.<span class="ident">is_undefined</span>() {
-            <span class="prelude-val">Ok</span>(<span class="ident">inner</span>)
-        } <span class="kw">else</span> {
-            <span class="prelude-val">Ok</span>(<span class="ident">ext_val</span>)
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>unwrap_scalar(<span class="kw-2">&amp;</span><span class="self">self</span>, ext_val: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, JsValue&gt; {
+        <span class="kw">let </span>inner = Reflect::get(<span class="kw-2">&amp;</span>ext_val, <span class="kw-2">&amp;</span>Symbol::for_(RAW_DATA_SYMBOL))<span class="question-mark">?</span>;
+        <span class="kw">if </span>!inner.is_undefined() {
+            <span class="prelude-val">Ok</span>(inner)
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(ext_val)
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">maybe_wrap_object</span>(
+    <span class="kw">fn </span>maybe_wrap_object(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        (<span class="ident">datatype</span>, <span class="ident">raw_value</span>): (<span class="ident">Datatype</span>, <span class="ident">JsValue</span>),
-        <span class="ident">id</span>: <span class="kw-2">&amp;</span><span class="ident">ObjId</span>,
-        <span class="ident">meta</span>: <span class="kw-2">&amp;</span><span class="ident">JsValue</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="ident">obj</span>) <span class="op">=</span> <span class="ident">raw_value</span>.<span class="ident">clone</span>().<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">Object</span><span class="op">&gt;</span>() {
-            <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">wrap_object</span>(<span class="ident">obj</span>, <span class="ident">datatype</span>, <span class="kw-2">&amp;</span><span class="ident">id</span>.<span class="ident">to_string</span>().<span class="ident">into</span>(), <span class="ident">meta</span>)<span class="question-mark">?</span>;
-            <span class="prelude-val">Ok</span>(<span class="ident">result</span>.<span class="ident">into</span>())
-        } <span class="kw">else</span> {
-            <span class="self">self</span>.<span class="ident">export_value</span>((<span class="ident">datatype</span>, <span class="ident">raw_value</span>))
+        (datatype, raw_value): (Datatype, JsValue),
+        id: <span class="kw-2">&amp;</span>ObjId,
+        meta: <span class="kw-2">&amp;</span>JsValue,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, JsValue&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>(obj) = raw_value.clone().dyn_into::&lt;Object&gt;() {
+            <span class="kw">let </span>result = <span class="self">self</span>.wrap_object(obj, datatype, <span class="kw-2">&amp;</span>id.to_string().into(), meta)<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>(result.into())
+        } <span class="kw">else </span>{
+            <span class="self">self</span>.export_value((datatype, raw_value))
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">wrap_object</span>(
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>wrap_object(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">value</span>: <span class="ident">Object</span>,
-        <span class="ident">datatype</span>: <span class="ident">Datatype</span>,
-        <span class="ident">id</span>: <span class="kw-2">&amp;</span><span class="ident">JsValue</span>,
-        <span class="ident">meta</span>: <span class="kw-2">&amp;</span><span class="ident">JsValue</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Object</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">function</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">external_types</span>.<span class="ident">get</span>(<span class="kw-2">&amp;</span><span class="ident">datatype</span>) {
-            <span class="kw">let</span> <span class="ident">wrapped_value</span> <span class="op">=</span> <span class="ident">function</span>.<span class="ident">call1</span>(<span class="kw-2">&amp;</span><span class="ident">JsValue::undefined</span>(), <span class="kw-2">&amp;</span><span class="ident">value</span>)<span class="question-mark">?</span>;
-            <span class="kw">let</span> <span class="ident">wrapped_object</span> <span class="op">=</span> <span class="ident">wrapped_value</span>.<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">Object</span><span class="op">&gt;</span>().<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> {
-                <span class="ident">to_js_err</span>(<span class="macro">format!</span>(
+        value: Object,
+        datatype: Datatype,
+        id: <span class="kw-2">&amp;</span>JsValue,
+        meta: <span class="kw-2">&amp;</span>JsValue,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, JsValue&gt; {
+        <span class="kw">let </span>value = <span class="kw">if let </span><span class="prelude-val">Some</span>(function) = <span class="self">self</span>.external_types.get(<span class="kw-2">&amp;</span>datatype) {
+            <span class="kw">let </span>wrapped_value = function.call1(<span class="kw-2">&amp;</span>JsValue::undefined(), <span class="kw-2">&amp;</span>value)<span class="question-mark">?</span>;
+            <span class="kw">let </span>wrapped_object = wrapped_value.dyn_into::&lt;Object&gt;().map_err(|<span class="kw">_</span>| {
+                to_js_err(<span class="macro">format!</span>(
                     <span class="string">&quot;data handler for type {} did not return a valid object&quot;</span>,
-                    <span class="ident">datatype</span>
+                    datatype
                 ))
             })<span class="question-mark">?</span>;
-            <span class="ident">set_hidden_value</span>(<span class="kw-2">&amp;</span><span class="ident">wrapped_object</span>, <span class="kw-2">&amp;</span><span class="ident">Symbol::for_</span>(<span class="ident">RAW_DATA_SYMBOL</span>), <span class="ident">value</span>)<span class="question-mark">?</span>;
-            <span class="ident">wrapped_object</span>
-        } <span class="kw">else</span> {
-            <span class="ident">value</span>
+            set_hidden_value(<span class="kw-2">&amp;</span>wrapped_object, <span class="kw-2">&amp;</span>Symbol::for_(RAW_DATA_SYMBOL), value)<span class="question-mark">?</span>;
+            wrapped_object
+        } <span class="kw">else </span>{
+            value
         };
-        <span class="kw">if</span> <span class="macro">matches!</span>(<span class="ident">datatype</span>, <span class="ident">Datatype::Map</span> <span class="op">|</span> <span class="ident">Datatype::List</span> <span class="op">|</span> <span class="ident">Datatype::Text</span>) {
-            <span class="ident">set_hidden_value</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>, <span class="kw-2">&amp;</span><span class="ident">Symbol::for_</span>(<span class="ident">RAW_OBJECT_SYMBOL</span>), <span class="ident">id</span>)<span class="question-mark">?</span>;
+        <span class="kw">if </span><span class="macro">matches!</span>(datatype, Datatype::Map | Datatype::List | Datatype::Text) {
+            set_hidden_value(<span class="kw-2">&amp;</span>value, <span class="kw-2">&amp;</span>Symbol::for_(RAW_OBJECT_SYMBOL), id)<span class="question-mark">?</span>;
         }
-        <span class="ident">set_hidden_value</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>, <span class="kw-2">&amp;</span><span class="ident">Symbol::for_</span>(<span class="ident">DATATYPE_SYMBOL</span>), <span class="ident">datatype</span>)<span class="question-mark">?</span>;
-        <span class="ident">set_hidden_value</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>, <span class="kw-2">&amp;</span><span class="ident">Symbol::for_</span>(<span class="ident">META_SYMBOL</span>), <span class="ident">meta</span>)<span class="question-mark">?</span>;
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">freeze</span> {
-            <span class="ident">Object::freeze</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>);
+        set_hidden_value(<span class="kw-2">&amp;</span>value, <span class="kw-2">&amp;</span>Symbol::for_(DATATYPE_SYMBOL), datatype)<span class="question-mark">?</span>;
+        set_hidden_value(<span class="kw-2">&amp;</span>value, <span class="kw-2">&amp;</span>Symbol::for_(META_SYMBOL), meta)<span class="question-mark">?</span>;
+        <span class="kw">if </span><span class="self">self</span>.freeze {
+            Object::freeze(<span class="kw-2">&amp;</span>value);
         }
-        <span class="prelude-val">Ok</span>(<span class="ident">value</span>)
+        <span class="prelude-val">Ok</span>(value)
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">apply_patch_to_array</span>(
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>apply_patch_to_array(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">array</span>: <span class="kw-2">&amp;</span><span class="ident">Object</span>,
-        <span class="ident">patch</span>: <span class="kw-2">&amp;</span><span class="ident">Patch</span>,
-        <span class="ident">meta</span>: <span class="kw-2">&amp;</span><span class="ident">JsValue</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Object</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Array::from</span>(<span class="ident">array</span>); <span class="comment">// shallow copy</span>
-        <span class="kw">match</span> <span class="ident">patch</span> {
-            <span class="ident">Patch::PutSeq</span> { <span class="ident">index</span>, <span class="ident">value</span>, .. } =&gt; {
-                <span class="kw">let</span> <span class="ident">sub_val</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">maybe_wrap_object</span>(<span class="ident">alloc</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>.<span class="number">0</span>), <span class="kw-2">&amp;</span><span class="ident">value</span>.<span class="number">1</span>, <span class="ident">meta</span>)<span class="question-mark">?</span>;
-                <span class="ident">Reflect::set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="kw-2">&amp;</span>(<span class="kw-2">*</span><span class="ident">index</span> <span class="kw">as</span> <span class="ident">f64</span>).<span class="ident">into</span>(), <span class="kw-2">&amp;</span><span class="ident">sub_val</span>)<span class="question-mark">?</span>;
-                <span class="prelude-val">Ok</span>(<span class="ident">result</span>.<span class="ident">into</span>())
+        array: <span class="kw-2">&amp;</span>Object,
+        patch: <span class="kw-2">&amp;</span>Patch,
+        meta: <span class="kw-2">&amp;</span>JsValue,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, JsValue&gt; {
+        <span class="kw">let </span>result = Array::from(array); <span class="comment">// shallow copy
+        </span><span class="kw">match </span>patch {
+            Patch::PutSeq { index, value, .. } =&gt; {
+                <span class="kw">let </span>sub_val = <span class="self">self</span>.maybe_wrap_object(alloc(<span class="kw-2">&amp;</span>value.<span class="number">0</span>), <span class="kw-2">&amp;</span>value.<span class="number">1</span>, meta)<span class="question-mark">?</span>;
+                Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span>(<span class="kw-2">*</span>index <span class="kw">as </span>f64).into(), <span class="kw-2">&amp;</span>sub_val)<span class="question-mark">?</span>;
+                <span class="prelude-val">Ok</span>(result.into())
             }
-            <span class="ident">Patch::DeleteSeq</span> { <span class="ident">index</span>, .. } =&gt; <span class="self">self</span>.<span class="ident">sub_splice</span>(<span class="ident">result</span>, <span class="kw-2">*</span><span class="ident">index</span>, <span class="number">1</span>, <span class="kw-2">&amp;</span>[], <span class="ident">meta</span>),
-            <span class="ident">Patch::Insert</span> { <span class="ident">index</span>, <span class="ident">values</span>, .. } =&gt; <span class="self">self</span>.<span class="ident">sub_splice</span>(<span class="ident">result</span>, <span class="kw-2">*</span><span class="ident">index</span>, <span class="number">0</span>, <span class="ident">values</span>, <span class="ident">meta</span>),
-            <span class="ident">Patch::Increment</span> { <span class="ident">prop</span>, <span class="ident">value</span>, .. } =&gt; {
-                <span class="kw">if</span> <span class="kw">let</span> <span class="ident">Prop::Seq</span>(<span class="ident">index</span>) <span class="op">=</span> <span class="ident">prop</span> {
-                    <span class="kw">let</span> <span class="ident">index</span> <span class="op">=</span> (<span class="kw-2">*</span><span class="ident">index</span> <span class="kw">as</span> <span class="ident">f64</span>).<span class="ident">into</span>();
-                    <span class="kw">let</span> <span class="ident">old_val</span> <span class="op">=</span> <span class="ident">Reflect::get</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="kw-2">&amp;</span><span class="ident">index</span>)<span class="question-mark">?</span>;
-                    <span class="kw">let</span> <span class="ident">old_val</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">unwrap_scalar</span>(<span class="ident">old_val</span>)<span class="question-mark">?</span>;
-                    <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">old</span>) <span class="op">=</span> <span class="ident">old_val</span>.<span class="ident">as_f64</span>() {
-                        <span class="kw">let</span> <span class="ident">new_value</span>: <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span> <span class="op">=</span>
-                            <span class="ident">am::ScalarValue::counter</span>(<span class="ident">old</span> <span class="kw">as</span> <span class="ident">i64</span> <span class="op">+</span> <span class="kw-2">*</span><span class="ident">value</span>).<span class="ident">into</span>();
-                        <span class="ident">Reflect::set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="kw-2">&amp;</span><span class="ident">index</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">export_value</span>(<span class="ident">alloc</span>(<span class="kw-2">&amp;</span><span class="ident">new_value</span>))<span class="question-mark">?</span>)<span class="question-mark">?</span>;
-                        <span class="prelude-val">Ok</span>(<span class="ident">result</span>.<span class="ident">into</span>())
-                    } <span class="kw">else</span> {
-                        <span class="prelude-val">Err</span>(<span class="ident">to_js_err</span>(<span class="string">&quot;cant increment a non number value&quot;</span>))
+            Patch::DeleteSeq { index, .. } =&gt; <span class="self">self</span>.sub_splice(result, <span class="kw-2">*</span>index, <span class="number">1</span>, <span class="kw-2">&amp;</span>[], meta),
+            Patch::Insert { index, values, .. } =&gt; <span class="self">self</span>.sub_splice(result, <span class="kw-2">*</span>index, <span class="number">0</span>, values, meta),
+            Patch::Increment { prop, value, .. } =&gt; {
+                <span class="kw">if let </span>Prop::Seq(index) = prop {
+                    <span class="kw">let </span>index = (<span class="kw-2">*</span>index <span class="kw">as </span>f64).into();
+                    <span class="kw">let </span>old_val = Reflect::get(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span>index)<span class="question-mark">?</span>;
+                    <span class="kw">let </span>old_val = <span class="self">self</span>.unwrap_scalar(old_val)<span class="question-mark">?</span>;
+                    <span class="kw">if let </span><span class="prelude-val">Some</span>(old) = old_val.as_f64() {
+                        <span class="kw">let </span>new_value: Value&lt;<span class="lifetime">&#39;_</span>&gt; =
+                            am::ScalarValue::counter(old <span class="kw">as </span>i64 + <span class="kw-2">*</span>value).into();
+                        Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span>index, <span class="kw-2">&amp;</span><span class="self">self</span>.export_value(alloc(<span class="kw-2">&amp;</span>new_value))<span class="question-mark">?</span>)<span class="question-mark">?</span>;
+                        <span class="prelude-val">Ok</span>(result.into())
+                    } <span class="kw">else </span>{
+                        <span class="prelude-val">Err</span>(to_js_err(<span class="string">&quot;cant increment a non number value&quot;</span>))
                     }
-                } <span class="kw">else</span> {
-                    <span class="prelude-val">Err</span>(<span class="ident">to_js_err</span>(<span class="string">&quot;cant increment a key on a seq&quot;</span>))
+                } <span class="kw">else </span>{
+                    <span class="prelude-val">Err</span>(to_js_err(<span class="string">&quot;cant increment a key on a seq&quot;</span>))
                 }
             }
-            <span class="ident">Patch::DeleteMap</span> { .. } =&gt; <span class="prelude-val">Err</span>(<span class="ident">to_js_err</span>(<span class="string">&quot;cannot delete from a seq&quot;</span>)),
-            <span class="ident">Patch::PutMap</span> { .. } =&gt; <span class="prelude-val">Err</span>(<span class="ident">to_js_err</span>(<span class="string">&quot;cannot set key in seq&quot;</span>)),
+            Patch::DeleteMap { .. } =&gt; <span class="prelude-val">Err</span>(to_js_err(<span class="string">&quot;cannot delete from a seq&quot;</span>)),
+            Patch::PutMap { .. } =&gt; <span class="prelude-val">Err</span>(to_js_err(<span class="string">&quot;cannot set key in seq&quot;</span>)),
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">apply_patch_to_map</span>(
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>apply_patch_to_map(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">map</span>: <span class="kw-2">&amp;</span><span class="ident">Object</span>,
-        <span class="ident">patch</span>: <span class="kw-2">&amp;</span><span class="ident">Patch</span>,
-        <span class="ident">meta</span>: <span class="kw-2">&amp;</span><span class="ident">JsValue</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Object</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Object::assign</span>(<span class="kw-2">&amp;</span><span class="ident">Object::new</span>(), <span class="ident">map</span>); <span class="comment">// shallow copy</span>
-        <span class="kw">match</span> <span class="ident">patch</span> {
-            <span class="ident">Patch::PutMap</span> { <span class="ident">key</span>, <span class="ident">value</span>, .. } =&gt; {
-                <span class="kw">let</span> <span class="ident">sub_val</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">maybe_wrap_object</span>(<span class="ident">alloc</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>.<span class="number">0</span>), <span class="kw-2">&amp;</span><span class="ident">value</span>.<span class="number">1</span>, <span class="ident">meta</span>)<span class="question-mark">?</span>;
-                <span class="ident">Reflect::set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="kw-2">&amp;</span><span class="ident">key</span>.<span class="ident">into</span>(), <span class="kw-2">&amp;</span><span class="ident">sub_val</span>)<span class="question-mark">?</span>;
-                <span class="prelude-val">Ok</span>(<span class="ident">result</span>)
+        map: <span class="kw-2">&amp;</span>Object,
+        patch: <span class="kw-2">&amp;</span>Patch,
+        meta: <span class="kw-2">&amp;</span>JsValue,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, JsValue&gt; {
+        <span class="kw">let </span>result = Object::assign(<span class="kw-2">&amp;</span>Object::new(), map); <span class="comment">// shallow copy
+        </span><span class="kw">match </span>patch {
+            Patch::PutMap { key, value, .. } =&gt; {
+                <span class="kw">let </span>sub_val = <span class="self">self</span>.maybe_wrap_object(alloc(<span class="kw-2">&amp;</span>value.<span class="number">0</span>), <span class="kw-2">&amp;</span>value.<span class="number">1</span>, meta)<span class="question-mark">?</span>;
+                Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span>key.into(), <span class="kw-2">&amp;</span>sub_val)<span class="question-mark">?</span>;
+                <span class="prelude-val">Ok</span>(result)
             }
-            <span class="ident">Patch::DeleteMap</span> { <span class="ident">key</span>, .. } =&gt; {
-                <span class="ident">Reflect::delete_property</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="kw-2">&amp;</span><span class="ident">key</span>.<span class="ident">into</span>())<span class="question-mark">?</span>;
-                <span class="prelude-val">Ok</span>(<span class="ident">result</span>)
+            Patch::DeleteMap { key, .. } =&gt; {
+                Reflect::delete_property(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span>key.into())<span class="question-mark">?</span>;
+                <span class="prelude-val">Ok</span>(result)
             }
-            <span class="ident">Patch::Increment</span> { <span class="ident">prop</span>, <span class="ident">value</span>, .. } =&gt; {
-                <span class="kw">if</span> <span class="kw">let</span> <span class="ident">Prop::Map</span>(<span class="ident">key</span>) <span class="op">=</span> <span class="ident">prop</span> {
-                    <span class="kw">let</span> <span class="ident">key</span> <span class="op">=</span> <span class="ident">key</span>.<span class="ident">into</span>();
-                    <span class="kw">let</span> <span class="ident">old_val</span> <span class="op">=</span> <span class="ident">Reflect::get</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="kw-2">&amp;</span><span class="ident">key</span>)<span class="question-mark">?</span>;
-                    <span class="kw">let</span> <span class="ident">old_val</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">unwrap_scalar</span>(<span class="ident">old_val</span>)<span class="question-mark">?</span>;
-                    <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">old</span>) <span class="op">=</span> <span class="ident">old_val</span>.<span class="ident">as_f64</span>() {
-                        <span class="kw">let</span> <span class="ident">new_value</span>: <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span> <span class="op">=</span>
-                            <span class="ident">am::ScalarValue::counter</span>(<span class="ident">old</span> <span class="kw">as</span> <span class="ident">i64</span> <span class="op">+</span> <span class="kw-2">*</span><span class="ident">value</span>).<span class="ident">into</span>();
-                        <span class="ident">Reflect::set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="kw-2">&amp;</span><span class="ident">key</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">export_value</span>(<span class="ident">alloc</span>(<span class="kw-2">&amp;</span><span class="ident">new_value</span>))<span class="question-mark">?</span>)<span class="question-mark">?</span>;
-                        <span class="prelude-val">Ok</span>(<span class="ident">result</span>)
-                    } <span class="kw">else</span> {
-                        <span class="prelude-val">Err</span>(<span class="ident">to_js_err</span>(<span class="string">&quot;cant increment a non number value&quot;</span>))
+            Patch::Increment { prop, value, .. } =&gt; {
+                <span class="kw">if let </span>Prop::Map(key) = prop {
+                    <span class="kw">let </span>key = key.into();
+                    <span class="kw">let </span>old_val = Reflect::get(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span>key)<span class="question-mark">?</span>;
+                    <span class="kw">let </span>old_val = <span class="self">self</span>.unwrap_scalar(old_val)<span class="question-mark">?</span>;
+                    <span class="kw">if let </span><span class="prelude-val">Some</span>(old) = old_val.as_f64() {
+                        <span class="kw">let </span>new_value: Value&lt;<span class="lifetime">&#39;_</span>&gt; =
+                            am::ScalarValue::counter(old <span class="kw">as </span>i64 + <span class="kw-2">*</span>value).into();
+                        Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span>key, <span class="kw-2">&amp;</span><span class="self">self</span>.export_value(alloc(<span class="kw-2">&amp;</span>new_value))<span class="question-mark">?</span>)<span class="question-mark">?</span>;
+                        <span class="prelude-val">Ok</span>(result)
+                    } <span class="kw">else </span>{
+                        <span class="prelude-val">Err</span>(to_js_err(<span class="string">&quot;cant increment a non number value&quot;</span>))
                     }
-                } <span class="kw">else</span> {
-                    <span class="prelude-val">Err</span>(<span class="ident">to_js_err</span>(<span class="string">&quot;cant increment an index on a map&quot;</span>))
+                } <span class="kw">else </span>{
+                    <span class="prelude-val">Err</span>(to_js_err(<span class="string">&quot;cant increment an index on a map&quot;</span>))
                 }
             }
-            <span class="ident">Patch::Insert</span> { .. } =&gt; <span class="prelude-val">Err</span>(<span class="ident">to_js_err</span>(<span class="string">&quot;cannot insert into map&quot;</span>)),
-            <span class="ident">Patch::DeleteSeq</span> { .. } =&gt; <span class="prelude-val">Err</span>(<span class="ident">to_js_err</span>(<span class="string">&quot;cannot splice a map&quot;</span>)),
-            <span class="ident">Patch::PutSeq</span> { .. } =&gt; <span class="prelude-val">Err</span>(<span class="ident">to_js_err</span>(<span class="string">&quot;cannot array index a map&quot;</span>)),
+            Patch::Insert { .. } =&gt; <span class="prelude-val">Err</span>(to_js_err(<span class="string">&quot;cannot insert into map&quot;</span>)),
+            Patch::DeleteSeq { .. } =&gt; <span class="prelude-val">Err</span>(to_js_err(<span class="string">&quot;cannot splice a map&quot;</span>)),
+            Patch::PutSeq { .. } =&gt; <span class="prelude-val">Err</span>(to_js_err(<span class="string">&quot;cannot array index a map&quot;</span>)),
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">apply_patch</span>(
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>apply_patch(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">Object</span>,
-        <span class="ident">patch</span>: <span class="kw-2">&amp;</span><span class="ident">Patch</span>,
-        <span class="ident">depth</span>: <span class="ident">usize</span>,
-        <span class="ident">meta</span>: <span class="kw-2">&amp;</span><span class="ident">JsValue</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Object</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> (<span class="ident">inner</span>, <span class="ident">datatype</span>, <span class="ident">id</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">unwrap_object</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">prop</span> <span class="op">=</span> <span class="ident">patch</span>.<span class="ident">path</span>().<span class="ident">get</span>(<span class="ident">depth</span>).<span class="ident">map</span>(<span class="op">|</span><span class="ident">p</span><span class="op">|</span> <span class="ident">prop_to_js</span>(<span class="kw-2">&amp;</span><span class="ident">p</span>.<span class="number">1</span>));
-        <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">prop</span>) <span class="op">=</span> <span class="ident">prop</span> {
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="ident">sub_obj</span>) <span class="op">=</span> <span class="ident">Reflect::get</span>(<span class="kw-2">&amp;</span><span class="ident">inner</span>, <span class="kw-2">&amp;</span><span class="ident">prop</span>)<span class="question-mark">?</span>.<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">Object</span><span class="op">&gt;</span>() {
-                <span class="kw">let</span> <span class="ident">new_value</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">apply_patch</span>(<span class="ident">sub_obj</span>, <span class="ident">patch</span>, <span class="ident">depth</span> <span class="op">+</span> <span class="number">1</span>, <span class="ident">meta</span>)<span class="question-mark">?</span>;
-                <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">shallow_copy</span>(<span class="kw-2">&amp;</span><span class="ident">inner</span>);
-                <span class="ident">Reflect::set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="kw-2">&amp;</span><span class="ident">prop</span>, <span class="kw-2">&amp;</span><span class="ident">new_value</span>)<span class="question-mark">?</span>;
-                <span class="prelude-val">Ok</span>(<span class="ident">result</span>)
-            } <span class="kw">else</span> {
-                <span class="comment">// if a patch is trying to access a deleted object make no change</span>
-                <span class="comment">// short circuit the wrap process</span>
-                <span class="kw">return</span> <span class="prelude-val">Ok</span>(<span class="ident">obj</span>);
+        obj: Object,
+        patch: <span class="kw-2">&amp;</span>Patch,
+        depth: usize,
+        meta: <span class="kw-2">&amp;</span>JsValue,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, JsValue&gt; {
+        <span class="kw">let </span>(inner, datatype, id) = <span class="self">self</span>.unwrap_object(<span class="kw-2">&amp;</span>obj)<span class="question-mark">?</span>;
+        <span class="kw">let </span>prop = patch.path().get(depth).map(|p| prop_to_js(<span class="kw-2">&amp;</span>p.<span class="number">1</span>));
+        <span class="kw">let </span>result = <span class="kw">if let </span><span class="prelude-val">Some</span>(prop) = prop {
+            <span class="kw">if let </span><span class="prelude-val">Ok</span>(sub_obj) = Reflect::get(<span class="kw-2">&amp;</span>inner, <span class="kw-2">&amp;</span>prop)<span class="question-mark">?</span>.dyn_into::&lt;Object&gt;() {
+                <span class="kw">let </span>new_value = <span class="self">self</span>.apply_patch(sub_obj, patch, depth + <span class="number">1</span>, meta)<span class="question-mark">?</span>;
+                <span class="kw">let </span>result = shallow_copy(<span class="kw-2">&amp;</span>inner);
+                Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span>prop, <span class="kw-2">&amp;</span>new_value)<span class="question-mark">?</span>;
+                <span class="prelude-val">Ok</span>(result)
+            } <span class="kw">else </span>{
+                <span class="comment">// if a patch is trying to access a deleted object make no change
+                // short circuit the wrap process
+                </span><span class="kw">return </span><span class="prelude-val">Ok</span>(obj);
             }
-        } <span class="kw">else</span> <span class="kw">if</span> <span class="ident">Array::is_array</span>(<span class="kw-2">&amp;</span><span class="ident">inner</span>) {
-            <span class="self">self</span>.<span class="ident">apply_patch_to_array</span>(<span class="kw-2">&amp;</span><span class="ident">inner</span>, <span class="ident">patch</span>, <span class="ident">meta</span>)
-        } <span class="kw">else</span> {
-            <span class="self">self</span>.<span class="ident">apply_patch_to_map</span>(<span class="kw-2">&amp;</span><span class="ident">inner</span>, <span class="ident">patch</span>, <span class="ident">meta</span>)
+        } <span class="kw">else if </span>Array::is_array(<span class="kw-2">&amp;</span>inner) {
+            <span class="self">self</span>.apply_patch_to_array(<span class="kw-2">&amp;</span>inner, patch, meta)
+        } <span class="kw">else </span>{
+            <span class="self">self</span>.apply_patch_to_map(<span class="kw-2">&amp;</span>inner, patch, meta)
         }<span class="question-mark">?</span>;
 
-        <span class="self">self</span>.<span class="ident">wrap_object</span>(<span class="ident">result</span>, <span class="ident">datatype</span>, <span class="kw-2">&amp;</span><span class="ident">id</span>, <span class="ident">meta</span>)
+        <span class="self">self</span>.wrap_object(result, datatype, <span class="kw-2">&amp;</span>id, meta)
     }
 
-    <span class="kw">fn</span> <span class="ident">sub_splice</span>(
+    <span class="kw">fn </span>sub_splice(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">o</span>: <span class="ident">Array</span>,
-        <span class="ident">index</span>: <span class="ident">usize</span>,
-        <span class="ident">num_del</span>: <span class="ident">usize</span>,
-        <span class="ident">values</span>: <span class="kw-2">&amp;</span>[(<span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>, <span class="ident">ObjId</span>)],
-        <span class="ident">meta</span>: <span class="kw-2">&amp;</span><span class="ident">JsValue</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Object</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">args</span>: <span class="ident">Array</span> <span class="op">=</span> <span class="ident">values</span>
-            .<span class="ident">iter</span>()
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">v</span><span class="op">|</span> <span class="self">self</span>.<span class="ident">maybe_wrap_object</span>(<span class="ident">alloc</span>(<span class="kw-2">&amp;</span><span class="ident">v</span>.<span class="number">0</span>), <span class="kw-2">&amp;</span><span class="ident">v</span>.<span class="number">1</span>, <span class="ident">meta</span>))
-            .<span class="ident">collect</span>::<span class="op">&lt;</span><span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="kw">_</span>, <span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>()<span class="question-mark">?</span>;
-        <span class="ident">args</span>.<span class="ident">unshift</span>(<span class="kw-2">&amp;</span>(<span class="ident">num_del</span> <span class="kw">as</span> <span class="ident">u32</span>).<span class="ident">into</span>());
-        <span class="ident">args</span>.<span class="ident">unshift</span>(<span class="kw-2">&amp;</span>(<span class="ident">index</span> <span class="kw">as</span> <span class="ident">u32</span>).<span class="ident">into</span>());
-        <span class="kw">let</span> <span class="ident">method</span> <span class="op">=</span> <span class="ident">Reflect::get</span>(<span class="kw-2">&amp;</span><span class="ident">o</span>, <span class="kw-2">&amp;</span><span class="string">&quot;splice&quot;</span>.<span class="ident">into</span>())<span class="question-mark">?</span>.<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">Function</span><span class="op">&gt;</span>()<span class="question-mark">?</span>;
-        <span class="ident">Reflect::apply</span>(<span class="kw-2">&amp;</span><span class="ident">method</span>, <span class="kw-2">&amp;</span><span class="ident">o</span>, <span class="kw-2">&amp;</span><span class="ident">args</span>)<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(<span class="ident">o</span>.<span class="ident">into</span>())
+        o: Array,
+        index: usize,
+        num_del: usize,
+        values: <span class="kw-2">&amp;</span>[(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ObjId)],
+        meta: <span class="kw-2">&amp;</span>JsValue,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, JsValue&gt; {
+        <span class="kw">let </span>args: Array = values
+            .iter()
+            .map(|v| <span class="self">self</span>.maybe_wrap_object(alloc(<span class="kw-2">&amp;</span>v.<span class="number">0</span>), <span class="kw-2">&amp;</span>v.<span class="number">1</span>, meta))
+            .collect::&lt;<span class="prelude-ty">Result</span>&lt;<span class="kw">_</span>, <span class="kw">_</span>&gt;&gt;()<span class="question-mark">?</span>;
+        args.unshift(<span class="kw-2">&amp;</span>(num_del <span class="kw">as </span>u32).into());
+        args.unshift(<span class="kw-2">&amp;</span>(index <span class="kw">as </span>u32).into());
+        <span class="kw">let </span>method = Reflect::get(<span class="kw-2">&amp;</span>o, <span class="kw-2">&amp;</span><span class="string">&quot;splice&quot;</span>.into())<span class="question-mark">?</span>.dyn_into::&lt;Function&gt;()<span class="question-mark">?</span>;
+        Reflect::apply(<span class="kw-2">&amp;</span>method, <span class="kw-2">&amp;</span>o, <span class="kw-2">&amp;</span>args)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(o.into())
     }
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">alloc</span>(<span class="ident">value</span>: <span class="kw-2">&amp;</span><span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; (<span class="ident">Datatype</span>, <span class="ident">JsValue</span>) {
-    <span class="kw">match</span> <span class="ident">value</span> {
-        <span class="ident">am::Value::Object</span>(<span class="ident">o</span>) =&gt; <span class="kw">match</span> <span class="ident">o</span> {
-            <span class="ident">ObjType::Map</span> =&gt; (<span class="ident">Datatype::Map</span>, <span class="ident">Object::new</span>().<span class="ident">into</span>()),
-            <span class="ident">ObjType::Table</span> =&gt; (<span class="ident">Datatype::Table</span>, <span class="ident">Object::new</span>().<span class="ident">into</span>()),
-            <span class="ident">ObjType::List</span> =&gt; (<span class="ident">Datatype::List</span>, <span class="ident">Array::new</span>().<span class="ident">into</span>()),
-            <span class="ident">ObjType::Text</span> =&gt; (<span class="ident">Datatype::Text</span>, <span class="ident">Array::new</span>().<span class="ident">into</span>()),
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>alloc(value: <span class="kw-2">&amp;</span>Value&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; (Datatype, JsValue) {
+    <span class="kw">match </span>value {
+        am::Value::Object(o) =&gt; <span class="kw">match </span>o {
+            ObjType::Map =&gt; (Datatype::Map, Object::new().into()),
+            ObjType::Table =&gt; (Datatype::Table, Object::new().into()),
+            ObjType::List =&gt; (Datatype::List, Array::new().into()),
+            ObjType::Text =&gt; (Datatype::Text, Array::new().into()),
         },
-        <span class="ident">am::Value::Scalar</span>(<span class="ident">s</span>) =&gt; <span class="kw">match</span> <span class="ident">s</span>.<span class="ident">as_ref</span>() {
-            <span class="ident">am::ScalarValue::Bytes</span>(<span class="ident">v</span>) =&gt; (<span class="ident">Datatype::Bytes</span>, <span class="ident">Uint8Array::from</span>(<span class="ident">v</span>.<span class="ident">as_slice</span>()).<span class="ident">into</span>()),
-            <span class="ident">am::ScalarValue::Str</span>(<span class="ident">v</span>) =&gt; (<span class="ident">Datatype::Str</span>, <span class="ident">v</span>.<span class="ident">to_string</span>().<span class="ident">into</span>()),
-            <span class="ident">am::ScalarValue::Int</span>(<span class="ident">v</span>) =&gt; (<span class="ident">Datatype::Int</span>, (<span class="kw-2">*</span><span class="ident">v</span> <span class="kw">as</span> <span class="ident">f64</span>).<span class="ident">into</span>()),
-            <span class="ident">am::ScalarValue::Uint</span>(<span class="ident">v</span>) =&gt; (<span class="ident">Datatype::Uint</span>, (<span class="kw-2">*</span><span class="ident">v</span> <span class="kw">as</span> <span class="ident">f64</span>).<span class="ident">into</span>()),
-            <span class="ident">am::ScalarValue::F64</span>(<span class="ident">v</span>) =&gt; (<span class="ident">Datatype::F64</span>, (<span class="kw-2">*</span><span class="ident">v</span>).<span class="ident">into</span>()),
-            <span class="ident">am::ScalarValue::Counter</span>(<span class="ident">v</span>) =&gt; (<span class="ident">Datatype::Counter</span>, (<span class="ident">f64::from</span>(<span class="ident">v</span>)).<span class="ident">into</span>()),
-            <span class="ident">am::ScalarValue::Timestamp</span>(<span class="ident">v</span>) =&gt; (
-                <span class="ident">Datatype::Timestamp</span>,
-                <span class="ident">js_sys::Date::new</span>(<span class="kw-2">&amp;</span>(<span class="kw-2">*</span><span class="ident">v</span> <span class="kw">as</span> <span class="ident">f64</span>).<span class="ident">into</span>()).<span class="ident">into</span>(),
+        am::Value::Scalar(s) =&gt; <span class="kw">match </span>s.as_ref() {
+            am::ScalarValue::Bytes(v) =&gt; (Datatype::Bytes, Uint8Array::from(v.as_slice()).into()),
+            am::ScalarValue::Str(v) =&gt; (Datatype::Str, v.to_string().into()),
+            am::ScalarValue::Int(v) =&gt; (Datatype::Int, (<span class="kw-2">*</span>v <span class="kw">as </span>f64).into()),
+            am::ScalarValue::Uint(v) =&gt; (Datatype::Uint, (<span class="kw-2">*</span>v <span class="kw">as </span>f64).into()),
+            am::ScalarValue::F64(v) =&gt; (Datatype::F64, (<span class="kw-2">*</span>v).into()),
+            am::ScalarValue::Counter(v) =&gt; (Datatype::Counter, (f64::from(v)).into()),
+            am::ScalarValue::Timestamp(v) =&gt; (
+                Datatype::Timestamp,
+                js_sys::Date::new(<span class="kw-2">&amp;</span>(<span class="kw-2">*</span>v <span class="kw">as </span>f64).into()).into(),
             ),
-            <span class="ident">am::ScalarValue::Boolean</span>(<span class="ident">v</span>) =&gt; (<span class="ident">Datatype::Boolean</span>, (<span class="kw-2">*</span><span class="ident">v</span>).<span class="ident">into</span>()),
-            <span class="ident">am::ScalarValue::Null</span> =&gt; (<span class="ident">Datatype::Null</span>, <span class="ident">JsValue::null</span>()),
-            <span class="ident">am::ScalarValue::Unknown</span> { <span class="ident">bytes</span>, <span class="ident">type_code</span> } =&gt; (
-                <span class="ident">Datatype::Unknown</span>(<span class="kw-2">*</span><span class="ident">type_code</span>),
-                <span class="ident">Uint8Array::from</span>(<span class="ident">bytes</span>.<span class="ident">as_slice</span>()).<span class="ident">into</span>(),
+            am::ScalarValue::Boolean(v) =&gt; (Datatype::Boolean, (<span class="kw-2">*</span>v).into()),
+            am::ScalarValue::Null =&gt; (Datatype::Null, JsValue::null()),
+            am::ScalarValue::Unknown { bytes, type_code } =&gt; (
+                Datatype::Unknown(<span class="kw-2">*</span>type_code),
+                Uint8Array::from(bytes.as_slice()).into(),
             ),
         },
     }
 }
 
-<span class="kw">fn</span> <span class="ident">set_hidden_value</span><span class="op">&lt;</span><span class="ident">V</span>: <span class="ident">Into</span><span class="op">&lt;</span><span class="ident">JsValue</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="ident">o</span>: <span class="kw-2">&amp;</span><span class="ident">Object</span>, <span class="ident">key</span>: <span class="kw-2">&amp;</span><span class="ident">Symbol</span>, <span class="ident">value</span>: <span class="ident">V</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">JsValue</span><span class="op">&gt;</span> {
-    <span class="kw">let</span> <span class="ident">definition</span> <span class="op">=</span> <span class="ident">Object::new</span>();
-    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">definition</span>, <span class="string">&quot;value&quot;</span>, <span class="kw-2">&amp;</span><span class="ident">value</span>.<span class="ident">into</span>())<span class="question-mark">?</span>;
-    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">definition</span>, <span class="string">&quot;writable&quot;</span>, <span class="bool-val">false</span>)<span class="question-mark">?</span>;
-    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">definition</span>, <span class="string">&quot;enumerable&quot;</span>, <span class="bool-val">false</span>)<span class="question-mark">?</span>;
-    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">definition</span>, <span class="string">&quot;configurable&quot;</span>, <span class="bool-val">false</span>)<span class="question-mark">?</span>;
-    <span class="ident">Object::define_property</span>(<span class="ident">o</span>, <span class="kw-2">&amp;</span><span class="ident">key</span>.<span class="ident">into</span>(), <span class="kw-2">&amp;</span><span class="ident">definition</span>);
+<span class="kw">fn </span>set_hidden_value&lt;V: Into&lt;JsValue&gt;&gt;(o: <span class="kw-2">&amp;</span>Object, key: <span class="kw-2">&amp;</span>Symbol, value: V) -&gt; <span class="prelude-ty">Result</span>&lt;(), JsValue&gt; {
+    <span class="kw">let </span>definition = Object::new();
+    js_set(<span class="kw-2">&amp;</span>definition, <span class="string">&quot;value&quot;</span>, <span class="kw-2">&amp;</span>value.into())<span class="question-mark">?</span>;
+    js_set(<span class="kw-2">&amp;</span>definition, <span class="string">&quot;writable&quot;</span>, <span class="bool-val">false</span>)<span class="question-mark">?</span>;
+    js_set(<span class="kw-2">&amp;</span>definition, <span class="string">&quot;enumerable&quot;</span>, <span class="bool-val">false</span>)<span class="question-mark">?</span>;
+    js_set(<span class="kw-2">&amp;</span>definition, <span class="string">&quot;configurable&quot;</span>, <span class="bool-val">false</span>)<span class="question-mark">?</span>;
+    Object::define_property(o, <span class="kw-2">&amp;</span>key.into(), <span class="kw-2">&amp;</span>definition);
     <span class="prelude-val">Ok</span>(())
 }
 
-<span class="kw">fn</span> <span class="ident">shallow_copy</span>(<span class="ident">obj</span>: <span class="kw-2">&amp;</span><span class="ident">Object</span>) -&gt; <span class="ident">Object</span> {
-    <span class="kw">if</span> <span class="ident">Array::is_array</span>(<span class="ident">obj</span>) {
-        <span class="ident">Array::from</span>(<span class="ident">obj</span>).<span class="ident">into</span>()
-    } <span class="kw">else</span> {
-        <span class="ident">Object::assign</span>(<span class="kw-2">&amp;</span><span class="ident">Object::new</span>(), <span class="ident">obj</span>)
+<span class="kw">fn </span>shallow_copy(obj: <span class="kw-2">&amp;</span>Object) -&gt; Object {
+    <span class="kw">if </span>Array::is_array(obj) {
+        Array::from(obj).into()
+    } <span class="kw">else </span>{
+        Object::assign(<span class="kw-2">&amp;</span>Object::new(), obj)
     }
 }
 
-<span class="kw">fn</span> <span class="ident">prop_to_js</span>(<span class="ident">prop</span>: <span class="kw-2">&amp;</span><span class="ident">Prop</span>) -&gt; <span class="ident">JsValue</span> {
-    <span class="kw">match</span> <span class="ident">prop</span> {
-        <span class="ident">Prop::Map</span>(<span class="ident">key</span>) =&gt; <span class="ident">key</span>.<span class="ident">into</span>(),
-        <span class="ident">Prop::Seq</span>(<span class="ident">index</span>) =&gt; (<span class="kw-2">*</span><span class="ident">index</span> <span class="kw">as</span> <span class="ident">f64</span>).<span class="ident">into</span>(),
+<span class="kw">fn </span>prop_to_js(prop: <span class="kw-2">&amp;</span>Prop) -&gt; JsValue {
+    <span class="kw">match </span>prop {
+        Prop::Map(key) =&gt; key.into(),
+        Prop::Seq(index) =&gt; (<span class="kw-2">*</span>index <span class="kw">as </span>f64).into(),
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge_wasm" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge_wasm" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

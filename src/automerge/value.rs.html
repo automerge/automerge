@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/value.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>value.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/value.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>value.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -734,739 +734,739 @@
 <span id="732">732</span>
 <span id="733">733</span>
 <span id="734">734</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::error</span>;
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::types::ObjType</span>;
-<span class="kw">use</span> <span class="ident">serde</span>::{<span class="ident">Deserialize</span>, <span class="ident">Serialize</span>, <span class="ident">Serializer</span>};
-<span class="kw">use</span> <span class="ident">smol_str::SmolStr</span>;
-<span class="kw">use</span> <span class="ident">std::borrow::Cow</span>;
-<span class="kw">use</span> <span class="ident">std::fmt</span>;
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error;
+<span class="kw">use </span><span class="kw">crate</span>::types::ObjType;
+<span class="kw">use </span>serde::{Deserialize, Serialize, Serializer};
+<span class="kw">use </span>smol_str::SmolStr;
+<span class="kw">use </span>std::borrow::Cow;
+<span class="kw">use </span>std::fmt;
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">Object</span>(<span class="ident">ObjType</span>),
-    <span class="comment">// TODO: if we don&#39;t have to store this in patches any more then it might be able to be just a</span>
-    <span class="comment">// &amp;&#39;a ScalarValue rather than a Cow</span>
-    <span class="ident">Scalar</span>(<span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">ScalarValue</span><span class="op">&gt;</span>),
+<span class="attribute">#[derive(Debug, Clone, PartialEq)]
+</span><span class="kw">pub enum </span>Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+    Object(ObjType),
+    <span class="comment">// TODO: if we don&#39;t have to store this in patches any more then it might be able to be just a
+    // &amp;&#39;a ScalarValue rather than a Cow
+    </span>Scalar(Cow&lt;<span class="lifetime">&#39;a</span>, ScalarValue&gt;),
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">map</span>() -&gt; <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="ident">Value::Object</span>(<span class="ident">ObjType::Map</span>)
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub fn </span>map() -&gt; Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+        Value::Object(ObjType::Map)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">list</span>() -&gt; <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="ident">Value::Object</span>(<span class="ident">ObjType::List</span>)
+    <span class="kw">pub fn </span>list() -&gt; Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+        Value::Object(ObjType::List)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">text</span>() -&gt; <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="ident">Value::Object</span>(<span class="ident">ObjType::Text</span>)
+    <span class="kw">pub fn </span>text() -&gt; Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+        Value::Object(ObjType::Text)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">table</span>() -&gt; <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="ident">Value::Object</span>(<span class="ident">ObjType::Table</span>)
+    <span class="kw">pub fn </span>table() -&gt; Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+        Value::Object(ObjType::Table)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">str</span>(<span class="ident">s</span>: <span class="kw-2">&amp;</span><span class="ident">str</span>) -&gt; <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::Str</span>(<span class="ident">s</span>.<span class="ident">into</span>())))
+    <span class="kw">pub fn </span>str(s: <span class="kw-2">&amp;</span>str) -&gt; Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+        Value::Scalar(Cow::Owned(ScalarValue::Str(s.into())))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">int</span>(<span class="ident">n</span>: <span class="ident">i64</span>) -&gt; <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::Int</span>(<span class="ident">n</span>)))
+    <span class="kw">pub fn </span>int(n: i64) -&gt; Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+        Value::Scalar(Cow::Owned(ScalarValue::Int(n)))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">uint</span>(<span class="ident">n</span>: <span class="ident">u64</span>) -&gt; <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::Uint</span>(<span class="ident">n</span>)))
+    <span class="kw">pub fn </span>uint(n: u64) -&gt; Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+        Value::Scalar(Cow::Owned(ScalarValue::Uint(n)))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">counter</span>(<span class="ident">n</span>: <span class="ident">i64</span>) -&gt; <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::counter</span>(<span class="ident">n</span>)))
+    <span class="kw">pub fn </span>counter(n: i64) -&gt; Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+        Value::Scalar(Cow::Owned(ScalarValue::counter(n)))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">timestamp</span>(<span class="ident">n</span>: <span class="ident">i64</span>) -&gt; <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::Timestamp</span>(<span class="ident">n</span>)))
+    <span class="kw">pub fn </span>timestamp(n: i64) -&gt; Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+        Value::Scalar(Cow::Owned(ScalarValue::Timestamp(n)))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">f64</span>(<span class="ident">n</span>: <span class="ident">f64</span>) -&gt; <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::F64</span>(<span class="ident">n</span>)))
+    <span class="kw">pub fn </span>f64(n: f64) -&gt; Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+        Value::Scalar(Cow::Owned(ScalarValue::F64(n)))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">bytes</span>(<span class="ident">b</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) -&gt; <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::Bytes</span>(<span class="ident">b</span>)))
+    <span class="kw">pub fn </span>bytes(b: Vec&lt;u8&gt;) -&gt; Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+        Value::Scalar(Cow::Owned(ScalarValue::Bytes(b)))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_object</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="macro">matches!</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">Value::Object</span>(<span class="kw">_</span>))
+    <span class="kw">pub fn </span>is_object(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="macro">matches!</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, Value::Object(<span class="kw">_</span>))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_scalar</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="macro">matches!</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">Value::Scalar</span>(<span class="kw">_</span>))
+    <span class="kw">pub fn </span>is_scalar(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="macro">matches!</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, Value::Scalar(<span class="kw">_</span>))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="ident"><span class="self">Self</span>::Scalar</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="self">self</span> {
-            <span class="ident">s</span>.<span class="ident">is_bytes</span>()
-        } <span class="kw">else</span> {
-            <span class="bool-val">false</span>
+    <span class="kw">pub fn </span>is_bytes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="kw">if let </span><span class="self">Self</span>::Scalar(s) = <span class="self">self </span>{
+            s.is_bytes()
+        } <span class="kw">else </span>{
+            <span class="bool-val">false
+        </span>}
+    }
+
+    <span class="kw">pub fn </span>is_str(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="kw">if let </span><span class="self">Self</span>::Scalar(s) = <span class="self">self </span>{
+            s.is_str()
+        } <span class="kw">else </span>{
+            <span class="bool-val">false
+        </span>}
+    }
+
+    <span class="kw">pub fn </span>is_int(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="kw">if let </span><span class="self">Self</span>::Scalar(s) = <span class="self">self </span>{
+            s.is_int()
+        } <span class="kw">else </span>{
+            <span class="bool-val">false
+        </span>}
+    }
+
+    <span class="kw">pub fn </span>is_uint(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="kw">if let </span><span class="self">Self</span>::Scalar(s) = <span class="self">self </span>{
+            s.is_uint()
+        } <span class="kw">else </span>{
+            <span class="bool-val">false
+        </span>}
+    }
+
+    <span class="kw">pub fn </span>is_f64(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="kw">if let </span><span class="self">Self</span>::Scalar(s) = <span class="self">self </span>{
+            s.is_f64()
+        } <span class="kw">else </span>{
+            <span class="bool-val">false
+        </span>}
+    }
+
+    <span class="kw">pub fn </span>is_counter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="kw">if let </span><span class="self">Self</span>::Scalar(s) = <span class="self">self </span>{
+            s.is_counter()
+        } <span class="kw">else </span>{
+            <span class="bool-val">false
+        </span>}
+    }
+
+    <span class="kw">pub fn </span>is_timestamp(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="kw">if let </span><span class="self">Self</span>::Scalar(s) = <span class="self">self </span>{
+            s.is_timestamp()
+        } <span class="kw">else </span>{
+            <span class="bool-val">false
+        </span>}
+    }
+
+    <span class="kw">pub fn </span>is_boolean(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="kw">if let </span><span class="self">Self</span>::Scalar(s) = <span class="self">self </span>{
+            s.is_boolean()
+        } <span class="kw">else </span>{
+            <span class="bool-val">false
+        </span>}
+    }
+
+    <span class="kw">pub fn </span>is_null(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="kw">if let </span><span class="self">Self</span>::Scalar(s) = <span class="self">self </span>{
+            s.is_null()
+        } <span class="kw">else </span>{
+            <span class="bool-val">false
+        </span>}
+    }
+
+    <span class="kw">pub fn </span>into_scalar(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;ScalarValue, <span class="self">Self</span>&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            <span class="self">Self</span>::Scalar(s) =&gt; <span class="prelude-val">Ok</span>(s.into_owned()),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(<span class="self">self</span>),
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_str</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="ident"><span class="self">Self</span>::Scalar</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="self">self</span> {
-            <span class="ident">s</span>.<span class="ident">is_str</span>()
-        } <span class="kw">else</span> {
-            <span class="bool-val">false</span>
+    <span class="kw">pub fn </span>to_scalar(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>ScalarValue&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            <span class="self">Self</span>::Scalar(s) =&gt; <span class="prelude-val">Some</span>(s),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_int</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="ident"><span class="self">Self</span>::Scalar</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="self">self</span> {
-            <span class="ident">s</span>.<span class="ident">is_int</span>()
-        } <span class="kw">else</span> {
-            <span class="bool-val">false</span>
+    <span class="kw">pub fn </span>to_objtype(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;ObjType&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            <span class="self">Self</span>::Object(o) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span>o),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_uint</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="ident"><span class="self">Self</span>::Scalar</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="self">self</span> {
-            <span class="ident">s</span>.<span class="ident">is_uint</span>()
-        } <span class="kw">else</span> {
-            <span class="bool-val">false</span>
+    <span class="kw">pub fn </span>into_owned(<span class="self">self</span>) -&gt; Value&lt;<span class="lifetime">&#39;static</span>&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            Value::Object(o) =&gt; Value::Object(o),
+            Value::Scalar(Cow::Owned(s)) =&gt; Value::Scalar(Cow::Owned(s)),
+            Value::Scalar(Cow::Borrowed(s)) =&gt; Value::Scalar(Cow::Owned((<span class="kw-2">*</span>s).clone())),
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_f64</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="ident"><span class="self">Self</span>::Scalar</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="self">self</span> {
-            <span class="ident">s</span>.<span class="ident">is_f64</span>()
-        } <span class="kw">else</span> {
-            <span class="bool-val">false</span>
+    <span class="kw">pub fn </span>to_owned(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Value&lt;<span class="lifetime">&#39;static</span>&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            Value::Object(o) =&gt; Value::Object(<span class="kw-2">*</span>o),
+            Value::Scalar(Cow::Owned(s)) =&gt; Value::Scalar(Cow::Owned(s.clone())),
+            Value::Scalar(Cow::Borrowed(s)) =&gt; Value::Scalar(Cow::Owned((<span class="kw-2">*</span>s).clone())),
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_counter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="ident"><span class="self">Self</span>::Scalar</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="self">self</span> {
-            <span class="ident">s</span>.<span class="ident">is_counter</span>()
-        } <span class="kw">else</span> {
-            <span class="bool-val">false</span>
+    <span class="kw">pub fn </span>into_bytes(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;u8&gt;, <span class="self">Self</span>&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            Value::Scalar(s) =&gt; s
+                .into_owned()
+                .into_bytes()
+                .map_err(|v| Value::Scalar(Cow::Owned(v))),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(<span class="self">self</span>),
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_timestamp</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="ident"><span class="self">Self</span>::Scalar</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="self">self</span> {
-            <span class="ident">s</span>.<span class="ident">is_timestamp</span>()
-        } <span class="kw">else</span> {
-            <span class="bool-val">false</span>
+    <span class="kw">pub fn </span>to_bytes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[u8]&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            Value::Scalar(s) =&gt; s.to_bytes(),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_boolean</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="ident"><span class="self">Self</span>::Scalar</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="self">self</span> {
-            <span class="ident">s</span>.<span class="ident">is_boolean</span>()
-        } <span class="kw">else</span> {
-            <span class="bool-val">false</span>
+    <span class="kw">pub fn </span>into_string(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;String, <span class="self">Self</span>&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            Value::Scalar(s) =&gt; s
+                .into_owned()
+                .into_string()
+                .map_err(|v| Value::Scalar(Cow::Owned(v))),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(<span class="self">self</span>),
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_null</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="ident"><span class="self">Self</span>::Scalar</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="self">self</span> {
-            <span class="ident">s</span>.<span class="ident">is_null</span>()
-        } <span class="kw">else</span> {
-            <span class="bool-val">false</span>
+    <span class="kw">pub fn </span>to_str(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            Value::Scalar(val) =&gt; val.to_str(),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">into_scalar</span>(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">ScalarValue</span>, <span class="self">Self</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident"><span class="self">Self</span>::Scalar</span>(<span class="ident">s</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">s</span>.<span class="ident">into_owned</span>()),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">Err</span>(<span class="self">self</span>),
+    <span class="doccomment">/// If this value can be coerced to an i64, return the i64 value
+    </span><span class="kw">pub fn </span>to_i64(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;i64&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            Value::Scalar(s) =&gt; s.to_i64(),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_scalar</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">ScalarValue</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident"><span class="self">Self</span>::Scalar</span>(<span class="ident">s</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">s</span>),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">None</span>,
+    <span class="kw">pub fn </span>to_u64(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;u64&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            Value::Scalar(s) =&gt; s.to_u64(),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_objtype</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ObjType</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident"><span class="self">Self</span>::Object</span>(<span class="ident">o</span>) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span><span class="ident">o</span>),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">None</span>,
+    <span class="kw">pub fn </span>to_f64(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;f64&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            Value::Scalar(s) =&gt; s.to_f64(),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">into_owned</span>(<span class="self">self</span>) -&gt; <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;static</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Value::Object</span>(<span class="ident">o</span>) =&gt; <span class="ident">Value::Object</span>(<span class="ident">o</span>),
-            <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">s</span>)) =&gt; <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">s</span>)),
-            <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Borrowed</span>(<span class="ident">s</span>)) =&gt; <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>((<span class="kw-2">*</span><span class="ident">s</span>).<span class="ident">clone</span>())),
-        }
-    }
-
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_owned</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;static</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Value::Object</span>(<span class="ident">o</span>) =&gt; <span class="ident">Value::Object</span>(<span class="kw-2">*</span><span class="ident">o</span>),
-            <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">s</span>)) =&gt; <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">s</span>.<span class="ident">clone</span>())),
-            <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Borrowed</span>(<span class="ident">s</span>)) =&gt; <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>((<span class="kw-2">*</span><span class="ident">s</span>).<span class="ident">clone</span>())),
-        }
-    }
-
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">into_bytes</span>(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>, <span class="self">Self</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Value::Scalar</span>(<span class="ident">s</span>) =&gt; <span class="ident">s</span>
-                .<span class="ident">into_owned</span>()
-                .<span class="ident">into_bytes</span>()
-                .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">v</span><span class="op">|</span> <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">v</span>))),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">Err</span>(<span class="self">self</span>),
-        }
-    }
-
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span>[<span class="ident">u8</span>]<span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Value::Scalar</span>(<span class="ident">s</span>) =&gt; <span class="ident">s</span>.<span class="ident">to_bytes</span>(),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">None</span>,
-        }
-    }
-
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">into_string</span>(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">String</span>, <span class="self">Self</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Value::Scalar</span>(<span class="ident">s</span>) =&gt; <span class="ident">s</span>
-                .<span class="ident">into_owned</span>()
-                .<span class="ident">into_string</span>()
-                .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">v</span><span class="op">|</span> <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">v</span>))),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">Err</span>(<span class="self">self</span>),
-        }
-    }
-
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_str</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">str</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Value::Scalar</span>(<span class="ident">val</span>) =&gt; <span class="ident">val</span>.<span class="ident">to_str</span>(),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">None</span>,
-        }
-    }
-
-    <span class="doccomment">/// If this value can be coerced to an i64, return the i64 value</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_i64</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">i64</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Value::Scalar</span>(<span class="ident">s</span>) =&gt; <span class="ident">s</span>.<span class="ident">to_i64</span>(),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">None</span>,
-        }
-    }
-
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_u64</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Value::Scalar</span>(<span class="ident">s</span>) =&gt; <span class="ident">s</span>.<span class="ident">to_u64</span>(),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">None</span>,
-        }
-    }
-
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_f64</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">f64</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Value::Scalar</span>(<span class="ident">s</span>) =&gt; <span class="ident">s</span>.<span class="ident">to_f64</span>(),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">None</span>,
-        }
-    }
-
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_bool</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">bool</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Value::Scalar</span>(<span class="ident">s</span>) =&gt; <span class="ident">s</span>.<span class="ident">to_bool</span>(),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">None</span>,
-        }
-    }
-}
-
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">fmt::Display</span> <span class="kw">for</span> <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">fmt::Result</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">Value::Object</span>(<span class="ident">o</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Object: {}&quot;</span>, <span class="ident">o</span>),
-            <span class="ident">Value::Scalar</span>(<span class="ident">s</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Scalar: {}&quot;</span>, <span class="ident">s</span>),
+    <span class="kw">pub fn </span>to_bool(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;bool&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            Value::Scalar(s) =&gt; s.to_bool(),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">str</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">s</span>: <span class="kw-2">&amp;</span><span class="ident">str</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::Str</span>(<span class="ident">s</span>.<span class="ident">into</span>())))
-    }
-}
-
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">String</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">s</span>: <span class="kw-2">&amp;</span><span class="ident">String</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::Str</span>(<span class="ident">s</span>.<span class="ident">into</span>())))
-    }
-}
-
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">s</span>: <span class="ident">String</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::Str</span>(<span class="ident">s</span>.<span class="ident">into</span>())))
-    }
-}
-
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">char</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">c</span>: <span class="ident">char</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::Str</span>(<span class="ident">SmolStr::new</span>(<span class="ident">c</span>.<span class="ident">to_string</span>()))))
-    }
-}
-
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">v</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::Bytes</span>(<span class="ident">v</span>)))
-    }
-}
-
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">f64</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">n</span>: <span class="ident">f64</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::F64</span>(<span class="ident">n</span>)))
-    }
-}
-
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">i64</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">n</span>: <span class="ident">i64</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::Int</span>(<span class="ident">n</span>)))
-    }
-}
-
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">i32</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">n</span>: <span class="ident">i32</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::Int</span>(<span class="ident">n</span>.<span class="ident">into</span>())))
-    }
-}
-
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">u32</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">n</span>: <span class="ident">u32</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::Uint</span>(<span class="ident">n</span>.<span class="ident">into</span>())))
-    }
-}
-
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">n</span>: <span class="ident">u64</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::Uint</span>(<span class="ident">n</span>)))
-    }
-}
-
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">bool</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">v</span>: <span class="ident">bool</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::Boolean</span>(<span class="ident">v</span>)))
-    }
-}
-
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span>()<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="kw">_</span>: ()) -&gt; <span class="self">Self</span> {
-        <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::Null</span>))
-    }
-}
-
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">ObjType</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">o</span>: <span class="ident">ObjType</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">Value::Object</span>(<span class="ident">o</span>)
-    }
-}
-
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">ScalarValue</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">v</span>: <span class="ident">ScalarValue</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">Value::Scalar</span>(<span class="ident">Cow::Owned</span>(<span class="ident">v</span>))
-    }
-}
-
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Deserialize</span>, <span class="ident">Serialize</span>, <span class="ident">PartialEq</span>, <span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">Copy</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">DataType</span> {
-    <span class="attribute">#[<span class="ident">serde</span>(<span class="ident">rename</span> <span class="op">=</span> <span class="string">&quot;counter&quot;</span>)]</span>
-    <span class="ident">Counter</span>,
-    <span class="attribute">#[<span class="ident">serde</span>(<span class="ident">rename</span> <span class="op">=</span> <span class="string">&quot;timestamp&quot;</span>)]</span>
-    <span class="ident">Timestamp</span>,
-    <span class="attribute">#[<span class="ident">serde</span>(<span class="ident">rename</span> <span class="op">=</span> <span class="string">&quot;bytes&quot;</span>)]</span>
-    <span class="ident">Bytes</span>,
-    <span class="attribute">#[<span class="ident">serde</span>(<span class="ident">rename</span> <span class="op">=</span> <span class="string">&quot;uint&quot;</span>)]</span>
-    <span class="ident">Uint</span>,
-    <span class="attribute">#[<span class="ident">serde</span>(<span class="ident">rename</span> <span class="op">=</span> <span class="string">&quot;int&quot;</span>)]</span>
-    <span class="ident">Int</span>,
-    <span class="attribute">#[<span class="ident">serde</span>(<span class="ident">rename</span> <span class="op">=</span> <span class="string">&quot;float64&quot;</span>)]</span>
-    <span class="ident">F64</span>,
-    <span class="attribute">#[<span class="ident">serde</span>(<span class="ident">rename</span> <span class="op">=</span> <span class="string">&quot;undefined&quot;</span>)]</span>
-    <span class="ident">Undefined</span>,
-}
-
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>)]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Counter</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">start</span>: <span class="ident">i64</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">current</span>: <span class="ident">i64</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">increments</span>: <span class="ident">usize</span>,
-}
-
-<span class="kw">impl</span> <span class="ident">Counter</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">increment</span><span class="op">&lt;</span><span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">i64</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">increments</span>: <span class="ident">I</span>) {
-        <span class="kw">for</span> <span class="ident">inc</span> <span class="kw">in</span> <span class="ident">increments</span> {
-            <span class="self">self</span>.<span class="ident">current</span> <span class="op">+</span><span class="op">=</span> <span class="ident">inc</span>;
-            <span class="self">self</span>.<span class="ident">increments</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; fmt::Display <span class="kw">for </span>Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; fmt::Result {
+        <span class="kw">match </span><span class="self">self </span>{
+            Value::Object(o) =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;Object: {}&quot;</span>, o),
+            Value::Scalar(s) =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;Scalar: {}&quot;</span>, s),
         }
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Serialize</span> <span class="kw">for</span> <span class="ident">Counter</span> {
-    <span class="kw">fn</span> <span class="ident">serialize</span><span class="op">&lt;</span><span class="ident">S</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">serializer</span>: <span class="ident">S</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">S::Ok</span>, <span class="ident">S::Error</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">S</span>: <span class="ident">Serializer</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;<span class="kw-2">&amp;</span>str&gt; <span class="kw">for </span>Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>from(s: <span class="kw-2">&amp;</span>str) -&gt; <span class="self">Self </span>{
+        Value::Scalar(Cow::Owned(ScalarValue::Str(s.into())))
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;<span class="kw-2">&amp;</span>String&gt; <span class="kw">for </span>Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>from(s: <span class="kw-2">&amp;</span>String) -&gt; <span class="self">Self </span>{
+        Value::Scalar(Cow::Owned(ScalarValue::Str(s.into())))
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;String&gt; <span class="kw">for </span>Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>from(s: String) -&gt; <span class="self">Self </span>{
+        Value::Scalar(Cow::Owned(ScalarValue::Str(s.into())))
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;char&gt; <span class="kw">for </span>Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>from(c: char) -&gt; <span class="self">Self </span>{
+        Value::Scalar(Cow::Owned(ScalarValue::Str(SmolStr::new(c.to_string()))))
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;Vec&lt;u8&gt;&gt; <span class="kw">for </span>Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>from(v: Vec&lt;u8&gt;) -&gt; <span class="self">Self </span>{
+        Value::Scalar(Cow::Owned(ScalarValue::Bytes(v)))
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;f64&gt; <span class="kw">for </span>Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>from(n: f64) -&gt; <span class="self">Self </span>{
+        Value::Scalar(Cow::Owned(ScalarValue::F64(n)))
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;i64&gt; <span class="kw">for </span>Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>from(n: i64) -&gt; <span class="self">Self </span>{
+        Value::Scalar(Cow::Owned(ScalarValue::Int(n)))
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;i32&gt; <span class="kw">for </span>Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>from(n: i32) -&gt; <span class="self">Self </span>{
+        Value::Scalar(Cow::Owned(ScalarValue::Int(n.into())))
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;u32&gt; <span class="kw">for </span>Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>from(n: u32) -&gt; <span class="self">Self </span>{
+        Value::Scalar(Cow::Owned(ScalarValue::Uint(n.into())))
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;u64&gt; <span class="kw">for </span>Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>from(n: u64) -&gt; <span class="self">Self </span>{
+        Value::Scalar(Cow::Owned(ScalarValue::Uint(n)))
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;bool&gt; <span class="kw">for </span>Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>from(v: bool) -&gt; <span class="self">Self </span>{
+        Value::Scalar(Cow::Owned(ScalarValue::Boolean(v)))
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;()&gt; <span class="kw">for </span>Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>from(<span class="kw">_</span>: ()) -&gt; <span class="self">Self </span>{
+        Value::Scalar(Cow::Owned(ScalarValue::Null))
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;ObjType&gt; <span class="kw">for </span>Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>from(o: ObjType) -&gt; <span class="self">Self </span>{
+        Value::Object(o)
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;ScalarValue&gt; <span class="kw">for </span>Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>from(v: ScalarValue) -&gt; <span class="self">Self </span>{
+        Value::Scalar(Cow::Owned(v))
+    }
+}
+
+<span class="attribute">#[derive(Deserialize, Serialize, PartialEq, Debug, Clone, Copy)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>DataType {
+    <span class="attribute">#[serde(rename = <span class="string">&quot;counter&quot;</span>)]
+    </span>Counter,
+    <span class="attribute">#[serde(rename = <span class="string">&quot;timestamp&quot;</span>)]
+    </span>Timestamp,
+    <span class="attribute">#[serde(rename = <span class="string">&quot;bytes&quot;</span>)]
+    </span>Bytes,
+    <span class="attribute">#[serde(rename = <span class="string">&quot;uint&quot;</span>)]
+    </span>Uint,
+    <span class="attribute">#[serde(rename = <span class="string">&quot;int&quot;</span>)]
+    </span>Int,
+    <span class="attribute">#[serde(rename = <span class="string">&quot;float64&quot;</span>)]
+    </span>F64,
+    <span class="attribute">#[serde(rename = <span class="string">&quot;undefined&quot;</span>)]
+    </span>Undefined,
+}
+
+<span class="attribute">#[derive(Debug, Clone)]
+</span><span class="kw">pub struct </span>Counter {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) start: i64,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) current: i64,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) increments: usize,
+}
+
+<span class="kw">impl </span>Counter {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>increment&lt;I: Iterator&lt;Item = i64&gt;&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, increments: I) {
+        <span class="kw">for </span>inc <span class="kw">in </span>increments {
+            <span class="self">self</span>.current += inc;
+            <span class="self">self</span>.increments += <span class="number">1</span>;
+        }
+    }
+}
+
+<span class="kw">impl </span>Serialize <span class="kw">for </span>Counter {
+    <span class="kw">fn </span>serialize&lt;S&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, serializer: S) -&gt; <span class="prelude-ty">Result</span>&lt;S::Ok, S::Error&gt;
+    <span class="kw">where
+        </span>S: Serializer,
     {
-        <span class="ident">serializer</span>.<span class="ident">serialize_i64</span>(<span class="self">self</span>.<span class="ident">current</span>)
+        serializer.serialize_i64(<span class="self">self</span>.current)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">fmt::Display</span> <span class="kw">for</span> <span class="ident">Counter</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">fmt::Result</span> {
-        <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">current</span>)
+<span class="kw">impl </span>fmt::Display <span class="kw">for </span>Counter {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; fmt::Result {
+        <span class="macro">write!</span>(f, <span class="string">&quot;{}&quot;</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.current)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">i64</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Counter</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">n</span>: <span class="ident">i64</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">Counter</span> {
-            <span class="ident">start</span>: <span class="ident">n</span>,
-            <span class="ident">current</span>: <span class="ident">n</span>,
-            <span class="ident">increments</span>: <span class="number">0</span>,
+<span class="kw">impl </span>From&lt;i64&gt; <span class="kw">for </span>Counter {
+    <span class="kw">fn </span>from(n: i64) -&gt; <span class="self">Self </span>{
+        Counter {
+            start: n,
+            current: n,
+            increments: <span class="number">0</span>,
         }
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">i64</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Counter</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">n</span>: <span class="kw-2">&amp;</span><span class="ident">i64</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">Counter</span> {
-            <span class="ident">start</span>: <span class="kw-2">*</span><span class="ident">n</span>,
-            <span class="ident">current</span>: <span class="kw-2">*</span><span class="ident">n</span>,
-            <span class="ident">increments</span>: <span class="number">0</span>,
+<span class="kw">impl </span>From&lt;<span class="kw-2">&amp;</span>i64&gt; <span class="kw">for </span>Counter {
+    <span class="kw">fn </span>from(n: <span class="kw-2">&amp;</span>i64) -&gt; <span class="self">Self </span>{
+        Counter {
+            start: <span class="kw-2">*</span>n,
+            current: <span class="kw-2">*</span>n,
+            increments: <span class="number">0</span>,
         }
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">Counter</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">i64</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">val</span>: <span class="kw-2">&amp;</span><span class="ident">Counter</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">val</span>.<span class="ident">current</span>
+<span class="kw">impl </span>From&lt;<span class="kw-2">&amp;</span>Counter&gt; <span class="kw">for </span>i64 {
+    <span class="kw">fn </span>from(val: <span class="kw-2">&amp;</span>Counter) -&gt; <span class="self">Self </span>{
+        val.current
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">Counter</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">i64</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">val</span>: <span class="ident">Counter</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">val</span>.<span class="ident">current</span>
+<span class="kw">impl </span>From&lt;Counter&gt; <span class="kw">for </span>i64 {
+    <span class="kw">fn </span>from(val: Counter) -&gt; <span class="self">Self </span>{
+        val.current
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">Counter</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">u64</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">val</span>: <span class="kw-2">&amp;</span><span class="ident">Counter</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">val</span>.<span class="ident">current</span> <span class="kw">as</span> <span class="ident">u64</span>
+<span class="kw">impl </span>From&lt;<span class="kw-2">&amp;</span>Counter&gt; <span class="kw">for </span>u64 {
+    <span class="kw">fn </span>from(val: <span class="kw-2">&amp;</span>Counter) -&gt; <span class="self">Self </span>{
+        val.current <span class="kw">as </span>u64
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">Counter</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">f64</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">val</span>: <span class="kw-2">&amp;</span><span class="ident">Counter</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">val</span>.<span class="ident">current</span> <span class="kw">as</span> <span class="ident">f64</span>
+<span class="kw">impl </span>From&lt;<span class="kw-2">&amp;</span>Counter&gt; <span class="kw">for </span>f64 {
+    <span class="kw">fn </span>from(val: <span class="kw-2">&amp;</span>Counter) -&gt; <span class="self">Self </span>{
+        val.current <span class="kw">as </span>f64
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Serialize</span>, <span class="ident">PartialEq</span>, <span class="ident">Debug</span>, <span class="ident">Clone</span>)]</span>
-<span class="attribute">#[<span class="ident">serde</span>(<span class="ident">untagged</span>)]</span>
-<span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">ScalarValue</span> {
-    <span class="ident">Bytes</span>(<span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>),
-    <span class="ident">Str</span>(<span class="ident">SmolStr</span>),
-    <span class="ident">Int</span>(<span class="ident">i64</span>),
-    <span class="ident">Uint</span>(<span class="ident">u64</span>),
-    <span class="ident">F64</span>(<span class="ident">f64</span>),
-    <span class="ident">Counter</span>(<span class="ident">Counter</span>),
-    <span class="ident">Timestamp</span>(<span class="ident">i64</span>),
-    <span class="ident">Boolean</span>(<span class="ident">bool</span>),
-    <span class="ident">Unknown</span> { <span class="ident">type_code</span>: <span class="ident">u8</span>, <span class="ident">bytes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> },
-    <span class="ident">Null</span>,
+<span class="attribute">#[derive(Serialize, PartialEq, Debug, Clone)]
+#[serde(untagged)]
+</span><span class="kw">pub enum </span>ScalarValue {
+    Bytes(Vec&lt;u8&gt;),
+    Str(SmolStr),
+    Int(i64),
+    Uint(u64),
+    F64(f64),
+    Counter(Counter),
+    Timestamp(i64),
+    Boolean(bool),
+    Unknown { type_code: u8, bytes: Vec&lt;u8&gt; },
+    Null,
 }
 
-<span class="kw">impl</span> <span class="ident">PartialEq</span> <span class="kw">for</span> <span class="ident">Counter</span> {
-    <span class="kw">fn</span> <span class="ident">eq</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="ident">current</span> <span class="op">==</span> <span class="ident">other</span>.<span class="ident">current</span>
+<span class="kw">impl </span>PartialEq <span class="kw">for </span>Counter {
+    <span class="kw">fn </span>eq(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; bool {
+        <span class="self">self</span>.current == other.current
     }
 }
 
-<span class="kw">impl</span> <span class="ident">ScalarValue</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">as_datatype</span>(
+<span class="kw">impl </span>ScalarValue {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>as_datatype(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">datatype</span>: <span class="ident">DataType</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">ScalarValue</span>, <span class="ident">error::InvalidScalarValue</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> (<span class="ident">datatype</span>, <span class="self">self</span>) {
-            (<span class="ident">DataType::Counter</span>, <span class="ident">ScalarValue::Int</span>(<span class="ident">i</span>)) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">ScalarValue::Counter</span>(<span class="ident">i</span>.<span class="ident">into</span>())),
-            (<span class="ident">DataType::Counter</span>, <span class="ident">ScalarValue::Uint</span>(<span class="ident">u</span>)) =&gt; <span class="kw">match</span> <span class="ident">i64::try_from</span>(<span class="kw-2">*</span><span class="ident">u</span>) {
-                <span class="prelude-val">Ok</span>(<span class="ident">i</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">ScalarValue::Counter</span>(<span class="ident">i</span>.<span class="ident">into</span>())),
-                <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(<span class="ident">error::InvalidScalarValue</span> {
-                    <span class="ident">raw_value</span>: <span class="self">self</span>.<span class="ident">clone</span>(),
-                    <span class="ident">expected</span>: <span class="string">&quot;an integer&quot;</span>.<span class="ident">to_string</span>(),
-                    <span class="ident">unexpected</span>: <span class="string">&quot;an integer larger than i64::max_value&quot;</span>.<span class="ident">to_string</span>(),
-                    <span class="ident">datatype</span>,
+        datatype: DataType,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;ScalarValue, error::InvalidScalarValue&gt; {
+        <span class="kw">match </span>(datatype, <span class="self">self</span>) {
+            (DataType::Counter, ScalarValue::Int(i)) =&gt; <span class="prelude-val">Ok</span>(ScalarValue::Counter(i.into())),
+            (DataType::Counter, ScalarValue::Uint(u)) =&gt; <span class="kw">match </span>i64::try_from(<span class="kw-2">*</span>u) {
+                <span class="prelude-val">Ok</span>(i) =&gt; <span class="prelude-val">Ok</span>(ScalarValue::Counter(i.into())),
+                <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(error::InvalidScalarValue {
+                    raw_value: <span class="self">self</span>.clone(),
+                    expected: <span class="string">&quot;an integer&quot;</span>.to_string(),
+                    unexpected: <span class="string">&quot;an integer larger than i64::max_value&quot;</span>.to_string(),
+                    datatype,
                 }),
             },
-            (<span class="ident">DataType::Bytes</span>, <span class="ident">ScalarValue::Bytes</span>(<span class="ident">bytes</span>)) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">ScalarValue::Bytes</span>(<span class="ident">bytes</span>.<span class="ident">clone</span>())),
-            (<span class="ident">DataType::Bytes</span>, <span class="ident">v</span>) =&gt; <span class="prelude-val">Err</span>(<span class="ident">error::InvalidScalarValue</span> {
-                <span class="ident">raw_value</span>: <span class="self">self</span>.<span class="ident">clone</span>(),
-                <span class="ident">expected</span>: <span class="string">&quot;a vector of bytes&quot;</span>.<span class="ident">to_string</span>(),
-                <span class="ident">unexpected</span>: <span class="ident">v</span>.<span class="ident">to_string</span>(),
-                <span class="ident">datatype</span>,
+            (DataType::Bytes, ScalarValue::Bytes(bytes)) =&gt; <span class="prelude-val">Ok</span>(ScalarValue::Bytes(bytes.clone())),
+            (DataType::Bytes, v) =&gt; <span class="prelude-val">Err</span>(error::InvalidScalarValue {
+                raw_value: <span class="self">self</span>.clone(),
+                expected: <span class="string">&quot;a vector of bytes&quot;</span>.to_string(),
+                unexpected: v.to_string(),
+                datatype,
             }),
-            (<span class="ident">DataType::Counter</span>, <span class="ident">v</span>) =&gt; <span class="prelude-val">Err</span>(<span class="ident">error::InvalidScalarValue</span> {
-                <span class="ident">raw_value</span>: <span class="self">self</span>.<span class="ident">clone</span>(),
-                <span class="ident">expected</span>: <span class="string">&quot;an integer&quot;</span>.<span class="ident">to_string</span>(),
-                <span class="ident">unexpected</span>: <span class="ident">v</span>.<span class="ident">to_string</span>(),
-                <span class="ident">datatype</span>,
+            (DataType::Counter, v) =&gt; <span class="prelude-val">Err</span>(error::InvalidScalarValue {
+                raw_value: <span class="self">self</span>.clone(),
+                expected: <span class="string">&quot;an integer&quot;</span>.to_string(),
+                unexpected: v.to_string(),
+                datatype,
             }),
-            (<span class="ident">DataType::Timestamp</span>, <span class="ident">ScalarValue::Int</span>(<span class="ident">i</span>)) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">ScalarValue::Timestamp</span>(<span class="kw-2">*</span><span class="ident">i</span>)),
-            (<span class="ident">DataType::Timestamp</span>, <span class="ident">ScalarValue::Uint</span>(<span class="ident">u</span>)) =&gt; <span class="kw">match</span> <span class="ident">i64::try_from</span>(<span class="kw-2">*</span><span class="ident">u</span>) {
-                <span class="prelude-val">Ok</span>(<span class="ident">i</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">ScalarValue::Timestamp</span>(<span class="ident">i</span>)),
-                <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(<span class="ident">error::InvalidScalarValue</span> {
-                    <span class="ident">raw_value</span>: <span class="self">self</span>.<span class="ident">clone</span>(),
-                    <span class="ident">expected</span>: <span class="string">&quot;an integer&quot;</span>.<span class="ident">to_string</span>(),
-                    <span class="ident">unexpected</span>: <span class="string">&quot;an integer larger than i64::max_value&quot;</span>.<span class="ident">to_string</span>(),
-                    <span class="ident">datatype</span>,
+            (DataType::Timestamp, ScalarValue::Int(i)) =&gt; <span class="prelude-val">Ok</span>(ScalarValue::Timestamp(<span class="kw-2">*</span>i)),
+            (DataType::Timestamp, ScalarValue::Uint(u)) =&gt; <span class="kw">match </span>i64::try_from(<span class="kw-2">*</span>u) {
+                <span class="prelude-val">Ok</span>(i) =&gt; <span class="prelude-val">Ok</span>(ScalarValue::Timestamp(i)),
+                <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(error::InvalidScalarValue {
+                    raw_value: <span class="self">self</span>.clone(),
+                    expected: <span class="string">&quot;an integer&quot;</span>.to_string(),
+                    unexpected: <span class="string">&quot;an integer larger than i64::max_value&quot;</span>.to_string(),
+                    datatype,
                 }),
             },
-            (<span class="ident">DataType::Timestamp</span>, <span class="ident">v</span>) =&gt; <span class="prelude-val">Err</span>(<span class="ident">error::InvalidScalarValue</span> {
-                <span class="ident">raw_value</span>: <span class="self">self</span>.<span class="ident">clone</span>(),
-                <span class="ident">expected</span>: <span class="string">&quot;an integer&quot;</span>.<span class="ident">to_string</span>(),
-                <span class="ident">unexpected</span>: <span class="ident">v</span>.<span class="ident">to_string</span>(),
-                <span class="ident">datatype</span>,
+            (DataType::Timestamp, v) =&gt; <span class="prelude-val">Err</span>(error::InvalidScalarValue {
+                raw_value: <span class="self">self</span>.clone(),
+                expected: <span class="string">&quot;an integer&quot;</span>.to_string(),
+                unexpected: v.to_string(),
+                datatype,
             }),
-            (<span class="ident">DataType::Int</span>, <span class="ident">v</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">ScalarValue::Int</span>(<span class="ident">v</span>.<span class="ident">to_i64</span>().<span class="ident">ok_or</span>(
-                <span class="ident">error::InvalidScalarValue</span> {
-                    <span class="ident">raw_value</span>: <span class="self">self</span>.<span class="ident">clone</span>(),
-                    <span class="ident">expected</span>: <span class="string">&quot;an int&quot;</span>.<span class="ident">to_string</span>(),
-                    <span class="ident">unexpected</span>: <span class="ident">v</span>.<span class="ident">to_string</span>(),
-                    <span class="ident">datatype</span>,
+            (DataType::Int, v) =&gt; <span class="prelude-val">Ok</span>(ScalarValue::Int(v.to_i64().ok_or(
+                error::InvalidScalarValue {
+                    raw_value: <span class="self">self</span>.clone(),
+                    expected: <span class="string">&quot;an int&quot;</span>.to_string(),
+                    unexpected: v.to_string(),
+                    datatype,
                 },
             )<span class="question-mark">?</span>)),
-            (<span class="ident">DataType::Uint</span>, <span class="ident">v</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">ScalarValue::Uint</span>(<span class="ident">v</span>.<span class="ident">to_u64</span>().<span class="ident">ok_or</span>(
-                <span class="ident">error::InvalidScalarValue</span> {
-                    <span class="ident">raw_value</span>: <span class="self">self</span>.<span class="ident">clone</span>(),
-                    <span class="ident">expected</span>: <span class="string">&quot;a uint&quot;</span>.<span class="ident">to_string</span>(),
-                    <span class="ident">unexpected</span>: <span class="ident">v</span>.<span class="ident">to_string</span>(),
-                    <span class="ident">datatype</span>,
+            (DataType::Uint, v) =&gt; <span class="prelude-val">Ok</span>(ScalarValue::Uint(v.to_u64().ok_or(
+                error::InvalidScalarValue {
+                    raw_value: <span class="self">self</span>.clone(),
+                    expected: <span class="string">&quot;a uint&quot;</span>.to_string(),
+                    unexpected: v.to_string(),
+                    datatype,
                 },
             )<span class="question-mark">?</span>)),
-            (<span class="ident">DataType::F64</span>, <span class="ident">v</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">ScalarValue::F64</span>(<span class="ident">v</span>.<span class="ident">to_f64</span>().<span class="ident">ok_or</span>(
-                <span class="ident">error::InvalidScalarValue</span> {
-                    <span class="ident">raw_value</span>: <span class="self">self</span>.<span class="ident">clone</span>(),
-                    <span class="ident">expected</span>: <span class="string">&quot;an f64&quot;</span>.<span class="ident">to_string</span>(),
-                    <span class="ident">unexpected</span>: <span class="ident">v</span>.<span class="ident">to_string</span>(),
-                    <span class="ident">datatype</span>,
+            (DataType::F64, v) =&gt; <span class="prelude-val">Ok</span>(ScalarValue::F64(v.to_f64().ok_or(
+                error::InvalidScalarValue {
+                    raw_value: <span class="self">self</span>.clone(),
+                    expected: <span class="string">&quot;an f64&quot;</span>.to_string(),
+                    unexpected: v.to_string(),
+                    datatype,
                 },
             )<span class="question-mark">?</span>)),
-            (<span class="ident">DataType::Undefined</span>, <span class="kw">_</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="self">self</span>.<span class="ident">clone</span>()),
+            (DataType::Undefined, <span class="kw">_</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="self">self</span>.clone()),
         }
     }
 
-    <span class="doccomment">/// Returns an Option containing a `DataType` if</span>
-    <span class="doccomment">/// `self` represents a numerical scalar value</span>
-    <span class="doccomment">/// This is necessary b/c numerical values are not self-describing</span>
-    <span class="doccomment">/// (unlike strings / bytes / etc. )</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">as_numerical_datatype</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">DataType</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">ScalarValue::Counter</span>(..) =&gt; <span class="prelude-val">Some</span>(<span class="ident">DataType::Counter</span>),
-            <span class="ident">ScalarValue::Timestamp</span>(..) =&gt; <span class="prelude-val">Some</span>(<span class="ident">DataType::Timestamp</span>),
-            <span class="ident">ScalarValue::Int</span>(..) =&gt; <span class="prelude-val">Some</span>(<span class="ident">DataType::Int</span>),
-            <span class="ident">ScalarValue::Uint</span>(..) =&gt; <span class="prelude-val">Some</span>(<span class="ident">DataType::Uint</span>),
-            <span class="ident">ScalarValue::F64</span>(..) =&gt; <span class="prelude-val">Some</span>(<span class="ident">DataType::F64</span>),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">None</span>,
+    <span class="doccomment">/// Returns an Option containing a `DataType` if
+    /// `self` represents a numerical scalar value
+    /// This is necessary b/c numerical values are not self-describing
+    /// (unlike strings / bytes / etc. )
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>as_numerical_datatype(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;DataType&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            ScalarValue::Counter(..) =&gt; <span class="prelude-val">Some</span>(DataType::Counter),
+            ScalarValue::Timestamp(..) =&gt; <span class="prelude-val">Some</span>(DataType::Timestamp),
+            ScalarValue::Int(..) =&gt; <span class="prelude-val">Some</span>(DataType::Int),
+            ScalarValue::Uint(..) =&gt; <span class="prelude-val">Some</span>(DataType::Uint),
+            ScalarValue::F64(..) =&gt; <span class="prelude-val">Some</span>(DataType::F64),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="ident"><span class="self">Self</span>::Bytes</span>(<span class="kw">_</span>))
+    <span class="kw">pub fn </span>is_bytes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Bytes(<span class="kw">_</span>))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_str</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="ident"><span class="self">Self</span>::Str</span>(<span class="kw">_</span>))
+    <span class="kw">pub fn </span>is_str(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Str(<span class="kw">_</span>))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_int</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="ident"><span class="self">Self</span>::Int</span>(<span class="kw">_</span>))
+    <span class="kw">pub fn </span>is_int(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Int(<span class="kw">_</span>))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_uint</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="ident"><span class="self">Self</span>::Uint</span>(<span class="kw">_</span>))
+    <span class="kw">pub fn </span>is_uint(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Uint(<span class="kw">_</span>))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_f64</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="ident"><span class="self">Self</span>::F64</span>(<span class="kw">_</span>))
+    <span class="kw">pub fn </span>is_f64(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::F64(<span class="kw">_</span>))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_counter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="ident"><span class="self">Self</span>::Counter</span>(<span class="kw">_</span>))
+    <span class="kw">pub fn </span>is_counter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Counter(<span class="kw">_</span>))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_timestamp</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="ident"><span class="self">Self</span>::Timestamp</span>(<span class="kw">_</span>))
+    <span class="kw">pub fn </span>is_timestamp(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Timestamp(<span class="kw">_</span>))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_boolean</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="ident"><span class="self">Self</span>::Boolean</span>(<span class="kw">_</span>))
+    <span class="kw">pub fn </span>is_boolean(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Boolean(<span class="kw">_</span>))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">is_null</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="ident"><span class="self">Self</span>::Null</span>)
+    <span class="kw">pub fn </span>is_null(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Null)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">into_bytes</span>(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>, <span class="self">Self</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">ScalarValue::Bytes</span>(<span class="ident">b</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">b</span>),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">Err</span>(<span class="self">self</span>),
+    <span class="kw">pub fn </span>into_bytes(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;u8&gt;, <span class="self">Self</span>&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            ScalarValue::Bytes(b) =&gt; <span class="prelude-val">Ok</span>(b),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(<span class="self">self</span>),
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_bytes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span>[<span class="ident">u8</span>]<span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">ScalarValue::Bytes</span>(<span class="ident">b</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">b</span>),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">None</span>,
+    <span class="kw">pub fn </span>to_bytes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[u8]&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            ScalarValue::Bytes(b) =&gt; <span class="prelude-val">Some</span>(b),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">into_string</span>(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">String</span>, <span class="self">Self</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">ScalarValue::Str</span>(<span class="ident">s</span>) =&gt; <span class="prelude-val">Ok</span>(<span class="ident">s</span>.<span class="ident">to_string</span>()),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">Err</span>(<span class="self">self</span>),
+    <span class="kw">pub fn </span>into_string(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;String, <span class="self">Self</span>&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            ScalarValue::Str(s) =&gt; <span class="prelude-val">Ok</span>(s.to_string()),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(<span class="self">self</span>),
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_str</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">str</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">ScalarValue::Str</span>(<span class="ident">s</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">s</span>),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">None</span>,
+    <span class="kw">pub fn </span>to_str(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            ScalarValue::Str(s) =&gt; <span class="prelude-val">Some</span>(s),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
         }
     }
 
-    <span class="doccomment">/// If this value can be coerced to an i64, return the i64 value</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_i64</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">i64</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">ScalarValue::Int</span>(<span class="ident">n</span>) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span><span class="ident">n</span>),
-            <span class="ident">ScalarValue::Uint</span>(<span class="ident">n</span>) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span><span class="ident">n</span> <span class="kw">as</span> <span class="ident">i64</span>),
-            <span class="ident">ScalarValue::F64</span>(<span class="ident">n</span>) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span><span class="ident">n</span> <span class="kw">as</span> <span class="ident">i64</span>),
-            <span class="ident">ScalarValue::Counter</span>(<span class="ident">n</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">n</span>.<span class="ident">into</span>()),
-            <span class="ident">ScalarValue::Timestamp</span>(<span class="ident">n</span>) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span><span class="ident">n</span>),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">None</span>,
+    <span class="doccomment">/// If this value can be coerced to an i64, return the i64 value
+    </span><span class="kw">pub fn </span>to_i64(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;i64&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            ScalarValue::Int(n) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span>n),
+            ScalarValue::Uint(n) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span>n <span class="kw">as </span>i64),
+            ScalarValue::F64(n) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span>n <span class="kw">as </span>i64),
+            ScalarValue::Counter(n) =&gt; <span class="prelude-val">Some</span>(n.into()),
+            ScalarValue::Timestamp(n) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span>n),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_u64</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">ScalarValue::Int</span>(<span class="ident">n</span>) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span><span class="ident">n</span> <span class="kw">as</span> <span class="ident">u64</span>),
-            <span class="ident">ScalarValue::Uint</span>(<span class="ident">n</span>) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span><span class="ident">n</span>),
-            <span class="ident">ScalarValue::F64</span>(<span class="ident">n</span>) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span><span class="ident">n</span> <span class="kw">as</span> <span class="ident">u64</span>),
-            <span class="ident">ScalarValue::Counter</span>(<span class="ident">n</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">n</span>.<span class="ident">into</span>()),
-            <span class="ident">ScalarValue::Timestamp</span>(<span class="ident">n</span>) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span><span class="ident">n</span> <span class="kw">as</span> <span class="ident">u64</span>),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">None</span>,
+    <span class="kw">pub fn </span>to_u64(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;u64&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            ScalarValue::Int(n) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span>n <span class="kw">as </span>u64),
+            ScalarValue::Uint(n) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span>n),
+            ScalarValue::F64(n) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span>n <span class="kw">as </span>u64),
+            ScalarValue::Counter(n) =&gt; <span class="prelude-val">Some</span>(n.into()),
+            ScalarValue::Timestamp(n) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span>n <span class="kw">as </span>u64),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_f64</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">f64</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">ScalarValue::Int</span>(<span class="ident">n</span>) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span><span class="ident">n</span> <span class="kw">as</span> <span class="ident">f64</span>),
-            <span class="ident">ScalarValue::Uint</span>(<span class="ident">n</span>) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span><span class="ident">n</span> <span class="kw">as</span> <span class="ident">f64</span>),
-            <span class="ident">ScalarValue::F64</span>(<span class="ident">n</span>) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span><span class="ident">n</span>),
-            <span class="ident">ScalarValue::Counter</span>(<span class="ident">n</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">n</span>.<span class="ident">into</span>()),
-            <span class="ident">ScalarValue::Timestamp</span>(<span class="ident">n</span>) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span><span class="ident">n</span> <span class="kw">as</span> <span class="ident">f64</span>),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">None</span>,
+    <span class="kw">pub fn </span>to_f64(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;f64&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            ScalarValue::Int(n) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span>n <span class="kw">as </span>f64),
+            ScalarValue::Uint(n) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span>n <span class="kw">as </span>f64),
+            ScalarValue::F64(n) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span>n),
+            ScalarValue::Counter(n) =&gt; <span class="prelude-val">Some</span>(n.into()),
+            ScalarValue::Timestamp(n) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span>n <span class="kw">as </span>f64),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_bool</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">bool</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">ScalarValue::Boolean</span>(<span class="ident">b</span>) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span><span class="ident">b</span>),
-            <span class="kw">_</span> =&gt; <span class="prelude-val">None</span>,
+    <span class="kw">pub fn </span>to_bool(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;bool&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            ScalarValue::Boolean(b) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span>b),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">counter</span>(<span class="ident">n</span>: <span class="ident">i64</span>) -&gt; <span class="ident">ScalarValue</span> {
-        <span class="ident">ScalarValue::Counter</span>(<span class="ident">n</span>.<span class="ident">into</span>())
+    <span class="kw">pub fn </span>counter(n: i64) -&gt; ScalarValue {
+        ScalarValue::Counter(n.into())
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">str</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ScalarValue</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">s</span>: <span class="kw-2">&amp;</span><span class="ident">str</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">ScalarValue::Str</span>(<span class="ident">s</span>.<span class="ident">into</span>())
+<span class="kw">impl </span>From&lt;<span class="kw-2">&amp;</span>str&gt; <span class="kw">for </span>ScalarValue {
+    <span class="kw">fn </span>from(s: <span class="kw-2">&amp;</span>str) -&gt; <span class="self">Self </span>{
+        ScalarValue::Str(s.into())
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">String</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ScalarValue</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">s</span>: <span class="kw-2">&amp;</span><span class="ident">String</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">ScalarValue::Str</span>(<span class="ident">s</span>.<span class="ident">into</span>())
+<span class="kw">impl </span>From&lt;<span class="kw-2">&amp;</span>String&gt; <span class="kw">for </span>ScalarValue {
+    <span class="kw">fn </span>from(s: <span class="kw-2">&amp;</span>String) -&gt; <span class="self">Self </span>{
+        ScalarValue::Str(s.into())
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ScalarValue</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">s</span>: <span class="ident">String</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">ScalarValue::Str</span>(<span class="ident">s</span>.<span class="ident">into</span>())
+<span class="kw">impl </span>From&lt;String&gt; <span class="kw">for </span>ScalarValue {
+    <span class="kw">fn </span>from(s: String) -&gt; <span class="self">Self </span>{
+        ScalarValue::Str(s.into())
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ScalarValue</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">b</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">ScalarValue::Bytes</span>(<span class="ident">b</span>)
+<span class="kw">impl </span>From&lt;Vec&lt;u8&gt;&gt; <span class="kw">for </span>ScalarValue {
+    <span class="kw">fn </span>from(b: Vec&lt;u8&gt;) -&gt; <span class="self">Self </span>{
+        ScalarValue::Bytes(b)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">i64</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ScalarValue</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">n</span>: <span class="ident">i64</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">ScalarValue::Int</span>(<span class="ident">n</span>)
+<span class="kw">impl </span>From&lt;i64&gt; <span class="kw">for </span>ScalarValue {
+    <span class="kw">fn </span>from(n: i64) -&gt; <span class="self">Self </span>{
+        ScalarValue::Int(n)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">f64</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ScalarValue</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">n</span>: <span class="ident">f64</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">ScalarValue::F64</span>(<span class="ident">n</span>)
+<span class="kw">impl </span>From&lt;f64&gt; <span class="kw">for </span>ScalarValue {
+    <span class="kw">fn </span>from(n: f64) -&gt; <span class="self">Self </span>{
+        ScalarValue::F64(n)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ScalarValue</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">n</span>: <span class="ident">u64</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">ScalarValue::Uint</span>(<span class="ident">n</span>)
+<span class="kw">impl </span>From&lt;u64&gt; <span class="kw">for </span>ScalarValue {
+    <span class="kw">fn </span>from(n: u64) -&gt; <span class="self">Self </span>{
+        ScalarValue::Uint(n)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">u32</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ScalarValue</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">n</span>: <span class="ident">u32</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">ScalarValue::Uint</span>(<span class="ident">n</span>.<span class="ident">into</span>())
+<span class="kw">impl </span>From&lt;u32&gt; <span class="kw">for </span>ScalarValue {
+    <span class="kw">fn </span>from(n: u32) -&gt; <span class="self">Self </span>{
+        ScalarValue::Uint(n.into())
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">i32</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ScalarValue</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">n</span>: <span class="ident">i32</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">ScalarValue::Int</span>(<span class="ident">n</span> <span class="kw">as</span> <span class="ident">i64</span>)
+<span class="kw">impl </span>From&lt;i32&gt; <span class="kw">for </span>ScalarValue {
+    <span class="kw">fn </span>from(n: i32) -&gt; <span class="self">Self </span>{
+        ScalarValue::Int(n <span class="kw">as </span>i64)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">bool</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ScalarValue</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">b</span>: <span class="ident">bool</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">ScalarValue::Boolean</span>(<span class="ident">b</span>)
+<span class="kw">impl </span>From&lt;bool&gt; <span class="kw">for </span>ScalarValue {
+    <span class="kw">fn </span>from(b: bool) -&gt; <span class="self">Self </span>{
+        ScalarValue::Boolean(b)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span>()<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ScalarValue</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="kw">_</span>: ()) -&gt; <span class="self">Self</span> {
-        <span class="ident">ScalarValue::Null</span>
+<span class="kw">impl </span>From&lt;()&gt; <span class="kw">for </span>ScalarValue {
+    <span class="kw">fn </span>from(<span class="kw">_</span>: ()) -&gt; <span class="self">Self </span>{
+        ScalarValue::Null
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">char</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ScalarValue</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">c</span>: <span class="ident">char</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">ScalarValue::Str</span>(<span class="ident">SmolStr::new</span>(<span class="ident">c</span>.<span class="ident">to_string</span>()))
+<span class="kw">impl </span>From&lt;char&gt; <span class="kw">for </span>ScalarValue {
+    <span class="kw">fn </span>from(c: char) -&gt; <span class="self">Self </span>{
+        ScalarValue::Str(SmolStr::new(c.to_string()))
     }
 }
 
-<span class="kw">impl</span> <span class="ident">fmt::Display</span> <span class="kw">for</span> <span class="ident">ScalarValue</span> {
-    <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;mut</span> <span class="ident">fmt::Formatter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>) -&gt; <span class="ident">fmt::Result</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident">ScalarValue::Bytes</span>(<span class="ident">b</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;\&quot;{:?}\&quot;&quot;</span>, <span class="ident">b</span>),
-            <span class="ident">ScalarValue::Str</span>(<span class="ident">s</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;\&quot;{}\&quot;&quot;</span>, <span class="ident">s</span>),
-            <span class="ident">ScalarValue::Int</span>(<span class="ident">i</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="ident">i</span>),
-            <span class="ident">ScalarValue::Uint</span>(<span class="ident">i</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="ident">i</span>),
-            <span class="ident">ScalarValue::F64</span>(<span class="ident">n</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{:.324}&quot;</span>, <span class="ident">n</span>),
-            <span class="ident">ScalarValue::Counter</span>(<span class="ident">c</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Counter: {}&quot;</span>, <span class="ident">c</span>),
-            <span class="ident">ScalarValue::Timestamp</span>(<span class="ident">i</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;Timestamp: {}&quot;</span>, <span class="ident">i</span>),
-            <span class="ident">ScalarValue::Boolean</span>(<span class="ident">b</span>) =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="ident">b</span>),
-            <span class="ident">ScalarValue::Null</span> =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;null&quot;</span>),
-            <span class="ident">ScalarValue::Unknown</span> { <span class="ident">type_code</span>, .. } =&gt; <span class="macro">write!</span>(<span class="ident">f</span>, <span class="string">&quot;unknown type {}&quot;</span>, <span class="ident">type_code</span>),
+<span class="kw">impl </span>fmt::Display <span class="kw">for </span>ScalarValue {
+    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; fmt::Result {
+        <span class="kw">match </span><span class="self">self </span>{
+            ScalarValue::Bytes(b) =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;\&quot;{:?}\&quot;&quot;</span>, b),
+            ScalarValue::Str(s) =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;\&quot;{}\&quot;&quot;</span>, s),
+            ScalarValue::Int(i) =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;{}&quot;</span>, i),
+            ScalarValue::Uint(i) =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;{}&quot;</span>, i),
+            ScalarValue::F64(n) =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;{:.324}&quot;</span>, n),
+            ScalarValue::Counter(c) =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;Counter: {}&quot;</span>, c),
+            ScalarValue::Timestamp(i) =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;Timestamp: {}&quot;</span>, i),
+            ScalarValue::Boolean(b) =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;{}&quot;</span>, b),
+            ScalarValue::Null =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;null&quot;</span>),
+            ScalarValue::Unknown { type_code, .. } =&gt; <span class="macro">write!</span>(f, <span class="string">&quot;unknown type {}&quot;</span>, type_code),
         }
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

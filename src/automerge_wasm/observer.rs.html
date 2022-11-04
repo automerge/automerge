@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge-wasm/src/observer.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>observer.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../automerge_wasm/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../automerge_wasm/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge-wasm/src/observer.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>observer.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../automerge_wasm/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../automerge_wasm/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../automerge_wasm/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -332,337 +332,337 @@
 <span id="330">330</span>
 <span id="331">331</span>
 <span id="332">332</span>
-</pre><pre class="rust"><code><span class="attribute">#![<span class="ident">allow</span>(<span class="ident">dead_code</span>)]</span>
+</pre><pre class="rust"><code><span class="attribute">#![allow(dead_code)]
 
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::interop</span>::{<span class="ident">alloc</span>, <span class="ident">js_set</span>};
-<span class="kw">use</span> <span class="ident">automerge</span>::{<span class="ident">ObjId</span>, <span class="ident">OpObserver</span>, <span class="ident">Parents</span>, <span class="ident">Prop</span>, <span class="ident">Value</span>};
-<span class="kw">use</span> <span class="ident">js_sys</span>::{<span class="ident">Array</span>, <span class="ident">Object</span>};
-<span class="kw">use</span> <span class="ident">wasm_bindgen::prelude</span>::<span class="kw-2">*</span>;
+</span><span class="kw">use </span><span class="kw">crate</span>::interop::{alloc, js_set};
+<span class="kw">use </span>automerge::{ObjId, OpObserver, Parents, Prop, Value};
+<span class="kw">use </span>js_sys::{Array, Object};
+<span class="kw">use </span>wasm_bindgen::prelude::<span class="kw-2">*</span>;
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">Default</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">Observer</span> {
-    <span class="ident">enabled</span>: <span class="ident">bool</span>,
-    <span class="ident">patches</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Patch</span><span class="op">&gt;</span>,
+<span class="attribute">#[derive(Debug, Clone, Default)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Observer {
+    enabled: bool,
+    patches: Vec&lt;Patch&gt;,
 }
 
-<span class="kw">impl</span> <span class="ident">Observer</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">take_patches</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Patch</span><span class="op">&gt;</span> {
-        <span class="ident">std::mem::take</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">patches</span>)
+<span class="kw">impl </span>Observer {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>take_patches(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Vec&lt;Patch&gt; {
+        std::mem::take(<span class="kw-2">&amp;mut </span><span class="self">self</span>.patches)
     }
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">enable</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">enable</span>: <span class="ident">bool</span>) -&gt; <span class="ident">bool</span> {
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">enabled</span> <span class="op">&amp;&amp;</span> <span class="op">!</span><span class="ident">enable</span> {
-            <span class="self">self</span>.<span class="ident">patches</span>.<span class="ident">truncate</span>(<span class="number">0</span>)
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>enable(<span class="kw-2">&amp;mut </span><span class="self">self</span>, enable: bool) -&gt; bool {
+        <span class="kw">if </span><span class="self">self</span>.enabled &amp;&amp; !enable {
+            <span class="self">self</span>.patches.truncate(<span class="number">0</span>)
         }
-        <span class="kw">let</span> <span class="ident">old_enabled</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">enabled</span>;
-        <span class="self">self</span>.<span class="ident">enabled</span> <span class="op">=</span> <span class="ident">enable</span>;
-        <span class="ident">old_enabled</span>
+        <span class="kw">let </span>old_enabled = <span class="self">self</span>.enabled;
+        <span class="self">self</span>.enabled = enable;
+        old_enabled
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">Patch</span> {
-    <span class="ident">PutMap</span> {
-        <span class="ident">obj</span>: <span class="ident">ObjId</span>,
-        <span class="ident">path</span>: <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">ObjId</span>, <span class="ident">Prop</span>)<span class="op">&gt;</span>,
-        <span class="ident">key</span>: <span class="ident">String</span>,
-        <span class="ident">value</span>: (<span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;static</span><span class="op">&gt;</span>, <span class="ident">ObjId</span>),
-        <span class="ident">conflict</span>: <span class="ident">bool</span>,
+<span class="attribute">#[derive(Debug, Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>Patch {
+    PutMap {
+        obj: ObjId,
+        path: Vec&lt;(ObjId, Prop)&gt;,
+        key: String,
+        value: (Value&lt;<span class="lifetime">&#39;static</span>&gt;, ObjId),
+        conflict: bool,
     },
-    <span class="ident">PutSeq</span> {
-        <span class="ident">obj</span>: <span class="ident">ObjId</span>,
-        <span class="ident">path</span>: <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">ObjId</span>, <span class="ident">Prop</span>)<span class="op">&gt;</span>,
-        <span class="ident">index</span>: <span class="ident">usize</span>,
-        <span class="ident">value</span>: (<span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;static</span><span class="op">&gt;</span>, <span class="ident">ObjId</span>),
-        <span class="ident">conflict</span>: <span class="ident">bool</span>,
+    PutSeq {
+        obj: ObjId,
+        path: Vec&lt;(ObjId, Prop)&gt;,
+        index: usize,
+        value: (Value&lt;<span class="lifetime">&#39;static</span>&gt;, ObjId),
+        conflict: bool,
     },
-    <span class="ident">Insert</span> {
-        <span class="ident">obj</span>: <span class="ident">ObjId</span>,
-        <span class="ident">path</span>: <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">ObjId</span>, <span class="ident">Prop</span>)<span class="op">&gt;</span>,
-        <span class="ident">index</span>: <span class="ident">usize</span>,
-        <span class="ident">values</span>: <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;static</span><span class="op">&gt;</span>, <span class="ident">ObjId</span>)<span class="op">&gt;</span>,
+    Insert {
+        obj: ObjId,
+        path: Vec&lt;(ObjId, Prop)&gt;,
+        index: usize,
+        values: Vec&lt;(Value&lt;<span class="lifetime">&#39;static</span>&gt;, ObjId)&gt;,
     },
-    <span class="ident">Increment</span> {
-        <span class="ident">obj</span>: <span class="ident">ObjId</span>,
-        <span class="ident">path</span>: <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">ObjId</span>, <span class="ident">Prop</span>)<span class="op">&gt;</span>,
-        <span class="ident">prop</span>: <span class="ident">Prop</span>,
-        <span class="ident">value</span>: <span class="ident">i64</span>,
+    Increment {
+        obj: ObjId,
+        path: Vec&lt;(ObjId, Prop)&gt;,
+        prop: Prop,
+        value: i64,
     },
-    <span class="ident">DeleteMap</span> {
-        <span class="ident">obj</span>: <span class="ident">ObjId</span>,
-        <span class="ident">path</span>: <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">ObjId</span>, <span class="ident">Prop</span>)<span class="op">&gt;</span>,
-        <span class="ident">key</span>: <span class="ident">String</span>,
+    DeleteMap {
+        obj: ObjId,
+        path: Vec&lt;(ObjId, Prop)&gt;,
+        key: String,
     },
-    <span class="ident">DeleteSeq</span> {
-        <span class="ident">obj</span>: <span class="ident">ObjId</span>,
-        <span class="ident">path</span>: <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">ObjId</span>, <span class="ident">Prop</span>)<span class="op">&gt;</span>,
-        <span class="ident">index</span>: <span class="ident">usize</span>,
-        <span class="ident">length</span>: <span class="ident">usize</span>,
+    DeleteSeq {
+        obj: ObjId,
+        path: Vec&lt;(ObjId, Prop)&gt;,
+        index: usize,
+        length: usize,
     },
 }
 
-<span class="kw">impl</span> <span class="ident">OpObserver</span> <span class="kw">for</span> <span class="ident">Observer</span> {
-    <span class="kw">fn</span> <span class="ident">insert</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="kw-2">mut</span> <span class="ident">parents</span>: <span class="ident">Parents</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>,
-        <span class="ident">obj</span>: <span class="ident">ObjId</span>,
-        <span class="ident">index</span>: <span class="ident">usize</span>,
-        <span class="ident">tagged_value</span>: (<span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>, <span class="ident">ObjId</span>),
+<span class="kw">impl </span>OpObserver <span class="kw">for </span>Observer {
+    <span class="kw">fn </span>insert(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        <span class="kw-2">mut </span>parents: Parents&lt;<span class="lifetime">&#39;_</span>&gt;,
+        obj: ObjId,
+        index: usize,
+        tagged_value: (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ObjId),
     ) {
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">enabled</span> {
-            <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> (<span class="ident">tagged_value</span>.<span class="number">0</span>.<span class="ident">to_owned</span>(), <span class="ident">tagged_value</span>.<span class="number">1</span>);
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">Patch::Insert</span> {
-                <span class="ident">obj</span>: <span class="ident">tail_obj</span>,
-                <span class="ident">index</span>: <span class="ident">tail_index</span>,
-                <span class="ident">values</span>,
+        <span class="kw">if </span><span class="self">self</span>.enabled {
+            <span class="kw">let </span>value = (tagged_value.<span class="number">0</span>.to_owned(), tagged_value.<span class="number">1</span>);
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(Patch::Insert {
+                obj: tail_obj,
+                index: tail_index,
+                values,
                 ..
-            }) <span class="op">=</span> <span class="self">self</span>.<span class="ident">patches</span>.<span class="ident">last_mut</span>()
+            }) = <span class="self">self</span>.patches.last_mut()
             {
-                <span class="kw">let</span> <span class="ident">range</span> <span class="op">=</span> <span class="kw-2">*</span><span class="ident">tail_index</span>..<span class="op">=</span><span class="kw-2">*</span><span class="ident">tail_index</span> <span class="op">+</span> <span class="ident">values</span>.<span class="ident">len</span>();
-                <span class="comment">//if tail_obj == &amp;obj &amp;&amp; *tail_index + values.len() == index {</span>
-                <span class="kw">if</span> <span class="ident">tail_obj</span> <span class="op">==</span> <span class="kw-2">&amp;</span><span class="ident">obj</span> <span class="op">&amp;&amp;</span> <span class="ident">range</span>.<span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="ident">index</span>) {
-                    <span class="ident">values</span>.<span class="ident">insert</span>(<span class="ident">index</span> <span class="op">-</span> <span class="kw-2">*</span><span class="ident">tail_index</span>, <span class="ident">value</span>);
+                <span class="kw">let </span>range = <span class="kw-2">*</span>tail_index..=<span class="kw-2">*</span>tail_index + values.len();
+                <span class="comment">//if tail_obj == &amp;obj &amp;&amp; *tail_index + values.len() == index {
+                </span><span class="kw">if </span>tail_obj == <span class="kw-2">&amp;</span>obj &amp;&amp; range.contains(<span class="kw-2">&amp;</span>index) {
+                    values.insert(index - <span class="kw-2">*</span>tail_index, value);
                     <span class="kw">return</span>;
                 }
             }
-            <span class="kw">let</span> <span class="ident">path</span> <span class="op">=</span> <span class="ident">parents</span>.<span class="ident">path</span>();
-            <span class="kw">let</span> <span class="ident">patch</span> <span class="op">=</span> <span class="ident">Patch::Insert</span> {
-                <span class="ident">path</span>,
-                <span class="ident">obj</span>,
-                <span class="ident">index</span>,
-                <span class="ident">values</span>: <span class="macro">vec!</span>[<span class="ident">value</span>],
+            <span class="kw">let </span>path = parents.path();
+            <span class="kw">let </span>patch = Patch::Insert {
+                path,
+                obj,
+                index,
+                values: <span class="macro">vec!</span>[value],
             };
-            <span class="self">self</span>.<span class="ident">patches</span>.<span class="ident">push</span>(<span class="ident">patch</span>);
+            <span class="self">self</span>.patches.push(patch);
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">delete</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="kw-2">mut</span> <span class="ident">parents</span>: <span class="ident">Parents</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>, <span class="ident">obj</span>: <span class="ident">ObjId</span>, <span class="ident">prop</span>: <span class="ident">Prop</span>) {
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">enabled</span> {
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">Patch::Insert</span> {
-                <span class="ident">obj</span>: <span class="ident">tail_obj</span>,
-                <span class="ident">index</span>: <span class="ident">tail_index</span>,
-                <span class="ident">values</span>,
+    <span class="kw">fn </span>delete(<span class="kw-2">&amp;mut </span><span class="self">self</span>, <span class="kw-2">mut </span>parents: Parents&lt;<span class="lifetime">&#39;_</span>&gt;, obj: ObjId, prop: Prop) {
+        <span class="kw">if </span><span class="self">self</span>.enabled {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(Patch::Insert {
+                obj: tail_obj,
+                index: tail_index,
+                values,
                 ..
-            }) <span class="op">=</span> <span class="self">self</span>.<span class="ident">patches</span>.<span class="ident">last_mut</span>()
+            }) = <span class="self">self</span>.patches.last_mut()
             {
-                <span class="kw">if</span> <span class="kw">let</span> <span class="ident">Prop::Seq</span>(<span class="ident">index</span>) <span class="op">=</span> <span class="ident">prop</span> {
-                    <span class="kw">let</span> <span class="ident">range</span> <span class="op">=</span> <span class="kw-2">*</span><span class="ident">tail_index</span>..<span class="kw-2">*</span><span class="ident">tail_index</span> <span class="op">+</span> <span class="ident">values</span>.<span class="ident">len</span>();
-                    <span class="kw">if</span> <span class="ident">tail_obj</span> <span class="op">==</span> <span class="kw-2">&amp;</span><span class="ident">obj</span> <span class="op">&amp;&amp;</span> <span class="ident">range</span>.<span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="ident">index</span>) {
-                        <span class="ident">values</span>.<span class="ident">remove</span>(<span class="ident">index</span> <span class="op">-</span> <span class="kw-2">*</span><span class="ident">tail_index</span>);
+                <span class="kw">if let </span>Prop::Seq(index) = prop {
+                    <span class="kw">let </span>range = <span class="kw-2">*</span>tail_index..<span class="kw-2">*</span>tail_index + values.len();
+                    <span class="kw">if </span>tail_obj == <span class="kw-2">&amp;</span>obj &amp;&amp; range.contains(<span class="kw-2">&amp;</span>index) {
+                        values.remove(index - <span class="kw-2">*</span>tail_index);
                         <span class="kw">return</span>;
                     }
                 }
             }
-            <span class="kw">let</span> <span class="ident">path</span> <span class="op">=</span> <span class="ident">parents</span>.<span class="ident">path</span>();
-            <span class="kw">let</span> <span class="ident">patch</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">prop</span> {
-                <span class="ident">Prop::Map</span>(<span class="ident">key</span>) =&gt; <span class="ident">Patch::DeleteMap</span> { <span class="ident">path</span>, <span class="ident">obj</span>, <span class="ident">key</span> },
-                <span class="ident">Prop::Seq</span>(<span class="ident">index</span>) =&gt; <span class="ident">Patch::DeleteSeq</span> {
-                    <span class="ident">path</span>,
-                    <span class="ident">obj</span>,
-                    <span class="ident">index</span>,
-                    <span class="ident">length</span>: <span class="number">1</span>,
+            <span class="kw">let </span>path = parents.path();
+            <span class="kw">let </span>patch = <span class="kw">match </span>prop {
+                Prop::Map(key) =&gt; Patch::DeleteMap { path, obj, key },
+                Prop::Seq(index) =&gt; Patch::DeleteSeq {
+                    path,
+                    obj,
+                    index,
+                    length: <span class="number">1</span>,
                 },
             };
-            <span class="self">self</span>.<span class="ident">patches</span>.<span class="ident">push</span>(<span class="ident">patch</span>)
+            <span class="self">self</span>.patches.push(patch)
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">put</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="kw-2">mut</span> <span class="ident">parents</span>: <span class="ident">Parents</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>,
-        <span class="ident">obj</span>: <span class="ident">ObjId</span>,
-        <span class="ident">prop</span>: <span class="ident">Prop</span>,
-        <span class="ident">tagged_value</span>: (<span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>, <span class="ident">ObjId</span>),
-        <span class="ident">conflict</span>: <span class="ident">bool</span>,
+    <span class="kw">fn </span>put(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        <span class="kw-2">mut </span>parents: Parents&lt;<span class="lifetime">&#39;_</span>&gt;,
+        obj: ObjId,
+        prop: Prop,
+        tagged_value: (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ObjId),
+        conflict: bool,
     ) {
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">enabled</span> {
-            <span class="kw">let</span> <span class="ident">path</span> <span class="op">=</span> <span class="ident">parents</span>.<span class="ident">path</span>();
-            <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> (<span class="ident">tagged_value</span>.<span class="number">0</span>.<span class="ident">to_owned</span>(), <span class="ident">tagged_value</span>.<span class="number">1</span>);
-            <span class="kw">let</span> <span class="ident">patch</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">prop</span> {
-                <span class="ident">Prop::Map</span>(<span class="ident">key</span>) =&gt; <span class="ident">Patch::PutMap</span> {
-                    <span class="ident">path</span>,
-                    <span class="ident">obj</span>,
-                    <span class="ident">key</span>,
-                    <span class="ident">value</span>,
-                    <span class="ident">conflict</span>,
+        <span class="kw">if </span><span class="self">self</span>.enabled {
+            <span class="kw">let </span>path = parents.path();
+            <span class="kw">let </span>value = (tagged_value.<span class="number">0</span>.to_owned(), tagged_value.<span class="number">1</span>);
+            <span class="kw">let </span>patch = <span class="kw">match </span>prop {
+                Prop::Map(key) =&gt; Patch::PutMap {
+                    path,
+                    obj,
+                    key,
+                    value,
+                    conflict,
                 },
-                <span class="ident">Prop::Seq</span>(<span class="ident">index</span>) =&gt; <span class="ident">Patch::PutSeq</span> {
-                    <span class="ident">path</span>,
-                    <span class="ident">obj</span>,
-                    <span class="ident">index</span>,
-                    <span class="ident">value</span>,
-                    <span class="ident">conflict</span>,
+                Prop::Seq(index) =&gt; Patch::PutSeq {
+                    path,
+                    obj,
+                    index,
+                    value,
+                    conflict,
                 },
             };
-            <span class="self">self</span>.<span class="ident">patches</span>.<span class="ident">push</span>(<span class="ident">patch</span>);
+            <span class="self">self</span>.patches.push(patch);
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">increment</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="kw-2">mut</span> <span class="ident">parents</span>: <span class="ident">Parents</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>,
-        <span class="ident">obj</span>: <span class="ident">ObjId</span>,
-        <span class="ident">prop</span>: <span class="ident">Prop</span>,
-        <span class="ident">tagged_value</span>: (<span class="ident">i64</span>, <span class="ident">ObjId</span>),
+    <span class="kw">fn </span>increment(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        <span class="kw-2">mut </span>parents: Parents&lt;<span class="lifetime">&#39;_</span>&gt;,
+        obj: ObjId,
+        prop: Prop,
+        tagged_value: (i64, ObjId),
     ) {
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">enabled</span> {
-            <span class="kw">let</span> <span class="ident">path</span> <span class="op">=</span> <span class="ident">parents</span>.<span class="ident">path</span>();
-            <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="ident">tagged_value</span>.<span class="number">0</span>;
-            <span class="self">self</span>.<span class="ident">patches</span>.<span class="ident">push</span>(<span class="ident">Patch::Increment</span> {
-                <span class="ident">path</span>,
-                <span class="ident">obj</span>,
-                <span class="ident">prop</span>,
-                <span class="ident">value</span>,
+        <span class="kw">if </span><span class="self">self</span>.enabled {
+            <span class="kw">let </span>path = parents.path();
+            <span class="kw">let </span>value = tagged_value.<span class="number">0</span>;
+            <span class="self">self</span>.patches.push(Patch::Increment {
+                path,
+                obj,
+                prop,
+                value,
             })
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">merge</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;</span><span class="self">Self</span>) {
-        <span class="self">self</span>.<span class="ident">patches</span>.<span class="ident">extend_from_slice</span>(<span class="ident">other</span>.<span class="ident">patches</span>.<span class="ident">as_slice</span>())
+    <span class="kw">fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>) {
+        <span class="self">self</span>.patches.extend_from_slice(other.patches.as_slice())
     }
 
-    <span class="kw">fn</span> <span class="ident">branch</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">Observer</span> {
-            <span class="ident">patches</span>: <span class="macro">vec!</span>[],
-            <span class="ident">enabled</span>: <span class="self">self</span>.<span class="ident">enabled</span>,
+    <span class="kw">fn </span>branch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
+        Observer {
+            patches: <span class="macro">vec!</span>[],
+            enabled: <span class="self">self</span>.enabled,
         }
     }
 }
 
-<span class="kw">fn</span> <span class="ident">prop_to_js</span>(<span class="ident">p</span>: <span class="kw-2">&amp;</span><span class="ident">Prop</span>) -&gt; <span class="ident">JsValue</span> {
-    <span class="kw">match</span> <span class="ident">p</span> {
-        <span class="ident">Prop::Map</span>(<span class="ident">key</span>) =&gt; <span class="ident">JsValue::from_str</span>(<span class="ident">key</span>),
-        <span class="ident">Prop::Seq</span>(<span class="ident">index</span>) =&gt; <span class="ident">JsValue::from_f64</span>(<span class="kw-2">*</span><span class="ident">index</span> <span class="kw">as</span> <span class="ident">f64</span>),
+<span class="kw">fn </span>prop_to_js(p: <span class="kw-2">&amp;</span>Prop) -&gt; JsValue {
+    <span class="kw">match </span>p {
+        Prop::Map(key) =&gt; JsValue::from_str(key),
+        Prop::Seq(index) =&gt; JsValue::from_f64(<span class="kw-2">*</span>index <span class="kw">as </span>f64),
     }
 }
 
-<span class="kw">fn</span> <span class="ident">export_path</span>(<span class="ident">path</span>: <span class="kw-2">&amp;</span>[(<span class="ident">ObjId</span>, <span class="ident">Prop</span>)], <span class="ident">end</span>: <span class="kw-2">&amp;</span><span class="ident">Prop</span>) -&gt; <span class="ident">Array</span> {
-    <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Array::new</span>();
-    <span class="kw">for</span> <span class="ident">p</span> <span class="kw">in</span> <span class="ident">path</span> {
-        <span class="ident">result</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">prop_to_js</span>(<span class="kw-2">&amp;</span><span class="ident">p</span>.<span class="number">1</span>));
+<span class="kw">fn </span>export_path(path: <span class="kw-2">&amp;</span>[(ObjId, Prop)], end: <span class="kw-2">&amp;</span>Prop) -&gt; Array {
+    <span class="kw">let </span>result = Array::new();
+    <span class="kw">for </span>p <span class="kw">in </span>path {
+        result.push(<span class="kw-2">&amp;</span>prop_to_js(<span class="kw-2">&amp;</span>p.<span class="number">1</span>));
     }
-    <span class="ident">result</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">prop_to_js</span>(<span class="ident">end</span>));
-    <span class="ident">result</span>
+    result.push(<span class="kw-2">&amp;</span>prop_to_js(end));
+    result
 }
 
-<span class="kw">impl</span> <span class="ident">Patch</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">path</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[(<span class="ident">ObjId</span>, <span class="ident">Prop</span>)] {
-        <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="self">self</span> {
-            <span class="ident"><span class="self">Self</span>::PutMap</span> { <span class="ident">path</span>, .. } =&gt; <span class="ident">path</span>.<span class="ident">as_slice</span>(),
-            <span class="ident"><span class="self">Self</span>::PutSeq</span> { <span class="ident">path</span>, .. } =&gt; <span class="ident">path</span>.<span class="ident">as_slice</span>(),
-            <span class="ident"><span class="self">Self</span>::Increment</span> { <span class="ident">path</span>, .. } =&gt; <span class="ident">path</span>.<span class="ident">as_slice</span>(),
-            <span class="ident"><span class="self">Self</span>::Insert</span> { <span class="ident">path</span>, .. } =&gt; <span class="ident">path</span>.<span class="ident">as_slice</span>(),
-            <span class="ident"><span class="self">Self</span>::DeleteMap</span> { <span class="ident">path</span>, .. } =&gt; <span class="ident">path</span>.<span class="ident">as_slice</span>(),
-            <span class="ident"><span class="self">Self</span>::DeleteSeq</span> { <span class="ident">path</span>, .. } =&gt; <span class="ident">path</span>.<span class="ident">as_slice</span>(),
+<span class="kw">impl </span>Patch {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>path(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[(ObjId, Prop)] {
+        <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self </span>{
+            <span class="self">Self</span>::PutMap { path, .. } =&gt; path.as_slice(),
+            <span class="self">Self</span>::PutSeq { path, .. } =&gt; path.as_slice(),
+            <span class="self">Self</span>::Increment { path, .. } =&gt; path.as_slice(),
+            <span class="self">Self</span>::Insert { path, .. } =&gt; path.as_slice(),
+            <span class="self">Self</span>::DeleteMap { path, .. } =&gt; path.as_slice(),
+            <span class="self">Self</span>::DeleteSeq { path, .. } =&gt; path.as_slice(),
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">obj</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">ObjId</span> {
-        <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="self">self</span> {
-            <span class="ident"><span class="self">Self</span>::PutMap</span> { <span class="ident">obj</span>, .. } =&gt; <span class="ident">obj</span>,
-            <span class="ident"><span class="self">Self</span>::PutSeq</span> { <span class="ident">obj</span>, .. } =&gt; <span class="ident">obj</span>,
-            <span class="ident"><span class="self">Self</span>::Increment</span> { <span class="ident">obj</span>, .. } =&gt; <span class="ident">obj</span>,
-            <span class="ident"><span class="self">Self</span>::Insert</span> { <span class="ident">obj</span>, .. } =&gt; <span class="ident">obj</span>,
-            <span class="ident"><span class="self">Self</span>::DeleteMap</span> { <span class="ident">obj</span>, .. } =&gt; <span class="ident">obj</span>,
-            <span class="ident"><span class="self">Self</span>::DeleteSeq</span> { <span class="ident">obj</span>, .. } =&gt; <span class="ident">obj</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>obj(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>ObjId {
+        <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self </span>{
+            <span class="self">Self</span>::PutMap { obj, .. } =&gt; obj,
+            <span class="self">Self</span>::PutSeq { obj, .. } =&gt; obj,
+            <span class="self">Self</span>::Increment { obj, .. } =&gt; obj,
+            <span class="self">Self</span>::Insert { obj, .. } =&gt; obj,
+            <span class="self">Self</span>::DeleteMap { obj, .. } =&gt; obj,
+            <span class="self">Self</span>::DeleteSeq { obj, .. } =&gt; obj,
         }
     }
 }
 
-<span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span><span class="ident">Patch</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">JsValue</span> {
-    <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">JsValue</span>;
+<span class="kw">impl </span>TryFrom&lt;Patch&gt; <span class="kw">for </span>JsValue {
+    <span class="kw">type </span>Error = JsValue;
 
-    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">p</span>: <span class="ident">Patch</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Object::new</span>();
-        <span class="kw">match</span> <span class="ident">p</span> {
-            <span class="ident">Patch::PutMap</span> {
-                <span class="ident">path</span>,
-                <span class="ident">key</span>,
-                <span class="ident">value</span>,
-                <span class="ident">conflict</span>,
+    <span class="kw">fn </span>try_from(p: Patch) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, <span class="self">Self</span>::Error&gt; {
+        <span class="kw">let </span>result = Object::new();
+        <span class="kw">match </span>p {
+            Patch::PutMap {
+                path,
+                key,
+                value,
+                conflict,
                 ..
             } =&gt; {
-                <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="string">&quot;action&quot;</span>, <span class="string">&quot;put&quot;</span>)<span class="question-mark">?</span>;
-                <span class="ident">js_set</span>(
-                    <span class="kw-2">&amp;</span><span class="ident">result</span>,
+                js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;action&quot;</span>, <span class="string">&quot;put&quot;</span>)<span class="question-mark">?</span>;
+                js_set(
+                    <span class="kw-2">&amp;</span>result,
                     <span class="string">&quot;path&quot;</span>,
-                    <span class="ident">export_path</span>(<span class="ident">path</span>.<span class="ident">as_slice</span>(), <span class="kw-2">&amp;</span><span class="ident">Prop::Map</span>(<span class="ident">key</span>)),
+                    export_path(path.as_slice(), <span class="kw-2">&amp;</span>Prop::Map(key)),
                 )<span class="question-mark">?</span>;
-                <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="string">&quot;value&quot;</span>, <span class="ident">alloc</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>.<span class="number">0</span>).<span class="number">1</span>)<span class="question-mark">?</span>;
-                <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="string">&quot;conflict&quot;</span>, <span class="kw-2">&amp;</span><span class="ident">JsValue::from_bool</span>(<span class="ident">conflict</span>))<span class="question-mark">?</span>;
-                <span class="prelude-val">Ok</span>(<span class="ident">result</span>.<span class="ident">into</span>())
+                js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;value&quot;</span>, alloc(<span class="kw-2">&amp;</span>value.<span class="number">0</span>).<span class="number">1</span>)<span class="question-mark">?</span>;
+                js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;conflict&quot;</span>, <span class="kw-2">&amp;</span>JsValue::from_bool(conflict))<span class="question-mark">?</span>;
+                <span class="prelude-val">Ok</span>(result.into())
             }
-            <span class="ident">Patch::PutSeq</span> {
-                <span class="ident">path</span>,
-                <span class="ident">index</span>,
-                <span class="ident">value</span>,
-                <span class="ident">conflict</span>,
+            Patch::PutSeq {
+                path,
+                index,
+                value,
+                conflict,
                 ..
             } =&gt; {
-                <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="string">&quot;action&quot;</span>, <span class="string">&quot;put&quot;</span>)<span class="question-mark">?</span>;
-                <span class="ident">js_set</span>(
-                    <span class="kw-2">&amp;</span><span class="ident">result</span>,
+                js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;action&quot;</span>, <span class="string">&quot;put&quot;</span>)<span class="question-mark">?</span>;
+                js_set(
+                    <span class="kw-2">&amp;</span>result,
                     <span class="string">&quot;path&quot;</span>,
-                    <span class="ident">export_path</span>(<span class="ident">path</span>.<span class="ident">as_slice</span>(), <span class="kw-2">&amp;</span><span class="ident">Prop::Seq</span>(<span class="ident">index</span>)),
+                    export_path(path.as_slice(), <span class="kw-2">&amp;</span>Prop::Seq(index)),
                 )<span class="question-mark">?</span>;
-                <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="string">&quot;value&quot;</span>, <span class="ident">alloc</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>.<span class="number">0</span>).<span class="number">1</span>)<span class="question-mark">?</span>;
-                <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="string">&quot;conflict&quot;</span>, <span class="kw-2">&amp;</span><span class="ident">JsValue::from_bool</span>(<span class="ident">conflict</span>))<span class="question-mark">?</span>;
-                <span class="prelude-val">Ok</span>(<span class="ident">result</span>.<span class="ident">into</span>())
+                js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;value&quot;</span>, alloc(<span class="kw-2">&amp;</span>value.<span class="number">0</span>).<span class="number">1</span>)<span class="question-mark">?</span>;
+                js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;conflict&quot;</span>, <span class="kw-2">&amp;</span>JsValue::from_bool(conflict))<span class="question-mark">?</span>;
+                <span class="prelude-val">Ok</span>(result.into())
             }
-            <span class="ident">Patch::Insert</span> {
-                <span class="ident">path</span>,
-                <span class="ident">index</span>,
-                <span class="ident">values</span>,
+            Patch::Insert {
+                path,
+                index,
+                values,
                 ..
             } =&gt; {
-                <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="string">&quot;action&quot;</span>, <span class="string">&quot;splice&quot;</span>)<span class="question-mark">?</span>;
-                <span class="ident">js_set</span>(
-                    <span class="kw-2">&amp;</span><span class="ident">result</span>,
+                js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;action&quot;</span>, <span class="string">&quot;splice&quot;</span>)<span class="question-mark">?</span>;
+                js_set(
+                    <span class="kw-2">&amp;</span>result,
                     <span class="string">&quot;path&quot;</span>,
-                    <span class="ident">export_path</span>(<span class="ident">path</span>.<span class="ident">as_slice</span>(), <span class="kw-2">&amp;</span><span class="ident">Prop::Seq</span>(<span class="ident">index</span>)),
+                    export_path(path.as_slice(), <span class="kw-2">&amp;</span>Prop::Seq(index)),
                 )<span class="question-mark">?</span>;
-                <span class="ident">js_set</span>(
-                    <span class="kw-2">&amp;</span><span class="ident">result</span>,
+                js_set(
+                    <span class="kw-2">&amp;</span>result,
                     <span class="string">&quot;values&quot;</span>,
-                    <span class="ident">values</span>.<span class="ident">iter</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">v</span><span class="op">|</span> <span class="ident">alloc</span>(<span class="kw-2">&amp;</span><span class="ident">v</span>.<span class="number">0</span>).<span class="number">1</span>).<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Array</span><span class="op">&gt;</span>(),
+                    values.iter().map(|v| alloc(<span class="kw-2">&amp;</span>v.<span class="number">0</span>).<span class="number">1</span>).collect::&lt;Array&gt;(),
                 )<span class="question-mark">?</span>;
-                <span class="prelude-val">Ok</span>(<span class="ident">result</span>.<span class="ident">into</span>())
+                <span class="prelude-val">Ok</span>(result.into())
             }
-            <span class="ident">Patch::Increment</span> {
-                <span class="ident">path</span>, <span class="ident">prop</span>, <span class="ident">value</span>, ..
+            Patch::Increment {
+                path, prop, value, ..
             } =&gt; {
-                <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="string">&quot;action&quot;</span>, <span class="string">&quot;inc&quot;</span>)<span class="question-mark">?</span>;
-                <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="string">&quot;path&quot;</span>, <span class="ident">export_path</span>(<span class="ident">path</span>.<span class="ident">as_slice</span>(), <span class="kw-2">&amp;</span><span class="ident">prop</span>))<span class="question-mark">?</span>;
-                <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="string">&quot;value&quot;</span>, <span class="kw-2">&amp;</span><span class="ident">JsValue::from_f64</span>(<span class="ident">value</span> <span class="kw">as</span> <span class="ident">f64</span>))<span class="question-mark">?</span>;
-                <span class="prelude-val">Ok</span>(<span class="ident">result</span>.<span class="ident">into</span>())
+                js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;action&quot;</span>, <span class="string">&quot;inc&quot;</span>)<span class="question-mark">?</span>;
+                js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;path&quot;</span>, export_path(path.as_slice(), <span class="kw-2">&amp;</span>prop))<span class="question-mark">?</span>;
+                js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;value&quot;</span>, <span class="kw-2">&amp;</span>JsValue::from_f64(value <span class="kw">as </span>f64))<span class="question-mark">?</span>;
+                <span class="prelude-val">Ok</span>(result.into())
             }
-            <span class="ident">Patch::DeleteMap</span> { <span class="ident">path</span>, <span class="ident">key</span>, .. } =&gt; {
-                <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="string">&quot;action&quot;</span>, <span class="string">&quot;del&quot;</span>)<span class="question-mark">?</span>;
-                <span class="ident">js_set</span>(
-                    <span class="kw-2">&amp;</span><span class="ident">result</span>,
+            Patch::DeleteMap { path, key, .. } =&gt; {
+                js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;action&quot;</span>, <span class="string">&quot;del&quot;</span>)<span class="question-mark">?</span>;
+                js_set(
+                    <span class="kw-2">&amp;</span>result,
                     <span class="string">&quot;path&quot;</span>,
-                    <span class="ident">export_path</span>(<span class="ident">path</span>.<span class="ident">as_slice</span>(), <span class="kw-2">&amp;</span><span class="ident">Prop::Map</span>(<span class="ident">key</span>)),
+                    export_path(path.as_slice(), <span class="kw-2">&amp;</span>Prop::Map(key)),
                 )<span class="question-mark">?</span>;
-                <span class="prelude-val">Ok</span>(<span class="ident">result</span>.<span class="ident">into</span>())
+                <span class="prelude-val">Ok</span>(result.into())
             }
-            <span class="ident">Patch::DeleteSeq</span> {
-                <span class="ident">path</span>,
-                <span class="ident">index</span>,
-                <span class="ident">length</span>,
+            Patch::DeleteSeq {
+                path,
+                index,
+                length,
                 ..
             } =&gt; {
-                <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="string">&quot;action&quot;</span>, <span class="string">&quot;del&quot;</span>)<span class="question-mark">?</span>;
-                <span class="ident">js_set</span>(
-                    <span class="kw-2">&amp;</span><span class="ident">result</span>,
+                js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;action&quot;</span>, <span class="string">&quot;del&quot;</span>)<span class="question-mark">?</span>;
+                js_set(
+                    <span class="kw-2">&amp;</span>result,
                     <span class="string">&quot;path&quot;</span>,
-                    <span class="ident">export_path</span>(<span class="ident">path</span>.<span class="ident">as_slice</span>(), <span class="kw-2">&amp;</span><span class="ident">Prop::Seq</span>(<span class="ident">index</span>)),
+                    export_path(path.as_slice(), <span class="kw-2">&amp;</span>Prop::Seq(index)),
                 )<span class="question-mark">?</span>;
-                <span class="kw">if</span> <span class="ident">length</span> <span class="op">&gt;</span> <span class="number">1</span> {
-                    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">result</span>, <span class="string">&quot;length&quot;</span>, <span class="ident">length</span>)<span class="question-mark">?</span>;
+                <span class="kw">if </span>length &gt; <span class="number">1 </span>{
+                    js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;length&quot;</span>, length)<span class="question-mark">?</span>;
                 }
-                <span class="prelude-val">Ok</span>(<span class="ident">result</span>.<span class="ident">into</span>())
+                <span class="prelude-val">Ok</span>(result.into())
             }
         }
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge_wasm" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge_wasm" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

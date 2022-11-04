@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/types/opids.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>opids.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/types/opids.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>opids.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -197,202 +197,202 @@
 <span id="195">195</span>
 <span id="196">196</span>
 <span id="197">197</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">itertools::Itertools</span>;
+</pre><pre class="rust"><code><span class="kw">use </span>itertools::Itertools;
 
-<span class="kw">use</span> <span class="ident"><span class="kw">super</span>::OpId</span>;
+<span class="kw">use </span><span class="kw">super</span>::OpId;
 
-<span class="doccomment">/// A wrapper around `Vec&lt;Opid&gt;` which preserves the invariant that the ops are</span>
-<span class="doccomment">/// in ascending order with respect to their counters and actor IDs. In order to</span>
-<span class="doccomment">/// maintain this invariant you must provide a comparator function when adding</span>
-<span class="doccomment">/// ops as the actor indices in an  OpId are not sufficient to order the OpIds</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>, <span class="ident">Default</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">OpIds</span>(<span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">OpId</span><span class="op">&gt;</span>);
+<span class="doccomment">/// A wrapper around `Vec&lt;Opid&gt;` which preserves the invariant that the ops are
+/// in ascending order with respect to their counters and actor IDs. In order to
+/// maintain this invariant you must provide a comparator function when adding
+/// ops as the actor indices in an  OpId are not sufficient to order the OpIds
+</span><span class="attribute">#[derive(Debug, Clone, PartialEq, Default)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpIds(Vec&lt;OpId&gt;);
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">IntoIterator</span> <span class="kw">for</span> <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">OpIds</span> {
-    <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">OpId</span>;
-    <span class="kw">type</span> <span class="ident">IntoIter</span> <span class="op">=</span> <span class="ident">std::slice::Iter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">OpId</span><span class="op">&gt;</span>;
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; IntoIterator <span class="kw">for </span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpIds {
+    <span class="kw">type </span>Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpId;
+    <span class="kw">type </span>IntoIter = std::slice::Iter&lt;<span class="lifetime">&#39;a</span>, OpId&gt;;
 
-    <span class="kw">fn</span> <span class="ident">into_iter</span>(<span class="self">self</span>) -&gt; <span class="ident"><span class="self">Self</span>::IntoIter</span> {
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">iter</span>()
+    <span class="kw">fn </span>into_iter(<span class="self">self</span>) -&gt; <span class="self">Self</span>::IntoIter {
+        <span class="self">self</span>.<span class="number">0</span>.iter()
     }
 }
 
-<span class="kw">impl</span> <span class="ident">OpIds</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">empty</span>() -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span>(<span class="ident">Vec::new</span>())
+<span class="kw">impl </span>OpIds {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>empty() -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>(Vec::new())
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span><span class="op">&lt;</span><span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">OpId</span><span class="op">&gt;</span>, <span class="ident">F</span>: <span class="ident">Fn</span>(<span class="kw-2">&amp;</span><span class="ident">OpId</span>, <span class="kw-2">&amp;</span><span class="ident">OpId</span>) -&gt; <span class="ident">std::cmp::Ordering</span><span class="op">&gt;</span>(
-        <span class="ident">opids</span>: <span class="ident">I</span>,
-        <span class="ident">cmp</span>: <span class="ident">F</span>,
-    ) -&gt; <span class="self">Self</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">inner</span> <span class="op">=</span> <span class="ident">opids</span>.<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
-        <span class="ident">inner</span>.<span class="ident">sort_by</span>(<span class="ident">cmp</span>);
-        <span class="self">Self</span>(<span class="ident">inner</span>)
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new&lt;I: Iterator&lt;Item = OpId&gt;, F: Fn(<span class="kw-2">&amp;</span>OpId, <span class="kw-2">&amp;</span>OpId) -&gt; std::cmp::Ordering&gt;(
+        opids: I,
+        cmp: F,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span><span class="kw-2">mut </span>inner = opids.collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+        inner.sort_by(cmp);
+        <span class="self">Self</span>(inner)
     }
 
-    <span class="doccomment">/// Create a new OpIds if `opids` are sorted with respect to `cmp` and contain no duplicates.</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// Returns `Some(OpIds)` if `opids` is sorted and has no duplicates, otherwise returns `None`</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new_if_sorted</span><span class="op">&lt;</span><span class="ident">F</span>: <span class="ident">Fn</span>(<span class="kw-2">&amp;</span><span class="ident">OpId</span>, <span class="kw-2">&amp;</span><span class="ident">OpId</span>) -&gt; <span class="ident">std::cmp::Ordering</span><span class="op">&gt;</span>(
-        <span class="ident">opids</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">OpId</span><span class="op">&gt;</span>,
-        <span class="ident">cmp</span>: <span class="ident">F</span>,
-    ) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="self">Self</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="ident">are_sorted_and_unique</span>(<span class="ident">opids</span>.<span class="ident">iter</span>(), <span class="ident">cmp</span>) {
-            <span class="prelude-val">Some</span>(<span class="self">Self</span>(<span class="ident">opids</span>))
-        } <span class="kw">else</span> {
-            <span class="prelude-val">None</span>
-        }
+    <span class="doccomment">/// Create a new OpIds if `opids` are sorted with respect to `cmp` and contain no duplicates.
+    ///
+    /// Returns `Some(OpIds)` if `opids` is sorted and has no duplicates, otherwise returns `None`
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new_if_sorted&lt;F: Fn(<span class="kw-2">&amp;</span>OpId, <span class="kw-2">&amp;</span>OpId) -&gt; std::cmp::Ordering&gt;(
+        opids: Vec&lt;OpId&gt;,
+        cmp: F,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt; {
+        <span class="kw">if </span>are_sorted_and_unique(opids.iter(), cmp) {
+            <span class="prelude-val">Some</span>(<span class="self">Self</span>(opids))
+        } <span class="kw">else </span>{
+            <span class="prelude-val">None
+        </span>}
     }
 
-    <span class="doccomment">/// Add an op to this set of OpIds. The `comparator` must provide a</span>
-    <span class="doccomment">/// consistent ordering between successive calls to `add`.</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">add</span><span class="op">&lt;</span><span class="ident">F</span>: <span class="ident">Fn</span>(<span class="kw-2">&amp;</span><span class="ident">OpId</span>, <span class="kw-2">&amp;</span><span class="ident">OpId</span>) -&gt; <span class="ident">std::cmp::Ordering</span><span class="op">&gt;</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">opid</span>: <span class="ident">OpId</span>,
-        <span class="ident">comparator</span>: <span class="ident">F</span>,
+    <span class="doccomment">/// Add an op to this set of OpIds. The `comparator` must provide a
+    /// consistent ordering between successive calls to `add`.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add&lt;F: Fn(<span class="kw-2">&amp;</span>OpId, <span class="kw-2">&amp;</span>OpId) -&gt; std::cmp::Ordering&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        opid: OpId,
+        comparator: F,
     ) {
-        <span class="kw">use</span> <span class="ident">std::cmp::Ordering</span>::<span class="kw-2">*</span>;
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">is_empty</span>() {
-            <span class="self">self</span>.<span class="number">0</span>.<span class="ident">push</span>(<span class="ident">opid</span>);
+        <span class="kw">use </span>std::cmp::Ordering::<span class="kw-2">*</span>;
+        <span class="kw">if </span><span class="self">self</span>.is_empty() {
+            <span class="self">self</span>.<span class="number">0</span>.push(opid);
             <span class="kw">return</span>;
         }
-        <span class="kw">let</span> <span class="ident">idx_and_elem</span> <span class="op">=</span> <span class="self">self</span>
-            .<span class="number">0</span>
-            .<span class="ident">iter</span>()
-            .<span class="ident">find_position</span>(<span class="op">|</span><span class="ident">an_opid</span><span class="op">|</span> <span class="macro">matches!</span>(<span class="ident">comparator</span>(<span class="ident">an_opid</span>, <span class="kw-2">&amp;</span><span class="ident">opid</span>), <span class="ident">Greater</span> <span class="op">|</span> <span class="ident">Equal</span>));
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>((<span class="ident">idx</span>, <span class="ident">an_opid</span>)) <span class="op">=</span> <span class="ident">idx_and_elem</span> {
-            <span class="kw">if</span> <span class="ident">comparator</span>(<span class="ident">an_opid</span>, <span class="kw-2">&amp;</span><span class="ident">opid</span>) <span class="op">==</span> <span class="ident">Equal</span> {
-                <span class="comment">// nothing to do</span>
-            } <span class="kw">else</span> {
-                <span class="self">self</span>.<span class="number">0</span>.<span class="ident">insert</span>(<span class="ident">idx</span>, <span class="ident">opid</span>);
+        <span class="kw">let </span>idx_and_elem = <span class="self">self
+            </span>.<span class="number">0
+            </span>.iter()
+            .find_position(|an_opid| <span class="macro">matches!</span>(comparator(an_opid, <span class="kw-2">&amp;</span>opid), Greater | Equal));
+        <span class="kw">if let </span><span class="prelude-val">Some</span>((idx, an_opid)) = idx_and_elem {
+            <span class="kw">if </span>comparator(an_opid, <span class="kw-2">&amp;</span>opid) == Equal {
+                <span class="comment">// nothing to do
+            </span>} <span class="kw">else </span>{
+                <span class="self">self</span>.<span class="number">0</span>.insert(idx, opid);
             }
-        } <span class="kw">else</span> {
-            <span class="self">self</span>.<span class="number">0</span>.<span class="ident">push</span>(<span class="ident">opid</span>);
+        } <span class="kw">else </span>{
+            <span class="self">self</span>.<span class="number">0</span>.push(opid);
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">retain</span><span class="op">&lt;</span><span class="ident">F</span>: <span class="ident">Fn</span>(<span class="kw-2">&amp;</span><span class="ident">OpId</span>) -&gt; <span class="ident">bool</span><span class="op">&gt;</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">f</span>: <span class="ident">F</span>) {
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">retain</span>(<span class="ident">f</span>)
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>retain&lt;F: Fn(<span class="kw-2">&amp;</span>OpId) -&gt; bool&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, f: F) {
+        <span class="self">self</span>.<span class="number">0</span>.retain(f)
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">is_empty</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">is_empty</span>()
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>is_empty(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="self">self</span>.<span class="number">0</span>.is_empty()
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">len</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">len</span>()
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.<span class="number">0</span>.len()
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">iter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">std::slice::Iter</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">OpId</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">iter</span>()
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>iter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; std::slice::Iter&lt;<span class="lifetime">&#39;_</span>, OpId&gt; {
+        <span class="self">self</span>.<span class="number">0</span>.iter()
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">contains</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">op</span>: <span class="kw-2">&amp;</span><span class="ident">OpId</span>) -&gt; <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">contains</span>(<span class="ident">op</span>)
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>contains(<span class="kw-2">&amp;</span><span class="self">self</span>, op: <span class="kw-2">&amp;</span>OpId) -&gt; bool {
+        <span class="self">self</span>.<span class="number">0</span>.contains(op)
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">get</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">idx</span>: <span class="ident">usize</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">OpId</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">get</span>(<span class="ident">idx</span>)
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>get(<span class="kw-2">&amp;</span><span class="self">self</span>, idx: usize) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>OpId&gt; {
+        <span class="self">self</span>.<span class="number">0</span>.get(idx)
     }
 }
 
-<span class="kw">fn</span> <span class="ident">are_sorted_and_unique</span><span class="op">&lt;</span>
+<span class="kw">fn </span>are_sorted_and_unique&lt;
     <span class="lifetime">&#39;a</span>,
-    <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">OpId</span><span class="op">&gt;</span>,
-    <span class="ident">F</span>: <span class="ident">FnMut</span>(<span class="kw-2">&amp;</span><span class="ident">OpId</span>, <span class="kw-2">&amp;</span><span class="ident">OpId</span>) -&gt; <span class="ident">std::cmp::Ordering</span>,
-<span class="op">&gt;</span>(
-    <span class="kw-2">mut</span> <span class="ident">opids</span>: <span class="ident">I</span>,
-    <span class="kw-2">mut</span> <span class="ident">f</span>: <span class="ident">F</span>,
-) -&gt; <span class="ident">bool</span> {
-    <span class="kw">use</span> <span class="ident">std::cmp::Ordering</span>;
-    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">last</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">opids</span>.<span class="ident">next</span>() {
-        <span class="prelude-val">Some</span>(<span class="ident">e</span>) =&gt; <span class="ident">e</span>,
-        <span class="prelude-val">None</span> =&gt; <span class="kw">return</span> <span class="bool-val">true</span>,
+    I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpId&gt;,
+    F: FnMut(<span class="kw-2">&amp;</span>OpId, <span class="kw-2">&amp;</span>OpId) -&gt; std::cmp::Ordering,
+&gt;(
+    <span class="kw-2">mut </span>opids: I,
+    <span class="kw-2">mut </span>f: F,
+) -&gt; bool {
+    <span class="kw">use </span>std::cmp::Ordering;
+    <span class="kw">let </span><span class="kw-2">mut </span>last = <span class="kw">match </span>opids.next() {
+        <span class="prelude-val">Some</span>(e) =&gt; e,
+        <span class="prelude-val">None </span>=&gt; <span class="kw">return </span><span class="bool-val">true</span>,
     };
 
-    <span class="kw">for</span> <span class="ident">next</span> <span class="kw">in</span> <span class="ident">opids</span> {
-        <span class="kw">if</span> <span class="macro">matches!</span>(<span class="ident">f</span>(<span class="ident">last</span>, <span class="ident">next</span>), <span class="ident">Ordering::Greater</span> <span class="op">|</span> <span class="ident">Ordering::Equal</span>) {
-            <span class="kw">return</span> <span class="bool-val">false</span>;
+    <span class="kw">for </span>next <span class="kw">in </span>opids {
+        <span class="kw">if </span><span class="macro">matches!</span>(f(last, next), Ordering::Greater | Ordering::Equal) {
+            <span class="kw">return </span><span class="bool-val">false</span>;
         }
-        <span class="ident">last</span> <span class="op">=</span> <span class="ident">next</span>;
+        last = next;
     }
-    <span class="bool-val">true</span>
-}
+    <span class="bool-val">true
+</span>}
 
-<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
-<span class="kw">mod</span> <span class="ident">tests</span> {
-    <span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">OpId</span>, <span class="ident">OpIds</span>};
-    <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::ActorId</span>;
-    <span class="kw">use</span> <span class="ident">proptest::prelude</span>::<span class="kw-2">*</span>;
+<span class="attribute">#[cfg(test)]
+</span><span class="kw">mod </span>tests {
+    <span class="kw">use super</span>::{OpId, OpIds};
+    <span class="kw">use </span><span class="kw">crate</span>::ActorId;
+    <span class="kw">use </span>proptest::prelude::<span class="kw-2">*</span>;
 
-    <span class="kw">fn</span> <span class="ident">gen_opid</span>(<span class="ident">actors</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ActorId</span><span class="op">&gt;</span>) -&gt; <span class="kw">impl</span> <span class="ident">Strategy</span><span class="op">&lt;</span><span class="ident">Value</span> <span class="op">=</span> <span class="ident">OpId</span><span class="op">&gt;</span> {
-        (<span class="number">0</span>..<span class="ident">actors</span>.<span class="ident">len</span>()).<span class="ident">prop_flat_map</span>(<span class="op">|</span><span class="ident">actor_idx</span><span class="op">|</span> {
-            (<span class="ident">Just</span>(<span class="ident">actor_idx</span>), <span class="number">0</span>..<span class="ident">u64::MAX</span>).<span class="ident">prop_map</span>(<span class="op">|</span>(<span class="ident">actor_idx</span>, <span class="ident">counter</span>)<span class="op">|</span> <span class="ident">OpId</span>(<span class="ident">counter</span>, <span class="ident">actor_idx</span>))
+    <span class="kw">fn </span>gen_opid(actors: Vec&lt;ActorId&gt;) -&gt; <span class="kw">impl </span>Strategy&lt;Value = OpId&gt; {
+        (<span class="number">0</span>..actors.len()).prop_flat_map(|actor_idx| {
+            (Just(actor_idx), <span class="number">0</span>..u64::MAX).prop_map(|(actor_idx, counter)| OpId(counter, actor_idx))
         })
     }
 
-    <span class="kw">fn</span> <span class="ident">scenario</span>(<span class="ident">size</span>: <span class="ident">std::ops::Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>) -&gt; <span class="kw">impl</span> <span class="ident">Strategy</span><span class="op">&lt;</span><span class="ident">Value</span> <span class="op">=</span> (<span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ActorId</span><span class="op">&gt;</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">OpId</span><span class="op">&gt;</span>)<span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">actors</span> <span class="op">=</span> <span class="macro">vec!</span>[
-            <span class="string">&quot;aaaa&quot;</span>.<span class="ident">try_into</span>().<span class="ident">unwrap</span>(),
-            <span class="string">&quot;cccc&quot;</span>.<span class="ident">try_into</span>().<span class="ident">unwrap</span>(),
-            <span class="string">&quot;bbbb&quot;</span>.<span class="ident">try_into</span>().<span class="ident">unwrap</span>(),
+    <span class="kw">fn </span>scenario(size: std::ops::Range&lt;usize&gt;) -&gt; <span class="kw">impl </span>Strategy&lt;Value = (Vec&lt;ActorId&gt;, Vec&lt;OpId&gt;)&gt; {
+        <span class="kw">let </span>actors = <span class="macro">vec!</span>[
+            <span class="string">&quot;aaaa&quot;</span>.try_into().unwrap(),
+            <span class="string">&quot;cccc&quot;</span>.try_into().unwrap(),
+            <span class="string">&quot;bbbb&quot;</span>.try_into().unwrap(),
         ];
-        <span class="ident">proptest::collection::vec</span>(<span class="ident">gen_opid</span>(<span class="ident">actors</span>.<span class="ident">clone</span>()), <span class="ident">size</span>)
-            .<span class="ident">prop_map</span>(<span class="kw">move</span> <span class="op">|</span><span class="ident">opids</span><span class="op">|</span> (<span class="ident">actors</span>.<span class="ident">clone</span>(), <span class="ident">opids</span>))
+        proptest::collection::vec(gen_opid(actors.clone()), size)
+            .prop_map(<span class="kw">move </span>|opids| (actors.clone(), opids))
     }
 
-    <span class="kw">fn</span> <span class="ident">duplicate_unsorted_scenario</span>() -&gt; <span class="kw">impl</span> <span class="ident">Strategy</span><span class="op">&lt;</span><span class="ident">Value</span> <span class="op">=</span> (<span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ActorId</span><span class="op">&gt;</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">OpId</span><span class="op">&gt;</span>)<span class="op">&gt;</span> {
-        <span class="ident">scenario</span>(<span class="number">1</span>..<span class="number">100</span>).<span class="ident">prop_map</span>(<span class="op">|</span>(<span class="ident">actors</span>, <span class="kw-2">mut</span> <span class="ident">opids</span>)<span class="op">|</span> {
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">sorted_opids</span> <span class="op">=</span> <span class="ident">opids</span>.<span class="ident">clone</span>();
-            <span class="ident">sorted_opids</span>.<span class="ident">sort_by</span>(<span class="op">|</span><span class="ident">left</span>, <span class="ident">right</span><span class="op">|</span> <span class="ident">cmp</span>(<span class="kw-2">&amp;</span><span class="ident">actors</span>, <span class="ident">left</span>, <span class="ident">right</span>));
-            <span class="ident">sorted_opids</span>.<span class="ident">dedup</span>();
-            <span class="comment">// Unwrap is okay due to the size we pass to `scenario()`</span>
-            <span class="kw">let</span> <span class="ident">last</span> <span class="op">=</span> <span class="kw-2">*</span><span class="ident">sorted_opids</span>.<span class="ident">last</span>().<span class="ident">unwrap</span>();
-            <span class="kw">if</span> <span class="ident">sorted_opids</span> <span class="op">==</span> <span class="ident">opids</span> {
-                <span class="comment">// Opids are sorted and deduplicated, just copy the last opid and insert it at the</span>
-                <span class="comment">// front</span>
-                <span class="ident">opids</span>.<span class="ident">insert</span>(<span class="number">0</span>, <span class="ident">last</span>);
+    <span class="kw">fn </span>duplicate_unsorted_scenario() -&gt; <span class="kw">impl </span>Strategy&lt;Value = (Vec&lt;ActorId&gt;, Vec&lt;OpId&gt;)&gt; {
+        scenario(<span class="number">1</span>..<span class="number">100</span>).prop_map(|(actors, <span class="kw-2">mut </span>opids)| {
+            <span class="kw">let </span><span class="kw-2">mut </span>sorted_opids = opids.clone();
+            sorted_opids.sort_by(|left, right| cmp(<span class="kw-2">&amp;</span>actors, left, right));
+            sorted_opids.dedup();
+            <span class="comment">// Unwrap is okay due to the size we pass to `scenario()`
+            </span><span class="kw">let </span>last = <span class="kw-2">*</span>sorted_opids.last().unwrap();
+            <span class="kw">if </span>sorted_opids == opids {
+                <span class="comment">// Opids are sorted and deduplicated, just copy the last opid and insert it at the
+                // front
+                </span>opids.insert(<span class="number">0</span>, last);
             }
-            (<span class="ident">actors</span>, <span class="ident">opids</span>)
+            (actors, opids)
         })
     }
 
-    <span class="macro">proptest!</span> {
-        <span class="attribute">#[<span class="ident">test</span>]</span>
-        <span class="kw">fn</span> <span class="ident">test_sorted_opids</span>((<span class="ident">actors</span>, <span class="ident">opids</span>) <span class="kw">in</span> <span class="ident">scenario</span>(<span class="number">0</span>..<span class="number">100</span>)) {
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">sorted_opids</span> <span class="op">=</span> <span class="ident">OpIds::default</span>();
-            <span class="kw">for</span> <span class="ident">opid</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">opids</span> {
-                <span class="ident">sorted_opids</span>.<span class="ident">add</span>(<span class="kw-2">*</span><span class="ident">opid</span>, <span class="op">|</span><span class="ident">left</span>, <span class="ident">right</span><span class="op">|</span> <span class="ident">cmp</span>(<span class="kw-2">&amp;</span><span class="ident">actors</span>, <span class="ident">left</span>, <span class="ident">right</span>));
+    <span class="macro">proptest! </span>{
+        <span class="attribute">#[test]
+        </span><span class="kw">fn </span>test_sorted_opids((actors, opids) <span class="kw">in </span>scenario(<span class="number">0</span>..<span class="number">100</span>)) {
+            <span class="kw">let </span><span class="kw-2">mut </span>sorted_opids = OpIds::default();
+            <span class="kw">for </span>opid <span class="kw">in </span><span class="kw-2">&amp;</span>opids {
+                sorted_opids.add(<span class="kw-2">*</span>opid, |left, right| cmp(<span class="kw-2">&amp;</span>actors, left, right));
             }
-            <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">sorted_opids</span>.<span class="ident">into_iter</span>().<span class="ident">cloned</span>().<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">expected</span> <span class="op">=</span> <span class="ident">opids</span>;
-            <span class="ident">expected</span>.<span class="ident">sort_by</span>(<span class="op">|</span><span class="ident">left</span>, <span class="ident">right</span><span class="op">|</span> <span class="ident">cmp</span>(<span class="kw-2">&amp;</span><span class="ident">actors</span>, <span class="ident">left</span>, <span class="ident">right</span>));
-            <span class="ident">expected</span>.<span class="ident">dedup</span>();
-            <span class="macro">assert_eq!</span>(<span class="ident">result</span>, <span class="ident">expected</span>);
+            <span class="kw">let </span>result = sorted_opids.into_iter().cloned().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+            <span class="kw">let </span><span class="kw-2">mut </span>expected = opids;
+            expected.sort_by(|left, right| cmp(<span class="kw-2">&amp;</span>actors, left, right));
+            expected.dedup();
+            <span class="macro">assert_eq!</span>(result, expected);
         }
 
-        <span class="attribute">#[<span class="ident">test</span>]</span>
-        <span class="kw">fn</span> <span class="ident">test_new_if_sorted</span>((<span class="ident">actors</span>, <span class="ident">opids</span>) <span class="kw">in</span> <span class="ident">duplicate_unsorted_scenario</span>()) {
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">expected</span> <span class="op">=</span> <span class="ident">opids</span>.<span class="ident">clone</span>();
-            <span class="macro">assert_eq!</span>(<span class="ident">OpIds::new_if_sorted</span>(<span class="ident">opids</span>, <span class="op">|</span><span class="ident">left</span>, <span class="ident">right</span><span class="op">|</span> <span class="ident">cmp</span>(<span class="kw-2">&amp;</span><span class="ident">actors</span>, <span class="ident">left</span>, <span class="ident">right</span>)), <span class="prelude-val">None</span>);
-            <span class="ident">expected</span>.<span class="ident">sort_by</span>(<span class="op">|</span><span class="ident">left</span>, <span class="ident">right</span><span class="op">|</span> <span class="ident">cmp</span>(<span class="kw-2">&amp;</span><span class="ident">actors</span>, <span class="ident">left</span>, <span class="ident">right</span>));
-            <span class="ident">expected</span>.<span class="ident">dedup</span>();
-            <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">OpIds::new_if_sorted</span>(<span class="ident">expected</span>.<span class="ident">clone</span>(), <span class="op">|</span><span class="ident">left</span>, <span class="ident">right</span><span class="op">|</span> <span class="ident">cmp</span>(<span class="kw-2">&amp;</span><span class="ident">actors</span>, <span class="ident">left</span>, <span class="ident">right</span>)).<span class="ident">unwrap</span>().<span class="ident">into_iter</span>().<span class="ident">cloned</span>().<span class="ident">collect</span>::<span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span><span class="op">&gt;</span>();
-            <span class="macro">assert_eq!</span>(<span class="ident">result</span>, <span class="ident">expected</span>)
+        <span class="attribute">#[test]
+        </span><span class="kw">fn </span>test_new_if_sorted((actors, opids) <span class="kw">in </span>duplicate_unsorted_scenario()) {
+            <span class="kw">let </span><span class="kw-2">mut </span>expected = opids.clone();
+            <span class="macro">assert_eq!</span>(OpIds::new_if_sorted(opids, |left, right| cmp(<span class="kw-2">&amp;</span>actors, left, right)), <span class="prelude-val">None</span>);
+            expected.sort_by(|left, right| cmp(<span class="kw-2">&amp;</span>actors, left, right));
+            expected.dedup();
+            <span class="kw">let </span>result = OpIds::new_if_sorted(expected.clone(), |left, right| cmp(<span class="kw-2">&amp;</span>actors, left, right)).unwrap().into_iter().cloned().collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+            <span class="macro">assert_eq!</span>(result, expected)
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">cmp</span>(<span class="ident">actors</span>: <span class="kw-2">&amp;</span>[<span class="ident">ActorId</span>], <span class="ident">left</span>: <span class="kw-2">&amp;</span><span class="ident">OpId</span>, <span class="ident">right</span>: <span class="kw-2">&amp;</span><span class="ident">OpId</span>) -&gt; <span class="ident">std::cmp::Ordering</span> {
-        <span class="kw">use</span> <span class="ident">std::cmp::Ordering</span>;
-        <span class="kw">match</span> (<span class="ident">left</span>, <span class="ident">right</span>) {
-            (<span class="ident">OpId</span>(<span class="number">0</span>, <span class="kw">_</span>), <span class="ident">OpId</span>(<span class="number">0</span>, <span class="kw">_</span>)) =&gt; <span class="ident">Ordering::Equal</span>,
-            (<span class="ident">OpId</span>(<span class="number">0</span>, <span class="kw">_</span>), <span class="ident">OpId</span>(<span class="kw">_</span>, <span class="kw">_</span>)) =&gt; <span class="ident">Ordering::Less</span>,
-            (<span class="ident">OpId</span>(<span class="kw">_</span>, <span class="kw">_</span>), <span class="ident">OpId</span>(<span class="number">0</span>, <span class="kw">_</span>)) =&gt; <span class="ident">Ordering::Greater</span>,
-            (<span class="ident">OpId</span>(<span class="ident">a</span>, <span class="ident">x</span>), <span class="ident">OpId</span>(<span class="ident">b</span>, <span class="ident">y</span>)) <span class="kw">if</span> <span class="ident">a</span> <span class="op">==</span> <span class="ident">b</span> =&gt; <span class="ident">actors</span>[<span class="kw-2">*</span><span class="ident">x</span>].<span class="ident">cmp</span>(<span class="kw-2">&amp;</span><span class="ident">actors</span>[<span class="kw-2">*</span><span class="ident">y</span>]),
-            (<span class="ident">OpId</span>(<span class="ident">a</span>, <span class="kw">_</span>), <span class="ident">OpId</span>(<span class="ident">b</span>, <span class="kw">_</span>)) =&gt; <span class="ident">a</span>.<span class="ident">cmp</span>(<span class="ident">b</span>),
+    <span class="kw">fn </span>cmp(actors: <span class="kw-2">&amp;</span>[ActorId], left: <span class="kw-2">&amp;</span>OpId, right: <span class="kw-2">&amp;</span>OpId) -&gt; std::cmp::Ordering {
+        <span class="kw">use </span>std::cmp::Ordering;
+        <span class="kw">match </span>(left, right) {
+            (OpId(<span class="number">0</span>, <span class="kw">_</span>), OpId(<span class="number">0</span>, <span class="kw">_</span>)) =&gt; Ordering::Equal,
+            (OpId(<span class="number">0</span>, <span class="kw">_</span>), OpId(<span class="kw">_</span>, <span class="kw">_</span>)) =&gt; Ordering::Less,
+            (OpId(<span class="kw">_</span>, <span class="kw">_</span>), OpId(<span class="number">0</span>, <span class="kw">_</span>)) =&gt; Ordering::Greater,
+            (OpId(a, x), OpId(b, y)) <span class="kw">if </span>a == b =&gt; actors[<span class="kw-2">*</span>x].cmp(<span class="kw-2">&amp;</span>actors[<span class="kw-2">*</span>y]),
+            (OpId(a, <span class="kw">_</span>), OpId(b, <span class="kw">_</span>)) =&gt; a.cmp(b),
         }
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

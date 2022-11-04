@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/transaction/manual_transaction.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>manual_transaction.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/transaction/manual_transaction.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>manual_transaction.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -297,302 +297,302 @@
 <span id="295">295</span>
 <span id="296">296</span>
 <span id="297">297</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::ops::RangeBounds</span>;
+</pre><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::exid::ExId</span>;
-<span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">Automerge</span>, <span class="ident">ChangeHash</span>, <span class="ident">KeysAt</span>, <span class="ident">ObjType</span>, <span class="ident">OpObserver</span>, <span class="ident">Prop</span>, <span class="ident">ScalarValue</span>, <span class="ident">Value</span>, <span class="ident">Values</span>};
-<span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">AutomergeError</span>, <span class="ident">Keys</span>};
-<span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">ListRange</span>, <span class="ident">ListRangeAt</span>, <span class="ident">MapRange</span>, <span class="ident">MapRangeAt</span>};
+<span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
+<span class="kw">use crate</span>::{Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, ScalarValue, Value, Values};
+<span class="kw">use crate</span>::{AutomergeError, Keys};
+<span class="kw">use crate</span>::{ListRange, ListRangeAt, MapRange, MapRangeAt};
 
-<span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">observation</span>, <span class="ident">CommitOptions</span>, <span class="ident">Transactable</span>, <span class="ident">TransactionInner</span>};
+<span class="kw">use super</span>::{observation, CommitOptions, Transactable, TransactionInner};
 
-<span class="doccomment">/// A transaction on a document.</span>
-<span class="doccomment">/// Transactions group operations into a single change so that no other operations can happen</span>
-<span class="doccomment">/// in-between.</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// Created from [`Automerge::transaction`].</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// ## Drop</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// This transaction should be manually committed or rolled back. If not done manually then it will</span>
-<span class="doccomment">/// be rolled back when it is dropped. This is to prevent the document being in an unsafe</span>
-<span class="doccomment">/// intermediate state.</span>
-<span class="doccomment">/// This is consistent with `?` error handling.</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Transaction</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Obs</span>: <span class="ident">observation::Observation</span><span class="op">&gt;</span> {
-    <span class="comment">// this is an option so that we can take it during commit and rollback to prevent it being</span>
-    <span class="comment">// rolled back during drop.</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">inner</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">TransactionInner</span><span class="op">&gt;</span>,
-    <span class="comment">// As with `inner` this is an `Option` so we can `take` it during `commit`</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">observation</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Obs</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">doc</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="kw-2">mut</span> <span class="ident">Automerge</span>,
+<span class="doccomment">/// A transaction on a document.
+/// Transactions group operations into a single change so that no other operations can happen
+/// in-between.
+///
+/// Created from [`Automerge::transaction`].
+///
+/// ## Drop
+///
+/// This transaction should be manually committed or rolled back. If not done manually then it will
+/// be rolled back when it is dropped. This is to prevent the document being in an unsafe
+/// intermediate state.
+/// This is consistent with `?` error handling.
+</span><span class="attribute">#[derive(Debug)]
+</span><span class="kw">pub struct </span>Transaction&lt;<span class="lifetime">&#39;a</span>, Obs: observation::Observation&gt; {
+    <span class="comment">// this is an option so that we can take it during commit and rollback to prevent it being
+    // rolled back during drop.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) inner: <span class="prelude-ty">Option</span>&lt;TransactionInner&gt;,
+    <span class="comment">// As with `inner` this is an `Option` so we can `take` it during `commit`
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) observation: <span class="prelude-ty">Option</span>&lt;Obs&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>Automerge,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Obs</span>: <span class="ident">OpObserver</span><span class="op">&gt;</span> <span class="ident">Transaction</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">observation::Observed</span><span class="op">&lt;</span><span class="ident">Obs</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">observer</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="ident">Obs</span> {
-        <span class="self">self</span>.<span class="ident">observation</span>.<span class="ident">as_mut</span>().<span class="ident">unwrap</span>().<span class="ident">observer</span>()
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, Obs: OpObserver&gt; Transaction&lt;<span class="lifetime">&#39;a</span>, observation::Observed&lt;Obs&gt;&gt; {
+    <span class="kw">pub fn </span>observer(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut </span>Obs {
+        <span class="self">self</span>.observation.as_mut().unwrap().observer()
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Obs</span>: <span class="ident">observation::Observation</span><span class="op">&gt;</span> <span class="ident">Transaction</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Obs</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// Get the heads of the document before this transaction was started.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_heads</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">ChangeHash</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_heads</span>()
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, Obs: observation::Observation&gt; Transaction&lt;<span class="lifetime">&#39;a</span>, Obs&gt; {
+    <span class="doccomment">/// Get the heads of the document before this transaction was started.
+    </span><span class="kw">pub fn </span>get_heads(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;ChangeHash&gt; {
+        <span class="self">self</span>.doc.get_heads()
     }
 
-    <span class="doccomment">/// Commit the operations performed in this transaction, returning the hashes corresponding to</span>
-    <span class="doccomment">/// the new heads.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">commit</span>(<span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="ident">Obs::CommitResult</span> {
-        <span class="kw">let</span> <span class="ident">tx</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">take</span>().<span class="ident">unwrap</span>();
-        <span class="kw">let</span> <span class="ident">hash</span> <span class="op">=</span> <span class="ident">tx</span>.<span class="ident">commit</span>(<span class="self">self</span>.<span class="ident">doc</span>, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>);
-        <span class="kw">let</span> <span class="ident">obs</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">observation</span>.<span class="ident">take</span>().<span class="ident">unwrap</span>();
-        <span class="ident">obs</span>.<span class="ident">make_result</span>(<span class="ident">hash</span>)
+    <span class="doccomment">/// Commit the operations performed in this transaction, returning the hashes corresponding to
+    /// the new heads.
+    </span><span class="kw">pub fn </span>commit(<span class="kw-2">mut </span><span class="self">self</span>) -&gt; Obs::CommitResult {
+        <span class="kw">let </span>tx = <span class="self">self</span>.inner.take().unwrap();
+        <span class="kw">let </span>hash = tx.commit(<span class="self">self</span>.doc, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>);
+        <span class="kw">let </span>obs = <span class="self">self</span>.observation.take().unwrap();
+        obs.make_result(hash)
     }
 
-    <span class="doccomment">/// Commit the operations in this transaction with some options.</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// ```</span>
-    <span class="doccomment">/// # use automerge::transaction::CommitOptions;</span>
-    <span class="doccomment">/// # use automerge::transaction::Transactable;</span>
-    <span class="doccomment">/// # use automerge::ROOT;</span>
-    <span class="doccomment">/// # use automerge::Automerge;</span>
-    <span class="doccomment">/// # use automerge::ObjType;</span>
-    <span class="doccomment">/// # use std::time::SystemTime;</span>
-    <span class="doccomment">/// let mut doc = Automerge::new();</span>
-    <span class="doccomment">/// let mut tx = doc.transaction();</span>
-    <span class="doccomment">/// tx.put_object(ROOT, &quot;todos&quot;, ObjType::List).unwrap();</span>
-    <span class="doccomment">/// let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as</span>
-    <span class="doccomment">/// i64;</span>
-    <span class="doccomment">/// tx.commit_with(CommitOptions::default().with_message(&quot;Create todos list&quot;).with_time(now));</span>
-    <span class="doccomment">/// ```</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">commit_with</span>(<span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">options</span>: <span class="ident">CommitOptions</span>) -&gt; <span class="ident">Obs::CommitResult</span> {
-        <span class="kw">let</span> <span class="ident">tx</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">take</span>().<span class="ident">unwrap</span>();
-        <span class="kw">let</span> <span class="ident">hash</span> <span class="op">=</span> <span class="ident">tx</span>.<span class="ident">commit</span>(<span class="self">self</span>.<span class="ident">doc</span>, <span class="ident">options</span>.<span class="ident">message</span>, <span class="ident">options</span>.<span class="ident">time</span>);
-        <span class="kw">let</span> <span class="ident">obs</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">observation</span>.<span class="ident">take</span>().<span class="ident">unwrap</span>();
-        <span class="ident">obs</span>.<span class="ident">make_result</span>(<span class="ident">hash</span>)
+    <span class="doccomment">/// Commit the operations in this transaction with some options.
+    ///
+    /// ```
+    /// # use automerge::transaction::CommitOptions;
+    /// # use automerge::transaction::Transactable;
+    /// # use automerge::ROOT;
+    /// # use automerge::Automerge;
+    /// # use automerge::ObjType;
+    /// # use std::time::SystemTime;
+    /// let mut doc = Automerge::new();
+    /// let mut tx = doc.transaction();
+    /// tx.put_object(ROOT, &quot;todos&quot;, ObjType::List).unwrap();
+    /// let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as
+    /// i64;
+    /// tx.commit_with(CommitOptions::default().with_message(&quot;Create todos list&quot;).with_time(now));
+    /// ```
+    </span><span class="kw">pub fn </span>commit_with(<span class="kw-2">mut </span><span class="self">self</span>, options: CommitOptions) -&gt; Obs::CommitResult {
+        <span class="kw">let </span>tx = <span class="self">self</span>.inner.take().unwrap();
+        <span class="kw">let </span>hash = tx.commit(<span class="self">self</span>.doc, options.message, options.time);
+        <span class="kw">let </span>obs = <span class="self">self</span>.observation.take().unwrap();
+        obs.make_result(hash)
     }
 
-    <span class="doccomment">/// Undo the operations added in this transaction, returning the number of cancelled</span>
-    <span class="doccomment">/// operations.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">rollback</span>(<span class="kw-2">mut</span> <span class="self">self</span>) -&gt; <span class="ident">usize</span> {
-        <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">take</span>().<span class="ident">unwrap</span>().<span class="ident">rollback</span>(<span class="self">self</span>.<span class="ident">doc</span>)
+    <span class="doccomment">/// Undo the operations added in this transaction, returning the number of cancelled
+    /// operations.
+    </span><span class="kw">pub fn </span>rollback(<span class="kw-2">mut </span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.inner.take().unwrap().rollback(<span class="self">self</span>.doc)
     }
 
-    <span class="kw">fn</span> <span class="ident">do_tx</span><span class="op">&lt;</span><span class="ident">F</span>, <span class="ident">O</span><span class="op">&gt;</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">f</span>: <span class="ident">F</span>) -&gt; <span class="ident">O</span>
-    <span class="kw">where</span>
-        <span class="ident">F</span>: <span class="ident">FnOnce</span>(<span class="kw-2">&amp;mut</span> <span class="ident">TransactionInner</span>, <span class="kw-2">&amp;mut</span> <span class="ident">Automerge</span>, <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="kw-2">&amp;mut</span> <span class="ident">Obs::Obs</span><span class="op">&gt;</span>) -&gt; <span class="ident">O</span>,
+    <span class="kw">fn </span>do_tx&lt;F, O&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, f: F) -&gt; O
+    <span class="kw">where
+        </span>F: FnOnce(<span class="kw-2">&amp;mut </span>TransactionInner, <span class="kw-2">&amp;mut </span>Automerge, <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span>Obs::Obs&gt;) -&gt; O,
     {
-        <span class="kw">let</span> <span class="ident">tx</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">as_mut</span>().<span class="ident">unwrap</span>();
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">obs</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">observation</span>.<span class="ident">as_mut</span>() {
-            <span class="ident">f</span>(<span class="ident">tx</span>, <span class="self">self</span>.<span class="ident">doc</span>, <span class="ident">obs</span>.<span class="ident">observer</span>())
-        } <span class="kw">else</span> {
-            <span class="ident">f</span>(<span class="ident">tx</span>, <span class="self">self</span>.<span class="ident">doc</span>, <span class="prelude-val">None</span>)
+        <span class="kw">let </span>tx = <span class="self">self</span>.inner.as_mut().unwrap();
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(obs) = <span class="self">self</span>.observation.as_mut() {
+            f(tx, <span class="self">self</span>.doc, obs.observer())
+        } <span class="kw">else </span>{
+            f(tx, <span class="self">self</span>.doc, <span class="prelude-val">None</span>)
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Obs</span>: <span class="ident">observation::Observation</span><span class="op">&gt;</span> <span class="ident">Transactable</span> <span class="kw">for</span> <span class="ident">Transaction</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Obs</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// Get the number of pending operations in this transaction.</span>
-    <span class="kw">fn</span> <span class="ident">pending_ops</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
-        <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">as_ref</span>().<span class="ident">unwrap</span>().<span class="ident">pending_ops</span>()
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, Obs: observation::Observation&gt; Transactable <span class="kw">for </span>Transaction&lt;<span class="lifetime">&#39;a</span>, Obs&gt; {
+    <span class="doccomment">/// Get the number of pending operations in this transaction.
+    </span><span class="kw">fn </span>pending_ops(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.inner.as_ref().unwrap().pending_ops()
     }
 
-    <span class="doccomment">/// Set the value of property `P` to value `V` in object `obj`.</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// # Errors</span>
-    <span class="doccomment">///</span>
-    <span class="doccomment">/// This will return an error if</span>
-    <span class="doccomment">/// - The object does not exist</span>
-    <span class="doccomment">/// - The key is the wrong type for the object</span>
-    <span class="doccomment">/// - The key does not exist in the object</span>
-    <span class="kw">fn</span> <span class="ident">put</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">P</span>: <span class="ident">Into</span><span class="op">&lt;</span><span class="ident">Prop</span><span class="op">&gt;</span>, <span class="ident">V</span>: <span class="ident">Into</span><span class="op">&lt;</span><span class="ident">ScalarValue</span><span class="op">&gt;</span><span class="op">&gt;</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">O</span>,
-        <span class="ident">prop</span>: <span class="ident">P</span>,
-        <span class="ident">value</span>: <span class="ident">V</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">do_tx</span>(<span class="op">|</span><span class="ident">tx</span>, <span class="ident">doc</span>, <span class="ident">obs</span><span class="op">|</span> <span class="ident">tx</span>.<span class="ident">put</span>(<span class="ident">doc</span>, <span class="ident">obs</span>, <span class="ident">obj</span>.<span class="ident">as_ref</span>(), <span class="ident">prop</span>, <span class="ident">value</span>))
+    <span class="doccomment">/// Set the value of property `P` to value `V` in object `obj`.
+    ///
+    /// # Errors
+    ///
+    /// This will return an error if
+    /// - The object does not exist
+    /// - The key is the wrong type for the object
+    /// - The key does not exist in the object
+    </span><span class="kw">fn </span>put&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;, V: Into&lt;ScalarValue&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: O,
+        prop: P,
+        value: V,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
+        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.put(doc, obs, obj.as_ref(), prop, value))
     }
 
-    <span class="kw">fn</span> <span class="ident">put_object</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">P</span>: <span class="ident">Into</span><span class="op">&lt;</span><span class="ident">Prop</span><span class="op">&gt;</span><span class="op">&gt;</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">O</span>,
-        <span class="ident">prop</span>: <span class="ident">P</span>,
-        <span class="ident">value</span>: <span class="ident">ObjType</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">ExId</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">do_tx</span>(<span class="op">|</span><span class="ident">tx</span>, <span class="ident">doc</span>, <span class="ident">obs</span><span class="op">|</span> <span class="ident">tx</span>.<span class="ident">put_object</span>(<span class="ident">doc</span>, <span class="ident">obs</span>, <span class="ident">obj</span>.<span class="ident">as_ref</span>(), <span class="ident">prop</span>, <span class="ident">value</span>))
+    <span class="kw">fn </span>put_object&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: O,
+        prop: P,
+        value: ObjType,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;ExId, AutomergeError&gt; {
+        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.put_object(doc, obs, obj.as_ref(), prop, value))
     }
 
-    <span class="kw">fn</span> <span class="ident">insert</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">V</span>: <span class="ident">Into</span><span class="op">&lt;</span><span class="ident">ScalarValue</span><span class="op">&gt;</span><span class="op">&gt;</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">O</span>,
-        <span class="ident">index</span>: <span class="ident">usize</span>,
-        <span class="ident">value</span>: <span class="ident">V</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">do_tx</span>(<span class="op">|</span><span class="ident">tx</span>, <span class="ident">doc</span>, <span class="ident">obs</span><span class="op">|</span> <span class="ident">tx</span>.<span class="ident">insert</span>(<span class="ident">doc</span>, <span class="ident">obs</span>, <span class="ident">obj</span>.<span class="ident">as_ref</span>(), <span class="ident">index</span>, <span class="ident">value</span>))
+    <span class="kw">fn </span>insert&lt;O: AsRef&lt;ExId&gt;, V: Into&lt;ScalarValue&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: O,
+        index: usize,
+        value: V,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
+        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.insert(doc, obs, obj.as_ref(), index, value))
     }
 
-    <span class="kw">fn</span> <span class="ident">insert_object</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">O</span>,
-        <span class="ident">index</span>: <span class="ident">usize</span>,
-        <span class="ident">value</span>: <span class="ident">ObjType</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">ExId</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">do_tx</span>(<span class="op">|</span><span class="ident">tx</span>, <span class="ident">doc</span>, <span class="ident">obs</span><span class="op">|</span> <span class="ident">tx</span>.<span class="ident">insert_object</span>(<span class="ident">doc</span>, <span class="ident">obs</span>, <span class="ident">obj</span>.<span class="ident">as_ref</span>(), <span class="ident">index</span>, <span class="ident">value</span>))
+    <span class="kw">fn </span>insert_object&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: O,
+        index: usize,
+        value: ObjType,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;ExId, AutomergeError&gt; {
+        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.insert_object(doc, obs, obj.as_ref(), index, value))
     }
 
-    <span class="kw">fn</span> <span class="ident">increment</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">P</span>: <span class="ident">Into</span><span class="op">&lt;</span><span class="ident">Prop</span><span class="op">&gt;</span><span class="op">&gt;</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">O</span>,
-        <span class="ident">prop</span>: <span class="ident">P</span>,
-        <span class="ident">value</span>: <span class="ident">i64</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">do_tx</span>(<span class="op">|</span><span class="ident">tx</span>, <span class="ident">doc</span>, <span class="ident">obs</span><span class="op">|</span> <span class="ident">tx</span>.<span class="ident">increment</span>(<span class="ident">doc</span>, <span class="ident">obs</span>, <span class="ident">obj</span>.<span class="ident">as_ref</span>(), <span class="ident">prop</span>, <span class="ident">value</span>))
+    <span class="kw">fn </span>increment&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: O,
+        prop: P,
+        value: i64,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
+        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.increment(doc, obs, obj.as_ref(), prop, value))
     }
 
-    <span class="kw">fn</span> <span class="ident">delete</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">P</span>: <span class="ident">Into</span><span class="op">&lt;</span><span class="ident">Prop</span><span class="op">&gt;</span><span class="op">&gt;</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">O</span>,
-        <span class="ident">prop</span>: <span class="ident">P</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">do_tx</span>(<span class="op">|</span><span class="ident">tx</span>, <span class="ident">doc</span>, <span class="ident">obs</span><span class="op">|</span> <span class="ident">tx</span>.<span class="ident">delete</span>(<span class="ident">doc</span>, <span class="ident">obs</span>, <span class="ident">obj</span>.<span class="ident">as_ref</span>(), <span class="ident">prop</span>))
+    <span class="kw">fn </span>delete&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: O,
+        prop: P,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
+        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.delete(doc, obs, obj.as_ref(), prop))
     }
 
-    <span class="doccomment">/// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert</span>
-    <span class="doccomment">/// the new elements</span>
-    <span class="kw">fn</span> <span class="ident">splice</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">V</span>: <span class="ident">IntoIterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">ScalarValue</span><span class="op">&gt;</span><span class="op">&gt;</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">O</span>,
-        <span class="ident">pos</span>: <span class="ident">usize</span>,
-        <span class="ident">del</span>: <span class="ident">usize</span>,
-        <span class="ident">vals</span>: <span class="ident">V</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">do_tx</span>(<span class="op">|</span><span class="ident">tx</span>, <span class="ident">doc</span>, <span class="ident">obs</span><span class="op">|</span> <span class="ident">tx</span>.<span class="ident">splice</span>(<span class="ident">doc</span>, <span class="ident">obs</span>, <span class="ident">obj</span>.<span class="ident">as_ref</span>(), <span class="ident">pos</span>, <span class="ident">del</span>, <span class="ident">vals</span>))
+    <span class="doccomment">/// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
+    /// the new elements
+    </span><span class="kw">fn </span>splice&lt;O: AsRef&lt;ExId&gt;, V: IntoIterator&lt;Item = ScalarValue&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: O,
+        pos: usize,
+        del: usize,
+        vals: V,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
+        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.splice(doc, obs, obj.as_ref(), pos, del, vals))
     }
 
-    <span class="kw">fn</span> <span class="ident">keys</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>) -&gt; <span class="ident">Keys</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">keys</span>(<span class="ident">obj</span>)
+    <span class="kw">fn </span>keys&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; Keys&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt; {
+        <span class="self">self</span>.doc.keys(obj)
     }
 
-    <span class="kw">fn</span> <span class="ident">keys_at</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>, <span class="ident">heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>]) -&gt; <span class="ident">KeysAt</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">keys_at</span>(<span class="ident">obj</span>, <span class="ident">heads</span>)
+    <span class="kw">fn </span>keys_at&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; KeysAt&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt; {
+        <span class="self">self</span>.doc.keys_at(obj, heads)
     }
 
-    <span class="kw">fn</span> <span class="ident">map_range</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">R</span>: <span class="ident">RangeBounds</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span><span class="op">&gt;</span>(
+    <span class="kw">fn </span>map_range&lt;O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;String&gt;&gt;(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">O</span>,
-        <span class="ident">range</span>: <span class="ident">R</span>,
-    ) -&gt; <span class="ident">MapRange</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">R</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">map_range</span>(<span class="ident">obj</span>, <span class="ident">range</span>)
+        obj: O,
+        range: R,
+    ) -&gt; MapRange&lt;<span class="lifetime">&#39;_</span>, R&gt; {
+        <span class="self">self</span>.doc.map_range(obj, range)
     }
 
-    <span class="kw">fn</span> <span class="ident">map_range_at</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">R</span>: <span class="ident">RangeBounds</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span><span class="op">&gt;</span>(
+    <span class="kw">fn </span>map_range_at&lt;O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;String&gt;&gt;(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">O</span>,
-        <span class="ident">range</span>: <span class="ident">R</span>,
-        <span class="ident">heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>],
-    ) -&gt; <span class="ident">MapRangeAt</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">R</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">map_range_at</span>(<span class="ident">obj</span>, <span class="ident">range</span>, <span class="ident">heads</span>)
+        obj: O,
+        range: R,
+        heads: <span class="kw-2">&amp;</span>[ChangeHash],
+    ) -&gt; MapRangeAt&lt;<span class="lifetime">&#39;_</span>, R&gt; {
+        <span class="self">self</span>.doc.map_range_at(obj, range, heads)
     }
 
-    <span class="kw">fn</span> <span class="ident">list_range</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">R</span>: <span class="ident">RangeBounds</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span><span class="op">&gt;</span>(
+    <span class="kw">fn </span>list_range&lt;O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;usize&gt;&gt;(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">O</span>,
-        <span class="ident">range</span>: <span class="ident">R</span>,
-    ) -&gt; <span class="ident">ListRange</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">R</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">list_range</span>(<span class="ident">obj</span>, <span class="ident">range</span>)
+        obj: O,
+        range: R,
+    ) -&gt; ListRange&lt;<span class="lifetime">&#39;_</span>, R&gt; {
+        <span class="self">self</span>.doc.list_range(obj, range)
     }
 
-    <span class="kw">fn</span> <span class="ident">list_range_at</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">R</span>: <span class="ident">RangeBounds</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span><span class="op">&gt;</span>(
+    <span class="kw">fn </span>list_range_at&lt;O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;usize&gt;&gt;(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">O</span>,
-        <span class="ident">range</span>: <span class="ident">R</span>,
-        <span class="ident">heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>],
-    ) -&gt; <span class="ident">ListRangeAt</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">R</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">list_range_at</span>(<span class="ident">obj</span>, <span class="ident">range</span>, <span class="ident">heads</span>)
+        obj: O,
+        range: R,
+        heads: <span class="kw-2">&amp;</span>[ChangeHash],
+    ) -&gt; ListRangeAt&lt;<span class="lifetime">&#39;_</span>, R&gt; {
+        <span class="self">self</span>.doc.list_range_at(obj, range, heads)
     }
 
-    <span class="kw">fn</span> <span class="ident">values</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>) -&gt; <span class="ident">Values</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">values</span>(<span class="ident">obj</span>)
+    <span class="kw">fn </span>values&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; Values&lt;<span class="lifetime">&#39;_</span>&gt; {
+        <span class="self">self</span>.doc.values(obj)
     }
 
-    <span class="kw">fn</span> <span class="ident">values_at</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>, <span class="ident">heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>]) -&gt; <span class="ident">Values</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">values_at</span>(<span class="ident">obj</span>, <span class="ident">heads</span>)
+    <span class="kw">fn </span>values_at&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; Values&lt;<span class="lifetime">&#39;_</span>&gt; {
+        <span class="self">self</span>.doc.values_at(obj, heads)
     }
 
-    <span class="kw">fn</span> <span class="ident">length</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>) -&gt; <span class="ident">usize</span> {
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">length</span>(<span class="ident">obj</span>)
+    <span class="kw">fn </span>length&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; usize {
+        <span class="self">self</span>.doc.length(obj)
     }
 
-    <span class="kw">fn</span> <span class="ident">length_at</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>, <span class="ident">heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>]) -&gt; <span class="ident">usize</span> {
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">length_at</span>(<span class="ident">obj</span>, <span class="ident">heads</span>)
+    <span class="kw">fn </span>length_at&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; usize {
+        <span class="self">self</span>.doc.length_at(obj, heads)
     }
 
-    <span class="kw">fn</span> <span class="ident">object_type</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ObjType</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">object_type</span>(<span class="ident">obj</span>)
+    <span class="kw">fn </span>object_type&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Option</span>&lt;ObjType&gt; {
+        <span class="self">self</span>.doc.object_type(obj)
     }
 
-    <span class="kw">fn</span> <span class="ident">text</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">String</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">text</span>(<span class="ident">obj</span>)
+    <span class="kw">fn </span>text&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt; {
+        <span class="self">self</span>.doc.text(obj)
     }
 
-    <span class="kw">fn</span> <span class="ident">text_at</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(
+    <span class="kw">fn </span>text_at&lt;O: AsRef&lt;ExId&gt;&gt;(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">O</span>,
-        <span class="ident">heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>],
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">String</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">text_at</span>(<span class="ident">obj</span>, <span class="ident">heads</span>)
+        obj: O,
+        heads: <span class="kw-2">&amp;</span>[ChangeHash],
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt; {
+        <span class="self">self</span>.doc.text_at(obj, heads)
     }
 
-    <span class="kw">fn</span> <span class="ident">get</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">P</span>: <span class="ident">Into</span><span class="op">&lt;</span><span class="ident">Prop</span><span class="op">&gt;</span><span class="op">&gt;</span>(
+    <span class="kw">fn </span>get&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">O</span>,
-        <span class="ident">prop</span>: <span class="ident">P</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>, <span class="ident">ExId</span>)<span class="op">&gt;</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get</span>(<span class="ident">obj</span>, <span class="ident">prop</span>)
+        obj: O,
+        prop: P,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
+        <span class="self">self</span>.doc.get(obj, prop)
     }
 
-    <span class="kw">fn</span> <span class="ident">get_at</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">P</span>: <span class="ident">Into</span><span class="op">&lt;</span><span class="ident">Prop</span><span class="op">&gt;</span><span class="op">&gt;</span>(
+    <span class="kw">fn </span>get_at&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">O</span>,
-        <span class="ident">prop</span>: <span class="ident">P</span>,
-        <span class="ident">heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>],
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span>(<span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>, <span class="ident">ExId</span>)<span class="op">&gt;</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_at</span>(<span class="ident">obj</span>, <span class="ident">prop</span>, <span class="ident">heads</span>)
+        obj: O,
+        prop: P,
+        heads: <span class="kw-2">&amp;</span>[ChangeHash],
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
+        <span class="self">self</span>.doc.get_at(obj, prop, heads)
     }
 
-    <span class="kw">fn</span> <span class="ident">get_all</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">P</span>: <span class="ident">Into</span><span class="op">&lt;</span><span class="ident">Prop</span><span class="op">&gt;</span><span class="op">&gt;</span>(
+    <span class="kw">fn </span>get_all&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">O</span>,
-        <span class="ident">prop</span>: <span class="ident">P</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>, <span class="ident">ExId</span>)<span class="op">&gt;</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_all</span>(<span class="ident">obj</span>, <span class="ident">prop</span>)
+        obj: O,
+        prop: P,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
+        <span class="self">self</span>.doc.get_all(obj, prop)
     }
 
-    <span class="kw">fn</span> <span class="ident">get_all_at</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span>, <span class="ident">P</span>: <span class="ident">Into</span><span class="op">&lt;</span><span class="ident">Prop</span><span class="op">&gt;</span><span class="op">&gt;</span>(
+    <span class="kw">fn </span>get_all_at&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">O</span>,
-        <span class="ident">prop</span>: <span class="ident">P</span>,
-        <span class="ident">heads</span>: <span class="kw-2">&amp;</span>[<span class="ident">ChangeHash</span>],
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>, <span class="ident">ExId</span>)<span class="op">&gt;</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_all_at</span>(<span class="ident">obj</span>, <span class="ident">prop</span>, <span class="ident">heads</span>)
+        obj: O,
+        prop: P,
+        heads: <span class="kw-2">&amp;</span>[ChangeHash],
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
+        <span class="self">self</span>.doc.get_all_at(obj, prop, heads)
     }
 
-    <span class="kw">fn</span> <span class="ident">parents</span><span class="op">&lt;</span><span class="ident">O</span>: <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">ExId</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">O</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident"><span class="kw">crate</span>::Parents</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span><span class="op">&gt;</span>, <span class="ident">AutomergeError</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">parents</span>(<span class="ident">obj</span>)
+    <span class="kw">fn </span>parents&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw">crate</span>::Parents&lt;<span class="lifetime">&#39;_</span>&gt;, AutomergeError&gt; {
+        <span class="self">self</span>.doc.parents(obj)
     }
 }
 
-<span class="comment">// If a transaction is not commited or rolled back manually then it can leave the document in an</span>
-<span class="comment">// intermediate state.</span>
-<span class="comment">// This defaults to rolling back the transaction to be compatible with `?` error returning before</span>
-<span class="comment">// reaching a call to `commit`.</span>
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Obs</span>: <span class="ident">observation::Observation</span><span class="op">&gt;</span> <span class="ident">Drop</span> <span class="kw">for</span> <span class="ident">Transaction</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">Obs</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">drop</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">txn</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">inner</span>.<span class="ident">take</span>() {
-            <span class="ident">txn</span>.<span class="ident">rollback</span>(<span class="self">self</span>.<span class="ident">doc</span>);
+<span class="comment">// If a transaction is not commited or rolled back manually then it can leave the document in an
+// intermediate state.
+// This defaults to rolling back the transaction to be compatible with `?` error returning before
+// reaching a call to `commit`.
+</span><span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, Obs: observation::Observation&gt; Drop <span class="kw">for </span>Transaction&lt;<span class="lifetime">&#39;a</span>, Obs&gt; {
+    <span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(txn) = <span class="self">self</span>.inner.take() {
+            txn.rollback(<span class="self">self</span>.doc);
         }
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

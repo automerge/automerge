@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/columnar/column_range/opid_list.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>opid_list.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/columnar/column_range/opid_list.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>opid_list.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -324,329 +324,329 @@
 <span id="322">322</span>
 <span id="323">323</span>
 <span id="324">324</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std</span>::{<span class="ident">convert::Infallible</span>, <span class="ident">ops::Range</span>};
+</pre><pre class="rust"><code><span class="kw">use </span>std::{convert::Infallible, ops::Range};
 
-<span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">DeltaRange</span>, <span class="ident">RleRange</span>};
-<span class="kw">use</span> <span class="kw">crate</span>::{
-    <span class="ident">columnar</span>::{
-        <span class="ident">encoding</span>::{
-            <span class="ident">raw</span>, <span class="ident">DecodeColumnError</span>, <span class="ident">DeltaDecoder</span>, <span class="ident">DeltaEncoder</span>, <span class="ident">RleDecoder</span>, <span class="ident">RleEncoder</span>, <span class="ident">Sink</span>,
+<span class="kw">use super</span>::{DeltaRange, RleRange};
+<span class="kw">use crate</span>::{
+    columnar::{
+        encoding::{
+            raw, DecodeColumnError, DeltaDecoder, DeltaEncoder, RleDecoder, RleEncoder, Sink,
         },
-        <span class="ident">SpliceError</span>,
+        SpliceError,
     },
-    <span class="ident">convert</span>,
-    <span class="ident">types::OpId</span>,
+    convert,
+    types::OpId,
 };
 
-<span class="doccomment">/// A collection of ranges which decode to lists of OpIds</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">OpIdListRange</span> {
-    <span class="ident">num</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>,
-    <span class="ident">actor</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>,
-    <span class="ident">counter</span>: <span class="ident">DeltaRange</span>,
+<span class="doccomment">/// A collection of ranges which decode to lists of OpIds
+</span><span class="attribute">#[derive(Clone, Debug, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpIdListRange {
+    num: RleRange&lt;u64&gt;,
+    actor: RleRange&lt;u64&gt;,
+    counter: DeltaRange,
 }
 
-<span class="kw">impl</span> <span class="ident">OpIdListRange</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">num</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>, <span class="ident">actor</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>, <span class="ident">counter</span>: <span class="ident">DeltaRange</span>) -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span> {
-            <span class="ident">num</span>,
-            <span class="ident">actor</span>,
-            <span class="ident">counter</span>,
+<span class="kw">impl </span>OpIdListRange {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(num: RleRange&lt;u64&gt;, actor: RleRange&lt;u64&gt;, counter: DeltaRange) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            num,
+            actor,
+            counter,
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">group_range</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span> {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">num</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>group_range(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>RleRange&lt;u64&gt; {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.num
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">actor_range</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span> {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">actor</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>actor_range(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>RleRange&lt;u64&gt; {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.actor
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">counter_range</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">DeltaRange</span> {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">counter</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>counter_range(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>DeltaRange {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.counter
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">iter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>]) -&gt; <span class="ident">OpIdListIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="ident">OpIdListIter</span> {
-            <span class="ident">num</span>: <span class="self">self</span>.<span class="ident">num</span>.<span class="ident">decoder</span>(<span class="ident">data</span>),
-            <span class="ident">actor</span>: <span class="self">self</span>.<span class="ident">actor</span>.<span class="ident">decoder</span>(<span class="ident">data</span>),
-            <span class="ident">counter</span>: <span class="self">self</span>.<span class="ident">counter</span>.<span class="ident">decoder</span>(<span class="ident">data</span>),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>iter&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, data: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8]) -&gt; OpIdListIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+        OpIdListIter {
+            num: <span class="self">self</span>.num.decoder(data),
+            actor: <span class="self">self</span>.actor.decoder(data),
+            counter: <span class="self">self</span>.counter.decoder(data),
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="ident">O</span>, <span class="ident">I</span>, <span class="ident">II</span>, <span class="ident">IE</span><span class="op">&gt;</span>(<span class="ident">opids</span>: <span class="ident">I</span>, <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) -&gt; <span class="self">Self</span>
-    <span class="kw">where</span>
-        <span class="ident">O</span>: <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-        <span class="ident">II</span>: <span class="ident">IntoIterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">O</span>, <span class="ident">IntoIter</span> <span class="op">=</span> <span class="ident">IE</span><span class="op">&gt;</span>,
-        <span class="ident">IE</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">O</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">ExactSizeIterator</span>,
-        <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">II</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>encode&lt;O, I, II, IE&gt;(opids: I, out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;) -&gt; <span class="self">Self
+    </span><span class="kw">where
+        </span>O: convert::OpId&lt;usize&gt;,
+        II: IntoIterator&lt;Item = O, IntoIter = IE&gt;,
+        IE: Iterator&lt;Item = O&gt; + ExactSizeIterator,
+        I: Iterator&lt;Item = II&gt; + Clone,
     {
-        <span class="kw">let</span> <span class="ident">num</span> <span class="op">=</span> <span class="ident">RleRange::encode</span>(
-            <span class="ident">opids</span>.<span class="ident">clone</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">os</span><span class="op">|</span> <span class="prelude-val">Some</span>(<span class="ident">os</span>.<span class="ident">into_iter</span>().<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>)),
-            <span class="ident">out</span>,
+        <span class="kw">let </span>num = RleRange::encode(
+            opids.clone().map(|os| <span class="prelude-val">Some</span>(os.into_iter().len() <span class="kw">as </span>u64)),
+            out,
         );
-        <span class="kw">let</span> <span class="ident">actor</span> <span class="op">=</span> <span class="ident">RleRange::encode</span>(
-            <span class="ident">opids</span>
-                .<span class="ident">clone</span>()
-                .<span class="ident">flat_map</span>(<span class="op">|</span><span class="ident">os</span><span class="op">|</span> <span class="ident">os</span>.<span class="ident">into_iter</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">o</span><span class="op">|</span> <span class="prelude-val">Some</span>(<span class="ident">o</span>.<span class="ident">actor</span>() <span class="kw">as</span> <span class="ident">u64</span>))),
-            <span class="ident">out</span>,
+        <span class="kw">let </span>actor = RleRange::encode(
+            opids
+                .clone()
+                .flat_map(|os| os.into_iter().map(|o| <span class="prelude-val">Some</span>(o.actor() <span class="kw">as </span>u64))),
+            out,
         );
-        <span class="kw">let</span> <span class="ident">counter</span> <span class="op">=</span> <span class="ident">DeltaRange::encode</span>(
-            <span class="ident">opids</span>.<span class="ident">flat_map</span>(<span class="op">|</span><span class="ident">os</span><span class="op">|</span> <span class="ident">os</span>.<span class="ident">into_iter</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">o</span><span class="op">|</span> <span class="prelude-val">Some</span>(<span class="ident">o</span>.<span class="ident">counter</span>() <span class="kw">as</span> <span class="ident">i64</span>))),
-            <span class="ident">out</span>,
+        <span class="kw">let </span>counter = DeltaRange::encode(
+            opids.flat_map(|os| os.into_iter().map(|o| <span class="prelude-val">Some</span>(o.counter() <span class="kw">as </span>i64))),
+            out,
         );
-        <span class="self">Self</span> {
-            <span class="ident">num</span>,
-            <span class="ident">actor</span>,
-            <span class="ident">counter</span>,
+        <span class="self">Self </span>{
+            num,
+            actor,
+            counter,
         }
     }
 
-    <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">dead_code</span>)]</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">splice</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">II</span>, <span class="ident">IE</span>, <span class="ident">R</span><span class="op">&gt;</span>(
+    <span class="attribute">#[allow(dead_code)]
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>splice&lt;I, II, IE, R&gt;(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">data</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
-        <span class="ident">replace</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-        <span class="ident">replace_with</span>: <span class="ident">I</span>,
-        <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident">SpliceError</span><span class="op">&lt;</span><span class="ident">raw::Error</span>, <span class="ident">R</span><span class="op">&gt;</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">R</span>: <span class="ident">std::error::Error</span> <span class="op">+</span> <span class="ident">Clone</span>,
-        <span class="ident">II</span>: <span class="ident">IntoIterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">OpId</span>, <span class="ident">IntoIter</span> <span class="op">=</span> <span class="ident">IE</span><span class="op">&gt;</span>,
-        <span class="ident">IE</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">OpId</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">ExactSizeIterator</span>,
-        <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">II</span>, <span class="ident">R</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span>,
+        data: <span class="kw-2">&amp;</span>[u8],
+        replace: Range&lt;usize&gt;,
+        replace_with: I,
+        out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, SpliceError&lt;raw::Error, R&gt;&gt;
+    <span class="kw">where
+        </span>R: std::error::Error + Clone,
+        II: IntoIterator&lt;Item = OpId, IntoIter = IE&gt;,
+        IE: Iterator&lt;Item = OpId&gt; + ExactSizeIterator,
+        I: Iterator&lt;Item = <span class="prelude-ty">Result</span>&lt;II, R&gt;&gt; + Clone,
     {
-        <span class="kw">let</span> <span class="ident">group_replace</span> <span class="op">=</span> <span class="ident">group_replace_range</span>(<span class="ident">replace</span>.<span class="ident">clone</span>(), <span class="self">self</span>.<span class="ident">num</span>.<span class="ident">decoder</span>(<span class="ident">data</span>))
-            .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">e</span>.<span class="ident">existing</span>())<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">num</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">num</span>.<span class="ident">splice</span>(
-            <span class="ident">data</span>,
-            <span class="ident">replace</span>,
-            <span class="ident">replace_with</span>
-                .<span class="ident">clone</span>()
-                .<span class="ident">map</span>(<span class="op">|</span><span class="ident">elems</span><span class="op">|</span> <span class="ident">elems</span>.<span class="ident">map</span>(<span class="op">|</span><span class="ident">elems</span><span class="op">|</span> <span class="prelude-val">Some</span>(<span class="ident">elems</span>.<span class="ident">into_iter</span>().<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>))),
-            <span class="ident">out</span>,
+        <span class="kw">let </span>group_replace = group_replace_range(replace.clone(), <span class="self">self</span>.num.decoder(data))
+            .map_err(|e| e.existing())<span class="question-mark">?</span>;
+        <span class="kw">let </span>num = <span class="self">self</span>.num.splice(
+            data,
+            replace,
+            replace_with
+                .clone()
+                .map(|elems| elems.map(|elems| <span class="prelude-val">Some</span>(elems.into_iter().len() <span class="kw">as </span>u64))),
+            out,
         )<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">actor</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">actor</span>.<span class="ident">splice</span>(
-            <span class="ident">data</span>,
-            <span class="ident">group_replace</span>.<span class="ident">clone</span>(),
-            <span class="ident">replace_with</span>.<span class="ident">clone</span>().<span class="ident">flat_map</span>(<span class="op">|</span><span class="ident">elem</span><span class="op">|</span> <span class="kw">match</span> <span class="ident">elem</span> {
-                <span class="prelude-val">Err</span>(<span class="ident">e</span>) =&gt; <span class="ident">SplicingIter::Failed</span>(<span class="ident">e</span>),
-                <span class="prelude-val">Ok</span>(<span class="ident">i</span>) =&gt; <span class="ident">SplicingIter::Iter</span>(<span class="ident">i</span>.<span class="ident">into_iter</span>(), <span class="op">|</span><span class="ident">oid</span>: <span class="ident">OpId</span><span class="op">|</span> <span class="ident">oid</span>.<span class="ident">actor</span>() <span class="kw">as</span> <span class="ident">u64</span>),
+        <span class="kw">let </span>actor = <span class="self">self</span>.actor.splice(
+            data,
+            group_replace.clone(),
+            replace_with.clone().flat_map(|elem| <span class="kw">match </span>elem {
+                <span class="prelude-val">Err</span>(e) =&gt; SplicingIter::Failed(e),
+                <span class="prelude-val">Ok</span>(i) =&gt; SplicingIter::Iter(i.into_iter(), |oid: OpId| oid.actor() <span class="kw">as </span>u64),
             }),
-            <span class="ident">out</span>,
+            out,
         )<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">counter</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">counter</span>.<span class="ident">splice</span>(
-            <span class="ident">data</span>,
-            <span class="ident">group_replace</span>,
-            <span class="ident">replace_with</span>.<span class="ident">flat_map</span>(<span class="op">|</span><span class="ident">elem</span><span class="op">|</span> <span class="kw">match</span> <span class="ident">elem</span> {
-                <span class="prelude-val">Err</span>(<span class="ident">e</span>) =&gt; <span class="ident">SplicingIter::Failed</span>(<span class="ident">e</span>),
-                <span class="prelude-val">Ok</span>(<span class="ident">i</span>) =&gt; <span class="ident">SplicingIter::Iter</span>(<span class="ident">i</span>.<span class="ident">into_iter</span>(), <span class="op">|</span><span class="ident">oid</span>: <span class="ident">OpId</span><span class="op">|</span> <span class="ident">oid</span>.<span class="ident">counter</span>() <span class="kw">as</span> <span class="ident">i64</span>),
+        <span class="kw">let </span>counter = <span class="self">self</span>.counter.splice(
+            data,
+            group_replace,
+            replace_with.flat_map(|elem| <span class="kw">match </span>elem {
+                <span class="prelude-val">Err</span>(e) =&gt; SplicingIter::Failed(e),
+                <span class="prelude-val">Ok</span>(i) =&gt; SplicingIter::Iter(i.into_iter(), |oid: OpId| oid.counter() <span class="kw">as </span>i64),
             }),
-            <span class="ident">out</span>,
+            out,
         )<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(<span class="self">Self</span> {
-            <span class="ident">num</span>,
-            <span class="ident">actor</span>,
-            <span class="ident">counter</span>,
+        <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
+            num,
+            actor,
+            counter,
         })
     }
 }
 
-<span class="kw">enum</span> <span class="ident">SplicingIter</span><span class="op">&lt;</span><span class="ident">E</span>, <span class="ident">I</span>, <span class="ident">F</span><span class="op">&gt;</span> {
-    <span class="ident">Failed</span>(<span class="ident">E</span>),
-    <span class="ident">Iter</span>(<span class="ident">I</span>, <span class="ident">F</span>),
+<span class="kw">enum </span>SplicingIter&lt;E, I, F&gt; {
+    Failed(E),
+    Iter(I, F),
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">E</span>, <span class="ident">I</span>, <span class="ident">F</span>, <span class="ident">U</span><span class="op">&gt;</span> <span class="ident">Iterator</span> <span class="kw">for</span> <span class="ident">SplicingIter</span><span class="op">&lt;</span><span class="ident">E</span>, <span class="ident">I</span>, <span class="ident">F</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">E</span>: <span class="ident">std::error::Error</span> <span class="op">+</span> <span class="ident">Clone</span>,
-    <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">OpId</span><span class="op">&gt;</span>,
-    <span class="ident">F</span>: <span class="ident">Fn</span>(<span class="ident">OpId</span>) -&gt; <span class="ident">U</span>,
+<span class="kw">impl</span>&lt;E, I, F, U&gt; Iterator <span class="kw">for </span>SplicingIter&lt;E, I, F&gt;
+<span class="kw">where
+    </span>E: std::error::Error + Clone,
+    I: Iterator&lt;Item = OpId&gt;,
+    F: Fn(OpId) -&gt; U,
 {
-    <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">U</span><span class="op">&gt;</span>, <span class="ident">E</span><span class="op">&gt;</span>;
+    <span class="kw">type </span>Item = <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;U&gt;, E&gt;;
 
-    <span class="kw">fn</span> <span class="ident">next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span> {
-            <span class="ident"><span class="self">Self</span>::Failed</span>(<span class="ident">e</span>) =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Err</span>(<span class="ident">e</span>.<span class="ident">clone</span>())),
-            <span class="ident"><span class="self">Self</span>::Iter</span>(<span class="ident">i</span>, <span class="ident">f</span>) =&gt; <span class="ident">i</span>.<span class="ident">next</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">oid</span><span class="op">|</span> <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="ident">f</span>(<span class="ident">oid</span>)))),
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            <span class="self">Self</span>::Failed(e) =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Err</span>(e.clone())),
+            <span class="self">Self</span>::Iter(i, f) =&gt; i.next().map(|oid| <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(f(oid)))),
         }
     }
 }
 
-<span class="doccomment">/// Find the replace range for the grouped columns.</span>
-<span class="kw">fn</span> <span class="ident">group_replace_range</span>(
-    <span class="ident">replace</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-    <span class="kw-2">mut</span> <span class="ident">num</span>: <span class="ident">RleDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;_</span>, <span class="ident">u64</span><span class="op">&gt;</span>,
-) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>, <span class="ident">SpliceError</span><span class="op">&lt;</span><span class="ident">raw::Error</span>, <span class="ident">Infallible</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">idx</span> <span class="op">=</span> <span class="number">0</span>;
-    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">grouped_replace_start</span>: <span class="ident">usize</span> <span class="op">=</span> <span class="number">0</span>;
-    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">grouped_replace_len</span>: <span class="ident">usize</span> <span class="op">=</span> <span class="number">0</span>;
-    <span class="kw">while</span> <span class="ident">idx</span> <span class="op">&lt;</span> <span class="ident">replace</span>.<span class="ident">start</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(<span class="ident">count</span>)) <span class="op">=</span> <span class="ident">num</span>.<span class="ident">next</span>().<span class="ident">transpose</span>().<span class="ident">map_err</span>(<span class="ident">SpliceError::ReadExisting</span>)<span class="question-mark">?</span> {
-            <span class="ident">grouped_replace_start</span> <span class="op">+</span><span class="op">=</span> <span class="ident">count</span> <span class="kw">as</span> <span class="ident">usize</span>;
+<span class="doccomment">/// Find the replace range for the grouped columns.
+</span><span class="kw">fn </span>group_replace_range(
+    replace: Range&lt;usize&gt;,
+    <span class="kw-2">mut </span>num: RleDecoder&lt;<span class="lifetime">&#39;_</span>, u64&gt;,
+) -&gt; <span class="prelude-ty">Result</span>&lt;Range&lt;usize&gt;, SpliceError&lt;raw::Error, Infallible&gt;&gt; {
+    <span class="kw">let </span><span class="kw-2">mut </span>idx = <span class="number">0</span>;
+    <span class="kw">let </span><span class="kw-2">mut </span>grouped_replace_start: usize = <span class="number">0</span>;
+    <span class="kw">let </span><span class="kw-2">mut </span>grouped_replace_len: usize = <span class="number">0</span>;
+    <span class="kw">while </span>idx &lt; replace.start {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(count)) = num.next().transpose().map_err(SpliceError::ReadExisting)<span class="question-mark">? </span>{
+            grouped_replace_start += count <span class="kw">as </span>usize;
         }
-        <span class="ident">idx</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
+        idx += <span class="number">1</span>;
     }
-    <span class="kw">for</span> <span class="kw">_</span> <span class="kw">in</span> <span class="number">0</span>..<span class="ident">replace</span>.<span class="ident">len</span>() {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(<span class="ident">count</span>)) <span class="op">=</span> <span class="ident">num</span>.<span class="ident">next</span>().<span class="ident">transpose</span>().<span class="ident">map_err</span>(<span class="ident">SpliceError::ReadExisting</span>)<span class="question-mark">?</span> {
-            <span class="ident">grouped_replace_len</span> <span class="op">+</span><span class="op">=</span> <span class="ident">count</span> <span class="kw">as</span> <span class="ident">usize</span>;
+    <span class="kw">for _ in </span><span class="number">0</span>..replace.len() {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(count)) = num.next().transpose().map_err(SpliceError::ReadExisting)<span class="question-mark">? </span>{
+            grouped_replace_len += count <span class="kw">as </span>usize;
         }
     }
-    <span class="prelude-val">Ok</span>(<span class="ident">grouped_replace_start</span>..(<span class="ident">grouped_replace_start</span> <span class="op">+</span> <span class="ident">grouped_replace_len</span>))
+    <span class="prelude-val">Ok</span>(grouped_replace_start..(grouped_replace_start + grouped_replace_len))
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">OpIdListIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">num</span>: <span class="ident">RleDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">u64</span><span class="op">&gt;</span>,
-    <span class="ident">actor</span>: <span class="ident">RleDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">u64</span><span class="op">&gt;</span>,
-    <span class="ident">counter</span>: <span class="ident">DeltaDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
+<span class="attribute">#[derive(Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpIdListIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    num: RleDecoder&lt;<span class="lifetime">&#39;a</span>, u64&gt;,
+    actor: RleDecoder&lt;<span class="lifetime">&#39;a</span>, u64&gt;,
+    counter: DeltaDecoder&lt;<span class="lifetime">&#39;a</span>&gt;,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">OpIdListIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">try_next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">OpId</span><span class="op">&gt;</span><span class="op">&gt;</span>, <span class="ident">DecodeColumnError</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">num</span> <span class="op">=</span> <span class="kw">match</span> <span class="self">self</span>
-            .<span class="ident">num</span>
-            .<span class="ident">next</span>()
-            .<span class="ident">transpose</span>()
-            .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">DecodeColumnError::decode_raw</span>(<span class="string">&quot;num&quot;</span>, <span class="ident">e</span>))<span class="question-mark">?</span>
-        {
-            <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(<span class="ident">n</span>)) =&gt; <span class="ident">n</span>,
-            <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) =&gt; <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">DecodeColumnError::unexpected_null</span>(<span class="string">&quot;num&quot;</span>)),
-            <span class="prelude-val">None</span> =&gt; <span class="kw">return</span> <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>),
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; OpIdListIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>try_next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;Vec&lt;OpId&gt;&gt;, DecodeColumnError&gt; {
+        <span class="kw">let </span>num = <span class="kw">match </span><span class="self">self
+            </span>.num
+            .next()
+            .transpose()
+            .map_err(|e| DecodeColumnError::decode_raw(<span class="string">&quot;num&quot;</span>, e))<span class="question-mark">?
+        </span>{
+            <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(n)) =&gt; n,
+            <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(DecodeColumnError::unexpected_null(<span class="string">&quot;num&quot;</span>)),
+            <span class="prelude-val">None </span>=&gt; <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>),
         };
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">p</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="ident">num</span> <span class="kw">as</span> <span class="ident">usize</span>);
-        <span class="kw">for</span> <span class="kw">_</span> <span class="kw">in</span> <span class="number">0</span>..<span class="ident">num</span> {
-            <span class="kw">let</span> <span class="ident">actor</span> <span class="op">=</span> <span class="self">self</span>
-                .<span class="ident">actor</span>
-                .<span class="ident">next</span>()
-                .<span class="ident">transpose</span>()
-                .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">DecodeColumnError::decode_raw</span>(<span class="string">&quot;actor&quot;</span>, <span class="ident">e</span>))<span class="question-mark">?</span>;
-            <span class="kw">let</span> <span class="ident">counter</span> <span class="op">=</span> <span class="self">self</span>
-                .<span class="ident">counter</span>
-                .<span class="ident">next</span>()
-                .<span class="ident">transpose</span>()
-                .<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">DecodeColumnError::decode_raw</span>(<span class="string">&quot;counter&quot;</span>, <span class="ident">e</span>))<span class="question-mark">?</span>;
-            <span class="kw">match</span> (<span class="ident">actor</span>, <span class="ident">counter</span>) {
-                (<span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(<span class="ident">a</span>)), <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(<span class="ident">ctr</span>))) =&gt; <span class="kw">match</span> <span class="ident">ctr</span>.<span class="ident">try_into</span>() {
-                    <span class="prelude-val">Ok</span>(<span class="ident">ctr</span>) =&gt; <span class="ident">p</span>.<span class="ident">push</span>(<span class="ident">OpId</span>(<span class="ident">ctr</span>, <span class="ident">a</span> <span class="kw">as</span> <span class="ident">usize</span>)),
-                    <span class="prelude-val">Err</span>(<span class="ident">_e</span>) =&gt; {
-                        <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">DecodeColumnError::invalid_value</span>(
+        <span class="kw">let </span><span class="kw-2">mut </span>p = Vec::with_capacity(num <span class="kw">as </span>usize);
+        <span class="kw">for _ in </span><span class="number">0</span>..num {
+            <span class="kw">let </span>actor = <span class="self">self
+                </span>.actor
+                .next()
+                .transpose()
+                .map_err(|e| DecodeColumnError::decode_raw(<span class="string">&quot;actor&quot;</span>, e))<span class="question-mark">?</span>;
+            <span class="kw">let </span>counter = <span class="self">self
+                </span>.counter
+                .next()
+                .transpose()
+                .map_err(|e| DecodeColumnError::decode_raw(<span class="string">&quot;counter&quot;</span>, e))<span class="question-mark">?</span>;
+            <span class="kw">match </span>(actor, counter) {
+                (<span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(a)), <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(ctr))) =&gt; <span class="kw">match </span>ctr.try_into() {
+                    <span class="prelude-val">Ok</span>(ctr) =&gt; p.push(OpId(ctr, a <span class="kw">as </span>usize)),
+                    <span class="prelude-val">Err</span>(_e) =&gt; {
+                        <span class="kw">return </span><span class="prelude-val">Err</span>(DecodeColumnError::invalid_value(
                             <span class="string">&quot;counter&quot;</span>,
                             <span class="string">&quot;negative value for counter&quot;</span>,
                         ))
                     }
                 },
-                (<span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) <span class="op">|</span> <span class="prelude-val">None</span>, <span class="kw">_</span>) =&gt; <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">DecodeColumnError::unexpected_null</span>(<span class="string">&quot;actor&quot;</span>)),
-                (<span class="kw">_</span>, <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) <span class="op">|</span> <span class="prelude-val">None</span>) =&gt; {
-                    <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">DecodeColumnError::unexpected_null</span>(<span class="string">&quot;counter&quot;</span>))
+                (<span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) | <span class="prelude-val">None</span>, <span class="kw">_</span>) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(DecodeColumnError::unexpected_null(<span class="string">&quot;actor&quot;</span>)),
+                (<span class="kw">_</span>, <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) | <span class="prelude-val">None</span>) =&gt; {
+                    <span class="kw">return </span><span class="prelude-val">Err</span>(DecodeColumnError::unexpected_null(<span class="string">&quot;counter&quot;</span>))
                 }
             }
         }
-        <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="ident">p</span>))
+        <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(p))
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Iterator</span> <span class="kw">for</span> <span class="ident">OpIdListIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">OpId</span><span class="op">&gt;</span>, <span class="ident">DecodeColumnError</span><span class="op">&gt;</span>;
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>OpIdListIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">type </span>Item = <span class="prelude-ty">Result</span>&lt;Vec&lt;OpId&gt;, DecodeColumnError&gt;;
 
-    <span class="kw">fn</span> <span class="ident">next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">try_next</span>().<span class="ident">transpose</span>()
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="self">self</span>.try_next().transpose()
     }
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">OpIdListEncoder</span><span class="op">&lt;</span><span class="ident">S</span><span class="op">&gt;</span> {
-    <span class="ident">num</span>: <span class="ident">RleEncoder</span><span class="op">&lt;</span><span class="ident">S</span>, <span class="ident">u64</span><span class="op">&gt;</span>,
-    <span class="ident">actor</span>: <span class="ident">RleEncoder</span><span class="op">&lt;</span><span class="ident">S</span>, <span class="ident">u64</span><span class="op">&gt;</span>,
-    <span class="ident">counter</span>: <span class="ident">DeltaEncoder</span><span class="op">&lt;</span><span class="ident">S</span><span class="op">&gt;</span>,
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpIdListEncoder&lt;S&gt; {
+    num: RleEncoder&lt;S, u64&gt;,
+    actor: RleEncoder&lt;S, u64&gt;,
+    counter: DeltaEncoder&lt;S&gt;,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span><span class="op">&gt;</span> <span class="ident">OpIdListEncoder</span><span class="op">&lt;</span><span class="ident">S</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">append</span><span class="op">&lt;</span><span class="ident">I</span>, <span class="ident">O</span><span class="op">&gt;</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">ids</span>: <span class="ident">I</span>)
-    <span class="kw">where</span>
-        <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">O</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">ExactSizeIterator</span>,
-        <span class="ident">O</span>: <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
+<span class="kw">impl</span>&lt;S: Sink&gt; OpIdListEncoder&lt;S&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>append&lt;I, O&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, ids: I)
+    <span class="kw">where
+        </span>I: Iterator&lt;Item = O&gt; + ExactSizeIterator,
+        O: convert::OpId&lt;usize&gt;,
     {
-        <span class="self">self</span>.<span class="ident">num</span>.<span class="ident">append_value</span>(<span class="ident">ids</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">u64</span>);
-        <span class="kw">for</span> <span class="ident">id</span> <span class="kw">in</span> <span class="ident">ids</span> {
-            <span class="self">self</span>.<span class="ident">actor</span>.<span class="ident">append_value</span>(<span class="ident">id</span>.<span class="ident">actor</span>() <span class="kw">as</span> <span class="ident">u64</span>);
-            <span class="self">self</span>.<span class="ident">counter</span>.<span class="ident">append_value</span>(<span class="ident">id</span>.<span class="ident">counter</span>() <span class="kw">as</span> <span class="ident">i64</span>);
+        <span class="self">self</span>.num.append_value(ids.len() <span class="kw">as </span>u64);
+        <span class="kw">for </span>id <span class="kw">in </span>ids {
+            <span class="self">self</span>.actor.append_value(id.actor() <span class="kw">as </span>u64);
+            <span class="self">self</span>.counter.append_value(id.counter() <span class="kw">as </span>i64);
         }
     }
 }
 
-<span class="kw">impl</span> <span class="ident">OpIdListEncoder</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>() -&gt; <span class="self">Self</span> {
-        <span class="self">Self</span> {
-            <span class="ident">num</span>: <span class="ident">RleEncoder::from</span>(<span class="ident">Vec::new</span>()),
-            <span class="ident">actor</span>: <span class="ident">RleEncoder::from</span>(<span class="ident">Vec::new</span>()),
-            <span class="ident">counter</span>: <span class="ident">DeltaEncoder::from</span>(<span class="ident">Vec::new</span>()),
+<span class="kw">impl </span>OpIdListEncoder&lt;Vec&lt;u8&gt;&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new() -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            num: RleEncoder::from(Vec::new()),
+            actor: RleEncoder::from(Vec::new()),
+            counter: DeltaEncoder::from(Vec::new()),
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">finish</span>(<span class="self">self</span>, <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) -&gt; <span class="ident">OpIdListRange</span> {
-        <span class="kw">let</span> <span class="ident">start</span> <span class="op">=</span> <span class="ident">out</span>.<span class="ident">len</span>();
-        <span class="kw">let</span> (<span class="ident">num</span>, <span class="kw">_</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">num</span>.<span class="ident">finish</span>();
-        <span class="ident">out</span>.<span class="ident">extend</span>(<span class="ident">num</span>);
-        <span class="kw">let</span> <span class="ident">num_end</span> <span class="op">=</span> <span class="ident">out</span>.<span class="ident">len</span>();
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>finish(<span class="self">self</span>, out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;) -&gt; OpIdListRange {
+        <span class="kw">let </span>start = out.len();
+        <span class="kw">let </span>(num, <span class="kw">_</span>) = <span class="self">self</span>.num.finish();
+        out.extend(num);
+        <span class="kw">let </span>num_end = out.len();
 
-        <span class="kw">let</span> (<span class="ident">actor</span>, <span class="kw">_</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">actor</span>.<span class="ident">finish</span>();
-        <span class="ident">out</span>.<span class="ident">extend</span>(<span class="ident">actor</span>);
-        <span class="kw">let</span> <span class="ident">actor_end</span> <span class="op">=</span> <span class="ident">out</span>.<span class="ident">len</span>();
+        <span class="kw">let </span>(actor, <span class="kw">_</span>) = <span class="self">self</span>.actor.finish();
+        out.extend(actor);
+        <span class="kw">let </span>actor_end = out.len();
 
-        <span class="kw">let</span> (<span class="ident">counter</span>, <span class="kw">_</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">counter</span>.<span class="ident">finish</span>();
-        <span class="ident">out</span>.<span class="ident">extend</span>(<span class="ident">counter</span>);
-        <span class="kw">let</span> <span class="ident">counter_end</span> <span class="op">=</span> <span class="ident">out</span>.<span class="ident">len</span>();
+        <span class="kw">let </span>(counter, <span class="kw">_</span>) = <span class="self">self</span>.counter.finish();
+        out.extend(counter);
+        <span class="kw">let </span>counter_end = out.len();
 
-        <span class="ident">OpIdListRange</span> {
-            <span class="ident">num</span>: (<span class="ident">start</span>..<span class="ident">num_end</span>).<span class="ident">into</span>(),
-            <span class="ident">actor</span>: (<span class="ident">num_end</span>..<span class="ident">actor_end</span>).<span class="ident">into</span>(),
-            <span class="ident">counter</span>: (<span class="ident">actor_end</span>..<span class="ident">counter_end</span>).<span class="ident">into</span>(),
+        OpIdListRange {
+            num: (start..num_end).into(),
+            actor: (num_end..actor_end).into(),
+            counter: (actor_end..counter_end).into(),
         }
     }
 }
 
-<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">test</span>)]</span>
-<span class="kw">mod</span> <span class="ident">tests</span> {
-    <span class="kw">use</span> <span class="kw">super</span>::<span class="kw-2">*</span>;
-    <span class="kw">use</span> <span class="ident">proptest::collection::vec</span> <span class="kw">as</span> <span class="ident">propvec</span>;
-    <span class="kw">use</span> <span class="ident">proptest::prelude</span>::<span class="kw-2">*</span>;
+<span class="attribute">#[cfg(test)]
+</span><span class="kw">mod </span>tests {
+    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+    <span class="kw">use </span>proptest::collection::vec <span class="kw">as </span>propvec;
+    <span class="kw">use </span>proptest::prelude::<span class="kw-2">*</span>;
 
-    <span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::columnar::encoding::properties</span>::{<span class="ident">opid</span>, <span class="ident">splice_scenario</span>};
+    <span class="kw">use </span><span class="kw">crate</span>::columnar::encoding::properties::{opid, splice_scenario};
 
-    <span class="kw">fn</span> <span class="ident">encode</span>(<span class="ident">opids</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">OpId</span><span class="op">&gt;</span><span class="op">&gt;</span>) -&gt; (<span class="ident">OpIdListRange</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">out</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
-        <span class="kw">let</span> <span class="ident">range</span> <span class="op">=</span> <span class="ident">OpIdListRange::encode</span>(<span class="ident">opids</span>.<span class="ident">iter</span>(), <span class="kw-2">&amp;mut</span> <span class="ident">out</span>);
-        (<span class="ident">range</span>, <span class="ident">out</span>)
+    <span class="kw">fn </span>encode(opids: Vec&lt;Vec&lt;OpId&gt;&gt;) -&gt; (OpIdListRange, Vec&lt;u8&gt;) {
+        <span class="kw">let </span><span class="kw-2">mut </span>out = Vec::new();
+        <span class="kw">let </span>range = OpIdListRange::encode(opids.iter(), <span class="kw-2">&amp;mut </span>out);
+        (range, out)
     }
 
-    <span class="kw">fn</span> <span class="ident">decode</span>(<span class="ident">range</span>: <span class="ident">OpIdListRange</span>, <span class="ident">buf</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">OpId</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-        <span class="ident">range</span>.<span class="ident">iter</span>(<span class="ident">buf</span>).<span class="ident">map</span>(<span class="op">|</span><span class="ident">c</span><span class="op">|</span> <span class="ident">c</span>.<span class="ident">unwrap</span>()).<span class="ident">collect</span>()
+    <span class="kw">fn </span>decode(range: OpIdListRange, buf: <span class="kw-2">&amp;</span>[u8]) -&gt; Vec&lt;Vec&lt;OpId&gt;&gt; {
+        range.iter(buf).map(|c| c.unwrap()).collect()
     }
 
-    <span class="macro">proptest!</span> {
-        <span class="attribute">#[<span class="ident">test</span>]</span>
-        <span class="kw">fn</span> <span class="ident">encode_decode_opid_list</span>(<span class="ident">opids</span> <span class="kw">in</span> <span class="ident">propvec</span>(<span class="ident">propvec</span>(<span class="ident">opid</span>(), <span class="number">0</span>..<span class="number">100</span>), <span class="number">0</span>..<span class="number">100</span>)){
-            <span class="kw">let</span> (<span class="ident">range</span>, <span class="ident">encoded</span>) <span class="op">=</span> <span class="ident">encode</span>(<span class="ident">opids</span>.<span class="ident">clone</span>());
-            <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">decode</span>(<span class="ident">range</span>, <span class="kw-2">&amp;</span><span class="ident">encoded</span>);
-            <span class="macro">assert_eq!</span>(<span class="ident">opids</span>, <span class="ident">result</span>)
+    <span class="macro">proptest! </span>{
+        <span class="attribute">#[test]
+        </span><span class="kw">fn </span>encode_decode_opid_list(opids <span class="kw">in </span>propvec(propvec(opid(), <span class="number">0</span>..<span class="number">100</span>), <span class="number">0</span>..<span class="number">100</span>)){
+            <span class="kw">let </span>(range, encoded) = encode(opids.clone());
+            <span class="kw">let </span>result = decode(range, <span class="kw-2">&amp;</span>encoded);
+            <span class="macro">assert_eq!</span>(opids, result)
         }
 
-        <span class="attribute">#[<span class="ident">test</span>]</span>
-        <span class="kw">fn</span> <span class="ident">splice_opid_list</span>(<span class="ident">scenario</span> <span class="kw">in</span> <span class="ident">splice_scenario</span>(<span class="ident">propvec</span>(<span class="ident">opid</span>(), <span class="number">0</span>..<span class="number">100</span>))) {
-            <span class="kw">let</span> (<span class="ident">range</span>, <span class="ident">encoded</span>) <span class="op">=</span> <span class="ident">encode</span>(<span class="ident">scenario</span>.<span class="ident">initial_values</span>.<span class="ident">clone</span>());
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">out</span> <span class="op">=</span> <span class="ident">Vec::new</span>();
-            <span class="kw">let</span> <span class="ident">replacements</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">OpId</span><span class="op">&gt;</span>, <span class="ident">Infallible</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">scenario</span>.<span class="ident">replacements</span>.<span class="ident">iter</span>().<span class="ident">cloned</span>().<span class="ident">map</span>(<span class="prelude-val">Ok</span>).<span class="ident">collect</span>();
-            <span class="kw">let</span> <span class="ident">new_range</span> <span class="op">=</span> <span class="ident">range</span>.<span class="ident">splice</span>(
-                <span class="kw-2">&amp;</span><span class="ident">encoded</span>,
-                <span class="ident">scenario</span>.<span class="ident">replace_range</span>.<span class="ident">clone</span>(),
-                <span class="ident">replacements</span>.<span class="ident">into_iter</span>(),
-                <span class="kw-2">&amp;mut</span> <span class="ident">out</span>
-                ).<span class="ident">unwrap</span>();
-            <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">decode</span>(<span class="ident">new_range</span>, <span class="kw-2">&amp;</span><span class="ident">out</span>[..]);
-            <span class="ident">scenario</span>.<span class="ident">check</span>(<span class="ident">result</span>);
+        <span class="attribute">#[test]
+        </span><span class="kw">fn </span>splice_opid_list(scenario <span class="kw">in </span>splice_scenario(propvec(opid(), <span class="number">0</span>..<span class="number">100</span>))) {
+            <span class="kw">let </span>(range, encoded) = encode(scenario.initial_values.clone());
+            <span class="kw">let </span><span class="kw-2">mut </span>out = Vec::new();
+            <span class="kw">let </span>replacements: Vec&lt;<span class="prelude-ty">Result</span>&lt;Vec&lt;OpId&gt;, Infallible&gt;&gt; = scenario.replacements.iter().cloned().map(<span class="prelude-val">Ok</span>).collect();
+            <span class="kw">let </span>new_range = range.splice(
+                <span class="kw-2">&amp;</span>encoded,
+                scenario.replace_range.clone(),
+                replacements.into_iter(),
+                <span class="kw-2">&amp;mut </span>out
+                ).unwrap();
+            <span class="kw">let </span>result = decode(new_range, <span class="kw-2">&amp;</span>out[..]);
+            scenario.check(result);
         }
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

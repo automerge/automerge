@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/columns/column_builder.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>column_builder.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/columns/column_builder.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>column_builder.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -199,204 +199,204 @@
 <span id="197">197</span>
 <span id="198">198</span>
 <span id="199">199</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::ops::Range</span>;
+</pre><pre class="rust"><code><span class="kw">use </span>std::ops::Range;
 
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::columnar::column_range</span>::{
-    <span class="ident">generic</span>::{<span class="ident">GenericColumnRange</span>, <span class="ident">GroupRange</span>, <span class="ident">GroupedColumnRange</span>, <span class="ident">SimpleColRange</span>},
-    <span class="ident">BooleanRange</span>, <span class="ident">DeltaRange</span>, <span class="ident">RawRange</span>, <span class="ident">RleRange</span>, <span class="ident">ValueRange</span>,
+<span class="kw">use </span><span class="kw">crate</span>::columnar::column_range::{
+    generic::{GenericColumnRange, GroupRange, GroupedColumnRange, SimpleColRange},
+    BooleanRange, DeltaRange, RawRange, RleRange, ValueRange,
 };
 
-<span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">Column</span>, <span class="ident">ColumnId</span>, <span class="ident">ColumnSpec</span>};
+<span class="kw">use super</span>::{Column, ColumnId, ColumnSpec};
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">ColumnBuilder</span>;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ColumnBuilder;
 
-<span class="kw">impl</span> <span class="ident">ColumnBuilder</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">build_actor</span>(<span class="ident">spec</span>: <span class="ident">ColumnSpec</span>, <span class="ident">range</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>) -&gt; <span class="ident">Column</span> {
-        <span class="ident">Column::new</span>(
-            <span class="ident">spec</span>,
-            <span class="ident">GenericColumnRange::Simple</span>(<span class="ident">SimpleColRange::RleInt</span>(<span class="ident">range</span>)),
+<span class="kw">impl </span>ColumnBuilder {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>build_actor(spec: ColumnSpec, range: RleRange&lt;u64&gt;) -&gt; Column {
+        Column::new(
+            spec,
+            GenericColumnRange::Simple(SimpleColRange::RleInt(range)),
         )
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">build_string</span>(<span class="ident">spec</span>: <span class="ident">ColumnSpec</span>, <span class="ident">range</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">smol_str::SmolStr</span><span class="op">&gt;</span>) -&gt; <span class="ident">Column</span> {
-        <span class="ident">Column::new</span>(
-            <span class="ident">spec</span>,
-            <span class="ident">GenericColumnRange::Simple</span>(<span class="ident">SimpleColRange::RleString</span>(<span class="ident">range</span>)),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>build_string(spec: ColumnSpec, range: RleRange&lt;smol_str::SmolStr&gt;) -&gt; Column {
+        Column::new(
+            spec,
+            GenericColumnRange::Simple(SimpleColRange::RleString(range)),
         )
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">build_integer</span>(<span class="ident">spec</span>: <span class="ident">ColumnSpec</span>, <span class="ident">range</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>) -&gt; <span class="ident">Column</span> {
-        <span class="ident">Column::new</span>(
-            <span class="ident">spec</span>,
-            <span class="ident">GenericColumnRange::Simple</span>(<span class="ident">SimpleColRange::RleInt</span>(<span class="ident">range</span>)),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>build_integer(spec: ColumnSpec, range: RleRange&lt;u64&gt;) -&gt; Column {
+        Column::new(
+            spec,
+            GenericColumnRange::Simple(SimpleColRange::RleInt(range)),
         )
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">build_delta_integer</span>(<span class="ident">spec</span>: <span class="ident">ColumnSpec</span>, <span class="ident">range</span>: <span class="ident">DeltaRange</span>) -&gt; <span class="ident">Column</span> {
-        <span class="ident">Column::new</span>(
-            <span class="ident">spec</span>,
-            <span class="ident">GenericColumnRange::Simple</span>(<span class="ident">SimpleColRange::Delta</span>(<span class="ident">range</span>)),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>build_delta_integer(spec: ColumnSpec, range: DeltaRange) -&gt; Column {
+        Column::new(
+            spec,
+            GenericColumnRange::Simple(SimpleColRange::Delta(range)),
         )
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">build_boolean</span>(<span class="ident">spec</span>: <span class="ident">ColumnSpec</span>, <span class="ident">range</span>: <span class="ident">BooleanRange</span>) -&gt; <span class="ident">Column</span> {
-        <span class="ident">Column::new</span>(
-            <span class="ident">spec</span>,
-            <span class="ident">GenericColumnRange::Simple</span>(<span class="ident">SimpleColRange::Boolean</span>(<span class="ident">range</span>)),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>build_boolean(spec: ColumnSpec, range: BooleanRange) -&gt; Column {
+        Column::new(
+            spec,
+            GenericColumnRange::Simple(SimpleColRange::Boolean(range)),
         )
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">start_value</span>(
-        <span class="ident">spec</span>: <span class="ident">ColumnSpec</span>,
-        <span class="ident">meta</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="ident">AwaitingRawColumnValueBuilder</span> {
-        <span class="ident">AwaitingRawColumnValueBuilder</span> { <span class="ident">spec</span>, <span class="ident">meta</span> }
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>start_value(
+        spec: ColumnSpec,
+        meta: RleRange&lt;u64&gt;,
+    ) -&gt; AwaitingRawColumnValueBuilder {
+        AwaitingRawColumnValueBuilder { spec, meta }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">start_group</span>(<span class="ident">spec</span>: <span class="ident">ColumnSpec</span>, <span class="ident">num</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>) -&gt; <span class="ident">GroupBuilder</span> {
-        <span class="ident">GroupBuilder</span> {
-            <span class="ident">spec</span>,
-            <span class="ident">num_range</span>: <span class="ident">num</span>,
-            <span class="ident">columns</span>: <span class="ident">Vec::new</span>(),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>start_group(spec: ColumnSpec, num: RleRange&lt;u64&gt;) -&gt; GroupBuilder {
+        GroupBuilder {
+            spec,
+            num_range: num,
+            columns: Vec::new(),
         }
     }
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">AwaitingRawColumnValueBuilder</span> {
-    <span class="ident">spec</span>: <span class="ident">ColumnSpec</span>,
-    <span class="ident">meta</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>,
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>AwaitingRawColumnValueBuilder {
+    spec: ColumnSpec,
+    meta: RleRange&lt;u64&gt;,
 }
 
-<span class="kw">impl</span> <span class="ident">AwaitingRawColumnValueBuilder</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">id</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">ColumnId</span> {
-        <span class="self">self</span>.<span class="ident">spec</span>.<span class="ident">id</span>()
+<span class="kw">impl </span>AwaitingRawColumnValueBuilder {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ColumnId {
+        <span class="self">self</span>.spec.id()
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">meta_range</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span> {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">meta</span>
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>meta_range(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>RleRange&lt;u64&gt; {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.meta
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">build</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">raw</span>: <span class="ident">RawRange</span>) -&gt; <span class="ident">Column</span> {
-        <span class="ident">Column::new</span>(
-            <span class="self">self</span>.<span class="ident">spec</span>,
-            <span class="ident">GenericColumnRange::Value</span>(<span class="ident">ValueRange::new</span>(<span class="self">self</span>.<span class="ident">meta</span>.<span class="ident">clone</span>(), <span class="ident">raw</span>)),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>build(<span class="kw-2">&amp;mut </span><span class="self">self</span>, raw: RawRange) -&gt; Column {
+        Column::new(
+            <span class="self">self</span>.spec,
+            GenericColumnRange::Value(ValueRange::new(<span class="self">self</span>.meta.clone(), raw)),
         )
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">GroupBuilder</span> {
-    <span class="ident">spec</span>: <span class="ident">ColumnSpec</span>,
-    <span class="ident">num_range</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>,
-    <span class="ident">columns</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">GroupedColumnRange</span><span class="op">&gt;</span>,
+<span class="attribute">#[derive(Debug)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>GroupBuilder {
+    spec: ColumnSpec,
+    num_range: RleRange&lt;u64&gt;,
+    columns: Vec&lt;GroupedColumnRange&gt;,
 }
 
-<span class="kw">impl</span> <span class="ident">GroupBuilder</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">range</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">start</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">num_range</span>.<span class="ident">start</span>();
-        <span class="kw">let</span> <span class="ident">end</span> <span class="op">=</span> <span class="self">self</span>
-            .<span class="ident">columns</span>
-            .<span class="ident">last</span>()
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">c</span><span class="op">|</span> <span class="ident">c</span>.<span class="ident">range</span>().<span class="ident">end</span>)
-            .<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="self">self</span>.<span class="ident">num_range</span>.<span class="ident">end</span>());
-        <span class="ident">start</span>..<span class="ident">end</span>
+<span class="kw">impl </span>GroupBuilder {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>range(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Range&lt;usize&gt; {
+        <span class="kw">let </span>start = <span class="self">self</span>.num_range.start();
+        <span class="kw">let </span>end = <span class="self">self
+            </span>.columns
+            .last()
+            .map(|c| c.range().end)
+            .unwrap_or_else(|| <span class="self">self</span>.num_range.end());
+        start..end
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">add_actor</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">_spec</span>: <span class="ident">ColumnSpec</span>, <span class="ident">range</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>) {
-        <span class="self">self</span>.<span class="ident">columns</span>
-            .<span class="ident">push</span>(<span class="ident">GroupedColumnRange::Simple</span>(<span class="ident">SimpleColRange::RleInt</span>(
-                <span class="ident">range</span>.<span class="ident">into</span>(),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add_actor(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _spec: ColumnSpec, range: Range&lt;usize&gt;) {
+        <span class="self">self</span>.columns
+            .push(GroupedColumnRange::Simple(SimpleColRange::RleInt(
+                range.into(),
             )));
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">add_string</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">_spec</span>: <span class="ident">ColumnSpec</span>, <span class="ident">range</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>) {
-        <span class="self">self</span>.<span class="ident">columns</span>
-            .<span class="ident">push</span>(<span class="ident">GroupedColumnRange::Simple</span>(<span class="ident">SimpleColRange::RleString</span>(
-                <span class="ident">range</span>.<span class="ident">into</span>(),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add_string(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _spec: ColumnSpec, range: Range&lt;usize&gt;) {
+        <span class="self">self</span>.columns
+            .push(GroupedColumnRange::Simple(SimpleColRange::RleString(
+                range.into(),
             )));
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">add_integer</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">_spec</span>: <span class="ident">ColumnSpec</span>, <span class="ident">range</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>) {
-        <span class="self">self</span>.<span class="ident">columns</span>
-            .<span class="ident">push</span>(<span class="ident">GroupedColumnRange::Simple</span>(<span class="ident">SimpleColRange::RleInt</span>(
-                <span class="ident">range</span>.<span class="ident">into</span>(),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add_integer(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _spec: ColumnSpec, range: Range&lt;usize&gt;) {
+        <span class="self">self</span>.columns
+            .push(GroupedColumnRange::Simple(SimpleColRange::RleInt(
+                range.into(),
             )));
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">add_delta_integer</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">_spec</span>: <span class="ident">ColumnSpec</span>, <span class="ident">range</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>) {
-        <span class="self">self</span>.<span class="ident">columns</span>
-            .<span class="ident">push</span>(<span class="ident">GroupedColumnRange::Simple</span>(<span class="ident">SimpleColRange::Delta</span>(
-                <span class="ident">range</span>.<span class="ident">into</span>(),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add_delta_integer(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _spec: ColumnSpec, range: Range&lt;usize&gt;) {
+        <span class="self">self</span>.columns
+            .push(GroupedColumnRange::Simple(SimpleColRange::Delta(
+                range.into(),
             )));
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">add_boolean</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">_spec</span>: <span class="ident">ColumnSpec</span>, <span class="ident">range</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>) {
-        <span class="self">self</span>.<span class="ident">columns</span>
-            .<span class="ident">push</span>(<span class="ident">GroupedColumnRange::Simple</span>(<span class="ident">SimpleColRange::Boolean</span>(
-                <span class="ident">range</span>.<span class="ident">into</span>(),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add_boolean(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _spec: ColumnSpec, range: Range&lt;usize&gt;) {
+        <span class="self">self</span>.columns
+            .push(GroupedColumnRange::Simple(SimpleColRange::Boolean(
+                range.into(),
             )));
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">start_value</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">_spec</span>: <span class="ident">ColumnSpec</span>,
-        <span class="ident">meta</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="ident">GroupAwaitingValue</span> {
-        <span class="ident">GroupAwaitingValue</span> {
-            <span class="ident">spec</span>: <span class="self">self</span>.<span class="ident">spec</span>,
-            <span class="ident">num_range</span>: <span class="self">self</span>.<span class="ident">num_range</span>.<span class="ident">clone</span>(),
-            <span class="ident">columns</span>: <span class="ident">std::mem::take</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">columns</span>),
-            <span class="ident">val_meta</span>: <span class="ident">meta</span>.<span class="ident">into</span>(),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>start_value(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        _spec: ColumnSpec,
+        meta: Range&lt;usize&gt;,
+    ) -&gt; GroupAwaitingValue {
+        GroupAwaitingValue {
+            spec: <span class="self">self</span>.spec,
+            num_range: <span class="self">self</span>.num_range.clone(),
+            columns: std::mem::take(<span class="kw-2">&amp;mut </span><span class="self">self</span>.columns),
+            val_meta: meta.into(),
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">finish</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">Column</span> {
-        <span class="ident">Column::new</span>(
-            <span class="self">self</span>.<span class="ident">spec</span>,
-            <span class="ident">GenericColumnRange::Group</span>(<span class="ident">GroupRange::new</span>(
-                <span class="self">self</span>.<span class="ident">num_range</span>.<span class="ident">clone</span>(),
-                <span class="ident">std::mem::take</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">columns</span>),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>finish(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Column {
+        Column::new(
+            <span class="self">self</span>.spec,
+            GenericColumnRange::Group(GroupRange::new(
+                <span class="self">self</span>.num_range.clone(),
+                std::mem::take(<span class="kw-2">&amp;mut </span><span class="self">self</span>.columns),
             )),
         )
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">GroupAwaitingValue</span> {
-    <span class="ident">spec</span>: <span class="ident">ColumnSpec</span>,
-    <span class="ident">num_range</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>,
-    <span class="ident">columns</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">GroupedColumnRange</span><span class="op">&gt;</span>,
-    <span class="ident">val_meta</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>,
+<span class="attribute">#[derive(Debug)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>GroupAwaitingValue {
+    spec: ColumnSpec,
+    num_range: RleRange&lt;u64&gt;,
+    columns: Vec&lt;GroupedColumnRange&gt;,
+    val_meta: RleRange&lt;u64&gt;,
 }
 
-<span class="kw">impl</span> <span class="ident">GroupAwaitingValue</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">finish_empty</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">GroupBuilder</span> {
-        <span class="self">self</span>.<span class="ident">columns</span>.<span class="ident">push</span>(<span class="ident">GroupedColumnRange::Value</span>(<span class="ident">ValueRange::new</span>(
-            <span class="self">self</span>.<span class="ident">val_meta</span>.<span class="ident">clone</span>(),
-            (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>(),
+<span class="kw">impl </span>GroupAwaitingValue {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>finish_empty(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; GroupBuilder {
+        <span class="self">self</span>.columns.push(GroupedColumnRange::Value(ValueRange::new(
+            <span class="self">self</span>.val_meta.clone(),
+            (<span class="number">0</span>..<span class="number">0</span>).into(),
         )));
-        <span class="ident">GroupBuilder</span> {
-            <span class="ident">spec</span>: <span class="self">self</span>.<span class="ident">spec</span>,
-            <span class="ident">num_range</span>: <span class="self">self</span>.<span class="ident">num_range</span>.<span class="ident">clone</span>(),
-            <span class="ident">columns</span>: <span class="ident">std::mem::take</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">columns</span>),
+        GroupBuilder {
+            spec: <span class="self">self</span>.spec,
+            num_range: <span class="self">self</span>.num_range.clone(),
+            columns: std::mem::take(<span class="kw-2">&amp;mut </span><span class="self">self</span>.columns),
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">finish_value</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">raw</span>: <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>) -&gt; <span class="ident">GroupBuilder</span> {
-        <span class="self">self</span>.<span class="ident">columns</span>.<span class="ident">push</span>(<span class="ident">GroupedColumnRange::Value</span>(<span class="ident">ValueRange::new</span>(
-            <span class="self">self</span>.<span class="ident">val_meta</span>.<span class="ident">clone</span>(),
-            <span class="ident">raw</span>.<span class="ident">into</span>(),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>finish_value(<span class="kw-2">&amp;mut </span><span class="self">self</span>, raw: Range&lt;usize&gt;) -&gt; GroupBuilder {
+        <span class="self">self</span>.columns.push(GroupedColumnRange::Value(ValueRange::new(
+            <span class="self">self</span>.val_meta.clone(),
+            raw.into(),
         )));
-        <span class="ident">GroupBuilder</span> {
-            <span class="ident">spec</span>: <span class="self">self</span>.<span class="ident">spec</span>,
-            <span class="ident">num_range</span>: <span class="self">self</span>.<span class="ident">num_range</span>.<span class="ident">clone</span>(),
-            <span class="ident">columns</span>: <span class="ident">std::mem::take</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">columns</span>),
+        GroupBuilder {
+            spec: <span class="self">self</span>.spec,
+            num_range: <span class="self">self</span>.num_range.clone(),
+            columns: std::mem::take(<span class="kw-2">&amp;mut </span><span class="self">self</span>.columns),
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">range</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Range</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">num_range</span>.<span class="ident">start</span>()..<span class="self">self</span>.<span class="ident">val_meta</span>.<span class="ident">end</span>()
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>range(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Range&lt;usize&gt; {
+        <span class="self">self</span>.num_range.start()..<span class="self">self</span>.val_meta.end()
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

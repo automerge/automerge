@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/columnar/encoding/encodable_impls.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>encodable_impls.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/columnar/encoding/encodable_impls.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>encodable_impls.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -200,205 +200,205 @@
 <span id="198">198</span>
 <span id="199">199</span>
 <span id="200">200</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">Encodable</span>, <span class="ident">Sink</span>};
+</pre><pre class="rust"><code><span class="kw">use super</span>::{Encodable, Sink};
 
-<span class="kw">use</span> <span class="ident">std::borrow::Cow</span>;
+<span class="kw">use </span>std::borrow::Cow;
 
-<span class="kw">use</span> <span class="ident">smol_str::SmolStr</span>;
+<span class="kw">use </span>smol_str::SmolStr;
 
-<span class="doccomment">/// Encodes bytes without a length prefix</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">RawBytes</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(<span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, [<span class="ident">u8</span>]<span class="op">&gt;</span>);
+<span class="doccomment">/// Encodes bytes without a length prefix
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>RawBytes&lt;<span class="lifetime">&#39;a</span>&gt;(Cow&lt;<span class="lifetime">&#39;a</span>, [u8]&gt;);
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>]<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">RawBytes</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">r</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>]) -&gt; <span class="self">Self</span> {
-        <span class="ident">RawBytes</span>(<span class="ident">r</span>.<span class="ident">into</span>())
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8]&gt; <span class="kw">for </span>RawBytes&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>from(r: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8]) -&gt; <span class="self">Self </span>{
+        RawBytes(r.into())
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, [<span class="ident">u8</span>]<span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">RawBytes</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">c</span>: <span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, [<span class="ident">u8</span>]<span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">RawBytes</span>(<span class="ident">c</span>)
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;Cow&lt;<span class="lifetime">&#39;a</span>, [u8]&gt;&gt; <span class="kw">for </span>RawBytes&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>from(c: Cow&lt;<span class="lifetime">&#39;a</span>, [u8]&gt;) -&gt; <span class="self">Self </span>{
+        RawBytes(c)
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Encodable</span> <span class="kw">for</span> <span class="ident">RawBytes</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">S</span>) -&gt; <span class="ident">usize</span> {
-        <span class="ident">out</span>.<span class="ident">append</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>);
-        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">len</span>()
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Encodable <span class="kw">for </span>RawBytes&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>encode&lt;S: Sink&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, out: <span class="kw-2">&amp;mut </span>S) -&gt; usize {
+        out.append(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>);
+        <span class="self">self</span>.<span class="number">0</span>.len()
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Encodable</span> <span class="kw">for</span> <span class="ident">SmolStr</span> {
-    <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">buf</span>: <span class="kw-2">&amp;mut</span> <span class="ident">S</span>) -&gt; <span class="ident">usize</span> {
-        <span class="kw">let</span> <span class="ident">bytes</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">as_bytes</span>();
-        <span class="kw">let</span> <span class="ident">len_encoded</span> <span class="op">=</span> <span class="ident">bytes</span>.<span class="ident">len</span>().<span class="ident">encode</span>(<span class="ident">buf</span>);
-        <span class="kw">let</span> <span class="ident">data_len</span> <span class="op">=</span> <span class="ident">bytes</span>.<span class="ident">encode</span>(<span class="ident">buf</span>);
-        <span class="ident">len_encoded</span> <span class="op">+</span> <span class="ident">data_len</span>
+<span class="kw">impl </span>Encodable <span class="kw">for </span>SmolStr {
+    <span class="kw">fn </span>encode&lt;S: Sink&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, buf: <span class="kw-2">&amp;mut </span>S) -&gt; usize {
+        <span class="kw">let </span>bytes = <span class="self">self</span>.as_bytes();
+        <span class="kw">let </span>len_encoded = bytes.len().encode(buf);
+        <span class="kw">let </span>data_len = bytes.encode(buf);
+        len_encoded + data_len
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Encodable</span> <span class="kw">for</span> <span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">SmolStr</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">buf</span>: <span class="kw-2">&amp;mut</span> <span class="ident">S</span>) -&gt; <span class="ident">usize</span> {
-        <span class="self">self</span>.<span class="ident">as_ref</span>().<span class="ident">encode</span>(<span class="ident">buf</span>)
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Encodable <span class="kw">for </span>Cow&lt;<span class="lifetime">&#39;a</span>, SmolStr&gt; {
+    <span class="kw">fn </span>encode&lt;S: Sink&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, buf: <span class="kw-2">&amp;mut </span>S) -&gt; usize {
+        <span class="self">self</span>.as_ref().encode(buf)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Encodable</span> <span class="kw">for</span> <span class="ident">String</span> {
-    <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">buf</span>: <span class="kw-2">&amp;mut</span> <span class="ident">S</span>) -&gt; <span class="ident">usize</span> {
-        <span class="kw">let</span> <span class="ident">bytes</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">as_bytes</span>();
-        <span class="kw">let</span> <span class="ident">len_encoded</span> <span class="op">=</span> <span class="ident">bytes</span>.<span class="ident">len</span>().<span class="ident">encode</span>(<span class="ident">buf</span>);
-        <span class="kw">let</span> <span class="ident">data_len</span> <span class="op">=</span> <span class="ident">bytes</span>.<span class="ident">encode</span>(<span class="ident">buf</span>);
-        <span class="ident">len_encoded</span> <span class="op">+</span> <span class="ident">data_len</span>
+<span class="kw">impl </span>Encodable <span class="kw">for </span>String {
+    <span class="kw">fn </span>encode&lt;S: Sink&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, buf: <span class="kw-2">&amp;mut </span>S) -&gt; usize {
+        <span class="kw">let </span>bytes = <span class="self">self</span>.as_bytes();
+        <span class="kw">let </span>len_encoded = bytes.len().encode(buf);
+        <span class="kw">let </span>data_len = bytes.encode(buf);
+        len_encoded + data_len
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Encodable</span> <span class="kw">for</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">buf</span>: <span class="kw-2">&amp;mut</span> <span class="ident">S</span>) -&gt; <span class="ident">usize</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="self">self</span> {
-            <span class="ident">s</span>.<span class="ident">encode</span>(<span class="ident">buf</span>)
-        } <span class="kw">else</span> {
-            <span class="number">0</span>.<span class="ident">encode</span>(<span class="ident">buf</span>)
+<span class="kw">impl </span>Encodable <span class="kw">for </span><span class="prelude-ty">Option</span>&lt;String&gt; {
+    <span class="kw">fn </span>encode&lt;S: Sink&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, buf: <span class="kw-2">&amp;mut </span>S) -&gt; usize {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = <span class="self">self </span>{
+            s.encode(buf)
+        } <span class="kw">else </span>{
+            <span class="number">0</span>.encode(buf)
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Encodable</span> <span class="kw">for</span> <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">SmolStr</span><span class="op">&gt;</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">S</span>) -&gt; <span class="ident">usize</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="self">self</span> {
-            <span class="ident">SmolStr::encode</span>(<span class="ident">s</span>, <span class="ident">out</span>)
-        } <span class="kw">else</span> {
-            <span class="number">0</span>.<span class="ident">encode</span>(<span class="ident">out</span>)
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Encodable <span class="kw">for </span><span class="prelude-ty">Option</span>&lt;Cow&lt;<span class="lifetime">&#39;a</span>, SmolStr&gt;&gt; {
+    <span class="kw">fn </span>encode&lt;S: Sink&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, out: <span class="kw-2">&amp;mut </span>S) -&gt; usize {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = <span class="self">self </span>{
+            SmolStr::encode(s, out)
+        } <span class="kw">else </span>{
+            <span class="number">0</span>.encode(out)
         }
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Encodable</span> <span class="kw">for</span> <span class="ident">f64</span> {
-    <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">buf</span>: <span class="kw-2">&amp;mut</span> <span class="ident">S</span>) -&gt; <span class="ident">usize</span> {
-        <span class="kw">let</span> <span class="ident">bytes</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">to_le_bytes</span>();
-        <span class="ident">buf</span>.<span class="ident">append</span>(<span class="kw-2">&amp;</span><span class="ident">bytes</span>);
-        <span class="ident">bytes</span>.<span class="ident">len</span>()
+<span class="kw">impl </span>Encodable <span class="kw">for </span>f64 {
+    <span class="kw">fn </span>encode&lt;S: Sink&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, buf: <span class="kw-2">&amp;mut </span>S) -&gt; usize {
+        <span class="kw">let </span>bytes = <span class="self">self</span>.to_le_bytes();
+        buf.append(<span class="kw-2">&amp;</span>bytes);
+        bytes.len()
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Encodable</span> <span class="kw">for</span> <span class="ident">f32</span> {
-    <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">buf</span>: <span class="kw-2">&amp;mut</span> <span class="ident">S</span>) -&gt; <span class="ident">usize</span> {
-        <span class="kw">let</span> <span class="ident">bytes</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">to_le_bytes</span>();
-        <span class="ident">buf</span>.<span class="ident">append</span>(<span class="kw-2">&amp;</span><span class="ident">bytes</span>);
-        <span class="ident">bytes</span>.<span class="ident">len</span>()
+<span class="kw">impl </span>Encodable <span class="kw">for </span>f32 {
+    <span class="kw">fn </span>encode&lt;S: Sink&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, buf: <span class="kw-2">&amp;mut </span>S) -&gt; usize {
+        <span class="kw">let </span>bytes = <span class="self">self</span>.to_le_bytes();
+        buf.append(<span class="kw-2">&amp;</span>bytes);
+        bytes.len()
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Encodable</span> <span class="kw">for</span> <span class="ident">usize</span> {
-    <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">buf</span>: <span class="kw-2">&amp;mut</span> <span class="ident">S</span>) -&gt; <span class="ident">usize</span> {
-        (<span class="kw-2">*</span><span class="self">self</span> <span class="kw">as</span> <span class="ident">u64</span>).<span class="ident">encode</span>(<span class="ident">buf</span>)
+<span class="kw">impl </span>Encodable <span class="kw">for </span>usize {
+    <span class="kw">fn </span>encode&lt;S: Sink&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, buf: <span class="kw-2">&amp;mut </span>S) -&gt; usize {
+        (<span class="kw-2">*</span><span class="self">self </span><span class="kw">as </span>u64).encode(buf)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Encodable</span> <span class="kw">for</span> <span class="ident">u32</span> {
-    <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">buf</span>: <span class="kw-2">&amp;mut</span> <span class="ident">S</span>) -&gt; <span class="ident">usize</span> {
-        <span class="ident">u64::from</span>(<span class="kw-2">*</span><span class="self">self</span>).<span class="ident">encode</span>(<span class="ident">buf</span>)
+<span class="kw">impl </span>Encodable <span class="kw">for </span>u32 {
+    <span class="kw">fn </span>encode&lt;S: Sink&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, buf: <span class="kw-2">&amp;mut </span>S) -&gt; usize {
+        u64::from(<span class="kw-2">*</span><span class="self">self</span>).encode(buf)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Encodable</span> <span class="kw">for</span> <span class="ident">i32</span> {
-    <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">buf</span>: <span class="kw-2">&amp;mut</span> <span class="ident">S</span>) -&gt; <span class="ident">usize</span> {
-        <span class="ident">i64::from</span>(<span class="kw-2">*</span><span class="self">self</span>).<span class="ident">encode</span>(<span class="ident">buf</span>)
+<span class="kw">impl </span>Encodable <span class="kw">for </span>i32 {
+    <span class="kw">fn </span>encode&lt;S: Sink&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, buf: <span class="kw-2">&amp;mut </span>S) -&gt; usize {
+        i64::from(<span class="kw-2">*</span><span class="self">self</span>).encode(buf)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Encodable</span> <span class="kw">for</span> [<span class="ident">u8</span>] {
-    <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">S</span>) -&gt; <span class="ident">usize</span> {
-        <span class="ident">out</span>.<span class="ident">append</span>(<span class="self">self</span>);
-        <span class="self">self</span>.<span class="ident">len</span>()
+<span class="kw">impl </span>Encodable <span class="kw">for </span>[u8] {
+    <span class="kw">fn </span>encode&lt;S: Sink&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, out: <span class="kw-2">&amp;mut </span>S) -&gt; usize {
+        out.append(<span class="self">self</span>);
+        <span class="self">self</span>.len()
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Encodable</span> <span class="kw">for</span> <span class="kw-2">&amp;</span>[<span class="ident">u8</span>] {
-    <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">S</span>) -&gt; <span class="ident">usize</span> {
-        <span class="ident">out</span>.<span class="ident">append</span>(<span class="self">self</span>);
-        <span class="self">self</span>.<span class="ident">len</span>()
+<span class="kw">impl </span>Encodable <span class="kw">for </span><span class="kw-2">&amp;</span>[u8] {
+    <span class="kw">fn </span>encode&lt;S: Sink&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, out: <span class="kw-2">&amp;mut </span>S) -&gt; usize {
+        out.append(<span class="self">self</span>);
+        <span class="self">self</span>.len()
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Encodable</span> <span class="kw">for</span> <span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, [<span class="ident">u8</span>]<span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">S</span>) -&gt; <span class="ident">usize</span> {
-        <span class="ident">out</span>.<span class="ident">append</span>(<span class="self">self</span>);
-        <span class="self">self</span>.<span class="ident">len</span>()
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Encodable <span class="kw">for </span>Cow&lt;<span class="lifetime">&#39;a</span>, [u8]&gt; {
+    <span class="kw">fn </span>encode&lt;S: Sink&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, out: <span class="kw-2">&amp;mut </span>S) -&gt; usize {
+        out.append(<span class="self">self</span>);
+        <span class="self">self</span>.len()
     }
 }
 
-<span class="kw">impl</span> <span class="ident">Encodable</span> <span class="kw">for</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">S</span>) -&gt; <span class="ident">usize</span> {
-        <span class="ident">Encodable::encode</span>(<span class="kw-2">&amp;</span><span class="self">self</span>[..], <span class="ident">out</span>)
+<span class="kw">impl </span>Encodable <span class="kw">for </span>Vec&lt;u8&gt; {
+    <span class="kw">fn </span>encode&lt;S: Sink&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, out: <span class="kw-2">&amp;mut </span>S) -&gt; usize {
+        Encodable::encode(<span class="kw-2">&amp;</span><span class="self">self</span>[..], out)
     }
 }
 
-<span class="kw">mod</span> <span class="ident">leb128_things</span> {
-    <span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">Encodable</span>, <span class="ident">Sink</span>};
+<span class="kw">mod </span>leb128_things {
+    <span class="kw">use super</span>::{Encodable, Sink};
 
-    <span class="kw">impl</span> <span class="ident">Encodable</span> <span class="kw">for</span> <span class="ident">u64</span> {
-        <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">buf</span>: <span class="kw-2">&amp;mut</span> <span class="ident">S</span>) -&gt; <span class="ident">usize</span> {
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">val</span> <span class="op">=</span> <span class="kw-2">*</span><span class="self">self</span>;
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">bytes_written</span> <span class="op">=</span> <span class="number">0</span>;
-            <span class="kw">loop</span> {
-                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">byte</span> <span class="op">=</span> <span class="ident">low_bits_of_u64</span>(<span class="ident">val</span>);
-                <span class="ident">val</span> <span class="op">&gt;</span><span class="op">&gt;</span><span class="op">=</span> <span class="number">7</span>;
-                <span class="kw">if</span> <span class="ident">val</span> <span class="op">!</span><span class="op">=</span> <span class="number">0</span> {
-                    <span class="comment">// More bytes to come, so set the continuation bit.</span>
-                    <span class="ident">byte</span> <span class="op">|</span><span class="op">=</span> <span class="ident">CONTINUATION_BIT</span>;
+    <span class="kw">impl </span>Encodable <span class="kw">for </span>u64 {
+        <span class="kw">fn </span>encode&lt;S: Sink&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, buf: <span class="kw-2">&amp;mut </span>S) -&gt; usize {
+            <span class="kw">let </span><span class="kw-2">mut </span>val = <span class="kw-2">*</span><span class="self">self</span>;
+            <span class="kw">let </span><span class="kw-2">mut </span>bytes_written = <span class="number">0</span>;
+            <span class="kw">loop </span>{
+                <span class="kw">let </span><span class="kw-2">mut </span>byte = low_bits_of_u64(val);
+                val &gt;&gt;= <span class="number">7</span>;
+                <span class="kw">if </span>val != <span class="number">0 </span>{
+                    <span class="comment">// More bytes to come, so set the continuation bit.
+                    </span>byte |= CONTINUATION_BIT;
                 }
 
-                <span class="ident">buf</span>.<span class="ident">append</span>(<span class="kw-2">&amp;</span>[<span class="ident">byte</span>]);
-                <span class="ident">bytes_written</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
+                buf.append(<span class="kw-2">&amp;</span>[byte]);
+                bytes_written += <span class="number">1</span>;
 
-                <span class="kw">if</span> <span class="ident">val</span> <span class="op">==</span> <span class="number">0</span> {
-                    <span class="kw">return</span> <span class="ident">bytes_written</span>;
-                }
-            }
-        }
-    }
-
-    <span class="kw">impl</span> <span class="ident">Encodable</span> <span class="kw">for</span> <span class="ident">i64</span> {
-        <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">buf</span>: <span class="kw-2">&amp;mut</span> <span class="ident">S</span>) -&gt; <span class="ident">usize</span> {
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">val</span> <span class="op">=</span> <span class="kw-2">*</span><span class="self">self</span>;
-            <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">bytes_written</span> <span class="op">=</span> <span class="number">0</span>;
-            <span class="kw">loop</span> {
-                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">byte</span> <span class="op">=</span> <span class="ident">val</span> <span class="kw">as</span> <span class="ident">u8</span>;
-                <span class="comment">// Keep the sign bit for testing</span>
-                <span class="ident">val</span> <span class="op">&gt;</span><span class="op">&gt;</span><span class="op">=</span> <span class="number">6</span>;
-                <span class="kw">let</span> <span class="ident">done</span> <span class="op">=</span> <span class="ident">val</span> <span class="op">==</span> <span class="number">0</span> <span class="op">|</span><span class="op">|</span> <span class="ident">val</span> <span class="op">==</span> <span class="op">-</span><span class="number">1</span>;
-                <span class="kw">if</span> <span class="ident">done</span> {
-                    <span class="ident">byte</span> <span class="op">&amp;=</span> <span class="op">!</span><span class="ident">CONTINUATION_BIT</span>;
-                } <span class="kw">else</span> {
-                    <span class="comment">// Remove the sign bit</span>
-                    <span class="ident">val</span> <span class="op">&gt;</span><span class="op">&gt;</span><span class="op">=</span> <span class="number">1</span>;
-                    <span class="comment">// More bytes to come, so set the continuation bit.</span>
-                    <span class="ident">byte</span> <span class="op">|</span><span class="op">=</span> <span class="ident">CONTINUATION_BIT</span>;
-                }
-
-                <span class="ident">buf</span>.<span class="ident">append</span>(<span class="kw-2">&amp;</span>[<span class="ident">byte</span>]);
-                <span class="ident">bytes_written</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
-
-                <span class="kw">if</span> <span class="ident">done</span> {
-                    <span class="kw">return</span> <span class="ident">bytes_written</span>;
+                <span class="kw">if </span>val == <span class="number">0 </span>{
+                    <span class="kw">return </span>bytes_written;
                 }
             }
         }
     }
 
-    <span class="attribute">#[<span class="ident">doc</span>(<span class="ident">hidden</span>)]</span>
-    <span class="kw">const</span> <span class="ident">CONTINUATION_BIT</span>: <span class="ident">u8</span> <span class="op">=</span> <span class="number">1</span> <span class="op">&lt;</span><span class="op">&lt;</span> <span class="number">7</span>;
+    <span class="kw">impl </span>Encodable <span class="kw">for </span>i64 {
+        <span class="kw">fn </span>encode&lt;S: Sink&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, buf: <span class="kw-2">&amp;mut </span>S) -&gt; usize {
+            <span class="kw">let </span><span class="kw-2">mut </span>val = <span class="kw-2">*</span><span class="self">self</span>;
+            <span class="kw">let </span><span class="kw-2">mut </span>bytes_written = <span class="number">0</span>;
+            <span class="kw">loop </span>{
+                <span class="kw">let </span><span class="kw-2">mut </span>byte = val <span class="kw">as </span>u8;
+                <span class="comment">// Keep the sign bit for testing
+                </span>val &gt;&gt;= <span class="number">6</span>;
+                <span class="kw">let </span>done = val == <span class="number">0 </span>|| val == -<span class="number">1</span>;
+                <span class="kw">if </span>done {
+                    byte &amp;= !CONTINUATION_BIT;
+                } <span class="kw">else </span>{
+                    <span class="comment">// Remove the sign bit
+                    </span>val &gt;&gt;= <span class="number">1</span>;
+                    <span class="comment">// More bytes to come, so set the continuation bit.
+                    </span>byte |= CONTINUATION_BIT;
+                }
 
-    <span class="attribute">#[<span class="ident">inline</span>]</span>
-    <span class="kw">fn</span> <span class="ident">low_bits_of_byte</span>(<span class="ident">byte</span>: <span class="ident">u8</span>) -&gt; <span class="ident">u8</span> {
-        <span class="ident">byte</span> <span class="op">&amp;</span> <span class="op">!</span><span class="ident">CONTINUATION_BIT</span>
+                buf.append(<span class="kw-2">&amp;</span>[byte]);
+                bytes_written += <span class="number">1</span>;
+
+                <span class="kw">if </span>done {
+                    <span class="kw">return </span>bytes_written;
+                }
+            }
+        }
     }
 
-    <span class="attribute">#[<span class="ident">inline</span>]</span>
-    <span class="kw">fn</span> <span class="ident">low_bits_of_u64</span>(<span class="ident">val</span>: <span class="ident">u64</span>) -&gt; <span class="ident">u8</span> {
-        <span class="kw">let</span> <span class="ident">byte</span> <span class="op">=</span> <span class="ident">val</span> <span class="op">&amp;</span> (<span class="ident">std::u8::MAX</span> <span class="kw">as</span> <span class="ident">u64</span>);
-        <span class="ident">low_bits_of_byte</span>(<span class="ident">byte</span> <span class="kw">as</span> <span class="ident">u8</span>)
+    <span class="attribute">#[doc(hidden)]
+    </span><span class="kw">const </span>CONTINUATION_BIT: u8 = <span class="number">1 </span>&lt;&lt; <span class="number">7</span>;
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>low_bits_of_byte(byte: u8) -&gt; u8 {
+        byte &amp; !CONTINUATION_BIT
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">fn </span>low_bits_of_u64(val: u64) -&gt; u8 {
+        <span class="kw">let </span>byte = val &amp; (std::u8::MAX <span class="kw">as </span>u64);
+        low_bits_of_byte(byte <span class="kw">as </span>u8)
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/convert/op_as_docop.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>op_as_docop.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/convert/op_as_docop.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>op_as_docop.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -145,150 +145,150 @@
 <span id="143">143</span>
 <span id="144">144</span>
 <span id="145">145</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std::borrow::Cow</span>;
+</pre><pre class="rust"><code><span class="kw">use </span>std::borrow::Cow;
 
-<span class="kw">use</span> <span class="kw">crate</span>::{
-    <span class="ident">convert</span>,
-    <span class="ident">indexed_cache::IndexedCache</span>,
-    <span class="ident">storage::AsDocOp</span>,
-    <span class="ident">types</span>::{<span class="ident">ElemId</span>, <span class="ident">Key</span>, <span class="ident">ObjId</span>, <span class="ident">Op</span>, <span class="ident">OpId</span>, <span class="ident">OpType</span>, <span class="ident">ScalarValue</span>},
+<span class="kw">use crate</span>::{
+    convert,
+    indexed_cache::IndexedCache,
+    storage::AsDocOp,
+    types::{ElemId, Key, ObjId, Op, OpId, OpType, ScalarValue},
 };
 
-<span class="doccomment">/// Create an [`AsDocOp`] implementation for a [`crate::types::Op`]</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// # Arguments</span>
-<span class="doccomment">/// * actors - A vector where the i&#39;th element is the actor index of the document encoding of actor</span>
-<span class="doccomment">///            i, as returned by [`OpSetMetadata.actors.encode_index`]</span>
-<span class="doccomment">/// * props - An indexed cache containing the properties in this op_as_docop</span>
-<span class="doccomment">/// * obj - The object ID this op refers too</span>
-<span class="doccomment">/// * op - The op itself</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// # Panics</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// The methods of the resulting `AsDocOp` implementation will panic if any actor ID in the op</span>
-<span class="doccomment">/// references an index not in `actors` or a property not in `props`</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">op_as_docop</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(
-    <span class="ident">actors</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">usize</span>],
-    <span class="ident">props</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">IndexedCache</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>,
-    <span class="ident">obj</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">ObjId</span>,
-    <span class="ident">op</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Op</span>,
-) -&gt; <span class="ident">OpAsDocOp</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">OpAsDocOp</span> {
-        <span class="ident">op</span>,
-        <span class="ident">obj</span>,
-        <span class="ident">actor_lookup</span>: <span class="ident">actors</span>,
-        <span class="ident">props</span>,
+<span class="doccomment">/// Create an [`AsDocOp`] implementation for a [`crate::types::Op`]
+///
+/// # Arguments
+/// * actors - A vector where the i&#39;th element is the actor index of the document encoding of actor
+///            i, as returned by [`OpSetMetadata.actors.encode_index`]
+/// * props - An indexed cache containing the properties in this op_as_docop
+/// * obj - The object ID this op refers too
+/// * op - The op itself
+///
+/// # Panics
+///
+/// The methods of the resulting `AsDocOp` implementation will panic if any actor ID in the op
+/// references an index not in `actors` or a property not in `props`
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>op_as_docop&lt;<span class="lifetime">&#39;a</span>&gt;(
+    actors: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[usize],
+    props: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>IndexedCache&lt;String&gt;,
+    obj: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId,
+    op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
+) -&gt; OpAsDocOp&lt;<span class="lifetime">&#39;a</span>&gt; {
+    OpAsDocOp {
+        op,
+        obj,
+        actor_lookup: actors,
+        props,
     }
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">OpAsDocOp</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">op</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Op</span>,
-    <span class="ident">obj</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">ObjId</span>,
-    <span class="ident">actor_lookup</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">usize</span>],
-    <span class="ident">props</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">IndexedCache</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>,
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpAsDocOp&lt;<span class="lifetime">&#39;a</span>&gt; {
+    op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
+    obj: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId,
+    actor_lookup: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[usize],
+    props: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>IndexedCache&lt;String&gt;,
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">DocOpId</span> {
-    <span class="ident">actor</span>: <span class="ident">usize</span>,
-    <span class="ident">counter</span>: <span class="ident">u64</span>,
+<span class="attribute">#[derive(Debug)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>DocOpId {
+    actor: usize,
+    counter: u64,
 }
 
-<span class="kw">impl</span> <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">DocOpId</span> {
-    <span class="kw">fn</span> <span class="ident">actor</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
-        <span class="self">self</span>.<span class="ident">actor</span>
+<span class="kw">impl </span>convert::OpId&lt;usize&gt; <span class="kw">for </span>DocOpId {
+    <span class="kw">fn </span>actor(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.actor
     }
 
-    <span class="kw">fn</span> <span class="ident">counter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u64</span> {
-        <span class="self">self</span>.<span class="ident">counter</span>
+    <span class="kw">fn </span>counter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
+        <span class="self">self</span>.counter
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">OpAsDocOp</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {}
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; OpAsDocOp&lt;<span class="lifetime">&#39;a</span>&gt; {}
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">AsDocOp</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">OpAsDocOp</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">ActorId</span> <span class="op">=</span> <span class="ident">usize</span>;
-    <span class="kw">type</span> <span class="ident">OpId</span> <span class="op">=</span> <span class="ident">DocOpId</span>;
-    <span class="kw">type</span> <span class="ident">SuccIter</span> <span class="op">=</span> <span class="ident">OpAsDocOpSuccIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>;
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; AsDocOp&lt;<span class="lifetime">&#39;a</span>&gt; <span class="kw">for </span>OpAsDocOp&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">type </span>ActorId = usize;
+    <span class="kw">type </span>OpId = DocOpId;
+    <span class="kw">type </span>SuccIter = OpAsDocOpSuccIter&lt;<span class="lifetime">&#39;a</span>&gt;;
 
-    <span class="kw">fn</span> <span class="ident">id</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident"><span class="self">Self</span>::OpId</span> {
-        <span class="ident">translate</span>(<span class="self">self</span>.<span class="ident">actor_lookup</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">op</span>.<span class="ident">id</span>)
+    <span class="kw">fn </span>id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::OpId {
+        translate(<span class="self">self</span>.actor_lookup, <span class="kw-2">&amp;</span><span class="self">self</span>.op.id)
     }
 
-    <span class="kw">fn</span> <span class="ident">obj</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">convert::ObjId</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::OpId</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">obj</span>.<span class="ident">is_root</span>() {
-            <span class="ident">convert::ObjId::Root</span>
-        } <span class="kw">else</span> {
-            <span class="ident">convert::ObjId::Op</span>(<span class="ident">translate</span>(<span class="self">self</span>.<span class="ident">actor_lookup</span>, <span class="self">self</span>.<span class="ident">obj</span>.<span class="ident">opid</span>()))
+    <span class="kw">fn </span>obj(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; convert::ObjId&lt;<span class="self">Self</span>::OpId&gt; {
+        <span class="kw">if </span><span class="self">self</span>.obj.is_root() {
+            convert::ObjId::Root
+        } <span class="kw">else </span>{
+            convert::ObjId::Op(translate(<span class="self">self</span>.actor_lookup, <span class="self">self</span>.obj.opid()))
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">convert::Key</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident"><span class="self">Self</span>::OpId</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">key</span> {
-            <span class="ident">Key::Map</span>(<span class="ident">idx</span>) =&gt; <span class="ident">convert::Key::Prop</span>(<span class="ident">Cow::Owned</span>(<span class="self">self</span>.<span class="ident">props</span>.<span class="ident">get</span>(<span class="ident">idx</span>).<span class="ident">into</span>())),
-            <span class="ident">Key::Seq</span>(<span class="ident">e</span>) <span class="kw">if</span> <span class="ident">e</span>.<span class="ident">is_head</span>() =&gt; <span class="ident">convert::Key::Elem</span>(<span class="ident">convert::ElemId::Head</span>),
-            <span class="ident">Key::Seq</span>(<span class="ident">ElemId</span>(<span class="ident">o</span>)) =&gt; {
-                <span class="ident">convert::Key::Elem</span>(<span class="ident">convert::ElemId::Op</span>(<span class="ident">translate</span>(<span class="self">self</span>.<span class="ident">actor_lookup</span>, <span class="kw-2">&amp;</span><span class="ident">o</span>)))
+    <span class="kw">fn </span>key(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; convert::Key&lt;<span class="lifetime">&#39;a</span>, <span class="self">Self</span>::OpId&gt; {
+        <span class="kw">match </span><span class="self">self</span>.op.key {
+            Key::Map(idx) =&gt; convert::Key::Prop(Cow::Owned(<span class="self">self</span>.props.get(idx).into())),
+            Key::Seq(e) <span class="kw">if </span>e.is_head() =&gt; convert::Key::Elem(convert::ElemId::Head),
+            Key::Seq(ElemId(o)) =&gt; {
+                convert::Key::Elem(convert::ElemId::Op(translate(<span class="self">self</span>.actor_lookup, <span class="kw-2">&amp;</span>o)))
             }
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">val</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident"><span class="kw">crate</span>::ScalarValue</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">op</span>.<span class="ident">action</span> {
-            <span class="ident">OpType::Put</span>(<span class="ident">v</span>) =&gt; <span class="ident">Cow::Borrowed</span>(<span class="ident">v</span>),
-            <span class="ident">OpType::Increment</span>(<span class="ident">i</span>) =&gt; <span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::Int</span>(<span class="kw-2">*</span><span class="ident">i</span>)),
-            <span class="kw">_</span> =&gt; <span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::Null</span>),
+    <span class="kw">fn </span>val(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Cow&lt;<span class="lifetime">&#39;a</span>, <span class="kw">crate</span>::ScalarValue&gt; {
+        <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.op.action {
+            OpType::Put(v) =&gt; Cow::Borrowed(v),
+            OpType::Increment(i) =&gt; Cow::Owned(ScalarValue::Int(<span class="kw-2">*</span>i)),
+            <span class="kw">_ </span>=&gt; Cow::Owned(ScalarValue::Null),
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">succ</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident"><span class="self">Self</span>::SuccIter</span> {
-        <span class="ident">OpAsDocOpSuccIter</span> {
-            <span class="ident">op</span>: <span class="self">self</span>.<span class="ident">op</span>,
-            <span class="ident">offset</span>: <span class="number">0</span>,
-            <span class="ident">actor_index</span>: <span class="self">self</span>.<span class="ident">actor_lookup</span>,
+    <span class="kw">fn </span>succ(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::SuccIter {
+        OpAsDocOpSuccIter {
+            op: <span class="self">self</span>.op,
+            offset: <span class="number">0</span>,
+            actor_index: <span class="self">self</span>.actor_lookup,
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">insert</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">insert</span>
+    <span class="kw">fn </span>insert(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="self">self</span>.op.insert
     }
 
-    <span class="kw">fn</span> <span class="ident">action</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u64</span> {
-        <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">action</span>.<span class="ident">action_index</span>()
-    }
-}
-
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">OpAsDocOpSuccIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">op</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Op</span>,
-    <span class="ident">offset</span>: <span class="ident">usize</span>,
-    <span class="ident">actor_index</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">usize</span>],
-}
-
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Iterator</span> <span class="kw">for</span> <span class="ident">OpAsDocOpSuccIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="ident">DocOpId</span>;
-
-    <span class="kw">fn</span> <span class="ident">next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">succ</span>.<span class="ident">get</span>(<span class="self">self</span>.<span class="ident">offset</span>) {
-            <span class="self">self</span>.<span class="ident">offset</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
-            <span class="prelude-val">Some</span>(<span class="ident">translate</span>(<span class="self">self</span>.<span class="ident">actor_index</span>, <span class="ident">s</span>))
-        } <span class="kw">else</span> {
-            <span class="prelude-val">None</span>
-        }
+    <span class="kw">fn </span>action(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
+        <span class="self">self</span>.op.action.action_index()
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">ExactSizeIterator</span> <span class="kw">for</span> <span class="ident">OpAsDocOpSuccIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">len</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
-        <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">succ</span>.<span class="ident">len</span>()
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpAsDocOpSuccIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
+    offset: usize,
+    actor_index: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[usize],
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>OpAsDocOpSuccIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">type </span>Item = DocOpId;
+
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = <span class="self">self</span>.op.succ.get(<span class="self">self</span>.offset) {
+            <span class="self">self</span>.offset += <span class="number">1</span>;
+            <span class="prelude-val">Some</span>(translate(<span class="self">self</span>.actor_index, s))
+        } <span class="kw">else </span>{
+            <span class="prelude-val">None
+        </span>}
     }
 }
 
-<span class="kw">fn</span> <span class="ident">translate</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(<span class="ident">actor_lookup</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">usize</span>], <span class="ident">op</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">OpId</span>) -&gt; <span class="ident">DocOpId</span> {
-    <span class="kw">let</span> <span class="ident">index</span> <span class="op">=</span> <span class="ident">actor_lookup</span>[<span class="ident">op</span>.<span class="ident">actor</span>()];
-    <span class="ident">DocOpId</span> {
-        <span class="ident">actor</span>: <span class="ident">index</span>,
-        <span class="ident">counter</span>: <span class="ident">op</span>.<span class="ident">counter</span>(),
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; ExactSizeIterator <span class="kw">for </span>OpAsDocOpSuccIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.op.succ.len()
+    }
+}
+
+<span class="kw">fn </span>translate&lt;<span class="lifetime">&#39;a</span>&gt;(actor_lookup: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[usize], op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpId) -&gt; DocOpId {
+    <span class="kw">let </span>index = actor_lookup[op.actor()];
+    DocOpId {
+        actor: index,
+        counter: op.counter(),
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

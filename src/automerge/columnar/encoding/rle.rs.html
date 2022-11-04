@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/columnar/encoding/rle.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>rle.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/columnar/encoding/rle.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>rle.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -239,244 +239,244 @@
 <span id="237">237</span>
 <span id="238">238</span>
 <span id="239">239</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std</span>::{
-    <span class="ident">borrow</span>::{<span class="ident">Borrow</span>, <span class="ident">Cow</span>},
-    <span class="ident">fmt::Debug</span>,
+</pre><pre class="rust"><code><span class="kw">use </span>std::{
+    borrow::{Borrow, Cow},
+    fmt::Debug,
 };
 
-<span class="kw">use</span> <span class="kw">super</span>::{<span class="ident">raw</span>, <span class="ident">Decodable</span>, <span class="ident">Encodable</span>, <span class="ident">RawDecoder</span>, <span class="ident">Sink</span>};
+<span class="kw">use super</span>::{raw, Decodable, Encodable, RawDecoder, Sink};
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">RleEncoder</span><span class="op">&lt;</span><span class="ident">S</span>, <span class="ident">T</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">T</span>: <span class="ident">Encodable</span> <span class="op">+</span> <span class="ident">PartialEq</span> <span class="op">+</span> <span class="ident">Clone</span>,
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>RleEncoder&lt;S, T&gt;
+<span class="kw">where
+    </span>T: Encodable + PartialEq + Clone,
 {
-    <span class="ident">buf</span>: <span class="ident">S</span>,
-    <span class="ident">written</span>: <span class="ident">usize</span>,
-    <span class="ident">state</span>: <span class="ident">RleState</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>,
+    buf: S,
+    written: usize,
+    state: RleState&lt;T&gt;,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">S</span>, <span class="ident">T</span><span class="op">&gt;</span> <span class="ident">RleEncoder</span><span class="op">&lt;</span><span class="ident">S</span>, <span class="ident">T</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">S</span>: <span class="ident">Sink</span>,
-    <span class="ident">T</span>: <span class="ident">Encodable</span> <span class="op">+</span> <span class="ident">PartialEq</span> <span class="op">+</span> <span class="ident">Clone</span>,
+<span class="kw">impl</span>&lt;S, T&gt; RleEncoder&lt;S, T&gt;
+<span class="kw">where
+    </span>S: Sink,
+    T: Encodable + PartialEq + Clone,
 {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">output_buf</span>: <span class="ident">S</span>) -&gt; <span class="ident">RleEncoder</span><span class="op">&lt;</span><span class="ident">S</span>, <span class="ident">T</span><span class="op">&gt;</span> {
-        <span class="ident">RleEncoder</span> {
-            <span class="ident">buf</span>: <span class="ident">output_buf</span>,
-            <span class="ident">written</span>: <span class="number">0</span>,
-            <span class="ident">state</span>: <span class="ident">RleState::Empty</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(output_buf: S) -&gt; RleEncoder&lt;S, T&gt; {
+        RleEncoder {
+            buf: output_buf,
+            written: <span class="number">0</span>,
+            state: RleState::Empty,
         }
     }
 
-    <span class="doccomment">/// Flush the encoded values and return the output buffer and the number of bytes written</span>
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">finish</span>(<span class="kw-2">mut</span> <span class="self">self</span>) -&gt; (<span class="ident">S</span>, <span class="ident">usize</span>) {
-        <span class="kw">match</span> <span class="self">self</span>.<span class="ident">take_state</span>() {
-            <span class="ident">RleState::InitialNullRun</span>(<span class="ident">_size</span>) =&gt; {}
-            <span class="ident">RleState::NullRun</span>(<span class="ident">size</span>) =&gt; {
-                <span class="self">self</span>.<span class="ident">flush_null_run</span>(<span class="ident">size</span>);
+    <span class="doccomment">/// Flush the encoded values and return the output buffer and the number of bytes written
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>finish(<span class="kw-2">mut </span><span class="self">self</span>) -&gt; (S, usize) {
+        <span class="kw">match </span><span class="self">self</span>.take_state() {
+            RleState::InitialNullRun(_size) =&gt; {}
+            RleState::NullRun(size) =&gt; {
+                <span class="self">self</span>.flush_null_run(size);
             }
-            <span class="ident">RleState::LoneVal</span>(<span class="ident">value</span>) =&gt; <span class="self">self</span>.<span class="ident">flush_lit_run</span>(<span class="macro">vec!</span>[<span class="ident">value</span>]),
-            <span class="ident">RleState::Run</span>(<span class="ident">value</span>, <span class="ident">len</span>) =&gt; <span class="self">self</span>.<span class="ident">flush_run</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>, <span class="ident">len</span>),
-            <span class="ident">RleState::LiteralRun</span>(<span class="ident">last</span>, <span class="kw-2">mut</span> <span class="ident">run</span>) =&gt; {
-                <span class="ident">run</span>.<span class="ident">push</span>(<span class="ident">last</span>);
-                <span class="self">self</span>.<span class="ident">flush_lit_run</span>(<span class="ident">run</span>);
+            RleState::LoneVal(value) =&gt; <span class="self">self</span>.flush_lit_run(<span class="macro">vec!</span>[value]),
+            RleState::Run(value, len) =&gt; <span class="self">self</span>.flush_run(<span class="kw-2">&amp;</span>value, len),
+            RleState::LiteralRun(last, <span class="kw-2">mut </span>run) =&gt; {
+                run.push(last);
+                <span class="self">self</span>.flush_lit_run(run);
             }
-            <span class="ident">RleState::Empty</span> =&gt; {}
+            RleState::Empty =&gt; {}
         }
-        (<span class="self">self</span>.<span class="ident">buf</span>, <span class="self">self</span>.<span class="ident">written</span>)
+        (<span class="self">self</span>.buf, <span class="self">self</span>.written)
     }
 
-    <span class="kw">fn</span> <span class="ident">flush_run</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">val</span>: <span class="kw-2">&amp;</span><span class="ident">T</span>, <span class="ident">len</span>: <span class="ident">usize</span>) {
-        <span class="self">self</span>.<span class="ident">encode</span>(<span class="kw-2">&amp;</span>(<span class="ident">len</span> <span class="kw">as</span> <span class="ident">i64</span>));
-        <span class="self">self</span>.<span class="ident">encode</span>(<span class="ident">val</span>);
+    <span class="kw">fn </span>flush_run(<span class="kw-2">&amp;mut </span><span class="self">self</span>, val: <span class="kw-2">&amp;</span>T, len: usize) {
+        <span class="self">self</span>.encode(<span class="kw-2">&amp;</span>(len <span class="kw">as </span>i64));
+        <span class="self">self</span>.encode(val);
     }
 
-    <span class="kw">fn</span> <span class="ident">flush_null_run</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">len</span>: <span class="ident">usize</span>) {
-        <span class="self">self</span>.<span class="ident">encode</span>::<span class="op">&lt;</span><span class="ident">i64</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="number">0</span>);
-        <span class="self">self</span>.<span class="ident">encode</span>(<span class="kw-2">&amp;</span><span class="ident">len</span>);
+    <span class="kw">fn </span>flush_null_run(<span class="kw-2">&amp;mut </span><span class="self">self</span>, len: usize) {
+        <span class="self">self</span>.encode::&lt;i64&gt;(<span class="kw-2">&amp;</span><span class="number">0</span>);
+        <span class="self">self</span>.encode(<span class="kw-2">&amp;</span>len);
     }
 
-    <span class="kw">fn</span> <span class="ident">flush_lit_run</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">run</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>) {
-        <span class="self">self</span>.<span class="ident">encode</span>(<span class="kw-2">&amp;</span><span class="op">-</span>(<span class="ident">run</span>.<span class="ident">len</span>() <span class="kw">as</span> <span class="ident">i64</span>));
-        <span class="kw">for</span> <span class="ident">val</span> <span class="kw">in</span> <span class="ident">run</span> {
-            <span class="self">self</span>.<span class="ident">encode</span>(<span class="kw-2">&amp;</span><span class="ident">val</span>);
-        }
-    }
-
-    <span class="kw">fn</span> <span class="ident">take_state</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">RleState</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">state</span> <span class="op">=</span> <span class="ident">RleState::Empty</span>;
-        <span class="ident">std::mem::swap</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">state</span>, <span class="kw-2">&amp;mut</span> <span class="ident">state</span>);
-        <span class="ident">state</span>
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">append_null</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
-        <span class="self">self</span>.<span class="ident">state</span> <span class="op">=</span> <span class="kw">match</span> <span class="self">self</span>.<span class="ident">take_state</span>() {
-            <span class="ident">RleState::Empty</span> =&gt; <span class="ident">RleState::InitialNullRun</span>(<span class="number">1</span>),
-            <span class="ident">RleState::InitialNullRun</span>(<span class="ident">size</span>) =&gt; <span class="ident">RleState::InitialNullRun</span>(<span class="ident">size</span> <span class="op">+</span> <span class="number">1</span>),
-            <span class="ident">RleState::NullRun</span>(<span class="ident">size</span>) =&gt; <span class="ident">RleState::NullRun</span>(<span class="ident">size</span> <span class="op">+</span> <span class="number">1</span>),
-            <span class="ident">RleState::LoneVal</span>(<span class="ident">other</span>) =&gt; {
-                <span class="self">self</span>.<span class="ident">flush_lit_run</span>(<span class="macro">vec!</span>[<span class="ident">other</span>]);
-                <span class="ident">RleState::NullRun</span>(<span class="number">1</span>)
-            }
-            <span class="ident">RleState::Run</span>(<span class="ident">other</span>, <span class="ident">len</span>) =&gt; {
-                <span class="self">self</span>.<span class="ident">flush_run</span>(<span class="kw-2">&amp;</span><span class="ident">other</span>, <span class="ident">len</span>);
-                <span class="ident">RleState::NullRun</span>(<span class="number">1</span>)
-            }
-            <span class="ident">RleState::LiteralRun</span>(<span class="ident">last</span>, <span class="kw-2">mut</span> <span class="ident">run</span>) =&gt; {
-                <span class="ident">run</span>.<span class="ident">push</span>(<span class="ident">last</span>);
-                <span class="self">self</span>.<span class="ident">flush_lit_run</span>(<span class="ident">run</span>);
-                <span class="ident">RleState::NullRun</span>(<span class="number">1</span>)
-            }
+    <span class="kw">fn </span>flush_lit_run(<span class="kw-2">&amp;mut </span><span class="self">self</span>, run: Vec&lt;T&gt;) {
+        <span class="self">self</span>.encode(<span class="kw-2">&amp;</span>-(run.len() <span class="kw">as </span>i64));
+        <span class="kw">for </span>val <span class="kw">in </span>run {
+            <span class="self">self</span>.encode(<span class="kw-2">&amp;</span>val);
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">append_value</span><span class="op">&lt;</span><span class="ident">BT</span>: <span class="ident">Borrow</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">value</span>: <span class="ident">BT</span>) {
-        <span class="self">self</span>.<span class="ident">state</span> <span class="op">=</span> <span class="kw">match</span> <span class="self">self</span>.<span class="ident">take_state</span>() {
-            <span class="ident">RleState::Empty</span> =&gt; <span class="ident">RleState::LoneVal</span>(<span class="ident">value</span>.<span class="ident">borrow</span>().<span class="ident">clone</span>()),
-            <span class="ident">RleState::LoneVal</span>(<span class="ident">other</span>) =&gt; {
-                <span class="kw">if</span> <span class="kw-2">&amp;</span><span class="ident">other</span> <span class="op">==</span> <span class="ident">value</span>.<span class="ident">borrow</span>() {
-                    <span class="ident">RleState::Run</span>(<span class="ident">value</span>.<span class="ident">borrow</span>().<span class="ident">clone</span>(), <span class="number">2</span>)
-                } <span class="kw">else</span> {
-                    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">v</span> <span class="op">=</span> <span class="ident">Vec::with_capacity</span>(<span class="number">2</span>);
-                    <span class="ident">v</span>.<span class="ident">push</span>(<span class="ident">other</span>);
-                    <span class="ident">RleState::LiteralRun</span>(<span class="ident">value</span>.<span class="ident">borrow</span>().<span class="ident">clone</span>(), <span class="ident">v</span>)
+    <span class="kw">fn </span>take_state(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; RleState&lt;T&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>state = RleState::Empty;
+        std::mem::swap(<span class="kw-2">&amp;mut </span><span class="self">self</span>.state, <span class="kw-2">&amp;mut </span>state);
+        state
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>append_null(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <span class="self">self</span>.state = <span class="kw">match </span><span class="self">self</span>.take_state() {
+            RleState::Empty =&gt; RleState::InitialNullRun(<span class="number">1</span>),
+            RleState::InitialNullRun(size) =&gt; RleState::InitialNullRun(size + <span class="number">1</span>),
+            RleState::NullRun(size) =&gt; RleState::NullRun(size + <span class="number">1</span>),
+            RleState::LoneVal(other) =&gt; {
+                <span class="self">self</span>.flush_lit_run(<span class="macro">vec!</span>[other]);
+                RleState::NullRun(<span class="number">1</span>)
+            }
+            RleState::Run(other, len) =&gt; {
+                <span class="self">self</span>.flush_run(<span class="kw-2">&amp;</span>other, len);
+                RleState::NullRun(<span class="number">1</span>)
+            }
+            RleState::LiteralRun(last, <span class="kw-2">mut </span>run) =&gt; {
+                run.push(last);
+                <span class="self">self</span>.flush_lit_run(run);
+                RleState::NullRun(<span class="number">1</span>)
+            }
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>append_value&lt;BT: Borrow&lt;T&gt;&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, value: BT) {
+        <span class="self">self</span>.state = <span class="kw">match </span><span class="self">self</span>.take_state() {
+            RleState::Empty =&gt; RleState::LoneVal(value.borrow().clone()),
+            RleState::LoneVal(other) =&gt; {
+                <span class="kw">if </span><span class="kw-2">&amp;</span>other == value.borrow() {
+                    RleState::Run(value.borrow().clone(), <span class="number">2</span>)
+                } <span class="kw">else </span>{
+                    <span class="kw">let </span><span class="kw-2">mut </span>v = Vec::with_capacity(<span class="number">2</span>);
+                    v.push(other);
+                    RleState::LiteralRun(value.borrow().clone(), v)
                 }
             }
-            <span class="ident">RleState::Run</span>(<span class="ident">other</span>, <span class="ident">len</span>) =&gt; {
-                <span class="kw">if</span> <span class="kw-2">&amp;</span><span class="ident">other</span> <span class="op">==</span> <span class="ident">value</span>.<span class="ident">borrow</span>() {
-                    <span class="ident">RleState::Run</span>(<span class="ident">other</span>, <span class="ident">len</span> <span class="op">+</span> <span class="number">1</span>)
-                } <span class="kw">else</span> {
-                    <span class="self">self</span>.<span class="ident">flush_run</span>(<span class="kw-2">&amp;</span><span class="ident">other</span>, <span class="ident">len</span>);
-                    <span class="ident">RleState::LoneVal</span>(<span class="ident">value</span>.<span class="ident">borrow</span>().<span class="ident">clone</span>())
+            RleState::Run(other, len) =&gt; {
+                <span class="kw">if </span><span class="kw-2">&amp;</span>other == value.borrow() {
+                    RleState::Run(other, len + <span class="number">1</span>)
+                } <span class="kw">else </span>{
+                    <span class="self">self</span>.flush_run(<span class="kw-2">&amp;</span>other, len);
+                    RleState::LoneVal(value.borrow().clone())
                 }
             }
-            <span class="ident">RleState::LiteralRun</span>(<span class="ident">last</span>, <span class="kw-2">mut</span> <span class="ident">run</span>) =&gt; {
-                <span class="kw">if</span> <span class="kw-2">&amp;</span><span class="ident">last</span> <span class="op">==</span> <span class="ident">value</span>.<span class="ident">borrow</span>() {
-                    <span class="self">self</span>.<span class="ident">flush_lit_run</span>(<span class="ident">run</span>);
-                    <span class="ident">RleState::Run</span>(<span class="ident">value</span>.<span class="ident">borrow</span>().<span class="ident">clone</span>(), <span class="number">2</span>)
-                } <span class="kw">else</span> {
-                    <span class="ident">run</span>.<span class="ident">push</span>(<span class="ident">last</span>);
-                    <span class="ident">RleState::LiteralRun</span>(<span class="ident">value</span>.<span class="ident">borrow</span>().<span class="ident">clone</span>(), <span class="ident">run</span>)
+            RleState::LiteralRun(last, <span class="kw-2">mut </span>run) =&gt; {
+                <span class="kw">if </span><span class="kw-2">&amp;</span>last == value.borrow() {
+                    <span class="self">self</span>.flush_lit_run(run);
+                    RleState::Run(value.borrow().clone(), <span class="number">2</span>)
+                } <span class="kw">else </span>{
+                    run.push(last);
+                    RleState::LiteralRun(value.borrow().clone(), run)
                 }
             }
-            <span class="ident">RleState::NullRun</span>(<span class="ident">size</span>) <span class="op">|</span> <span class="ident">RleState::InitialNullRun</span>(<span class="ident">size</span>) =&gt; {
-                <span class="self">self</span>.<span class="ident">flush_null_run</span>(<span class="ident">size</span>);
-                <span class="ident">RleState::LoneVal</span>(<span class="ident">value</span>.<span class="ident">borrow</span>().<span class="ident">clone</span>())
+            RleState::NullRun(size) | RleState::InitialNullRun(size) =&gt; {
+                <span class="self">self</span>.flush_null_run(size);
+                RleState::LoneVal(value.borrow().clone())
             }
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">append</span><span class="op">&lt;</span><span class="ident">BT</span>: <span class="ident">Borrow</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span><span class="op">&gt;</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">value</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">BT</span><span class="op">&gt;</span>) {
-        <span class="kw">match</span> <span class="ident">value</span> {
-            <span class="prelude-val">Some</span>(<span class="ident">t</span>) =&gt; <span class="self">self</span>.<span class="ident">append_value</span>(<span class="ident">t</span>),
-            <span class="prelude-val">None</span> =&gt; <span class="self">self</span>.<span class="ident">append_null</span>(),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>append&lt;BT: Borrow&lt;T&gt;&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, value: <span class="prelude-ty">Option</span>&lt;BT&gt;) {
+        <span class="kw">match </span>value {
+            <span class="prelude-val">Some</span>(t) =&gt; <span class="self">self</span>.append_value(t),
+            <span class="prelude-val">None </span>=&gt; <span class="self">self</span>.append_null(),
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="ident">V</span><span class="op">&gt;</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">val</span>: <span class="kw-2">&amp;</span><span class="ident">V</span>)
-    <span class="kw">where</span>
-        <span class="ident">V</span>: <span class="ident">Encodable</span>,
+    <span class="kw">fn </span>encode&lt;V&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, val: <span class="kw-2">&amp;</span>V)
+    <span class="kw">where
+        </span>V: Encodable,
     {
-        <span class="self">self</span>.<span class="ident">written</span> <span class="op">+</span><span class="op">=</span> <span class="ident">val</span>.<span class="ident">encode</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>.<span class="ident">buf</span>);
+        <span class="self">self</span>.written += val.encode(<span class="kw-2">&amp;mut </span><span class="self">self</span>.buf);
     }
 }
 
-<span class="kw">enum</span> <span class="ident">RleState</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> {
-    <span class="ident">Empty</span>,
-    <span class="comment">// Note that this is different to a `NullRun` because if every element of a column is null</span>
-    <span class="comment">// (i.e. the state when we call `finish` is `InitialNullRun`) then we don&#39;t output anything at</span>
-    <span class="comment">// all for the column</span>
-    <span class="ident">InitialNullRun</span>(<span class="ident">usize</span>),
-    <span class="ident">NullRun</span>(<span class="ident">usize</span>),
-    <span class="ident">LiteralRun</span>(<span class="ident">T</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>),
-    <span class="ident">LoneVal</span>(<span class="ident">T</span>),
-    <span class="ident">Run</span>(<span class="ident">T</span>, <span class="ident">usize</span>),
+<span class="kw">enum </span>RleState&lt;T&gt; {
+    Empty,
+    <span class="comment">// Note that this is different to a `NullRun` because if every element of a column is null
+    // (i.e. the state when we call `finish` is `InitialNullRun`) then we don&#39;t output anything at
+    // all for the column
+    </span>InitialNullRun(usize),
+    NullRun(usize),
+    LiteralRun(T, Vec&lt;T&gt;),
+    LoneVal(T),
+    Run(T, usize),
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">S</span>: <span class="ident">Sink</span>, <span class="ident">T</span>: <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">PartialEq</span> <span class="op">+</span> <span class="ident">Encodable</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">S</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">RleEncoder</span><span class="op">&lt;</span><span class="ident">S</span>, <span class="ident">T</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">output</span>: <span class="ident">S</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident"><span class="self">Self</span>::new</span>(<span class="ident">output</span>)
+<span class="kw">impl</span>&lt;S: Sink, T: Clone + PartialEq + Encodable&gt; From&lt;S&gt; <span class="kw">for </span>RleEncoder&lt;S, T&gt; {
+    <span class="kw">fn </span>from(output: S) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>::new(output)
     }
 }
 
-<span class="doccomment">/// See discussion on [`RleEncoder`] for the format data is stored in.</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>, <span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">RleDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">T</span><span class="op">&gt;</span> {
-    <span class="ident">decoder</span>: <span class="ident">RawDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
-    <span class="ident">last_value</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>,
-    <span class="ident">count</span>: <span class="ident">isize</span>,
-    <span class="ident">literal</span>: <span class="ident">bool</span>,
+<span class="doccomment">/// See discussion on [`RleEncoder`] for the format data is stored in.
+</span><span class="attribute">#[derive(Clone, Debug)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>RleDecoder&lt;<span class="lifetime">&#39;a</span>, T&gt; {
+    decoder: RawDecoder&lt;<span class="lifetime">&#39;a</span>&gt;,
+    last_value: <span class="prelude-ty">Option</span>&lt;T&gt;,
+    count: isize,
+    literal: bool,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">T</span><span class="op">&gt;</span> <span class="ident">RleDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">T</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">done</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="ident">decoder</span>.<span class="ident">done</span>() <span class="op">&amp;&amp;</span> <span class="self">self</span>.<span class="ident">count</span> <span class="op">==</span> <span class="number">0</span>
-    }
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, T&gt; RleDecoder&lt;<span class="lifetime">&#39;a</span>, T&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>done(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="self">self</span>.decoder.done() &amp;&amp; <span class="self">self</span>.count == <span class="number">0
+    </span>}
 
-    <span class="kw">fn</span> <span class="ident">try_next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span><span class="op">&gt;</span>, <span class="ident">raw::Error</span><span class="op">&gt;</span>
-    <span class="kw">where</span>
-        <span class="ident">T</span>: <span class="ident">Decodable</span> <span class="op">+</span> <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Debug</span>,
+    <span class="kw">fn </span>try_next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;<span class="prelude-ty">Option</span>&lt;T&gt;&gt;, raw::Error&gt;
+    <span class="kw">where
+        </span>T: Decodable + Clone + Debug,
     {
-        <span class="kw">while</span> <span class="self">self</span>.<span class="ident">count</span> <span class="op">==</span> <span class="number">0</span> {
-            <span class="kw">if</span> <span class="self">self</span>.<span class="ident">decoder</span>.<span class="ident">done</span>() {
-                <span class="kw">return</span> <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>);
+        <span class="kw">while </span><span class="self">self</span>.count == <span class="number">0 </span>{
+            <span class="kw">if </span><span class="self">self</span>.decoder.done() {
+                <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>);
             }
-            <span class="kw">match</span> <span class="self">self</span>.<span class="ident">decoder</span>.<span class="ident">read</span>::<span class="op">&lt;</span><span class="ident">i64</span><span class="op">&gt;</span>()<span class="question-mark">?</span> {
-                <span class="ident">count</span> <span class="kw">if</span> <span class="ident">count</span> <span class="op">&gt;</span> <span class="number">0</span> =&gt; {
-                    <span class="comment">// normal run</span>
-                    <span class="self">self</span>.<span class="ident">count</span> <span class="op">=</span> <span class="ident">count</span> <span class="kw">as</span> <span class="ident">isize</span>;
-                    <span class="self">self</span>.<span class="ident">last_value</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="self">self</span>.<span class="ident">decoder</span>.<span class="ident">read</span>()<span class="question-mark">?</span>);
-                    <span class="self">self</span>.<span class="ident">literal</span> <span class="op">=</span> <span class="bool-val">false</span>;
+            <span class="kw">match </span><span class="self">self</span>.decoder.read::&lt;i64&gt;()<span class="question-mark">? </span>{
+                count <span class="kw">if </span>count &gt; <span class="number">0 </span>=&gt; {
+                    <span class="comment">// normal run
+                    </span><span class="self">self</span>.count = count <span class="kw">as </span>isize;
+                    <span class="self">self</span>.last_value = <span class="prelude-val">Some</span>(<span class="self">self</span>.decoder.read()<span class="question-mark">?</span>);
+                    <span class="self">self</span>.literal = <span class="bool-val">false</span>;
                 }
-                <span class="ident">count</span> <span class="kw">if</span> <span class="ident">count</span> <span class="op">&lt;</span> <span class="number">0</span> =&gt; {
-                    <span class="comment">// literal run</span>
-                    <span class="self">self</span>.<span class="ident">count</span> <span class="op">=</span> <span class="ident">count</span>.<span class="ident">abs</span>() <span class="kw">as</span> <span class="ident">isize</span>;
-                    <span class="self">self</span>.<span class="ident">literal</span> <span class="op">=</span> <span class="bool-val">true</span>;
+                count <span class="kw">if </span>count &lt; <span class="number">0 </span>=&gt; {
+                    <span class="comment">// literal run
+                    </span><span class="self">self</span>.count = count.abs() <span class="kw">as </span>isize;
+                    <span class="self">self</span>.literal = <span class="bool-val">true</span>;
                 }
-                <span class="kw">_</span> =&gt; {
-                    <span class="comment">// null run</span>
-                    <span class="comment">// FIXME(jeffa5): handle usize &gt; i64 here somehow</span>
-                    <span class="self">self</span>.<span class="ident">count</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">decoder</span>.<span class="ident">read</span>::<span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>()<span class="question-mark">?</span> <span class="kw">as</span> <span class="ident">isize</span>;
-                    <span class="self">self</span>.<span class="ident">last_value</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-                    <span class="self">self</span>.<span class="ident">literal</span> <span class="op">=</span> <span class="bool-val">false</span>;
+                <span class="kw">_ </span>=&gt; {
+                    <span class="comment">// null run
+                    // FIXME(jeffa5): handle usize &gt; i64 here somehow
+                    </span><span class="self">self</span>.count = <span class="self">self</span>.decoder.read::&lt;usize&gt;()<span class="question-mark">? </span><span class="kw">as </span>isize;
+                    <span class="self">self</span>.last_value = <span class="prelude-val">None</span>;
+                    <span class="self">self</span>.literal = <span class="bool-val">false</span>;
                 }
             }
         }
-        <span class="self">self</span>.<span class="ident">count</span> <span class="op">-</span><span class="op">=</span> <span class="number">1</span>;
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">literal</span> {
-            <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(<span class="self">self</span>.<span class="ident">decoder</span>.<span class="ident">read</span>()<span class="question-mark">?</span>)))
-        } <span class="kw">else</span> {
-            <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="self">self</span>.<span class="ident">last_value</span>.<span class="ident">clone</span>()))
+        <span class="self">self</span>.count -= <span class="number">1</span>;
+        <span class="kw">if </span><span class="self">self</span>.literal {
+            <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(<span class="self">self</span>.decoder.read()<span class="question-mark">?</span>)))
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="self">self</span>.last_value.clone()))
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">T</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, [<span class="ident">u8</span>]<span class="op">&gt;</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">RleDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">T</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">bytes</span>: <span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, [<span class="ident">u8</span>]<span class="op">&gt;</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">RleDecoder</span> {
-            <span class="ident">decoder</span>: <span class="ident">RawDecoder::from</span>(<span class="ident">bytes</span>),
-            <span class="ident">last_value</span>: <span class="prelude-val">None</span>,
-            <span class="ident">count</span>: <span class="number">0</span>,
-            <span class="ident">literal</span>: <span class="bool-val">false</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, T&gt; From&lt;Cow&lt;<span class="lifetime">&#39;a</span>, [u8]&gt;&gt; <span class="kw">for </span>RleDecoder&lt;<span class="lifetime">&#39;a</span>, T&gt; {
+    <span class="kw">fn </span>from(bytes: Cow&lt;<span class="lifetime">&#39;a</span>, [u8]&gt;) -&gt; <span class="self">Self </span>{
+        RleDecoder {
+            decoder: RawDecoder::from(bytes),
+            last_value: <span class="prelude-val">None</span>,
+            count: <span class="number">0</span>,
+            literal: <span class="bool-val">false</span>,
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">T</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>]<span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">RleDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">T</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">d</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>]) -&gt; <span class="self">Self</span> {
-        <span class="ident">Cow::Borrowed</span>(<span class="ident">d</span>).<span class="ident">into</span>()
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, T&gt; From&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8]&gt; <span class="kw">for </span>RleDecoder&lt;<span class="lifetime">&#39;a</span>, T&gt; {
+    <span class="kw">fn </span>from(d: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8]) -&gt; <span class="self">Self </span>{
+        Cow::Borrowed(d).into()
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">T</span><span class="op">&gt;</span> <span class="ident">Iterator</span> <span class="kw">for</span> <span class="ident">RleDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">T</span><span class="op">&gt;</span>
-<span class="kw">where</span>
-    <span class="ident">T</span>: <span class="ident">Clone</span> <span class="op">+</span> <span class="ident">Debug</span> <span class="op">+</span> <span class="ident">Decodable</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, T&gt; Iterator <span class="kw">for </span>RleDecoder&lt;<span class="lifetime">&#39;a</span>, T&gt;
+<span class="kw">where
+    </span>T: Clone + Debug + Decodable,
 {
-    <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span>, <span class="ident">raw::Error</span><span class="op">&gt;</span>;
+    <span class="kw">type </span>Item = <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;T&gt;, raw::Error&gt;;
 
-    <span class="kw">fn</span> <span class="ident">next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">try_next</span>().<span class="ident">transpose</span>()
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="self">self</span>.try_next().transpose()
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/convert/op_as_changeop.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>op_as_changeop.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/convert/op_as_changeop.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>op_as_changeop.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -128,133 +128,133 @@
 <span id="126">126</span>
 <span id="127">127</span>
 <span id="128">128</span>
-</pre><pre class="rust"><code><span class="doccomment">/// Types for converting an OpTree op into a `ChangeOp` or a `DocOp`</span>
-<span class="kw">use</span> <span class="ident">std::borrow::Cow</span>;
+</pre><pre class="rust"><code><span class="doccomment">/// Types for converting an OpTree op into a `ChangeOp` or a `DocOp`
+</span><span class="kw">use </span>std::borrow::Cow;
 
-<span class="kw">use</span> <span class="kw">crate</span>::{
-    <span class="ident">convert</span>,
-    <span class="ident">op_set::OpSetMetadata</span>,
-    <span class="ident">storage::AsChangeOp</span>,
-    <span class="ident">types</span>::{<span class="ident">ActorId</span>, <span class="ident">Key</span>, <span class="ident">ObjId</span>, <span class="ident">Op</span>, <span class="ident">OpId</span>, <span class="ident">OpType</span>, <span class="ident">ScalarValue</span>},
+<span class="kw">use crate</span>::{
+    convert,
+    op_set::OpSetMetadata,
+    storage::AsChangeOp,
+    types::{ActorId, Key, ObjId, Op, OpId, OpType, ScalarValue},
 };
 
-<span class="doccomment">/// Wrap an op in an implementation of `AsChangeOp` which represents actor IDs using a reference to</span>
-<span class="doccomment">/// the actor ID stored in the metadata.</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// Note that the methods of `AsChangeOp` will panic if the actor is missing from the metadata</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">op_as_actor_id</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(
-    <span class="ident">obj</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">ObjId</span>,
-    <span class="ident">op</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Op</span>,
-    <span class="ident">metadata</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">OpSetMetadata</span>,
-) -&gt; <span class="ident">OpWithMetadata</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">OpWithMetadata</span> { <span class="ident">obj</span>, <span class="ident">op</span>, <span class="ident">metadata</span> }
+<span class="doccomment">/// Wrap an op in an implementation of `AsChangeOp` which represents actor IDs using a reference to
+/// the actor ID stored in the metadata.
+///
+/// Note that the methods of `AsChangeOp` will panic if the actor is missing from the metadata
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>op_as_actor_id&lt;<span class="lifetime">&#39;a</span>&gt;(
+    obj: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId,
+    op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
+    metadata: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetMetadata,
+) -&gt; OpWithMetadata&lt;<span class="lifetime">&#39;a</span>&gt; {
+    OpWithMetadata { obj, op, metadata }
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">OpWithMetadata</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">obj</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">ObjId</span>,
-    <span class="ident">op</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Op</span>,
-    <span class="ident">metadata</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">OpSetMetadata</span>,
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpWithMetadata&lt;<span class="lifetime">&#39;a</span>&gt; {
+    obj: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId,
+    op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
+    metadata: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetMetadata,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">OpWithMetadata</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">wrap</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">opid</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">OpId</span>) -&gt; <span class="ident">OpIdWithMetadata</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="ident">OpIdWithMetadata</span> {
-            <span class="ident">opid</span>,
-            <span class="ident">metadata</span>: <span class="self">self</span>.<span class="ident">metadata</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; OpWithMetadata&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>wrap(<span class="kw-2">&amp;</span><span class="self">self</span>, opid: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpId) -&gt; OpIdWithMetadata&lt;<span class="lifetime">&#39;a</span>&gt; {
+        OpIdWithMetadata {
+            opid,
+            metadata: <span class="self">self</span>.metadata,
         }
     }
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">OpIdWithMetadata</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">opid</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">OpId</span>,
-    <span class="ident">metadata</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">OpSetMetadata</span>,
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpIdWithMetadata&lt;<span class="lifetime">&#39;a</span>&gt; {
+    opid: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpId,
+    metadata: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetMetadata,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">convert::OpId</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">ActorId</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">OpIdWithMetadata</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">counter</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u64</span> {
-        <span class="self">self</span>.<span class="ident">opid</span>.<span class="ident">counter</span>()
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; convert::OpId&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ActorId&gt; <span class="kw">for </span>OpIdWithMetadata&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>counter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
+        <span class="self">self</span>.opid.counter()
     }
 
-    <span class="kw">fn</span> <span class="ident">actor</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">ActorId</span> {
-        <span class="self">self</span>.<span class="ident">metadata</span>.<span class="ident">actors</span>.<span class="ident">get</span>(<span class="self">self</span>.<span class="ident">opid</span>.<span class="ident">actor</span>())
-    }
-}
-
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">PredWithMetadata</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">op</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">Op</span>,
-    <span class="ident">offset</span>: <span class="ident">usize</span>,
-    <span class="ident">metadata</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">OpSetMetadata</span>,
-}
-
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">ExactSizeIterator</span> <span class="kw">for</span> <span class="ident">PredWithMetadata</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">len</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> {
-        <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">pred</span>.<span class="ident">len</span>()
+    <span class="kw">fn </span>actor(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ActorId {
+        <span class="self">self</span>.metadata.actors.get(<span class="self">self</span>.opid.actor())
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Iterator</span> <span class="kw">for</span> <span class="ident">PredWithMetadata</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="ident">OpIdWithMetadata</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>PredWithMetadata&lt;<span class="lifetime">&#39;a</span>&gt; {
+    op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
+    offset: usize,
+    metadata: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetMetadata,
+}
 
-    <span class="kw">fn</span> <span class="ident">next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">op</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">pred</span>.<span class="ident">get</span>(<span class="self">self</span>.<span class="ident">offset</span>) {
-            <span class="self">self</span>.<span class="ident">offset</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
-            <span class="prelude-val">Some</span>(<span class="ident">OpIdWithMetadata</span> {
-                <span class="ident">opid</span>: <span class="ident">op</span>,
-                <span class="ident">metadata</span>: <span class="self">self</span>.<span class="ident">metadata</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; ExactSizeIterator <span class="kw">for </span>PredWithMetadata&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.op.pred.len()
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>PredWithMetadata&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">type </span>Item = OpIdWithMetadata&lt;<span class="lifetime">&#39;a</span>&gt;;
+
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(op) = <span class="self">self</span>.op.pred.get(<span class="self">self</span>.offset) {
+            <span class="self">self</span>.offset += <span class="number">1</span>;
+            <span class="prelude-val">Some</span>(OpIdWithMetadata {
+                opid: op,
+                metadata: <span class="self">self</span>.metadata,
             })
-        } <span class="kw">else</span> {
-            <span class="prelude-val">None</span>
-        }
+        } <span class="kw">else </span>{
+            <span class="prelude-val">None
+        </span>}
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">AsChangeOp</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">OpWithMetadata</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">ActorId</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">ActorId</span>;
-    <span class="kw">type</span> <span class="ident">OpId</span> <span class="op">=</span> <span class="ident">OpIdWithMetadata</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>;
-    <span class="kw">type</span> <span class="ident">PredIter</span> <span class="op">=</span> <span class="ident">PredWithMetadata</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>;
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; AsChangeOp&lt;<span class="lifetime">&#39;a</span>&gt; <span class="kw">for </span>OpWithMetadata&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">type </span>ActorId = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ActorId;
+    <span class="kw">type </span>OpId = OpIdWithMetadata&lt;<span class="lifetime">&#39;a</span>&gt;;
+    <span class="kw">type </span>PredIter = PredWithMetadata&lt;<span class="lifetime">&#39;a</span>&gt;;
 
-    <span class="kw">fn</span> <span class="ident">action</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u64</span> {
-        <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">action</span>.<span class="ident">action_index</span>()
+    <span class="kw">fn </span>action(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
+        <span class="self">self</span>.op.action.action_index()
     }
 
-    <span class="kw">fn</span> <span class="ident">insert</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="self">self</span>.<span class="ident">op</span>.<span class="ident">insert</span>
+    <span class="kw">fn </span>insert(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="self">self</span>.op.insert
     }
 
-    <span class="kw">fn</span> <span class="ident">val</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">ScalarValue</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">op</span>.<span class="ident">action</span> {
-            <span class="ident">OpType::Make</span>(..) <span class="op">|</span> <span class="ident">OpType::Delete</span> =&gt; <span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::Null</span>),
-            <span class="ident">OpType::Increment</span>(<span class="ident">i</span>) =&gt; <span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::Int</span>(<span class="kw-2">*</span><span class="ident">i</span>)),
-            <span class="ident">OpType::Put</span>(<span class="ident">s</span>) =&gt; <span class="ident">Cow::Borrowed</span>(<span class="ident">s</span>),
+    <span class="kw">fn </span>val(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Cow&lt;<span class="lifetime">&#39;a</span>, ScalarValue&gt; {
+        <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.op.action {
+            OpType::Make(..) | OpType::Delete =&gt; Cow::Owned(ScalarValue::Null),
+            OpType::Increment(i) =&gt; Cow::Owned(ScalarValue::Int(<span class="kw-2">*</span>i)),
+            OpType::Put(s) =&gt; Cow::Borrowed(s),
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">obj</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">convert::ObjId</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::OpId</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">obj</span>.<span class="ident">is_root</span>() {
-            <span class="ident">convert::ObjId::Root</span>
-        } <span class="kw">else</span> {
-            <span class="ident">convert::ObjId::Op</span>(<span class="ident">OpIdWithMetadata</span> {
-                <span class="ident">opid</span>: <span class="self">self</span>.<span class="ident">obj</span>.<span class="ident">opid</span>(),
-                <span class="ident">metadata</span>: <span class="self">self</span>.<span class="ident">metadata</span>,
+    <span class="kw">fn </span>obj(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; convert::ObjId&lt;<span class="self">Self</span>::OpId&gt; {
+        <span class="kw">if </span><span class="self">self</span>.obj.is_root() {
+            convert::ObjId::Root
+        } <span class="kw">else </span>{
+            convert::ObjId::Op(OpIdWithMetadata {
+                opid: <span class="self">self</span>.obj.opid(),
+                metadata: <span class="self">self</span>.metadata,
             })
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">pred</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident"><span class="self">Self</span>::PredIter</span> {
-        <span class="ident">PredWithMetadata</span> {
-            <span class="ident">op</span>: <span class="self">self</span>.<span class="ident">op</span>,
-            <span class="ident">offset</span>: <span class="number">0</span>,
-            <span class="ident">metadata</span>: <span class="self">self</span>.<span class="ident">metadata</span>,
+    <span class="kw">fn </span>pred(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::PredIter {
+        PredWithMetadata {
+            op: <span class="self">self</span>.op,
+            offset: <span class="number">0</span>,
+            metadata: <span class="self">self</span>.metadata,
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">convert::Key</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident"><span class="self">Self</span>::OpId</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">op</span>.<span class="ident">key</span> {
-            <span class="ident">Key::Map</span>(<span class="ident">idx</span>) =&gt; <span class="ident">convert::Key::Prop</span>(<span class="ident">Cow::Owned</span>(<span class="self">self</span>.<span class="ident">metadata</span>.<span class="ident">props</span>.<span class="ident">get</span>(<span class="kw-2">*</span><span class="ident">idx</span>).<span class="ident">into</span>())),
-            <span class="ident">Key::Seq</span>(<span class="ident">e</span>) <span class="kw">if</span> <span class="ident">e</span>.<span class="ident">is_head</span>() =&gt; <span class="ident">convert::Key::Elem</span>(<span class="ident">convert::ElemId::Head</span>),
-            <span class="ident">Key::Seq</span>(<span class="ident">e</span>) =&gt; <span class="ident">convert::Key::Elem</span>(<span class="ident">convert::ElemId::Op</span>(<span class="self">self</span>.<span class="ident">wrap</span>(<span class="kw-2">&amp;</span><span class="ident">e</span>.<span class="number">0</span>))),
+    <span class="kw">fn </span>key(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; convert::Key&lt;<span class="lifetime">&#39;a</span>, <span class="self">Self</span>::OpId&gt; {
+        <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.op.key {
+            Key::Map(idx) =&gt; convert::Key::Prop(Cow::Owned(<span class="self">self</span>.metadata.props.get(<span class="kw-2">*</span>idx).into())),
+            Key::Seq(e) <span class="kw">if </span>e.is_head() =&gt; convert::Key::Elem(convert::ElemId::Head),
+            Key::Seq(e) =&gt; convert::Key::Elem(convert::ElemId::Op(<span class="self">self</span>.wrap(<span class="kw-2">&amp;</span>e.<span class="number">0</span>))),
         }
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

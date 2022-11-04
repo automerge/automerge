@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/query/prop_at.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>prop_at.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/query/prop_at.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>prop_at.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../normalize.css"><link rel="stylesheet" href="../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../ayu.css" disabled><link rel="stylesheet" href="../../../dark.css" disabled><link rel="stylesheet" href="../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../storage.js"></script><script defer src="../../../source-script.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../main.js"></script><noscript><link rel="stylesheet" href="../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -62,67 +62,67 @@
 <span id="60">60</span>
 <span id="61">61</span>
 <span id="62">62</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::op_tree</span>::{<span class="ident">OpSetMetadata</span>, <span class="ident">OpTreeNode</span>};
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::query</span>::{<span class="ident">binary_search_by</span>, <span class="ident">QueryResult</span>, <span class="ident">TreeQuery</span>, <span class="ident">VisWindow</span>};
-<span class="kw">use</span> <span class="ident"><span class="kw">crate</span>::types</span>::{<span class="ident">Clock</span>, <span class="ident">Key</span>, <span class="ident">Op</span>};
-<span class="kw">use</span> <span class="ident">std::fmt::Debug</span>;
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTreeNode};
+<span class="kw">use </span><span class="kw">crate</span>::query::{binary_search_by, QueryResult, TreeQuery, VisWindow};
+<span class="kw">use </span><span class="kw">crate</span>::types::{Clock, Key, Op};
+<span class="kw">use </span>std::fmt::Debug;
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>, <span class="ident">PartialEq</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">PropAt</span> {
-    <span class="ident">clock</span>: <span class="ident">Clock</span>,
-    <span class="ident">key</span>: <span class="ident">Key</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">ops</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">Op</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">ops_pos</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">pos</span>: <span class="ident">usize</span>,
+<span class="attribute">#[derive(Debug, Clone, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>PropAt {
+    clock: Clock,
+    key: Key,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) ops: Vec&lt;Op&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) ops_pos: Vec&lt;usize&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) pos: usize,
 }
 
-<span class="kw">impl</span> <span class="ident">PropAt</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">prop</span>: <span class="ident">usize</span>, <span class="ident">clock</span>: <span class="ident">Clock</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident">PropAt</span> {
-            <span class="ident">clock</span>,
-            <span class="ident">key</span>: <span class="ident">Key::Map</span>(<span class="ident">prop</span>),
-            <span class="ident">ops</span>: <span class="macro">vec!</span>[],
-            <span class="ident">ops_pos</span>: <span class="macro">vec!</span>[],
-            <span class="ident">pos</span>: <span class="number">0</span>,
+<span class="kw">impl </span>PropAt {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(prop: usize, clock: Clock) -&gt; <span class="self">Self </span>{
+        PropAt {
+            clock,
+            key: Key::Map(prop),
+            ops: <span class="macro">vec!</span>[],
+            ops_pos: <span class="macro">vec!</span>[],
+            pos: <span class="number">0</span>,
         }
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">TreeQuery</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">PropAt</span> {
-    <span class="kw">fn</span> <span class="ident">query_node_with_metadata</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">child</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> <span class="ident">OpTreeNode</span>,
-        <span class="ident">m</span>: <span class="kw-2">&amp;</span><span class="ident">OpSetMetadata</span>,
-    ) -&gt; <span class="ident">QueryResult</span> {
-        <span class="kw">let</span> <span class="ident">start</span> <span class="op">=</span> <span class="ident">binary_search_by</span>(<span class="ident">child</span>, <span class="op">|</span><span class="ident">op</span><span class="op">|</span> <span class="ident">m</span>.<span class="ident">key_cmp</span>(<span class="kw-2">&amp;</span><span class="ident">op</span>.<span class="ident">key</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">key</span>));
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">window</span>: <span class="ident">VisWindow</span> <span class="op">=</span> <span class="ident">Default::default</span>();
-        <span class="self">self</span>.<span class="ident">pos</span> <span class="op">=</span> <span class="ident">start</span>;
-        <span class="kw">for</span> <span class="ident">pos</span> <span class="kw">in</span> <span class="ident">start</span>..<span class="ident">child</span>.<span class="ident">len</span>() {
-            <span class="kw">let</span> <span class="ident">op</span> <span class="op">=</span> <span class="ident">child</span>.<span class="ident">get</span>(<span class="ident">pos</span>).<span class="ident">unwrap</span>();
-            <span class="kw">if</span> <span class="ident">op</span>.<span class="ident">key</span> <span class="op">!</span><span class="op">=</span> <span class="self">self</span>.<span class="ident">key</span> {
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; TreeQuery&lt;<span class="lifetime">&#39;a</span>&gt; <span class="kw">for </span>PropAt {
+    <span class="kw">fn </span>query_node_with_metadata(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode,
+        m: <span class="kw-2">&amp;</span>OpSetMetadata,
+    ) -&gt; QueryResult {
+        <span class="kw">let </span>start = binary_search_by(child, |op| m.key_cmp(<span class="kw-2">&amp;</span>op.key, <span class="kw-2">&amp;</span><span class="self">self</span>.key));
+        <span class="kw">let </span><span class="kw-2">mut </span>window: VisWindow = Default::default();
+        <span class="self">self</span>.pos = start;
+        <span class="kw">for </span>pos <span class="kw">in </span>start..child.len() {
+            <span class="kw">let </span>op = child.get(pos).unwrap();
+            <span class="kw">if </span>op.key != <span class="self">self</span>.key {
                 <span class="kw">break</span>;
             }
-            <span class="kw">if</span> <span class="ident">window</span>.<span class="ident">visible_at</span>(<span class="ident">op</span>, <span class="ident">pos</span>, <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">clock</span>) {
-                <span class="kw">for</span> (<span class="ident">vpos</span>, <span class="ident">vop</span>) <span class="kw">in</span> <span class="ident">window</span>.<span class="ident">seen_op</span>(<span class="ident">op</span>, <span class="ident">pos</span>) {
-                    <span class="kw">if</span> <span class="ident">vop</span>.<span class="ident">is_counter</span>() {
-                        <span class="comment">// this could be out of order because of inc&#39;s - we can find the right place</span>
-                        <span class="comment">// since pos will always be in order</span>
-                        <span class="kw">let</span> <span class="ident">pos</span> <span class="op">=</span> <span class="self">self</span>
-                            .<span class="ident">ops_pos</span>
-                            .<span class="ident">binary_search_by</span>(<span class="op">|</span><span class="ident">probe</span><span class="op">|</span> <span class="ident">probe</span>.<span class="ident">cmp</span>(<span class="kw-2">&amp;</span><span class="ident">vpos</span>))
-                            .<span class="ident">unwrap_err</span>();
-                        <span class="self">self</span>.<span class="ident">ops</span>.<span class="ident">insert</span>(<span class="ident">pos</span>, <span class="ident">vop</span>);
-                        <span class="self">self</span>.<span class="ident">ops_pos</span>.<span class="ident">insert</span>(<span class="ident">pos</span>, <span class="ident">vpos</span>);
-                    } <span class="kw">else</span> {
-                        <span class="self">self</span>.<span class="ident">ops</span>.<span class="ident">push</span>(<span class="ident">vop</span>);
-                        <span class="self">self</span>.<span class="ident">ops_pos</span>.<span class="ident">push</span>(<span class="ident">vpos</span>);
+            <span class="kw">if </span>window.visible_at(op, pos, <span class="kw-2">&amp;</span><span class="self">self</span>.clock) {
+                <span class="kw">for </span>(vpos, vop) <span class="kw">in </span>window.seen_op(op, pos) {
+                    <span class="kw">if </span>vop.is_counter() {
+                        <span class="comment">// this could be out of order because of inc&#39;s - we can find the right place
+                        // since pos will always be in order
+                        </span><span class="kw">let </span>pos = <span class="self">self
+                            </span>.ops_pos
+                            .binary_search_by(|probe| probe.cmp(<span class="kw-2">&amp;</span>vpos))
+                            .unwrap_err();
+                        <span class="self">self</span>.ops.insert(pos, vop);
+                        <span class="self">self</span>.ops_pos.insert(pos, vpos);
+                    } <span class="kw">else </span>{
+                        <span class="self">self</span>.ops.push(vop);
+                        <span class="self">self</span>.ops_pos.push(vpos);
                     }
                 }
             }
-            <span class="self">self</span>.<span class="ident">pos</span> <span class="op">+</span><span class="op">=</span> <span class="number">1</span>;
+            <span class="self">self</span>.pos += <span class="number">1</span>;
         }
-        <span class="ident">QueryResult::Finish</span>
+        QueryResult::Finish
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

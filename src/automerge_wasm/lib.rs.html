@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge-wasm/src/lib.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>lib.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../normalize.css"><link rel="stylesheet" type="text/css" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../automerge_wasm/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../automerge_wasm/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge-wasm/src/lib.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>lib.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../normalize.css"><link rel="stylesheet" href="../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../ayu.css" disabled><link rel="stylesheet" href="../../dark.css" disabled><link rel="stylesheet" href="../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../storage.js"></script><script defer src="../../source-script.js"></script><script defer src="../../source-files.js"></script><script defer src="../../main.js"></script><noscript><link rel="stylesheet" href="../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../automerge_wasm/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../automerge_wasm/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../automerge_wasm/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -881,886 +881,886 @@
 <span id="879">879</span>
 <span id="880">880</span>
 <span id="881">881</span>
-</pre><pre class="rust"><code><span class="attribute">#![<span class="ident">doc</span>(
-    <span class="ident">html_logo_url</span> <span class="op">=</span> <span class="string">&quot;https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg&quot;</span>,
-    <span class="ident">html_favicon_url</span> <span class="op">=</span> <span class="string">&quot;https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico&quot;</span>
-)]</span>
-<span class="attribute">#![<span class="ident">warn</span>(
-    <span class="ident">missing_debug_implementations</span>,
-    <span class="comment">// missing_docs, // TODO: add documentation!</span>
-    <span class="ident">rust_2021_compatibility</span>,
-    <span class="ident">rust_2018_idioms</span>,
-    <span class="ident">unreachable_pub</span>,
-    <span class="ident">bad_style</span>,
-    <span class="ident">const_err</span>,
-    <span class="ident">dead_code</span>,
-    <span class="ident">improper_ctypes</span>,
-    <span class="ident">non_shorthand_field_patterns</span>,
-    <span class="ident">no_mangle_generic_items</span>,
-    <span class="ident">overflowing_literals</span>,
-    <span class="ident">path_statements</span>,
-    <span class="ident">patterns_in_fns_without_body</span>,
-    <span class="ident">private_in_public</span>,
-    <span class="ident">unconditional_recursion</span>,
-    <span class="ident">unused</span>,
-    <span class="ident">unused_allocation</span>,
-    <span class="ident">unused_comparisons</span>,
-    <span class="ident">unused_parens</span>,
-    <span class="ident">while_true</span>
-)]</span>
-<span class="attribute">#![<span class="ident">allow</span>(<span class="ident">clippy::unused_unit</span>)]</span>
-<span class="kw">use</span> <span class="ident">am::transaction::CommitOptions</span>;
-<span class="kw">use</span> <span class="ident">am::transaction</span>::{<span class="ident">Observed</span>, <span class="ident">Transactable</span>, <span class="ident">UnObserved</span>};
-<span class="kw">use</span> <span class="ident">automerge</span> <span class="kw">as</span> <span class="ident">am</span>;
-<span class="kw">use</span> <span class="ident">automerge</span>::{<span class="ident">Change</span>, <span class="ident">ObjId</span>, <span class="ident">ObjType</span>, <span class="ident">Prop</span>, <span class="ident">Value</span>, <span class="ident">ROOT</span>};
-<span class="kw">use</span> <span class="ident">js_sys</span>::{<span class="ident">Array</span>, <span class="ident">Function</span>, <span class="ident">Object</span>, <span class="ident">Uint8Array</span>};
-<span class="kw">use</span> <span class="ident">serde::ser::Serialize</span>;
-<span class="kw">use</span> <span class="ident">std::collections::HashMap</span>;
-<span class="kw">use</span> <span class="ident">std::convert::TryInto</span>;
-<span class="kw">use</span> <span class="ident">wasm_bindgen::prelude</span>::<span class="kw-2">*</span>;
-<span class="kw">use</span> <span class="ident">wasm_bindgen::JsCast</span>;
+</pre><pre class="rust"><code><span class="attribute">#![doc(
+    html_logo_url = <span class="string">&quot;https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg&quot;</span>,
+    html_favicon_url = <span class="string">&quot;https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico&quot;
+</span>)]
+#![warn(
+    missing_debug_implementations,
+    <span class="comment">// missing_docs, // TODO: add documentation!
+    </span>rust_2021_compatibility,
+    rust_2018_idioms,
+    unreachable_pub,
+    bad_style,
+    const_err,
+    dead_code,
+    improper_ctypes,
+    non_shorthand_field_patterns,
+    no_mangle_generic_items,
+    overflowing_literals,
+    path_statements,
+    patterns_in_fns_without_body,
+    private_in_public,
+    unconditional_recursion,
+    unused,
+    unused_allocation,
+    unused_comparisons,
+    unused_parens,
+    while_true
+)]
+#![allow(clippy::unused_unit)]
+</span><span class="kw">use </span>am::transaction::CommitOptions;
+<span class="kw">use </span>am::transaction::{Observed, Transactable, UnObserved};
+<span class="kw">use </span>automerge <span class="kw">as </span>am;
+<span class="kw">use </span>automerge::{Change, ObjId, ObjType, Prop, Value, ROOT};
+<span class="kw">use </span>js_sys::{Array, Function, Object, Uint8Array};
+<span class="kw">use </span>serde::ser::Serialize;
+<span class="kw">use </span>std::collections::HashMap;
+<span class="kw">use </span>std::convert::TryInto;
+<span class="kw">use </span>wasm_bindgen::prelude::<span class="kw-2">*</span>;
+<span class="kw">use </span>wasm_bindgen::JsCast;
 
-<span class="kw">mod</span> <span class="ident">interop</span>;
-<span class="kw">mod</span> <span class="ident">observer</span>;
-<span class="kw">mod</span> <span class="ident">sync</span>;
-<span class="kw">mod</span> <span class="ident">value</span>;
+<span class="kw">mod </span>interop;
+<span class="kw">mod </span>observer;
+<span class="kw">mod </span>sync;
+<span class="kw">mod </span>value;
 
-<span class="kw">use</span> <span class="ident">observer::Observer</span>;
+<span class="kw">use </span>observer::Observer;
 
-<span class="kw">use</span> <span class="ident">interop</span>::{<span class="ident">alloc</span>, <span class="ident">get_heads</span>, <span class="ident">js_get</span>, <span class="ident">js_set</span>, <span class="ident">to_js_err</span>, <span class="ident">to_objtype</span>, <span class="ident">to_prop</span>, <span class="ident">AR</span>, <span class="ident">JS</span>};
-<span class="kw">use</span> <span class="ident">sync::SyncState</span>;
-<span class="kw">use</span> <span class="ident">value::Datatype</span>;
+<span class="kw">use </span>interop::{alloc, get_heads, js_get, js_set, to_js_err, to_objtype, to_prop, AR, JS};
+<span class="kw">use </span>sync::SyncState;
+<span class="kw">use </span>value::Datatype;
 
-<span class="attribute">#[<span class="ident">allow</span>(<span class="ident">unused_macros</span>)]</span>
-<span class="macro">macro_rules!</span> <span class="ident">log</span> {
-    ( $( <span class="macro-nonterminal">$</span><span class="macro-nonterminal">t</span>:<span class="ident">tt</span> )<span class="op">*</span> ) =&gt; {
-          <span class="ident">web_sys::console::log_1</span>(<span class="kw-2">&amp;</span><span class="macro">format!</span>( $( <span class="macro-nonterminal">$</span><span class="macro-nonterminal">t</span> )<span class="op">*</span> ).<span class="ident">into</span>());
+<span class="attribute">#[allow(unused_macros)]
+</span><span class="macro">macro_rules! </span>log {
+    ( $( <span class="macro-nonterminal">$t</span>:tt )* ) =&gt; {
+          web_sys::console::log_1(<span class="kw-2">&amp;</span><span class="macro">format!</span>( $( <span class="macro-nonterminal">$t </span>)* ).into());
     };
 }
 
-<span class="kw">type</span> <span class="ident">AutoCommit</span> <span class="op">=</span> <span class="ident">am::AutoCommitWithObs</span><span class="op">&lt;</span><span class="ident">Observed</span><span class="op">&lt;</span><span class="ident">Observer</span><span class="op">&gt;</span><span class="op">&gt;</span>;
+<span class="kw">type </span>AutoCommit = am::AutoCommitWithObs&lt;Observed&lt;Observer&gt;&gt;;
 
-<span class="attribute">#[<span class="ident">cfg</span>(<span class="ident">feature</span> <span class="op">=</span> <span class="string">&quot;wee_alloc&quot;</span>)]</span>
-<span class="attribute">#[<span class="ident">global_allocator</span>]</span>
-<span class="kw">static</span> <span class="ident">ALLOC</span>: <span class="ident">wee_alloc::WeeAlloc</span> <span class="op">=</span> <span class="ident">wee_alloc::WeeAlloc::INIT</span>;
+<span class="attribute">#[cfg(feature = <span class="string">&quot;wee_alloc&quot;</span>)]
+#[global_allocator]
+</span><span class="kw">static </span>ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
-<span class="attribute">#[<span class="ident">wasm_bindgen</span>]</span>
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">Automerge</span> {
-    <span class="ident">doc</span>: <span class="ident">AutoCommit</span>,
-    <span class="ident">freeze</span>: <span class="ident">bool</span>,
-    <span class="ident">external_types</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">Datatype</span>, <span class="ident">Function</span><span class="op">&gt;</span>,
+<span class="attribute">#[wasm_bindgen]
+#[derive(Debug)]
+</span><span class="kw">pub struct </span>Automerge {
+    doc: AutoCommit,
+    freeze: bool,
+    external_types: HashMap&lt;Datatype, Function&gt;,
 }
 
-<span class="attribute">#[<span class="ident">wasm_bindgen</span>]</span>
-<span class="kw">impl</span> <span class="ident">Automerge</span> {
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="ident">actor</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Automerge</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">doc</span> <span class="op">=</span> <span class="ident">AutoCommit::default</span>();
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">a</span>) <span class="op">=</span> <span class="ident">actor</span> {
-            <span class="kw">let</span> <span class="ident">a</span> <span class="op">=</span> <span class="ident">automerge::ActorId::from</span>(<span class="ident">hex::decode</span>(<span class="ident">a</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>.<span class="ident">to_vec</span>());
-            <span class="ident">doc</span>.<span class="ident">set_actor</span>(<span class="ident">a</span>);
+<span class="attribute">#[wasm_bindgen]
+</span><span class="kw">impl </span>Automerge {
+    <span class="kw">pub fn </span>new(actor: <span class="prelude-ty">Option</span>&lt;String&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;Automerge, JsValue&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>doc = AutoCommit::default();
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(a) = actor {
+            <span class="kw">let </span>a = automerge::ActorId::from(hex::decode(a).map_err(to_js_err)<span class="question-mark">?</span>.to_vec());
+            doc.set_actor(a);
         }
-        <span class="prelude-val">Ok</span>(<span class="ident">Automerge</span> {
-            <span class="ident">doc</span>,
-            <span class="ident">freeze</span>: <span class="bool-val">false</span>,
-            <span class="ident">external_types</span>: <span class="ident">HashMap::default</span>(),
+        <span class="prelude-val">Ok</span>(Automerge {
+            doc,
+            freeze: <span class="bool-val">false</span>,
+            external_types: HashMap::default(),
         })
     }
 
-    <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy::should_implement_trait</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">clone</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">actor</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Automerge</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">automerge</span> <span class="op">=</span> <span class="ident">Automerge</span> {
-            <span class="ident">doc</span>: <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">clone</span>(),
-            <span class="ident">freeze</span>: <span class="self">self</span>.<span class="ident">freeze</span>,
-            <span class="ident">external_types</span>: <span class="self">self</span>.<span class="ident">external_types</span>.<span class="ident">clone</span>(),
+    <span class="attribute">#[allow(clippy::should_implement_trait)]
+    </span><span class="kw">pub fn </span>clone(<span class="kw-2">&amp;mut </span><span class="self">self</span>, actor: <span class="prelude-ty">Option</span>&lt;String&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;Automerge, JsValue&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>automerge = Automerge {
+            doc: <span class="self">self</span>.doc.clone(),
+            freeze: <span class="self">self</span>.freeze,
+            external_types: <span class="self">self</span>.external_types.clone(),
         };
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="ident">actor</span> {
-            <span class="kw">let</span> <span class="ident">actor</span> <span class="op">=</span> <span class="ident">automerge::ActorId::from</span>(<span class="ident">hex::decode</span>(<span class="ident">s</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>.<span class="ident">to_vec</span>());
-            <span class="ident">automerge</span>.<span class="ident">doc</span>.<span class="ident">set_actor</span>(<span class="ident">actor</span>);
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = actor {
+            <span class="kw">let </span>actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)<span class="question-mark">?</span>.to_vec());
+            automerge.doc.set_actor(actor);
         }
-        <span class="prelude-val">Ok</span>(<span class="ident">automerge</span>)
+        <span class="prelude-val">Ok</span>(automerge)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">fork</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">actor</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>, <span class="ident">heads</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Automerge</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">heads</span>: <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">am::ChangeHash</span><span class="op">&gt;</span>, <span class="kw">_</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">JS</span>(<span class="ident">heads</span>).<span class="ident">try_into</span>();
-        <span class="kw">let</span> <span class="ident">doc</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="ident">heads</span>) <span class="op">=</span> <span class="ident">heads</span> {
-            <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">fork_at</span>(<span class="kw-2">&amp;</span><span class="ident">heads</span>)<span class="question-mark">?</span>
-        } <span class="kw">else</span> {
-            <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">fork</span>()
+    <span class="kw">pub fn </span>fork(<span class="kw-2">&amp;mut </span><span class="self">self</span>, actor: <span class="prelude-ty">Option</span>&lt;String&gt;, heads: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;Automerge, JsValue&gt; {
+        <span class="kw">let </span>heads: <span class="prelude-ty">Result</span>&lt;Vec&lt;am::ChangeHash&gt;, <span class="kw">_</span>&gt; = JS(heads).try_into();
+        <span class="kw">let </span>doc = <span class="kw">if let </span><span class="prelude-val">Ok</span>(heads) = heads {
+            <span class="self">self</span>.doc.fork_at(<span class="kw-2">&amp;</span>heads)<span class="question-mark">?
+        </span>} <span class="kw">else </span>{
+            <span class="self">self</span>.doc.fork()
         };
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">automerge</span> <span class="op">=</span> <span class="ident">Automerge</span> {
-            <span class="ident">doc</span>,
-            <span class="ident">freeze</span>: <span class="self">self</span>.<span class="ident">freeze</span>,
-            <span class="ident">external_types</span>: <span class="self">self</span>.<span class="ident">external_types</span>.<span class="ident">clone</span>(),
+        <span class="kw">let </span><span class="kw-2">mut </span>automerge = Automerge {
+            doc,
+            freeze: <span class="self">self</span>.freeze,
+            external_types: <span class="self">self</span>.external_types.clone(),
         };
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="ident">actor</span> {
-            <span class="kw">let</span> <span class="ident">actor</span> <span class="op">=</span> <span class="ident">automerge::ActorId::from</span>(<span class="ident">hex::decode</span>(<span class="ident">s</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>.<span class="ident">to_vec</span>());
-            <span class="ident">automerge</span>.<span class="ident">doc</span>.<span class="ident">set_actor</span>(<span class="ident">actor</span>);
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = actor {
+            <span class="kw">let </span>actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)<span class="question-mark">?</span>.to_vec());
+            automerge.doc.set_actor(actor);
         }
-        <span class="prelude-val">Ok</span>(<span class="ident">automerge</span>)
+        <span class="prelude-val">Ok</span>(automerge)
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">pendingOps</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">pending_ops</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">JsValue</span> {
-        (<span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">pending_ops</span>() <span class="kw">as</span> <span class="ident">u32</span>).<span class="ident">into</span>()
+    <span class="attribute">#[wasm_bindgen(js_name = pendingOps)]
+    </span><span class="kw">pub fn </span>pending_ops(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; JsValue {
+        (<span class="self">self</span>.doc.pending_ops() <span class="kw">as </span>u32).into()
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">commit</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">message</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>, <span class="ident">time</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">f64</span><span class="op">&gt;</span>) -&gt; <span class="ident">JsValue</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">commit_opts</span> <span class="op">=</span> <span class="ident">CommitOptions::default</span>();
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">message</span>) <span class="op">=</span> <span class="ident">message</span> {
-            <span class="ident">commit_opts</span>.<span class="ident">set_message</span>(<span class="ident">message</span>);
+    <span class="kw">pub fn </span>commit(<span class="kw-2">&amp;mut </span><span class="self">self</span>, message: <span class="prelude-ty">Option</span>&lt;String&gt;, time: <span class="prelude-ty">Option</span>&lt;f64&gt;) -&gt; JsValue {
+        <span class="kw">let </span><span class="kw-2">mut </span>commit_opts = CommitOptions::default();
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(message) = message {
+            commit_opts.set_message(message);
         }
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">time</span>) <span class="op">=</span> <span class="ident">time</span> {
-            <span class="ident">commit_opts</span>.<span class="ident">set_time</span>(<span class="ident">time</span> <span class="kw">as</span> <span class="ident">i64</span>);
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(time) = time {
+            commit_opts.set_time(time <span class="kw">as </span>i64);
         }
-        <span class="kw">let</span> <span class="ident">hash</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">commit_with</span>(<span class="ident">commit_opts</span>);
-        <span class="ident">JsValue::from_str</span>(<span class="kw-2">&amp;</span><span class="ident">hex::encode</span>(<span class="kw-2">&amp;</span><span class="ident">hash</span>.<span class="number">0</span>))
+        <span class="kw">let </span>hash = <span class="self">self</span>.doc.commit_with(commit_opts);
+        JsValue::from_str(<span class="kw-2">&amp;</span>hex::encode(<span class="kw-2">&amp;</span>hash.<span class="number">0</span>))
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">merge</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Automerge</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Array</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">heads</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">merge</span>(<span class="kw-2">&amp;mut</span> <span class="ident">other</span>.<span class="ident">doc</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">heads</span>: <span class="ident">Array</span> <span class="op">=</span> <span class="ident">heads</span>
-            .<span class="ident">iter</span>()
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">h</span><span class="op">|</span> <span class="ident">JsValue::from_str</span>(<span class="kw-2">&amp;</span><span class="ident">hex::encode</span>(<span class="kw-2">&amp;</span><span class="ident">h</span>.<span class="number">0</span>)))
-            .<span class="ident">collect</span>();
-        <span class="prelude-val">Ok</span>(<span class="ident">heads</span>)
+    <span class="kw">pub fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;mut </span>Automerge) -&gt; <span class="prelude-ty">Result</span>&lt;Array, JsValue&gt; {
+        <span class="kw">let </span>heads = <span class="self">self</span>.doc.merge(<span class="kw-2">&amp;mut </span>other.doc)<span class="question-mark">?</span>;
+        <span class="kw">let </span>heads: Array = heads
+            .iter()
+            .map(|h| JsValue::from_str(<span class="kw-2">&amp;</span>hex::encode(<span class="kw-2">&amp;</span>h.<span class="number">0</span>)))
+            .collect();
+        <span class="prelude-val">Ok</span>(heads)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">rollback</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">f64</span> {
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">rollback</span>() <span class="kw">as</span> <span class="ident">f64</span>
+    <span class="kw">pub fn </span>rollback(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; f64 {
+        <span class="self">self</span>.doc.rollback() <span class="kw">as </span>f64
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">keys</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">JsValue</span>, <span class="ident">heads</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Array</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Array</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">import</span>(<span class="ident">obj</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">heads</span>) <span class="op">=</span> <span class="ident">get_heads</span>(<span class="ident">heads</span>) {
-            <span class="self">self</span>.<span class="ident">doc</span>
-                .<span class="ident">keys_at</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="kw-2">&amp;</span><span class="ident">heads</span>)
-                .<span class="ident">map</span>(<span class="op">|</span><span class="ident">s</span><span class="op">|</span> <span class="ident">JsValue::from_str</span>(<span class="kw-2">&amp;</span><span class="ident">s</span>))
-                .<span class="ident">collect</span>()
-        } <span class="kw">else</span> {
-            <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">keys</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>).<span class="ident">map</span>(<span class="op">|</span><span class="ident">s</span><span class="op">|</span> <span class="ident">JsValue::from_str</span>(<span class="kw-2">&amp;</span><span class="ident">s</span>)).<span class="ident">collect</span>()
+    <span class="kw">pub fn </span>keys(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: JsValue, heads: <span class="prelude-ty">Option</span>&lt;Array&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;Array, JsValue&gt; {
+        <span class="kw">let </span>obj = <span class="self">self</span>.import(obj)<span class="question-mark">?</span>;
+        <span class="kw">let </span>result = <span class="kw">if let </span><span class="prelude-val">Some</span>(heads) = get_heads(heads) {
+            <span class="self">self</span>.doc
+                .keys_at(<span class="kw-2">&amp;</span>obj, <span class="kw-2">&amp;</span>heads)
+                .map(|s| JsValue::from_str(<span class="kw-2">&amp;</span>s))
+                .collect()
+        } <span class="kw">else </span>{
+            <span class="self">self</span>.doc.keys(<span class="kw-2">&amp;</span>obj).map(|s| JsValue::from_str(<span class="kw-2">&amp;</span>s)).collect()
         };
-        <span class="prelude-val">Ok</span>(<span class="ident">result</span>)
+        <span class="prelude-val">Ok</span>(result)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">text</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">JsValue</span>, <span class="ident">heads</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Array</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">String</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">import</span>(<span class="ident">obj</span>)<span class="question-mark">?</span>;
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">heads</span>) <span class="op">=</span> <span class="ident">get_heads</span>(<span class="ident">heads</span>) {
-            <span class="prelude-val">Ok</span>(<span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">text_at</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="kw-2">&amp;</span><span class="ident">heads</span>)<span class="question-mark">?</span>)
-        } <span class="kw">else</span> {
-            <span class="prelude-val">Ok</span>(<span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">text</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>)<span class="question-mark">?</span>)
+    <span class="kw">pub fn </span>text(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: JsValue, heads: <span class="prelude-ty">Option</span>&lt;Array&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;String, JsValue&gt; {
+        <span class="kw">let </span>obj = <span class="self">self</span>.import(obj)<span class="question-mark">?</span>;
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(heads) = get_heads(heads) {
+            <span class="prelude-val">Ok</span>(<span class="self">self</span>.doc.text_at(<span class="kw-2">&amp;</span>obj, <span class="kw-2">&amp;</span>heads)<span class="question-mark">?</span>)
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(<span class="self">self</span>.doc.text(<span class="kw-2">&amp;</span>obj)<span class="question-mark">?</span>)
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">splice</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">JsValue</span>,
-        <span class="ident">start</span>: <span class="ident">f64</span>,
-        <span class="ident">delete_count</span>: <span class="ident">f64</span>,
-        <span class="ident">text</span>: <span class="ident">JsValue</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">import</span>(<span class="ident">obj</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">start</span> <span class="op">=</span> <span class="ident">start</span> <span class="kw">as</span> <span class="ident">usize</span>;
-        <span class="kw">let</span> <span class="ident">delete_count</span> <span class="op">=</span> <span class="ident">delete_count</span> <span class="kw">as</span> <span class="ident">usize</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">vals</span> <span class="op">=</span> <span class="macro">vec!</span>[];
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">t</span>) <span class="op">=</span> <span class="ident">text</span>.<span class="ident">as_string</span>() {
-            <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">splice_text</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">start</span>, <span class="ident">delete_count</span>, <span class="kw-2">&amp;</span><span class="ident">t</span>)<span class="question-mark">?</span>;
-        } <span class="kw">else</span> {
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="ident">array</span>) <span class="op">=</span> <span class="ident">text</span>.<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">Array</span><span class="op">&gt;</span>() {
-                <span class="kw">for</span> <span class="ident">i</span> <span class="kw">in</span> <span class="ident">array</span>.<span class="ident">iter</span>() {
-                    <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="self">self</span>
-                        .<span class="ident">import_scalar</span>(<span class="kw-2">&amp;</span><span class="ident">i</span>, <span class="kw-2">&amp;</span><span class="prelude-val">None</span>)
-                        .<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">to_js_err</span>(<span class="string">&quot;expected scalar&quot;</span>))<span class="question-mark">?</span>;
-                    <span class="ident">vals</span>.<span class="ident">push</span>(<span class="ident">value</span>);
+    <span class="kw">pub fn </span>splice(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: JsValue,
+        start: f64,
+        delete_count: f64,
+        text: JsValue,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), JsValue&gt; {
+        <span class="kw">let </span>obj = <span class="self">self</span>.import(obj)<span class="question-mark">?</span>;
+        <span class="kw">let </span>start = start <span class="kw">as </span>usize;
+        <span class="kw">let </span>delete_count = delete_count <span class="kw">as </span>usize;
+        <span class="kw">let </span><span class="kw-2">mut </span>vals = <span class="macro">vec!</span>[];
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(t) = text.as_string() {
+            <span class="self">self</span>.doc.splice_text(<span class="kw-2">&amp;</span>obj, start, delete_count, <span class="kw-2">&amp;</span>t)<span class="question-mark">?</span>;
+        } <span class="kw">else </span>{
+            <span class="kw">if let </span><span class="prelude-val">Ok</span>(array) = text.dyn_into::&lt;Array&gt;() {
+                <span class="kw">for </span>i <span class="kw">in </span>array.iter() {
+                    <span class="kw">let </span>value = <span class="self">self
+                        </span>.import_scalar(<span class="kw-2">&amp;</span>i, <span class="kw-2">&amp;</span><span class="prelude-val">None</span>)
+                        .ok_or_else(|| to_js_err(<span class="string">&quot;expected scalar&quot;</span>))<span class="question-mark">?</span>;
+                    vals.push(value);
                 }
             }
-            <span class="self">self</span>.<span class="ident">doc</span>
-                .<span class="ident">splice</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">start</span>, <span class="ident">delete_count</span>, <span class="ident">vals</span>.<span class="ident">into_iter</span>())<span class="question-mark">?</span>;
+            <span class="self">self</span>.doc
+                .splice(<span class="kw-2">&amp;</span>obj, start, delete_count, vals.into_iter())<span class="question-mark">?</span>;
         }
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">push</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">JsValue</span>, <span class="ident">value</span>: <span class="ident">JsValue</span>, <span class="ident">datatype</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">import</span>(<span class="ident">obj</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="self">self</span>
-            .<span class="ident">import_scalar</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>, <span class="kw-2">&amp;</span><span class="ident">datatype</span>.<span class="ident">as_string</span>())
-            .<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">to_js_err</span>(<span class="string">&quot;invalid scalar value&quot;</span>))<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">index</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">length</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>);
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">insert</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">index</span>, <span class="ident">value</span>)<span class="question-mark">?</span>;
+    <span class="kw">pub fn </span>push(<span class="kw-2">&amp;mut </span><span class="self">self</span>, obj: JsValue, value: JsValue, datatype: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;(), JsValue&gt; {
+        <span class="kw">let </span>obj = <span class="self">self</span>.import(obj)<span class="question-mark">?</span>;
+        <span class="kw">let </span>value = <span class="self">self
+            </span>.import_scalar(<span class="kw-2">&amp;</span>value, <span class="kw-2">&amp;</span>datatype.as_string())
+            .ok_or_else(|| to_js_err(<span class="string">&quot;invalid scalar value&quot;</span>))<span class="question-mark">?</span>;
+        <span class="kw">let </span>index = <span class="self">self</span>.doc.length(<span class="kw-2">&amp;</span>obj);
+        <span class="self">self</span>.doc.insert(<span class="kw-2">&amp;</span>obj, index, value)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">pushObject</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">push_object</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">JsValue</span>, <span class="ident">value</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">import</span>(<span class="ident">obj</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> (<span class="ident">value</span>, <span class="ident">subvals</span>) <span class="op">=</span>
-            <span class="ident">to_objtype</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>, <span class="kw-2">&amp;</span><span class="prelude-val">None</span>).<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">to_js_err</span>(<span class="string">&quot;expected object&quot;</span>))<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">index</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">length</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>);
-        <span class="kw">let</span> <span class="ident">opid</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">insert_object</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">index</span>, <span class="ident">value</span>)<span class="question-mark">?</span>;
-        <span class="self">self</span>.<span class="ident">subset</span>(<span class="kw-2">&amp;</span><span class="ident">opid</span>, <span class="ident">subvals</span>)<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(<span class="ident">opid</span>.<span class="ident">to_string</span>().<span class="ident">into</span>())
+    <span class="attribute">#[wasm_bindgen(js_name = pushObject)]
+    </span><span class="kw">pub fn </span>push_object(<span class="kw-2">&amp;mut </span><span class="self">self</span>, obj: JsValue, value: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;String&gt;, JsValue&gt; {
+        <span class="kw">let </span>obj = <span class="self">self</span>.import(obj)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(value, subvals) =
+            to_objtype(<span class="kw-2">&amp;</span>value, <span class="kw-2">&amp;</span><span class="prelude-val">None</span>).ok_or_else(|| to_js_err(<span class="string">&quot;expected object&quot;</span>))<span class="question-mark">?</span>;
+        <span class="kw">let </span>index = <span class="self">self</span>.doc.length(<span class="kw-2">&amp;</span>obj);
+        <span class="kw">let </span>opid = <span class="self">self</span>.doc.insert_object(<span class="kw-2">&amp;</span>obj, index, value)<span class="question-mark">?</span>;
+        <span class="self">self</span>.subset(<span class="kw-2">&amp;</span>opid, subvals)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(opid.to_string().into())
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">insert</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">JsValue</span>,
-        <span class="ident">index</span>: <span class="ident">f64</span>,
-        <span class="ident">value</span>: <span class="ident">JsValue</span>,
-        <span class="ident">datatype</span>: <span class="ident">JsValue</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">import</span>(<span class="ident">obj</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">index</span> <span class="op">=</span> <span class="ident">index</span> <span class="kw">as</span> <span class="ident">f64</span>;
-        <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="self">self</span>
-            .<span class="ident">import_scalar</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>, <span class="kw-2">&amp;</span><span class="ident">datatype</span>.<span class="ident">as_string</span>())
-            .<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">to_js_err</span>(<span class="string">&quot;expected scalar value&quot;</span>))<span class="question-mark">?</span>;
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">insert</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">index</span> <span class="kw">as</span> <span class="ident">usize</span>, <span class="ident">value</span>)<span class="question-mark">?</span>;
+    <span class="kw">pub fn </span>insert(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: JsValue,
+        index: f64,
+        value: JsValue,
+        datatype: JsValue,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), JsValue&gt; {
+        <span class="kw">let </span>obj = <span class="self">self</span>.import(obj)<span class="question-mark">?</span>;
+        <span class="kw">let </span>index = index <span class="kw">as </span>f64;
+        <span class="kw">let </span>value = <span class="self">self
+            </span>.import_scalar(<span class="kw-2">&amp;</span>value, <span class="kw-2">&amp;</span>datatype.as_string())
+            .ok_or_else(|| to_js_err(<span class="string">&quot;expected scalar value&quot;</span>))<span class="question-mark">?</span>;
+        <span class="self">self</span>.doc.insert(<span class="kw-2">&amp;</span>obj, index <span class="kw">as </span>usize, value)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">insertObject</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">insert_object</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">JsValue</span>,
-        <span class="ident">index</span>: <span class="ident">f64</span>,
-        <span class="ident">value</span>: <span class="ident">JsValue</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">import</span>(<span class="ident">obj</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">index</span> <span class="op">=</span> <span class="ident">index</span> <span class="kw">as</span> <span class="ident">f64</span>;
-        <span class="kw">let</span> (<span class="ident">value</span>, <span class="ident">subvals</span>) <span class="op">=</span>
-            <span class="ident">to_objtype</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>, <span class="kw-2">&amp;</span><span class="prelude-val">None</span>).<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">to_js_err</span>(<span class="string">&quot;expected object&quot;</span>))<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">opid</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">insert_object</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">index</span> <span class="kw">as</span> <span class="ident">usize</span>, <span class="ident">value</span>)<span class="question-mark">?</span>;
-        <span class="self">self</span>.<span class="ident">subset</span>(<span class="kw-2">&amp;</span><span class="ident">opid</span>, <span class="ident">subvals</span>)<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(<span class="ident">opid</span>.<span class="ident">to_string</span>().<span class="ident">into</span>())
+    <span class="attribute">#[wasm_bindgen(js_name = insertObject)]
+    </span><span class="kw">pub fn </span>insert_object(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: JsValue,
+        index: f64,
+        value: JsValue,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;String&gt;, JsValue&gt; {
+        <span class="kw">let </span>obj = <span class="self">self</span>.import(obj)<span class="question-mark">?</span>;
+        <span class="kw">let </span>index = index <span class="kw">as </span>f64;
+        <span class="kw">let </span>(value, subvals) =
+            to_objtype(<span class="kw-2">&amp;</span>value, <span class="kw-2">&amp;</span><span class="prelude-val">None</span>).ok_or_else(|| to_js_err(<span class="string">&quot;expected object&quot;</span>))<span class="question-mark">?</span>;
+        <span class="kw">let </span>opid = <span class="self">self</span>.doc.insert_object(<span class="kw-2">&amp;</span>obj, index <span class="kw">as </span>usize, value)<span class="question-mark">?</span>;
+        <span class="self">self</span>.subset(<span class="kw-2">&amp;</span>opid, subvals)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(opid.to_string().into())
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">put</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">JsValue</span>,
-        <span class="ident">prop</span>: <span class="ident">JsValue</span>,
-        <span class="ident">value</span>: <span class="ident">JsValue</span>,
-        <span class="ident">datatype</span>: <span class="ident">JsValue</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">import</span>(<span class="ident">obj</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">prop</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">import_prop</span>(<span class="ident">prop</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="self">self</span>
-            .<span class="ident">import_scalar</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>, <span class="kw-2">&amp;</span><span class="ident">datatype</span>.<span class="ident">as_string</span>())
-            .<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">to_js_err</span>(<span class="string">&quot;expected scalar value&quot;</span>))<span class="question-mark">?</span>;
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">put</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">prop</span>, <span class="ident">value</span>)<span class="question-mark">?</span>;
+    <span class="kw">pub fn </span>put(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: JsValue,
+        prop: JsValue,
+        value: JsValue,
+        datatype: JsValue,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), JsValue&gt; {
+        <span class="kw">let </span>obj = <span class="self">self</span>.import(obj)<span class="question-mark">?</span>;
+        <span class="kw">let </span>prop = <span class="self">self</span>.import_prop(prop)<span class="question-mark">?</span>;
+        <span class="kw">let </span>value = <span class="self">self
+            </span>.import_scalar(<span class="kw-2">&amp;</span>value, <span class="kw-2">&amp;</span>datatype.as_string())
+            .ok_or_else(|| to_js_err(<span class="string">&quot;expected scalar value&quot;</span>))<span class="question-mark">?</span>;
+        <span class="self">self</span>.doc.put(<span class="kw-2">&amp;</span>obj, prop, value)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">putObject</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">put_object</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">JsValue</span>,
-        <span class="ident">prop</span>: <span class="ident">JsValue</span>,
-        <span class="ident">value</span>: <span class="ident">JsValue</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">import</span>(<span class="ident">obj</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">prop</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">import_prop</span>(<span class="ident">prop</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> (<span class="ident">value</span>, <span class="ident">subvals</span>) <span class="op">=</span>
-            <span class="ident">to_objtype</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>, <span class="kw-2">&amp;</span><span class="prelude-val">None</span>).<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">to_js_err</span>(<span class="string">&quot;expected object&quot;</span>))<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">opid</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">put_object</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">prop</span>, <span class="ident">value</span>)<span class="question-mark">?</span>;
-        <span class="self">self</span>.<span class="ident">subset</span>(<span class="kw-2">&amp;</span><span class="ident">opid</span>, <span class="ident">subvals</span>)<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(<span class="ident">opid</span>.<span class="ident">to_string</span>().<span class="ident">into</span>())
+    <span class="attribute">#[wasm_bindgen(js_name = putObject)]
+    </span><span class="kw">pub fn </span>put_object(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: JsValue,
+        prop: JsValue,
+        value: JsValue,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, JsValue&gt; {
+        <span class="kw">let </span>obj = <span class="self">self</span>.import(obj)<span class="question-mark">?</span>;
+        <span class="kw">let </span>prop = <span class="self">self</span>.import_prop(prop)<span class="question-mark">?</span>;
+        <span class="kw">let </span>(value, subvals) =
+            to_objtype(<span class="kw-2">&amp;</span>value, <span class="kw-2">&amp;</span><span class="prelude-val">None</span>).ok_or_else(|| to_js_err(<span class="string">&quot;expected object&quot;</span>))<span class="question-mark">?</span>;
+        <span class="kw">let </span>opid = <span class="self">self</span>.doc.put_object(<span class="kw-2">&amp;</span>obj, prop, value)<span class="question-mark">?</span>;
+        <span class="self">self</span>.subset(<span class="kw-2">&amp;</span>opid, subvals)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(opid.to_string().into())
     }
 
-    <span class="kw">fn</span> <span class="ident">subset</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">obj</span>: <span class="kw-2">&amp;</span><span class="ident">am::ObjId</span>, <span class="ident">vals</span>: <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">am::Prop</span>, <span class="ident">JsValue</span>)<span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">for</span> (<span class="ident">p</span>, <span class="ident">v</span>) <span class="kw">in</span> <span class="ident">vals</span> {
-            <span class="kw">let</span> (<span class="ident">value</span>, <span class="ident">subvals</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">import_value</span>(<span class="kw-2">&amp;</span><span class="ident">v</span>, <span class="prelude-val">None</span>)<span class="question-mark">?</span>;
-            <span class="comment">//let opid = self.0.set(id, p, value)?;</span>
-            <span class="kw">let</span> <span class="ident">opid</span> <span class="op">=</span> <span class="kw">match</span> (<span class="ident">p</span>, <span class="ident">value</span>) {
-                (<span class="ident">Prop::Map</span>(<span class="ident">s</span>), <span class="ident">Value::Object</span>(<span class="ident">objtype</span>)) =&gt; {
-                    <span class="prelude-val">Some</span>(<span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">put_object</span>(<span class="ident">obj</span>, <span class="ident">s</span>, <span class="ident">objtype</span>)<span class="question-mark">?</span>)
+    <span class="kw">fn </span>subset(<span class="kw-2">&amp;mut </span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>am::ObjId, vals: Vec&lt;(am::Prop, JsValue)&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;(), JsValue&gt; {
+        <span class="kw">for </span>(p, v) <span class="kw">in </span>vals {
+            <span class="kw">let </span>(value, subvals) = <span class="self">self</span>.import_value(<span class="kw-2">&amp;</span>v, <span class="prelude-val">None</span>)<span class="question-mark">?</span>;
+            <span class="comment">//let opid = self.0.set(id, p, value)?;
+            </span><span class="kw">let </span>opid = <span class="kw">match </span>(p, value) {
+                (Prop::Map(s), Value::Object(objtype)) =&gt; {
+                    <span class="prelude-val">Some</span>(<span class="self">self</span>.doc.put_object(obj, s, objtype)<span class="question-mark">?</span>)
                 }
-                (<span class="ident">Prop::Map</span>(<span class="ident">s</span>), <span class="ident">Value::Scalar</span>(<span class="ident">scalar</span>)) =&gt; {
-                    <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">put</span>(<span class="ident">obj</span>, <span class="ident">s</span>, <span class="ident">scalar</span>.<span class="ident">into_owned</span>())<span class="question-mark">?</span>;
-                    <span class="prelude-val">None</span>
+                (Prop::Map(s), Value::Scalar(scalar)) =&gt; {
+                    <span class="self">self</span>.doc.put(obj, s, scalar.into_owned())<span class="question-mark">?</span>;
+                    <span class="prelude-val">None
+                </span>}
+                (Prop::Seq(i), Value::Object(objtype)) =&gt; {
+                    <span class="prelude-val">Some</span>(<span class="self">self</span>.doc.insert_object(obj, i, objtype)<span class="question-mark">?</span>)
                 }
-                (<span class="ident">Prop::Seq</span>(<span class="ident">i</span>), <span class="ident">Value::Object</span>(<span class="ident">objtype</span>)) =&gt; {
-                    <span class="prelude-val">Some</span>(<span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">insert_object</span>(<span class="ident">obj</span>, <span class="ident">i</span>, <span class="ident">objtype</span>)<span class="question-mark">?</span>)
-                }
-                (<span class="ident">Prop::Seq</span>(<span class="ident">i</span>), <span class="ident">Value::Scalar</span>(<span class="ident">scalar</span>)) =&gt; {
-                    <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">insert</span>(<span class="ident">obj</span>, <span class="ident">i</span>, <span class="ident">scalar</span>.<span class="ident">into_owned</span>())<span class="question-mark">?</span>;
-                    <span class="prelude-val">None</span>
-                }
+                (Prop::Seq(i), Value::Scalar(scalar)) =&gt; {
+                    <span class="self">self</span>.doc.insert(obj, i, scalar.into_owned())<span class="question-mark">?</span>;
+                    <span class="prelude-val">None
+                </span>}
             };
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">opid</span>) <span class="op">=</span> <span class="ident">opid</span> {
-                <span class="self">self</span>.<span class="ident">subset</span>(<span class="kw-2">&amp;</span><span class="ident">opid</span>, <span class="ident">subvals</span>)<span class="question-mark">?</span>;
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(opid) = opid {
+                <span class="self">self</span>.subset(<span class="kw-2">&amp;</span>opid, subvals)<span class="question-mark">?</span>;
             }
         }
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">increment</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">JsValue</span>,
-        <span class="ident">prop</span>: <span class="ident">JsValue</span>,
-        <span class="ident">value</span>: <span class="ident">JsValue</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">import</span>(<span class="ident">obj</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">prop</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">import_prop</span>(<span class="ident">prop</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">value</span>: <span class="ident">f64</span> <span class="op">=</span> <span class="ident">value</span>
-            .<span class="ident">as_f64</span>()
-            .<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">to_js_err</span>(<span class="string">&quot;increment needs a numeric value&quot;</span>))<span class="question-mark">?</span>;
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">increment</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">prop</span>, <span class="ident">value</span> <span class="kw">as</span> <span class="ident">i64</span>)<span class="question-mark">?</span>;
+    <span class="kw">pub fn </span>increment(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: JsValue,
+        prop: JsValue,
+        value: JsValue,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), JsValue&gt; {
+        <span class="kw">let </span>obj = <span class="self">self</span>.import(obj)<span class="question-mark">?</span>;
+        <span class="kw">let </span>prop = <span class="self">self</span>.import_prop(prop)<span class="question-mark">?</span>;
+        <span class="kw">let </span>value: f64 = value
+            .as_f64()
+            .ok_or_else(|| to_js_err(<span class="string">&quot;increment needs a numeric value&quot;</span>))<span class="question-mark">?</span>;
+        <span class="self">self</span>.doc.increment(<span class="kw-2">&amp;</span>obj, prop, value <span class="kw">as </span>i64)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">get</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get</span>(
+    <span class="attribute">#[wasm_bindgen(js_name = get)]
+    </span><span class="kw">pub fn </span>get(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">JsValue</span>,
-        <span class="ident">prop</span>: <span class="ident">JsValue</span>,
-        <span class="ident">heads</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Array</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">import</span>(<span class="ident">obj</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">prop</span> <span class="op">=</span> <span class="ident">to_prop</span>(<span class="ident">prop</span>);
-        <span class="kw">let</span> <span class="ident">heads</span> <span class="op">=</span> <span class="ident">get_heads</span>(<span class="ident">heads</span>);
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="ident">prop</span>) <span class="op">=</span> <span class="ident">prop</span> {
-            <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">h</span>) <span class="op">=</span> <span class="ident">heads</span> {
-                <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_at</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">prop</span>, <span class="kw-2">&amp;</span><span class="ident">h</span>)<span class="question-mark">?</span>
-            } <span class="kw">else</span> {
-                <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">prop</span>)<span class="question-mark">?</span>
-            };
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>((<span class="ident">value</span>, <span class="ident">id</span>)) <span class="op">=</span> <span class="ident">value</span> {
-                <span class="kw">match</span> <span class="ident">alloc</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>) {
-                    (<span class="ident">datatype</span>, <span class="ident">js_value</span>) <span class="kw">if</span> <span class="ident">datatype</span>.<span class="ident">is_scalar</span>() =&gt; <span class="prelude-val">Ok</span>(<span class="ident">js_value</span>),
-                    <span class="kw">_</span> =&gt; <span class="prelude-val">Ok</span>(<span class="ident">id</span>.<span class="ident">to_string</span>().<span class="ident">into</span>()),
+        obj: JsValue,
+        prop: JsValue,
+        heads: <span class="prelude-ty">Option</span>&lt;Array&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, JsValue&gt; {
+        <span class="kw">let </span>obj = <span class="self">self</span>.import(obj)<span class="question-mark">?</span>;
+        <span class="kw">let </span>prop = to_prop(prop);
+        <span class="kw">let </span>heads = get_heads(heads);
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>(prop) = prop {
+            <span class="kw">let </span>value = <span class="kw">if let </span><span class="prelude-val">Some</span>(h) = heads {
+                <span class="self">self</span>.doc.get_at(<span class="kw-2">&amp;</span>obj, prop, <span class="kw-2">&amp;</span>h)<span class="question-mark">?
+            </span>} <span class="kw">else </span>{
+                <span class="self">self</span>.doc.get(<span class="kw-2">&amp;</span>obj, prop)<span class="question-mark">?
+            </span>};
+            <span class="kw">if let </span><span class="prelude-val">Some</span>((value, id)) = value {
+                <span class="kw">match </span>alloc(<span class="kw-2">&amp;</span>value) {
+                    (datatype, js_value) <span class="kw">if </span>datatype.is_scalar() =&gt; <span class="prelude-val">Ok</span>(js_value),
+                    <span class="kw">_ </span>=&gt; <span class="prelude-val">Ok</span>(id.to_string().into()),
                 }
-            } <span class="kw">else</span> {
-                <span class="prelude-val">Ok</span>(<span class="ident">JsValue::undefined</span>())
+            } <span class="kw">else </span>{
+                <span class="prelude-val">Ok</span>(JsValue::undefined())
             }
-        } <span class="kw">else</span> {
-            <span class="prelude-val">Ok</span>(<span class="ident">JsValue::undefined</span>())
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(JsValue::undefined())
         }
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">getWithType</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_with_type</span>(
+    <span class="attribute">#[wasm_bindgen(js_name = getWithType)]
+    </span><span class="kw">pub fn </span>get_with_type(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">JsValue</span>,
-        <span class="ident">prop</span>: <span class="ident">JsValue</span>,
-        <span class="ident">heads</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Array</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">import</span>(<span class="ident">obj</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">prop</span> <span class="op">=</span> <span class="ident">to_prop</span>(<span class="ident">prop</span>);
-        <span class="kw">let</span> <span class="ident">heads</span> <span class="op">=</span> <span class="ident">get_heads</span>(<span class="ident">heads</span>);
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="ident">prop</span>) <span class="op">=</span> <span class="ident">prop</span> {
-            <span class="kw">let</span> <span class="ident">value</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">h</span>) <span class="op">=</span> <span class="ident">heads</span> {
-                <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_at</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">prop</span>, <span class="kw-2">&amp;</span><span class="ident">h</span>)<span class="question-mark">?</span>
-            } <span class="kw">else</span> {
-                <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">prop</span>)<span class="question-mark">?</span>
-            };
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">value</span>) <span class="op">=</span> <span class="ident">value</span> {
-                <span class="kw">match</span> <span class="kw-2">&amp;</span><span class="ident">value</span> {
-                    (<span class="ident">Value::Object</span>(<span class="ident">obj_type</span>), <span class="ident">obj_id</span>) =&gt; {
-                        <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Array::new</span>();
-                        <span class="ident">result</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">obj_type</span>.<span class="ident">to_string</span>().<span class="ident">into</span>());
-                        <span class="ident">result</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">obj_id</span>.<span class="ident">to_string</span>().<span class="ident">into</span>());
-                        <span class="prelude-val">Ok</span>(<span class="ident">result</span>.<span class="ident">into</span>())
+        obj: JsValue,
+        prop: JsValue,
+        heads: <span class="prelude-ty">Option</span>&lt;Array&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, JsValue&gt; {
+        <span class="kw">let </span>obj = <span class="self">self</span>.import(obj)<span class="question-mark">?</span>;
+        <span class="kw">let </span>prop = to_prop(prop);
+        <span class="kw">let </span>heads = get_heads(heads);
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>(prop) = prop {
+            <span class="kw">let </span>value = <span class="kw">if let </span><span class="prelude-val">Some</span>(h) = heads {
+                <span class="self">self</span>.doc.get_at(<span class="kw-2">&amp;</span>obj, prop, <span class="kw-2">&amp;</span>h)<span class="question-mark">?
+            </span>} <span class="kw">else </span>{
+                <span class="self">self</span>.doc.get(<span class="kw-2">&amp;</span>obj, prop)<span class="question-mark">?
+            </span>};
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(value) = value {
+                <span class="kw">match </span><span class="kw-2">&amp;</span>value {
+                    (Value::Object(obj_type), obj_id) =&gt; {
+                        <span class="kw">let </span>result = Array::new();
+                        result.push(<span class="kw-2">&amp;</span>obj_type.to_string().into());
+                        result.push(<span class="kw-2">&amp;</span>obj_id.to_string().into());
+                        <span class="prelude-val">Ok</span>(result.into())
                     }
-                    (<span class="ident">Value::Scalar</span>(<span class="kw">_</span>), <span class="kw">_</span>) =&gt; {
-                        <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Array::new</span>();
-                        <span class="kw">let</span> (<span class="ident">datatype</span>, <span class="ident">value</span>) <span class="op">=</span> <span class="ident">alloc</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>.<span class="number">0</span>);
-                        <span class="ident">result</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">datatype</span>.<span class="ident">into</span>());
-                        <span class="ident">result</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>);
-                        <span class="prelude-val">Ok</span>(<span class="ident">result</span>.<span class="ident">into</span>())
+                    (Value::Scalar(<span class="kw">_</span>), <span class="kw">_</span>) =&gt; {
+                        <span class="kw">let </span>result = Array::new();
+                        <span class="kw">let </span>(datatype, value) = alloc(<span class="kw-2">&amp;</span>value.<span class="number">0</span>);
+                        result.push(<span class="kw-2">&amp;</span>datatype.into());
+                        result.push(<span class="kw-2">&amp;</span>value);
+                        <span class="prelude-val">Ok</span>(result.into())
                     }
                 }
-            } <span class="kw">else</span> {
-                <span class="prelude-val">Ok</span>(<span class="ident">JsValue::null</span>())
+            } <span class="kw">else </span>{
+                <span class="prelude-val">Ok</span>(JsValue::null())
             }
-        } <span class="kw">else</span> {
-            <span class="prelude-val">Ok</span>(<span class="ident">JsValue::null</span>())
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(JsValue::null())
         }
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">getAll</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_all</span>(
+    <span class="attribute">#[wasm_bindgen(js_name = getAll)]
+    </span><span class="kw">pub fn </span>get_all(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">JsValue</span>,
-        <span class="ident">arg</span>: <span class="ident">JsValue</span>,
-        <span class="ident">heads</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Array</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Array</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">import</span>(<span class="ident">obj</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Array::new</span>();
-        <span class="kw">let</span> <span class="ident">prop</span> <span class="op">=</span> <span class="ident">to_prop</span>(<span class="ident">arg</span>);
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="ident">prop</span>) <span class="op">=</span> <span class="ident">prop</span> {
-            <span class="kw">let</span> <span class="ident">values</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">heads</span>) <span class="op">=</span> <span class="ident">get_heads</span>(<span class="ident">heads</span>) {
-                <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_all_at</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">prop</span>, <span class="kw-2">&amp;</span><span class="ident">heads</span>)
-            } <span class="kw">else</span> {
-                <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_all</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">prop</span>)
+        obj: JsValue,
+        arg: JsValue,
+        heads: <span class="prelude-ty">Option</span>&lt;Array&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Array, JsValue&gt; {
+        <span class="kw">let </span>obj = <span class="self">self</span>.import(obj)<span class="question-mark">?</span>;
+        <span class="kw">let </span>result = Array::new();
+        <span class="kw">let </span>prop = to_prop(arg);
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>(prop) = prop {
+            <span class="kw">let </span>values = <span class="kw">if let </span><span class="prelude-val">Some</span>(heads) = get_heads(heads) {
+                <span class="self">self</span>.doc.get_all_at(<span class="kw-2">&amp;</span>obj, prop, <span class="kw-2">&amp;</span>heads)
+            } <span class="kw">else </span>{
+                <span class="self">self</span>.doc.get_all(<span class="kw-2">&amp;</span>obj, prop)
             }
-            .<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
-            <span class="kw">for</span> (<span class="ident">value</span>, <span class="ident">id</span>) <span class="kw">in</span> <span class="ident">values</span> {
-                <span class="kw">let</span> <span class="ident">sub</span> <span class="op">=</span> <span class="ident">Array::new</span>();
-                <span class="kw">let</span> (<span class="ident">datatype</span>, <span class="ident">js_value</span>) <span class="op">=</span> <span class="ident">alloc</span>(<span class="kw-2">&amp;</span><span class="ident">value</span>);
-                <span class="ident">sub</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">datatype</span>.<span class="ident">into</span>());
-                <span class="kw">if</span> <span class="ident">value</span>.<span class="ident">is_scalar</span>() {
-                    <span class="ident">sub</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">js_value</span>);
+            .map_err(to_js_err)<span class="question-mark">?</span>;
+            <span class="kw">for </span>(value, id) <span class="kw">in </span>values {
+                <span class="kw">let </span>sub = Array::new();
+                <span class="kw">let </span>(datatype, js_value) = alloc(<span class="kw-2">&amp;</span>value);
+                sub.push(<span class="kw-2">&amp;</span>datatype.into());
+                <span class="kw">if </span>value.is_scalar() {
+                    sub.push(<span class="kw-2">&amp;</span>js_value);
                 }
-                <span class="ident">sub</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">id</span>.<span class="ident">to_string</span>().<span class="ident">into</span>());
-                <span class="ident">result</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">JsValue::from</span>(<span class="kw-2">&amp;</span><span class="ident">sub</span>));
+                sub.push(<span class="kw-2">&amp;</span>id.to_string().into());
+                result.push(<span class="kw-2">&amp;</span>JsValue::from(<span class="kw-2">&amp;</span>sub));
             }
         }
-        <span class="prelude-val">Ok</span>(<span class="ident">result</span>)
+        <span class="prelude-val">Ok</span>(result)
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">enableFreeze</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">enable_freeze</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">enable</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">enable</span> <span class="op">=</span> <span class="ident">enable</span>
-            .<span class="ident">as_bool</span>()
-            .<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">to_js_err</span>(<span class="string">&quot;must pass a bool to enableFreeze&quot;</span>))<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">old_freeze</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">freeze</span>;
-        <span class="self">self</span>.<span class="ident">freeze</span> <span class="op">=</span> <span class="ident">enable</span>;
-        <span class="prelude-val">Ok</span>(<span class="ident">old_freeze</span>.<span class="ident">into</span>())
+    <span class="attribute">#[wasm_bindgen(js_name = enableFreeze)]
+    </span><span class="kw">pub fn </span>enable_freeze(<span class="kw-2">&amp;mut </span><span class="self">self</span>, enable: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, JsValue&gt; {
+        <span class="kw">let </span>enable = enable
+            .as_bool()
+            .ok_or_else(|| to_js_err(<span class="string">&quot;must pass a bool to enableFreeze&quot;</span>))<span class="question-mark">?</span>;
+        <span class="kw">let </span>old_freeze = <span class="self">self</span>.freeze;
+        <span class="self">self</span>.freeze = enable;
+        <span class="prelude-val">Ok</span>(old_freeze.into())
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">enablePatches</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">enable_patches</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">enable</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">enable</span> <span class="op">=</span> <span class="ident">enable</span>
-            .<span class="ident">as_bool</span>()
-            .<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">to_js_err</span>(<span class="string">&quot;must pass a bool to enablePatches&quot;</span>))<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">old_enabled</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">observer</span>().<span class="ident">enable</span>(<span class="ident">enable</span>);
-        <span class="prelude-val">Ok</span>(<span class="ident">old_enabled</span>.<span class="ident">into</span>())
+    <span class="attribute">#[wasm_bindgen(js_name = enablePatches)]
+    </span><span class="kw">pub fn </span>enable_patches(<span class="kw-2">&amp;mut </span><span class="self">self</span>, enable: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, JsValue&gt; {
+        <span class="kw">let </span>enable = enable
+            .as_bool()
+            .ok_or_else(|| to_js_err(<span class="string">&quot;must pass a bool to enablePatches&quot;</span>))<span class="question-mark">?</span>;
+        <span class="kw">let </span>old_enabled = <span class="self">self</span>.doc.observer().enable(enable);
+        <span class="prelude-val">Ok</span>(old_enabled.into())
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">registerDatatype</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">register_datatype</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">datatype</span>: <span class="ident">JsValue</span>,
-        <span class="ident">function</span>: <span class="ident">JsValue</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">datatype</span> <span class="op">=</span> <span class="ident">Datatype::try_from</span>(<span class="ident">datatype</span>)<span class="question-mark">?</span>;
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="ident">function</span>) <span class="op">=</span> <span class="ident">function</span>.<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">Function</span><span class="op">&gt;</span>() {
-            <span class="self">self</span>.<span class="ident">external_types</span>.<span class="ident">insert</span>(<span class="ident">datatype</span>, <span class="ident">function</span>);
-        } <span class="kw">else</span> {
-            <span class="self">self</span>.<span class="ident">external_types</span>.<span class="ident">remove</span>(<span class="kw-2">&amp;</span><span class="ident">datatype</span>);
+    <span class="attribute">#[wasm_bindgen(js_name = registerDatatype)]
+    </span><span class="kw">pub fn </span>register_datatype(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        datatype: JsValue,
+        function: JsValue,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), JsValue&gt; {
+        <span class="kw">let </span>datatype = Datatype::try_from(datatype)<span class="question-mark">?</span>;
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>(function) = function.dyn_into::&lt;Function&gt;() {
+            <span class="self">self</span>.external_types.insert(datatype, function);
+        } <span class="kw">else </span>{
+            <span class="self">self</span>.external_types.remove(<span class="kw-2">&amp;</span>datatype);
         }
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">applyPatches</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">apply_patches</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">object</span>: <span class="ident">JsValue</span>,
-        <span class="ident">meta</span>: <span class="ident">JsValue</span>,
-        <span class="ident">callback</span>: <span class="ident">JsValue</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">object</span> <span class="op">=</span> <span class="ident">object</span>.<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">Object</span><span class="op">&gt;</span>()<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">patches</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">observer</span>().<span class="ident">take_patches</span>();
-        <span class="kw">let</span> <span class="ident">callback</span> <span class="op">=</span> <span class="ident">callback</span>.<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">Function</span><span class="op">&gt;</span>().<span class="ident">ok</span>();
+    <span class="attribute">#[wasm_bindgen(js_name = applyPatches)]
+    </span><span class="kw">pub fn </span>apply_patches(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        object: JsValue,
+        meta: JsValue,
+        callback: JsValue,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, JsValue&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>object = object.dyn_into::&lt;Object&gt;()<span class="question-mark">?</span>;
+        <span class="kw">let </span>patches = <span class="self">self</span>.doc.observer().take_patches();
+        <span class="kw">let </span>callback = callback.dyn_into::&lt;Function&gt;().ok();
 
-        <span class="comment">// even if there are no patches we may need to update the meta object</span>
-        <span class="comment">// which requires that we update the object too</span>
-        <span class="kw">if</span> <span class="ident">patches</span>.<span class="ident">is_empty</span>() <span class="op">&amp;&amp;</span> <span class="op">!</span><span class="ident">meta</span>.<span class="ident">is_undefined</span>() {
-            <span class="kw">let</span> (<span class="ident">obj</span>, <span class="ident">datatype</span>, <span class="ident">id</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">unwrap_object</span>(<span class="kw-2">&amp;</span><span class="ident">object</span>)<span class="question-mark">?</span>;
-            <span class="ident">object</span> <span class="op">=</span> <span class="ident">Object::assign</span>(<span class="kw-2">&amp;</span><span class="ident">Object::new</span>(), <span class="kw-2">&amp;</span><span class="ident">obj</span>);
-            <span class="ident">object</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">wrap_object</span>(<span class="ident">object</span>, <span class="ident">datatype</span>, <span class="kw-2">&amp;</span><span class="ident">id</span>, <span class="kw-2">&amp;</span><span class="ident">meta</span>)<span class="question-mark">?</span>;
+        <span class="comment">// even if there are no patches we may need to update the meta object
+        // which requires that we update the object too
+        </span><span class="kw">if </span>patches.is_empty() &amp;&amp; !meta.is_undefined() {
+            <span class="kw">let </span>(obj, datatype, id) = <span class="self">self</span>.unwrap_object(<span class="kw-2">&amp;</span>object)<span class="question-mark">?</span>;
+            object = Object::assign(<span class="kw-2">&amp;</span>Object::new(), <span class="kw-2">&amp;</span>obj);
+            object = <span class="self">self</span>.wrap_object(object, datatype, <span class="kw-2">&amp;</span>id, <span class="kw-2">&amp;</span>meta)<span class="question-mark">?</span>;
         }
 
-        <span class="kw">for</span> <span class="ident">p</span> <span class="kw">in</span> <span class="ident">patches</span> {
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">c</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">callback</span> {
-                <span class="kw">let</span> <span class="ident">before</span> <span class="op">=</span> <span class="ident">object</span>.<span class="ident">clone</span>();
-                <span class="ident">object</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">apply_patch</span>(<span class="ident">object</span>, <span class="kw-2">&amp;</span><span class="ident">p</span>, <span class="number">0</span>, <span class="kw-2">&amp;</span><span class="ident">meta</span>)<span class="question-mark">?</span>;
-                <span class="ident">c</span>.<span class="ident">call3</span>(<span class="kw-2">&amp;</span><span class="ident">JsValue::undefined</span>(), <span class="kw-2">&amp;</span><span class="ident">p</span>.<span class="ident">try_into</span>()<span class="question-mark">?</span>, <span class="kw-2">&amp;</span><span class="ident">before</span>, <span class="kw-2">&amp;</span><span class="ident">object</span>)<span class="question-mark">?</span>;
-            } <span class="kw">else</span> {
-                <span class="ident">object</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">apply_patch</span>(<span class="ident">object</span>, <span class="kw-2">&amp;</span><span class="ident">p</span>, <span class="number">0</span>, <span class="kw-2">&amp;</span><span class="ident">meta</span>)<span class="question-mark">?</span>;
+        <span class="kw">for </span>p <span class="kw">in </span>patches {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(c) = <span class="kw-2">&amp;</span>callback {
+                <span class="kw">let </span>before = object.clone();
+                object = <span class="self">self</span>.apply_patch(object, <span class="kw-2">&amp;</span>p, <span class="number">0</span>, <span class="kw-2">&amp;</span>meta)<span class="question-mark">?</span>;
+                c.call3(<span class="kw-2">&amp;</span>JsValue::undefined(), <span class="kw-2">&amp;</span>p.try_into()<span class="question-mark">?</span>, <span class="kw-2">&amp;</span>before, <span class="kw-2">&amp;</span>object)<span class="question-mark">?</span>;
+            } <span class="kw">else </span>{
+                object = <span class="self">self</span>.apply_patch(object, <span class="kw-2">&amp;</span>p, <span class="number">0</span>, <span class="kw-2">&amp;</span>meta)<span class="question-mark">?</span>;
             }
         }
 
-        <span class="prelude-val">Ok</span>(<span class="ident">object</span>.<span class="ident">into</span>())
+        <span class="prelude-val">Ok</span>(object.into())
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">popPatches</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">pop_patches</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Array</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="comment">// transactions send out observer updates as they occur, not waiting for them to be</span>
-        <span class="comment">// committed.</span>
-        <span class="comment">// If we pop the patches then we won&#39;t be able to revert them.</span>
+    <span class="attribute">#[wasm_bindgen(js_name = popPatches)]
+    </span><span class="kw">pub fn </span>pop_patches(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Array, JsValue&gt; {
+        <span class="comment">// transactions send out observer updates as they occur, not waiting for them to be
+        // committed.
+        // If we pop the patches then we won&#39;t be able to revert them.
 
-        <span class="kw">let</span> <span class="ident">patches</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">observer</span>().<span class="ident">take_patches</span>();
-        <span class="kw">let</span> <span class="ident">result</span> <span class="op">=</span> <span class="ident">Array::new</span>();
-        <span class="kw">for</span> <span class="ident">p</span> <span class="kw">in</span> <span class="ident">patches</span> {
-            <span class="ident">result</span>.<span class="ident">push</span>(<span class="kw-2">&amp;</span><span class="ident">p</span>.<span class="ident">try_into</span>()<span class="question-mark">?</span>);
+        </span><span class="kw">let </span>patches = <span class="self">self</span>.doc.observer().take_patches();
+        <span class="kw">let </span>result = Array::new();
+        <span class="kw">for </span>p <span class="kw">in </span>patches {
+            result.push(<span class="kw-2">&amp;</span>p.try_into()<span class="question-mark">?</span>);
         }
-        <span class="prelude-val">Ok</span>(<span class="ident">result</span>)
+        <span class="prelude-val">Ok</span>(result)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">length</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">JsValue</span>, <span class="ident">heads</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Array</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">f64</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">import</span>(<span class="ident">obj</span>)<span class="question-mark">?</span>;
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">heads</span>) <span class="op">=</span> <span class="ident">get_heads</span>(<span class="ident">heads</span>) {
-            <span class="prelude-val">Ok</span>(<span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">length_at</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="kw-2">&amp;</span><span class="ident">heads</span>) <span class="kw">as</span> <span class="ident">f64</span>)
-        } <span class="kw">else</span> {
-            <span class="prelude-val">Ok</span>(<span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">length</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>) <span class="kw">as</span> <span class="ident">f64</span>)
+    <span class="kw">pub fn </span>length(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: JsValue, heads: <span class="prelude-ty">Option</span>&lt;Array&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;f64, JsValue&gt; {
+        <span class="kw">let </span>obj = <span class="self">self</span>.import(obj)<span class="question-mark">?</span>;
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(heads) = get_heads(heads) {
+            <span class="prelude-val">Ok</span>(<span class="self">self</span>.doc.length_at(<span class="kw-2">&amp;</span>obj, <span class="kw-2">&amp;</span>heads) <span class="kw">as </span>f64)
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(<span class="self">self</span>.doc.length(<span class="kw-2">&amp;</span>obj) <span class="kw">as </span>f64)
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">delete</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">obj</span>: <span class="ident">JsValue</span>, <span class="ident">prop</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">import</span>(<span class="ident">obj</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">prop</span> <span class="op">=</span> <span class="ident">to_prop</span>(<span class="ident">prop</span>)<span class="question-mark">?</span>;
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">delete</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">prop</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
+    <span class="kw">pub fn </span>delete(<span class="kw-2">&amp;mut </span><span class="self">self</span>, obj: JsValue, prop: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;(), JsValue&gt; {
+        <span class="kw">let </span>obj = <span class="self">self</span>.import(obj)<span class="question-mark">?</span>;
+        <span class="kw">let </span>prop = to_prop(prop)<span class="question-mark">?</span>;
+        <span class="self">self</span>.doc.delete(<span class="kw-2">&amp;</span>obj, prop).map_err(to_js_err)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">save</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">Uint8Array</span> {
-        <span class="ident">Uint8Array::from</span>(<span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">save</span>().<span class="ident">as_slice</span>())
+    <span class="kw">pub fn </span>save(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Uint8Array {
+        Uint8Array::from(<span class="self">self</span>.doc.save().as_slice())
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">saveIncremental</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">save_incremental</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">Uint8Array</span> {
-        <span class="kw">let</span> <span class="ident">bytes</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">save_incremental</span>();
-        <span class="ident">Uint8Array::from</span>(<span class="ident">bytes</span>.<span class="ident">as_slice</span>())
+    <span class="attribute">#[wasm_bindgen(js_name = saveIncremental)]
+    </span><span class="kw">pub fn </span>save_incremental(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Uint8Array {
+        <span class="kw">let </span>bytes = <span class="self">self</span>.doc.save_incremental();
+        Uint8Array::from(bytes.as_slice())
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">loadIncremental</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">load_incremental</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">data</span>: <span class="ident">Uint8Array</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">f64</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">data</span> <span class="op">=</span> <span class="ident">data</span>.<span class="ident">to_vec</span>();
-        <span class="kw">let</span> <span class="ident">len</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">load_incremental</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(<span class="ident">len</span> <span class="kw">as</span> <span class="ident">f64</span>)
+    <span class="attribute">#[wasm_bindgen(js_name = loadIncremental)]
+    </span><span class="kw">pub fn </span>load_incremental(<span class="kw-2">&amp;mut </span><span class="self">self</span>, data: Uint8Array) -&gt; <span class="prelude-ty">Result</span>&lt;f64, JsValue&gt; {
+        <span class="kw">let </span>data = data.to_vec();
+        <span class="kw">let </span>len = <span class="self">self</span>.doc.load_incremental(<span class="kw-2">&amp;</span>data).map_err(to_js_err)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(len <span class="kw">as </span>f64)
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">applyChanges</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">apply_changes</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">changes</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">changes</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">JS</span>(<span class="ident">changes</span>).<span class="ident">try_into</span>()<span class="question-mark">?</span>;
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">apply_changes</span>(<span class="ident">changes</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
+    <span class="attribute">#[wasm_bindgen(js_name = applyChanges)]
+    </span><span class="kw">pub fn </span>apply_changes(<span class="kw-2">&amp;mut </span><span class="self">self</span>, changes: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;(), JsValue&gt; {
+        <span class="kw">let </span>changes: Vec&lt;<span class="kw">_</span>&gt; = JS(changes).try_into()<span class="question-mark">?</span>;
+        <span class="self">self</span>.doc.apply_changes(changes).map_err(to_js_err)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">getChanges</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_changes</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">have_deps</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Array</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">deps</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="kw">_</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">JS</span>(<span class="ident">have_deps</span>).<span class="ident">try_into</span>()<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">changes</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_changes</span>(<span class="kw-2">&amp;</span><span class="ident">deps</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">changes</span>: <span class="ident">Array</span> <span class="op">=</span> <span class="ident">changes</span>
-            .<span class="ident">iter</span>()
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">c</span><span class="op">|</span> <span class="ident">Uint8Array::from</span>(<span class="ident">c</span>.<span class="ident">raw_bytes</span>()))
-            .<span class="ident">collect</span>();
-        <span class="prelude-val">Ok</span>(<span class="ident">changes</span>)
+    <span class="attribute">#[wasm_bindgen(js_name = getChanges)]
+    </span><span class="kw">pub fn </span>get_changes(<span class="kw-2">&amp;mut </span><span class="self">self</span>, have_deps: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;Array, JsValue&gt; {
+        <span class="kw">let </span>deps: Vec&lt;<span class="kw">_</span>&gt; = JS(have_deps).try_into()<span class="question-mark">?</span>;
+        <span class="kw">let </span>changes = <span class="self">self</span>.doc.get_changes(<span class="kw-2">&amp;</span>deps)<span class="question-mark">?</span>;
+        <span class="kw">let </span>changes: Array = changes
+            .iter()
+            .map(|c| Uint8Array::from(c.raw_bytes()))
+            .collect();
+        <span class="prelude-val">Ok</span>(changes)
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">getChangeByHash</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_change_by_hash</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">hash</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">hash</span> <span class="op">=</span> <span class="ident">serde_wasm_bindgen::from_value</span>(<span class="ident">hash</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">change</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_change_by_hash</span>(<span class="kw-2">&amp;</span><span class="ident">hash</span>);
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">c</span>) <span class="op">=</span> <span class="ident">change</span> {
-            <span class="prelude-val">Ok</span>(<span class="ident">Uint8Array::from</span>(<span class="ident">c</span>.<span class="ident">raw_bytes</span>()).<span class="ident">into</span>())
-        } <span class="kw">else</span> {
-            <span class="prelude-val">Ok</span>(<span class="ident">JsValue::null</span>())
+    <span class="attribute">#[wasm_bindgen(js_name = getChangeByHash)]
+    </span><span class="kw">pub fn </span>get_change_by_hash(<span class="kw-2">&amp;mut </span><span class="self">self</span>, hash: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, JsValue&gt; {
+        <span class="kw">let </span>hash = serde_wasm_bindgen::from_value(hash).map_err(to_js_err)<span class="question-mark">?</span>;
+        <span class="kw">let </span>change = <span class="self">self</span>.doc.get_change_by_hash(<span class="kw-2">&amp;</span>hash);
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(c) = change {
+            <span class="prelude-val">Ok</span>(Uint8Array::from(c.raw_bytes()).into())
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(JsValue::null())
         }
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">getChangesAdded</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_changes_added</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">other</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Automerge</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Array</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">changes</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_changes_added</span>(<span class="kw-2">&amp;mut</span> <span class="ident">other</span>.<span class="ident">doc</span>);
-        <span class="kw">let</span> <span class="ident">changes</span>: <span class="ident">Array</span> <span class="op">=</span> <span class="ident">changes</span>
-            .<span class="ident">iter</span>()
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">c</span><span class="op">|</span> <span class="ident">Uint8Array::from</span>(<span class="ident">c</span>.<span class="ident">raw_bytes</span>()))
-            .<span class="ident">collect</span>();
-        <span class="prelude-val">Ok</span>(<span class="ident">changes</span>)
+    <span class="attribute">#[wasm_bindgen(js_name = getChangesAdded)]
+    </span><span class="kw">pub fn </span>get_changes_added(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;mut </span>Automerge) -&gt; <span class="prelude-ty">Result</span>&lt;Array, JsValue&gt; {
+        <span class="kw">let </span>changes = <span class="self">self</span>.doc.get_changes_added(<span class="kw-2">&amp;mut </span>other.doc);
+        <span class="kw">let </span>changes: Array = changes
+            .iter()
+            .map(|c| Uint8Array::from(c.raw_bytes()))
+            .collect();
+        <span class="prelude-val">Ok</span>(changes)
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">getHeads</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_heads</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">Array</span> {
-        <span class="kw">let</span> <span class="ident">heads</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_heads</span>();
-        <span class="kw">let</span> <span class="ident">heads</span>: <span class="ident">Array</span> <span class="op">=</span> <span class="ident">heads</span>
-            .<span class="ident">iter</span>()
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">h</span><span class="op">|</span> <span class="ident">JsValue::from_str</span>(<span class="kw-2">&amp;</span><span class="ident">hex::encode</span>(<span class="kw-2">&amp;</span><span class="ident">h</span>.<span class="number">0</span>)))
-            .<span class="ident">collect</span>();
-        <span class="ident">heads</span>
+    <span class="attribute">#[wasm_bindgen(js_name = getHeads)]
+    </span><span class="kw">pub fn </span>get_heads(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Array {
+        <span class="kw">let </span>heads = <span class="self">self</span>.doc.get_heads();
+        <span class="kw">let </span>heads: Array = heads
+            .iter()
+            .map(|h| JsValue::from_str(<span class="kw-2">&amp;</span>hex::encode(<span class="kw-2">&amp;</span>h.<span class="number">0</span>)))
+            .collect();
+        heads
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">getActorId</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_actor_id</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">String</span> {
-        <span class="kw">let</span> <span class="ident">actor</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_actor</span>();
-        <span class="ident">actor</span>.<span class="ident">to_string</span>()
+    <span class="attribute">#[wasm_bindgen(js_name = getActorId)]
+    </span><span class="kw">pub fn </span>get_actor_id(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; String {
+        <span class="kw">let </span>actor = <span class="self">self</span>.doc.get_actor();
+        actor.to_string()
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">getLastLocalChange</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_last_local_change</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">change</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_last_local_change</span>() {
-            <span class="prelude-val">Ok</span>(<span class="ident">Uint8Array::from</span>(<span class="ident">change</span>.<span class="ident">raw_bytes</span>()).<span class="ident">into</span>())
-        } <span class="kw">else</span> {
-            <span class="prelude-val">Ok</span>(<span class="ident">JsValue::null</span>())
+    <span class="attribute">#[wasm_bindgen(js_name = getLastLocalChange)]
+    </span><span class="kw">pub fn </span>get_last_local_change(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, JsValue&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(change) = <span class="self">self</span>.doc.get_last_local_change() {
+            <span class="prelude-val">Ok</span>(Uint8Array::from(change.raw_bytes()).into())
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(JsValue::null())
         }
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">dump</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) {
-        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">dump</span>()
+    <span class="kw">pub fn </span>dump(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <span class="self">self</span>.doc.dump()
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">getMissingDeps</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">get_missing_deps</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">heads</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Array</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Array</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">heads</span> <span class="op">=</span> <span class="ident">get_heads</span>(<span class="ident">heads</span>).<span class="ident">unwrap_or_default</span>();
-        <span class="kw">let</span> <span class="ident">deps</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get_missing_deps</span>(<span class="kw-2">&amp;</span><span class="ident">heads</span>);
-        <span class="kw">let</span> <span class="ident">deps</span>: <span class="ident">Array</span> <span class="op">=</span> <span class="ident">deps</span>
-            .<span class="ident">iter</span>()
-            .<span class="ident">map</span>(<span class="op">|</span><span class="ident">h</span><span class="op">|</span> <span class="ident">JsValue::from_str</span>(<span class="kw-2">&amp;</span><span class="ident">hex::encode</span>(<span class="kw-2">&amp;</span><span class="ident">h</span>.<span class="number">0</span>)))
-            .<span class="ident">collect</span>();
-        <span class="prelude-val">Ok</span>(<span class="ident">deps</span>)
+    <span class="attribute">#[wasm_bindgen(js_name = getMissingDeps)]
+    </span><span class="kw">pub fn </span>get_missing_deps(<span class="kw-2">&amp;mut </span><span class="self">self</span>, heads: <span class="prelude-ty">Option</span>&lt;Array&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;Array, JsValue&gt; {
+        <span class="kw">let </span>heads = get_heads(heads).unwrap_or_default();
+        <span class="kw">let </span>deps = <span class="self">self</span>.doc.get_missing_deps(<span class="kw-2">&amp;</span>heads);
+        <span class="kw">let </span>deps: Array = deps
+            .iter()
+            .map(|h| JsValue::from_str(<span class="kw-2">&amp;</span>hex::encode(<span class="kw-2">&amp;</span>h.<span class="number">0</span>)))
+            .collect();
+        <span class="prelude-val">Ok</span>(deps)
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">receiveSyncMessage</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">receive_sync_message</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">state</span>: <span class="kw-2">&amp;mut</span> <span class="ident">SyncState</span>,
-        <span class="ident">message</span>: <span class="ident">Uint8Array</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">message</span> <span class="op">=</span> <span class="ident">message</span>.<span class="ident">to_vec</span>();
-        <span class="kw">let</span> <span class="ident">message</span> <span class="op">=</span> <span class="ident">am::sync::Message::decode</span>(<span class="ident">message</span>.<span class="ident">as_slice</span>()).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
-        <span class="self">self</span>.<span class="ident">doc</span>
-            .<span class="ident">receive_sync_message</span>(<span class="kw-2">&amp;mut</span> <span class="ident">state</span>.<span class="number">0</span>, <span class="ident">message</span>)
-            .<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
+    <span class="attribute">#[wasm_bindgen(js_name = receiveSyncMessage)]
+    </span><span class="kw">pub fn </span>receive_sync_message(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        state: <span class="kw-2">&amp;mut </span>SyncState,
+        message: Uint8Array,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), JsValue&gt; {
+        <span class="kw">let </span>message = message.to_vec();
+        <span class="kw">let </span>message = am::sync::Message::decode(message.as_slice()).map_err(to_js_err)<span class="question-mark">?</span>;
+        <span class="self">self</span>.doc
+            .receive_sync_message(<span class="kw-2">&amp;mut </span>state.<span class="number">0</span>, message)
+            .map_err(to_js_err)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">generateSyncMessage</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">generate_sync_message</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">state</span>: <span class="kw-2">&amp;mut</span> <span class="ident">SyncState</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">message</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">generate_sync_message</span>(<span class="kw-2">&amp;mut</span> <span class="ident">state</span>.<span class="number">0</span>) {
-            <span class="prelude-val">Ok</span>(<span class="ident">Uint8Array::from</span>(<span class="ident">message</span>.<span class="ident">encode</span>().<span class="ident">as_slice</span>()).<span class="ident">into</span>())
-        } <span class="kw">else</span> {
-            <span class="prelude-val">Ok</span>(<span class="ident">JsValue::null</span>())
+    <span class="attribute">#[wasm_bindgen(js_name = generateSyncMessage)]
+    </span><span class="kw">pub fn </span>generate_sync_message(<span class="kw-2">&amp;mut </span><span class="self">self</span>, state: <span class="kw-2">&amp;mut </span>SyncState) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, JsValue&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(message) = <span class="self">self</span>.doc.generate_sync_message(<span class="kw-2">&amp;mut </span>state.<span class="number">0</span>) {
+            <span class="prelude-val">Ok</span>(Uint8Array::from(message.encode().as_slice()).into())
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Ok</span>(JsValue::null())
         }
     }
 
-    <span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">toJS</span>)]</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">to_js</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">meta</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">export_object</span>(<span class="kw-2">&amp;</span><span class="ident">ROOT</span>, <span class="ident">Datatype::Map</span>, <span class="prelude-val">None</span>, <span class="kw-2">&amp;</span><span class="ident">meta</span>)
+    <span class="attribute">#[wasm_bindgen(js_name = toJS)]
+    </span><span class="kw">pub fn </span>to_js(<span class="kw-2">&amp;mut </span><span class="self">self</span>, meta: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, JsValue&gt; {
+        <span class="self">self</span>.export_object(<span class="kw-2">&amp;</span>ROOT, Datatype::Map, <span class="prelude-val">None</span>, <span class="kw-2">&amp;</span>meta)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">materialize</span>(
-        <span class="kw-2">&amp;mut</span> <span class="self">self</span>,
-        <span class="ident">obj</span>: <span class="ident">JsValue</span>,
-        <span class="ident">heads</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Array</span><span class="op">&gt;</span>,
-        <span class="ident">meta</span>: <span class="ident">JsValue</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">import</span>(<span class="ident">obj</span>).<span class="ident">unwrap_or</span>(<span class="ident">ROOT</span>);
-        <span class="kw">let</span> <span class="ident">heads</span> <span class="op">=</span> <span class="ident">get_heads</span>(<span class="ident">heads</span>);
-        <span class="kw">let</span> <span class="ident">obj_type</span> <span class="op">=</span> <span class="self">self</span>
-            .<span class="ident">doc</span>
-            .<span class="ident">object_type</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>)
-            .<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">to_js_err</span>(<span class="macro">format!</span>(<span class="string">&quot;invalid obj {}&quot;</span>, <span class="ident">obj</span>)))<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">_patches</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">observer</span>().<span class="ident">take_patches</span>(); <span class="comment">// throw away patches</span>
-        <span class="self">self</span>.<span class="ident">export_object</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="ident">obj_type</span>.<span class="ident">into</span>(), <span class="ident">heads</span>.<span class="ident">as_ref</span>(), <span class="kw-2">&amp;</span><span class="ident">meta</span>)
+    <span class="kw">pub fn </span>materialize(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: JsValue,
+        heads: <span class="prelude-ty">Option</span>&lt;Array&gt;,
+        meta: JsValue,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, JsValue&gt; {
+        <span class="kw">let </span>obj = <span class="self">self</span>.import(obj).unwrap_or(ROOT);
+        <span class="kw">let </span>heads = get_heads(heads);
+        <span class="kw">let </span>obj_type = <span class="self">self
+            </span>.doc
+            .object_type(<span class="kw-2">&amp;</span>obj)
+            .ok_or_else(|| to_js_err(<span class="macro">format!</span>(<span class="string">&quot;invalid obj {}&quot;</span>, obj)))<span class="question-mark">?</span>;
+        <span class="kw">let </span>_patches = <span class="self">self</span>.doc.observer().take_patches(); <span class="comment">// throw away patches
+        </span><span class="self">self</span>.export_object(<span class="kw-2">&amp;</span>obj, obj_type.into(), heads.as_ref(), <span class="kw-2">&amp;</span>meta)
     }
 
-    <span class="kw">fn</span> <span class="ident">import</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">id</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">ObjId</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="ident">id</span>.<span class="ident">as_string</span>() {
-            <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">post</span>) <span class="op">=</span> <span class="ident">s</span>.<span class="ident">strip_prefix</span>(<span class="string">&#39;/&#39;</span>) {
-                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">obj</span> <span class="op">=</span> <span class="ident">ROOT</span>;
-                <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">is_map</span> <span class="op">=</span> <span class="bool-val">true</span>;
-                <span class="kw">let</span> <span class="ident">parts</span> <span class="op">=</span> <span class="ident">post</span>.<span class="ident">split</span>(<span class="string">&#39;/&#39;</span>);
-                <span class="kw">for</span> <span class="ident">prop</span> <span class="kw">in</span> <span class="ident">parts</span> {
-                    <span class="kw">if</span> <span class="ident">prop</span>.<span class="ident">is_empty</span>() {
+    <span class="kw">fn </span>import(<span class="kw-2">&amp;</span><span class="self">self</span>, id: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;ObjId, JsValue&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = id.as_string() {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(post) = s.strip_prefix(<span class="string">&#39;/&#39;</span>) {
+                <span class="kw">let </span><span class="kw-2">mut </span>obj = ROOT;
+                <span class="kw">let </span><span class="kw-2">mut </span>is_map = <span class="bool-val">true</span>;
+                <span class="kw">let </span>parts = post.split(<span class="string">&#39;/&#39;</span>);
+                <span class="kw">for </span>prop <span class="kw">in </span>parts {
+                    <span class="kw">if </span>prop.is_empty() {
                         <span class="kw">break</span>;
                     }
-                    <span class="kw">let</span> <span class="ident">val</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">is_map</span> {
-                        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get</span>(<span class="ident">obj</span>, <span class="ident">prop</span>)<span class="question-mark">?</span>
-                    } <span class="kw">else</span> {
-                        <span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">get</span>(<span class="ident">obj</span>, <span class="ident">am::Prop::Seq</span>(<span class="ident">prop</span>.<span class="ident">parse</span>().<span class="ident">unwrap</span>()))<span class="question-mark">?</span>
-                    };
-                    <span class="kw">match</span> <span class="ident">val</span> {
-                        <span class="prelude-val">Some</span>((<span class="ident">am::Value::Object</span>(<span class="ident">ObjType::Map</span>), <span class="ident">id</span>)) =&gt; {
-                            <span class="ident">is_map</span> <span class="op">=</span> <span class="bool-val">true</span>;
-                            <span class="ident">obj</span> <span class="op">=</span> <span class="ident">id</span>;
+                    <span class="kw">let </span>val = <span class="kw">if </span>is_map {
+                        <span class="self">self</span>.doc.get(obj, prop)<span class="question-mark">?
+                    </span>} <span class="kw">else </span>{
+                        <span class="self">self</span>.doc.get(obj, am::Prop::Seq(prop.parse().unwrap()))<span class="question-mark">?
+                    </span>};
+                    <span class="kw">match </span>val {
+                        <span class="prelude-val">Some</span>((am::Value::Object(ObjType::Map), id)) =&gt; {
+                            is_map = <span class="bool-val">true</span>;
+                            obj = id;
                         }
-                        <span class="prelude-val">Some</span>((<span class="ident">am::Value::Object</span>(<span class="ident">ObjType::Table</span>), <span class="ident">id</span>)) =&gt; {
-                            <span class="ident">is_map</span> <span class="op">=</span> <span class="bool-val">true</span>;
-                            <span class="ident">obj</span> <span class="op">=</span> <span class="ident">id</span>;
+                        <span class="prelude-val">Some</span>((am::Value::Object(ObjType::Table), id)) =&gt; {
+                            is_map = <span class="bool-val">true</span>;
+                            obj = id;
                         }
-                        <span class="prelude-val">Some</span>((<span class="ident">am::Value::Object</span>(<span class="kw">_</span>), <span class="ident">id</span>)) =&gt; {
-                            <span class="ident">is_map</span> <span class="op">=</span> <span class="bool-val">false</span>;
-                            <span class="ident">obj</span> <span class="op">=</span> <span class="ident">id</span>;
+                        <span class="prelude-val">Some</span>((am::Value::Object(<span class="kw">_</span>), id)) =&gt; {
+                            is_map = <span class="bool-val">false</span>;
+                            obj = id;
                         }
-                        <span class="prelude-val">None</span> =&gt; <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">to_js_err</span>(<span class="macro">format!</span>(<span class="string">&quot;invalid path &#39;{}&#39;&quot;</span>, <span class="ident">s</span>))),
-                        <span class="kw">_</span> =&gt; <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">to_js_err</span>(<span class="macro">format!</span>(<span class="string">&quot;path &#39;{}&#39; is not an object&quot;</span>, <span class="ident">s</span>))),
+                        <span class="prelude-val">None </span>=&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(to_js_err(<span class="macro">format!</span>(<span class="string">&quot;invalid path &#39;{}&#39;&quot;</span>, s))),
+                        <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(to_js_err(<span class="macro">format!</span>(<span class="string">&quot;path &#39;{}&#39; is not an object&quot;</span>, s))),
                     };
                 }
-                <span class="prelude-val">Ok</span>(<span class="ident">obj</span>)
-            } <span class="kw">else</span> {
-                <span class="prelude-val">Ok</span>(<span class="self">self</span>.<span class="ident">doc</span>.<span class="ident">import</span>(<span class="kw-2">&amp;</span><span class="ident">s</span>)<span class="question-mark">?</span>)
+                <span class="prelude-val">Ok</span>(obj)
+            } <span class="kw">else </span>{
+                <span class="prelude-val">Ok</span>(<span class="self">self</span>.doc.import(<span class="kw-2">&amp;</span>s)<span class="question-mark">?</span>)
             }
-        } <span class="kw">else</span> {
-            <span class="prelude-val">Err</span>(<span class="ident">to_js_err</span>(<span class="string">&quot;invalid objid&quot;</span>))
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Err</span>(to_js_err(<span class="string">&quot;invalid objid&quot;</span>))
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">import_prop</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">prop</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Prop</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="ident">prop</span>.<span class="ident">as_string</span>() {
-            <span class="prelude-val">Ok</span>(<span class="ident">s</span>.<span class="ident">into</span>())
-        } <span class="kw">else</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">n</span>) <span class="op">=</span> <span class="ident">prop</span>.<span class="ident">as_f64</span>() {
-            <span class="prelude-val">Ok</span>((<span class="ident">n</span> <span class="kw">as</span> <span class="ident">usize</span>).<span class="ident">into</span>())
-        } <span class="kw">else</span> {
-            <span class="prelude-val">Err</span>(<span class="ident">to_js_err</span>(<span class="macro">format!</span>(<span class="string">&quot;invalid prop {:?}&quot;</span>, <span class="ident">prop</span>)))
+    <span class="kw">fn </span>import_prop(<span class="kw-2">&amp;</span><span class="self">self</span>, prop: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;Prop, JsValue&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = prop.as_string() {
+            <span class="prelude-val">Ok</span>(s.into())
+        } <span class="kw">else if let </span><span class="prelude-val">Some</span>(n) = prop.as_f64() {
+            <span class="prelude-val">Ok</span>((n <span class="kw">as </span>usize).into())
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Err</span>(to_js_err(<span class="macro">format!</span>(<span class="string">&quot;invalid prop {:?}&quot;</span>, prop)))
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">import_scalar</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">value</span>: <span class="kw-2">&amp;</span><span class="ident">JsValue</span>, <span class="ident">datatype</span>: <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">am::ScalarValue</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="ident">datatype</span>.<span class="ident">as_deref</span>() {
-            <span class="prelude-val">Some</span>(<span class="string">&quot;boolean&quot;</span>) =&gt; <span class="ident">value</span>.<span class="ident">as_bool</span>().<span class="ident">map</span>(<span class="ident">am::ScalarValue::Boolean</span>),
-            <span class="prelude-val">Some</span>(<span class="string">&quot;int&quot;</span>) =&gt; <span class="ident">value</span>.<span class="ident">as_f64</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">v</span><span class="op">|</span> <span class="ident">am::ScalarValue::Int</span>(<span class="ident">v</span> <span class="kw">as</span> <span class="ident">i64</span>)),
-            <span class="prelude-val">Some</span>(<span class="string">&quot;uint&quot;</span>) =&gt; <span class="ident">value</span>.<span class="ident">as_f64</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">v</span><span class="op">|</span> <span class="ident">am::ScalarValue::Uint</span>(<span class="ident">v</span> <span class="kw">as</span> <span class="ident">u64</span>)),
-            <span class="prelude-val">Some</span>(<span class="string">&quot;str&quot;</span>) =&gt; <span class="ident">value</span>.<span class="ident">as_string</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">v</span><span class="op">|</span> <span class="ident">am::ScalarValue::Str</span>(<span class="ident">v</span>.<span class="ident">into</span>())),
-            <span class="prelude-val">Some</span>(<span class="string">&quot;f64&quot;</span>) =&gt; <span class="ident">value</span>.<span class="ident">as_f64</span>().<span class="ident">map</span>(<span class="ident">am::ScalarValue::F64</span>),
-            <span class="prelude-val">Some</span>(<span class="string">&quot;bytes&quot;</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">am::ScalarValue::Bytes</span>(
-                <span class="ident">value</span>.<span class="ident">clone</span>().<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">Uint8Array</span><span class="op">&gt;</span>().<span class="ident">unwrap</span>().<span class="ident">to_vec</span>(),
+    <span class="kw">fn </span>import_scalar(<span class="kw-2">&amp;</span><span class="self">self</span>, value: <span class="kw-2">&amp;</span>JsValue, datatype: <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;String&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;am::ScalarValue&gt; {
+        <span class="kw">match </span>datatype.as_deref() {
+            <span class="prelude-val">Some</span>(<span class="string">&quot;boolean&quot;</span>) =&gt; value.as_bool().map(am::ScalarValue::Boolean),
+            <span class="prelude-val">Some</span>(<span class="string">&quot;int&quot;</span>) =&gt; value.as_f64().map(|v| am::ScalarValue::Int(v <span class="kw">as </span>i64)),
+            <span class="prelude-val">Some</span>(<span class="string">&quot;uint&quot;</span>) =&gt; value.as_f64().map(|v| am::ScalarValue::Uint(v <span class="kw">as </span>u64)),
+            <span class="prelude-val">Some</span>(<span class="string">&quot;str&quot;</span>) =&gt; value.as_string().map(|v| am::ScalarValue::Str(v.into())),
+            <span class="prelude-val">Some</span>(<span class="string">&quot;f64&quot;</span>) =&gt; value.as_f64().map(am::ScalarValue::F64),
+            <span class="prelude-val">Some</span>(<span class="string">&quot;bytes&quot;</span>) =&gt; <span class="prelude-val">Some</span>(am::ScalarValue::Bytes(
+                value.clone().dyn_into::&lt;Uint8Array&gt;().unwrap().to_vec(),
             )),
-            <span class="prelude-val">Some</span>(<span class="string">&quot;counter&quot;</span>) =&gt; <span class="ident">value</span>.<span class="ident">as_f64</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">v</span><span class="op">|</span> <span class="ident">am::ScalarValue::counter</span>(<span class="ident">v</span> <span class="kw">as</span> <span class="ident">i64</span>)),
+            <span class="prelude-val">Some</span>(<span class="string">&quot;counter&quot;</span>) =&gt; value.as_f64().map(|v| am::ScalarValue::counter(v <span class="kw">as </span>i64)),
             <span class="prelude-val">Some</span>(<span class="string">&quot;timestamp&quot;</span>) =&gt; {
-                <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">v</span>) <span class="op">=</span> <span class="ident">value</span>.<span class="ident">as_f64</span>() {
-                    <span class="prelude-val">Some</span>(<span class="ident">am::ScalarValue::Timestamp</span>(<span class="ident">v</span> <span class="kw">as</span> <span class="ident">i64</span>))
-                } <span class="kw">else</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="ident">d</span>) <span class="op">=</span> <span class="ident">value</span>.<span class="ident">clone</span>().<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">js_sys::Date</span><span class="op">&gt;</span>() {
-                    <span class="prelude-val">Some</span>(<span class="ident">am::ScalarValue::Timestamp</span>(<span class="ident">d</span>.<span class="ident">get_time</span>() <span class="kw">as</span> <span class="ident">i64</span>))
-                } <span class="kw">else</span> {
-                    <span class="prelude-val">None</span>
-                }
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(v) = value.as_f64() {
+                    <span class="prelude-val">Some</span>(am::ScalarValue::Timestamp(v <span class="kw">as </span>i64))
+                } <span class="kw">else if let </span><span class="prelude-val">Ok</span>(d) = value.clone().dyn_into::&lt;js_sys::Date&gt;() {
+                    <span class="prelude-val">Some</span>(am::ScalarValue::Timestamp(d.get_time() <span class="kw">as </span>i64))
+                } <span class="kw">else </span>{
+                    <span class="prelude-val">None
+                </span>}
             }
-            <span class="prelude-val">Some</span>(<span class="string">&quot;null&quot;</span>) =&gt; <span class="prelude-val">Some</span>(<span class="ident">am::ScalarValue::Null</span>),
+            <span class="prelude-val">Some</span>(<span class="string">&quot;null&quot;</span>) =&gt; <span class="prelude-val">Some</span>(am::ScalarValue::Null),
             <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
-            <span class="prelude-val">None</span> =&gt; {
-                <span class="kw">if</span> <span class="ident">value</span>.<span class="ident">is_null</span>() {
-                    <span class="prelude-val">Some</span>(<span class="ident">am::ScalarValue::Null</span>)
-                } <span class="kw">else</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">b</span>) <span class="op">=</span> <span class="ident">value</span>.<span class="ident">as_bool</span>() {
-                    <span class="prelude-val">Some</span>(<span class="ident">am::ScalarValue::Boolean</span>(<span class="ident">b</span>))
-                } <span class="kw">else</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="ident">value</span>.<span class="ident">as_string</span>() {
-                    <span class="prelude-val">Some</span>(<span class="ident">am::ScalarValue::Str</span>(<span class="ident">s</span>.<span class="ident">into</span>()))
-                } <span class="kw">else</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">n</span>) <span class="op">=</span> <span class="ident">value</span>.<span class="ident">as_f64</span>() {
-                    <span class="kw">if</span> (<span class="ident">n</span>.<span class="ident">round</span>() <span class="op">-</span> <span class="ident">n</span>).<span class="ident">abs</span>() <span class="op">&lt;</span> <span class="ident">f64::EPSILON</span> {
-                        <span class="prelude-val">Some</span>(<span class="ident">am::ScalarValue::Int</span>(<span class="ident">n</span> <span class="kw">as</span> <span class="ident">i64</span>))
-                    } <span class="kw">else</span> {
-                        <span class="prelude-val">Some</span>(<span class="ident">am::ScalarValue::F64</span>(<span class="ident">n</span>))
+            <span class="prelude-val">None </span>=&gt; {
+                <span class="kw">if </span>value.is_null() {
+                    <span class="prelude-val">Some</span>(am::ScalarValue::Null)
+                } <span class="kw">else if let </span><span class="prelude-val">Some</span>(b) = value.as_bool() {
+                    <span class="prelude-val">Some</span>(am::ScalarValue::Boolean(b))
+                } <span class="kw">else if let </span><span class="prelude-val">Some</span>(s) = value.as_string() {
+                    <span class="prelude-val">Some</span>(am::ScalarValue::Str(s.into()))
+                } <span class="kw">else if let </span><span class="prelude-val">Some</span>(n) = value.as_f64() {
+                    <span class="kw">if </span>(n.round() - n).abs() &lt; f64::EPSILON {
+                        <span class="prelude-val">Some</span>(am::ScalarValue::Int(n <span class="kw">as </span>i64))
+                    } <span class="kw">else </span>{
+                        <span class="prelude-val">Some</span>(am::ScalarValue::F64(n))
                     }
-                } <span class="kw">else</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="ident">d</span>) <span class="op">=</span> <span class="ident">value</span>.<span class="ident">clone</span>().<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">js_sys::Date</span><span class="op">&gt;</span>() {
-                    <span class="prelude-val">Some</span>(<span class="ident">am::ScalarValue::Timestamp</span>(<span class="ident">d</span>.<span class="ident">get_time</span>() <span class="kw">as</span> <span class="ident">i64</span>))
-                } <span class="kw">else</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Ok</span>(<span class="ident">o</span>) <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">value</span>.<span class="ident">clone</span>().<span class="ident">dyn_into</span>::<span class="op">&lt;</span><span class="ident">Uint8Array</span><span class="op">&gt;</span>() {
-                    <span class="prelude-val">Some</span>(<span class="ident">am::ScalarValue::Bytes</span>(<span class="ident">o</span>.<span class="ident">to_vec</span>()))
-                } <span class="kw">else</span> {
-                    <span class="prelude-val">None</span>
-                }
+                } <span class="kw">else if let </span><span class="prelude-val">Ok</span>(d) = value.clone().dyn_into::&lt;js_sys::Date&gt;() {
+                    <span class="prelude-val">Some</span>(am::ScalarValue::Timestamp(d.get_time() <span class="kw">as </span>i64))
+                } <span class="kw">else if let </span><span class="prelude-val">Ok</span>(o) = <span class="kw-2">&amp;</span>value.clone().dyn_into::&lt;Uint8Array&gt;() {
+                    <span class="prelude-val">Some</span>(am::ScalarValue::Bytes(o.to_vec()))
+                } <span class="kw">else </span>{
+                    <span class="prelude-val">None
+                </span>}
             }
         }
     }
 
-    <span class="kw">fn</span> <span class="ident">import_value</span>(
+    <span class="kw">fn </span>import_value(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        <span class="ident">value</span>: <span class="kw-2">&amp;</span><span class="ident">JsValue</span>,
-        <span class="ident">datatype</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>,
-    ) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span>(<span class="ident">Value</span><span class="op">&lt;</span><span class="lifetime">&#39;static</span><span class="op">&gt;</span>, <span class="ident">Vec</span><span class="op">&lt;</span>(<span class="ident">Prop</span>, <span class="ident">JsValue</span>)<span class="op">&gt;</span>), <span class="ident">JsValue</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span>.<span class="ident">import_scalar</span>(<span class="ident">value</span>, <span class="kw-2">&amp;</span><span class="ident">datatype</span>) {
-            <span class="prelude-val">Some</span>(<span class="ident">val</span>) =&gt; <span class="prelude-val">Ok</span>((<span class="ident">val</span>.<span class="ident">into</span>(), <span class="macro">vec!</span>[])),
-            <span class="prelude-val">None</span> =&gt; {
-                <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>((<span class="ident">o</span>, <span class="ident">subvals</span>)) <span class="op">=</span> <span class="ident">to_objtype</span>(<span class="ident">value</span>, <span class="kw-2">&amp;</span><span class="ident">datatype</span>) {
-                    <span class="prelude-val">Ok</span>((<span class="ident">o</span>.<span class="ident">into</span>(), <span class="ident">subvals</span>))
-                } <span class="kw">else</span> {
-                    <span class="ident">web_sys::console::log_2</span>(<span class="kw-2">&amp;</span><span class="string">&quot;Invalid value&quot;</span>.<span class="ident">into</span>(), <span class="ident">value</span>);
-                    <span class="prelude-val">Err</span>(<span class="ident">to_js_err</span>(<span class="string">&quot;invalid value&quot;</span>))
+        value: <span class="kw-2">&amp;</span>JsValue,
+        datatype: <span class="prelude-ty">Option</span>&lt;String&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(Value&lt;<span class="lifetime">&#39;static</span>&gt;, Vec&lt;(Prop, JsValue)&gt;), JsValue&gt; {
+        <span class="kw">match </span><span class="self">self</span>.import_scalar(value, <span class="kw-2">&amp;</span>datatype) {
+            <span class="prelude-val">Some</span>(val) =&gt; <span class="prelude-val">Ok</span>((val.into(), <span class="macro">vec!</span>[])),
+            <span class="prelude-val">None </span>=&gt; {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>((o, subvals)) = to_objtype(value, <span class="kw-2">&amp;</span>datatype) {
+                    <span class="prelude-val">Ok</span>((o.into(), subvals))
+                } <span class="kw">else </span>{
+                    web_sys::console::log_2(<span class="kw-2">&amp;</span><span class="string">&quot;Invalid value&quot;</span>.into(), value);
+                    <span class="prelude-val">Err</span>(to_js_err(<span class="string">&quot;invalid value&quot;</span>))
                 }
             }
         }
     }
 }
 
-<span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">create</span>)]</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">init</span>(<span class="ident">actor</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Automerge</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-    <span class="ident">console_error_panic_hook::set_once</span>();
-    <span class="ident">Automerge::new</span>(<span class="ident">actor</span>)
+<span class="attribute">#[wasm_bindgen(js_name = create)]
+</span><span class="kw">pub fn </span>init(actor: <span class="prelude-ty">Option</span>&lt;String&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;Automerge, JsValue&gt; {
+    console_error_panic_hook::set_once();
+    Automerge::new(actor)
 }
 
-<span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">load</span>)]</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">load</span>(<span class="ident">data</span>: <span class="ident">Uint8Array</span>, <span class="ident">actor</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Automerge</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-    <span class="kw">let</span> <span class="ident">data</span> <span class="op">=</span> <span class="ident">data</span>.<span class="ident">to_vec</span>();
-    <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">doc</span> <span class="op">=</span> <span class="ident">am::AutoCommitWithObs</span>::<span class="op">&lt;</span><span class="ident">UnObserved</span><span class="op">&gt;</span><span class="ident">::load</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>)
-        .<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>
-        .<span class="ident">with_observer</span>(<span class="ident">Observer::default</span>());
-    <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">s</span>) <span class="op">=</span> <span class="ident">actor</span> {
-        <span class="kw">let</span> <span class="ident">actor</span> <span class="op">=</span> <span class="ident">automerge::ActorId::from</span>(<span class="ident">hex::decode</span>(<span class="ident">s</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>.<span class="ident">to_vec</span>());
-        <span class="ident">doc</span>.<span class="ident">set_actor</span>(<span class="ident">actor</span>);
+<span class="attribute">#[wasm_bindgen(js_name = load)]
+</span><span class="kw">pub fn </span>load(data: Uint8Array, actor: <span class="prelude-ty">Option</span>&lt;String&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;Automerge, JsValue&gt; {
+    <span class="kw">let </span>data = data.to_vec();
+    <span class="kw">let </span><span class="kw-2">mut </span>doc = am::AutoCommitWithObs::&lt;UnObserved&gt;::load(<span class="kw-2">&amp;</span>data)
+        .map_err(to_js_err)<span class="question-mark">?
+        </span>.with_observer(Observer::default());
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = actor {
+        <span class="kw">let </span>actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)<span class="question-mark">?</span>.to_vec());
+        doc.set_actor(actor);
     }
-    <span class="prelude-val">Ok</span>(<span class="ident">Automerge</span> {
-        <span class="ident">doc</span>,
-        <span class="ident">freeze</span>: <span class="bool-val">false</span>,
-        <span class="ident">external_types</span>: <span class="ident">HashMap::default</span>(),
+    <span class="prelude-val">Ok</span>(Automerge {
+        doc,
+        freeze: <span class="bool-val">false</span>,
+        external_types: HashMap::default(),
     })
 }
 
-<span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">encodeChange</span>)]</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">encode_change</span>(<span class="ident">change</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Uint8Array</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-    <span class="comment">// Alex: Technically we should be using serde_wasm_bindgen::from_value instead of into_serde.</span>
-    <span class="comment">// Unfortunately serde_wasm_bindgen::from_value fails for some inscrutable reason, so instead</span>
-    <span class="comment">// we use into_serde (sorry to future me).</span>
-    <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">deprecated</span>)]</span>
-    <span class="kw">let</span> <span class="ident">change</span>: <span class="ident">am::ExpandedChange</span> <span class="op">=</span> <span class="ident">change</span>.<span class="ident">into_serde</span>().<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
-    <span class="kw">let</span> <span class="ident">change</span>: <span class="ident">Change</span> <span class="op">=</span> <span class="ident">change</span>.<span class="ident">into</span>();
-    <span class="prelude-val">Ok</span>(<span class="ident">Uint8Array::from</span>(<span class="ident">change</span>.<span class="ident">raw_bytes</span>()))
+<span class="attribute">#[wasm_bindgen(js_name = encodeChange)]
+</span><span class="kw">pub fn </span>encode_change(change: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;Uint8Array, JsValue&gt; {
+    <span class="comment">// Alex: Technically we should be using serde_wasm_bindgen::from_value instead of into_serde.
+    // Unfortunately serde_wasm_bindgen::from_value fails for some inscrutable reason, so instead
+    // we use into_serde (sorry to future me).
+    </span><span class="attribute">#[allow(deprecated)]
+    </span><span class="kw">let </span>change: am::ExpandedChange = change.into_serde().map_err(to_js_err)<span class="question-mark">?</span>;
+    <span class="kw">let </span>change: Change = change.into();
+    <span class="prelude-val">Ok</span>(Uint8Array::from(change.raw_bytes()))
 }
 
-<span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">decodeChange</span>)]</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">decode_change</span>(<span class="ident">change</span>: <span class="ident">Uint8Array</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-    <span class="kw">let</span> <span class="ident">change</span> <span class="op">=</span> <span class="ident">Change::from_bytes</span>(<span class="ident">change</span>.<span class="ident">to_vec</span>()).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
-    <span class="kw">let</span> <span class="ident">change</span>: <span class="ident">am::ExpandedChange</span> <span class="op">=</span> <span class="ident">change</span>.<span class="ident">decode</span>();
-    <span class="kw">let</span> <span class="ident">serializer</span> <span class="op">=</span> <span class="ident">serde_wasm_bindgen::Serializer::json_compatible</span>();
-    <span class="ident">change</span>.<span class="ident">serialize</span>(<span class="kw-2">&amp;</span><span class="ident">serializer</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)
+<span class="attribute">#[wasm_bindgen(js_name = decodeChange)]
+</span><span class="kw">pub fn </span>decode_change(change: Uint8Array) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, JsValue&gt; {
+    <span class="kw">let </span>change = Change::from_bytes(change.to_vec()).map_err(to_js_err)<span class="question-mark">?</span>;
+    <span class="kw">let </span>change: am::ExpandedChange = change.decode();
+    <span class="kw">let </span>serializer = serde_wasm_bindgen::Serializer::json_compatible();
+    change.serialize(<span class="kw-2">&amp;</span>serializer).map_err(to_js_err)
 }
 
-<span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">initSyncState</span>)]</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">init_sync_state</span>() -&gt; <span class="ident">SyncState</span> {
-    <span class="ident">SyncState</span>(<span class="ident">am::sync::State::new</span>())
+<span class="attribute">#[wasm_bindgen(js_name = initSyncState)]
+</span><span class="kw">pub fn </span>init_sync_state() -&gt; SyncState {
+    SyncState(am::sync::State::new())
 }
 
-<span class="comment">// this is needed to be compatible with the automerge-js api</span>
-<span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">importSyncState</span>)]</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">import_sync_state</span>(<span class="ident">state</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">SyncState</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-    <span class="prelude-val">Ok</span>(<span class="ident">SyncState</span>(<span class="ident">JS</span>(<span class="ident">state</span>).<span class="ident">try_into</span>()<span class="question-mark">?</span>))
+<span class="comment">// this is needed to be compatible with the automerge-js api
+</span><span class="attribute">#[wasm_bindgen(js_name = importSyncState)]
+</span><span class="kw">pub fn </span>import_sync_state(state: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;SyncState, JsValue&gt; {
+    <span class="prelude-val">Ok</span>(SyncState(JS(state).try_into()<span class="question-mark">?</span>))
 }
 
-<span class="comment">// this is needed to be compatible with the automerge-js api</span>
-<span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">exportSyncState</span>)]</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">export_sync_state</span>(<span class="ident">state</span>: <span class="kw-2">&amp;</span><span class="ident">SyncState</span>) -&gt; <span class="ident">JsValue</span> {
-    <span class="ident">JS::from</span>(<span class="ident">state</span>.<span class="number">0</span>.<span class="ident">clone</span>()).<span class="ident">into</span>()
+<span class="comment">// this is needed to be compatible with the automerge-js api
+</span><span class="attribute">#[wasm_bindgen(js_name = exportSyncState)]
+</span><span class="kw">pub fn </span>export_sync_state(state: <span class="kw-2">&amp;</span>SyncState) -&gt; JsValue {
+    JS::from(state.<span class="number">0</span>.clone()).into()
 }
 
-<span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">encodeSyncMessage</span>)]</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">encode_sync_message</span>(<span class="ident">message</span>: <span class="ident">JsValue</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Uint8Array</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-    <span class="kw">let</span> <span class="ident">heads</span> <span class="op">=</span> <span class="ident">js_get</span>(<span class="kw-2">&amp;</span><span class="ident">message</span>, <span class="string">&quot;heads&quot;</span>)<span class="question-mark">?</span>.<span class="ident">try_into</span>()<span class="question-mark">?</span>;
-    <span class="kw">let</span> <span class="ident">need</span> <span class="op">=</span> <span class="ident">js_get</span>(<span class="kw-2">&amp;</span><span class="ident">message</span>, <span class="string">&quot;need&quot;</span>)<span class="question-mark">?</span>.<span class="ident">try_into</span>()<span class="question-mark">?</span>;
-    <span class="kw">let</span> <span class="ident">changes</span> <span class="op">=</span> <span class="ident">js_get</span>(<span class="kw-2">&amp;</span><span class="ident">message</span>, <span class="string">&quot;changes&quot;</span>)<span class="question-mark">?</span>.<span class="ident">try_into</span>()<span class="question-mark">?</span>;
-    <span class="kw">let</span> <span class="ident">have</span> <span class="op">=</span> <span class="ident">js_get</span>(<span class="kw-2">&amp;</span><span class="ident">message</span>, <span class="string">&quot;have&quot;</span>)<span class="question-mark">?</span>.<span class="ident">try_into</span>()<span class="question-mark">?</span>;
-    <span class="prelude-val">Ok</span>(<span class="ident">Uint8Array::from</span>(
-        <span class="ident">am::sync::Message</span> {
-            <span class="ident">heads</span>,
-            <span class="ident">need</span>,
-            <span class="ident">have</span>,
-            <span class="ident">changes</span>,
+<span class="attribute">#[wasm_bindgen(js_name = encodeSyncMessage)]
+</span><span class="kw">pub fn </span>encode_sync_message(message: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;Uint8Array, JsValue&gt; {
+    <span class="kw">let </span>heads = js_get(<span class="kw-2">&amp;</span>message, <span class="string">&quot;heads&quot;</span>)<span class="question-mark">?</span>.try_into()<span class="question-mark">?</span>;
+    <span class="kw">let </span>need = js_get(<span class="kw-2">&amp;</span>message, <span class="string">&quot;need&quot;</span>)<span class="question-mark">?</span>.try_into()<span class="question-mark">?</span>;
+    <span class="kw">let </span>changes = js_get(<span class="kw-2">&amp;</span>message, <span class="string">&quot;changes&quot;</span>)<span class="question-mark">?</span>.try_into()<span class="question-mark">?</span>;
+    <span class="kw">let </span>have = js_get(<span class="kw-2">&amp;</span>message, <span class="string">&quot;have&quot;</span>)<span class="question-mark">?</span>.try_into()<span class="question-mark">?</span>;
+    <span class="prelude-val">Ok</span>(Uint8Array::from(
+        am::sync::Message {
+            heads,
+            need,
+            have,
+            changes,
         }
-        .<span class="ident">encode</span>()
-        .<span class="ident">as_slice</span>(),
+        .encode()
+        .as_slice(),
     ))
 }
 
-<span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">decodeSyncMessage</span>)]</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">decode_sync_message</span>(<span class="ident">msg</span>: <span class="ident">Uint8Array</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">JsValue</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-    <span class="kw">let</span> <span class="ident">data</span> <span class="op">=</span> <span class="ident">msg</span>.<span class="ident">to_vec</span>();
-    <span class="kw">let</span> <span class="ident">msg</span> <span class="op">=</span> <span class="ident">am::sync::Message::decode</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>).<span class="ident">map_err</span>(<span class="ident">to_js_err</span>)<span class="question-mark">?</span>;
-    <span class="kw">let</span> <span class="ident">heads</span> <span class="op">=</span> <span class="ident">AR::from</span>(<span class="ident">msg</span>.<span class="ident">heads</span>.<span class="ident">as_slice</span>());
-    <span class="kw">let</span> <span class="ident">need</span> <span class="op">=</span> <span class="ident">AR::from</span>(<span class="ident">msg</span>.<span class="ident">need</span>.<span class="ident">as_slice</span>());
-    <span class="kw">let</span> <span class="ident">changes</span> <span class="op">=</span> <span class="ident">AR::from</span>(<span class="ident">msg</span>.<span class="ident">changes</span>.<span class="ident">as_slice</span>());
-    <span class="kw">let</span> <span class="ident">have</span> <span class="op">=</span> <span class="ident">AR::from</span>(<span class="ident">msg</span>.<span class="ident">have</span>.<span class="ident">as_slice</span>());
-    <span class="kw">let</span> <span class="ident">obj</span> <span class="op">=</span> <span class="ident">Object::new</span>().<span class="ident">into</span>();
-    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="string">&quot;heads&quot;</span>, <span class="ident">heads</span>)<span class="question-mark">?</span>;
-    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="string">&quot;need&quot;</span>, <span class="ident">need</span>)<span class="question-mark">?</span>;
-    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="string">&quot;have&quot;</span>, <span class="ident">have</span>)<span class="question-mark">?</span>;
-    <span class="ident">js_set</span>(<span class="kw-2">&amp;</span><span class="ident">obj</span>, <span class="string">&quot;changes&quot;</span>, <span class="ident">changes</span>)<span class="question-mark">?</span>;
-    <span class="prelude-val">Ok</span>(<span class="ident">obj</span>)
+<span class="attribute">#[wasm_bindgen(js_name = decodeSyncMessage)]
+</span><span class="kw">pub fn </span>decode_sync_message(msg: Uint8Array) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, JsValue&gt; {
+    <span class="kw">let </span>data = msg.to_vec();
+    <span class="kw">let </span>msg = am::sync::Message::decode(<span class="kw-2">&amp;</span>data).map_err(to_js_err)<span class="question-mark">?</span>;
+    <span class="kw">let </span>heads = AR::from(msg.heads.as_slice());
+    <span class="kw">let </span>need = AR::from(msg.need.as_slice());
+    <span class="kw">let </span>changes = AR::from(msg.changes.as_slice());
+    <span class="kw">let </span>have = AR::from(msg.have.as_slice());
+    <span class="kw">let </span>obj = Object::new().into();
+    js_set(<span class="kw-2">&amp;</span>obj, <span class="string">&quot;heads&quot;</span>, heads)<span class="question-mark">?</span>;
+    js_set(<span class="kw-2">&amp;</span>obj, <span class="string">&quot;need&quot;</span>, need)<span class="question-mark">?</span>;
+    js_set(<span class="kw-2">&amp;</span>obj, <span class="string">&quot;have&quot;</span>, have)<span class="question-mark">?</span>;
+    js_set(<span class="kw-2">&amp;</span>obj, <span class="string">&quot;changes&quot;</span>, changes)<span class="question-mark">?</span>;
+    <span class="prelude-val">Ok</span>(obj)
 }
 
-<span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">encodeSyncState</span>)]</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">encode_sync_state</span>(<span class="ident">state</span>: <span class="kw-2">&amp;</span><span class="ident">SyncState</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Uint8Array</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-    <span class="comment">//let state = state.0.clone();</span>
-    <span class="prelude-val">Ok</span>(<span class="ident">Uint8Array::from</span>(<span class="ident">state</span>.<span class="number">0</span>.<span class="ident">encode</span>().<span class="ident">as_slice</span>()))
+<span class="attribute">#[wasm_bindgen(js_name = encodeSyncState)]
+</span><span class="kw">pub fn </span>encode_sync_state(state: <span class="kw-2">&amp;</span>SyncState) -&gt; <span class="prelude-ty">Result</span>&lt;Uint8Array, JsValue&gt; {
+    <span class="comment">//let state = state.0.clone();
+    </span><span class="prelude-val">Ok</span>(Uint8Array::from(state.<span class="number">0</span>.encode().as_slice()))
 }
 
-<span class="attribute">#[<span class="ident">wasm_bindgen</span>(<span class="ident">js_name</span> <span class="op">=</span> <span class="ident">decodeSyncState</span>)]</span>
-<span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">decode_sync_state</span>(<span class="ident">data</span>: <span class="ident">Uint8Array</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">SyncState</span>, <span class="ident">JsValue</span><span class="op">&gt;</span> {
-    <span class="ident">SyncState::decode</span>(<span class="ident">data</span>)
+<span class="attribute">#[wasm_bindgen(js_name = decodeSyncState)]
+</span><span class="kw">pub fn </span>decode_sync_state(data: Uint8Array) -&gt; <span class="prelude-ty">Result</span>&lt;SyncState, JsValue&gt; {
+    SyncState::decode(data)
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge_wasm" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge_wasm" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/document/doc_change_columns.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>doc_change_columns.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../../../../normalize.css"><link rel="stylesheet" type="text/css" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../../../../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../../../../dark.css" disabled><link rel="stylesheet" type="text/css" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/storage/document/doc_change_columns.rs`."><meta name="keywords" content="rust, rustlang, rust-lang"><title>doc_change_columns.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" href="../../../../normalize.css"><link rel="stylesheet" href="../../../../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" href="../../../../ayu.css" disabled><link rel="stylesheet" href="../../../../dark.css" disabled><link rel="stylesheet" href="../../../../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../../../../storage.js"></script><script defer src="../../../../source-script.js"></script><script defer src="../../../../source-files.js"></script><script defer src="../../../../main.js"></script><noscript><link rel="stylesheet" href="../../../../noscript.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container"><img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a><h2 class="location"></h2></nav><nav class="sidebar"><a class="sidebar-logo" href="../../../../automerge/index.html"><div class="logo-container">
                     <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></div></a></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../../../../automerge/index.html">
                         <img src="https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><button type="button">?</button></div><div id="settings-menu" tabindex="-1"><a href="../../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../../wheel.svg"></a></div></div></form></nav></div><section id="main-content" class="content"><div class="example-wrap"><pre class="line-numbers"><span id="1">1</span>
 <span id="2">2</span>
@@ -339,344 +339,344 @@
 <span id="337">337</span>
 <span id="338">338</span>
 <span id="339">339</span>
-</pre><pre class="rust"><code><span class="kw">use</span> <span class="ident">std</span>::{<span class="ident">borrow::Cow</span>, <span class="ident">convert::TryFrom</span>};
+</pre><pre class="rust"><code><span class="kw">use </span>std::{borrow::Cow, convert::TryFrom};
 
-<span class="kw">use</span> <span class="kw">crate</span>::{
-    <span class="ident">columnar</span>::{
-        <span class="ident">column_range</span>::{
-            <span class="ident">generic</span>::{<span class="ident">GenericColumnRange</span>, <span class="ident">GroupRange</span>, <span class="ident">GroupedColumnRange</span>, <span class="ident">SimpleColRange</span>},
-            <span class="ident">DeltaRange</span>, <span class="ident">DepsIter</span>, <span class="ident">DepsRange</span>, <span class="ident">RleRange</span>, <span class="ident">ValueIter</span>, <span class="ident">ValueRange</span>,
+<span class="kw">use crate</span>::{
+    columnar::{
+        column_range::{
+            generic::{GenericColumnRange, GroupRange, GroupedColumnRange, SimpleColRange},
+            DeltaRange, DepsIter, DepsRange, RleRange, ValueIter, ValueRange,
         },
-        <span class="ident">encoding</span>::{<span class="ident">ColumnDecoder</span>, <span class="ident">DecodeColumnError</span>, <span class="ident">DeltaDecoder</span>, <span class="ident">RleDecoder</span>},
+        encoding::{ColumnDecoder, DecodeColumnError, DeltaDecoder, RleDecoder},
     },
-    <span class="ident">storage</span>::{
-        <span class="ident">columns</span>::{<span class="ident">compression</span>, <span class="ident">ColumnId</span>, <span class="ident">ColumnSpec</span>, <span class="ident">ColumnType</span>},
-        <span class="ident">Columns</span>, <span class="ident">MismatchingColumn</span>, <span class="ident">RawColumn</span>, <span class="ident">RawColumns</span>,
+    storage::{
+        columns::{compression, ColumnId, ColumnSpec, ColumnType},
+        Columns, MismatchingColumn, RawColumn, RawColumns,
     },
-    <span class="ident">types::ScalarValue</span>,
+    types::ScalarValue,
 };
 
-<span class="kw">const</span> <span class="ident">ACTOR_COL_ID</span>: <span class="ident">ColumnId</span> <span class="op">=</span> <span class="ident">ColumnId::new</span>(<span class="number">0</span>);
-<span class="kw">const</span> <span class="ident">SEQ_COL_ID</span>: <span class="ident">ColumnId</span> <span class="op">=</span> <span class="ident">ColumnId::new</span>(<span class="number">0</span>);
-<span class="kw">const</span> <span class="ident">MAX_OP_COL_ID</span>: <span class="ident">ColumnId</span> <span class="op">=</span> <span class="ident">ColumnId::new</span>(<span class="number">1</span>);
-<span class="kw">const</span> <span class="ident">TIME_COL_ID</span>: <span class="ident">ColumnId</span> <span class="op">=</span> <span class="ident">ColumnId::new</span>(<span class="number">2</span>);
-<span class="kw">const</span> <span class="ident">MESSAGE_COL_ID</span>: <span class="ident">ColumnId</span> <span class="op">=</span> <span class="ident">ColumnId::new</span>(<span class="number">3</span>);
-<span class="kw">const</span> <span class="ident">DEPS_COL_ID</span>: <span class="ident">ColumnId</span> <span class="op">=</span> <span class="ident">ColumnId::new</span>(<span class="number">4</span>);
-<span class="kw">const</span> <span class="ident">EXTRA_COL_ID</span>: <span class="ident">ColumnId</span> <span class="op">=</span> <span class="ident">ColumnId::new</span>(<span class="number">5</span>);
+<span class="kw">const </span>ACTOR_COL_ID: ColumnId = ColumnId::new(<span class="number">0</span>);
+<span class="kw">const </span>SEQ_COL_ID: ColumnId = ColumnId::new(<span class="number">0</span>);
+<span class="kw">const </span>MAX_OP_COL_ID: ColumnId = ColumnId::new(<span class="number">1</span>);
+<span class="kw">const </span>TIME_COL_ID: ColumnId = ColumnId::new(<span class="number">2</span>);
+<span class="kw">const </span>MESSAGE_COL_ID: ColumnId = ColumnId::new(<span class="number">3</span>);
+<span class="kw">const </span>DEPS_COL_ID: ColumnId = ColumnId::new(<span class="number">4</span>);
+<span class="kw">const </span>EXTRA_COL_ID: ColumnId = ColumnId::new(<span class="number">5</span>);
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">ChangeMetadata</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">actor</span>: <span class="ident">usize</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">seq</span>: <span class="ident">u64</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">max_op</span>: <span class="ident">u64</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">timestamp</span>: <span class="ident">i64</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">message</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">smol_str::SmolStr</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">deps</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="ident">extra</span>: <span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, [<span class="ident">u8</span>]<span class="op">&gt;</span>,
+<span class="attribute">#[derive(Debug)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ChangeMetadata&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) actor: usize,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) seq: u64,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) max_op: u64,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) timestamp: i64,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) message: <span class="prelude-ty">Option</span>&lt;smol_str::SmolStr&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) deps: Vec&lt;u64&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) extra: Cow&lt;<span class="lifetime">&#39;a</span>, [u8]&gt;,
 }
 
-<span class="doccomment">/// A row to be encoded as change metadata in the document format</span>
-<span class="doccomment">///</span>
-<span class="doccomment">/// The lifetime `&#39;a` is the lifetime of the extra bytes Cow. For types which cannot</span>
-<span class="doccomment">/// provide a reference (e.g. because they are decoding from some columnar storage on each</span>
-<span class="doccomment">/// iteration) this should be `&#39;static`.</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">trait</span> <span class="ident">AsChangeMeta</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="doccomment">/// The type of the iterator over dependency indices</span>
-    <span class="kw">type</span> <span class="ident">DepsIter</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">u64</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">ExactSizeIterator</span>;
+<span class="doccomment">/// A row to be encoded as change metadata in the document format
+///
+/// The lifetime `&#39;a` is the lifetime of the extra bytes Cow. For types which cannot
+/// provide a reference (e.g. because they are decoding from some columnar storage on each
+/// iteration) this should be `&#39;static`.
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">trait </span>AsChangeMeta&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="doccomment">/// The type of the iterator over dependency indices
+    </span><span class="kw">type </span>DepsIter: Iterator&lt;Item = u64&gt; + ExactSizeIterator;
 
-    <span class="kw">fn</span> <span class="ident">actor</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u64</span>;
-    <span class="kw">fn</span> <span class="ident">seq</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u64</span>;
-    <span class="kw">fn</span> <span class="ident">max_op</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">u64</span>;
-    <span class="kw">fn</span> <span class="ident">timestamp</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">i64</span>;
-    <span class="kw">fn</span> <span class="ident">message</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">smol_str::SmolStr</span><span class="op">&gt;</span><span class="op">&gt;</span>;
-    <span class="kw">fn</span> <span class="ident">deps</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident"><span class="self">Self</span>::DepsIter</span>;
-    <span class="kw">fn</span> <span class="ident">extra</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, [<span class="ident">u8</span>]<span class="op">&gt;</span>;
+    <span class="kw">fn </span>actor(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64;
+    <span class="kw">fn </span>seq(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64;
+    <span class="kw">fn </span>max_op(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64;
+    <span class="kw">fn </span>timestamp(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; i64;
+    <span class="kw">fn </span>message(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Cow&lt;<span class="lifetime">&#39;a</span>, smol_str::SmolStr&gt;&gt;;
+    <span class="kw">fn </span>deps(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::DepsIter;
+    <span class="kw">fn </span>extra(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Cow&lt;<span class="lifetime">&#39;a</span>, [u8]&gt;;
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">Clone</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">DocChangeColumns</span> {
-    <span class="ident">actor</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span>,
-    <span class="ident">seq</span>: <span class="ident">DeltaRange</span>,
-    <span class="ident">max_op</span>: <span class="ident">DeltaRange</span>,
-    <span class="ident">time</span>: <span class="ident">DeltaRange</span>,
-    <span class="ident">message</span>: <span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">smol_str::SmolStr</span><span class="op">&gt;</span>,
-    <span class="ident">deps</span>: <span class="ident">DepsRange</span>,
-    <span class="ident">extra</span>: <span class="ident">ValueRange</span>,
-    <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">dead_code</span>)]</span>
-    <span class="ident">other</span>: <span class="ident">Columns</span>,
+<span class="attribute">#[derive(Debug, Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>DocChangeColumns {
+    actor: RleRange&lt;u64&gt;,
+    seq: DeltaRange,
+    max_op: DeltaRange,
+    time: DeltaRange,
+    message: RleRange&lt;smol_str::SmolStr&gt;,
+    deps: DepsRange,
+    extra: ValueRange,
+    <span class="attribute">#[allow(dead_code)]
+    </span>other: Columns,
 }
 
-<span class="kw">impl</span> <span class="ident">DocChangeColumns</span> {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">iter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">data</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a</span> [<span class="ident">u8</span>]) -&gt; <span class="ident">DocChangeColumnIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-        <span class="ident">DocChangeColumnIter</span> {
-            <span class="ident">actors</span>: <span class="self">self</span>.<span class="ident">actor</span>.<span class="ident">decoder</span>(<span class="ident">data</span>),
-            <span class="ident">seq</span>: <span class="self">self</span>.<span class="ident">seq</span>.<span class="ident">decoder</span>(<span class="ident">data</span>),
-            <span class="ident">max_op</span>: <span class="self">self</span>.<span class="ident">max_op</span>.<span class="ident">decoder</span>(<span class="ident">data</span>),
-            <span class="ident">time</span>: <span class="self">self</span>.<span class="ident">time</span>.<span class="ident">decoder</span>(<span class="ident">data</span>),
-            <span class="ident">message</span>: <span class="kw">if</span> <span class="self">self</span>.<span class="ident">message</span>.<span class="ident">is_empty</span>() {
-                <span class="prelude-val">None</span>
-            } <span class="kw">else</span> {
-                <span class="prelude-val">Some</span>(<span class="self">self</span>.<span class="ident">message</span>.<span class="ident">decoder</span>(<span class="ident">data</span>))
+<span class="kw">impl </span>DocChangeColumns {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>iter&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, data: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8]) -&gt; DocChangeColumnIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+        DocChangeColumnIter {
+            actors: <span class="self">self</span>.actor.decoder(data),
+            seq: <span class="self">self</span>.seq.decoder(data),
+            max_op: <span class="self">self</span>.max_op.decoder(data),
+            time: <span class="self">self</span>.time.decoder(data),
+            message: <span class="kw">if </span><span class="self">self</span>.message.is_empty() {
+                <span class="prelude-val">None
+            </span>} <span class="kw">else </span>{
+                <span class="prelude-val">Some</span>(<span class="self">self</span>.message.decoder(data))
             },
-            <span class="ident">deps</span>: <span class="self">self</span>.<span class="ident">deps</span>.<span class="ident">iter</span>(<span class="ident">data</span>),
-            <span class="ident">extra</span>: <span class="ident">ExtraDecoder</span> {
-                <span class="ident">val</span>: <span class="self">self</span>.<span class="ident">extra</span>.<span class="ident">iter</span>(<span class="ident">data</span>),
+            deps: <span class="self">self</span>.deps.iter(data),
+            extra: ExtraDecoder {
+                val: <span class="self">self</span>.extra.iter(data),
             },
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">encode</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">I</span>, <span class="ident">C</span><span class="op">&gt;</span>(<span class="ident">changes</span>: <span class="ident">I</span>, <span class="ident">out</span>: <span class="kw-2">&amp;mut</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) -&gt; <span class="ident">DocChangeColumns</span>
-    <span class="kw">where</span>
-        <span class="ident">C</span>: <span class="ident">AsChangeMeta</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
-        <span class="ident">I</span>: <span class="ident">Iterator</span><span class="op">&lt;</span><span class="ident">Item</span> <span class="op">=</span> <span class="ident">C</span><span class="op">&gt;</span> <span class="op">+</span> <span class="ident">Clone</span>,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>encode&lt;<span class="lifetime">&#39;a</span>, I, C&gt;(changes: I, out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;) -&gt; DocChangeColumns
+    <span class="kw">where
+        </span>C: AsChangeMeta&lt;<span class="lifetime">&#39;a</span>&gt;,
+        I: Iterator&lt;Item = C&gt; + Clone,
     {
-        <span class="kw">let</span> <span class="ident">actor</span> <span class="op">=</span> <span class="ident">RleRange</span>::<span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span><span class="ident">::encode</span>(
-            <span class="comment">// TODO: make this fallible once iterators have a try_splice</span>
-            <span class="ident">changes</span>.<span class="ident">clone</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">c</span><span class="op">|</span> <span class="prelude-val">Some</span>(<span class="ident">c</span>.<span class="ident">actor</span>())),
-            <span class="ident">out</span>,
+        <span class="kw">let </span>actor = RleRange::&lt;u64&gt;::encode(
+            <span class="comment">// TODO: make this fallible once iterators have a try_splice
+            </span>changes.clone().map(|c| <span class="prelude-val">Some</span>(c.actor())),
+            out,
         );
-        <span class="kw">let</span> <span class="ident">seq</span> <span class="op">=</span> <span class="ident">DeltaRange::encode</span>(<span class="ident">changes</span>.<span class="ident">clone</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">c</span><span class="op">|</span> <span class="prelude-val">Some</span>(<span class="ident">c</span>.<span class="ident">seq</span>() <span class="kw">as</span> <span class="ident">i64</span>)), <span class="ident">out</span>);
-        <span class="kw">let</span> <span class="ident">max_op</span> <span class="op">=</span> <span class="ident">DeltaRange::encode</span>(<span class="ident">changes</span>.<span class="ident">clone</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">c</span><span class="op">|</span> <span class="prelude-val">Some</span>(<span class="ident">c</span>.<span class="ident">max_op</span>() <span class="kw">as</span> <span class="ident">i64</span>)), <span class="ident">out</span>);
-        <span class="kw">let</span> <span class="ident">time</span> <span class="op">=</span> <span class="ident">DeltaRange::encode</span>(<span class="ident">changes</span>.<span class="ident">clone</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">c</span><span class="op">|</span> <span class="prelude-val">Some</span>(<span class="ident">c</span>.<span class="ident">timestamp</span>())), <span class="ident">out</span>);
-        <span class="kw">let</span> <span class="ident">message</span> <span class="op">=</span> <span class="ident">RleRange::encode</span>(<span class="ident">changes</span>.<span class="ident">clone</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">c</span><span class="op">|</span> <span class="ident">c</span>.<span class="ident">message</span>()), <span class="ident">out</span>);
-        <span class="kw">let</span> <span class="ident">deps</span> <span class="op">=</span> <span class="ident">DepsRange::encode</span>(<span class="ident">changes</span>.<span class="ident">clone</span>().<span class="ident">map</span>(<span class="op">|</span><span class="ident">c</span><span class="op">|</span> <span class="ident">c</span>.<span class="ident">deps</span>()), <span class="ident">out</span>);
-        <span class="kw">let</span> <span class="ident">extra</span> <span class="op">=</span> <span class="ident">ValueRange::encode</span>(
-            <span class="ident">changes</span>.<span class="ident">map</span>(<span class="op">|</span><span class="ident">c</span><span class="op">|</span> <span class="ident">Cow::Owned</span>(<span class="ident">ScalarValue::Bytes</span>(<span class="ident">c</span>.<span class="ident">extra</span>().<span class="ident">to_vec</span>()))),
-            <span class="ident">out</span>,
+        <span class="kw">let </span>seq = DeltaRange::encode(changes.clone().map(|c| <span class="prelude-val">Some</span>(c.seq() <span class="kw">as </span>i64)), out);
+        <span class="kw">let </span>max_op = DeltaRange::encode(changes.clone().map(|c| <span class="prelude-val">Some</span>(c.max_op() <span class="kw">as </span>i64)), out);
+        <span class="kw">let </span>time = DeltaRange::encode(changes.clone().map(|c| <span class="prelude-val">Some</span>(c.timestamp())), out);
+        <span class="kw">let </span>message = RleRange::encode(changes.clone().map(|c| c.message()), out);
+        <span class="kw">let </span>deps = DepsRange::encode(changes.clone().map(|c| c.deps()), out);
+        <span class="kw">let </span>extra = ValueRange::encode(
+            changes.map(|c| Cow::Owned(ScalarValue::Bytes(c.extra().to_vec()))),
+            out,
         );
-        <span class="ident">DocChangeColumns</span> {
-            <span class="ident">actor</span>,
-            <span class="ident">seq</span>,
-            <span class="ident">max_op</span>,
-            <span class="ident">time</span>,
-            <span class="ident">message</span>,
-            <span class="ident">deps</span>,
-            <span class="ident">extra</span>,
-            <span class="ident">other</span>: <span class="ident">Columns::empty</span>(),
+        DocChangeColumns {
+            actor,
+            seq,
+            max_op,
+            time,
+            message,
+            deps,
+            extra,
+            other: Columns::empty(),
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn</span> <span class="ident">raw_columns</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">RawColumns</span><span class="op">&lt;</span><span class="ident">compression::Uncompressed</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">cols</span> <span class="op">=</span> <span class="macro">vec!</span>[
-            <span class="ident">RawColumn::new</span>(
-                <span class="ident">ColumnSpec::new</span>(<span class="ident">ACTOR_COL_ID</span>, <span class="ident">ColumnType::Actor</span>, <span class="bool-val">false</span>),
-                <span class="self">self</span>.<span class="ident">actor</span>.<span class="ident">clone</span>().<span class="ident">into</span>(),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>raw_columns(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; RawColumns&lt;compression::Uncompressed&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>cols = <span class="macro">vec!</span>[
+            RawColumn::new(
+                ColumnSpec::new(ACTOR_COL_ID, ColumnType::Actor, <span class="bool-val">false</span>),
+                <span class="self">self</span>.actor.clone().into(),
             ),
-            <span class="ident">RawColumn::new</span>(
-                <span class="ident">ColumnSpec::new</span>(<span class="ident">SEQ_COL_ID</span>, <span class="ident">ColumnType::DeltaInteger</span>, <span class="bool-val">false</span>),
-                <span class="self">self</span>.<span class="ident">seq</span>.<span class="ident">clone</span>().<span class="ident">into</span>(),
+            RawColumn::new(
+                ColumnSpec::new(SEQ_COL_ID, ColumnType::DeltaInteger, <span class="bool-val">false</span>),
+                <span class="self">self</span>.seq.clone().into(),
             ),
-            <span class="ident">RawColumn::new</span>(
-                <span class="ident">ColumnSpec::new</span>(<span class="ident">MAX_OP_COL_ID</span>, <span class="ident">ColumnType::DeltaInteger</span>, <span class="bool-val">false</span>),
-                <span class="self">self</span>.<span class="ident">max_op</span>.<span class="ident">clone</span>().<span class="ident">into</span>(),
+            RawColumn::new(
+                ColumnSpec::new(MAX_OP_COL_ID, ColumnType::DeltaInteger, <span class="bool-val">false</span>),
+                <span class="self">self</span>.max_op.clone().into(),
             ),
-            <span class="ident">RawColumn::new</span>(
-                <span class="ident">ColumnSpec::new</span>(<span class="ident">TIME_COL_ID</span>, <span class="ident">ColumnType::DeltaInteger</span>, <span class="bool-val">false</span>),
-                <span class="self">self</span>.<span class="ident">time</span>.<span class="ident">clone</span>().<span class="ident">into</span>(),
+            RawColumn::new(
+                ColumnSpec::new(TIME_COL_ID, ColumnType::DeltaInteger, <span class="bool-val">false</span>),
+                <span class="self">self</span>.time.clone().into(),
             ),
-            <span class="ident">RawColumn::new</span>(
-                <span class="ident">ColumnSpec::new</span>(<span class="ident">MESSAGE_COL_ID</span>, <span class="ident">ColumnType::String</span>, <span class="bool-val">false</span>),
-                <span class="self">self</span>.<span class="ident">message</span>.<span class="ident">clone</span>().<span class="ident">into</span>(),
+            RawColumn::new(
+                ColumnSpec::new(MESSAGE_COL_ID, ColumnType::String, <span class="bool-val">false</span>),
+                <span class="self">self</span>.message.clone().into(),
             ),
-            <span class="ident">RawColumn::new</span>(
-                <span class="ident">ColumnSpec::new</span>(<span class="ident">DEPS_COL_ID</span>, <span class="ident">ColumnType::Group</span>, <span class="bool-val">false</span>),
-                <span class="self">self</span>.<span class="ident">deps</span>.<span class="ident">num_range</span>().<span class="ident">clone</span>().<span class="ident">into</span>(),
+            RawColumn::new(
+                ColumnSpec::new(DEPS_COL_ID, ColumnType::Group, <span class="bool-val">false</span>),
+                <span class="self">self</span>.deps.num_range().clone().into(),
             ),
         ];
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">deps</span>.<span class="ident">deps_range</span>().<span class="ident">len</span>() <span class="op">&gt;</span> <span class="number">0</span> {
-            <span class="ident">cols</span>.<span class="ident">push</span>(<span class="ident">RawColumn::new</span>(
-                <span class="ident">ColumnSpec::new</span>(<span class="ident">DEPS_COL_ID</span>, <span class="ident">ColumnType::DeltaInteger</span>, <span class="bool-val">false</span>),
-                <span class="self">self</span>.<span class="ident">deps</span>.<span class="ident">deps_range</span>().<span class="ident">clone</span>().<span class="ident">into</span>(),
+        <span class="kw">if </span><span class="self">self</span>.deps.deps_range().len() &gt; <span class="number">0 </span>{
+            cols.push(RawColumn::new(
+                ColumnSpec::new(DEPS_COL_ID, ColumnType::DeltaInteger, <span class="bool-val">false</span>),
+                <span class="self">self</span>.deps.deps_range().clone().into(),
             ))
         }
-        <span class="ident">cols</span>.<span class="ident">push</span>(<span class="ident">RawColumn::new</span>(
-            <span class="ident">ColumnSpec::new</span>(<span class="ident">EXTRA_COL_ID</span>, <span class="ident">ColumnType::ValueMetadata</span>, <span class="bool-val">false</span>),
-            <span class="self">self</span>.<span class="ident">extra</span>.<span class="ident">meta_range</span>().<span class="ident">clone</span>().<span class="ident">into</span>(),
+        cols.push(RawColumn::new(
+            ColumnSpec::new(EXTRA_COL_ID, ColumnType::ValueMetadata, <span class="bool-val">false</span>),
+            <span class="self">self</span>.extra.meta_range().clone().into(),
         ));
-        <span class="kw">if</span> <span class="op">!</span><span class="self">self</span>.<span class="ident">extra</span>.<span class="ident">raw_range</span>().<span class="ident">is_empty</span>() {
-            <span class="ident">cols</span>.<span class="ident">push</span>(<span class="ident">RawColumn::new</span>(
-                <span class="ident">ColumnSpec::new</span>(<span class="ident">EXTRA_COL_ID</span>, <span class="ident">ColumnType::Value</span>, <span class="bool-val">false</span>),
-                <span class="self">self</span>.<span class="ident">extra</span>.<span class="ident">raw_range</span>().<span class="ident">clone</span>().<span class="ident">into</span>(),
+        <span class="kw">if </span>!<span class="self">self</span>.extra.raw_range().is_empty() {
+            cols.push(RawColumn::new(
+                ColumnSpec::new(EXTRA_COL_ID, ColumnType::Value, <span class="bool-val">false</span>),
+                <span class="self">self</span>.extra.raw_range().clone().into(),
             ))
         }
-        <span class="ident">cols</span>.<span class="ident">into_iter</span>().<span class="ident">collect</span>()
+        cols.into_iter().collect()
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>, <span class="ident">thiserror::Error</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum</span> <span class="ident">ReadChangeError</span> {
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;unexpected null value for {0}&quot;</span>)]</span>
-    <span class="ident">UnexpectedNull</span>(<span class="ident">String</span>),
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;mismatching column types for column {index}&quot;</span>)]</span>
-    <span class="ident">MismatchingColumn</span> { <span class="ident">index</span>: <span class="ident">usize</span> },
-    <span class="attribute">#[<span class="ident">error</span>(<span class="string">&quot;incorrect value in extra bytes column&quot;</span>)]</span>
-    <span class="ident">InvalidExtraBytes</span>,
-    <span class="attribute">#[<span class="ident">error</span>(<span class="ident">transparent</span>)]</span>
-    <span class="ident">ReadColumn</span>(<span class="attribute">#[<span class="ident">from</span>]</span> <span class="ident">DecodeColumnError</span>),
+<span class="attribute">#[derive(Debug, thiserror::Error)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>ReadChangeError {
+    <span class="attribute">#[error(<span class="string">&quot;unexpected null value for {0}&quot;</span>)]
+    </span>UnexpectedNull(String),
+    <span class="attribute">#[error(<span class="string">&quot;mismatching column types for column {index}&quot;</span>)]
+    </span>MismatchingColumn { index: usize },
+    <span class="attribute">#[error(<span class="string">&quot;incorrect value in extra bytes column&quot;</span>)]
+    </span>InvalidExtraBytes,
+    <span class="attribute">#[error(transparent)]
+    </span>ReadColumn(<span class="attribute">#[from] </span>DecodeColumnError),
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">MismatchingColumn</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">ReadChangeError</span> {
-    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">m</span>: <span class="ident">MismatchingColumn</span>) -&gt; <span class="self">Self</span> {
-        <span class="ident"><span class="self">Self</span>::MismatchingColumn</span> { <span class="ident">index</span>: <span class="ident">m</span>.<span class="ident">index</span> }
+<span class="kw">impl </span>From&lt;MismatchingColumn&gt; <span class="kw">for </span>ReadChangeError {
+    <span class="kw">fn </span>from(m: MismatchingColumn) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>::MismatchingColumn { index: m.index }
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>)]</span>
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct</span> <span class="ident">DocChangeColumnIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">actors</span>: <span class="ident">RleDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">u64</span><span class="op">&gt;</span>,
-    <span class="ident">seq</span>: <span class="ident">DeltaDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
-    <span class="ident">max_op</span>: <span class="ident">DeltaDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
-    <span class="ident">time</span>: <span class="ident">DeltaDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
-    <span class="ident">message</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">RleDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, <span class="ident">smol_str::SmolStr</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    <span class="ident">deps</span>: <span class="ident">DepsIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
-    <span class="ident">extra</span>: <span class="ident">ExtraDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
+<span class="attribute">#[derive(Clone)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>DocChangeColumnIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    actors: RleDecoder&lt;<span class="lifetime">&#39;a</span>, u64&gt;,
+    seq: DeltaDecoder&lt;<span class="lifetime">&#39;a</span>&gt;,
+    max_op: DeltaDecoder&lt;<span class="lifetime">&#39;a</span>&gt;,
+    time: DeltaDecoder&lt;<span class="lifetime">&#39;a</span>&gt;,
+    message: <span class="prelude-ty">Option</span>&lt;RleDecoder&lt;<span class="lifetime">&#39;a</span>, smol_str::SmolStr&gt;&gt;,
+    deps: DepsIter&lt;<span class="lifetime">&#39;a</span>&gt;,
+    extra: ExtraDecoder&lt;<span class="lifetime">&#39;a</span>&gt;,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">DocChangeColumnIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">try_next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ChangeMetadata</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span><span class="op">&gt;</span>, <span class="ident">ReadChangeError</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="ident">actor</span> <span class="op">=</span> <span class="kw">match</span> <span class="self">self</span>.<span class="ident">actors</span>.<span class="ident">maybe_next_in_col</span>(<span class="string">&quot;actor&quot;</span>)<span class="question-mark">?</span> {
-            <span class="prelude-val">Some</span>(<span class="ident">actor</span>) =&gt; <span class="ident">actor</span> <span class="kw">as</span> <span class="ident">usize</span>,
-            <span class="prelude-val">None</span> =&gt; {
-                <span class="comment">// The actor column should always have a value so if the actor iterator returns None that</span>
-                <span class="comment">// means we should be done, we check by asserting that all the other iterators</span>
-                <span class="comment">// return none (which is what Self::check_done does).</span>
-                <span class="kw">if</span> <span class="self">self</span>.<span class="ident">check_done</span>() {
-                    <span class="kw">return</span> <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>);
-                } <span class="kw">else</span> {
-                    <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">ReadChangeError::UnexpectedNull</span>(<span class="string">&quot;actor&quot;</span>.<span class="ident">to_string</span>()));
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; DocChangeColumnIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>try_next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;ChangeMetadata&lt;<span class="lifetime">&#39;a</span>&gt;&gt;, ReadChangeError&gt; {
+        <span class="kw">let </span>actor = <span class="kw">match </span><span class="self">self</span>.actors.maybe_next_in_col(<span class="string">&quot;actor&quot;</span>)<span class="question-mark">? </span>{
+            <span class="prelude-val">Some</span>(actor) =&gt; actor <span class="kw">as </span>usize,
+            <span class="prelude-val">None </span>=&gt; {
+                <span class="comment">// The actor column should always have a value so if the actor iterator returns None that
+                // means we should be done, we check by asserting that all the other iterators
+                // return none (which is what Self::check_done does).
+                </span><span class="kw">if </span><span class="self">self</span>.check_done() {
+                    <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>);
+                } <span class="kw">else </span>{
+                    <span class="kw">return </span><span class="prelude-val">Err</span>(ReadChangeError::UnexpectedNull(<span class="string">&quot;actor&quot;</span>.to_string()));
                 }
             }
         };
-        <span class="kw">let</span> <span class="ident">seq</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">seq</span>.<span class="ident">next_in_col</span>(<span class="string">&quot;seq&quot;</span>).<span class="ident">and_then</span>(<span class="op">|</span><span class="ident">seq</span><span class="op">|</span> {
-            <span class="ident">u64::try_from</span>(<span class="ident">seq</span>).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">DecodeColumnError::invalid_value</span>(<span class="string">&quot;seq&quot;</span>, <span class="ident">e</span>.<span class="ident">to_string</span>()))
+        <span class="kw">let </span>seq = <span class="self">self</span>.seq.next_in_col(<span class="string">&quot;seq&quot;</span>).and_then(|seq| {
+            u64::try_from(seq).map_err(|e| DecodeColumnError::invalid_value(<span class="string">&quot;seq&quot;</span>, e.to_string()))
         })<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">max_op</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">max_op</span>.<span class="ident">next_in_col</span>(<span class="string">&quot;max_op&quot;</span>).<span class="ident">and_then</span>(<span class="op">|</span><span class="ident">seq</span><span class="op">|</span> {
-            <span class="ident">u64::try_from</span>(<span class="ident">seq</span>).<span class="ident">map_err</span>(<span class="op">|</span><span class="ident">e</span><span class="op">|</span> <span class="ident">DecodeColumnError::invalid_value</span>(<span class="string">&quot;seq&quot;</span>, <span class="ident">e</span>.<span class="ident">to_string</span>()))
+        <span class="kw">let </span>max_op = <span class="self">self</span>.max_op.next_in_col(<span class="string">&quot;max_op&quot;</span>).and_then(|seq| {
+            u64::try_from(seq).map_err(|e| DecodeColumnError::invalid_value(<span class="string">&quot;seq&quot;</span>, e.to_string()))
         })<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">time</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">time</span>.<span class="ident">next_in_col</span>(<span class="string">&quot;time&quot;</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">message</span> <span class="op">=</span> <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="kw-2">ref</span> <span class="kw-2">mut</span> <span class="ident">message</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">message</span> {
-            <span class="ident">message</span>.<span class="ident">maybe_next_in_col</span>(<span class="string">&quot;message&quot;</span>)<span class="question-mark">?</span>
-        } <span class="kw">else</span> {
-            <span class="prelude-val">None</span>
-        };
-        <span class="kw">let</span> <span class="ident">deps</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">deps</span>.<span class="ident">next_in_col</span>(<span class="string">&quot;deps&quot;</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">extra</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">extra</span>.<span class="ident">next</span>().<span class="ident">transpose</span>()<span class="question-mark">?</span>.<span class="ident">unwrap_or</span>(<span class="ident">Cow::Borrowed</span>(<span class="kw-2">&amp;</span>[]));
-        <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(<span class="ident">ChangeMetadata</span> {
-            <span class="ident">actor</span>,
-            <span class="ident">seq</span>,
-            <span class="ident">max_op</span>,
-            <span class="ident">timestamp</span>: <span class="ident">time</span>,
-            <span class="ident">message</span>,
-            <span class="ident">deps</span>,
-            <span class="ident">extra</span>,
+        <span class="kw">let </span>time = <span class="self">self</span>.time.next_in_col(<span class="string">&quot;time&quot;</span>)<span class="question-mark">?</span>;
+        <span class="kw">let </span>message = <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">ref mut </span>message) = <span class="self">self</span>.message {
+            message.maybe_next_in_col(<span class="string">&quot;message&quot;</span>)<span class="question-mark">?
+        </span>} <span class="kw">else </span>{
+            <span class="prelude-val">None
+        </span>};
+        <span class="kw">let </span>deps = <span class="self">self</span>.deps.next_in_col(<span class="string">&quot;deps&quot;</span>)<span class="question-mark">?</span>;
+        <span class="kw">let </span>extra = <span class="self">self</span>.extra.next().transpose()<span class="question-mark">?</span>.unwrap_or(Cow::Borrowed(<span class="kw-2">&amp;</span>[]));
+        <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(ChangeMetadata {
+            actor,
+            seq,
+            max_op,
+            timestamp: time,
+            message,
+            deps,
+            extra,
         }))
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Iterator</span> <span class="kw">for</span> <span class="ident">DocChangeColumnIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">ChangeMetadata</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>, <span class="ident">ReadChangeError</span><span class="op">&gt;</span>;
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>DocChangeColumnIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">type </span>Item = <span class="prelude-ty">Result</span>&lt;ChangeMetadata&lt;<span class="lifetime">&#39;a</span>&gt;, ReadChangeError&gt;;
 
-    <span class="kw">fn</span> <span class="ident">next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span> {
-        <span class="self">self</span>.<span class="ident">try_next</span>().<span class="ident">transpose</span>()
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="self">self</span>.try_next().transpose()
     }
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">DocChangeColumnIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">fn</span> <span class="ident">check_done</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="ident">bool</span> {
-        <span class="kw">let</span> <span class="ident">other_cols</span> <span class="op">=</span> [
-            <span class="self">self</span>.<span class="ident">seq</span>.<span class="ident">next</span>().<span class="ident">is_none</span>(),
-            <span class="self">self</span>.<span class="ident">max_op</span>.<span class="ident">next</span>().<span class="ident">is_none</span>(),
-            <span class="self">self</span>.<span class="ident">time</span>.<span class="ident">next</span>().<span class="ident">is_none</span>(),
-            <span class="self">self</span>.<span class="ident">deps</span>.<span class="ident">next</span>().<span class="ident">is_none</span>(),
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; DocChangeColumnIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>check_done(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; bool {
+        <span class="kw">let </span>other_cols = [
+            <span class="self">self</span>.seq.next().is_none(),
+            <span class="self">self</span>.max_op.next().is_none(),
+            <span class="self">self</span>.time.next().is_none(),
+            <span class="self">self</span>.deps.next().is_none(),
         ];
-        <span class="ident">other_cols</span>.<span class="ident">iter</span>().<span class="ident">any</span>(<span class="op">|</span><span class="ident">f</span><span class="op">|</span> <span class="kw-2">*</span><span class="ident">f</span>)
+        other_cols.iter().any(|f| <span class="kw-2">*</span>f)
     }
 }
 
-<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Clone</span>)]</span>
-<span class="kw">struct</span> <span class="ident">ExtraDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="ident">val</span>: <span class="ident">ValueIter</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span>,
+<span class="attribute">#[derive(Clone)]
+</span><span class="kw">struct </span>ExtraDecoder&lt;<span class="lifetime">&#39;a</span>&gt; {
+    val: ValueIter&lt;<span class="lifetime">&#39;a</span>&gt;,
 }
 
-<span class="kw">impl</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> <span class="ident">Iterator</span> <span class="kw">for</span> <span class="ident">ExtraDecoder</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span><span class="op">&gt;</span> {
-    <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">Cow</span><span class="op">&lt;</span><span class="lifetime">&#39;a</span>, [<span class="ident">u8</span>]<span class="op">&gt;</span>, <span class="ident">ReadChangeError</span><span class="op">&gt;</span>;
-    <span class="kw">fn</span> <span class="ident">next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span> {
-        <span class="kw">match</span> <span class="self">self</span>.<span class="ident">val</span>.<span class="ident">next</span>() {
-            <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(<span class="ident">ScalarValue::Bytes</span>(<span class="ident">b</span>))) =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(<span class="ident">Cow::Owned</span>(<span class="ident">b</span>))),
-            <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(<span class="kw">_</span>)) =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Err</span>(<span class="ident">ReadChangeError::InvalidExtraBytes</span>)),
-            <span class="prelude-val">Some</span>(<span class="prelude-val">Err</span>(<span class="ident">e</span>)) =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Err</span>(<span class="ident">e</span>.<span class="ident">into</span>())),
-            <span class="prelude-val">None</span> =&gt; <span class="prelude-val">None</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>ExtraDecoder&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">type </span>Item = <span class="prelude-ty">Result</span>&lt;Cow&lt;<span class="lifetime">&#39;a</span>, [u8]&gt;, ReadChangeError&gt;;
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="kw">match </span><span class="self">self</span>.val.next() {
+            <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(ScalarValue::Bytes(b))) =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(Cow::Owned(b))),
+            <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(<span class="kw">_</span>)) =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Err</span>(ReadChangeError::InvalidExtraBytes)),
+            <span class="prelude-val">Some</span>(<span class="prelude-val">Err</span>(e)) =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Err</span>(e.into())),
+            <span class="prelude-val">None </span>=&gt; <span class="prelude-val">None</span>,
         }
     }
 }
 
-<span class="kw">impl</span> <span class="ident">TryFrom</span><span class="op">&lt;</span><span class="ident">Columns</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">DocChangeColumns</span> {
-    <span class="kw">type</span> <span class="ident">Error</span> <span class="op">=</span> <span class="ident">ReadChangeError</span>;
+<span class="kw">impl </span>TryFrom&lt;Columns&gt; <span class="kw">for </span>DocChangeColumns {
+    <span class="kw">type </span>Error = ReadChangeError;
 
-    <span class="kw">fn</span> <span class="ident">try_from</span>(<span class="ident">columns</span>: <span class="ident">Columns</span>) -&gt; <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="self">Self</span>, <span class="ident"><span class="self">Self</span>::Error</span><span class="op">&gt;</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">actor</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">u64</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">seq</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">DeltaRange</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">max_op</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">DeltaRange</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">time</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">DeltaRange</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">message</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">RleRange</span><span class="op">&lt;</span><span class="ident">smol_str::SmolStr</span><span class="op">&gt;</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">deps</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">DepsRange</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">extra</span>: <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">ValueRange</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-val">None</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">other</span> <span class="op">=</span> <span class="ident">Columns::empty</span>();
+    <span class="kw">fn </span>try_from(columns: Columns) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, <span class="self">Self</span>::Error&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>actor: <span class="prelude-ty">Option</span>&lt;RleRange&lt;u64&gt;&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>seq: <span class="prelude-ty">Option</span>&lt;DeltaRange&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>max_op: <span class="prelude-ty">Option</span>&lt;DeltaRange&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>time: <span class="prelude-ty">Option</span>&lt;DeltaRange&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>message: <span class="prelude-ty">Option</span>&lt;RleRange&lt;smol_str::SmolStr&gt;&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>deps: <span class="prelude-ty">Option</span>&lt;DepsRange&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>extra: <span class="prelude-ty">Option</span>&lt;ValueRange&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>other = Columns::empty();
 
-        <span class="kw">for</span> (<span class="ident">index</span>, <span class="ident">col</span>) <span class="kw">in</span> <span class="ident">columns</span>.<span class="ident">into_iter</span>().<span class="ident">enumerate</span>() {
-            <span class="kw">match</span> (<span class="ident">col</span>.<span class="ident">id</span>(), <span class="ident">col</span>.<span class="ident">col_type</span>()) {
-                (<span class="ident">ACTOR_COL_ID</span>, <span class="ident">ColumnType::Actor</span>) =&gt; <span class="ident">actor</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">col</span>.<span class="ident">range</span>().<span class="ident">into</span>()),
-                (<span class="ident">SEQ_COL_ID</span>, <span class="ident">ColumnType::DeltaInteger</span>) =&gt; <span class="ident">seq</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">col</span>.<span class="ident">range</span>().<span class="ident">into</span>()),
-                (<span class="ident">MAX_OP_COL_ID</span>, <span class="ident">ColumnType::DeltaInteger</span>) =&gt; <span class="ident">max_op</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">col</span>.<span class="ident">range</span>().<span class="ident">into</span>()),
-                (<span class="ident">TIME_COL_ID</span>, <span class="ident">ColumnType::DeltaInteger</span>) =&gt; <span class="ident">time</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">col</span>.<span class="ident">range</span>().<span class="ident">into</span>()),
-                (<span class="ident">MESSAGE_COL_ID</span>, <span class="ident">ColumnType::String</span>) =&gt; <span class="ident">message</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">col</span>.<span class="ident">range</span>().<span class="ident">into</span>()),
-                (<span class="ident">DEPS_COL_ID</span>, <span class="ident">ColumnType::Group</span>) =&gt; <span class="kw">match</span> <span class="ident">col</span>.<span class="ident">into_ranges</span>() {
-                    <span class="ident">GenericColumnRange::Group</span>(<span class="ident">GroupRange</span> { <span class="ident">num</span>, <span class="ident">values</span> }) =&gt; {
-                        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">cols</span> <span class="op">=</span> <span class="ident">values</span>.<span class="ident">into_iter</span>();
-                        <span class="kw">let</span> <span class="ident">deps_group</span> <span class="op">=</span> <span class="ident">num</span>;
-                        <span class="kw">let</span> <span class="ident">first</span> <span class="op">=</span> <span class="ident">cols</span>.<span class="ident">next</span>();
-                        <span class="kw">let</span> <span class="ident">deps_index</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">first</span> {
-                            <span class="prelude-val">Some</span>(<span class="ident">GroupedColumnRange::Simple</span>(<span class="ident">SimpleColRange::Delta</span>(
-                                <span class="ident">index_range</span>,
-                            ))) =&gt; <span class="ident">index_range</span>,
+        <span class="kw">for </span>(index, col) <span class="kw">in </span>columns.into_iter().enumerate() {
+            <span class="kw">match </span>(col.id(), col.col_type()) {
+                (ACTOR_COL_ID, ColumnType::Actor) =&gt; actor = <span class="prelude-val">Some</span>(col.range().into()),
+                (SEQ_COL_ID, ColumnType::DeltaInteger) =&gt; seq = <span class="prelude-val">Some</span>(col.range().into()),
+                (MAX_OP_COL_ID, ColumnType::DeltaInteger) =&gt; max_op = <span class="prelude-val">Some</span>(col.range().into()),
+                (TIME_COL_ID, ColumnType::DeltaInteger) =&gt; time = <span class="prelude-val">Some</span>(col.range().into()),
+                (MESSAGE_COL_ID, ColumnType::String) =&gt; message = <span class="prelude-val">Some</span>(col.range().into()),
+                (DEPS_COL_ID, ColumnType::Group) =&gt; <span class="kw">match </span>col.into_ranges() {
+                    GenericColumnRange::Group(GroupRange { num, values }) =&gt; {
+                        <span class="kw">let </span><span class="kw-2">mut </span>cols = values.into_iter();
+                        <span class="kw">let </span>deps_group = num;
+                        <span class="kw">let </span>first = cols.next();
+                        <span class="kw">let </span>deps_index = <span class="kw">match </span>first {
+                            <span class="prelude-val">Some</span>(GroupedColumnRange::Simple(SimpleColRange::Delta(
+                                index_range,
+                            ))) =&gt; index_range,
                             <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; {
                                 <span class="macro">tracing::error!</span>(
-                                    <span class="string">&quot;deps column contained more than one grouped column&quot;</span>
-                                );
-                                <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">ReadChangeError::MismatchingColumn</span> { <span class="ident">index</span>: <span class="number">5</span> });
+                                    <span class="string">&quot;deps column contained more than one grouped column&quot;
+                                </span>);
+                                <span class="kw">return </span><span class="prelude-val">Err</span>(ReadChangeError::MismatchingColumn { index: <span class="number">5 </span>});
                             }
-                            <span class="prelude-val">None</span> =&gt; (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>(),
+                            <span class="prelude-val">None </span>=&gt; (<span class="number">0</span>..<span class="number">0</span>).into(),
                         };
-                        <span class="kw">if</span> <span class="ident">cols</span>.<span class="ident">next</span>().<span class="ident">is_some</span>() {
-                            <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">ReadChangeError::MismatchingColumn</span> { <span class="ident">index</span> });
+                        <span class="kw">if </span>cols.next().is_some() {
+                            <span class="kw">return </span><span class="prelude-val">Err</span>(ReadChangeError::MismatchingColumn { index });
                         }
-                        <span class="ident">deps</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">DepsRange::new</span>(<span class="ident">deps_group</span>, <span class="ident">deps_index</span>));
+                        deps = <span class="prelude-val">Some</span>(DepsRange::new(deps_group, deps_index));
                     }
-                    <span class="kw">_</span> =&gt; <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">ReadChangeError::MismatchingColumn</span> { <span class="ident">index</span> }),
+                    <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(ReadChangeError::MismatchingColumn { index }),
                 },
-                (<span class="ident">EXTRA_COL_ID</span>, <span class="ident">ColumnType::ValueMetadata</span>) =&gt; <span class="kw">match</span> <span class="ident">col</span>.<span class="ident">into_ranges</span>() {
-                    <span class="ident">GenericColumnRange::Value</span>(<span class="ident">val</span>) =&gt; {
-                        <span class="ident">extra</span> <span class="op">=</span> <span class="prelude-val">Some</span>(<span class="ident">val</span>);
+                (EXTRA_COL_ID, ColumnType::ValueMetadata) =&gt; <span class="kw">match </span>col.into_ranges() {
+                    GenericColumnRange::Value(val) =&gt; {
+                        extra = <span class="prelude-val">Some</span>(val);
                     }
-                    <span class="kw">_</span> =&gt; <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="ident">ReadChangeError::MismatchingColumn</span> { <span class="ident">index</span> }),
+                    <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(ReadChangeError::MismatchingColumn { index }),
                 },
-                (<span class="ident">other_id</span>, <span class="ident">other_type</span>) =&gt; {
-                    <span class="macro">tracing::warn!</span>(<span class="ident">id</span><span class="op">=</span><span class="question-mark">?</span><span class="ident">other_id</span>, <span class="ident">typ</span><span class="op">=</span><span class="question-mark">?</span><span class="ident">other_type</span>, <span class="string">&quot;unknown column&quot;</span>);
-                    <span class="ident">other</span>.<span class="ident">append</span>(<span class="ident">col</span>);
+                (other_id, other_type) =&gt; {
+                    <span class="macro">tracing::warn!</span>(id=<span class="question-mark">?</span>other_id, typ=<span class="question-mark">?</span>other_type, <span class="string">&quot;unknown column&quot;</span>);
+                    other.append(col);
                 }
             }
         }
-        <span class="prelude-val">Ok</span>(<span class="ident">DocChangeColumns</span> {
-            <span class="ident">actor</span>: <span class="ident">actor</span>.<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>()),
-            <span class="ident">seq</span>: <span class="ident">seq</span>.<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>()),
-            <span class="ident">max_op</span>: <span class="ident">max_op</span>.<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>()),
-            <span class="ident">time</span>: <span class="ident">time</span>.<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>()),
-            <span class="ident">message</span>: <span class="ident">message</span>.<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>()),
-            <span class="ident">deps</span>: <span class="ident">deps</span>.<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">DepsRange::new</span>((<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>(), (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>())),
-            <span class="ident">extra</span>: <span class="ident">extra</span>.<span class="ident">unwrap_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">ValueRange::new</span>((<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>(), (<span class="number">0</span>..<span class="number">0</span>).<span class="ident">into</span>())),
-            <span class="ident">other</span>,
+        <span class="prelude-val">Ok</span>(DocChangeColumns {
+            actor: actor.unwrap_or_else(|| (<span class="number">0</span>..<span class="number">0</span>).into()),
+            seq: seq.unwrap_or_else(|| (<span class="number">0</span>..<span class="number">0</span>).into()),
+            max_op: max_op.unwrap_or_else(|| (<span class="number">0</span>..<span class="number">0</span>).into()),
+            time: time.unwrap_or_else(|| (<span class="number">0</span>..<span class="number">0</span>).into()),
+            message: message.unwrap_or_else(|| (<span class="number">0</span>..<span class="number">0</span>).into()),
+            deps: deps.unwrap_or_else(|| DepsRange::new((<span class="number">0</span>..<span class="number">0</span>).into(), (<span class="number">0</span>..<span class="number">0</span>).into())),
+            extra: extra.unwrap_or_else(|| ValueRange::new((<span class="number">0</span>..<span class="number">0</span>).into(), (<span class="number">0</span>..<span class="number">0</span>).into())),
+            other,
         })
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.64.0 (a55dd71d5 2022-09-19)" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>
