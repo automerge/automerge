@@ -234,7 +234,7 @@ impl From<&[ChangeHash]> for AR {
     fn from(value: &[ChangeHash]) -> Self {
         AR(value
             .iter()
-            .map(|h| JsValue::from_str(&hex::encode(&h.0)))
+            .map(|h| JsValue::from_str(&hex::encode(h.0)))
             .collect())
     }
 }
@@ -257,7 +257,7 @@ impl From<&[am::sync::Have]> for AR {
                 let last_sync: Array = have
                     .last_sync
                     .iter()
-                    .map(|h| JsValue::from_str(&hex::encode(&h.0)))
+                    .map(|h| JsValue::from_str(&hex::encode(h.0)))
                     .collect();
                 // FIXME - the clone and the unwrap here shouldnt be needed - look at into_bytes()
                 let bloom = Uint8Array::from(have.bloom.to_bytes().as_slice());

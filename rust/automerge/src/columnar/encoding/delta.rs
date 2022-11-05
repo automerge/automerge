@@ -22,7 +22,7 @@ impl<S: Sink> DeltaEncoder<S> {
 
     pub(crate) fn append_value(&mut self, value: i64) {
         self.rle
-            .append_value(&(value.saturating_sub(self.absolute_value)));
+            .append_value(value.saturating_sub(self.absolute_value));
         self.absolute_value = value;
     }
 

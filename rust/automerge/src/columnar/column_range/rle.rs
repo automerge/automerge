@@ -147,7 +147,7 @@ mod tests {
         let mut buf = Vec::with_capacity(vals.len() * 3);
         let mut encoder: RleEncoder<_, u64> = RleEncoder::new(&mut buf);
         for val in vals {
-            encoder.append_value(&val)
+            encoder.append_value(val)
         }
         let (_, total_slice_len) = encoder.finish();
         let mut decoder: RleDecoder<'_, u64> =
@@ -167,7 +167,7 @@ mod tests {
         for val in vals.iter().take(4) {
             encoder.append_value(val)
         }
-        encoder.append_value(&5);
+        encoder.append_value(5);
         for val in vals.iter().skip(4) {
             encoder.append_value(val);
         }

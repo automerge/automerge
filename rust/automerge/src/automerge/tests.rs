@@ -192,14 +192,14 @@ fn test_props_vals_at() -> Result<(), AutomergeError> {
     assert!(doc.keys_at(ROOT, &heads1).collect_vec() == vec!["prop1".to_owned()]);
     assert_eq!(doc.length_at(ROOT, &heads1), 1);
     assert!(doc.get_at(ROOT, "prop1", &heads1)?.unwrap().0 == Value::str("val1"));
-    assert!(doc.get_at(ROOT, "prop2", &heads1)? == None);
-    assert!(doc.get_at(ROOT, "prop3", &heads1)? == None);
+    assert!(doc.get_at(ROOT, "prop2", &heads1)?.is_none());
+    assert!(doc.get_at(ROOT, "prop3", &heads1)?.is_none());
 
     assert!(doc.keys_at(ROOT, &heads2).collect_vec() == vec!["prop1".to_owned()]);
     assert_eq!(doc.length_at(ROOT, &heads2), 1);
     assert!(doc.get_at(ROOT, "prop1", &heads2)?.unwrap().0 == Value::str("val2"));
-    assert!(doc.get_at(ROOT, "prop2", &heads2)? == None);
-    assert!(doc.get_at(ROOT, "prop3", &heads2)? == None);
+    assert!(doc.get_at(ROOT, "prop2", &heads2)?.is_none());
+    assert!(doc.get_at(ROOT, "prop3", &heads2)?.is_none());
 
     assert!(
         doc.keys_at(ROOT, &heads3).collect_vec() == vec!["prop1".to_owned(), "prop2".to_owned()]
@@ -207,28 +207,28 @@ fn test_props_vals_at() -> Result<(), AutomergeError> {
     assert_eq!(doc.length_at(ROOT, &heads3), 2);
     assert!(doc.get_at(ROOT, "prop1", &heads3)?.unwrap().0 == Value::str("val2"));
     assert!(doc.get_at(ROOT, "prop2", &heads3)?.unwrap().0 == Value::str("val3"));
-    assert!(doc.get_at(ROOT, "prop3", &heads3)? == None);
+    assert!(doc.get_at(ROOT, "prop3", &heads3)?.is_none());
 
     assert!(doc.keys_at(ROOT, &heads4).collect_vec() == vec!["prop2".to_owned()]);
     assert_eq!(doc.length_at(ROOT, &heads4), 1);
-    assert!(doc.get_at(ROOT, "prop1", &heads4)? == None);
+    assert!(doc.get_at(ROOT, "prop1", &heads4)?.is_none());
     assert!(doc.get_at(ROOT, "prop2", &heads4)?.unwrap().0 == Value::str("val3"));
-    assert!(doc.get_at(ROOT, "prop3", &heads4)? == None);
+    assert!(doc.get_at(ROOT, "prop3", &heads4)?.is_none());
 
     assert!(
         doc.keys_at(ROOT, &heads5).collect_vec() == vec!["prop2".to_owned(), "prop3".to_owned()]
     );
     assert_eq!(doc.length_at(ROOT, &heads5), 2);
     assert_eq!(doc.length(ROOT), 2);
-    assert!(doc.get_at(ROOT, "prop1", &heads5)? == None);
+    assert!(doc.get_at(ROOT, "prop1", &heads5)?.is_none());
     assert!(doc.get_at(ROOT, "prop2", &heads5)?.unwrap().0 == Value::str("val3"));
     assert!(doc.get_at(ROOT, "prop3", &heads5)?.unwrap().0 == Value::str("val4"));
 
     assert_eq!(doc.keys_at(ROOT, &[]).count(), 0);
     assert_eq!(doc.length_at(ROOT, &[]), 0);
-    assert!(doc.get_at(ROOT, "prop1", &[])? == None);
-    assert!(doc.get_at(ROOT, "prop2", &[])? == None);
-    assert!(doc.get_at(ROOT, "prop3", &[])? == None);
+    assert!(doc.get_at(ROOT, "prop1", &[])?.is_none());
+    assert!(doc.get_at(ROOT, "prop2", &[])?.is_none());
+    assert!(doc.get_at(ROOT, "prop3", &[])?.is_none());
     Ok(())
 }
 

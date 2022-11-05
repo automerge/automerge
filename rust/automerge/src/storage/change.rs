@@ -467,7 +467,7 @@ impl ChangeBuilder<Set<NonZeroU64>, Set<ActorId>, Set<u64>, Set<i64>> {
         );
         leb128::write::unsigned(&mut data, other_actors.len() as u64).unwrap();
         for actor in other_actors.iter() {
-            length_prefixed_bytes(&actor, &mut data);
+            length_prefixed_bytes(actor, &mut data);
         }
         cols.raw_columns().write(&mut data);
         let ops_data_start = data.len();

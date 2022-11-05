@@ -9,7 +9,7 @@ impl Serialize for ChangeHash {
     where
         S: Serializer,
     {
-        hex::encode(&self.0).serialize(serializer)
+        hex::encode(self.0).serialize(serializer)
     }
 }
 

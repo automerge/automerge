@@ -610,14 +610,14 @@ impl AsRef<[u8]> for ChangeHash {
 impl fmt::Debug for ChangeHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("ChangeHash")
-            .field(&hex::encode(&self.0))
+            .field(&hex::encode(self.0))
             .finish()
     }
 }
 
 impl fmt::Display for ChangeHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", hex::encode(&self.0))
+        write!(f, "{}", hex::encode(self.0))
     }
 }
 

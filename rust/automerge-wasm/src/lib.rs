@@ -131,14 +131,14 @@ impl Automerge {
             commit_opts.set_time(time as i64);
         }
         let hash = self.doc.commit_with(commit_opts);
-        JsValue::from_str(&hex::encode(&hash.0))
+        JsValue::from_str(&hex::encode(hash.0))
     }
 
     pub fn merge(&mut self, other: &mut Automerge) -> Result<Array, JsValue> {
         let heads = self.doc.merge(&mut other.doc)?;
         let heads: Array = heads
             .iter()
-            .map(|h| JsValue::from_str(&hex::encode(&h.0)))
+            .map(|h| JsValue::from_str(&hex::encode(h.0)))
             .collect();
         Ok(heads)
     }
@@ -581,7 +581,7 @@ impl Automerge {
         let heads = self.doc.get_heads();
         let heads: Array = heads
             .iter()
-            .map(|h| JsValue::from_str(&hex::encode(&h.0)))
+            .map(|h| JsValue::from_str(&hex::encode(h.0)))
             .collect();
         heads
     }
@@ -611,7 +611,7 @@ impl Automerge {
         let deps = self.doc.get_missing_deps(&heads);
         let deps: Array = deps
             .iter()
-            .map(|h| JsValue::from_str(&hex::encode(&h.0)))
+            .map(|h| JsValue::from_str(&hex::encode(h.0)))
             .collect();
         Ok(deps)
     }
