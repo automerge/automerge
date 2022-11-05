@@ -7,11 +7,10 @@ use automerge::{
 // set up logging for all the tests
 use test_log::test;
 
-mod helpers;
 #[allow(unused_imports)]
-use helpers::{
-    mk_counter, new_doc, new_doc_with_actor, pretty_print, realize, realize_obj, sorted_actors,
-    RealizedObject,
+use automerge_test::{
+    assert_doc, assert_obj, list, map, mk_counter, new_doc, new_doc_with_actor, pretty_print,
+    realize, realize_obj, sorted_actors, RealizedObject,
 };
 use pretty_assertions::assert_eq;
 

@@ -40,17 +40,19 @@ pub fn sorted_actors() -> (automerge::ActorId, automerge::ActorId) {
 /// ## Constructing documents
 ///
 /// ```rust
-/// let mut doc = automerge::Automerge::new();
-/// let todos = doc.set(automerge::ROOT, "todos", automerge::Value::map()).unwrap().unwrap();
-/// let todo = doc.insert(todos, 0, automerge::Value::map()).unwrap();
-/// let title = doc.set(todo, "title", "water plants").unwrap().unwrap();
+/// # use automerge::transaction::Transactable;
+/// # use automerge_test::{assert_doc, map, list};
+/// let mut doc = automerge::AutoCommit::new();
+/// let todos = doc.put_object(automerge::ROOT, "todos", automerge::ObjType::List).unwrap();
+/// let todo = doc.insert_object(todos, 0, automerge::ObjType::Map).unwrap();
+/// let title = doc.put(todo, "title", "water plants").unwrap();
 ///
 /// assert_doc!(
-///     &doc,
+///     &doc.document(),
 ///     map!{
 ///         "todos" => {
 ///             list![
-///                 { map!{ title = "water plants" } }
+///                 { map!{ "title" => { "water plants" } } }
 ///             ]
 ///         }
 ///     }
@@ -63,13 +65,16 @@ pub fn sorted_actors() -> (automerge::ActorId, automerge::ActorId) {
 /// conflicting values we must capture all of these.
 ///
 /// ```rust
-/// let mut doc1 = automerge::Automerge::new();
-/// let mut doc2 = automerge::Automerge::new();
-/// let op1 = doc1.set(automerge::ROOT, "field", "one").unwrap().unwrap();
-/// let op2 = doc2.set(automerge::ROOT, "field", "two").unwrap().unwrap();
+/// # use automerge_test::{assert_doc, map};
+/// # use automerge::transaction::Transactable;
+///
+/// let mut doc1 = automerge::AutoCommit::new();
+/// let mut doc2 = automerge::AutoCommit::new();
+/// doc1.put(automerge::ROOT, "field", "one").unwrap();
+/// doc2.put(automerge::ROOT, "field", "two").unwrap();
 /// doc1.merge(&mut doc2);
 /// assert_doc!(
-///     &doc1,
+///     &doc1.document(),
 ///     map!{
 ///         "field" => {
 ///             "one",
@@ -81,16 +86,11 @@ pub fn sorted_actors() -> (automerge::ActorId, automerge::ActorId) {
 #[macro_export]
 macro_rules! assert_doc {
     ($doc: expr, $expected: expr) => {{
-        use $crate::helpers::realize;
+        use $crate::realize;
         let realized = realize($doc);
         let expected_obj = $expected.into();
         if realized != expected_obj {
-            let serde_right = serde_json::to_string_pretty(&realized).unwrap();
-            let serde_left = serde_json::to_string_pretty(&expected_obj).unwrap();
-            panic!(
-                "documents didn't match\n expected\n{}\n got\n{}",
-                &serde_left, &serde_right
-            );
+            $crate::pretty_panic(expected_obj, realized)
         }
     }};
 }
@@ -100,16 +100,11 @@ macro_rules! assert_doc {
 #[macro_export]
 macro_rules! assert_obj {
     ($doc: expr, $obj_id: expr, $prop: expr, $expected: expr) => {{
-        use $crate::helpers::realize_prop;
+        use $crate::realize_prop;
         let realized = realize_prop($doc, $obj_id, $prop);
         let expected_obj = $expected.into();
         if realized != expected_obj {
-            let serde_right = serde_json::to_string_pretty(&realized).unwrap();
-            let serde_left = serde_json::to_string_pretty(&expected_obj).unwrap();
-            panic!(
-                "documents didn't match\n expected\n{}\n got\n{}",
-                &serde_left, &serde_right
-            );
+            $crate::pretty_panic(expected_obj, realized)
         }
     }};
 }
@@ -118,12 +113,13 @@ macro_rules! assert_obj {
 /// the keys of the map, the inner set is the set of values for that key:
 ///
 /// ```
+/// # use automerge_test::map;
 /// map!{
 ///     "key" => {
 ///         "value1",
 ///         "value2",
 ///     }
-/// }
+/// };
 /// ```
 ///
 /// The map above would represent a map with a conflict on the "key" property. The values can be
@@ -134,6 +130,7 @@ macro_rules! map {
     (@inner { $($value:expr),* }) => {
         {
             use std::collections::BTreeSet;
+            use $crate::RealizedObject;
             let mut inner: BTreeSet<RealizedObject> = BTreeSet::new();
             $(
                 let _ = inner.insert($value.into());
@@ -145,6 +142,7 @@ macro_rules! map {
     ($($key:expr => $inner:tt),*) => {
         {
             use std::collections::{BTreeMap, BTreeSet};
+            use $crate::RealizedObject;
             let mut _map: BTreeMap<String, BTreeSet<RealizedObject>> = ::std::collections::BTreeMap::new();
             $(
                 let inner = map!(@inner $inner);
@@ -158,12 +156,13 @@ macro_rules! map {
 /// Construct `RealizedObject::Sequence`. This macro represents a sequence of values
 ///
 /// ```
+/// # use automerge_test::{list, RealizedObject};
 /// list![
 ///     {
 ///         "value1",
 ///         "value2",
 ///     }
-/// ]
+/// ];
 /// ```
 ///
 /// The list above would represent a list with a conflict on the 0 index. The values can be
@@ -178,6 +177,7 @@ macro_rules! list {
     (@inner { $($value:expr),* }) => {
         {
             use std::collections::BTreeSet;
+            use $crate::RealizedObject;
             let mut inner: BTreeSet<RealizedObject> = BTreeSet::new();
             $(
                 let _ = inner.insert($value.into());
@@ -473,7 +473,15 @@ impl From<Vec<u64>> for RealizedObject {
 }
 
 /// Pretty print the contents of a document
-#[allow(dead_code)]
 pub fn pretty_print(doc: &automerge::Automerge) {
     println!("{}", serde_json::to_string_pretty(&realize(doc)).unwrap())
+}
+
+pub fn pretty_panic(expected_obj: RealizedObject, realized: RealizedObject) {
+    let serde_right = serde_json::to_string_pretty(&realized).unwrap();
+    let serde_left = serde_json::to_string_pretty(&expected_obj).unwrap();
+    panic!(
+        "documents didn't match\n expected\n{}\n got\n{}",
+        &serde_left, &serde_right
+    );
 }
