@@ -365,7 +365,7 @@
         <span class="kw">let </span><span class="kw-2">mut </span>buf = Vec::with_capacity(vals.len() * <span class="number">3</span>);
         <span class="kw">let </span><span class="kw-2">mut </span>encoder: RleEncoder&lt;<span class="kw">_</span>, u64&gt; = RleEncoder::new(<span class="kw-2">&amp;mut </span>buf);
         <span class="kw">for </span>val <span class="kw">in </span>vals {
-            encoder.append_value(<span class="kw-2">&amp;</span>val)
+            encoder.append_value(val)
         }
         <span class="kw">let </span>(<span class="kw">_</span>, total_slice_len) = encoder.finish();
         <span class="kw">let </span><span class="kw-2">mut </span>decoder: RleDecoder&lt;<span class="lifetime">&#39;_</span>, u64&gt; =
@@ -385,7 +385,7 @@
         <span class="kw">for </span>val <span class="kw">in </span>vals.iter().take(<span class="number">4</span>) {
             encoder.append_value(val)
         }
-        encoder.append_value(<span class="kw-2">&amp;</span><span class="number">5</span>);
+        encoder.append_value(<span class="number">5</span>);
         <span class="kw">for </span>val <span class="kw">in </span>vals.iter().skip(<span class="number">4</span>) {
             encoder.append_value(val);
         }

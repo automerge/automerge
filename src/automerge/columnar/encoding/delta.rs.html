@@ -119,7 +119,7 @@
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>append_value(<span class="kw-2">&amp;mut </span><span class="self">self</span>, value: i64) {
         <span class="self">self</span>.rle
-            .append_value(<span class="kw-2">&amp;</span>(value.saturating_sub(<span class="self">self</span>.absolute_value)));
+            .append_value(value.saturating_sub(<span class="self">self</span>.absolute_value));
         <span class="self">self</span>.absolute_value = value;
     }
 

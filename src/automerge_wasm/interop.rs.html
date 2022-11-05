@@ -961,7 +961,7 @@
     <span class="kw">fn </span>from(value: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; <span class="self">Self </span>{
         AR(value
             .iter()
-            .map(|h| JsValue::from_str(<span class="kw-2">&amp;</span>hex::encode(<span class="kw-2">&amp;</span>h.<span class="number">0</span>)))
+            .map(|h| JsValue::from_str(<span class="kw-2">&amp;</span>hex::encode(h.<span class="number">0</span>)))
             .collect())
     }
 }
@@ -984,7 +984,7 @@
                 <span class="kw">let </span>last_sync: Array = have
                     .last_sync
                     .iter()
-                    .map(|h| JsValue::from_str(<span class="kw-2">&amp;</span>hex::encode(<span class="kw-2">&amp;</span>h.<span class="number">0</span>)))
+                    .map(|h| JsValue::from_str(<span class="kw-2">&amp;</span>hex::encode(h.<span class="number">0</span>)))
                     .collect();
                 <span class="comment">// FIXME - the clone and the unwrap here shouldnt be needed - look at into_bytes()
                 </span><span class="kw">let </span>bloom = Uint8Array::from(have.bloom.to_bytes().as_slice());

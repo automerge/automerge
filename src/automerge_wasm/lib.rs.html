@@ -1014,14 +1014,14 @@
             commit_opts.set_time(time <span class="kw">as </span>i64);
         }
         <span class="kw">let </span>hash = <span class="self">self</span>.doc.commit_with(commit_opts);
-        JsValue::from_str(<span class="kw-2">&amp;</span>hex::encode(<span class="kw-2">&amp;</span>hash.<span class="number">0</span>))
+        JsValue::from_str(<span class="kw-2">&amp;</span>hex::encode(hash.<span class="number">0</span>))
     }
 
     <span class="kw">pub fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;mut </span>Automerge) -&gt; <span class="prelude-ty">Result</span>&lt;Array, JsValue&gt; {
         <span class="kw">let </span>heads = <span class="self">self</span>.doc.merge(<span class="kw-2">&amp;mut </span>other.doc)<span class="question-mark">?</span>;
         <span class="kw">let </span>heads: Array = heads
             .iter()
-            .map(|h| JsValue::from_str(<span class="kw-2">&amp;</span>hex::encode(<span class="kw-2">&amp;</span>h.<span class="number">0</span>)))
+            .map(|h| JsValue::from_str(<span class="kw-2">&amp;</span>hex::encode(h.<span class="number">0</span>)))
             .collect();
         <span class="prelude-val">Ok</span>(heads)
     }
@@ -1464,7 +1464,7 @@
         <span class="kw">let </span>heads = <span class="self">self</span>.doc.get_heads();
         <span class="kw">let </span>heads: Array = heads
             .iter()
-            .map(|h| JsValue::from_str(<span class="kw-2">&amp;</span>hex::encode(<span class="kw-2">&amp;</span>h.<span class="number">0</span>)))
+            .map(|h| JsValue::from_str(<span class="kw-2">&amp;</span>hex::encode(h.<span class="number">0</span>)))
             .collect();
         heads
     }
@@ -1494,7 +1494,7 @@
         <span class="kw">let </span>deps = <span class="self">self</span>.doc.get_missing_deps(<span class="kw-2">&amp;</span>heads);
         <span class="kw">let </span>deps: Array = deps
             .iter()
-            .map(|h| JsValue::from_str(<span class="kw-2">&amp;</span>hex::encode(<span class="kw-2">&amp;</span>h.<span class="number">0</span>)))
+            .map(|h| JsValue::from_str(<span class="kw-2">&amp;</span>hex::encode(h.<span class="number">0</span>)))
             .collect();
         <span class="prelude-val">Ok</span>(deps)
     }

@@ -977,7 +977,7 @@
         );
         leb128::write::unsigned(<span class="kw-2">&amp;mut </span>data, other_actors.len() <span class="kw">as </span>u64).unwrap();
         <span class="kw">for </span>actor <span class="kw">in </span>other_actors.iter() {
-            length_prefixed_bytes(<span class="kw-2">&amp;</span>actor, <span class="kw-2">&amp;mut </span>data);
+            length_prefixed_bytes(actor, <span class="kw-2">&amp;mut </span>data);
         }
         cols.raw_columns().write(<span class="kw-2">&amp;mut </span>data);
         <span class="kw">let </span>ops_data_start = data.len();
