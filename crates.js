@@ -1,1 +1,1 @@
-window.ALL_CRATES = ["automerge","automerge_wasm"];
+window.ALL_CRATES = ["automerge","automerge_test","automerge_wasm"];
