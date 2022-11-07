@@ -4,7 +4,7 @@ use std::os::raw::c_char;
 
 use crate::change_hashes::AMchangeHashes;
 use crate::doc::{to_doc, to_doc_mut, to_obj_id, to_str, AMdoc};
-use crate::obj::{AMobjId, AMobjType};
+use crate::obj::{to_obj_type, AMobjId, AMobjType};
 use crate::result::{to_result, AMresult};
 
 pub mod item;
@@ -418,6 +418,7 @@ pub unsafe extern "C" fn AMlistPutNull(
 ///         `AMobjId` struct.
 /// \pre \p doc `!= NULL`.
 /// \pre `0 <=` \p index `<= AMobjSize(`\p obj_id`)` or \p index `== SIZE_MAX`.
+/// \pre \p obj_type != `AM_OBJ_TYPE_VOID`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
@@ -435,7 +436,7 @@ pub unsafe extern "C" fn AMlistPutObject(
     let doc = to_doc_mut!(doc);
     let obj_id = to_obj_id!(obj_id);
     let (index, insert) = adjust!(index, insert, doc.length(obj_id));
-    let object = obj_type.into();
+    let object = to_obj_type!(obj_type);
     to_result(if insert {
         doc.insert_object(obj_id, index, object)
     } else {
@@ -486,7 +487,8 @@ pub unsafe extern "C" fn AMlistPutStr(
 }
 
 /// \memberof AMdoc
-/// \brief Puts a Lamport timestamp as the value at an index in a list object.
+/// \brief Puts a *nix timestamp (milliseconds) as the value at an index in a
+///        list object.
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.

@@ -85,7 +85,7 @@ use crate::sync::{AMsyncMessage, AMsyncState};
 /// The variant discriminator.
 ///
 /// \var AMvalue::timestamp
-/// A Lamport timestamp.
+/// A *nix timestamp (milliseconds).
 ///
 /// \var AMvalue::uint
 /// A 64-bit unsigned integer.
@@ -133,7 +133,7 @@ pub enum AMvalue<'a> {
     SyncMessage(&'a AMsyncMessage),
     /// A synchronization state variant.
     SyncState(&'a mut AMsyncState),
-    /// A Lamport timestamp variant.
+    /// A *nix timestamp (milliseconds) variant.
     Timestamp(i64),
     /// A 64-bit unsigned integer variant.
     Uint(u64),

@@ -20,5 +20,6 @@ AMobjType AMobjType_tag(char const* obj_type_label) {
     if (!strcmp(obj_type_label, "List"))      return AM_OBJ_TYPE_LIST;
     else if (!strcmp(obj_type_label, "Map"))  return AM_OBJ_TYPE_MAP;
     else if (!strcmp(obj_type_label, "Text")) return AM_OBJ_TYPE_TEXT;
+    else if (!strcmp(obj_type_label, "Void")) return AM_OBJ_TYPE_VOID;
     else return 0;
 }

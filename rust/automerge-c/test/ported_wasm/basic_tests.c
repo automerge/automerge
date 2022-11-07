@@ -711,7 +711,7 @@ static void test_should_be_able_to_insert_objects_into_text(void** state) {
     assert_string_equal(AMpush(&stack,
                                AMtext(doc, text, NULL),
                                AM_VALUE_STR,
-                               cmocka_cb).str, "Hello \ufffcworld");
+                               cmocka_cb).str, u8"Hello \ufffcworld");
     /* assert.deepEqual(doc.getWithType(text, 6), ["map", obj]);             */
     assert_true(AMobjIdEqual(AMpush(&stack,
                                     AMlistGet(doc, text, 6, NULL),

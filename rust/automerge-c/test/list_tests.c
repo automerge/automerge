@@ -95,17 +95,33 @@ static void test_AMlistPutNull_ ## mode(void **state) {                       \
 #define static_void_test_AMlistPutObject(label, mode)                         \
 static void test_AMlistPutObject_ ## label ## _ ## mode(void **state) {       \
     GroupState* group_state = *state;                                         \
-    AMobjId const* const obj_id = AMpush(                                     \
-        &group_state->stack,                                                  \
-        AMlistPutObject(group_state->doc,                                     \
-                        AM_ROOT,                                              \
-                        0,                                                    \
-                        !strcmp(#mode, "insert"),                             \
-                        AMobjType_tag(#label)),                               \
-        AM_VALUE_OBJ_ID,                                                      \
-        cmocka_cb).obj_id;                                                    \
-    assert_non_null(obj_id);                                                  \
-    assert_int_equal(AMobjSize(group_state->doc, obj_id, NULL), 0);           \
+    AMobjType const obj_type = AMobjType_tag(#label);                         \
+    if (obj_type != AM_OBJ_TYPE_VOID) {                                       \
+        AMobjId const* const obj_id = AMpush(                                 \
+            &group_state->stack,                                              \
+            AMlistPutObject(group_state->doc,                                 \
+                            AM_ROOT,                                          \
+                            0,                                                \
+                            !strcmp(#mode, "insert"),                         \
+                            obj_type),                                        \
+            AM_VALUE_OBJ_ID,                                                  \
+            cmocka_cb).obj_id;                                                \
+        assert_non_null(obj_id);                                              \
+        assert_int_equal(AMobjObjType(group_state->doc, obj_id), obj_type);   \
+        assert_int_equal(AMobjSize(group_state->doc, obj_id, NULL), 0);       \
+    }                                                                         \
+    else {                                                                    \
+        AMpush(&group_state->stack,                                           \
+               AMlistPutObject(group_state->doc,                              \
+                               AM_ROOT,                                       \
+                               0,                                             \
+                               !strcmp(#mode, "insert"),                      \
+                               obj_type),                                     \
+               AM_VALUE_VOID,                                                 \
+               NULL);                                                         \
+        assert_int_not_equal(AMresultStatus(group_state->stack->result),      \
+                                            AM_STATUS_OK);                    \
+    }                                                                         \
     AMfree(AMpop(&group_state->stack));                                       \
 }
 
@@ -164,6 +180,10 @@ static_void_test_AMlistPutObject(Map, update)
 static_void_test_AMlistPutObject(Text, insert)
 
 static_void_test_AMlistPutObject(Text, update)
+
+static_void_test_AMlistPutObject(Void, insert)
+
+static_void_test_AMlistPutObject(Void, update)
 
 static_void_test_AMlistPutStr(insert, "Hello, world!")
 
@@ -365,6 +385,8 @@ int run_list_tests(void) {
         cmocka_unit_test(test_AMlistPutObject(Map, update)),
         cmocka_unit_test(test_AMlistPutObject(Text, insert)),
         cmocka_unit_test(test_AMlistPutObject(Text, update)),
+        cmocka_unit_test(test_AMlistPutObject(Void, insert)),
+        cmocka_unit_test(test_AMlistPutObject(Void, update)),
         cmocka_unit_test(test_AMlistPutStr(insert)),
         cmocka_unit_test(test_AMlistPutStr(update)),
         cmocka_unit_test(test_AMlistPut(Timestamp, insert)),

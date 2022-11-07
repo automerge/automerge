@@ -5,7 +5,7 @@ use std::os::raw::c_char;
 
 use crate::actor_id::AMactorId;
 use crate::change_hashes::AMchangeHashes;
-use crate::obj::AMobjId;
+use crate::obj::{AMobjId, AMobjType};
 use crate::result::{to_result, AMresult, AMvalue};
 use crate::sync::{to_sync_message, AMsyncMessage, AMsyncState};
 
@@ -143,11 +143,11 @@ pub unsafe extern "C" fn AMcreate(actor_id: *const AMactorId) -> *mut AMresult {
 
 /// \memberof AMdoc
 /// \brief Commits the current operations on a document with an optional
-///        message and/or time override as seconds since the epoch.
+///        message and/or *nix timestamp (milliseconds).
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] message A UTF-8 string or `NULL`.
-/// \param[in] time A pointer to a `time_t` value or `NULL`.
+/// \param[in] timestamp A pointer to a 64-bit integer or `NULL`.
 /// \return A pointer to an `AMresult` struct containing an `AMchangeHashes`
 ///         with one element.
 /// \pre \p doc `!= NULL`.
@@ -160,15 +160,15 @@ pub unsafe extern "C" fn AMcreate(actor_id: *const AMactorId) -> *mut AMresult {
 pub unsafe extern "C" fn AMcommit(
     doc: *mut AMdoc,
     message: *const c_char,
-    time: *const libc::time_t,
+    timestamp: *const i64,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let mut options = CommitOptions::default();
     if !message.is_null() {
         options.set_message(to_str(message));
     }
-    if let Some(time) = time.as_ref() {
-        options.set_time(*time);
+    if let Some(timestamp) = timestamp.as_ref() {
+        options.set_time(*timestamp);
     }
     to_result(doc.commit_with(options))
 }
@@ -543,6 +543,31 @@ pub unsafe extern "C" fn AMobjSize(
         }
     } else {
         0
+    }
+}
+
+/// \memberof AMdoc
+/// \brief Gets the type of an object.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
+/// \return An `AMobjType`.
+/// \pre \p doc `!= NULL`.
+/// \internal
+///
+/// # Safety
+/// doc must be a valid pointer to an AMdoc
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
+#[no_mangle]
+pub unsafe extern "C" fn AMobjObjType(doc: *const AMdoc, obj_id: *const AMobjId) -> AMobjType {
+    if let Some(doc) = doc.as_ref() {
+        let obj_id = to_obj_id!(obj_id);
+        match doc.object_type(obj_id) {
+            None => AMobjType::Void,
+            Some(obj_type) => obj_type.into(),
+        }
+    } else {
+        AMobjType::Void
     }
 }
 

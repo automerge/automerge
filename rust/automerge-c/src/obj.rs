@@ -7,6 +7,19 @@ use crate::actor_id::AMactorId;
 pub mod item;
 pub mod items;
 
+macro_rules! to_obj_type {
+    ($am_obj_type:expr) => {{
+        match $am_obj_type {
+            AMobjType::Map => am::ObjType::Map,
+            AMobjType::List => am::ObjType::List,
+            AMobjType::Text => am::ObjType::Text,
+            AMobjType::Void => return AMresult::err("Invalid AMobjType value").into(),
+        }
+    }};
+}
+
+pub(crate) use to_obj_type;
+
 /// \struct AMobjId
 /// \installed_headerfile
 /// \brief An object's unique identifier.
@@ -142,20 +155,23 @@ pub unsafe extern "C" fn AMobjIdIndex(obj_id: *const AMobjId) -> usize {
 /// \brief The type of an object value.
 #[repr(u8)]
 pub enum AMobjType {
+    /// A void.
+    /// \note This tag is unalphabetized to evaluate as false.
+    Void = 0,
     /// A list.
-    List = 1,
+    List,
     /// A key-value map.
     Map,
     /// A list of Unicode graphemes.
     Text,
 }
 
-impl From<AMobjType> for am::ObjType {
-    fn from(o: AMobjType) -> Self {
+impl From<am::ObjType> for AMobjType {
+    fn from(o: am::ObjType) -> Self {
         match o {
-            AMobjType::Map => am::ObjType::Map,
-            AMobjType::List => am::ObjType::List,
-            AMobjType::Text => am::ObjType::Text,
+            am::ObjType::Map | am::ObjType::Table => AMobjType::Map,
+            am::ObjType::List => AMobjType::List,
+            am::ObjType::Text => AMobjType::Text,
         }
     }
 }

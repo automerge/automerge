@@ -5,7 +5,7 @@ use std::os::raw::c_char;
 use crate::change_hashes::AMchangeHashes;
 use crate::doc::utils::to_str;
 use crate::doc::{to_doc, to_doc_mut, to_obj_id, AMdoc};
-use crate::obj::{AMobjId, AMobjType};
+use crate::obj::{to_obj_type, AMobjId, AMobjType};
 use crate::result::{to_result, AMresult};
 
 pub mod item;
@@ -268,6 +268,7 @@ pub unsafe extern "C" fn AMmapPutNull(
 ///         `AMobjId` struct.
 /// \pre \p doc `!= NULL`.
 /// \pre \p key `!= NULL`.
+/// \pre \p obj_type != `AM_OBJ_TYPE_VOID`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
@@ -283,7 +284,7 @@ pub unsafe extern "C" fn AMmapPutObject(
     obj_type: AMobjType,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
-    to_result(doc.put_object(to_obj_id!(obj_id), to_str(key), obj_type.into()))
+    to_result(doc.put_object(to_obj_id!(obj_id), to_str(key), to_obj_type!(obj_type)))
 }
 
 /// \memberof AMdoc
@@ -373,7 +374,8 @@ pub unsafe extern "C" fn AMmapPutStr(
 }
 
 /// \memberof AMdoc
-/// \brief Puts a Lamport timestamp as the value of a key in a map object.
+/// \brief Puts a *nix timestamp (milliseconds) as the value of a key in a map
+///        object.
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
