@@ -563,11 +563,11 @@ pub unsafe extern "C" fn AMobjObjType(doc: *const AMdoc, obj_id: *const AMobjId)
     if let Some(doc) = doc.as_ref() {
         let obj_id = to_obj_id!(obj_id);
         match doc.object_type(obj_id) {
-            None => AMobjType::Unknown,
+            None => AMobjType::Void,
             Some(obj_type) => obj_type.into(),
         }
     } else {
-        AMobjType::Unknown
+        AMobjType::Void
     }
 }
 

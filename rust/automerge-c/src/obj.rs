@@ -142,9 +142,9 @@ pub unsafe extern "C" fn AMobjIdIndex(obj_id: *const AMobjId) -> usize {
 /// \brief The type of an object value.
 #[repr(u8)]
 pub enum AMobjType {
-    /// An unknown type.
+    /// A void.
     /// \note This tag is unalphabetized to evaluate as false.
-    Unknown = 0,
+    Void = 0,
     /// A list.
     List,
     /// A key-value map.
@@ -156,9 +156,8 @@ pub enum AMobjType {
 impl From<am::ObjType> for AMobjType {
     fn from(o: am::ObjType) -> Self {
         match o {
-            am::ObjType::Map => AMobjType::Map,
+            am::ObjType::Map | am::ObjType::Table => AMobjType::Map,
             am::ObjType::List => AMobjType::List,
-            am::ObjType::Table => todo!(),
             am::ObjType::Text => AMobjType::Text,
         }
     }
@@ -170,7 +169,7 @@ impl From<AMobjType> for am::ObjType {
             AMobjType::Map => am::ObjType::Map,
             AMobjType::List => am::ObjType::List,
             AMobjType::Text => am::ObjType::Text,
-            AMobjType::Unknown => todo!(),
+            AMobjType::Void => todo!(),
         }
     }
 }
