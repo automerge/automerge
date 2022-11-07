@@ -186,6 +186,7 @@ static void test_insert_at_index(void** state) {
         AMlistPutObject(doc, AM_ROOT, 0, true, AM_OBJ_TYPE_LIST),
         AM_VALUE_OBJ_ID,
         cmocka_cb).obj_id;
+    assert_int_equal(AMobjObjType(doc, list), AM_OBJ_TYPE_LIST);
     /* Insert both at the same index. */
     AMfree(AMlistPutUint(doc, list, 0, true, 0));
     AMfree(AMlistPutUint(doc, list, 0, true, 1));

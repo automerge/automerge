@@ -5,7 +5,7 @@ use std::os::raw::c_char;
 
 use crate::actor_id::AMactorId;
 use crate::change_hashes::AMchangeHashes;
-use crate::obj::AMobjId;
+use crate::obj::{AMobjId, AMobjType};
 use crate::result::{to_result, AMresult, AMvalue};
 use crate::sync::{to_sync_message, AMsyncMessage, AMsyncState};
 
@@ -543,6 +543,31 @@ pub unsafe extern "C" fn AMobjSize(
         }
     } else {
         0
+    }
+}
+
+/// \memberof AMdoc
+/// \brief Gets the type of an object.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
+/// \return An `AMobjType`.
+/// \pre \p doc `!= NULL`.
+/// \internal
+///
+/// # Safety
+/// doc must be a valid pointer to an AMdoc
+/// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
+#[no_mangle]
+pub unsafe extern "C" fn AMobjObjType(doc: *const AMdoc, obj_id: *const AMobjId) -> AMobjType {
+    if let Some(doc) = doc.as_ref() {
+        let obj_id = to_obj_id!(obj_id);
+        match doc.object_type(obj_id) {
+            None => AMobjType::Unknown,
+            Some(obj_type) => obj_type.into(),
+        }
+    } else {
+        AMobjType::Unknown
     }
 }
 
