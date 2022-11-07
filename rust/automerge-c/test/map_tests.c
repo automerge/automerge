@@ -86,16 +86,31 @@ static void test_AMmapPutNull(void **state) {
 #define static_void_test_AMmapPutObject(label)                                \
 static void test_AMmapPutObject_ ## label(void **state) {                     \
     GroupState* group_state = *state;                                         \
-    AMobjId const* const obj_id = AMpush(                                     \
-        &group_state->stack,                                                  \
-        AMmapPutObject(group_state->doc,                                      \
-                       AM_ROOT,                                               \
-                       #label,                                                \
-                       AMobjType_tag(#label)),                                \
-        AM_VALUE_OBJ_ID,                                                      \
-        cmocka_cb).obj_id;                                                    \
-    assert_non_null(obj_id);                                                  \
-    assert_int_equal(AMobjSize(group_state->doc, obj_id, NULL), 0);           \
+    AMobjType const obj_type = AMobjType_tag(#label);                         \
+    if (obj_type != AM_OBJ_TYPE_VOID) {                                       \
+        AMobjId const* const obj_id = AMpush(                                 \
+            &group_state->stack,                                              \
+            AMmapPutObject(group_state->doc,                                  \
+                           AM_ROOT,                                           \
+                           #label,                                            \
+                           obj_type),                                         \
+            AM_VALUE_OBJ_ID,                                                  \
+            cmocka_cb).obj_id;                                                \
+        assert_non_null(obj_id);                                              \
+        assert_int_equal(AMobjObjType(group_state->doc, obj_id), obj_type);   \
+        assert_int_equal(AMobjSize(group_state->doc, obj_id, NULL), 0);       \
+    }                                                                         \
+    else {                                                                    \
+        AMpush(&group_state->stack,                                           \
+               AMmapPutObject(group_state->doc,                               \
+                              AM_ROOT,                                        \
+                              #label,                                         \
+                              obj_type),                                      \
+               AM_VALUE_VOID,                                                 \
+               NULL);                                                         \
+        assert_int_not_equal(AMresultStatus(group_state->stack->result),      \
+                                            AM_STATUS_OK);                    \
+    }                                                                         \
     AMfree(AMpop(&group_state->stack));                                       \
 }
 
@@ -125,6 +140,8 @@ static_void_test_AMmapPutObject(List)
 static_void_test_AMmapPutObject(Map)
 
 static_void_test_AMmapPutObject(Text)
+
+static_void_test_AMmapPutObject(Void)
 
 static_void_test_AMmapPut(Timestamp, timestamp, INT64_MAX)
 
@@ -1149,6 +1166,7 @@ int run_map_tests(void) {
         cmocka_unit_test(test_AMmapPutObject(List)),
         cmocka_unit_test(test_AMmapPutObject(Map)),
         cmocka_unit_test(test_AMmapPutObject(Text)),
+        cmocka_unit_test(test_AMmapPutObject(Void)),
         cmocka_unit_test(test_AMmapPutStr),
         cmocka_unit_test(test_AMmapPut(Timestamp)),
         cmocka_unit_test(test_AMmapPut(Uint)),
