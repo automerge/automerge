@@ -486,7 +486,7 @@ pub unsafe extern "C" fn AMlistPutStr(
 }
 
 /// \memberof AMdoc
-/// \brief Puts a Lamport timestamp as the value at an index in a list object.
+/// \brief Puts an epoch timestamp as the value at an index in a list object.
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.

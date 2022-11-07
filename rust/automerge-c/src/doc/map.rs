@@ -373,7 +373,7 @@ pub unsafe extern "C" fn AMmapPutStr(
 }
 
 /// \memberof AMdoc
-/// \brief Puts a Lamport timestamp as the value of a key in a map object.
+/// \brief Puts a epoch timestamp as the value of a key in a map object.
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
