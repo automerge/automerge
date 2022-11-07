@@ -3,9 +3,23 @@ use std::cell::RefCell;
 use std::ops::Deref;
 
 use crate::actor_id::AMactorId;
+use crate::result::AMresult;
 
 pub mod item;
 pub mod items;
+
+macro_rules! to_obj_type {
+    ($am_obj_type:expr) => {{
+        match $am_obj_type {
+            AMobjType::Map => am::ObjType::Map,
+            AMobjType::List => am::ObjType::List,
+            AMobjType::Text => am::ObjType::Text,
+            AMobjType::Void => return AMresult::err("Invalid AMobjType value").into(),
+        }
+    }};
+}
+
+pub(crate) use to_obj_type;
 
 /// \struct AMobjId
 /// \installed_headerfile
@@ -159,17 +173,6 @@ impl From<am::ObjType> for AMobjType {
             am::ObjType::Map | am::ObjType::Table => AMobjType::Map,
             am::ObjType::List => AMobjType::List,
             am::ObjType::Text => AMobjType::Text,
-        }
-    }
-}
-
-impl From<AMobjType> for am::ObjType {
-    fn from(o: AMobjType) -> Self {
-        match o {
-            AMobjType::Map => am::ObjType::Map,
-            AMobjType::List => am::ObjType::List,
-            AMobjType::Text => am::ObjType::Text,
-            AMobjType::Void => todo!(),
         }
     }
 }
