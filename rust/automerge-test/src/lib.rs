@@ -458,6 +458,12 @@ impl From<&str> for RealizedObject {
     }
 }
 
+impl From<f64> for RealizedObject {
+    fn from(f: f64) -> Self {
+        RealizedObject::Value(OrdScalarValue::F64(f.into()))
+    }
+}
+
 impl From<Vec<u64>> for RealizedObject {
     fn from(vals: Vec<u64>) -> Self {
         RealizedObject::Sequence(
