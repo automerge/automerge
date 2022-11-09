@@ -24,17 +24,17 @@
     jsonpointer "^5.0.0"
     leven "^3.1.0"
 
-"@automerge/automerge-wasm@0.1.9":
-  version "0.1.9"
-  resolved "http://localhost:4873/@automerge%2fautomerge-wasm/-/automerge-wasm-0.1.9.tgz#b2def5e8b643f1802bc696843b7755dc444dc2eb"
-  integrity sha512-S+sjJUJ3aPn2F37vKYAzKxz8CDgbHpOOGVjKSgkLjkAqe1pQ+wp4BpiELXafX73w8DVIrGx1zzru4w3t+Eo8gw==
+"@automerge/automerge-wasm@0.1.12":
+  version "0.1.12"
+  resolved "https://registry.yarnpkg.com/@automerge/automerge-wasm/-/automerge-wasm-0.1.12.tgz#8ce25255d95d4ed6fb387de6858f7b7b7e2ed4a9"
+  integrity sha512-/xjX1217QYJ+QaoT6iHQw4hGNUIoc3xc65c9eCnfX5v9J9BkTOl05p2Cnr51O2rPc/M6TqZLmlvpvNVdcH9JpA==
 
-"@automerge/automerge@2.0.0-alpha.4":
-  version "2.0.0-alpha.4"
-  resolved "http://localhost:4873/@automerge%2fautomerge/-/automerge-2.0.0-alpha.4.tgz#df406f5364960a4d21040044da55ebd47406ea3a"
-  integrity sha512-PVRD1dmLy0U4GttyMvlWr99wyr6xvskJbOkxJDHnp+W2VAFfcqa4QKouaFbJ4W3iIsYX8DfQJ+uhRxa6UnvkHg==
+"@automerge/automerge@2.0.0-alpha.7":
+  version "2.0.0-alpha.7"
+  resolved "https://registry.yarnpkg.com/@automerge/automerge/-/automerge-2.0.0-alpha.7.tgz#2ee220d51bcd796074a18af74eeabb5f177e1f36"
+  integrity sha512-Wd2/GNeqtBybUtXclEE7bWBmmEkhv3q2ITQmLh18V0VvMPbqMBpcOKYzQFnKCyiPyRe5XcYeQAyGyunhE5V0ug==
   dependencies:
-    "@automerge/automerge-wasm" "0.1.9"
+    "@automerge/automerge-wasm" "0.1.12"
     uuid "^8.3"
 
 "@babel/code-frame@^7.0.0", "@babel/code-frame@^7.10.4", "@babel/code-frame@^7.12.13", "@babel/code-frame@^7.16.0", "@babel/code-frame@^7.18.6", "@babel/code-frame@^7.8.3":
@@ -2827,7 +2827,7 @@ bfj@^7.0.2:
 
 big.js@^5.2.2:
   version "5.2.2"
-  resolved "http://localhost:4873/big.js/-/big.js-5.2.2.tgz#65f0af382f578bcdc742bd9c281e9cb2d7768328"
+  resolved "https://registry.yarnpkg.com/big.js/-/big.js-5.2.2.tgz#65f0af382f578bcdc742bd9c281e9cb2d7768328"
   integrity sha512-vyL2OymJxmarO8gxMr0mhChsO9QGwhynfuu4+MHTAW6czfq9humCB7rKpUjDd9YUiDPU4mzpyupFSvOClAwbmQ==
 
 binary-extensions@^2.0.0:
@@ -3817,7 +3817,7 @@ emoji-regex@^9.2.2:
 
 emojis-list@^3.0.0:
   version "3.0.0"
-  resolved "http://localhost:4873/emojis-list/-/emojis-list-3.0.0.tgz#5570662046ad29e2e916e71aae260abdff4f6a78"
+  resolved "https://registry.yarnpkg.com/emojis-list/-/emojis-list-3.0.0.tgz#5570662046ad29e2e916e71aae260abdff4f6a78"
   integrity sha512-/kyM18EfinwXZbno9FyUGeFh87KC8HRQBQGildHZbEuRyWFOmv1U10o9BBp8XVZDVNNuQKyIGIu5ZYAAXJ0V2Q==
 
 encodeurl@~1.0.2:
@@ -5942,9 +5942,9 @@ loader-runner@^4.2.0:
   integrity sha512-3R/1M+yS3j5ou80Me59j7F9IMs4PXs3VqRrm0TU3AbKPxlmpoY1TNscJV/oGJXo8qCatFGTfDbY6W6ipGOYXfg==
 
 loader-utils@^2.0.0:
-  version "2.0.2"
-  resolved "http://localhost:4873/loader-utils/-/loader-utils-2.0.2.tgz#d6e3b4fb81870721ae4e0868ab11dd638368c129"
-  integrity sha512-TM57VeHptv569d/GKh6TAYdzKblwDNiumOdkFnejjD0XwTH87K90w3O7AiJRqdQoXygvi1VQTJTLGhJl7WqA7A==
+  version "2.0.3"
+  resolved "https://registry.yarnpkg.com/loader-utils/-/loader-utils-2.0.3.tgz#d4b15b8504c63d1fc3f2ade52d41bc8459d6ede1"
+  integrity sha512-THWqIsn8QRnvLl0shHYVBN9syumU8pYWEHPTmkiVGd+7K5eFNVSY6AJhRvgGF70gg1Dz+l/k8WicvFCxdEs60A==
   dependencies:
     big.js "^5.2.2"
     emojis-list "^3.0.0"
