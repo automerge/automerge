@@ -39,6 +39,7 @@ features = ["console"]
 optional = true
 
 [dev-dependencies]
+rand = { version = "^0.8.4", features=["small_rng"] }
 pretty_assertions = "1.0.0"
 proptest = { version = "^1.0.0", default-features = false, features = ["std"] }
 serde_json = { version = "^1.0.73", features=["float_roundtrip"], default-features=true }
