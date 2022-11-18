@@ -6,41 +6,45 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum AutomergeError {
-    #[error("id was not an object id")]
-    NotAnObject,
-    #[error("invalid obj id format `{0}`")]
-    InvalidObjIdFormat(String),
-    #[error("invalid obj id `{0}`")]
-    InvalidObjId(String),
-    #[error("key must not be an empty string")]
-    EmptyStringKey,
-    #[error("invalid seq {0}")]
-    InvalidSeq(u64),
-    #[error("index {0} is out of bounds")]
-    InvalidIndex(usize),
+    #[error(transparent)]
+    Clocks(#[from] crate::clocks::MissingDep),
+    #[error("failed to load compressed data: {0}")]
+    Deflate(#[source] std::io::Error),
     #[error("duplicate seq {0} found for actor {1}")]
     DuplicateSeqNumber(u64, ActorId),
+    #[error("key must not be an empty string")]
+    EmptyStringKey,
+    #[error("general failure")]
+    Fail,
+    #[error("invalid actor ID `{0}`")]
+    InvalidActorId(String),
+    #[error("invalid UTF-8 character at {0}")]
+    InvalidCharacter(usize),
     #[error("invalid hash {0}")]
     InvalidHash(ChangeHash),
-    #[error("hash {0} does not correspond to a change in this document")]
-    MissingHash(ChangeHash),
-    #[error("increment operations must be against a counter value")]
-    MissingCounter,
+    #[error("invalid seq {0}")]
+    InvalidIndex(usize),
+    #[error("invalid obj id `{0}`")]
+    InvalidObjId(String),
+    #[error("invalid obj id format `{0}`")]
+    InvalidObjIdFormat(String),
+    #[error("invalid seq {0}")]
+    InvalidSeq(u64),
     #[error("invalid type of value, expected `{expected}` but received `{unexpected}`")]
     InvalidValueType {
         expected: String,
         unexpected: String,
     },
-    #[error("general failure")]
-    Fail,
     #[error(transparent)]
     Load(#[from] LoadError),
-    #[error("failed to load compressed data: {0}")]
-    Deflate(#[source] std::io::Error),
+    #[error("increment operations must be against a counter value")]
+    MissingCounter,
+     #[error("hash {0} does not correspond to a change in this document")]
+    MissingHash(ChangeHash),
     #[error("compressed chunk was not a change")]
     NonChangeCompressed,
-    #[error(transparent)]
-    Clocks(#[from] crate::clocks::MissingDep),
+    #[error("id was not an object id")]
+    NotAnObject,
 }
 
 #[cfg(feature = "wasm")]
