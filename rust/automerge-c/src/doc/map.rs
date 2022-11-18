@@ -419,11 +419,7 @@ pub unsafe extern "C" fn AMmapPutTimestamp(
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let key = to_str!(key);
-    to_result(doc.put(
-        to_obj_id!(obj_id),
-        key,
-        am::ScalarValue::Timestamp(value),
-    ))
+    to_result(doc.put(to_obj_id!(obj_id), key, am::ScalarValue::Timestamp(value)))
 }
 
 /// \memberof AMdoc

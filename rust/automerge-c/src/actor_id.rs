@@ -40,9 +40,12 @@ impl AMactorId {
         match hex_str.as_mut() {
             None => {
                 let hex_string = unsafe { (*self.body).to_hex_string() };
-                hex_str.insert(hex_string.into_boxed_str()).as_bytes().into()
+                hex_str
+                    .insert(hex_string.into_boxed_str())
+                    .as_bytes()
+                    .into()
             }
-            Some(hex_str) => hex_str.as_bytes().into()
+            Some(hex_str) => hex_str.as_bytes().into(),
         }
     }
 }
@@ -154,13 +157,12 @@ pub unsafe extern "C" fn AMactorIdInitBytes(src: *const u8, count: usize) -> *mu
 /// hex_str must be a valid pointer to an AMbyteSpan
 #[no_mangle]
 pub unsafe extern "C" fn AMactorIdInitStr(hex_str: AMbyteSpan) -> *mut AMresult {
-   use am::AutomergeError::InvalidActorId;
-    // use am::AutomergeError::InvalidCharacter;
+    use am::AutomergeError::InvalidActorId;
 
     to_result(match (&hex_str).try_into() {
         Ok(s) => match am::ActorId::from_str(s) {
             Ok(actor_id) => Ok(actor_id),
-            Err(_) => Err(InvalidActorId(String::from(s)))
+            Err(_) => Err(InvalidActorId(String::from(s))),
         },
         Err(e) => Err(e),
     })

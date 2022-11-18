@@ -39,7 +39,7 @@ pub enum AutomergeError {
     Load(#[from] LoadError),
     #[error("increment operations must be against a counter value")]
     MissingCounter,
-     #[error("hash {0} does not correspond to a change in this document")]
+    #[error("hash {0} does not correspond to a change in this document")]
     MissingHash(ChangeHash),
     #[error("compressed chunk was not a change")]
     NonChangeCompressed,

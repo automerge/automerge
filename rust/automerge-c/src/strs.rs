@@ -267,7 +267,7 @@ pub unsafe extern "C" fn AMstrsCmp(strs1: *const AMstrs, strs2: *const AMstrs) -
 pub unsafe extern "C" fn AMstrsNext(strs: *mut AMstrs, n: isize) -> AMbyteSpan {
     if let Some(strs) = strs.as_mut() {
         if let Some(key) = strs.next(n) {
-            return key
+            return key;
         }
     }
     Default::default()

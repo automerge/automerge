@@ -49,8 +49,7 @@ impl PartialEq for AMbyteSpan {
     fn eq(&self, other: &Self) -> bool {
         if self.count != other.count {
             return false;
-        }
-        else if self.src == other.src {
+        } else if self.src == other.src {
             return true;
         }
         let slice = unsafe { std::slice::from_raw_parts(self.src, self.count) };

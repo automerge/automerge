@@ -34,7 +34,7 @@ impl AMchange {
 
     pub fn message(&self) -> AMbyteSpan {
         if let Some(message) = unsafe { (*self.body).message() } {
-            return message.as_str().as_bytes().into()
+            return message.as_str().as_bytes().into();
         }
         Default::default()
     }
