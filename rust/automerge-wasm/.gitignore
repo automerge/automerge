@@ -1,5 +1,6 @@
 /node_modules
 /bundler
 /nodejs
+/deno
 Cargo.lock
 yarn.lock
