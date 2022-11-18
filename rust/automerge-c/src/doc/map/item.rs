@@ -21,7 +21,7 @@ impl AMmapItem {
         Self {
             key: key.to_string(),
             obj_id: AMobjId::new(obj_id),
-            value: value,
+            value,
         }
     }
 }
