@@ -254,6 +254,7 @@ pub unsafe extern "C" fn AMchangeHashesCmp(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// src must be an AMbyteSpan array of size `>= count`
 #[no_mangle]
@@ -302,7 +303,7 @@ pub unsafe extern "C" fn AMchangeHashesNext(
             return change_hash.into();
         }
     }
-    AMbyteSpan::default()
+    Default::default()
 }
 
 /// \memberof AMchangeHashes
@@ -331,7 +332,7 @@ pub unsafe extern "C" fn AMchangeHashesPrev(
             return change_hash.into();
         }
     }
-    AMbyteSpan::default()
+    Default::default()
 }
 
 /// \memberof AMchangeHashes
@@ -372,7 +373,7 @@ pub unsafe extern "C" fn AMchangeHashesReversed(
     if let Some(change_hashes) = change_hashes.as_ref() {
         change_hashes.reversed()
     } else {
-        AMchangeHashes::default()
+        Default::default()
     }
 }
 
@@ -394,6 +395,6 @@ pub unsafe extern "C" fn AMchangeHashesRewound(
     if let Some(change_hashes) = change_hashes.as_ref() {
         change_hashes.rewound()
     } else {
-        AMchangeHashes::default()
+        Default::default()
     }
 }

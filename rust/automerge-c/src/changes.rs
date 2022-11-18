@@ -268,6 +268,7 @@ pub unsafe extern "C" fn AMchangesEqual(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// src must be an AMbyteSpan array of size `>= count`
 #[no_mangle]
@@ -373,7 +374,7 @@ pub unsafe extern "C" fn AMchangesReversed(changes: *const AMchanges) -> AMchang
     if let Some(changes) = changes.as_ref() {
         changes.reversed()
     } else {
-        AMchanges::default()
+        Default::default()
     }
 }
 
@@ -393,6 +394,6 @@ pub unsafe extern "C" fn AMchangesRewound(changes: *const AMchanges) -> AMchange
     if let Some(changes) = changes.as_ref() {
         changes.rewound()
     } else {
-        AMchanges::default()
+        Default::default()
     }
 }

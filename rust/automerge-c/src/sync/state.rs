@@ -67,6 +67,7 @@ impl From<AMsyncState> for *mut AMsyncState {
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// src must be a byte array of size `>= count`
 #[no_mangle]
@@ -86,6 +87,7 @@ pub unsafe extern "C" fn AMsyncStateDecode(src: *const u8, count: usize) -> *mut
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// sync_state must be a valid pointer to an AMsyncState
 #[no_mangle]
@@ -146,7 +148,7 @@ pub unsafe extern "C" fn AMsyncStateSharedHeads(sync_state: *const AMsyncState) 
     if let Some(sync_state) = sync_state.as_ref() {
         AMchangeHashes::new(&sync_state.as_ref().shared_heads)
     } else {
-        AMchangeHashes::default()
+        Default::default()
     }
 }
 
@@ -167,7 +169,7 @@ pub unsafe extern "C" fn AMsyncStateLastSentHeads(
     if let Some(sync_state) = sync_state.as_ref() {
         AMchangeHashes::new(&sync_state.as_ref().last_sent_heads)
     } else {
-        AMchangeHashes::default()
+        Default::default()
     }
 }
 
@@ -197,7 +199,7 @@ pub unsafe extern "C" fn AMsyncStateTheirHaves(
         };
     };
     *has_value = false;
-    AMsyncHaves::default()
+    Default::default()
 }
 
 /// \memberof AMsyncState
@@ -227,7 +229,7 @@ pub unsafe extern "C" fn AMsyncStateTheirHeads(
         }
     };
     *has_value = false;
-    AMchangeHashes::default()
+    Default::default()
 }
 
 /// \memberof AMsyncState
@@ -257,5 +259,5 @@ pub unsafe extern "C" fn AMsyncStateTheirNeeds(
         }
     };
     *has_value = false;
-    AMchangeHashes::default()
+    Default::default()
 }

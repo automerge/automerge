@@ -353,7 +353,7 @@ pub unsafe extern "C" fn AMsyncHavesReversed(sync_haves: *const AMsyncHaves) -> 
     if let Some(sync_haves) = sync_haves.as_ref() {
         sync_haves.reversed()
     } else {
-        AMsyncHaves::default()
+        Default::default()
     }
 }
 
@@ -373,6 +373,6 @@ pub unsafe extern "C" fn AMsyncHavesRewound(sync_haves: *const AMsyncHaves) -> A
     if let Some(sync_haves) = sync_haves.as_ref() {
         sync_haves.rewound()
     } else {
-        AMsyncHaves::default()
+        Default::default()
     }
 }

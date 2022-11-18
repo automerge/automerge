@@ -316,7 +316,7 @@ pub unsafe extern "C" fn AMmapItemsReversed(map_items: *const AMmapItems) -> AMm
     if let Some(map_items) = map_items.as_ref() {
         map_items.reversed()
     } else {
-        AMmapItems::default()
+        Default::default()
     }
 }
 
@@ -335,6 +335,6 @@ pub unsafe extern "C" fn AMmapItemsRewound(map_items: *const AMmapItems) -> AMma
     if let Some(map_items) = map_items.as_ref() {
         map_items.rewound()
     } else {
-        AMmapItems::default()
+        Default::default()
     }
 }

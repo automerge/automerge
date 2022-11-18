@@ -323,7 +323,7 @@ pub unsafe extern "C" fn AMlistItemsReversed(list_items: *const AMlistItems) -> 
     if let Some(list_items) = list_items.as_ref() {
         list_items.reversed()
     } else {
-        AMlistItems::default()
+        Default::default()
     }
 }
 
@@ -343,6 +343,6 @@ pub unsafe extern "C" fn AMlistItemsRewound(list_items: *const AMlistItems) -> A
     if let Some(list_items) = list_items.as_ref() {
         list_items.rewound()
     } else {
-        AMlistItems::default()
+        Default::default()
     }
 }

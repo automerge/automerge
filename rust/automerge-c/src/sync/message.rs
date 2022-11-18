@@ -65,7 +65,7 @@ pub unsafe extern "C" fn AMsyncMessageChanges(sync_message: *const AMsyncMessage
             &mut sync_message.changes_storage.borrow_mut(),
         )
     } else {
-        AMchanges::default()
+        Default::default()
     }
 }
 
@@ -81,6 +81,7 @@ pub unsafe extern "C" fn AMsyncMessageChanges(sync_message: *const AMsyncMessage
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// src must be a byte array of size `>= count`
 #[no_mangle]
@@ -100,6 +101,7 @@ pub unsafe extern "C" fn AMsyncMessageDecode(src: *const u8, count: usize) -> *m
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// sync_message must be a valid pointer to an AMsyncMessage
 #[no_mangle]
@@ -126,7 +128,7 @@ pub unsafe extern "C" fn AMsyncMessageHaves(sync_message: *const AMsyncMessage) 
             &mut sync_message.haves_storage.borrow_mut(),
         )
     } else {
-        AMsyncHaves::default()
+        Default::default()
     }
 }
 
@@ -145,7 +147,7 @@ pub unsafe extern "C" fn AMsyncMessageHeads(sync_message: *const AMsyncMessage) 
     if let Some(sync_message) = sync_message.as_ref() {
         AMchangeHashes::new(&sync_message.as_ref().heads)
     } else {
-        AMchangeHashes::default()
+        Default::default()
     }
 }
 
@@ -165,6 +167,6 @@ pub unsafe extern "C" fn AMsyncMessageNeeds(sync_message: *const AMsyncMessage) 
     if let Some(sync_message) = sync_message.as_ref() {
         AMchangeHashes::new(&sync_message.as_ref().need)
     } else {
-        AMchangeHashes::default()
+        Default::default()
     }
 }
