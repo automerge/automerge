@@ -23,14 +23,14 @@ static int setup(void** state) {
     TestState* test_state = test_calloc(1, sizeof(TestState));
     test_state->n1 = AMpush(&test_state->stack,
                             AMcreate(AMpush(&test_state->stack,
-                                            AMactorIdInitStr("01234567"),
+                                            AMactorIdInitStr(AMstr("01234567")),
                                             AM_VALUE_ACTOR_ID,
                                             cmocka_cb).actor_id),
                             AM_VALUE_DOC,
                             cmocka_cb).doc;
     test_state->n2 = AMpush(&test_state->stack,
                             AMcreate(AMpush(&test_state->stack,
-                                            AMactorIdInitStr("89abcdef"),
+                                            AMactorIdInitStr(AMstr("89abcdef")),
                                             AM_VALUE_ACTOR_ID,
                                             cmocka_cb).actor_id),
                             AM_VALUE_DOC,
@@ -166,18 +166,18 @@ static void test_repos_with_equal_heads_do_not_need_a_reply_message(void **state
     AMobjId const* const list = AMpush(&test_state->stack,
                                        AMmapPutObject(test_state->n1,
                                                       AM_ROOT,
-                                                      "n",
+                                                      AMstr("n"),
                                                       AM_OBJ_TYPE_LIST),
                                        AM_VALUE_OBJ_ID,
                                        cmocka_cb).obj_id;
     /* n1.commit("", 0)                                                      */
-    AMfree(AMcommit(test_state->n1, "", &TIME_0));
+    AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* for (let i = 0; i < 10; i++) {                                        */
     for (size_t i = 0; i != 10; ++i) {
         /* n1.insert(list, i, i)                                             */
         AMfree(AMlistPutUint(test_state->n1, AM_ROOT, i, true, i));
         /* n1.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n1, "", &TIME_0));
+        AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
     /* n2.applyChanges(n1.getChanges([]))                                    */
@@ -229,17 +229,17 @@ static void test_n1_should_offer_all_changes_to_n2_when_starting_from_nothing(vo
     /* const list = n1.putObject("_root", "n", [])                           */
     AMobjId const* const list = AMpush(
         &test_state->stack,
-        AMmapPutObject(test_state->n1, AM_ROOT, "n", AM_OBJ_TYPE_LIST),
+        AMmapPutObject(test_state->n1, AM_ROOT, AMstr("n"), AM_OBJ_TYPE_LIST),
         AM_VALUE_OBJ_ID,
         cmocka_cb).obj_id;
     /* n1.commit("", 0)                                                      */
-    AMfree(AMcommit(test_state->n1, "", &TIME_0));
+    AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* for (let i = 0; i < 10; i++) {                                        */
     for (size_t i = 0; i != 10; ++i) {
         /* n1.insert(list, i, i)                                             */
         AMfree(AMlistPutUint(test_state->n1, AM_ROOT, i, true, i));
         /* n1.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n1, "", &TIME_0));
+        AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
     /*                                                                       */
@@ -262,17 +262,17 @@ static void test_should_sync_peers_where_one_has_commits_the_other_does_not(void
     /* const list = n1.putObject("_root", "n", [])                           */
     AMobjId const* const list = AMpush(
         &test_state->stack,
-        AMmapPutObject(test_state->n1, AM_ROOT, "n", AM_OBJ_TYPE_LIST),
+        AMmapPutObject(test_state->n1, AM_ROOT, AMstr("n"), AM_OBJ_TYPE_LIST),
         AM_VALUE_OBJ_ID,
         cmocka_cb).obj_id;
     /* n1.commit("", 0)                                                      */
-    AMfree(AMcommit(test_state->n1, "", &TIME_0));
+    AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* for (let i = 0; i < 10; i++) {                                        */
     for (size_t i = 0; i != 10; ++i) {
         /* n1.insert(list, i, i)                                             */
         AMfree(AMlistPutUint(test_state->n1, AM_ROOT, i, true, i));
         /* n1.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n1, "", &TIME_0));
+        AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
     /*                                                                       */
@@ -296,9 +296,9 @@ static void test_should_work_with_prior_sync_state(void **state) {
     /* for (let i = 0; i < 5; i++) {                                         */
     for (size_t i = 0; i != 5; ++i) {
         /* n1.put("_root", "x", i)                                           */
-        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, "x", i));
+        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i));
         /* n1.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n1, "", &TIME_0));
+        AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
     /*                                                                       */
@@ -308,9 +308,9 @@ static void test_should_work_with_prior_sync_state(void **state) {
     /* for (let i = 5; i < 10; i++) {                                        */
     for (size_t i = 5; i != 10; ++i) {
         /* n1.put("_root", "x", i)                                           */
-        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, "x", i));
+        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i));
         /* n1.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n1, "", &TIME_0));
+        AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
     /*                                                                       */
@@ -331,11 +331,11 @@ static void test_should_not_generate_messages_once_synced(void **state) {
        const s1 = initSyncState(), s2 = initSyncState()                      */
     TestState* test_state = *state;
     AMfree(AMsetActorId(test_state->n1, AMpush(&test_state->stack,
-                                               AMactorIdInitStr("abc123"),
+                                               AMactorIdInitStr(AMstr("abc123")),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
     AMfree(AMsetActorId(test_state->n2, AMpush(&test_state->stack,
-                                               AMactorIdInitStr("def456"),
+                                               AMactorIdInitStr(AMstr("def456")),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
     /*                                                                       */
@@ -343,17 +343,17 @@ static void test_should_not_generate_messages_once_synced(void **state) {
        for (let i = 0; i < 5; i++) {                                         */
     for (size_t i = 0; i != 5; ++i) {
         // n1.put("_root", "x", i)                                           */
-        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, "x", i));
+        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i));
         // n1.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n1, "", &TIME_0));
+        AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
     /* for (let i = 0; i < 5; i++) {                                         */
     for (size_t i = 0; i != 5; ++i) {
         /* n2.put("_root", "y", i)                                           */
-        AMfree(AMmapPutUint(test_state->n2, AM_ROOT, "y", i));
+        AMfree(AMmapPutUint(test_state->n2, AM_ROOT, AMstr("y"), i));
         /* n2.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n2, "", &TIME_0));
+        AMfree(AMcommit(test_state->n2, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
     /*                                                                       */
@@ -430,28 +430,28 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void 
        const s1 = initSyncState(), s2 = initSyncState()                      */
     TestState* test_state = *state;
     AMfree(AMsetActorId(test_state->n1, AMpush(&test_state->stack,
-                                               AMactorIdInitStr("abc123"),
+                                               AMactorIdInitStr(AMstr("abc123")),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
     AMfree(AMsetActorId(test_state->n2, AMpush(&test_state->stack,
-                                               AMactorIdInitStr("def456"),
+                                               AMactorIdInitStr(AMstr("def456")),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id));
     /*                                                                       */
     /*  for (let i = 0; i < 5; i++) {                                        */
     for (size_t i = 0; i != 5; ++i) {
         /* n1.put("_root", "x", i)                                           */
-        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, "x", i));
+        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i));
         /* n1.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n1, "", &TIME_0));
+        AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
     /* for (let i = 0; i < 5; i++) {                                         */
     for (size_t i = 0; i != 5; ++i) {
         /* n2.put("_root", "y", i)                                           */
-        AMfree(AMmapPutUint(test_state->n2, AM_ROOT, "y", i));
+        AMfree(AMmapPutUint(test_state->n2, AM_ROOT, AMstr("y"), i));
         /* n2.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n2, "", &TIME_0));
+        AMfree(AMcommit(test_state->n2, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
     /* const head1 = n1.getHeads()[0], head2 = n2.getHeads()[0]              */
@@ -541,11 +541,11 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void 
     /* //assert.notDeepStrictEqual(patch1, null)
        assert.deepStrictEqual(n1.materialize(), { x: 4, y: 4 })              */
     assert_int_equal(AMpush(&test_state->stack,
-                            AMmapGet(test_state->n1, AM_ROOT, "x", NULL),
+                            AMmapGet(test_state->n1, AM_ROOT, AMstr("x"), NULL),
                             AM_VALUE_UINT,
                             cmocka_cb).uint, 4);
     assert_int_equal(AMpush(&test_state->stack,
-                            AMmapGet(test_state->n1, AM_ROOT, "y", NULL),
+                            AMmapGet(test_state->n1, AM_ROOT, AMstr("y"), NULL),
                             AM_VALUE_UINT,
                             cmocka_cb).uint, 4);
     /*                                                                       */
@@ -560,11 +560,11 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void 
     /* //assert.notDeepStrictEqual(patch2, null)
        assert.deepStrictEqual(n2.materialize(), { x: 4, y: 4 })              */
     assert_int_equal(AMpush(&test_state->stack,
-                            AMmapGet(test_state->n2, AM_ROOT, "x", NULL),
+                            AMmapGet(test_state->n2, AM_ROOT, AMstr("x"), NULL),
                             AM_VALUE_UINT,
                             cmocka_cb).uint, 4);
     assert_int_equal(AMpush(&test_state->stack,
-                            AMmapGet(test_state->n2, AM_ROOT, "y", NULL),
+                            AMmapGet(test_state->n2, AM_ROOT, AMstr("y"), NULL),
                             AM_VALUE_UINT,
                             cmocka_cb).uint, 4);
     /*                                                                       */
@@ -630,7 +630,7 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void 
     /* If we make one more change and start another sync then its lastSync
      * should be updated */
     /* n1.put("_root", "x", 5)                                               */
-    AMfree(AMmapPutUint(test_state->n1, AM_ROOT, "x", 5));
+    AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), 5));
     /* msg1to2 = n1.generateSyncMessage(s1)
        if (msg1to2 === null) { throw new RangeError("message should not be null") }*/
     msg1to2 = AMpush(&test_state->stack,
@@ -662,20 +662,20 @@ static void test_should_assume_sent_changes_were_received_until_we_hear_otherwis
     AMobjId const* items = AMpush(&test_state->stack,
                                   AMmapPutObject(test_state->n1,
                                                  AM_ROOT,
-                                                 "items",
+                                                 AMstr("items"),
                                                  AM_OBJ_TYPE_LIST),
                                   AM_VALUE_OBJ_ID,
                                   cmocka_cb).obj_id;
     /* n1.commit("", 0)                                                      */
-    AMfree(AMcommit(test_state->n1, "", &TIME_0));
+    AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /*                                                                       */
     /* sync(n1, n2, s1, s2)                                                  */
     sync(test_state->n1, test_state->n2, test_state->s1, test_state->s2);
     /*                                                                       */
     /* n1.push(items, "x")                                                   */
-    AMfree(AMlistPutStr(test_state->n1, items, SIZE_MAX, true, "x"));
+    AMfree(AMlistPutStr(test_state->n1, items, SIZE_MAX, true, AMstr("x")));
     /* n1.commit("", 0)                                                      */
-    AMfree(AMcommit(test_state->n1, "", &TIME_0));
+    AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* message = n1.generateSyncMessage(s1)
       if (message === null) { throw new RangeError("message should not be null") }*/
     AMsyncMessage const* message = AMpush(&test_state->stack,
@@ -688,9 +688,9 @@ static void test_should_assume_sent_changes_were_received_until_we_hear_otherwis
     assert_int_equal(AMchangesSize(&message_changes), 1);
     /*                                                                       */
     /* n1.push(items, "y")                                                   */
-    AMfree(AMlistPutStr(test_state->n1, items, SIZE_MAX, true, "y"));
+    AMfree(AMlistPutStr(test_state->n1, items, SIZE_MAX, true, AMstr("y")));
     /* n1.commit("", 0)                                                      */
-    AMfree(AMcommit(test_state->n1, "", &TIME_0));
+    AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* message = n1.generateSyncMessage(s1)
        if (message === null) { throw new RangeError("message should not be null") }*/
     message = AMpush(&test_state->stack,
@@ -702,9 +702,9 @@ static void test_should_assume_sent_changes_were_received_until_we_hear_otherwis
     assert_int_equal(AMchangesSize(&message_changes), 1);
     /*                                                                       */
     /* n1.push(items, "z")                                                   */
-    AMfree(AMlistPutStr(test_state->n1, items, SIZE_MAX, true, "z"));
+    AMfree(AMlistPutStr(test_state->n1, items, SIZE_MAX, true, AMstr("z")));
     /* n1.commit("", 0)                                                      */
-    AMfree(AMcommit(test_state->n1, "", &TIME_0));
+    AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /*                                                                       */
     /* message = n1.generateSyncMessage(s1)
        if (message === null) { throw new RangeError("message should not be null") }*/
@@ -729,9 +729,9 @@ static void test_should_work_regardless_of_who_initiates_the_exchange(void **sta
     /* for (let i = 0; i < 5; i++) {                                         */
     for (size_t i = 0; i != 5; ++i) {
         /* n1.put("_root", "x", i)                                           */
-        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, "x", i));
+        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i));
         /* n1.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n1, "", &TIME_0));
+        AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
     /*                                                                       */
@@ -742,9 +742,9 @@ static void test_should_work_regardless_of_who_initiates_the_exchange(void **sta
     /* for (let i = 5; i < 10; i++) {                                        */
     for (size_t i = 5; i != 10; ++i) {
         /* n1.put("_root", "x", i)                                           */
-        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, "x", i));
+        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i));
         /* n1.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n1, "", &TIME_0));
+        AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
     /*                                                                       */
@@ -773,9 +773,9 @@ static void test_should_work_without_prior_sync_state(void **state) {
     /* for (let i = 0; i < 10; i++) {                                        */
     for (size_t i = 0; i != 10; ++i) {
         /* n1.put("_root", "x", i)                                           */
-        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, "x", i));
+        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i));
         /* n1.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n1, "", &TIME_0));
+        AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
     /*                                                                       */
@@ -785,18 +785,18 @@ static void test_should_work_without_prior_sync_state(void **state) {
     /* for (let i = 10; i < 15; i++) {                                       */
     for (size_t i = 10; i != 15; ++i) {
         /* n1.put("_root", "x", i)                                           */
-        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, "x", i));
+        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i));
         /* n1.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n1, "", &TIME_0));
+        AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
     /*                                                                       */
     /* for (let i = 15; i < 18; i++) {                                       */
     for (size_t i = 15; i != 18; ++i) {
         /* n2.put("_root", "x", i)                                           */
-        AMfree(AMmapPutUint(test_state->n2, AM_ROOT, "x", i));
+        AMfree(AMmapPutUint(test_state->n2, AM_ROOT, AMstr("x"), i));
         /* n2.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n2, "", &TIME_0));
+        AMfree(AMcommit(test_state->n2, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
     /*                                                                       */
@@ -836,9 +836,9 @@ static void test_should_work_with_prior_sync_state_2(void **state) {
     /* for (let i = 0; i < 10; i++) {                                        */
     for (size_t i = 0; i != 10; ++i) {
         /* n1.put("_root", "x", i)                                           */
-        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, "x", i));
+        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i));
         /* n1.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n1, "", &TIME_0));
+        AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
     /*                                                                       */
@@ -848,17 +848,17 @@ static void test_should_work_with_prior_sync_state_2(void **state) {
     /* for (let i = 10; i < 15; i++) {                                       */
     for (size_t i = 10; i != 15; ++i) {
         /* n1.put("_root", "x", i)                                           */
-        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, "x", i));
+        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i));
         /* n1.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n1, "", &TIME_0));
+        AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
     /* for (let i = 15; i < 18; i++) {                                       */
     for (size_t i = 15; i != 18; ++i) {
         /* n2.put("_root", "x", i)                                           */
-        AMfree(AMmapPutUint(test_state->n2, AM_ROOT, "x", i));
+        AMfree(AMmapPutUint(test_state->n2, AM_ROOT, AMstr("x"), i));
         /* n2.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n2, "", &TIME_0));
+        AMfree(AMcommit(test_state->n2, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
     /*                                                                       */
@@ -911,9 +911,9 @@ static void test_should_ensure_non_empty_state_after_sync(void **state) {
     /* for (let i = 0; i < 3; i++) {                                         */
     for (size_t i = 0; i != 3; ++i) {
         /* n1.put("_root", "x", i)                                           */
-        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, "x", i));
+        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i));
         /* n1.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n1, "", &TIME_0));
+        AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
     /*                                                                       */
@@ -951,9 +951,9 @@ static void test_should_resync_after_one_node_crashed_with_data_loss(void **stat
     /* for (let i = 0; i < 3; i++) {                                         */
     for (size_t i = 0; i != 3; ++i) {
         /* n1.put("_root", "x", i)                                           */
-        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, "x", i));
+        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i));
         /* n1.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n1, "", &TIME_0));
+        AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
     /*                                                                       */
@@ -981,9 +981,9 @@ static void test_should_resync_after_one_node_crashed_with_data_loss(void **stat
     /* for (let i = 3; i < 6; i++) {                                         */
     for (size_t i = 3; i != 6; ++i) {
         /* n1.put("_root", "x", i)                                           */
-        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, "x", i));
+        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i));
         /* n1.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n1, "", &TIME_0));
+        AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
     /*                                                                       */
@@ -1009,9 +1009,9 @@ static void test_should_resync_after_one_node_crashed_with_data_loss(void **stat
     /* for (let i = 6; i < 9; i++) {                                         */
     for (size_t i = 6; i != 9; ++i) {
         /* n1.put("_root", "x", i)                                           */
-        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, "x", i));
+        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i));
         /* n1.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n1, "", &TIME_0));
+        AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
     /*                                                                       */
@@ -1049,12 +1049,12 @@ static void test_should_resync_after_one_node_crashed_with_data_loss(void **stat
     assert_false(AMequal(test_state->n1, r));
     /* assert.deepStrictEqual(n1.materialize(), { x: 8 })                    */
     assert_int_equal(AMpush(&test_state->stack,
-                            AMmapGet(test_state->n1, AM_ROOT, "x", NULL),
+                            AMmapGet(test_state->n1, AM_ROOT, AMstr("x"), NULL),
                             AM_VALUE_UINT,
                             cmocka_cb).uint, 8);
     /* assert.deepStrictEqual(r.materialize(), { x: 2 })                     */
     assert_int_equal(AMpush(&test_state->stack,
-                            AMmapGet(r, AM_ROOT, "x", NULL),
+                            AMmapGet(r, AM_ROOT, AMstr("x"), NULL),
                             AM_VALUE_UINT,
                             cmocka_cb).uint, 2);
     /* sync(n1, r, s1, rSyncState)                                           */
@@ -1085,9 +1085,9 @@ static void test_should_resync_after_one_node_experiences_data_loss_without_disc
     /* for (let i = 0; i < 3; i++) {                                         */
     for (size_t i = 0; i != 3; ++i) {
         /* n1.put("_root", "x", i)                                           */
-        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, "x", i));
+        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i));
         /* n1.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n1, "", &TIME_0));
+        AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
     /*                                                                       */
@@ -1110,7 +1110,7 @@ static void test_should_resync_after_one_node_experiences_data_loss_without_disc
     /* const n2AfterDataLoss = create('89abcdef')                            */
     AMdoc* n2_after_data_loss = AMpush(&test_state->stack,
                                        AMcreate(AMpush(&test_state->stack,
-                                                       AMactorIdInitStr("89abcdef"),
+                                                       AMactorIdInitStr(AMstr("89abcdef")),
                                                        AM_VALUE_ACTOR_ID,
                                                        cmocka_cb).actor_id),
                                        AM_VALUE_DOC,
@@ -1147,7 +1147,7 @@ static void test_should_handle_changes_concurrrent_to_the_last_sync_heads(void *
     TestState* test_state = *state;
     AMdoc* n3 = AMpush(&test_state->stack,
                        AMcreate(AMpush(&test_state->stack,
-                                       AMactorIdInitStr("fedcba98"),
+                                       AMactorIdInitStr(AMstr("fedcba98")),
                                        AM_VALUE_ACTOR_ID,
                                        cmocka_cb).actor_id),
                        AM_VALUE_DOC,
@@ -1167,8 +1167,8 @@ static void test_should_handle_changes_concurrrent_to_the_last_sync_heads(void *
     /* Change 1 is known to all three nodes */
     /* //n1 = Automerge.change(n1, {time: 0}, doc => doc.x = 1)              */
     /* n1.put("_root", "x", 1); n1.commit("", 0)                             */
-    AMfree(AMmapPutUint(test_state->n1, AM_ROOT, "x", 1));
-    AMfree(AMcommit(test_state->n1, "", &TIME_0));
+    AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), 1));
+    AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /*                                                                       */
     /* sync(n1, n2, s12, s21)                                                */
     sync(test_state->n1, test_state->n2, s12, s21);
@@ -1177,22 +1177,22 @@ static void test_should_handle_changes_concurrrent_to_the_last_sync_heads(void *
     /*                                                                       */
     /* Change 2 is known to n1 and n2 */
     /* n1.put("_root", "x", 2); n1.commit("", 0)                             */
-    AMfree(AMmapPutUint(test_state->n1, AM_ROOT, "x", 2));
-    AMfree(AMcommit(test_state->n1, "", &TIME_0));
+    AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), 2));
+    AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /*                                                                       */
     /* sync(n1, n2, s12, s21)                                                */
     sync(test_state->n1, test_state->n2, s12, s21);
     /*                                                                       */
     /* Each of the three nodes makes one change (changes 3, 4, 5) */
     /* n1.put("_root", "x", 3); n1.commit("", 0)                             */
-    AMfree(AMmapPutUint(test_state->n1, AM_ROOT, "x", 3));
-    AMfree(AMcommit(test_state->n1, "", &TIME_0));
+    AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), 3));
+    AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* n2.put("_root", "x", 4); n2.commit("", 0)                             */
-    AMfree(AMmapPutUint(test_state->n2, AM_ROOT, "x", 4));
-    AMfree(AMcommit(test_state->n2, "", &TIME_0));
+    AMfree(AMmapPutUint(test_state->n2, AM_ROOT, AMstr("x"), 4));
+    AMfree(AMcommit(test_state->n2, AMstr(""), &TIME_0));
     /* n3.put("_root", "x", 5); n3.commit("", 0)                             */
-    AMfree(AMmapPutUint(n3, AM_ROOT, "x", 5));
-    AMfree(AMcommit(n3, "", &TIME_0));
+    AMfree(AMmapPutUint(n3, AM_ROOT, AMstr("x"), 5));
+    AMfree(AMcommit(n3, AMstr(""), &TIME_0));
     /*                                                                       */
     /* Apply n3's latest change to n2. */
     /* let change = n3.getLastLocalChange()
@@ -1231,14 +1231,14 @@ static void test_should_handle_histories_with_lots_of_branching_and_merging(void
     TestState* test_state = *state;
     AMdoc* n3 = AMpush(&test_state->stack,
                        AMcreate(AMpush(&test_state->stack,
-                                       AMactorIdInitStr("fedcba98"),
+                                       AMactorIdInitStr(AMstr("fedcba98")),
                                        AM_VALUE_ACTOR_ID,
                                        cmocka_cb).actor_id),
                        AM_VALUE_DOC,
                        cmocka_cb).doc;
     /* n1.put("_root", "x", 0); n1.commit("", 0)                             */
-    AMfree(AMmapPutUint(test_state->n1, AM_ROOT, "x", 0));
-    AMfree(AMcommit(test_state->n1, "", &TIME_0));
+    AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), 0));
+    AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* let change1 = n1.getLastLocalChange()
        if (change1 === null) throw new RangeError("no local change")         */
     AMchanges change1 = AMpush(&test_state->stack,
@@ -1256,8 +1256,8 @@ static void test_should_handle_histories_with_lots_of_branching_and_merging(void
     /* n3.applyChanges([change2])                                            */
     AMfree(AMapplyChanges(n3, &change2));
     /* n3.put("_root", "x", 1); n3.commit("", 0)                             */
-    AMfree(AMmapPutUint(n3, AM_ROOT, "x", 1));
-    AMfree(AMcommit(n3, "", &TIME_0));
+    AMfree(AMmapPutUint(n3, AM_ROOT, AMstr("x"), 1));
+    AMfree(AMcommit(n3, AMstr(""), &TIME_0));
     /*                                                                       */
     /*        - n1c1 <------ n1c2 <------ n1c3 <-- etc. <-- n1c20 <------ n1c21
      *       /          \/           \/                              \/
@@ -1269,11 +1269,11 @@ static void test_should_handle_histories_with_lots_of_branching_and_merging(void
     /* for (let i = 1; i < 20; i++) {                                        */
     for (size_t i = 1; i != 20; ++i) {
         /* n1.put("_root", "n1", i); n1.commit("", 0)                        */
-        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, "n1", i));
-        AMfree(AMcommit(test_state->n1, "", &TIME_0));
+        AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("n1"), i));
+        AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
         /* n2.put("_root", "n2", i); n2.commit("", 0)                        */
-        AMfree(AMmapPutUint(test_state->n2, AM_ROOT, "n2", i));
-        AMfree(AMcommit(test_state->n2, "", &TIME_0));
+        AMfree(AMmapPutUint(test_state->n2, AM_ROOT, AMstr("n2"), i));
+        AMfree(AMcommit(test_state->n2, AMstr(""), &TIME_0));
         /* const change1 = n1.getLastLocalChange()
            if (change1 === null) throw new RangeError("no local change")     */
         AMchanges change1 = AMpush(&test_state->stack,
@@ -1307,11 +1307,11 @@ static void test_should_handle_histories_with_lots_of_branching_and_merging(void
     /* n2.applyChanges([change3])                                            */
     AMfree(AMapplyChanges(test_state->n2, &change3));
     /* n1.put("_root", "n1", "final"); n1.commit("", 0)                      */
-    AMfree(AMmapPutStr(test_state->n1, AM_ROOT, "n1", "final"));
-    AMfree(AMcommit(test_state->n1, "", &TIME_0));
+    AMfree(AMmapPutStr(test_state->n1, AM_ROOT, AMstr("n1"), AMstr("final")));
+    AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* n2.put("_root", "n2", "final"); n2.commit("", 0)                      */
-    AMfree(AMmapPutStr(test_state->n2, AM_ROOT, "n2", "final"));
-    AMfree(AMcommit(test_state->n2, "", &TIME_0));
+    AMfree(AMmapPutStr(test_state->n2, AM_ROOT, AMstr("n2"), AMstr("final")));
+    AMfree(AMcommit(test_state->n2, AMstr(""), &TIME_0));
     /*                                                                       */
     /* sync(n1, n2, s1, s2)                                                  */
     sync(test_state->n1, test_state->n2, test_state->s1, test_state->s2);

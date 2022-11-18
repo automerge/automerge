@@ -1,7 +1,22 @@
 use std::cmp::Ordering;
-use std::ffi::{c_void, CString};
+use std::ffi::c_void;
 use std::mem::size_of;
 use std::os::raw::c_char;
+
+use crate::byte_span::AMbyteSpan;
+
+/// \brief Creates a string view from a C string.
+///
+/// \param[in] c_str A UTF-8 C string.
+/// \return A UTF-8 string view as an `AMbyteSpan` struct.
+/// \internal
+///
+/// #Safety
+/// c_str must be a null-terminated array of `c_char`
+#[no_mangle]
+pub unsafe extern "C" fn AMstr(c_str: *const c_char) -> AMbyteSpan {
+    c_str.into()
+}
 
 #[repr(C)]
 struct Detail {
@@ -18,11 +33,11 @@ struct Detail {
 pub const USIZE_USIZE_USIZE_: usize = size_of::<Detail>();
 
 impl Detail {
-    fn new(c_strings: &[CString], offset: isize) -> Self {
+    fn new(strings: &[String], offset: isize) -> Self {
         Self {
-            len: c_strings.len(),
+            len: strings.len(),
             offset,
-            ptr: c_strings.as_ptr() as *const c_void,
+            ptr: strings.as_ptr() as *const c_void,
         }
     }
 
@@ -60,13 +75,13 @@ impl Detail {
             }) as usize
     }
 
-    pub fn next(&mut self, n: isize) -> Option<*const c_char> {
+    pub fn next(&mut self, n: isize) -> Option<AMbyteSpan> {
         if self.is_stopped() {
             return None;
         }
-        let slice: &[CString] =
-            unsafe { std::slice::from_raw_parts(self.ptr as *const CString, self.len) };
-        let value = slice[self.get_index()].as_ptr();
+        let slice: &[String] =
+            unsafe { std::slice::from_raw_parts(self.ptr as *const String, self.len) };
+        let value = slice[self.get_index()].as_bytes().into();
         self.advance(n);
         Some(value)
     }
@@ -76,14 +91,14 @@ impl Detail {
         self.offset < -len || self.offset == len
     }
 
-    pub fn prev(&mut self, n: isize) -> Option<*const c_char> {
+    pub fn prev(&mut self, n: isize) -> Option<AMbyteSpan> {
         self.advance(-n);
         if self.is_stopped() {
             return None;
         }
-        let slice: &[CString] =
-            unsafe { std::slice::from_raw_parts(self.ptr as *const CString, self.len) };
-        Some(slice[self.get_index()].as_ptr())
+        let slice: &[String] =
+            unsafe { std::slice::from_raw_parts(self.ptr as *const String, self.len) };
+        Some(slice[self.get_index()].as_bytes().into())
     }
 
     pub fn reversed(&self) -> Self {
@@ -127,9 +142,9 @@ pub struct AMstrs {
 }
 
 impl AMstrs {
-    pub fn new(c_strings: &[CString]) -> Self {
+    pub fn new(strings: &[String]) -> Self {
         Self {
-            detail: Detail::new(c_strings, 0).into(),
+            detail: Detail::new(strings, 0).into(),
         }
     }
 
@@ -143,12 +158,12 @@ impl AMstrs {
         detail.len
     }
 
-    pub fn next(&mut self, n: isize) -> Option<*const c_char> {
+    pub fn next(&mut self, n: isize) -> Option<AMbyteSpan> {
         let detail = unsafe { &mut *(self.detail.as_mut_ptr() as *mut Detail) };
         detail.next(n)
     }
 
-    pub fn prev(&mut self, n: isize) -> Option<*const c_char> {
+    pub fn prev(&mut self, n: isize) -> Option<AMbyteSpan> {
         let detail = unsafe { &mut *(self.detail.as_mut_ptr() as *mut Detail) };
         detail.prev(n)
     }
@@ -168,10 +183,10 @@ impl AMstrs {
     }
 }
 
-impl AsRef<[CString]> for AMstrs {
-    fn as_ref(&self) -> &[CString] {
+impl AsRef<[String]> for AMstrs {
+    fn as_ref(&self) -> &[String] {
         let detail = unsafe { &*(self.detail.as_ptr() as *const Detail) };
-        unsafe { std::slice::from_raw_parts(detail.ptr as *const CString, detail.len) }
+        unsafe { std::slice::from_raw_parts(detail.ptr as *const String, detail.len) }
     }
 }
 
@@ -241,21 +256,21 @@ pub unsafe extern "C" fn AMstrsCmp(strs1: *const AMstrs, strs2: *const AMstrs) -
 /// \param[in,out] strs A pointer to an `AMstrs` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
-/// \return A UTF-8 string that's `NULL` when \p strs was previously advanced
-///         past its forward/reverse limit.
+/// \return A UTF-8 string view as an `AMbyteSpan` struct that's `AMstr(NULL)`
+///         when \p strs was previously advanced past its forward/reverse limit.
 /// \pre \p strs `!= NULL`.
 /// \internal
 ///
 /// #Safety
 /// strs must be a valid pointer to an AMstrs
 #[no_mangle]
-pub unsafe extern "C" fn AMstrsNext(strs: *mut AMstrs, n: isize) -> *const c_char {
+pub unsafe extern "C" fn AMstrsNext(strs: *mut AMstrs, n: isize) -> AMbyteSpan {
     if let Some(strs) = strs.as_mut() {
         if let Some(key) = strs.next(n) {
-            return key;
+            return key
         }
     }
-    std::ptr::null()
+    Default::default()
 }
 
 /// \memberof AMstrs
@@ -266,21 +281,21 @@ pub unsafe extern "C" fn AMstrsNext(strs: *mut AMstrs, n: isize) -> *const c_cha
 /// \param[in,out] strs A pointer to an `AMstrs` struct.
 /// \param[in] n The direction (\p -n -> opposite, \p n -> same) and maximum
 ///              number of positions to advance.
-/// \return A UTF-8 string that's `NULL` when \p strs is presently advanced
-///         past its forward/reverse limit.
+/// \return A UTF-8 string view as an `AMbyteSpan` struct that's `AMstr(NULL)`
+///         when \p strs is presently advanced past its forward/reverse limit.
 /// \pre \p strs `!= NULL`.
 /// \internal
 ///
 /// #Safety
 /// strs must be a valid pointer to an AMstrs
 #[no_mangle]
-pub unsafe extern "C" fn AMstrsPrev(strs: *mut AMstrs, n: isize) -> *const c_char {
+pub unsafe extern "C" fn AMstrsPrev(strs: *mut AMstrs, n: isize) -> AMbyteSpan {
     if let Some(strs) = strs.as_mut() {
         if let Some(key) = strs.prev(n) {
             return key;
         }
     }
-    std::ptr::null()
+    Default::default()
 }
 
 /// \memberof AMstrs
@@ -339,6 +354,6 @@ pub unsafe extern "C" fn AMstrsRewound(strs: *const AMstrs) -> AMstrs {
     if let Some(strs) = strs.as_ref() {
         strs.rewound()
     } else {
-        AMstrs::default()
+        Default::default()
     }
 }

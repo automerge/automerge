@@ -1,9 +1,8 @@
 use automerge as am;
 use automerge::transaction::Transactable;
-use std::os::raw::c_char;
 
+use crate::byte_span::{to_str, AMbyteSpan};
 use crate::change_hashes::AMchangeHashes;
-use crate::doc::utils::to_str;
 use crate::doc::{to_doc, to_doc_mut, to_obj_id, AMdoc};
 use crate::obj::{to_obj_type, AMobjId, AMobjType};
 use crate::result::{to_result, AMresult};
@@ -16,25 +15,27 @@ pub mod items;
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
+/// \param[in] key A UTF-8 string view key for the map object identified by
+///                \p obj_id as an `AMbyteSpan` struct.
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc `!= NULL`.
 /// \pre \p key `!= NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
-/// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapDelete(
     doc: *mut AMdoc,
     obj_id: *const AMobjId,
-    key: *const c_char,
+    key: AMbyteSpan,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
-    to_result(doc.delete(to_obj_id!(obj_id), to_str(key)))
+    let key = to_str!(key);
+    to_result(doc.delete(to_obj_id!(obj_id), key))
 }
 
 /// \memberof AMdoc
@@ -42,8 +43,8 @@ pub unsafe extern "C" fn AMmapDelete(
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] key A UTF-8 string key for the map object identified by
-///                \p obj_id.
+/// \param[in] key A UTF-8 string view key for the map object identified by
+///                \p obj_id as an `AMbyteSpan` struct.
 /// \param[in] heads A pointer to an `AMchangeHashes` struct for a historical
 ///                  value or `NULL` for the current value.
 /// \return A pointer to an `AMresult` struct that doesn't contain a void.
@@ -52,23 +53,24 @@ pub unsafe extern "C" fn AMmapDelete(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
-/// key must be a c string of the map key to be used
 /// heads must be a valid pointer to an AMchangeHashes or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMmapGet(
     doc: *const AMdoc,
     obj_id: *const AMobjId,
-    key: *const c_char,
+    key: AMbyteSpan,
     heads: *const AMchangeHashes,
 ) -> *mut AMresult {
     let doc = to_doc!(doc);
     let obj_id = to_obj_id!(obj_id);
+    let key = to_str!(key);
     match heads.as_ref() {
-        None => to_result(doc.get(obj_id, to_str(key))),
-        Some(heads) => to_result(doc.get_at(obj_id, to_str(key), heads.as_ref())),
+        None => to_result(doc.get(obj_id, key)),
+        Some(heads) => to_result(doc.get_at(obj_id, key, heads.as_ref())),
     }
 }
 
@@ -78,8 +80,8 @@ pub unsafe extern "C" fn AMmapGet(
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] key A UTF-8 string key for the map object identified by
-///                \p obj_id.
+/// \param[in] key A UTF-8 string view key for the map object identified by
+///                \p obj_id as an `AMbyteSpan` struct.
 /// \param[in] heads A pointer to an `AMchangeHashes` struct for a historical
 ///                  last value or `NULL` for the current last value.
 /// \return A pointer to an `AMresult` struct containing an `AMobjItems` struct.
@@ -88,23 +90,24 @@ pub unsafe extern "C" fn AMmapGet(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
-/// key must be a c string of the map key to be used
 /// heads must be a valid pointer to an AMchangeHashes or std::ptr::null()
 #[no_mangle]
 pub unsafe extern "C" fn AMmapGetAll(
     doc: *const AMdoc,
     obj_id: *const AMobjId,
-    key: *const c_char,
+    key: AMbyteSpan,
     heads: *const AMchangeHashes,
 ) -> *mut AMresult {
     let doc = to_doc!(doc);
     let obj_id = to_obj_id!(obj_id);
+    let key = to_str!(key);
     match heads.as_ref() {
-        None => to_result(doc.get_all(obj_id, to_str(key))),
-        Some(heads) => to_result(doc.get_all_at(obj_id, to_str(key), heads.as_ref())),
+        None => to_result(doc.get_all(obj_id, key)),
+        Some(heads) => to_result(doc.get_all_at(obj_id, key, heads.as_ref())),
     }
 }
 
@@ -113,7 +116,8 @@ pub unsafe extern "C" fn AMmapGetAll(
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
+/// \param[in] key A UTF-8 string view key for the map object identified by
+///                \p obj_id as an `AMbyteSpan` struct.
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc `!= NULL`.
@@ -121,19 +125,20 @@ pub unsafe extern "C" fn AMmapGetAll(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
-/// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapIncrement(
     doc: *mut AMdoc,
     obj_id: *const AMobjId,
-    key: *const c_char,
+    key: AMbyteSpan,
     value: i64,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
-    to_result(doc.increment(to_obj_id!(obj_id), to_str(key), value))
+    let key = to_str!(key);
+    to_result(doc.increment(to_obj_id!(obj_id), key, value))
 }
 
 /// \memberof AMdoc
@@ -141,7 +146,8 @@ pub unsafe extern "C" fn AMmapIncrement(
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
+/// \param[in] key A UTF-8 string view key for the map object identified by
+///                \p obj_id as an `AMbyteSpan` struct.
 /// \param[in] value A boolean.
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc `!= NULL`.
@@ -149,19 +155,20 @@ pub unsafe extern "C" fn AMmapIncrement(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
-/// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutBool(
     doc: *mut AMdoc,
     obj_id: *const AMobjId,
-    key: *const c_char,
+    key: AMbyteSpan,
     value: bool,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
-    to_result(doc.put(to_obj_id!(obj_id), to_str(key), value))
+    let key = to_str!(key);
+    to_result(doc.put(to_obj_id!(obj_id), key, value))
 }
 
 /// \memberof AMdoc
@@ -169,7 +176,8 @@ pub unsafe extern "C" fn AMmapPutBool(
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
+/// \param[in] key A UTF-8 string view key for the map object identified by
+///                \p obj_id as an `AMbyteSpan` struct.
 /// \param[in] src A pointer to an array of bytes.
 /// \param[in] count The number of bytes to copy from \p src.
 /// \return A pointer to an `AMresult` struct containing a void.
@@ -180,23 +188,24 @@ pub unsafe extern "C" fn AMmapPutBool(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
-/// key must be a c string of the map key to be used
 /// src must be a byte array of size `>= count`
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutBytes(
     doc: *mut AMdoc,
     obj_id: *const AMobjId,
-    key: *const c_char,
+    key: AMbyteSpan,
     src: *const u8,
     count: usize,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
+    let key = to_str!(key);
     let mut vec = Vec::new();
     vec.extend_from_slice(std::slice::from_raw_parts(src, count));
-    to_result(doc.put(to_obj_id!(obj_id), to_str(key), vec))
+    to_result(doc.put(to_obj_id!(obj_id), key, vec))
 }
 
 /// \memberof AMdoc
@@ -204,7 +213,8 @@ pub unsafe extern "C" fn AMmapPutBytes(
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
+/// \param[in] key A UTF-8 string view key for the map object identified by
+///                \p obj_id as an `AMbyteSpan` struct.
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc `!= NULL`.
@@ -212,21 +222,22 @@ pub unsafe extern "C" fn AMmapPutBytes(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
-/// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutCounter(
     doc: *mut AMdoc,
     obj_id: *const AMobjId,
-    key: *const c_char,
+    key: AMbyteSpan,
     value: i64,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
+    let key = to_str!(key);
     to_result(doc.put(
         to_obj_id!(obj_id),
-        to_str(key),
+        key,
         am::ScalarValue::Counter(value.into()),
     ))
 }
@@ -236,25 +247,27 @@ pub unsafe extern "C" fn AMmapPutCounter(
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
+/// \param[in] key A UTF-8 string view key for the map object identified by
+///                \p obj_id as an `AMbyteSpan` struct.
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc `!= NULL`.
 /// \pre \p key `!= NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
-/// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutNull(
     doc: *mut AMdoc,
     obj_id: *const AMobjId,
-    key: *const c_char,
+    key: AMbyteSpan,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
-    to_result(doc.put(to_obj_id!(obj_id), to_str(key), ()))
+    let key = to_str!(key);
+    to_result(doc.put(to_obj_id!(obj_id), key, ()))
 }
 
 /// \memberof AMdoc
@@ -262,7 +275,8 @@ pub unsafe extern "C" fn AMmapPutNull(
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
+/// \param[in] key A UTF-8 string view key for the map object identified by
+///                \p obj_id as an `AMbyteSpan` struct.
 /// \param[in] obj_type An `AMobjIdType` enum tag.
 /// \return A pointer to an `AMresult` struct containing a pointer to an
 ///         `AMobjId` struct.
@@ -272,19 +286,20 @@ pub unsafe extern "C" fn AMmapPutNull(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
-/// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutObject(
     doc: *mut AMdoc,
     obj_id: *const AMobjId,
-    key: *const c_char,
+    key: AMbyteSpan,
     obj_type: AMobjType,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
-    to_result(doc.put_object(to_obj_id!(obj_id), to_str(key), to_obj_type!(obj_type)))
+    let key = to_str!(key);
+    to_result(doc.put_object(to_obj_id!(obj_id), key, to_obj_type!(obj_type)))
 }
 
 /// \memberof AMdoc
@@ -292,7 +307,8 @@ pub unsafe extern "C" fn AMmapPutObject(
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
+/// \param[in] key A UTF-8 string view key for the map object identified by
+///                \p obj_id as an `AMbyteSpan` struct.
 /// \param[in] value A 64-bit float.
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc `!= NULL`.
@@ -300,19 +316,20 @@ pub unsafe extern "C" fn AMmapPutObject(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
-/// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutF64(
     doc: *mut AMdoc,
     obj_id: *const AMobjId,
-    key: *const c_char,
+    key: AMbyteSpan,
     value: f64,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
-    to_result(doc.put(to_obj_id!(obj_id), to_str(key), value))
+    let key = to_str!(key);
+    to_result(doc.put(to_obj_id!(obj_id), key, value))
 }
 
 /// \memberof AMdoc
@@ -320,7 +337,8 @@ pub unsafe extern "C" fn AMmapPutF64(
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
+/// \param[in] key A UTF-8 string view key for the map object identified by
+///                \p obj_id as an `AMbyteSpan` struct.
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc `!= NULL`.
@@ -328,19 +346,20 @@ pub unsafe extern "C" fn AMmapPutF64(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
-/// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutInt(
     doc: *mut AMdoc,
     obj_id: *const AMobjId,
-    key: *const c_char,
+    key: AMbyteSpan,
     value: i64,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
-    to_result(doc.put(to_obj_id!(obj_id), to_str(key), value))
+    let key = to_str!(key);
+    to_result(doc.put(to_obj_id!(obj_id), key, value))
 }
 
 /// \memberof AMdoc
@@ -348,29 +367,28 @@ pub unsafe extern "C" fn AMmapPutInt(
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
-/// \param[in] value A UTF-8 string.
+/// \param[in] key A UTF-8 string view key for the map object identified by
+///                \p obj_id as an `AMbyteSpan` struct.
+/// \param[in] value A UTF-8 string view as an `AMbyteSpan` struct.
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc `!= NULL`.
 /// \pre \p key `!= NULL`.
-/// \pre \p value `!= NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
-/// key must be a c string of the map key to be used
-/// value must be a null-terminated array of `c_char`
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutStr(
     doc: *mut AMdoc,
     obj_id: *const AMobjId,
-    key: *const c_char,
-    value: *const c_char,
+    key: AMbyteSpan,
+    value: AMbyteSpan,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
-    to_result(doc.put(to_obj_id!(obj_id), to_str(key), to_str(value)))
+    to_result(doc.put(to_obj_id!(obj_id), to_str!(key), to_str!(value)))
 }
 
 /// \memberof AMdoc
@@ -379,7 +397,8 @@ pub unsafe extern "C" fn AMmapPutStr(
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
+/// \param[in] key A UTF-8 string view key for the map object identified by
+///                \p obj_id as an `AMbyteSpan` struct.
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc `!= NULL`.
@@ -387,21 +406,22 @@ pub unsafe extern "C" fn AMmapPutStr(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
-/// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutTimestamp(
     doc: *mut AMdoc,
     obj_id: *const AMobjId,
-    key: *const c_char,
+    key: AMbyteSpan,
     value: i64,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
+    let key = to_str!(key);
     to_result(doc.put(
         to_obj_id!(obj_id),
-        to_str(key),
+        key,
         am::ScalarValue::Timestamp(value),
     ))
 }
@@ -411,7 +431,8 @@ pub unsafe extern "C" fn AMmapPutTimestamp(
 ///
 /// \param[in,out] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] key A UTF-8 string key for the map object identified by \p obj_id.
+/// \param[in] key A UTF-8 string view key for the map object identified by
+///                \p obj_id as an `AMbyteSpan` struct.
 /// \param[in] value A 64-bit unsigned integer.
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc `!= NULL`.
@@ -419,19 +440,20 @@ pub unsafe extern "C" fn AMmapPutTimestamp(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
-/// key must be a c string of the map key to be used
 #[no_mangle]
 pub unsafe extern "C" fn AMmapPutUint(
     doc: *mut AMdoc,
     obj_id: *const AMobjId,
-    key: *const c_char,
+    key: AMbyteSpan,
     value: u64,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
-    to_result(doc.put(to_obj_id!(obj_id), to_str(key), value))
+    let key = to_str!(key);
+    to_result(doc.put(to_obj_id!(obj_id), key, value))
 }
 
 /// \memberof AMdoc
@@ -440,19 +462,19 @@ pub unsafe extern "C" fn AMmapPutUint(
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj_id A pointer to an `AMobjId` struct or `AM_ROOT`.
-/// \param[in] begin The first key in a subrange or `NULL` to indicate the
+/// \param[in] begin The first key in a subrange or `AMstr(NULL)` to indicate the
 ///                  absolute first key.
-/// \param[in] end The key one past the last key in a subrange or `NULL` to
+/// \param[in] end The key one past the last key in a subrange or `AMstr(NULL)` to
 ///                indicate one past the absolute last key.
 /// \param[in] heads A pointer to an `AMchangeHashes` struct for historical
 ///                  keys and values or `NULL` for current keys and values.
 /// \return A pointer to an `AMresult` struct containing an `AMmapItems`
 ///         struct.
 /// \pre \p doc `!= NULL`.
-/// \pre `strcmp(`\p begin, \p end`) != 1` if \p begin `!= NULL` and \p end `!= NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
@@ -461,15 +483,15 @@ pub unsafe extern "C" fn AMmapPutUint(
 pub unsafe extern "C" fn AMmapRange(
     doc: *const AMdoc,
     obj_id: *const AMobjId,
-    begin: *const c_char,
-    end: *const c_char,
+    begin: AMbyteSpan,
+    end: AMbyteSpan,
     heads: *const AMchangeHashes,
 ) -> *mut AMresult {
     let doc = to_doc!(doc);
     let obj_id = to_obj_id!(obj_id);
-    match (begin.as_ref(), end.as_ref()) {
-        (Some(_), Some(_)) => {
-            let (begin, end) = (to_str(begin), to_str(end));
+    match (begin.is_null(), end.is_null()) {
+        (false, false) => {
+            let (begin, end) = (to_str!(begin).to_string(), to_str!(end).to_string());
             if begin > end {
                 return AMresult::err(&format!("Invalid range [{}-{})", begin, end)).into();
             };
@@ -480,23 +502,23 @@ pub unsafe extern "C" fn AMmapRange(
                 to_result(doc.map_range(obj_id, bounds))
             }
         }
-        (Some(_), None) => {
-            let bounds = to_str(begin)..;
+        (false, true) => {
+            let bounds = to_str!(begin).to_string()..;
             if let Some(heads) = heads.as_ref() {
                 to_result(doc.map_range_at(obj_id, bounds, heads.as_ref()))
             } else {
                 to_result(doc.map_range(obj_id, bounds))
             }
         }
-        (None, Some(_)) => {
-            let bounds = ..to_str(end);
+        (true, false) => {
+            let bounds = ..to_str!(end).to_string();
             if let Some(heads) = heads.as_ref() {
                 to_result(doc.map_range_at(obj_id, bounds, heads.as_ref()))
             } else {
                 to_result(doc.map_range(obj_id, bounds))
             }
         }
-        (None, None) => {
+        (true, true) => {
             let bounds = ..;
             if let Some(heads) = heads.as_ref() {
                 to_result(doc.map_range_at(obj_id, bounds, heads.as_ref()))

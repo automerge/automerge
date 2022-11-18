@@ -1,10 +1,24 @@
 use automerge as am;
+use libc::strlen;
+use std::convert::TryFrom;
+use std::os::raw::c_char;
+
+macro_rules! to_str {
+    ($span:expr) => {{
+        let result: Result<&str, am::AutomergeError> = (&$span).try_into();
+        match result {
+            Ok(s) => s,
+            Err(e) => return AMresult::err(&e.to_string()).into(),
+        }
+    }};
+}
+
+pub(crate) use to_str;
 
 /// \struct AMbyteSpan
 /// \installed_headerfile
 /// \brief A view onto a contiguous sequence of bytes.
 #[repr(C)]
-#[derive(Eq, PartialEq)]
 pub struct AMbyteSpan {
     /// A pointer to an array of bytes.
     /// \attention <b>NEVER CALL `free()` ON \p src!</b>
@@ -16,6 +30,12 @@ pub struct AMbyteSpan {
     pub count: usize,
 }
 
+impl AMbyteSpan {
+    pub fn is_null(&self) -> bool {
+        self.src.is_null()
+    }
+}
+
 impl Default for AMbyteSpan {
     fn default() -> Self {
         Self {
@@ -24,6 +44,22 @@ impl Default for AMbyteSpan {
         }
     }
 }
+
+impl PartialEq for AMbyteSpan {
+    fn eq(&self, other: &Self) -> bool {
+        if self.count != other.count {
+            return false;
+        }
+        else if self.src == other.src {
+            return true;
+        }
+        let slice = unsafe { std::slice::from_raw_parts(self.src, self.count) };
+        let other_slice = unsafe { std::slice::from_raw_parts(other.src, other.count) };
+        slice == other_slice
+    }
+}
+
+impl Eq for AMbyteSpan {}
 
 impl From<&am::ActorId> for AMbyteSpan {
     fn from(actor: &am::ActorId) -> Self {
@@ -45,6 +81,19 @@ impl From<&mut am::ActorId> for AMbyteSpan {
     }
 }
 
+impl From<*const c_char> for AMbyteSpan {
+    fn from(cs: *const c_char) -> Self {
+        if !cs.is_null() {
+            Self {
+                src: cs as *const u8,
+                count: unsafe { strlen(cs) },
+            }
+        } else {
+            Self::default()
+        }
+    }
+}
+
 impl From<&am::ChangeHash> for AMbyteSpan {
     fn from(change_hash: &am::ChangeHash) -> Self {
         Self {
@@ -59,6 +108,20 @@ impl From<&[u8]> for AMbyteSpan {
         Self {
             src: slice.as_ptr(),
             count: slice.len(),
+        }
+    }
+}
+
+impl TryFrom<&AMbyteSpan> for &str {
+    type Error = am::AutomergeError;
+
+    fn try_from(span: &AMbyteSpan) -> Result<Self, Self::Error> {
+        use am::AutomergeError::InvalidCharacter;
+
+        let slice = unsafe { std::slice::from_raw_parts(span.src, span.count) };
+        match std::str::from_utf8(slice) {
+            Ok(str_) => Ok(str_),
+            Err(e) => Err(InvalidCharacter(e.valid_up_to())),
         }
     }
 }

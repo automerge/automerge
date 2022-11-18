@@ -1,6 +1,4 @@
 use automerge as am;
-use std::cell::RefCell;
-use std::ffi::CString;
 
 use crate::obj::AMobjId;
 use crate::result::AMvalue;
@@ -8,32 +6,31 @@ use crate::result::AMvalue;
 /// \struct AMobjItem
 /// \installed_headerfile
 /// \brief An item in an object.
-#[repr(C)]
 pub struct AMobjItem {
     /// The object identifier of an item in an object.
     obj_id: AMobjId,
     /// The value of an item in an object.
-    value: (am::Value<'static>, RefCell<Option<CString>>),
+    value: am::Value<'static>,
 }
 
 impl AMobjItem {
     pub fn new(value: am::Value<'static>, obj_id: am::ObjId) -> Self {
         Self {
             obj_id: AMobjId::new(obj_id),
-            value: (value, Default::default()),
+            value: value,
         }
     }
 }
 
 impl PartialEq for AMobjItem {
     fn eq(&self, other: &Self) -> bool {
-        self.obj_id == other.obj_id && self.value.0 == other.value.0
+        self.obj_id == other.obj_id && self.value == other.value
     }
 }
 
 impl From<&AMobjItem> for (am::Value<'static>, am::ObjId) {
     fn from(obj_item: &AMobjItem) -> Self {
-        (obj_item.value.0.clone(), obj_item.obj_id.as_ref().clone())
+        (obj_item.value.clone(), obj_item.obj_id.as_ref().clone())
     }
 }
 
@@ -69,7 +66,7 @@ pub unsafe extern "C" fn AMobjItemObjId(obj_item: *const AMobjItem) -> *const AM
 #[no_mangle]
 pub unsafe extern "C" fn AMobjItemValue<'a>(obj_item: *const AMobjItem) -> AMvalue<'a> {
     if let Some(obj_item) = obj_item.as_ref() {
-        (&obj_item.value.0, &obj_item.value.1).into()
+        (&obj_item.value).into()
     } else {
         AMvalue::Void
     }

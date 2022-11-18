@@ -1,12 +1,22 @@
 use automerge as am;
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::ffi::{CStr, CString};
-use std::os::raw::c_char;
 use std::str::FromStr;
 
 use crate::byte_span::AMbyteSpan;
 use crate::result::{to_result, AMresult};
+
+macro_rules! to_actor_id {
+    ($handle:expr) => {{
+        let handle = $handle.as_ref();
+        match handle {
+            Some(b) => b,
+            None => return AMresult::err("Invalid AMactorId pointer").into(),
+        }
+    }};
+}
+
+pub(crate) use to_actor_id;
 
 /// \struct AMactorId
 /// \installed_headerfile
@@ -14,25 +24,25 @@ use crate::result::{to_result, AMresult};
 #[derive(Eq, PartialEq)]
 pub struct AMactorId {
     body: *const am::ActorId,
-    c_str: RefCell<Option<CString>>,
+    hex_str: RefCell<Option<Box<str>>>,
 }
 
 impl AMactorId {
     pub fn new(actor_id: &am::ActorId) -> Self {
         Self {
             body: actor_id,
-            c_str: Default::default(),
+            hex_str: Default::default(),
         }
     }
 
-    pub fn as_c_str(&self) -> *const c_char {
-        let mut c_str = self.c_str.borrow_mut();
-        match c_str.as_mut() {
+    pub fn as_hex_str(&self) -> AMbyteSpan {
+        let mut hex_str = self.hex_str.borrow_mut();
+        match hex_str.as_mut() {
             None => {
-                let hex_str = unsafe { (*self.body).to_hex_string() };
-                c_str.insert(CString::new(hex_str).unwrap()).as_ptr()
+                let hex_string = unsafe { (*self.body).to_hex_string() };
+                hex_str.insert(hex_string.into_boxed_str()).as_bytes().into()
             }
-            Some(hex_str) => hex_str.as_ptr(),
+            Some(hex_str) => hex_str.as_bytes().into()
         }
     }
 }
@@ -57,7 +67,7 @@ impl AsRef<am::ActorId> for AMactorId {
 pub unsafe extern "C" fn AMactorIdBytes(actor_id: *const AMactorId) -> AMbyteSpan {
     match actor_id.as_ref() {
         Some(actor_id) => actor_id.as_ref().into(),
-        None => AMbyteSpan::default(),
+        None => Default::default(),
     }
 }
 
@@ -118,6 +128,7 @@ pub unsafe extern "C" fn AMactorIdInit() -> *mut AMresult {
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// src must be a byte array of size `>= count`
 #[no_mangle]
@@ -132,19 +143,27 @@ pub unsafe extern "C" fn AMactorIdInitBytes(src: *const u8, count: usize) -> *mu
 /// \brief Allocates a new actor identifier and initializes it from a
 ///        hexadecimal string.
 ///
-/// \param[in] hex_str A UTF-8 string.
+/// \param[in] hex_str A UTF-8 string view as an `AMbyteSpan` struct.
 /// \return A pointer to an `AMresult` struct containing a pointer to an
 ///         `AMactorId` struct.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
-/// hex_str must be a null-terminated array of `c_char`
+/// hex_str must be a valid pointer to an AMbyteSpan
 #[no_mangle]
-pub unsafe extern "C" fn AMactorIdInitStr(hex_str: *const c_char) -> *mut AMresult {
-    to_result(am::ActorId::from_str(
-        CStr::from_ptr(hex_str).to_str().unwrap(),
-    ))
+pub unsafe extern "C" fn AMactorIdInitStr(hex_str: AMbyteSpan) -> *mut AMresult {
+   use am::AutomergeError::InvalidActorId;
+    // use am::AutomergeError::InvalidCharacter;
+
+    to_result(match (&hex_str).try_into() {
+        Ok(s) => match am::ActorId::from_str(s) {
+            Ok(actor_id) => Ok(actor_id),
+            Err(_) => Err(InvalidActorId(String::from(s)))
+        },
+        Err(e) => Err(e),
+    })
 }
 
 /// \memberof AMactorId
@@ -152,15 +171,15 @@ pub unsafe extern "C" fn AMactorIdInitStr(hex_str: *const c_char) -> *mut AMresu
 ///
 /// \param[in] actor_id A pointer to an `AMactorId` struct.
 /// \pre \p actor_id `!= NULL`.
-/// \return A UTF-8 string.
+/// \return A UTF-8 string view as an `AMbyteSpan` struct.
 /// \internal
 ///
 /// # Safety
 /// actor_id must be a valid pointer to an AMactorId
 #[no_mangle]
-pub unsafe extern "C" fn AMactorIdStr(actor_id: *const AMactorId) -> *const c_char {
+pub unsafe extern "C" fn AMactorIdStr(actor_id: *const AMactorId) -> AMbyteSpan {
     match actor_id.as_ref() {
-        Some(actor_id) => actor_id.as_c_str(),
-        None => std::ptr::null::<c_char>(),
+        Some(actor_id) => actor_id.as_hex_str(),
+        None => Default::default(),
     }
 }
