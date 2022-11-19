@@ -346,16 +346,16 @@ static void test_get_list_values(void** state) {
 }
 
 /** \brief A JavaScript application can introduce NUL (`\0`) characters into a
- *         string which truncates them for a C application.
+ *         list object's string value which will truncate it in a C application.
  */
-static void test_get_NUL_string(void** state) {
+static void test_get_NUL_string_value(void** state) {
     /*
-    import * as Automerge from "@automerge/automerge"
-    let doc = Automerge.init()
+    import * as Automerge from "@automerge/automerge";
+    let doc = Automerge.init();
     doc = Automerge.change(doc, doc => {
-        doc[0] = 'o\0ps'
-    })
-    const bytes = Automerge.save(doc)
+        doc[0] = 'o\0ps';
+    });
+    const bytes = Automerge.save(doc);
     console.log("static uint8_t const SAVED_DOC[] = {" + Array.apply([], bytes).join(", ") + "};");
     */
     static uint8_t const OOPS_VALUE[] = {'o', '\0', 'p', 's'};
@@ -381,6 +381,7 @@ static void test_get_NUL_string(void** state) {
                                   AMlistGet(doc, AM_ROOT, 0, NULL),
                                   AM_VALUE_STR,
                                   cmocka_cb).str;
+    assert_int_not_equal(str.count, strlen(OOPS_VALUE));
     assert_int_equal(str.count, OOPS_SIZE);
     assert_memory_equal(str.src, OOPS_VALUE, str.count);
 }
@@ -441,7 +442,7 @@ int run_list_tests(void) {
         cmocka_unit_test(test_AMlistPut(Uint, insert)),
         cmocka_unit_test(test_AMlistPut(Uint, update)),
         cmocka_unit_test_setup_teardown(test_get_list_values, setup_stack, teardown_stack),
-        cmocka_unit_test_setup_teardown(test_get_NUL_string, setup_stack, teardown_stack),
+        cmocka_unit_test_setup_teardown(test_get_NUL_string_value, setup_stack, teardown_stack),
         cmocka_unit_test_setup_teardown(test_insert_at_index, setup_stack, teardown_stack),
     };
 

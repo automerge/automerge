@@ -149,16 +149,58 @@ static_void_test_AMmapPut(Timestamp, timestamp, INT64_MAX)
 static_void_test_AMmapPut(Uint, uint, UINT64_MAX)
 
 /** \brief A JavaScript application can introduce NUL (`\0`) characters into a
- *         string which truncates them for a C application.
+ *         map object's key which will truncate it in a C application.
  */
-static void test_get_NUL_string(void** state) {
+static void test_get_NUL_key(void** state) {
     /*
-    import * as Automerge from "@automerge/automerge"
-    let doc = Automerge.init()
+    import * as Automerge from "@automerge/automerge";
+    let doc = Automerge.init();
     doc = Automerge.change(doc, doc => {
-        doc.oops = 'o\0ps'
-    })
-    const bytes = Automerge.save(doc)
+    doc['o\0ps'] = 'oops';
+    });
+    const bytes = Automerge.save(doc);
+    console.log("static uint8_t const SAVED_DOC[] = {" + Array.apply([], bytes).join(", ") + "};");
+    */
+    static uint8_t const OOPS_SRC[] = {'o', '\0', 'p', 's'};
+    static AMbyteSpan const OOPS_KEY = {.src = OOPS_SRC, .count = sizeof(OOPS_SRC) / sizeof(uint8_t)};
+
+    static uint8_t const SAVED_DOC[] = {
+        133, 111, 74, 131, 233, 150, 60, 244, 0, 116, 1, 16, 223, 253, 146,
+        193, 58, 122, 66, 134, 151, 225, 210, 51, 58, 86, 247, 8, 1, 49, 118,
+        234, 228, 42, 116, 171, 13, 164, 99, 244, 27, 19, 150, 44, 201, 136,
+        222, 219, 90, 246, 226, 123, 77, 120, 157, 155, 55, 182, 2, 178, 64, 6,
+        1, 2, 3, 2, 19, 2, 35, 2, 64, 2, 86, 2, 8, 21, 6, 33, 2, 35, 2, 52, 1,
+        66, 2, 86, 2, 87, 4, 128, 1, 2, 127, 0, 127, 1, 127, 1, 127, 0, 127, 0,
+        127, 7, 127, 4, 111, 0, 112, 115, 127, 0, 127, 1, 1, 127, 1, 127, 70,
+        111, 111, 112, 115, 127, 0, 0
+    }; 
+    static size_t const SAVED_DOC_SIZE = sizeof(SAVED_DOC) / sizeof(uint8_t);
+
+    AMresultStack* stack = *state;
+    AMdoc* const doc = AMpush(&stack,
+                              AMload(SAVED_DOC, SAVED_DOC_SIZE),
+                              AM_VALUE_DOC,
+                              cmocka_cb).doc;
+    AMbyteSpan const str = AMpush(&stack,
+                                  AMmapGet(doc, AM_ROOT, OOPS_KEY, NULL),
+                                  AM_VALUE_STR,
+                                  cmocka_cb).str;
+    assert_int_not_equal(OOPS_KEY.count, strlen(OOPS_KEY.src));
+    assert_int_equal(str.count, strlen("oops"));
+    assert_memory_equal(str.src, "oops", str.count);
+}
+
+/** \brief A JavaScript application can introduce NUL (`\0`) characters into a
+ *         map object's string value which will truncate it in a C application.
+ */
+static void test_get_NUL_string_value(void** state) {
+    /*
+    import * as Automerge from "@automerge/automerge";
+    let doc = Automerge.init();
+    doc = Automerge.change(doc, doc => {
+        doc.oops = 'o\0ps';
+    });
+    const bytes = Automerge.save(doc);
     console.log("static uint8_t const SAVED_DOC[] = {" + Array.apply([], bytes).join(", ") + "};");
     */
     static uint8_t const OOPS_VALUE[] = {'o', '\0', 'p', 's'};
@@ -185,6 +227,7 @@ static void test_get_NUL_string(void** state) {
                                   AMmapGet(doc, AM_ROOT, AMstr("oops"), NULL),
                                   AM_VALUE_STR,
                                   cmocka_cb).str;
+    assert_int_not_equal(str.count, strlen(OOPS_VALUE));
     assert_int_equal(str.count, OOPS_SIZE);
     assert_memory_equal(str.src, OOPS_VALUE, str.count);
 }
@@ -1380,7 +1423,8 @@ int run_map_tests(void) {
         cmocka_unit_test(test_AMmapPutStr),
         cmocka_unit_test(test_AMmapPut(Timestamp)),
         cmocka_unit_test(test_AMmapPut(Uint)),
-        cmocka_unit_test_setup_teardown(test_get_NUL_string, setup_stack, teardown_stack),
+        cmocka_unit_test_setup_teardown(test_get_NUL_key, setup_stack, teardown_stack),
+        cmocka_unit_test_setup_teardown(test_get_NUL_string_value, setup_stack, teardown_stack),
         cmocka_unit_test_setup_teardown(test_range_iter_map, setup_stack, teardown_stack),
         cmocka_unit_test_setup_teardown(test_map_range_back_and_forth_single, setup_stack, teardown_stack),
         cmocka_unit_test_setup_teardown(test_map_range_back_and_forth_double, setup_stack, teardown_stack),
