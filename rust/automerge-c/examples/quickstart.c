@@ -13,22 +13,22 @@ int main(int argc, char** argv) {
     AMresultStack* stack = NULL;
     AMdoc* const doc1 = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, abort_cb).doc;
     AMobjId const* const cards = AMpush(&stack,
-                                        AMmapPutObject(doc1, AM_ROOT, "cards", AM_OBJ_TYPE_LIST),
+                                        AMmapPutObject(doc1, AM_ROOT, AMstr("cards"), AM_OBJ_TYPE_LIST),
                                         AM_VALUE_OBJ_ID,
                                         abort_cb).obj_id;
     AMobjId const* const card1 = AMpush(&stack,
                                         AMlistPutObject(doc1, cards, SIZE_MAX, true, AM_OBJ_TYPE_MAP),
                                         AM_VALUE_OBJ_ID,
                                         abort_cb).obj_id;
-    AMfree(AMmapPutStr(doc1, card1, "title", "Rewrite everything in Clojure"));
-    AMfree(AMmapPutBool(doc1, card1, "done", false));
+    AMfree(AMmapPutStr(doc1, card1, AMstr("title"), AMstr("Rewrite everything in Clojure")));
+    AMfree(AMmapPutBool(doc1, card1, AMstr("done"), false));
     AMobjId const* const card2 = AMpush(&stack,
                                         AMlistPutObject(doc1, cards, SIZE_MAX, true, AM_OBJ_TYPE_MAP),
                                         AM_VALUE_OBJ_ID,
                                         abort_cb).obj_id;
-    AMfree(AMmapPutStr(doc1, card2, "title", "Rewrite everything in Haskell"));
-    AMfree(AMmapPutBool(doc1, card2, "done", false));
-    AMfree(AMcommit(doc1, "Add card", NULL));
+    AMfree(AMmapPutStr(doc1, card2, AMstr("title"), AMstr("Rewrite everything in Haskell")));
+    AMfree(AMmapPutBool(doc1, card2, AMstr("done"), false));
+    AMfree(AMcommit(doc1, AMstr("Add card"), NULL));
 
     AMdoc* doc2 = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, abort_cb).doc;
     AMfree(AMmerge(doc2, doc1));
@@ -36,11 +36,11 @@ int main(int argc, char** argv) {
     AMbyteSpan const binary = AMpush(&stack, AMsave(doc1), AM_VALUE_BYTES, abort_cb).bytes;
     doc2 = AMpush(&stack, AMload(binary.src, binary.count), AM_VALUE_DOC, abort_cb).doc;
 
-    AMfree(AMmapPutBool(doc1, card1, "done", true));
-    AMfree(AMcommit(doc1, "Mark card as done", NULL));
+    AMfree(AMmapPutBool(doc1, card1, AMstr("done"), true));
+    AMfree(AMcommit(doc1, AMstr("Mark card as done"), NULL));
 
     AMfree(AMlistDelete(doc2, cards, 0));
-    AMfree(AMcommit(doc2, "Delete card", NULL));
+    AMfree(AMcommit(doc2, AMstr("Delete card"), NULL));
 
     AMfree(AMmerge(doc1, doc2));
 
@@ -52,7 +52,11 @@ int main(int argc, char** argv) {
                                             AMchangeHashesInit(&change_hash, 1),
                                             AM_VALUE_CHANGE_HASHES,
                                             abort_cb).change_hashes;
-        printf("%s %ld\n", AMchangeMessage(change), AMobjSize(doc1, cards, &heads));
+        AMbyteSpan const msg = AMchangeMessage(change);
+        char* const c_msg = calloc(1, msg.count + 1);
+        strncpy(c_msg, msg.src, msg.count);
+        printf("%s %ld\n", c_msg, AMobjSize(doc1, cards, &heads));
+        free(c_msg);
     }
     AMfreeStack(&stack);
 }
@@ -95,7 +99,11 @@ static void abort_cb(AMresultStack** stack, uint8_t discriminant) {
         default: sprintf(buffer, "Unknown `AMstatus` tag %d", status);
     }
     if (buffer[0]) {
-        fprintf(stderr, "%s; %s.", buffer, AMerrorMessage((*stack)->result));
+        AMbyteSpan const msg = AMerrorMessage((*stack)->result);
+        char* const c_msg = calloc(1, msg.count + 1);
+        strncpy(c_msg, msg.src, msg.count);
+        fprintf(stderr, "%s; %s.", buffer, c_msg);
+        free(c_msg);
         AMfreeStack(stack);
         exit(EXIT_FAILURE);
         return;
