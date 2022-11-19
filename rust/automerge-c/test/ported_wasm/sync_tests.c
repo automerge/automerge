@@ -136,7 +136,7 @@ static void test_should_not_reply_if_we_have_no_data_as_well(void **state) {
        const s1 = initSyncState(), s2 = initSyncState()                      */
     TestState* test_state = *state;
     /* const m1 = n1.generateSyncMessage(s1)
-       if (m1 === null) { throw new RangeError("message should not be null") }*/
+       if (m1 === null) { throw new RangeError("message should not be null")  */
     AMsyncMessage const* const m1 = AMpush(&test_state->stack,
                                            AMgenerateSyncMessage(
                                                test_state->n1,
@@ -191,7 +191,7 @@ static void test_repos_with_equal_heads_do_not_need_a_reply_message(void **state
     /*                                                                       */
     /* generate a naive sync message */
     /* const m1 = n1.generateSyncMessage(s1)
-       if (m1 === null) { throw new RangeError("message should not be null") }*/
+       if (m1 === null) { throw new RangeError("message should not be null")  */
     AMsyncMessage const* m1 = AMpush(&test_state->stack,
                                      AMgenerateSyncMessage(test_state->n1,
                                                            test_state->s1),
@@ -342,9 +342,9 @@ static void test_should_not_generate_messages_once_synced(void **state) {
     /* let message, patch
        for (let i = 0; i < 5; i++) {                                         */
     for (size_t i = 0; i != 5; ++i) {
-        // n1.put("_root", "x", i)                                           */
+        /* n1.put("_root", "x", i)                                           */
         AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), i));
-        // n1.commit("", 0)                                                  */
+        /* n1.commit("", 0)                                                  */
         AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* {                                                                     */
     }
@@ -359,7 +359,7 @@ static void test_should_not_generate_messages_once_synced(void **state) {
     /*                                                                       */
     /* n1 reports what it has */
     /* message = n1.generateSyncMessage(s1)
-       if (message === null) { throw new RangeError("message should not be null") }*/
+       if (message === null) { throw new RangeError("message should not be null")  */
     AMsyncMessage const* message = AMpush(&test_state->stack,
                                           AMgenerateSyncMessage(test_state->n1,
                                                                 test_state->s1),
@@ -370,7 +370,7 @@ static void test_should_not_generate_messages_once_synced(void **state) {
     /* n2.receiveSyncMessage(s2, message)                                    */
     AMfree(AMreceiveSyncMessage(test_state->n2, test_state->s2, message));
     /* message = n2.generateSyncMessage(s2)
-       if (message === null) { throw new RangeError("message should not be null") }*/
+       if (message === null) { throw new RangeError("message should not be null")  */
     message = AMpush(&test_state->stack,
                      AMgenerateSyncMessage(test_state->n2, test_state->s2),
                      AM_VALUE_SYNC_MESSAGE,
@@ -383,7 +383,7 @@ static void test_should_not_generate_messages_once_synced(void **state) {
     /* n1.receiveSyncMessage(s1, message)                                    */
     AMfree(AMreceiveSyncMessage(test_state->n1, test_state->s1, message));
     /* message = n2.generateSyncMessage(s2)
-       if (message === null) { throw new RangeError("message should not be null") }*/
+       if (message === null) { throw new RangeError("message should not be null")  */
     message = AMpush(&test_state->stack,
                      AMgenerateSyncMessage(test_state->n1, test_state->s1),
                      AM_VALUE_SYNC_MESSAGE,
@@ -395,7 +395,7 @@ static void test_should_not_generate_messages_once_synced(void **state) {
     /* n2.receiveSyncMessage(s2, message)                                    */
     AMfree(AMreceiveSyncMessage(test_state->n2, test_state->s2, message));
     /* message = n2.generateSyncMessage(s2)
-       if (message === null) { throw new RangeError("message should not be null") }*/
+       if (message === null) { throw new RangeError("message should not be null")  */
     message = AMpush(&test_state->stack,
                      AMgenerateSyncMessage(test_state->n2, test_state->s2),
                      AM_VALUE_SYNC_MESSAGE,
@@ -469,14 +469,14 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void 
     /* both sides report what they have but have no shared peer state */
     /* let msg1to2, msg2to1
        msg1to2 = n1.generateSyncMessage(s1)
-       if (msg1to2 === null) { throw new RangeError("message should not be null") }*/
+       if (msg1to2 === null) { throw new RangeError("message should not be null")  */
     AMsyncMessage const* msg1to2 = AMpush(&test_state->stack,
                                           AMgenerateSyncMessage(test_state->n1,
                                                                 test_state->s1),
                                           AM_VALUE_SYNC_MESSAGE,
                                           cmocka_cb).sync_message;
     /* msg2to1 = n2.generateSyncMessage(s2)
-       if (msg2to1 === null) { throw new RangeError("message should not be null") }*/
+       if (msg2to1 === null) { throw new RangeError("message should not be null")  */
     AMsyncMessage const* msg2to1 = AMpush(&test_state->stack,
                                           AMgenerateSyncMessage(test_state->n2,
                                                                 test_state->s2),
@@ -485,7 +485,7 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void 
     /* assert.deepStrictEqual(decodeSyncMessage(msg1to2).changes.length, 0)  */
     AMchanges msg1to2_changes = AMsyncMessageChanges(msg1to2);
     assert_int_equal(AMchangesSize(&msg1to2_changes), 0);
-    /* assert.deepStrictEqual(decodeSyncMessage(msg1to2).have[0].lastSync.length, 0)*/
+    /* assert.deepStrictEqual(decodeSyncMessage(msg1to2).have[0].lastSync.length, 0 */
     AMsyncHaves msg1to2_haves = AMsyncMessageHaves(msg1to2);
     AMsyncHave const* msg1to2_have = AMsyncHavesNext(&msg1to2_haves, 1);
     AMchangeHashes msg1to2_last_sync = AMsyncHaveLastSync(msg1to2_have);
@@ -493,13 +493,13 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void 
     /* assert.deepStrictEqual(decodeSyncMessage(msg2to1).changes.length, 0)  */
     AMchanges msg2to1_changes = AMsyncMessageChanges(msg2to1);
     assert_int_equal(AMchangesSize(&msg2to1_changes), 0);
-    /* assert.deepStrictEqual(decodeSyncMessage(msg2to1).have[0].lastSync.length, 0)*/
+    /* assert.deepStrictEqual(decodeSyncMessage(msg2to1).have[0].lastSync.length, 0 */
     AMsyncHaves msg2to1_haves = AMsyncMessageHaves(msg2to1);
     AMsyncHave const* msg2to1_have = AMsyncHavesNext(&msg2to1_haves, 1);
     AMchangeHashes msg2to1_last_sync = AMsyncHaveLastSync(msg2to1_have);
     assert_int_equal(AMchangeHashesSize(&msg2to1_last_sync), 0);
     /*                                                                       */
-    /* n1 and n2 receive that message and update sync state but make no patch*/
+    /* n1 and n2 receive that message and update sync state but make no patc */
     /* n1.receiveSyncMessage(s1, msg2to1)                                    */
     AMfree(AMreceiveSyncMessage(test_state->n1, test_state->s1, msg2to1));
     /* n2.receiveSyncMessage(s2, msg1to2)                                    */
@@ -509,7 +509,7 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void 
      * (standard warning that 1% of the time this will result in a "needs"
      * message) */
     /* msg1to2 = n1.generateSyncMessage(s1)
-       if (msg1to2 === null) { throw new RangeError("message should not be null") }*/
+       if (msg1to2 === null) { throw new RangeError("message should not be null")  */
     msg1to2 = AMpush(&test_state->stack,
                      AMgenerateSyncMessage(test_state->n1, test_state->s1),
                      AM_VALUE_SYNC_MESSAGE,
@@ -518,7 +518,7 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void 
     msg1to2_changes = AMsyncMessageChanges(msg1to2);
     assert_int_equal(AMchangesSize(&msg1to2_changes), 5);
     /* msg2to1 = n2.generateSyncMessage(s2)
-       if (msg2to1 === null) { throw new RangeError("message should not be null") }*/
+       if (msg2to1 === null) { throw new RangeError("message should not be null")  */
     msg2to1 = AMpush(&test_state->stack,
                      AMgenerateSyncMessage(test_state->n2, test_state->s2),
                      AM_VALUE_SYNC_MESSAGE,
@@ -571,7 +571,7 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void 
     /* The response acknowledges the changes received and sends no further
      * changes */
     /* msg1to2 = n1.generateSyncMessage(s1)
-       if (msg1to2 === null) { throw new RangeError("message should not be null") }*/
+       if (msg1to2 === null) { throw new RangeError("message should not be null")  */
     msg1to2 = AMpush(&test_state->stack,
                      AMgenerateSyncMessage(test_state->n1, test_state->s1),
                      AM_VALUE_SYNC_MESSAGE,
@@ -580,7 +580,7 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void 
     msg1to2_changes = AMsyncMessageChanges(msg1to2);
     assert_int_equal(AMchangesSize(&msg1to2_changes), 0);
     /* msg2to1 = n2.generateSyncMessage(s2)
-       if (msg2to1 === null) { throw new RangeError("message should not be null") }*/
+       if (msg2to1 === null) { throw new RangeError("message should not be null")  */
     msg2to1 = AMpush(&test_state->stack,
                      AMgenerateSyncMessage(test_state->n2, test_state->s2),
                      AM_VALUE_SYNC_MESSAGE,
@@ -632,12 +632,12 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void 
     /* n1.put("_root", "x", 5)                                               */
     AMfree(AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), 5));
     /* msg1to2 = n1.generateSyncMessage(s1)
-       if (msg1to2 === null) { throw new RangeError("message should not be null") }*/
+       if (msg1to2 === null) { throw new RangeError("message should not be null")  */
     msg1to2 = AMpush(&test_state->stack,
                      AMgenerateSyncMessage(test_state->n1, test_state->s1),
                      AM_VALUE_SYNC_MESSAGE,
                      cmocka_cb).sync_message;
-    /* assert.deepStrictEqual(decodeSyncMessage(msg1to2).have[0].lastSync, [head1, head2].sort()*/
+    /* assert.deepStrictEqual(decodeSyncMessage(msg1to2).have[0].lastSync, [head1, head2].sort( */
     msg1to2_haves = AMsyncMessageHaves(msg1to2);
     msg1to2_have = AMsyncHavesNext(&msg1to2_haves, 1);
     msg1to2_last_sync = AMsyncHaveLastSync(msg1to2_have);
@@ -677,7 +677,7 @@ static void test_should_assume_sent_changes_were_received_until_we_hear_otherwis
     /* n1.commit("", 0)                                                      */
     AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* message = n1.generateSyncMessage(s1)
-      if (message === null) { throw new RangeError("message should not be null") }*/
+      if (message === null) { throw new RangeError("message should not be null")  */
     AMsyncMessage const* message = AMpush(&test_state->stack,
                                           AMgenerateSyncMessage(test_state->n1,
                                                                 test_state->s1),
@@ -692,7 +692,7 @@ static void test_should_assume_sent_changes_were_received_until_we_hear_otherwis
     /* n1.commit("", 0)                                                      */
     AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /* message = n1.generateSyncMessage(s1)
-       if (message === null) { throw new RangeError("message should not be null") }*/
+       if (message === null) { throw new RangeError("message should not be null")  */
     message = AMpush(&test_state->stack,
                      AMgenerateSyncMessage(test_state->n1, test_state->s1),
                      AM_VALUE_SYNC_MESSAGE,
@@ -707,7 +707,7 @@ static void test_should_assume_sent_changes_were_received_until_we_hear_otherwis
     AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
     /*                                                                       */
     /* message = n1.generateSyncMessage(s1)
-       if (message === null) { throw new RangeError("message should not be null") }*/
+       if (message === null) { throw new RangeError("message should not be null")  */
     message = AMpush(&test_state->stack,
                      AMgenerateSyncMessage(test_state->n1, test_state->s1),
                      AM_VALUE_SYNC_MESSAGE,
@@ -1143,7 +1143,7 @@ static void test_should_resync_after_one_node_experiences_data_loss_without_disc
  * \brief should handle changes concurrent to the last sync heads
  */
 static void test_should_handle_changes_concurrrent_to_the_last_sync_heads(void **state) {
-    /* const n1 = create('01234567'), n2 = create('89abcdef'), n3 = create('fedcba98')*/
+    /* const n1 = create('01234567'), n2 = create('89abcdef'), n3 = create('fedcba98' */
     TestState* test_state = *state;
     AMdoc* n3 = AMpush(&test_state->stack,
                        AMcreate(AMpush(&test_state->stack,
@@ -1152,7 +1152,7 @@ static void test_should_handle_changes_concurrrent_to_the_last_sync_heads(void *
                                        cmocka_cb).actor_id),
                        AM_VALUE_DOC,
                        cmocka_cb).doc;
-    /* const s12 = initSyncState(), s21 = initSyncState(), s23 = initSyncState(), s32 = initSyncState()*/
+    /* const s12 = initSyncState(), s21 = initSyncState(), s23 = initSyncState(), s32 = initSyncState( */
     AMsyncState* s12 = test_state->s1;
     AMsyncState* s21 = test_state->s2;
     AMsyncState* s23 = AMpush(&test_state->stack,

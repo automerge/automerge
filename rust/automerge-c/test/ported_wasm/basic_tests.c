@@ -407,7 +407,7 @@ static void test_lists_have_insert_set_splice_and_push_ops(void** state) {
     }
     /* doc.push(sublist, 3, "timestamp");                                    */
     AMfree(AMlistPutTimestamp(doc, sublist, SIZE_MAX, true, 3));
-    /* assert.deepEqual(doc.materialize(), { letters: ["b", "a", "c", new Date(3)] })*/
+    /* assert.deepEqual(doc.materialize(), { letters: ["b", "a", "c", new Date(3)] } */
     doc_items = AMpush(&stack,
                        AMmapRange(doc, AM_ROOT, AMstr(NULL), AMstr(NULL), NULL),
                        AM_VALUE_MAP_ITEMS,
@@ -440,7 +440,7 @@ static void test_lists_have_insert_set_splice_and_push_ops(void** state) {
                                    {.str_tag = AM_VALUE_STR, .str = {.src = "e", .count = 1}},
                                    {.str_tag = AM_VALUE_STR, .str = {.src = "f", .count = 1}}};
     AMfree(AMsplice(doc, sublist, 1, 1, DATA, sizeof(DATA)/sizeof(AMvalue)));
-    /* assert.deepEqual(doc.materialize(), { letters: ["b", "d", "e", "f", "c", new Date(3)] })*/
+    /* assert.deepEqual(doc.materialize(), { letters: ["b", "d", "e", "f", "c", new Date(3)] } */
     doc_items = AMpush(&stack,
                        AMmapRange(doc, AM_ROOT, AMstr(NULL), AMstr(NULL), NULL),
                        AM_VALUE_MAP_ITEMS,
@@ -476,7 +476,7 @@ static void test_lists_have_insert_set_splice_and_push_ops(void** state) {
     }
     /* doc.put(sublist, 0, "z");                                             */
     AMfree(AMlistPutStr(doc, sublist, 0, false, AMstr("z")));
-    /* assert.deepEqual(doc.materialize(), { letters: ["z", "d", "e", "f", "c", new Date(3)] })*/
+    /* assert.deepEqual(doc.materialize(), { letters: ["z", "d", "e", "f", "c", new Date(3)] } */
     doc_items = AMpush(&stack,
                        AMmapRange(doc, AM_ROOT, AMstr(NULL), AMstr(NULL), NULL),
                        AM_VALUE_MAP_ITEMS,
@@ -510,7 +510,7 @@ static void test_lists_have_insert_set_splice_and_push_ops(void** state) {
                          3);
         assert_null(AMlistItemsNext(&list_items, 1));
     }
-    /* assert.deepEqual(doc.materialize(sublist), ["z", "d", "e", "f", "c", new Date(3)])*/
+    /* assert.deepEqual(doc.materialize(sublist), ["z", "d", "e", "f", "c", new Date(3)] */
     AMlistItems sublist_items = AMpush(
                            &stack,
                            AMlistRange(doc, sublist, 0, SIZE_MAX, NULL),
@@ -536,7 +536,7 @@ static void test_lists_have_insert_set_splice_and_push_ops(void** state) {
     assert_null(AMlistItemsNext(&sublist_items, 1));
     /* assert.deepEqual(doc.length(sublist), 6)                              */
     assert_int_equal(AMobjSize(doc, sublist, NULL), 6);
-    /* assert.deepEqual(doc.materialize("/", heads), { letters: ["b", "a", "c"] })*/
+    /* assert.deepEqual(doc.materialize("/", heads), { letters: ["b", "a", "c"] } */
     doc_items = AMpush(&stack,
                        AMmapRange(doc, AM_ROOT, AMstr(NULL), AMstr(NULL), &heads),
                        AM_VALUE_MAP_ITEMS,
@@ -1278,7 +1278,7 @@ static void test_should_be_able_to_fetch_changes_by_hash(void** state) {
                                   AM_VALUE_CHANGE_HASHES,
                                   cmocka_cb).change_hashes;
     /* const change1 = doc1.getChangeByHash(head1[0])
-       if (change1 === null) { throw new RangeError("change1 should not be null") }*/
+       if (change1 === null) { throw new RangeError("change1 should not be null")  */
     AMbyteSpan const change_hash1 = AMchangeHashesNext(&head1, 1);
     AMchanges change1 = AMpush(
         &stack,
@@ -1311,7 +1311,7 @@ static void test_recursive_sets_are_possible(void** state) {
                                               cmocka_cb).actor_id),
                               AM_VALUE_DOC,
                               cmocka_cb).doc;
-    /* const l1 = doc.putObject("_root", "list", [{ foo: "bar" }, [1, 2, 3]])*/
+    /* const l1 = doc.putObject("_root", "list", [{ foo: "bar" }, [1, 2, 3]] */
     AMobjId const* const l1 = AMpush(
         &stack,
         AMmapPutObject(doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST),
@@ -1348,7 +1348,7 @@ static void test_recursive_sets_are_possible(void** state) {
         AMfree(AMlistPutStr(doc, list, SIZE_MAX, true, AMstr("a")));
         AMfree(AMlistPutStr(doc, list, SIZE_MAX, true, AMstr("b")));
     }
-    /* const l3 = doc.putObject("_root", "info1", "hello world") // 'text' object*/
+    /* const l3 = doc.putObject("_root", "info1", "hello world") // 'text' object */
     AMobjId const* const l3 = AMpush(
         &stack,
         AMmapPutObject(doc, AM_ROOT, AMstr("info1"), AM_OBJ_TYPE_TEXT),
@@ -1492,7 +1492,7 @@ static void test_recursive_sets_are_possible(void** state) {
         assert_int_equal(str.count, 1);
         assert_memory_equal(str.src, "b", str.count);
     }
-    /* assert.deepEqual(doc.materialize(l1), [{ zip: ["a", "b"] }, { foo: "bar" }, [1, 2, 3]])*/
+    /* assert.deepEqual(doc.materialize(l1), [{ zip: ["a", "b"] }, { foo: "bar" }, [1, 2, 3]] */
     AMlistItems list_items = AMpush(
         &stack,
         AMlistRange(doc, l1, 0, SIZE_MAX, NULL),
@@ -1750,7 +1750,7 @@ static void test_should_allow_you_to_forkAt_a_heads(void** state) {
                                          cmocka_cb).change_hashes;
     /* A.put("/", "key5", "val5");                                           */
     AMfree(AMmapPutStr(A, AM_ROOT, AMstr("key5"), AMstr("val5")));
-    /* assert.deepEqual(A.forkAt(heads1).materialize("/"), A.materialize("/", heads1))*/
+    /* assert.deepEqual(A.forkAt(heads1).materialize("/"), A.materialize("/", heads1) */
     AMmapItems AforkAt1_items = AMpush(
         &stack,
         AMmapRange(
@@ -1763,7 +1763,7 @@ static void test_should_allow_you_to_forkAt_a_heads(void** state) {
                                  AM_VALUE_MAP_ITEMS,
                                  cmocka_cb).map_items;
     assert_true(AMmapItemsEqual(&AforkAt1_items, &A1_items));
-    /* assert.deepEqual(A.forkAt(heads2).materialize("/"), A.materialize("/", heads2))*/
+    /* assert.deepEqual(A.forkAt(heads2).materialize("/"), A.materialize("/", heads2) */
     AMmapItems AforkAt2_items = AMpush(
         &stack,
         AMmapRange(
@@ -1844,7 +1844,7 @@ static void test_should_handle_merging_text_conflicts_then_saving_and_loading(vo
                             AM_VALUE_DOC,
                             cmocka_cb).doc;
     /*                                                                       */
-    /* assert.deepEqual(C.getWithType('_root', 'text'), ['text', '1@aabbcc'])*/
+    /* assert.deepEqual(C.getWithType('_root', 'text'), ['text', '1@aabbcc'] */
     AMobjId const* const C_text = AMpush(&stack,
                                          AMmapGet(C, AM_ROOT, AMstr("text"), NULL),
                                          AM_VALUE_OBJ_ID,

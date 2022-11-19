@@ -3,9 +3,7 @@ use automerge as am;
 use smol_str::SmolStr;
 use std::any::type_name;
 use std::collections::BTreeMap;
-use std::ffi::CString;
 use std::ops::{Range, RangeFrom, RangeFull, RangeTo};
-use std::os::raw::c_char;
 
 use crate::actor_id::AMactorId;
 use crate::byte_span::AMbyteSpan;
@@ -343,7 +341,7 @@ pub enum AMresult {
     ChangeHashes(Vec<am::ChangeHash>),
     Changes(Vec<am::Change>, Option<BTreeMap<usize, AMchange>>),
     Doc(Box<AMdoc>),
-    Error(CString),
+    Error(String),
     ListItems(Vec<AMlistItem>),
     MapItems(Vec<AMmapItem>),
     ObjId(AMobjId),
@@ -358,7 +356,7 @@ pub enum AMresult {
 
 impl AMresult {
     pub(crate) fn err(s: &str) -> Self {
-        AMresult::Error(CString::new(s).unwrap())
+        AMresult::Error(s.to_string())
     }
 }
 
@@ -739,17 +737,17 @@ pub enum AMstatus {
 /// \brief Gets a result's error message string.
 ///
 /// \param[in] result A pointer to an `AMresult` struct.
-/// \return A UTF-8 string or `NULL`.
+/// \return A UTF-8 string view as an `AMbyteSpan` struct.
 /// \pre \p result `!= NULL`.
 /// \internal
 ///
 /// # Safety
 /// result must be a valid pointer to an AMresult
 #[no_mangle]
-pub unsafe extern "C" fn AMerrorMessage(result: *const AMresult) -> *const c_char {
+pub unsafe extern "C" fn AMerrorMessage(result: *const AMresult) -> AMbyteSpan {
     match result.as_ref() {
-        Some(AMresult::Error(s)) => s.as_ptr(),
-        _ => std::ptr::null::<c_char>(),
+        Some(AMresult::Error(s)) => s.as_bytes().into(),
+        _ => Default::default(),
     }
 }
 

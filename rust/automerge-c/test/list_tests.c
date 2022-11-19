@@ -11,6 +11,7 @@
 
 /* local */
 #include <automerge-c/automerge.h>
+#include "cmocka_utils.h"
 #include "group_state.h"
 #include "macro_utils.h"
 #include "stack_utils.h"
@@ -83,7 +84,7 @@ static void test_AMlistPutNull_ ## mode(void **state) {                       \
                          !strcmp(#mode, "insert")));                          \
     AMresult* const result = AMlistGet(group_state->doc, AM_ROOT, 0, NULL);   \
     if (AMresultStatus(result) != AM_STATUS_OK) {                             \
-        fail_msg("%s", AMerrorMessage(result));                               \
+        fail_msg_view("%s", AMerrorMessage(result));                               \
     }                                                                         \
     assert_int_equal(AMresultSize(result), 1);                                \
     assert_int_equal(AMresultValue(result).tag, AM_VALUE_NULL);               \

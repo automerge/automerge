@@ -11,6 +11,7 @@
 
 /* local */
 #include <automerge-c/automerge.h>
+#include "cmocka_utils.h"
 #include "str_utils.h"
 
 typedef struct {
@@ -45,7 +46,7 @@ static void test_AMactorIdInit() {
     for (size_t i = 0; i != 11; ++i) {
         result = AMactorIdInit();
         if (AMresultStatus(result) != AM_STATUS_OK) {
-            fail_msg("%s", AMerrorMessage(result));
+            fail_msg_view("%s", AMerrorMessage(result));
         }
         assert_int_equal(AMresultSize(result), 1);
         AMvalue const value = AMresultValue(result);
@@ -70,7 +71,7 @@ static void test_AMactorIdInitBytes(void **state) {
     GroupState* group_state = *state;
     AMresult* const result = AMactorIdInitBytes(group_state->src, group_state->count);
     if (AMresultStatus(result) != AM_STATUS_OK) {
-        fail_msg("%s", AMerrorMessage(result));
+        fail_msg_view("%s", AMerrorMessage(result));
     }
     assert_int_equal(AMresultSize(result), 1);
     AMvalue const value = AMresultValue(result);
@@ -85,7 +86,7 @@ static void test_AMactorIdInitStr(void **state) {
     GroupState* group_state = *state;
     AMresult* const result = AMactorIdInitStr(group_state->str);
     if (AMresultStatus(result) != AM_STATUS_OK) {
-        fail_msg("%s", AMerrorMessage(result));
+        fail_msg_view("%s", AMerrorMessage(result));
     }
     assert_int_equal(AMresultSize(result), 1);
     AMvalue const value = AMresultValue(result);
@@ -103,7 +104,7 @@ static void test_AMactorIdInitStr(void **state) {
 
 int run_actor_id_tests(void) {
     const struct CMUnitTest tests[] = {
-//        cmocka_unit_test(test_AMactorIdInit),
+        cmocka_unit_test(test_AMactorIdInit),
         cmocka_unit_test(test_AMactorIdInitBytes),
         cmocka_unit_test(test_AMactorIdInitStr),
     };
