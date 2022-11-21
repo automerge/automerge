@@ -101,8 +101,8 @@ function _state<T>(doc: Doc<T>, checkroot = true): InternalState<T> {
     if (typeof doc !== 'object') {
         throw new RangeError("must be the document root")
     }
-    const state = Reflect.get(doc, STATE)
-    if (state === undefined || (checkroot && _obj(doc) !== "_root")) {
+    const state = Reflect.get(doc, STATE) as InternalState<T>
+    if (state === undefined || state == null || (checkroot && _obj(doc) !== "_root")) {
         throw new RangeError("must be the document root")
     }
     return state
@@ -113,7 +113,7 @@ function _frozen<T>(doc: Doc<T>): boolean {
 }
 
 function _trace<T>(doc: Doc<T>): string | undefined {
-    return Reflect.get(doc, TRACE)
+    return Reflect.get(doc, TRACE) as string
 }
 
 function _set_heads<T>(doc: Doc<T>, heads: Heads) {
@@ -129,7 +129,7 @@ function _obj<T>(doc: Doc<T>): ObjID | null {
     if (!(typeof doc === 'object') || doc === null) {
         return null
     }
-    return Reflect.get(doc, OBJECT_ID)
+    return Reflect.get(doc, OBJECT_ID) as ObjID
 }
 
 function _readonly<T>(doc: Doc<T>): boolean {
