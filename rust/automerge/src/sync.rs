@@ -69,10 +69,6 @@ impl Automerge {
             false
         };
 
-        if heads_unchanged && heads_equal && changes_to_send.is_empty() {
-            return None;
-        }
-
         // deduplicate the changes to send with those we have already sent and clone it now
         let changes_to_send = changes_to_send
             .into_iter()
@@ -84,6 +80,15 @@ impl Automerge {
                 }
             })
             .collect::<Vec<_>>();
+
+        if heads_unchanged {
+            if heads_equal && changes_to_send.is_empty() {
+                return None;
+            }
+            if sync_state.in_flight {
+                return None;
+            }
+        }
 
         sync_state.last_sent_heads = our_heads.clone();
         sync_state
@@ -97,6 +102,7 @@ impl Automerge {
             changes: changes_to_send,
         };
 
+        sync_state.in_flight = true;
         Some(sync_message)
     }
 
@@ -140,12 +146,17 @@ impl Automerge {
             sync_state.last_sent_heads = message_heads.clone();
         }
 
+        if sync_state.sent_hashes.is_empty() {
+            sync_state.in_flight = false;
+        }
+
         let known_heads = message_heads
             .iter()
             .filter(|head| self.get_change_by_hash(head).is_some())
             .collect::<Vec<_>>();
         if known_heads.len() == message_heads.len() {
             sync_state.shared_heads = message_heads.clone();
+            sync_state.in_flight = false;
             // If the remote peer has lost all its data, reset our state to perform a full resync
             if message_heads.is_empty() {
                 sync_state.last_sent_heads = Default::default();
@@ -462,7 +473,9 @@ mod tests {
     use super::*;
     use crate::change::gen::gen_change;
     use crate::storage::parse::Input;
+    use crate::transaction::Transactable;
     use crate::types::gen::gen_hash;
+    use crate::ActorId;
     use proptest::prelude::*;
 
     prop_compose! {
@@ -523,6 +536,267 @@ mod tests {
             let (i, decoded) = Message::parse(Input::new(&encoded)).unwrap();
             assert!(i.is_empty());
             assert_eq!(msg, decoded);
+        }
+    }
+
+    #[test]
+    fn generate_sync_message_twice_does_nothing() {
+        let mut doc = crate::AutoCommit::new();
+        doc.put(crate::ROOT, "key", "value").unwrap();
+        let mut sync_state = State::new();
+
+        assert!(doc.generate_sync_message(&mut sync_state).is_some());
+        assert!(doc.generate_sync_message(&mut sync_state).is_none());
+    }
+
+    #[test]
+    fn should_not_reply_if_we_have_no_data() {
+        let mut doc1 = crate::AutoCommit::new();
+        let mut doc2 = crate::AutoCommit::new();
+        let mut s1 = State::new();
+        let mut s2 = State::new();
+        let m1 = doc1
+            .generate_sync_message(&mut s1)
+            .expect("message was none");
+
+        doc2.receive_sync_message(&mut s2, m1).unwrap();
+        let m2 = doc2.generate_sync_message(&mut s2);
+        assert!(m2.is_none());
+    }
+
+    #[test]
+    fn should_allow_simultaneous_messages_during_synchronisation() {
+        // create & synchronize two nodes
+        let mut doc1 = crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+        let mut doc2 = crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+        let mut s1 = State::new();
+        let mut s2 = State::new();
+
+        for i in 0..5 {
+            doc1.put(&crate::ROOT, "x", i).unwrap();
+            doc1.commit();
+            doc2.put(&crate::ROOT, "y", i).unwrap();
+            doc2.commit();
+        }
+
+        let head1 = doc1.get_heads()[0];
+        let head2 = doc2.get_heads()[0];
+
+        //// both sides report what they have but have no shared peer state
+        let msg1to2 = doc1
+            .generate_sync_message(&mut s1)
+            .expect("initial sync from 1 to 2 was None");
+        let msg2to1 = doc2
+            .generate_sync_message(&mut s2)
+            .expect("initial sync message from 2 to 1 was None");
+        assert_eq!(msg1to2.changes.len(), 0);
+        assert_eq!(msg1to2.have[0].last_sync.len(), 0);
+        assert_eq!(msg2to1.changes.len(), 0);
+        assert_eq!(msg2to1.have[0].last_sync.len(), 0);
+
+        //// doc1 and doc2 receive that message and update sync state
+        doc1.receive_sync_message(&mut s1, msg2to1).unwrap();
+        doc2.receive_sync_message(&mut s2, msg1to2).unwrap();
+
+        //// now both reply with their local changes the other lacks
+        //// (standard warning that 1% of the time this will result in a "need" message)
+        let msg1to2 = doc1
+            .generate_sync_message(&mut s1)
+            .expect("first reply from 1 to 2 was None");
+        assert_eq!(msg1to2.changes.len(), 5);
+
+        let msg2to1 = doc2
+            .generate_sync_message(&mut s2)
+            .expect("first reply from 2 to 1 was None");
+        assert_eq!(msg2to1.changes.len(), 5);
+
+        //// both should now apply the changes
+        doc1.receive_sync_message(&mut s1, msg2to1).unwrap();
+        assert_eq!(doc1.get_missing_deps(&[]), Vec::new());
+
+        doc2.receive_sync_message(&mut s2, msg1to2).unwrap();
+        assert_eq!(doc2.get_missing_deps(&[]), Vec::new());
+
+        //// The response acknowledges the changes received and sends no further changes
+        let msg1to2 = doc1
+            .generate_sync_message(&mut s1)
+            .expect("second reply from 1 to 2 was None");
+        assert_eq!(msg1to2.changes.len(), 0);
+        let msg2to1 = doc2
+            .generate_sync_message(&mut s2)
+            .expect("second reply from 2 to 1 was None");
+        assert_eq!(msg2to1.changes.len(), 0);
+
+        //// After receiving acknowledgements, their shared heads should be equal
+        doc1.receive_sync_message(&mut s1, msg2to1).unwrap();
+        doc2.receive_sync_message(&mut s2, msg1to2).unwrap();
+
+        assert_eq!(s1.shared_heads, s2.shared_heads);
+
+        //// We're in sync, no more messages required
+        assert!(doc1.generate_sync_message(&mut s1).is_none());
+        assert!(doc2.generate_sync_message(&mut s2).is_none());
+
+        //// If we make one more change and start another sync then its lastSync should be updated
+        doc1.put(crate::ROOT, "x", 5).unwrap();
+        doc1.commit();
+        let msg1to2 = doc1
+            .generate_sync_message(&mut s1)
+            .expect("third reply from 1 to 2 was None");
+        let mut expected_heads = vec![head1, head2];
+        expected_heads.sort();
+        let mut actual_heads = msg1to2.have[0].last_sync.clone();
+        actual_heads.sort();
+        assert_eq!(actual_heads, expected_heads);
+    }
+
+    #[test]
+    fn should_handle_false_positive_head() {
+        // Scenario:                                                            ,-- n1
+        // c0 <-- c1 <-- c2 <-- c3 <-- c4 <-- c5 <-- c6 <-- c7 <-- c8 <-- c9 <-+
+        //                                                                      `-- n2
+        // where n2 is a false positive in the Bloom filter containing {n1}.
+        // lastSync is c9.
+
+        let mut doc1 = crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+        let mut doc2 = crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+        let mut s1 = State::new();
+        let mut s2 = State::new();
+
+        for i in 0..10 {
+            doc1.put(crate::ROOT, "x", i).unwrap();
+            doc1.commit();
+        }
+
+        sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+        // search for false positive; see comment above
+        let mut i = 0;
+        let (mut doc1, mut doc2) = loop {
+            let mut doc1copy = doc1
+                .clone()
+                .with_actor(ActorId::try_from("01234567").unwrap());
+            let val1 = format!("{} @ n1", i);
+            doc1copy.put(crate::ROOT, "x", val1).unwrap();
+            doc1copy.commit();
+
+            let mut doc2copy = doc1
+                .clone()
+                .with_actor(ActorId::try_from("89abcdef").unwrap());
+            let val2 = format!("{} @ n2", i);
+            doc2copy.put(crate::ROOT, "x", val2).unwrap();
+            doc2copy.commit();
+
+            let n1_bloom = BloomFilter::from_hashes(doc1copy.get_heads().into_iter());
+            if n1_bloom.contains_hash(&doc2copy.get_heads()[0]) {
+                break (doc1copy, doc2copy);
+            }
+            i += 1;
+        };
+
+        let mut all_heads = doc1.get_heads();
+        all_heads.extend(doc2.get_heads());
+        all_heads.sort();
+
+        // reset sync states
+        let (_, mut s1) = State::parse(Input::new(s1.encode().as_slice())).unwrap();
+        let (_, mut s2) = State::parse(Input::new(s2.encode().as_slice())).unwrap();
+        sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+        assert_eq!(doc1.get_heads(), all_heads);
+        assert_eq!(doc2.get_heads(), all_heads);
+    }
+
+    #[test]
+    fn should_handle_chains_of_false_positives() {
+        //// Scenario:                         ,-- c5
+        //// c0 <-- c1 <-- c2 <-- c3 <-- c4 <-+
+        ////                                   `-- n2c1 <-- n2c2 <-- n2c3
+        //// where n2c1 and n2c2 are both false positives in the Bloom filter containing {c5}.
+        //// lastSync is c4.
+        let mut doc1 = crate::AutoCommit::new().with_actor(ActorId::try_from("abc123").unwrap());
+        let mut doc2 = crate::AutoCommit::new().with_actor(ActorId::try_from("def456").unwrap());
+        let mut s1 = State::new();
+        let mut s2 = State::new();
+
+        for i in 0..10 {
+            doc1.put(crate::ROOT, "x", i).unwrap();
+            doc1.commit();
+        }
+
+        sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+        doc1.put(crate::ROOT, "x", 5).unwrap();
+        doc1.commit();
+        let bloom = BloomFilter::from_hashes(doc1.get_heads().into_iter());
+
+        // search for false positive; see comment above
+        let mut i = 0;
+        let mut doc2 = loop {
+            let mut doc = doc2
+                .fork()
+                .with_actor(ActorId::try_from("89abcdef").unwrap());
+            doc.put(crate::ROOT, "x", format!("{} at 89abdef", i))
+                .unwrap();
+            doc.commit();
+            if bloom.contains_hash(&doc.get_heads()[0]) {
+                break doc;
+            }
+            i += 1;
+        };
+
+        // find another false positive building on the first
+        i = 0;
+        let mut doc2 = loop {
+            let mut doc = doc2
+                .fork()
+                .with_actor(ActorId::try_from("89abcdef").unwrap());
+            doc.put(crate::ROOT, "x", format!("{} again", i)).unwrap();
+            doc.commit();
+            if bloom.contains_hash(&doc.get_heads()[0]) {
+                break doc;
+            }
+            i += 1;
+        };
+
+        doc2.put(crate::ROOT, "x", "final @ 89abcdef").unwrap();
+
+        let mut all_heads = doc1.get_heads();
+        all_heads.extend(doc2.get_heads());
+        all_heads.sort();
+
+        let (_, mut s1) = State::parse(Input::new(s1.encode().as_slice())).unwrap();
+        let (_, mut s2) = State::parse(Input::new(s2.encode().as_slice())).unwrap();
+        sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+        assert_eq!(doc1.get_heads(), all_heads);
+        assert_eq!(doc2.get_heads(), all_heads);
+    }
+
+    fn sync(
+        a: &mut crate::AutoCommit,
+        b: &mut crate::AutoCommit,
+        a_sync_state: &mut State,
+        b_sync_state: &mut State,
+    ) {
+        //function sync(a: Automerge, b: Automerge, aSyncState = initSyncState(), bSyncState = initSyncState()) {
+        const MAX_ITER: usize = 10;
+        let mut iterations = 0;
+
+        loop {
+            let a_to_b = a.generate_sync_message(a_sync_state);
+            let b_to_a = b.generate_sync_message(b_sync_state);
+            if a_to_b.is_none() && b_to_a.is_none() {
+                break;
+            }
+            if iterations > MAX_ITER {
+                panic!("failed to sync in {} iterations", MAX_ITER);
+            }
+            if let Some(msg) = a_to_b {
+                b.receive_sync_message(b_sync_state, msg).unwrap()
+            }
+            if let Some(msg) = b_to_a {
+                a.receive_sync_message(a_sync_state, msg).unwrap()
+            }
+            iterations += 1;
         }
     }
 }
