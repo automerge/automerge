@@ -51,6 +51,7 @@ impl From<am::sync::State> for JS {
         Reflect::set(&result, &"theirNeed".into(), &their_need.0).unwrap();
         Reflect::set(&result, &"theirHave".into(), &their_have).unwrap();
         Reflect::set(&result, &"sentHashes".into(), &sent_hashes.0).unwrap();
+        Reflect::set(&result, &"inFlight".into(), &state.in_flight.into()).unwrap();
         JS(result)
     }
 }
@@ -178,6 +179,10 @@ impl TryFrom<JS> for am::sync::State {
         let their_need = js_get(&value, "theirNeed")?.into();
         let their_have = js_get(&value, "theirHave")?.try_into()?;
         let sent_hashes = js_get(&value, "sentHashes")?.try_into()?;
+        let in_flight = js_get(&value, "inFlight")?
+            .0
+            .as_bool()
+            .ok_or_else(|| JsValue::from_str("SyncState.inFLight must be a boolean"))?;
         Ok(am::sync::State {
             shared_heads,
             last_sent_heads,
@@ -185,6 +190,7 @@ impl TryFrom<JS> for am::sync::State {
             their_need,
             their_have,
             sent_hashes,
+            in_flight,
         })
     }
 }
