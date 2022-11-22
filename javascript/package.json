@@ -59,7 +59,7 @@
     "typescript": "^4.6.4"
   },
   "dependencies": {
-    "@automerge/automerge-wasm": "0.1.15",
+    "@automerge/automerge-wasm": "0.1.16",
     "uuid": "^8.3"
   }
 }
