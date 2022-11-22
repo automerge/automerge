@@ -90,6 +90,16 @@
 <span id="88">88</span>
 <span id="89">89</span>
 <span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::collections::BTreeSet;
 
 <span class="kw">use super</span>::{encode_hashes, BloomFilter};
@@ -123,6 +133,15 @@
     <span class="kw">pub </span>their_need: <span class="prelude-ty">Option</span>&lt;Vec&lt;ChangeHash&gt;&gt;,
     <span class="kw">pub </span>their_have: <span class="prelude-ty">Option</span>&lt;Vec&lt;Have&gt;&gt;,
     <span class="kw">pub </span>sent_hashes: BTreeSet&lt;ChangeHash&gt;,
+
+    <span class="doccomment">/// `generate_sync_message` should return `None` if there are no new changes to send. In
+    /// particular, if there are changes in flight which the other end has not yet acknowledged we
+    /// do not wish to generate duplicate sync messages. This field tracks whether the changes we
+    /// expect to send to the peer based on this sync state have been sent or not. If
+    /// `in_flight` is `false` then `generate_sync_message` will return a new message (provided
+    /// there are in fact changes to send). If it is `true` then we don&#39;t. This flag is cleared
+    /// in `receive_sync_message`.
+    </span><span class="kw">pub </span>in_flight: bool,
 }
 
 <span class="doccomment">/// A summary of the changes that the sender of the message already has.
@@ -176,6 +195,7 @@
                 their_need: <span class="prelude-val">None</span>,
                 their_have: <span class="prelude-val">Some</span>(Vec::new()),
                 sent_hashes: BTreeSet::new(),
+                in_flight: <span class="bool-val">false</span>,
             },
         ))
     }

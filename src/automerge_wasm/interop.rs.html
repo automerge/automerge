@@ -725,6 +725,12 @@
 <span id="723">723</span>
 <span id="724">724</span>
 <span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::value::Datatype;
 <span class="kw">use </span><span class="kw">crate</span>::Automerge;
 <span class="kw">use </span>automerge <span class="kw">as </span>am;
@@ -778,6 +784,7 @@
         Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span><span class="string">&quot;theirNeed&quot;</span>.into(), <span class="kw-2">&amp;</span>their_need.<span class="number">0</span>).unwrap();
         Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span><span class="string">&quot;theirHave&quot;</span>.into(), <span class="kw-2">&amp;</span>their_have).unwrap();
         Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span><span class="string">&quot;sentHashes&quot;</span>.into(), <span class="kw-2">&amp;</span>sent_hashes.<span class="number">0</span>).unwrap();
+        Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span><span class="string">&quot;inFlight&quot;</span>.into(), <span class="kw-2">&amp;</span>state.in_flight.into()).unwrap();
         JS(result)
     }
 }
@@ -905,6 +912,10 @@
         <span class="kw">let </span>their_need = js_get(<span class="kw-2">&amp;</span>value, <span class="string">&quot;theirNeed&quot;</span>)<span class="question-mark">?</span>.into();
         <span class="kw">let </span>their_have = js_get(<span class="kw-2">&amp;</span>value, <span class="string">&quot;theirHave&quot;</span>)<span class="question-mark">?</span>.try_into()<span class="question-mark">?</span>;
         <span class="kw">let </span>sent_hashes = js_get(<span class="kw-2">&amp;</span>value, <span class="string">&quot;sentHashes&quot;</span>)<span class="question-mark">?</span>.try_into()<span class="question-mark">?</span>;
+        <span class="kw">let </span>in_flight = js_get(<span class="kw-2">&amp;</span>value, <span class="string">&quot;inFlight&quot;</span>)<span class="question-mark">?
+            </span>.<span class="number">0
+            </span>.as_bool()
+            .ok_or_else(|| JsValue::from_str(<span class="string">&quot;SyncState.inFLight must be a boolean&quot;</span>))<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(am::sync::State {
             shared_heads,
             last_sent_heads,
@@ -912,6 +923,7 @@
             their_need,
             their_have,
             sent_hashes,
+            in_flight,
         })
     }
 }
