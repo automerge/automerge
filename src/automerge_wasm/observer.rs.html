@@ -332,10 +332,12 @@
 <span id="330">330</span>
 <span id="331">331</span>
 <span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
 </pre><pre class="rust"><code><span class="attribute">#![allow(dead_code)]
 
 </span><span class="kw">use </span><span class="kw">crate</span>::interop::{alloc, js_set};
-<span class="kw">use </span>automerge::{ObjId, OpObserver, Parents, Prop, Value};
+<span class="kw">use </span>automerge::{ObjId, OpObserver, Parents, Prop, SequenceTree, Value};
 <span class="kw">use </span>js_sys::{Array, Object};
 <span class="kw">use </span>wasm_bindgen::prelude::<span class="kw-2">*</span>;
 
@@ -379,7 +381,7 @@
         obj: ObjId,
         path: Vec&lt;(ObjId, Prop)&gt;,
         index: usize,
-        values: Vec&lt;(Value&lt;<span class="lifetime">&#39;static</span>&gt;, ObjId)&gt;,
+        values: SequenceTree&lt;(Value&lt;<span class="lifetime">&#39;static</span>&gt;, ObjId)&gt;,
     },
     Increment {
         obj: ObjId,
@@ -425,11 +427,13 @@
                 }
             }
             <span class="kw">let </span>path = parents.path();
+            <span class="kw">let </span><span class="kw-2">mut </span>values = SequenceTree::new();
+            values.push(value);
             <span class="kw">let </span>patch = Patch::Insert {
                 path,
                 obj,
                 index,
-                values: <span class="macro">vec!</span>[value],
+                values,
             };
             <span class="self">self</span>.patches.push(patch);
         }

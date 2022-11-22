@@ -1284,7 +1284,7 @@
                 Reflect::set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span>(<span class="kw-2">*</span>index <span class="kw">as </span>f64).into(), <span class="kw-2">&amp;</span>sub_val)<span class="question-mark">?</span>;
                 <span class="prelude-val">Ok</span>(result.into())
             }
-            Patch::DeleteSeq { index, .. } =&gt; <span class="self">self</span>.sub_splice(result, <span class="kw-2">*</span>index, <span class="number">1</span>, <span class="kw-2">&amp;</span>[], meta),
+            Patch::DeleteSeq { index, .. } =&gt; <span class="self">self</span>.sub_splice(result, <span class="kw-2">*</span>index, <span class="number">1</span>, <span class="macro">vec!</span>[], meta),
             Patch::Insert { index, values, .. } =&gt; <span class="self">self</span>.sub_splice(result, <span class="kw-2">*</span>index, <span class="number">0</span>, values, meta),
             Patch::Increment { prop, value, .. } =&gt; {
                 <span class="kw">if let </span>Prop::Seq(index) = prop {
@@ -1377,16 +1377,16 @@
         <span class="self">self</span>.wrap_object(result, datatype, <span class="kw-2">&amp;</span>id, meta)
     }
 
-    <span class="kw">fn </span>sub_splice(
+    <span class="kw">fn </span>sub_splice&lt;<span class="lifetime">&#39;a</span>, I: IntoIterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>(Value&lt;<span class="lifetime">&#39;a</span>&gt;, ObjId)&gt;&gt;(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         o: Array,
         index: usize,
         num_del: usize,
-        values: <span class="kw-2">&amp;</span>[(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ObjId)],
+        values: I,
         meta: <span class="kw-2">&amp;</span>JsValue,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, JsValue&gt; {
         <span class="kw">let </span>args: Array = values
-            .iter()
+            .into_iter()
             .map(|v| <span class="self">self</span>.maybe_wrap_object(alloc(<span class="kw-2">&amp;</span>v.<span class="number">0</span>), <span class="kw-2">&amp;</span>v.<span class="number">1</span>, meta))
             .collect::&lt;<span class="prelude-ty">Result</span>&lt;<span class="kw">_</span>, <span class="kw">_</span>&gt;&gt;()<span class="question-mark">?</span>;
         args.unshift(<span class="kw-2">&amp;</span>(num_del <span class="kw">as </span>u32).into());

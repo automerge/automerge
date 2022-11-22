@@ -112,6 +112,8 @@
 <span id="110">110</span>
 <span id="111">111</span>
 <span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
 </pre><pre class="rust"><code><span class="attribute">#![doc(
     html_logo_url = <span class="string">&quot;https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg&quot;</span>,
     html_favicon_url = <span class="string">&quot;https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico&quot;
@@ -191,6 +193,7 @@
 <span class="kw">mod </span>op_tree;
 <span class="kw">mod </span>parents;
 <span class="kw">mod </span>query;
+<span class="kw">mod </span>sequence_tree;
 <span class="kw">mod </span>storage;
 <span class="kw">pub mod </span>sync;
 <span class="kw">pub mod </span>transaction;
@@ -219,6 +222,7 @@
 <span class="kw">pub use </span>op_observer::Patch;
 <span class="kw">pub use </span>op_observer::VecOpObserver;
 <span class="kw">pub use </span>parents::Parents;
+<span class="kw">pub use </span>sequence_tree::SequenceTree;
 <span class="kw">pub use </span>types::{ActorId, ChangeHash, ObjType, OpType, Prop};
 <span class="kw">pub use </span>value::{ScalarValue, Value};
 <span class="kw">pub use </span>values::Values;
