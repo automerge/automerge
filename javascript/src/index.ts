@@ -603,8 +603,17 @@ export function getLastLocalChange<T>(doc: Doc<T>): Change | undefined {
  * This is useful to determine if something is actually an automerge document,
  * if `doc` is not an automerge document this will return null.
  */
-export function getObjectId(doc: any): ObjID | null {
-    return _obj(doc)
+export function getObjectId(doc: any, prop?: Prop): ObjID | null {
+    if (prop) {
+      const state = _state(doc, false)
+      const objectId = _obj(doc)
+      if (!state || !objectId) {
+        throw new RangeError("invalid object for splice")
+      }
+      return state.handle.get(objectId, prop) as ObjID
+    } else {
+      return _obj(doc)
+    }
 }
 
 /**
