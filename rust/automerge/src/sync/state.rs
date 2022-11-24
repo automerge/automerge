@@ -31,6 +31,15 @@ pub struct State {
     pub their_need: Option<Vec<ChangeHash>>,
     pub their_have: Option<Vec<Have>>,
     pub sent_hashes: BTreeSet<ChangeHash>,
+
+    /// `generate_sync_message` should return `None` if there are no new changes to send. In
+    /// particular, if there are changes in flight which the other end has not yet acknowledged we
+    /// do not wish to generate duplicate sync messages. This field tracks whether the changes we
+    /// expect to send to the peer based on this sync state have been sent or not. If
+    /// `in_flight` is `false` then `generate_sync_message` will return a new message (provided
+    /// there are in fact changes to send). If it is `true` then we don't. This flag is cleared
+    /// in `receive_sync_message`.
+    pub in_flight: bool,
 }
 
 /// A summary of the changes that the sender of the message already has.
@@ -84,6 +93,7 @@ impl State {
                 their_need: None,
                 their_have: Some(Vec::new()),
                 sent_hashes: BTreeSet::new(),
+                in_flight: false,
             },
         ))
     }

@@ -4,21 +4,22 @@ use std::{
     mem,
 };
 
-pub type SequenceTree<T> = SequenceTreeInternal<T, 25>;
+pub(crate) const B: usize = 16;
+pub type SequenceTree<T> = SequenceTreeInternal<T>;
 
 #[derive(Clone, Debug)]
 pub struct SequenceTreeInternal<T> {
-    root_node: Option<SequenceTreeNode<T, B>>,
+    root_node: Option<SequenceTreeNode<T>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 struct SequenceTreeNode<T> {
     elements: Vec<T>,
-    children: Vec<SequenceTreeNode<T, B>>,
+    children: Vec<SequenceTreeNode<T>>,
     length: usize,
 }
 
-impl<T> SequenceTreeInternal<T, B>
+impl<T> SequenceTreeInternal<T>
 where
     T: Clone + Debug,
 {
@@ -38,7 +39,7 @@ where
     }
 
     /// Create an iterator through the sequence.
-    pub fn iter(&self) -> Iter<'_, T, B> {
+    pub fn iter(&self) -> Iter<'_, T> {
         Iter {
             inner: self,
             index: 0,
@@ -145,7 +146,7 @@ where
     }
 }
 
-impl<T> SequenceTreeNode<T, B>
+impl<T> SequenceTreeNode<T>
 where
     T: Clone + Debug,
 {
@@ -157,7 +158,7 @@ where
         }
     }
 
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.length
     }
 
@@ -380,7 +381,7 @@ where
         l
     }
 
-    pub fn remove(&mut self, index: usize) -> T {
+    pub(crate) fn remove(&mut self, index: usize) -> T {
         let original_len = self.len();
         if self.is_leaf() {
             let v = self.remove_from_leaf(index);
@@ -423,7 +424,7 @@ where
         }
     }
 
-    fn merge(&mut self, middle: T, successor_sibling: SequenceTreeNode<T, B>) {
+    fn merge(&mut self, middle: T, successor_sibling: SequenceTreeNode<T>) {
         self.elements.push(middle);
         self.elements.extend(successor_sibling.elements);
         self.children.extend(successor_sibling.children);
@@ -431,7 +432,7 @@ where
         assert!(self.is_full());
     }
 
-    pub fn set(&mut self, index: usize, element: T) -> T {
+    pub(crate) fn set(&mut self, index: usize, element: T) -> T {
         if self.is_leaf() {
             let old_element = self.elements.get_mut(index).unwrap();
             mem::replace(old_element, element)
@@ -455,7 +456,7 @@ where
         }
     }
 
-    pub fn get(&self, index: usize) -> Option<&T> {
+    pub(crate) fn get(&self, index: usize) -> Option<&T> {
         if self.is_leaf() {
             return self.elements.get(index);
         } else {
@@ -475,7 +476,7 @@ where
         None
     }
 
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+    pub(crate) fn get_mut(&mut self, index: usize) -> Option<&mut T> {
         if self.is_leaf() {
             return self.elements.get_mut(index);
         } else {
@@ -496,7 +497,7 @@ where
     }
 }
 
-impl<T> Default for SequenceTreeInternal<T, B>
+impl<T> Default for SequenceTreeInternal<T>
 where
     T: Clone + Debug,
 {
@@ -505,7 +506,7 @@ where
     }
 }
 
-impl<T> PartialEq for SequenceTreeInternal<T, B>
+impl<T> PartialEq for SequenceTreeInternal<T>
 where
     T: Clone + Debug + PartialEq,
 {
@@ -514,13 +515,13 @@ where
     }
 }
 
-impl<'a, T> IntoIterator for &'a SequenceTreeInternal<T, B>
+impl<'a, T> IntoIterator for &'a SequenceTreeInternal<T>
 where
     T: Clone + Debug,
 {
     type Item = &'a T;
 
-    type IntoIter = Iter<'a, T, B>;
+    type IntoIter = Iter<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {
         Iter {
@@ -530,12 +531,13 @@ where
     }
 }
 
+#[derive(Debug)]
 pub struct Iter<'a, T> {
-    inner: &'a SequenceTreeInternal<T, B>,
+    inner: &'a SequenceTreeInternal<T>,
     index: usize,
 }
 
-impl<'a, T> Iterator for Iter<'a, T, B>
+impl<'a, T> Iterator for Iter<'a, T>
 where
     T: Clone + Debug,
 {
@@ -554,37 +556,35 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::ActorId;
+    use proptest::prelude::*;
 
     use super::*;
 
     #[test]
     fn push_back() {
         let mut t = SequenceTree::new();
-        let actor = ActorId::random();
 
-        t.push(actor.op_id_at(1));
-        t.push(actor.op_id_at(2));
-        t.push(actor.op_id_at(3));
-        t.push(actor.op_id_at(4));
-        t.push(actor.op_id_at(5));
-        t.push(actor.op_id_at(6));
-        t.push(actor.op_id_at(8));
-        t.push(actor.op_id_at(100));
+        t.push(1);
+        t.push(2);
+        t.push(3);
+        t.push(4);
+        t.push(5);
+        t.push(6);
+        t.push(8);
+        t.push(100);
     }
 
     #[test]
     fn insert() {
         let mut t = SequenceTree::new();
-        let actor = ActorId::random();
 
-        t.insert(0, actor.op_id_at(1));
-        t.insert(1, actor.op_id_at(1));
-        t.insert(0, actor.op_id_at(1));
-        t.insert(0, actor.op_id_at(1));
-        t.insert(0, actor.op_id_at(1));
-        t.insert(3, actor.op_id_at(1));
-        t.insert(4, actor.op_id_at(1));
+        t.insert(0, 1);
+        t.insert(1, 1);
+        t.insert(0, 1);
+        t.insert(0, 1);
+        t.insert(0, 1);
+        t.insert(3, 1);
+        t.insert(4, 1);
     }
 
     #[test]
@@ -609,79 +609,72 @@ mod tests {
         }
     }
 
-    /*
-        fn arb_indices() -> impl Strategy<Value = Vec<usize>> {
-            proptest::collection::vec(any::<usize>(), 0..1000).prop_map(|v| {
-                let mut len = 0;
-                v.into_iter()
-                    .map(|i| {
-                        len += 1;
-                        i % len
-                    })
-                    .collect::<Vec<_>>()
-            })
-        }
-    */
+    fn arb_indices() -> impl Strategy<Value = Vec<usize>> {
+        proptest::collection::vec(any::<usize>(), 0..1000).prop_map(|v| {
+            let mut len = 0;
+            v.into_iter()
+                .map(|i| {
+                    len += 1;
+                    i % len
+                })
+                .collect::<Vec<_>>()
+        })
+    }
 
-    //    use proptest::prelude::*;
+    proptest! {
 
-    /*
-        proptest! {
+        #[test]
+        fn proptest_insert(indices in arb_indices()) {
+            let mut t = SequenceTreeInternal::<usize>::new();
+            let mut v = Vec::new();
 
-            #[test]
-            fn proptest_insert(indices in arb_indices()) {
-                let mut t = SequenceTreeInternal::<usize, 3>::new();
-                let actor = ActorId::random();
-                let mut v = Vec::new();
-
-                for i in indices{
-                    if i <= v.len() {
-                        t.insert(i % 3, i);
-                        v.insert(i % 3, i);
-                    } else {
-                        return Err(proptest::test_runner::TestCaseError::reject("index out of bounds"))
-                    }
-
-                    assert_eq!(v, t.iter().copied().collect::<Vec<_>>())
+            for i in indices{
+                if i <= v.len() {
+                    t.insert(i % 3, i);
+                    v.insert(i % 3, i);
+                } else {
+                    return Err(proptest::test_runner::TestCaseError::reject("index out of bounds"))
                 }
+
+                assert_eq!(v, t.iter().copied().collect::<Vec<_>>())
+            }
+        }
+
+    }
+
+    proptest! {
+
+        // This is a really slow test due to all the copying of the Vecs (i.e. not due to the
+        // sequencetree) so we only do a few runs
+        #![proptest_config(ProptestConfig::with_cases(20))]
+        #[test]
+        fn proptest_remove(inserts in arb_indices(), removes in arb_indices()) {
+            let mut t = SequenceTreeInternal::<usize>::new();
+            let mut v = Vec::new();
+
+            for i in inserts {
+                if i <= v.len() {
+                    t.insert(i , i);
+                    v.insert(i , i);
+                } else {
+                    return Err(proptest::test_runner::TestCaseError::reject("index out of bounds"))
+                }
+
+                assert_eq!(v, t.iter().copied().collect::<Vec<_>>())
             }
 
-        }
-    */
-
-    /*
-        proptest! {
-
-            #[test]
-            fn proptest_remove(inserts in arb_indices(), removes in arb_indices()) {
-                let mut t = SequenceTreeInternal::<usize, 3>::new();
-                let actor = ActorId::random();
-                let mut v = Vec::new();
-
-                for i in inserts {
-                    if i <= v.len() {
-                        t.insert(i , i);
-                        v.insert(i , i);
-                    } else {
-                        return Err(proptest::test_runner::TestCaseError::reject("index out of bounds"))
-                    }
-
-                    assert_eq!(v, t.iter().copied().collect::<Vec<_>>())
+            for i in removes {
+                if i < v.len() {
+                    let tr = t.remove(i);
+                    let vr = v.remove(i);
+                    assert_eq!(tr, vr);
+                } else {
+                    return Err(proptest::test_runner::TestCaseError::reject("index out of bounds"))
                 }
 
-                for i in removes {
-                    if i < v.len() {
-                        let tr = t.remove(i);
-                        let vr = v.remove(i);
-                        assert_eq!(tr, vr);
-                    } else {
-                        return Err(proptest::test_runner::TestCaseError::reject("index out of bounds"))
-                    }
-
-                    assert_eq!(v, t.iter().copied().collect::<Vec<_>>())
-                }
+                assert_eq!(v, t.iter().copied().collect::<Vec<_>>())
             }
-
         }
-    */
+
+    }
 }

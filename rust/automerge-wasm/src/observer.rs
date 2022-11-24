@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::interop::{alloc, js_set};
-use automerge::{ObjId, OpObserver, Parents, Prop, Value};
+use automerge::{ObjId, OpObserver, Parents, Prop, SequenceTree, Value};
 use js_sys::{Array, Object};
 use wasm_bindgen::prelude::*;
 
@@ -45,7 +45,7 @@ pub(crate) enum Patch {
         obj: ObjId,
         path: Vec<(ObjId, Prop)>,
         index: usize,
-        values: Vec<(Value<'static>, ObjId)>,
+        values: SequenceTree<(Value<'static>, ObjId)>,
     },
     Increment {
         obj: ObjId,
@@ -91,11 +91,13 @@ impl OpObserver for Observer {
                 }
             }
             let path = parents.path();
+            let mut values = SequenceTree::new();
+            values.push(value);
             let patch = Patch::Insert {
                 path,
                 obj,
                 index,
-                values: vec![value],
+                values,
             };
             self.patches.push(patch);
         }
