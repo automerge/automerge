@@ -3,4 +3,4 @@ WASM_PROJECT=$THIS_SCRIPT/../../rust/automerge-wasm;
 
 yarn --cwd $WASM_PROJECT install;
 yarn --cwd $WASM_PROJECT build;
-yarn --cwd $WASM_PROJECT test;
+deno test $WASM_PROJECT/deno-tests/deno.ts --allow-read

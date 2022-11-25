@@ -7,5 +7,6 @@ set -eou pipefail
 ./scripts/ci/rust-docs
 ./scripts/ci/advisory
 ./scripts/ci/wasm_tests
+./scripts/ci/deno_tests
 ./scripts/ci/js_tests
 ./scripts/ci/cmake-build Release static
