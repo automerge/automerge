@@ -4,7 +4,6 @@ on:
     - cron: '0 18 * * *'
 jobs:
   cargo-deny:
-    if: ${{ false }}
     runs-on: ubuntu-latest
     strategy:
       matrix:

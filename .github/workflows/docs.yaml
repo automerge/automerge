@@ -7,7 +7,6 @@ name: Documentation
 
 jobs:
   deploy-docs:
-    if: ${{ false }}
     concurrency: deploy-docs
     runs-on: ubuntu-latest
     steps:
