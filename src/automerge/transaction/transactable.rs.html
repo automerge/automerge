@@ -200,6 +200,9 @@
 <span id="198">198</span>
 <span id="199">199</span>
 <span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
@@ -399,6 +402,9 @@
         path.reverse();
         <span class="prelude-val">Ok</span>(path)
     }
+
+    <span class="doccomment">/// The heads this transaction will be based on
+    </span><span class="kw">fn </span>base_heads(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;ChangeHash&gt;;
 }
 </code></pre></div>
 </section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

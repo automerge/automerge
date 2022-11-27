@@ -524,6 +524,10 @@
 <span id="522">522</span>
 <span id="523">523</span>
 <span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
@@ -1046,6 +1050,10 @@
 
     <span class="kw">fn </span>parents&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;Parents&lt;<span class="lifetime">&#39;_</span>&gt;, AutomergeError&gt; {
         <span class="self">self</span>.doc.parents(obj)
+    }
+
+    <span class="kw">fn </span>base_heads(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;ChangeHash&gt; {
+        <span class="self">self</span>.doc.get_heads()
     }
 }
 </code></pre></div>
