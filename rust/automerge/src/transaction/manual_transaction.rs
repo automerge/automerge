@@ -282,6 +282,10 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
     fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<crate::Parents<'_>, AutomergeError> {
         self.doc.parents(obj)
     }
+
+    fn base_heads(&self) -> Vec<ChangeHash> {
+        self.doc.get_heads()
+    }
 }
 
 // If a transaction is not commited or rolled back manually then it can leave the document in an

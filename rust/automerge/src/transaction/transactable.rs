@@ -197,4 +197,7 @@ pub trait Transactable {
         path.reverse();
         Ok(path)
     }
+
+    /// The heads this transaction will be based on
+    fn base_heads(&self) -> Vec<ChangeHash>;
 }

@@ -521,4 +521,8 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
     fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
         self.doc.parents(obj)
     }
+
+    fn base_heads(&self) -> Vec<ChangeHash> {
+        self.doc.get_heads()
+    }
 }
