@@ -22,13 +22,13 @@ pub enum AutomergeError {
     InvalidCharacter(usize),
     #[error("invalid hash {0}")]
     InvalidHash(ChangeHash),
-    #[error("invalid seq {0}")]
+    #[error("index {0} is out of bounds")]
     InvalidIndex(usize),
     #[error("invalid obj id `{0}`")]
     InvalidObjId(String),
     #[error("invalid obj id format `{0}`")]
     InvalidObjIdFormat(String),
-    #[error("invalid seq {0}")]
+    #[error("seq {0} is out of bounds")]
     InvalidSeq(u64),
     #[error("invalid type of value, expected `{expected}` but received `{unexpected}`")]
     InvalidValueType {
