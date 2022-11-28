@@ -470,13 +470,8 @@ pub(crate) fn to_objtype(
                     .map(|(key, val)| (key.as_string().unwrap().into(), val))
                     .collect();
                 Some((ObjType::Map, map))
-            } else if let Some(text) = value.as_string() {
-                let text = text
-                    .chars()
-                    .enumerate()
-                    .map(|(i, ch)| (i.into(), ch.to_string().into()))
-                    .collect();
-                Some((ObjType::Text, text))
+            } else if value.as_string().is_some() {
+                Some((ObjType::Text, vec![(0.into(), value.clone())]))
             } else {
                 None
             }

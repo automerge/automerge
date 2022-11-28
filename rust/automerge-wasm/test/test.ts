@@ -222,8 +222,8 @@ describe('Automerge', () => {
 
       const text = doc.putObject(root, "text", "");
       doc.splice(text, 0, 0, "hello ")
-      doc.splice(text, 6, 0, ["w", "o", "r", "l", "d"])
-      doc.splice(text, 11, 0, ["!", "?"])
+      doc.splice(text, 6, 0, "world")
+      doc.splice(text, 11, 0, "!?")
       assert.deepEqual(doc.getWithType(text, 0), ["str", "h"])
       assert.deepEqual(doc.getWithType(text, 1), ["str", "e"])
       assert.deepEqual(doc.getWithType(text, 9), ["str", "l"])
@@ -232,13 +232,12 @@ describe('Automerge', () => {
       assert.deepEqual(doc.getWithType(text, 12), ["str", "?"])
     })
 
-    it('should be able to insert objects into text', () => {
+    it('should NOT be able to insert objects into text', () => {
       const doc = create()
       const text = doc.putObject("/", "text", "Hello world");
-      const obj = doc.insertObject(text, 6, { hello: "world" });
-      assert.deepEqual(doc.text(text), "Hello \ufffcworld");
-      assert.deepEqual(doc.getWithType(text, 6), ["map", obj]);
-      assert.deepEqual(doc.getWithType(obj, "hello"), ["str", "world"]);
+      assert.throws(() => {
+        doc.insertObject(text, 6, { hello: "world" });
+      })
     })
 
     it('should be able save all or incrementally', () => {

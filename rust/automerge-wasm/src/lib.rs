@@ -203,9 +203,14 @@ impl Automerge {
                 vals.push(value);
             }
         }
-        Ok(self
-            .doc
-            .splice(&obj, start, delete_count, vals.into_iter())?)
+        if !vals.is_empty() {
+            self.doc.splice(&obj, start, delete_count, vals)?;
+        } else {
+            for _ in 0..delete_count {
+                self.doc.delete(&obj, start)?;
+            }
+        }
+        Ok(())
     }
 
     pub fn push(
@@ -230,11 +235,16 @@ impl Automerge {
         value: JsValue,
     ) -> Result<Option<String>, error::InsertObject> {
         let (obj, _) = self.import(obj)?;
-        let (value, subvals) =
+        let (objtype, subvals) =
             to_objtype(&value, &None).ok_or(error::InsertObject::ValueNotObject)?;
         let index = self.doc.length(&obj);
-        let opid = self.doc.insert_object(&obj, index, value)?;
-        self.subset::<error::InsertObject>(&opid, subvals)?;
+        let opid = self.doc.insert_object(&obj, index, objtype)?;
+        if objtype == am::ObjType::Text {
+            self.doc
+                .splice_text(&opid, 0, 0, &value.as_string().unwrap_or_default())?;
+        } else {
+            self.subset::<error::InsertObject>(&opid, subvals)?;
+        }
         Ok(opid.to_string().into())
     }
 
@@ -263,10 +273,15 @@ impl Automerge {
     ) -> Result<Option<String>, error::InsertObject> {
         let (obj, _) = self.import(obj)?;
         let index = index as f64;
-        let (value, subvals) =
+        let (objtype, subvals) =
             to_objtype(&value, &None).ok_or(error::InsertObject::ValueNotObject)?;
-        let opid = self.doc.insert_object(&obj, index as usize, value)?;
-        self.subset::<error::InsertObject>(&opid, subvals)?;
+        let opid = self.doc.insert_object(&obj, index as usize, objtype)?;
+        if objtype == am::ObjType::Text {
+            self.doc
+                .splice_text(&opid, 0, 0, &value.as_string().unwrap_or_default())?;
+        } else {
+            self.subset::<error::InsertObject>(&opid, subvals)?;
+        }
         Ok(opid.to_string().into())
     }
 
@@ -295,10 +310,15 @@ impl Automerge {
     ) -> Result<JsValue, error::InsertObject> {
         let (obj, _) = self.import(obj)?;
         let prop = self.import_prop(prop)?;
-        let (value, subvals) =
+        let (objtype, subvals) =
             to_objtype(&value, &None).ok_or(error::InsertObject::ValueNotObject)?;
-        let opid = self.doc.put_object(&obj, prop, value)?;
-        self.subset::<error::InsertObject>(&opid, subvals)?;
+        let opid = self.doc.put_object(&obj, prop, objtype)?;
+        if objtype == am::ObjType::Text {
+            self.doc
+                .splice_text(&opid, 0, 0, &value.as_string().unwrap_or_default())?;
+        } else {
+            self.subset::<error::InsertObject>(&opid, subvals)?;
+        }
         Ok(opid.to_string().into())
     }
 
