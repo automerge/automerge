@@ -820,11 +820,13 @@ export function splice<T>(doc: Doc<T>, prop: Prop, index: number, del: number, n
     if (!objectId) {
       throw new RangeError("invalid object for splice")
     }
-    const textId = state.handle.get(objectId, prop)
-    if (typeof textId === 'string') {
-        return state.handle.splice(textId, index, del, newText)
+    const value = state.handle.getWithType(objectId, prop)
+    if (value === null) {
+        throw new RangeError("Cannot splice, not a valid value");
+    } else if (value[0] === 'text') {
+        return state.handle.splice(value[1], index, del, newText)
     } else {
-        return undefined
+        throw new RangeError(`Cannot splice, value is of type '${value[0]}', must be 'text'`);
     }
 }
 

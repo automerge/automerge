@@ -1,6 +1,7 @@
 import * as assert from 'assert'
 import {Counter} from 'automerge'
 import * as Automerge from '../src'
+import * as WASM from "@automerge/automerge-wasm"
 
 describe('Automerge', () => {
     describe('basics', () => {
@@ -206,6 +207,15 @@ describe('Automerge', () => {
             let docB1 = Automerge.init()
             ;let [docB2] = Automerge.applyChanges(docB1, changes)
             assert.deepEqual(docB2, doc2);
+        })
+
+        it('handle non-text strings', () => {
+            let doc1 = WASM.create();
+            doc1.put("_root", "text", "hello world");
+            let doc2 = Automerge.load(doc1.save())
+            assert.throws(() => {
+              Automerge.change(doc2, (d) => { Automerge.splice(d, "text", 1, 0, "Z") })
+            }, /Cannot splice/)
         })
 
         it('have many list methods', () => {
