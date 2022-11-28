@@ -527,6 +527,7 @@ describe('Data sync protocol', () => {
         assert.deepStrictEqual(getHeads(n2), [n1hash2, n2hash2].sort())
       })
 
+      // FIXME - this has a periodic failure
       it('should sync two nodes with connection reset', () => {
         s1 = decodeSyncState(encodeSyncState(s1))
         s2 = decodeSyncState(encodeSyncState(s2))

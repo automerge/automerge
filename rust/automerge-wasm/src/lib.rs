@@ -500,13 +500,19 @@ impl Automerge {
 
         let mut exposed = HashSet::default();
 
-        for p in patches {
-            if let Some(c) = &callback {
-                let before = object.clone();
-                object = self.apply_patch(object, &p, 0, &meta, &mut exposed)?;
-                c.call3(&JsValue::undefined(), &p.try_into()?, &before, &object)?;
-            } else {
-                object = self.apply_patch(object, &p, 0, &meta, &mut exposed)?;
+        let before = object.clone();
+
+        for p in &patches {
+            object = self.apply_patch(object, p, 0, &meta, &mut exposed)?;
+        }
+
+        if let Some(c) = &callback {
+            if !patches.is_empty() {
+                let patches: Array = patches
+                    .into_iter()
+                    .map(|p| JsValue::try_from(p))
+                    .collect::<Result<_, _>>()?;
+                c.call3(&JsValue::undefined(), &patches.into(), &before, &object)?;
             }
         }
 

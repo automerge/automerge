@@ -291,12 +291,12 @@ describe('Automerge', () => {
         }, doc => {
           doc.birds = ['Goldfinch']
         })
-        assert.strictEqual(callbacks.length, 3)
-        assert.deepStrictEqual(callbacks[0].patch, { action: "put", path: ["birds"], value: [] })
-        assert.deepStrictEqual(callbacks[1].patch, { action: "insert", path: ["birds",0], values: [""] })
-        assert.deepStrictEqual(callbacks[2].patch, { action: "splice", path: ["birds",0, 0], value: "Goldfinch" })
+        assert.strictEqual(callbacks.length, 1)
+        assert.deepStrictEqual(callbacks[0].patch[0], { action: "put", path: ["birds"], value: [] })
+        assert.deepStrictEqual(callbacks[0].patch[1], { action: "insert", path: ["birds",0], values: [""] })
+        assert.deepStrictEqual(callbacks[0].patch[2], { action: "splice", path: ["birds",0, 0], value: "Goldfinch" })
         assert.strictEqual(callbacks[0].before, s1)
-        assert.strictEqual(callbacks[2].after, s2)
+        assert.strictEqual(callbacks[0].after, s2)
       })
 
       it('should call a patchCallback set up on document initialisation', () => {
@@ -306,15 +306,15 @@ describe('Automerge', () => {
         })
         const s2 = Automerge.change(s1, doc => doc.bird = 'Goldfinch')
         const actor = Automerge.getActorId(s1)
-        assert.strictEqual(callbacks.length, 2)
-        assert.deepStrictEqual(callbacks[0].patch, {
+        assert.strictEqual(callbacks.length, 1)
+        assert.deepStrictEqual(callbacks[0].patch[0], {
           action: "put", path: ["bird"], value: ""
         })
-        assert.deepStrictEqual(callbacks[1].patch, {
+        assert.deepStrictEqual(callbacks[0].patch[1], {
           action: "splice", path: ["bird", 0], value: "Goldfinch"
         })
         assert.strictEqual(callbacks[0].before, s1)
-        assert.strictEqual(callbacks[1].after, s2)
+        assert.strictEqual(callbacks[0].after, s2)
       })
     })
 
@@ -1361,12 +1361,12 @@ describe('Automerge', () => {
           callbacks.push({patch, before, after})
         }
       })
-      assert.strictEqual(callbacks.length, 3)
-      assert.deepStrictEqual(callbacks[0].patch, { action: 'put', path: ["birds"], value: [] })
-      assert.deepStrictEqual(callbacks[1].patch, { action: 'insert', path: ["birds",0], values: [""] })
-      assert.deepStrictEqual(callbacks[2].patch, { action: 'splice', path: ["birds",0,0], value: "Goldfinch" })
+      assert.strictEqual(callbacks.length, 1)
+      assert.deepStrictEqual(callbacks[0].patch[0], { action: 'put', path: ["birds"], value: [] })
+      assert.deepStrictEqual(callbacks[0].patch[1], { action: 'insert', path: ["birds",0], values: [""] })
+      assert.deepStrictEqual(callbacks[0].patch[2], { action: 'splice', path: ["birds",0,0], value: "Goldfinch" })
       assert.strictEqual(callbacks[0].before, before)
-      assert.strictEqual(callbacks[2].after, after)
+      assert.strictEqual(callbacks[0].after, after)
     })
 
     it('should merge multiple applied changes into one patch', () => {
@@ -1374,7 +1374,7 @@ describe('Automerge', () => {
       const s2 = Automerge.change(s1, doc => doc.birds.push('Chaffinch'))
       const patches = [], actor = Automerge.getActorId(s2)
       Automerge.applyChanges(Automerge.init(), Automerge.getAllChanges(s2),
-                             {patchCallback: p => patches.push(p)})
+                             {patchCallback: p => patches.push(... p)})
       assert.deepStrictEqual(patches, [
         { action: 'put', path: [ 'birds' ], value: [] },
         { action: "insert", path: [ "birds", 0 ], values: [ "" ] },
@@ -1387,7 +1387,7 @@ describe('Automerge', () => {
     it('should call a patchCallback registered on doc initialisation', () => {
       const s1 = Automerge.change(Automerge.init(), doc => doc.bird = 'Goldfinch')
       const patches = [], actor = Automerge.getActorId(s1)
-      const before = Automerge.init({patchCallback: p => patches.push(p)})
+      const before = Automerge.init({patchCallback: p => patches.push(... p)})
       Automerge.applyChanges(before, Automerge.getAllChanges(s1))
       assert.deepStrictEqual(patches, [
        { action: "put", path: [ "bird" ], value: "" },
