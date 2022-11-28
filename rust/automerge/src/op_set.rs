@@ -233,97 +233,99 @@ impl OpSetInternal {
         }
     }
 
-    pub(crate) fn insert_op(&mut self, obj: &ObjId, op: Op) -> Op {
-        let q = self.search(obj, query::SeekOp::new(&op));
+    /*
+        pub(crate) fn insert_op(&mut self, obj: &ObjId, op: Op) -> Op {
+            let q = self.search(obj, query::SeekOp::new(&op));
 
-        let succ = q.succ;
-        let pos = q.pos;
+            let succ = q.succ;
+            let pos = q.pos;
 
-        self.add_succ(obj, succ.iter().copied(), &op);
+            self.add_succ(obj, succ.iter().copied(), &op);
 
-        if !op.is_delete() {
-            self.insert(pos, obj, op.clone());
+            if !op.is_delete() {
+                self.insert(pos, obj, op.clone());
+            }
+            op
         }
-        op
-    }
 
-    pub(crate) fn insert_op_with_observer<Obs: OpObserver>(
-        &mut self,
-        obj: &ObjId,
-        op: Op,
-        observer: &mut Obs,
-    ) -> Op {
-        let q = self.search(obj, query::SeekOpWithPatch::new(&op));
-        let obj_type = self.object_type(obj);
+        pub(crate) fn insert_op_with_observer<Obs: OpObserver>(
+            &mut self,
+            obj: &ObjId,
+            op: Op,
+            observer: &mut Obs,
+        ) -> Op {
+            let q = self.search(obj, query::SeekOpWithPatch::new(&op));
+            let obj_type = self.object_type(obj);
 
-        let query::SeekOpWithPatch {
-            pos,
-            succ,
-            seen,
-            values,
-            had_value_before,
-            ..
-        } = q;
+            let query::SeekOpWithPatch {
+                pos,
+                succ,
+                seen,
+                values,
+                had_value_before,
+                ..
+            } = q;
 
-        let ex_obj = self.id_to_exid(obj.0);
-        let parents = self.parents(*obj);
+            let ex_obj = self.id_to_exid(obj.0);
+            let parents = self.parents(*obj);
 
-        let key = match op.key {
-            Key::Map(index) => self.m.props[index].clone().into(),
-            Key::Seq(_) => seen.into(),
-        };
+            let key = match op.key {
+                Key::Map(index) => self.m.props[index].clone().into(),
+                Key::Seq(_) => seen.into(),
+            };
 
-        if op.insert {
-            if obj_type == Some(ObjType::Text) {
-                observer.splice_text(parents, ex_obj, seen, op.to_str());
+            if op.insert {
+                if obj_type == Some(ObjType::Text) {
+                    observer.splice_text(parents, ex_obj, seen, op.to_str());
+                } else {
+                    let value = (op.value(), self.id_to_exid(op.id));
+                    observer.insert(parents, ex_obj, seen, value);
+                }
+            } else if op.is_delete() {
+                if let Some(winner) = &values.last() {
+                    let value = (winner.value(), self.id_to_exid(winner.id));
+                    let conflict = values.len() > 1;
+                    observer.expose(parents, ex_obj, key, value, conflict);
+                } else if had_value_before {
+                    observer.delete(parents, ex_obj, key);
+                }
+            } else if let Some(value) = op.get_increment_value() {
+                // only observe this increment if the counter is visible, i.e. the counter's
+                // create op is in the values
+                //if values.iter().any(|value| op.pred.contains(&value.id)) {
+                if values
+                    .last()
+                    .map(|value| op.pred.contains(&value.id))
+                    .unwrap_or_default()
+                {
+                    // we have observed the value
+                    observer.increment(parents, ex_obj, key, (value, self.id_to_exid(op.id)));
+                }
             } else {
+                let just_conflict = values
+                    .last()
+                    .map(|value| self.m.lamport_cmp(op.id, value.id) != Ordering::Greater)
+                    .unwrap_or(false);
                 let value = (op.value(), self.id_to_exid(op.id));
-                observer.insert(parents, ex_obj, seen, value);
+                if op.is_list_op() && !had_value_before {
+                    observer.insert(parents, ex_obj, seen, value);
+                } else if just_conflict {
+                    observer.flag_conflict(parents, ex_obj, key);
+                } else {
+                    let conflict = !values.is_empty();
+                    observer.put(parents, ex_obj, key, value, conflict);
+                }
             }
-        } else if op.is_delete() {
-            if let Some(winner) = &values.last() {
-                let value = (winner.value(), self.id_to_exid(winner.id));
-                let conflict = values.len() > 1;
-                observer.expose(parents, ex_obj, key, value, conflict);
-            } else if had_value_before {
-                observer.delete(parents, ex_obj, key);
+
+            self.add_succ(obj, succ.iter().copied(), &op);
+
+            if !op.is_delete() {
+                self.insert(pos, obj, op.clone());
             }
-        } else if let Some(value) = op.get_increment_value() {
-            // only observe this increment if the counter is visible, i.e. the counter's
-            // create op is in the values
-            //if values.iter().any(|value| op.pred.contains(&value.id)) {
-            if values
-                .last()
-                .map(|value| op.pred.contains(&value.id))
-                .unwrap_or_default()
-            {
-                // we have observed the value
-                observer.increment(parents, ex_obj, key, (value, self.id_to_exid(op.id)));
-            }
-        } else {
-            let just_conflict = values
-                .last()
-                .map(|value| self.m.lamport_cmp(op.id, value.id) != Ordering::Greater)
-                .unwrap_or(false);
-            let value = (op.value(), self.id_to_exid(op.id));
-            if op.is_list_op() && !had_value_before {
-                observer.insert(parents, ex_obj, seen, value);
-            } else if just_conflict {
-                observer.flag_conflict(parents, ex_obj, key);
-            } else {
-                let conflict = !values.is_empty();
-                observer.put(parents, ex_obj, key, value, conflict);
-            }
+
+            op
         }
-
-        self.add_succ(obj, succ.iter().copied(), &op);
-
-        if !op.is_delete() {
-            self.insert(pos, obj, op.clone());
-        }
-
-        op
-    }
+    */
 
     pub(crate) fn object_type(&self, id: &ObjId) -> Option<ObjType> {
         self.trees.get(id).map(|tree| tree.objtype)

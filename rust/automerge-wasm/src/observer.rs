@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::interop::{alloc, js_set};
-use automerge::{ObjId, OpObserver, Parents, Prop, SequenceTree, Value};
+use automerge::{Automerge, ObjId, OpObserver, Prop, SequenceTree, Value};
 use js_sys::{Array, Object};
 use ropey::Rope;
 use wasm_bindgen::prelude::*;
@@ -76,7 +76,7 @@ pub(crate) enum Patch {
 impl OpObserver for Observer {
     fn insert(
         &mut self,
-        mut parents: Parents<'_>,
+        doc: &Automerge,
         obj: ObjId,
         index: usize,
         tagged_value: (Value<'_>, ObjId),
@@ -97,7 +97,7 @@ impl OpObserver for Observer {
                     return;
                 }
             }
-            if let Some(path) = parents.visible_path() {
+            if let Some(path) = doc.parents(&obj).ok().and_then(|mut p| p.visible_path()) {
                 let mut values = SequenceTree::new();
                 values.push(value);
                 let patch = Patch::Insert {
@@ -111,7 +111,7 @@ impl OpObserver for Observer {
         }
     }
 
-    fn splice_text(&mut self, mut parents: Parents<'_>, obj: ObjId, index: usize, value: &str) {
+    fn splice_text(&mut self, doc: &Automerge, obj: ObjId, index: usize, value: &str) {
         if self.enabled {
             if let Some(Patch::SpliceText {
                 obj: tail_obj,
@@ -126,7 +126,7 @@ impl OpObserver for Observer {
                     return;
                 }
             }
-            if let Some(path) = parents.visible_path() {
+            if let Some(path) = doc.parents(&obj).ok().and_then(|mut p| p.visible_path()) {
                 let patch = Patch::SpliceText {
                     path,
                     obj,
@@ -138,7 +138,7 @@ impl OpObserver for Observer {
         }
     }
 
-    fn delete(&mut self, mut parents: Parents<'_>, obj: ObjId, prop: Prop) {
+    fn delete(&mut self, doc: &Automerge, obj: ObjId, prop: Prop) {
         if self.enabled {
             match self.patches.last_mut() {
                 Some(Patch::Insert {
@@ -173,7 +173,7 @@ impl OpObserver for Observer {
                 }
                 _ => {}
             }
-            if let Some(path) = parents.visible_path() {
+            if let Some(path) = doc.parents(&obj).ok().and_then(|mut p| p.visible_path()) {
                 let patch = match prop {
                     Prop::Map(key) => Patch::DeleteMap { path, obj, key },
                     Prop::Seq(index) => Patch::DeleteSeq {
@@ -190,7 +190,7 @@ impl OpObserver for Observer {
 
     fn put(
         &mut self,
-        mut parents: Parents<'_>,
+        doc: &Automerge,
         obj: ObjId,
         prop: Prop,
         tagged_value: (Value<'_>, ObjId),
@@ -198,7 +198,7 @@ impl OpObserver for Observer {
     ) {
         if self.enabled {
             let expose = false;
-            if let Some(path) = parents.visible_path() {
+            if let Some(path) = doc.parents(&obj).ok().and_then(|mut p| p.visible_path()) {
                 let value = (tagged_value.0.to_owned(), tagged_value.1);
                 let patch = match prop {
                     Prop::Map(key) => Patch::PutMap {
@@ -223,7 +223,7 @@ impl OpObserver for Observer {
 
     fn expose(
         &mut self,
-        mut parents: Parents<'_>,
+        doc: &Automerge,
         obj: ObjId,
         prop: Prop,
         tagged_value: (Value<'_>, ObjId),
@@ -231,7 +231,7 @@ impl OpObserver for Observer {
     ) {
         if self.enabled {
             let expose = true;
-            if let Some(path) = parents.visible_path() {
+            if let Some(path) = doc.parents(&obj).ok().and_then(|mut p| p.visible_path()) {
                 let value = (tagged_value.0.to_owned(), tagged_value.1);
                 let patch = match prop {
                     Prop::Map(key) => Patch::PutMap {
@@ -254,17 +254,11 @@ impl OpObserver for Observer {
         }
     }
 
-    fn flag_conflict(&mut self, mut _parents: Parents<'_>, _obj: ObjId, _prop: Prop) {}
+    fn flag_conflict(&mut self, _doc: &Automerge, _obj: ObjId, _prop: Prop) {}
 
-    fn increment(
-        &mut self,
-        mut parents: Parents<'_>,
-        obj: ObjId,
-        prop: Prop,
-        tagged_value: (i64, ObjId),
-    ) {
+    fn increment(&mut self, doc: &Automerge, obj: ObjId, prop: Prop, tagged_value: (i64, ObjId)) {
         if self.enabled {
-            if let Some(path) = parents.visible_path() {
+            if let Some(path) = doc.parents(&obj).ok().and_then(|mut p| p.visible_path()) {
                 let value = tagged_value.0;
                 self.patches.push(Patch::Increment {
                     path,
