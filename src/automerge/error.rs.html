@@ -116,13 +116,13 @@
     </span>InvalidCharacter(usize),
     <span class="attribute">#[error(<span class="string">&quot;invalid hash {0}&quot;</span>)]
     </span>InvalidHash(ChangeHash),
-    <span class="attribute">#[error(<span class="string">&quot;invalid seq {0}&quot;</span>)]
+    <span class="attribute">#[error(<span class="string">&quot;index {0} is out of bounds&quot;</span>)]
     </span>InvalidIndex(usize),
     <span class="attribute">#[error(<span class="string">&quot;invalid obj id `{0}`&quot;</span>)]
     </span>InvalidObjId(String),
     <span class="attribute">#[error(<span class="string">&quot;invalid obj id format `{0}`&quot;</span>)]
     </span>InvalidObjIdFormat(String),
-    <span class="attribute">#[error(<span class="string">&quot;invalid seq {0}&quot;</span>)]
+    <span class="attribute">#[error(<span class="string">&quot;seq {0} is out of bounds&quot;</span>)]
     </span>InvalidSeq(u64),
     <span class="attribute">#[error(<span class="string">&quot;invalid type of value, expected `{expected}` but received `{unexpected}`&quot;</span>)]
     </span>InvalidValueType {
