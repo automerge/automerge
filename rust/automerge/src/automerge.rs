@@ -800,11 +800,11 @@ impl Automerge {
         self.update_history(change, ops.len());
         if let Some(observer) = observer {
             for (obj, op) in ops {
-                self.ops.insert_op_with_observer(&obj, op, *observer);
+                self.insert_op_with_observer(&obj, op, *observer);
             }
         } else {
             for (obj, op) in ops {
-                self.ops.insert_op(&obj, op);
+                self.insert_op(&obj, op);
             }
         }
     }
@@ -1235,6 +1235,97 @@ impl Automerge {
         let objects =
             objects.map(|os| os.iter().filter_map(|o| self.exid_to_obj(o).ok()).collect());
         self.ops.visualise(objects)
+    }
+
+    pub(crate) fn insert_op(&mut self, obj: &ObjId, op: Op) -> Op {
+        let q = self.ops.search(obj, query::SeekOp::new(&op));
+
+        let succ = q.succ;
+        let pos = q.pos;
+
+        self.ops.add_succ(obj, succ.iter().copied(), &op);
+
+        if !op.is_delete() {
+            self.ops.insert(pos, obj, op.clone());
+        }
+        op
+    }
+
+    pub(crate) fn insert_op_with_observer<Obs: OpObserver>(
+        &mut self,
+        obj: &ObjId,
+        op: Op,
+        observer: &mut Obs,
+    ) -> Op {
+        let q = self.ops.search(obj, query::SeekOpWithPatch::new(&op));
+        let obj_type = self.ops.object_type(obj);
+
+        let query::SeekOpWithPatch {
+            pos,
+            succ,
+            seen,
+            values,
+            had_value_before,
+            ..
+        } = q;
+
+        let ex_obj = self.ops.id_to_exid(obj.0);
+
+        let key = match op.key {
+            Key::Map(index) => self.ops.m.props[index].clone().into(),
+            Key::Seq(_) => seen.into(),
+        };
+
+        if op.insert {
+            if obj_type == Some(ObjType::Text) {
+                observer.splice_text(self, ex_obj, seen, op.to_str());
+            } else {
+                let value = (op.value(), self.ops.id_to_exid(op.id));
+                observer.insert(self, ex_obj, seen, value);
+            }
+        } else if op.is_delete() {
+            if let Some(winner) = &values.last() {
+                let value = (winner.value(), self.ops.id_to_exid(winner.id));
+                let conflict = values.len() > 1;
+                observer.expose(self, ex_obj, key, value, conflict);
+            } else if had_value_before {
+                observer.delete(self, ex_obj, key);
+            }
+        } else if let Some(value) = op.get_increment_value() {
+            // only observe this increment if the counter is visible, i.e. the counter's
+            // create op is in the values
+            //if values.iter().any(|value| op.pred.contains(&value.id)) {
+            if values
+                .last()
+                .map(|value| op.pred.contains(&value.id))
+                .unwrap_or_default()
+            {
+                // we have observed the value
+                observer.increment(self, ex_obj, key, (value, self.ops.id_to_exid(op.id)));
+            }
+        } else {
+            let just_conflict = values
+                .last()
+                .map(|value| self.ops.m.lamport_cmp(op.id, value.id) != Ordering::Greater)
+                .unwrap_or(false);
+            let value = (op.value(), self.ops.id_to_exid(op.id));
+            if op.is_list_op() && !had_value_before {
+                observer.insert(self, ex_obj, seen, value);
+            } else if just_conflict {
+                observer.flag_conflict(self, ex_obj, key);
+            } else {
+                let conflict = !values.is_empty();
+                observer.put(self, ex_obj, key, value, conflict);
+            }
+        }
+
+        self.ops.add_succ(obj, succ.iter().copied(), &op);
+
+        if !op.is_delete() {
+            self.ops.insert(pos, obj, op.clone());
+        }
+
+        op
     }
 }
 

@@ -485,32 +485,31 @@ impl TransactionInner {
         // TODO - id_to_exid should be a noop if not used - change type to Into<ExId>?
         if let Some(op_observer) = op_observer {
             let ex_obj = doc.ops.id_to_exid(obj.0);
-            let parents = doc.ops.parents(obj);
             if op.insert {
                 let obj_type = doc.ops.object_type(&obj);
                 match (obj_type, prop.clone()) {
                     (Some(ObjType::List), Prop::Seq(index)) => {
                         let value = (op.value(), doc.ops.id_to_exid(op.id));
-                        op_observer.insert(parents, ex_obj, index, value)
+                        op_observer.insert(doc, ex_obj, index, value)
                     }
                     (Some(ObjType::Text), Prop::Seq(index)) => {
-                        op_observer.splice_text(parents, ex_obj, index, op.to_str())
+                        op_observer.splice_text(doc, ex_obj, index, op.to_str())
                     }
                     // this should be a warning - not a panic
                     _ => panic!("insert into a map"),
                 }
             } else if op.is_delete() {
-                op_observer.delete(parents, ex_obj, prop.clone());
+                op_observer.delete(doc, ex_obj, prop.clone());
             } else if let Some(value) = op.get_increment_value() {
                 op_observer.increment(
-                    parents,
+                    doc,
                     ex_obj,
                     prop.clone(),
                     (value, doc.ops.id_to_exid(op.id)),
                 );
             } else {
                 let value = (op.value(), doc.ops.id_to_exid(op.id));
-                op_observer.put(parents, ex_obj, prop.clone(), value, false);
+                op_observer.put(doc, ex_obj, prop.clone(), value, false);
             }
         }
         self.operations.push((obj, prop, op));

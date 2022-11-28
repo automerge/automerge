@@ -7,7 +7,7 @@ use crate::{
     op_tree::OpTreeInternal,
     storage::load::{DocObserver, LoadedObject},
     types::{ObjId, Op},
-    OpObserver,
+    Automerge, OpObserver,
 };
 
 /// An opset builder which creates an optree for each object as it finishes loading, inserting the
@@ -78,10 +78,10 @@ impl<'a, O: OpObserver> DocObserver for ObservedOpSetBuilder<'a, O> {
     }
 
     fn finish(self, _metadata: super::OpSetMetadata) -> Self::Output {
-        let mut opset = OpSet::new();
+        let mut opset = Automerge::new();
         for (obj, op) in self.ops {
             opset.insert_op_with_observer(&obj, op, self.observer);
         }
-        opset
+        opset.ops
     }
 }

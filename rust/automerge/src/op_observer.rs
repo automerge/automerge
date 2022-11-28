@@ -1,5 +1,5 @@
 use crate::exid::ExId;
-use crate::Parents;
+use crate::Automerge;
 use crate::Prop;
 use crate::Value;
 
@@ -7,24 +7,24 @@ use crate::Value;
 pub trait OpObserver {
     /// A new value has been inserted into the given object.
     ///
-    /// - `parents`: A parents iterator that can be used to collect path information
+    /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
     /// - `objid`: the object that has been inserted into.
     /// - `index`: the index the new value has been inserted at.
     /// - `tagged_value`: the value that has been inserted and the id of the operation that did the
     /// insert.
     fn insert(
         &mut self,
-        parents: Parents<'_>,
+        doc: &Automerge,
         objid: ExId,
         index: usize,
         tagged_value: (Value<'_>, ExId),
     );
 
-    fn splice_text(&mut self, parents: Parents<'_>, objid: ExId, index: usize, value: &str);
+    fn splice_text(&mut self, doc: &Automerge, objid: ExId, index: usize, value: &str);
 
     /// A new value has been put into the given object.
     ///
-    /// - `parents`: A parents iterator that can be used to collect path information
+    /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
     /// - `objid`: the object that has been put into.
     /// - `prop`: the prop that the value as been put at.
     /// - `tagged_value`: the value that has been put into the object and the id of the operation
@@ -32,7 +32,7 @@ pub trait OpObserver {
     /// - `conflict`: whether this put conflicts with other operations.
     fn put(
         &mut self,
-        parents: Parents<'_>,
+        doc: &Automerge,
         objid: ExId,
         prop: Prop,
         tagged_value: (Value<'_>, ExId),
@@ -43,7 +43,7 @@ pub trait OpObserver {
     /// Similar to a put op - except for maps, lists and text, edits
     /// may already exist and need to be queried
     ///
-    /// - `parents`: A parents iterator that can be used to collect path information
+    /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
     /// - `objid`: the object that has been put into.
     /// - `prop`: the prop that the value as been put at.
     /// - `tagged_value`: the value that has been put into the object and the id of the operation
@@ -51,7 +51,7 @@ pub trait OpObserver {
     /// - `conflict`: whether this put conflicts with other operations.
     fn expose(
         &mut self,
-        parents: Parents<'_>,
+        doc: &Automerge,
         objid: ExId,
         prop: Prop,
         tagged_value: (Value<'_>, ExId),
@@ -60,32 +60,26 @@ pub trait OpObserver {
 
     /// Flag a new conflict on a value without changing it
     ///
-    /// - `parents`: A parents iterator that can be used to collect path information
+    /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
     /// - `objid`: the object that has been put into.
     /// - `prop`: the prop that the value as been put at.
-    fn flag_conflict(&mut self, parents: Parents<'_>, objid: ExId, prop: Prop);
+    fn flag_conflict(&mut self, doc: &Automerge, objid: ExId, prop: Prop);
 
     /// A counter has been incremented.
     ///
-    /// - `parents`: A parents iterator that can be used to collect path information
+    /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
     /// - `objid`: the object that contains the counter.
     /// - `prop`: they prop that the chounter is at.
     /// - `tagged_value`: the amount the counter has been incremented by, and the the id of the
     /// increment operation.
-    fn increment(
-        &mut self,
-        parents: Parents<'_>,
-        objid: ExId,
-        prop: Prop,
-        tagged_value: (i64, ExId),
-    );
+    fn increment(&mut self, doc: &Automerge, objid: ExId, prop: Prop, tagged_value: (i64, ExId));
 
     /// A value has beeen deleted.
     ///
-    /// - `parents`: A parents iterator that can be used to collect path information
+    /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
     /// - `objid`: the object that has been deleted in.
     /// - `prop`: the prop of the value that has been deleted.
-    fn delete(&mut self, parents: Parents<'_>, objid: ExId, prop: Prop);
+    fn delete(&mut self, doc: &Automerge, objid: ExId, prop: Prop);
 
     /// Branch of a new op_observer later to be merged
     ///
@@ -105,18 +99,18 @@ pub trait OpObserver {
 impl OpObserver for () {
     fn insert(
         &mut self,
-        _parents: Parents<'_>,
+        _doc: &Automerge,
         _objid: ExId,
         _index: usize,
         _tagged_value: (Value<'_>, ExId),
     ) {
     }
 
-    fn splice_text(&mut self, _parents: Parents<'_>, _objid: ExId, _index: usize, _value: &str) {}
+    fn splice_text(&mut self, _doc: &Automerge, _objid: ExId, _index: usize, _value: &str) {}
 
     fn put(
         &mut self,
-        _parents: Parents<'_>,
+        _doc: &Automerge,
         _objid: ExId,
         _prop: Prop,
         _tagged_value: (Value<'_>, ExId),
@@ -126,7 +120,7 @@ impl OpObserver for () {
 
     fn expose(
         &mut self,
-        _parents: Parents<'_>,
+        _doc: &Automerge,
         _objid: ExId,
         _prop: Prop,
         _tagged_value: (Value<'_>, ExId),
@@ -134,18 +128,18 @@ impl OpObserver for () {
     ) {
     }
 
-    fn flag_conflict(&mut self, _parents: Parents<'_>, _objid: ExId, _prop: Prop) {}
+    fn flag_conflict(&mut self, _doc: &Automerge, _objid: ExId, _prop: Prop) {}
 
     fn increment(
         &mut self,
-        _parents: Parents<'_>,
+        _doc: &Automerge,
         _objid: ExId,
         _prop: Prop,
         _tagged_value: (i64, ExId),
     ) {
     }
 
-    fn delete(&mut self, _parents: Parents<'_>, _objid: ExId, _prop: Prop) {}
+    fn delete(&mut self, _doc: &Automerge, _objid: ExId, _prop: Prop) {}
 
     fn merge(&mut self, _other: &Self) {}
 
@@ -167,89 +161,87 @@ impl VecOpObserver {
 }
 
 impl OpObserver for VecOpObserver {
-    fn insert(
-        &mut self,
-        mut parents: Parents<'_>,
-        obj: ExId,
-        index: usize,
-        (value, id): (Value<'_>, ExId),
-    ) {
-        let path = parents.path();
-        self.patches.push(Patch::Insert {
-            obj,
-            path,
-            index,
-            value: (value.into_owned(), id),
-        });
+    fn insert(&mut self, doc: &Automerge, obj: ExId, index: usize, (value, id): (Value<'_>, ExId)) {
+        if let Ok(mut p) = doc.parents(&obj) {
+            self.patches.push(Patch::Insert {
+                obj,
+                path: p.path(),
+                index,
+                value: (value.into_owned(), id),
+            });
+        }
     }
 
-    fn splice_text(&mut self, mut parents: Parents<'_>, obj: ExId, index: usize, value: &str) {
-        let path = parents.path();
-        self.patches.push(Patch::Splice {
-            obj,
-            path,
-            index,
-            value: value.to_string(),
-        });
+    fn splice_text(&mut self, doc: &Automerge, obj: ExId, index: usize, value: &str) {
+        if let Ok(mut p) = doc.parents(&obj) {
+            self.patches.push(Patch::Splice {
+                obj,
+                path: p.path(),
+                index,
+                value: value.to_string(),
+            })
+        }
     }
 
     fn put(
         &mut self,
-        mut parents: Parents<'_>,
+        doc: &Automerge,
         obj: ExId,
         prop: Prop,
         (value, id): (Value<'_>, ExId),
         conflict: bool,
     ) {
-        let path = parents.path();
-        self.patches.push(Patch::Put {
-            obj,
-            path,
-            prop,
-            value: (value.into_owned(), id),
-            conflict,
-        });
+        if let Ok(mut p) = doc.parents(&obj) {
+            self.patches.push(Patch::Put {
+                obj,
+                path: p.path(),
+                prop,
+                value: (value.into_owned(), id),
+                conflict,
+            });
+        }
     }
 
     fn expose(
         &mut self,
-        mut parents: Parents<'_>,
+        doc: &Automerge,
         obj: ExId,
         prop: Prop,
         (value, id): (Value<'_>, ExId),
         conflict: bool,
     ) {
-        let path = parents.path();
-        self.patches.push(Patch::Expose {
-            obj,
-            path,
-            prop,
-            value: (value.into_owned(), id),
-            conflict,
-        });
+        if let Ok(mut p) = doc.parents(&obj) {
+            self.patches.push(Patch::Expose {
+                obj,
+                path: p.path(),
+                prop,
+                value: (value.into_owned(), id),
+                conflict,
+            });
+        }
     }
 
-    fn flag_conflict(&mut self, mut _parents: Parents<'_>, _obj: ExId, _prop: Prop) {}
+    fn flag_conflict(&mut self, mut _doc: &Automerge, _obj: ExId, _prop: Prop) {}
 
-    fn increment(
-        &mut self,
-        mut parents: Parents<'_>,
-        obj: ExId,
-        prop: Prop,
-        tagged_value: (i64, ExId),
-    ) {
-        let path = parents.path();
-        self.patches.push(Patch::Increment {
-            obj,
-            path,
-            prop,
-            value: tagged_value,
-        });
+    fn increment(&mut self, doc: &Automerge, obj: ExId, prop: Prop, tagged_value: (i64, ExId)) {
+        if let Ok(mut p) = doc.parents(&obj) {
+            self.patches.push(Patch::Increment {
+                obj,
+                path: p.path(),
+                prop,
+                value: tagged_value,
+            });
+        }
     }
 
-    fn delete(&mut self, mut parents: Parents<'_>, obj: ExId, prop: Prop) {
-        let path = parents.path();
-        self.patches.push(Patch::Delete { obj, path, prop })
+    fn delete(&mut self, doc: &Automerge, obj: ExId, prop: Prop) {
+        if let Ok(mut p) = doc.parents(&obj) {
+            self.patches.push(Patch::Delete {
+                obj,
+                path: p.path(),
+                prop,
+            })
+        }
     }
 
     fn merge(&mut self, other: &Self) {
