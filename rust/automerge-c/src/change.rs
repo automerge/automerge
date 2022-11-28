@@ -1,7 +1,5 @@
 use automerge as am;
 use std::cell::RefCell;
-use std::ffi::CString;
-use std::os::raw::c_char;
 
 use crate::byte_span::AMbyteSpan;
 use crate::change_hashes::AMchangeHashes;
@@ -23,43 +21,31 @@ macro_rules! to_change {
 #[derive(Eq, PartialEq)]
 pub struct AMchange {
     body: *mut am::Change,
-    c_msg: RefCell<Option<CString>>,
-    c_changehash: RefCell<Option<am::ChangeHash>>,
+    changehash: RefCell<Option<am::ChangeHash>>,
 }
 
 impl AMchange {
     pub fn new(change: &mut am::Change) -> Self {
         Self {
             body: change,
-            c_msg: Default::default(),
-            c_changehash: Default::default(),
+            changehash: Default::default(),
         }
     }
 
-    pub fn message(&self) -> *const c_char {
-        let mut c_msg = self.c_msg.borrow_mut();
-        match c_msg.as_mut() {
-            None => {
-                if let Some(message) = unsafe { (*self.body).message() } {
-                    return c_msg
-                        .insert(CString::new(message.as_bytes()).unwrap())
-                        .as_ptr();
-                }
-            }
-            Some(message) => {
-                return message.as_ptr();
-            }
+    pub fn message(&self) -> AMbyteSpan {
+        if let Some(message) = unsafe { (*self.body).message() } {
+            return message.as_str().as_bytes().into();
         }
-        std::ptr::null()
+        Default::default()
     }
 
     pub fn hash(&self) -> AMbyteSpan {
-        let mut c_changehash = self.c_changehash.borrow_mut();
-        if let Some(c_changehash) = c_changehash.as_ref() {
-            c_changehash.into()
+        let mut changehash = self.changehash.borrow_mut();
+        if let Some(changehash) = changehash.as_ref() {
+            changehash.into()
         } else {
             let hash = unsafe { (*self.body).hash() };
-            let ptr = c_changehash.insert(hash);
+            let ptr = changehash.insert(hash);
             AMbyteSpan {
                 src: ptr.0.as_ptr(),
                 count: hash.as_ref().len(),
@@ -90,6 +76,7 @@ impl AsRef<am::Change> for AMchange {
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// change must be a valid pointer to an AMchange
 #[no_mangle]
@@ -130,7 +117,7 @@ pub unsafe extern "C" fn AMchangeCompress(change: *mut AMchange) {
 pub unsafe extern "C" fn AMchangeDeps(change: *const AMchange) -> AMchangeHashes {
     match change.as_ref() {
         Some(change) => AMchangeHashes::new(change.as_ref().deps()),
-        None => AMchangeHashes::default(),
+        None => Default::default(),
     }
 }
 
@@ -149,7 +136,7 @@ pub unsafe extern "C" fn AMchangeExtraBytes(change: *const AMchange) -> AMbyteSp
     if let Some(change) = change.as_ref() {
         change.as_ref().extra_bytes().into()
     } else {
-        AMbyteSpan::default()
+        Default::default()
     }
 }
 
@@ -164,6 +151,7 @@ pub unsafe extern "C" fn AMchangeExtraBytes(change: *const AMchange) -> AMbyteSp
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// src must be a byte array of size `>= count`
 #[no_mangle]
@@ -187,7 +175,7 @@ pub unsafe extern "C" fn AMchangeFromBytes(src: *const u8, count: usize) -> *mut
 pub unsafe extern "C" fn AMchangeHash(change: *const AMchange) -> AMbyteSpan {
     match change.as_ref() {
         Some(change) => change.hash(),
-        None => AMbyteSpan::default(),
+        None => Default::default(),
     }
 }
 
@@ -233,18 +221,18 @@ pub unsafe extern "C" fn AMchangeMaxOp(change: *const AMchange) -> u64 {
 /// \brief Gets the message of a change.
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
-/// \return A UTF-8 string or `NULL`.
+/// \return A UTF-8 string view as an `AMbyteSpan` struct.
 /// \pre \p change `!= NULL`.
 /// \internal
 ///
 /// # Safety
 /// change must be a valid pointer to an AMchange
 #[no_mangle]
-pub unsafe extern "C" fn AMchangeMessage(change: *const AMchange) -> *const c_char {
+pub unsafe extern "C" fn AMchangeMessage(change: *const AMchange) -> AMbyteSpan {
     if let Some(change) = change.as_ref() {
         return change.message();
     };
-    std::ptr::null()
+    Default::default()
 }
 
 /// \memberof AMchange
@@ -338,7 +326,7 @@ pub unsafe extern "C" fn AMchangeRawBytes(change: *const AMchange) -> AMbyteSpan
     if let Some(change) = change.as_ref() {
         change.as_ref().raw_bytes().into()
     } else {
-        AMbyteSpan::default()
+        Default::default()
     }
 }
 
@@ -354,6 +342,7 @@ pub unsafe extern "C" fn AMchangeRawBytes(change: *const AMchange) -> AMbyteSpan
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// src must be a byte array of size `>= count`
 #[no_mangle]

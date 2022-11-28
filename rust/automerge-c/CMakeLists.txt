@@ -51,7 +51,7 @@ foreach(TOML_LINE IN ITEMS ${TOML_LINES})
     endif()
 endforeach()
 
-project(${CARGO_PKG_NAME} VERSION ${CARGO_PKG_VERSION} LANGUAGES C DESCRIPTION "C bindings for the Automerge Rust backend.")
+project(${CARGO_PKG_NAME} VERSION 0.0.1 LANGUAGES C DESCRIPTION "C bindings for the Automerge Rust backend.")
 
 include(CTest)
 

@@ -15,7 +15,7 @@
 
 typedef struct {
     GroupState* group_state;
-    char const* actor_id_str;
+    AMbyteSpan actor_id_str;
     uint8_t* actor_id_bytes;
     size_t actor_id_size;
 } TestState;
@@ -23,10 +23,11 @@ typedef struct {
 static int setup(void** state) {
     TestState* test_state = test_calloc(1, sizeof(TestState));
     group_setup((void**)&test_state->group_state);
-    test_state->actor_id_str = "000102030405060708090a0b0c0d0e0f";
-    test_state->actor_id_size = strlen(test_state->actor_id_str) / 2;
+    test_state->actor_id_str.src = "000102030405060708090a0b0c0d0e0f";
+    test_state->actor_id_str.count = strlen(test_state->actor_id_str.src);
+    test_state->actor_id_size = test_state->actor_id_str.count / 2;
     test_state->actor_id_bytes = test_malloc(test_state->actor_id_size);
-    hex_to_bytes(test_state->actor_id_str, test_state->actor_id_bytes, test_state->actor_id_size);
+    hex_to_bytes(test_state->actor_id_str.src, test_state->actor_id_bytes, test_state->actor_id_size);
     *state = test_state;
     return 0;
 }
@@ -49,10 +50,10 @@ static void test_AMkeys_empty() {
     assert_int_equal(AMstrsSize(&forward), 0);
     AMstrs reverse = AMstrsReversed(&forward);
     assert_int_equal(AMstrsSize(&reverse), 0);
-    assert_null(AMstrsNext(&forward, 1));
-    assert_null(AMstrsPrev(&forward, 1));
-    assert_null(AMstrsNext(&reverse, 1));
-    assert_null(AMstrsPrev(&reverse, 1));
+    assert_null(AMstrsNext(&forward, 1).src);
+    assert_null(AMstrsPrev(&forward, 1).src);
+    assert_null(AMstrsNext(&reverse, 1).src);
+    assert_null(AMstrsPrev(&reverse, 1).src);
     AMfreeStack(&stack);
 }
 
@@ -70,46 +71,46 @@ static void test_AMkeys_list() {
     AMstrs reverse = AMstrsReversed(&forward);
     assert_int_equal(AMstrsSize(&reverse), 3);
     /* Forward iterator forward. */
-    char const* str = AMstrsNext(&forward, 1);
-    assert_ptr_equal(strstr(str, "1@"), str);
+    AMbyteSpan str = AMstrsNext(&forward, 1);
+    assert_ptr_equal(strstr(str.src, "1@"), str.src);
     str = AMstrsNext(&forward, 1);
-    assert_ptr_equal(strstr(str, "2@"), str);
+    assert_ptr_equal(strstr(str.src, "2@"), str.src);
     str = AMstrsNext(&forward, 1);
-    assert_ptr_equal(strstr(str, "3@"), str);
-    assert_null(AMstrsNext(&forward, 1));
+    assert_ptr_equal(strstr(str.src, "3@"), str.src);
+    assert_null(AMstrsNext(&forward, 1).src);
     /* Forward iterator reverse. */
     str = AMstrsPrev(&forward, 1);
-    assert_ptr_equal(strstr(str, "3@"), str);
+    assert_ptr_equal(strstr(str.src, "3@"), str.src);
     str = AMstrsPrev(&forward, 1);
-    assert_ptr_equal(strstr(str, "2@"), str);
+    assert_ptr_equal(strstr(str.src, "2@"), str.src);
     str = AMstrsPrev(&forward, 1);
-    assert_ptr_equal(strstr(str, "1@"), str);
-    assert_null(AMstrsPrev(&forward, 1));
+    assert_ptr_equal(strstr(str.src, "1@"), str.src);
+    assert_null(AMstrsPrev(&forward, 1).src);
     /* Reverse iterator forward. */
     str = AMstrsNext(&reverse, 1);
-    assert_ptr_equal(strstr(str, "3@"), str);
+    assert_ptr_equal(strstr(str.src, "3@"), str.src);
     str = AMstrsNext(&reverse, 1);
-    assert_ptr_equal(strstr(str, "2@"), str);
+    assert_ptr_equal(strstr(str.src, "2@"), str.src);
     str = AMstrsNext(&reverse, 1);
-    assert_ptr_equal(strstr(str, "1@"), str);
+    assert_ptr_equal(strstr(str.src, "1@"), str.src);
     /* Reverse iterator reverse. */
-    assert_null(AMstrsNext(&reverse, 1));
+    assert_null(AMstrsNext(&reverse, 1).src);
     str = AMstrsPrev(&reverse, 1);
-    assert_ptr_equal(strstr(str, "1@"), str);
+    assert_ptr_equal(strstr(str.src, "1@"), str.src);
     str = AMstrsPrev(&reverse, 1);
-    assert_ptr_equal(strstr(str, "2@"), str);
+    assert_ptr_equal(strstr(str.src, "2@"), str.src);
     str = AMstrsPrev(&reverse, 1);
-    assert_ptr_equal(strstr(str, "3@"), str);
-    assert_null(AMstrsPrev(&reverse, 1));
+    assert_ptr_equal(strstr(str.src, "3@"), str.src);
+    assert_null(AMstrsPrev(&reverse, 1).src);
     AMfreeStack(&stack);
 }
 
 static void test_AMkeys_map() {
     AMresultStack* stack = NULL;
     AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
-    AMfree(AMmapPutInt(doc, AM_ROOT, "one", 1));
-    AMfree(AMmapPutInt(doc, AM_ROOT, "two", 2));
-    AMfree(AMmapPutInt(doc, AM_ROOT, "three", 3));
+    AMfree(AMmapPutInt(doc, AM_ROOT, AMstr("one"), 1));
+    AMfree(AMmapPutInt(doc, AM_ROOT, AMstr("two"), 2));
+    AMfree(AMmapPutInt(doc, AM_ROOT, AMstr("three"), 3));
     AMstrs forward = AMpush(&stack,
                             AMkeys(doc, AM_ROOT, NULL),
                             AM_VALUE_STRS,
@@ -118,25 +119,49 @@ static void test_AMkeys_map() {
     AMstrs reverse = AMstrsReversed(&forward);
     assert_int_equal(AMstrsSize(&reverse), 3);
     /* Forward iterator forward. */
-    assert_string_equal(AMstrsNext(&forward, 1), "one");
-    assert_string_equal(AMstrsNext(&forward, 1), "three");
-    assert_string_equal(AMstrsNext(&forward, 1), "two");
-    assert_null(AMstrsNext(&forward, 1));
+    AMbyteSpan str = AMstrsNext(&forward, 1);
+    assert_int_equal(str.count, 3);
+    assert_memory_equal(str.src, "one", str.count);
+    str = AMstrsNext(&forward, 1);
+    assert_int_equal(str.count, 5);
+    assert_memory_equal(str.src, "three", str.count);
+    str = AMstrsNext(&forward, 1);
+    assert_int_equal(str.count, 3);
+    assert_memory_equal(str.src, "two", str.count);
+    assert_null(AMstrsNext(&forward, 1).src);
     /* Forward iterator reverse. */
-    assert_string_equal(AMstrsPrev(&forward, 1), "two");
-    assert_string_equal(AMstrsPrev(&forward, 1), "three");
-    assert_string_equal(AMstrsPrev(&forward, 1), "one");
-    assert_null(AMstrsPrev(&forward, 1));
+    str = AMstrsPrev(&forward, 1);
+    assert_int_equal(str.count, 3);
+    assert_memory_equal(str.src, "two", str.count);
+    str = AMstrsPrev(&forward, 1);
+    assert_int_equal(str.count, 5);
+    assert_memory_equal(str.src, "three", str.count);
+    str = AMstrsPrev(&forward, 1);
+    assert_int_equal(str.count, 3);
+    assert_memory_equal(str.src, "one", str.count);
+    assert_null(AMstrsPrev(&forward, 1).src);
     /* Reverse iterator forward. */
-    assert_string_equal(AMstrsNext(&reverse, 1), "two");
-    assert_string_equal(AMstrsNext(&reverse, 1), "three");
-    assert_string_equal(AMstrsNext(&reverse, 1), "one");
-    assert_null(AMstrsNext(&reverse, 1));
+    str = AMstrsNext(&reverse, 1);
+    assert_int_equal(str.count, 3);
+    assert_memory_equal(str.src, "two", str.count);
+    str = AMstrsNext(&reverse, 1);
+    assert_int_equal(str.count, 5);
+    assert_memory_equal(str.src, "three", str.count);
+    str = AMstrsNext(&reverse, 1);
+    assert_int_equal(str.count, 3);
+    assert_memory_equal(str.src, "one", str.count);
+    assert_null(AMstrsNext(&reverse, 1).src);
     /* Reverse iterator reverse. */
-    assert_string_equal(AMstrsPrev(&reverse, 1), "one");
-    assert_string_equal(AMstrsPrev(&reverse, 1), "three");
-    assert_string_equal(AMstrsPrev(&reverse, 1), "two");
-    assert_null(AMstrsPrev(&reverse, 1));
+    str = AMstrsPrev(&reverse, 1);
+    assert_int_equal(str.count, 3);
+    assert_memory_equal(str.src, "one", str.count);
+    str = AMstrsPrev(&reverse, 1);
+    assert_int_equal(str.count, 5);
+    assert_memory_equal(str.src, "three", str.count);
+    str = AMstrsPrev(&reverse, 1);
+    assert_int_equal(str.count, 3);
+    assert_memory_equal(str.src, "two", str.count);
+    assert_null(AMstrsPrev(&reverse, 1).src);
     AMfreeStack(&stack);
 }
 
@@ -169,22 +194,24 @@ static void test_AMputActor_str(void **state) {
                       AMgetActorId(test_state->group_state->doc),
                       AM_VALUE_ACTOR_ID,
                       cmocka_cb).actor_id;
-    char const* const str = AMactorIdStr(actor_id);
-    assert_int_equal(strlen(str), test_state->actor_id_size * 2);
-    assert_string_equal(str, test_state->actor_id_str);
+    AMbyteSpan const str = AMactorIdStr(actor_id);
+    assert_int_equal(str.count, test_state->actor_id_str.count);
+    assert_memory_equal(str.src, test_state->actor_id_str.src, str.count);
 }
 
 static void test_AMspliceText() {
     AMresultStack* stack = NULL;
     AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
-    AMfree(AMspliceText(doc, AM_ROOT, 0, 0, "one + "));
-    AMfree(AMspliceText(doc, AM_ROOT, 4, 2, "two = "));
-    AMfree(AMspliceText(doc, AM_ROOT, 8, 2, "three"));
-    char const* const text = AMpush(&stack,
+    AMfree(AMspliceText(doc, AM_ROOT, 0, 0, AMstr("one + ")));
+    AMfree(AMspliceText(doc, AM_ROOT, 4, 2, AMstr("two = ")));
+    AMfree(AMspliceText(doc, AM_ROOT, 8, 2, AMstr("three")));
+    AMbyteSpan const text = AMpush(&stack,
                                     AMtext(doc, AM_ROOT, NULL),
                                     AM_VALUE_STR,
                                     cmocka_cb).str;
-    assert_string_equal(text, "one two three");
+    static char const* const TEXT_VALUE = "one two three";
+    assert_int_equal(text.count, strlen(TEXT_VALUE));
+    assert_memory_equal(text.src, TEXT_VALUE, text.count);
     AMfreeStack(&stack);
 }
 

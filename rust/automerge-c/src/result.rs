@@ -1,12 +1,9 @@
 use automerge as am;
-use libc::strcmp;
+
 use smol_str::SmolStr;
 use std::any::type_name;
-use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::ffi::CString;
 use std::ops::{Range, RangeFrom, RangeFull, RangeTo};
-use std::os::raw::c_char;
 
 use crate::actor_id::AMactorId;
 use crate::byte_span::AMbyteSpan;
@@ -15,7 +12,6 @@ use crate::change_hashes::AMchangeHashes;
 use crate::changes::AMchanges;
 use crate::doc::list::{item::AMlistItem, items::AMlistItems};
 use crate::doc::map::{item::AMmapItem, items::AMmapItems};
-use crate::doc::utils::to_str;
 use crate::doc::AMdoc;
 use crate::obj::item::AMobjItem;
 use crate::obj::items::AMobjItems;
@@ -70,7 +66,7 @@ use crate::sync::{AMsyncMessage, AMsyncState};
 /// A sequence of object items as an `AMobjItems` struct.
 ///
 /// \var AMvalue::str
-/// A UTF-8 string.
+/// A UTF-8 string view as an `AMbyteSpan` struct.
 ///
 /// \var AMvalue::strs
 /// A sequence of UTF-8 strings as an `AMstrs` struct.
@@ -125,9 +121,9 @@ pub enum AMvalue<'a> {
     ObjId(&'a AMobjId),
     /// An object items variant.
     ObjItems(AMobjItems),
-    /// A UTF-8 string variant.
-    Str(*const libc::c_char),
-    /// A UTF-8 strings variant.
+    /// A UTF-8 string view variant.
+    Str(AMbyteSpan),
+    /// A UTF-8 string views variant.
     Strs(AMstrs),
     /// A synchronization message variant.
     SyncMessage(&'a AMsyncMessage),
@@ -159,7 +155,7 @@ impl<'a> PartialEq for AMvalue<'a> {
             (MapItems(lhs), MapItems(rhs)) => lhs == rhs,
             (ObjId(lhs), ObjId(rhs)) => *lhs == *rhs,
             (ObjItems(lhs), ObjItems(rhs)) => lhs == rhs,
-            (Str(lhs), Str(rhs)) => unsafe { strcmp(*lhs, *rhs) == 0 },
+            (Str(lhs), Str(rhs)) => lhs == rhs,
             (Strs(lhs), Strs(rhs)) => lhs == rhs,
             (SyncMessage(lhs), SyncMessage(rhs)) => *lhs == *rhs,
             (SyncState(lhs), SyncState(rhs)) => *lhs == *rhs,
@@ -172,8 +168,8 @@ impl<'a> PartialEq for AMvalue<'a> {
     }
 }
 
-impl From<(&am::Value<'_>, &RefCell<Option<CString>>)> for AMvalue<'_> {
-    fn from((value, c_str): (&am::Value<'_>, &RefCell<Option<CString>>)) -> Self {
+impl From<&am::Value<'_>> for AMvalue<'_> {
+    fn from(value: &am::Value<'_>) -> Self {
         match value {
             am::Value::Scalar(scalar) => match scalar.as_ref() {
                 am::ScalarValue::Boolean(flag) => AMvalue::Boolean(*flag),
@@ -182,16 +178,7 @@ impl From<(&am::Value<'_>, &RefCell<Option<CString>>)> for AMvalue<'_> {
                 am::ScalarValue::F64(float) => AMvalue::F64(*float),
                 am::ScalarValue::Int(int) => AMvalue::Int(*int),
                 am::ScalarValue::Null => AMvalue::Null,
-                am::ScalarValue::Str(smol_str) => {
-                    let mut c_str = c_str.borrow_mut();
-                    AMvalue::Str(match c_str.as_mut() {
-                        None => {
-                            let value_str = CString::new(smol_str.to_string()).unwrap();
-                            c_str.insert(value_str).as_ptr()
-                        }
-                        Some(value_str) => value_str.as_ptr(),
-                    })
-                }
+                am::ScalarValue::Str(smol_str) => AMvalue::Str(smol_str.as_bytes().into()),
                 am::ScalarValue::Timestamp(timestamp) => AMvalue::Timestamp(*timestamp),
                 am::ScalarValue::Uint(uint) => AMvalue::Uint(*uint),
                 am::ScalarValue::Unknown { bytes, type_code } => AMvalue::Unknown(AMunknownValue {
@@ -256,9 +243,12 @@ impl TryFrom<&AMvalue<'_>> for am::ScalarValue {
             Counter(c) => Ok(am::ScalarValue::Counter(c.into())),
             F64(f) => Ok(am::ScalarValue::F64(*f)),
             Int(i) => Ok(am::ScalarValue::Int(*i)),
-            Str(c_str) => {
-                let smol_str = unsafe { SmolStr::new(to_str(*c_str)) };
-                Ok(am::ScalarValue::Str(smol_str))
+            Str(span) => {
+                let result: Result<&str, am::AutomergeError> = span.try_into();
+                match result {
+                    Ok(str_) => Ok(am::ScalarValue::Str(SmolStr::new(str_))),
+                    Err(e) => Err(e),
+                }
             }
             Timestamp(t) => Ok(am::ScalarValue::Timestamp(*t)),
             Uint(u) => Ok(am::ScalarValue::Uint(*u)),
@@ -351,22 +341,22 @@ pub enum AMresult {
     ChangeHashes(Vec<am::ChangeHash>),
     Changes(Vec<am::Change>, Option<BTreeMap<usize, AMchange>>),
     Doc(Box<AMdoc>),
-    Error(CString),
+    Error(String),
     ListItems(Vec<AMlistItem>),
     MapItems(Vec<AMmapItem>),
     ObjId(AMobjId),
     ObjItems(Vec<AMobjItem>),
-    String(CString),
-    Strings(Vec<CString>),
+    String(String),
+    Strings(Vec<String>),
     SyncMessage(AMsyncMessage),
     SyncState(Box<AMsyncState>),
-    Value(am::Value<'static>, RefCell<Option<CString>>),
+    Value(am::Value<'static>),
     Void,
 }
 
 impl AMresult {
     pub(crate) fn err(s: &str) -> Self {
-        AMresult::Error(CString::new(s).unwrap())
+        AMresult::Error(s.to_string())
     }
 }
 
@@ -384,15 +374,13 @@ impl From<am::ChangeHash> for AMresult {
 
 impl From<am::Keys<'_, '_>> for AMresult {
     fn from(keys: am::Keys<'_, '_>) -> Self {
-        let cstrings: Vec<CString> = keys.map(|s| CString::new(s).unwrap()).collect();
-        AMresult::Strings(cstrings)
+        AMresult::Strings(keys.collect())
     }
 }
 
 impl From<am::KeysAt<'_, '_>> for AMresult {
     fn from(keys: am::KeysAt<'_, '_>) -> Self {
-        let cstrings: Vec<CString> = keys.map(|s| CString::new(s).unwrap()).collect();
-        AMresult::Strings(cstrings)
+        AMresult::Strings(keys.collect())
     }
 }
 
@@ -612,7 +600,7 @@ impl From<Result<am::sync::State, am::sync::DecodeStateError>> for AMresult {
 impl From<Result<am::Value<'static>, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<am::Value<'static>, am::AutomergeError>) -> Self {
         match maybe {
-            Ok(value) => AMresult::Value(value, Default::default()),
+            Ok(value) => AMresult::Value(value),
             Err(e) => AMresult::err(&e.to_string()),
         }
     }
@@ -623,7 +611,7 @@ impl From<Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>> f
         match maybe {
             Ok(Some((value, obj_id))) => match value {
                 am::Value::Object(_) => AMresult::ObjId(AMobjId::new(obj_id)),
-                _ => AMresult::Value(value, Default::default()),
+                _ => AMresult::Value(value),
             },
             Ok(None) => AMresult::Void,
             Err(e) => AMresult::err(&e.to_string()),
@@ -634,7 +622,7 @@ impl From<Result<Option<(am::Value<'static>, am::ObjId)>, am::AutomergeError>> f
 impl From<Result<String, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<String, am::AutomergeError>) -> Self {
         match maybe {
-            Ok(string) => AMresult::String(CString::new(string).unwrap()),
+            Ok(string) => AMresult::String(string),
             Err(e) => AMresult::err(&e.to_string()),
         }
     }
@@ -643,7 +631,7 @@ impl From<Result<String, am::AutomergeError>> for AMresult {
 impl From<Result<usize, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<usize, am::AutomergeError>) -> Self {
         match maybe {
-            Ok(size) => AMresult::Value(am::Value::uint(size as u64), Default::default()),
+            Ok(size) => AMresult::Value(am::Value::uint(size as u64)),
             Err(e) => AMresult::err(&e.to_string()),
         }
     }
@@ -701,7 +689,7 @@ impl From<Result<Vec<am::ChangeHash>, am::InvalidChangeHashSlice>> for AMresult 
 impl From<Result<Vec<u8>, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<Vec<u8>, am::AutomergeError>) -> Self {
         match maybe {
-            Ok(bytes) => AMresult::Value(am::Value::bytes(bytes), Default::default()),
+            Ok(bytes) => AMresult::Value(am::Value::bytes(bytes)),
             Err(e) => AMresult::err(&e.to_string()),
         }
     }
@@ -722,7 +710,7 @@ impl From<Vec<am::ChangeHash>> for AMresult {
 
 impl From<Vec<u8>> for AMresult {
     fn from(bytes: Vec<u8>) -> Self {
-        AMresult::Value(am::Value::bytes(bytes), Default::default())
+        AMresult::Value(am::Value::bytes(bytes))
     }
 }
 
@@ -749,17 +737,17 @@ pub enum AMstatus {
 /// \brief Gets a result's error message string.
 ///
 /// \param[in] result A pointer to an `AMresult` struct.
-/// \return A UTF-8 string value or `NULL`.
+/// \return A UTF-8 string view as an `AMbyteSpan` struct.
 /// \pre \p result `!= NULL`.
 /// \internal
 ///
 /// # Safety
 /// result must be a valid pointer to an AMresult
 #[no_mangle]
-pub unsafe extern "C" fn AMerrorMessage(result: *const AMresult) -> *const c_char {
+pub unsafe extern "C" fn AMerrorMessage(result: *const AMresult) -> AMbyteSpan {
     match result.as_ref() {
-        Some(AMresult::Error(s)) => s.as_ptr(),
-        _ => std::ptr::null::<c_char>(),
+        Some(AMresult::Error(s)) => s.as_bytes().into(),
+        _ => Default::default(),
     }
 }
 
@@ -803,7 +791,7 @@ pub unsafe extern "C" fn AMresultSize(result: *const AMresult) -> usize {
             | String(_)
             | SyncMessage(_)
             | SyncState(_)
-            | Value(_, _) => 1,
+            | Value(_) => 1,
             ChangeHashes(change_hashes) => change_hashes.len(),
             Changes(changes, _) => changes.len(),
             ListItems(list_items) => list_items.len(),
@@ -881,9 +869,9 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult) -> AMvalue<'a>
             AMresult::ObjItems(obj_items) => {
                 content = AMvalue::ObjItems(AMobjItems::new(obj_items));
             }
-            AMresult::String(cstring) => content = AMvalue::Str(cstring.as_ptr()),
-            AMresult::Strings(cstrings) => {
-                content = AMvalue::Strs(AMstrs::new(cstrings));
+            AMresult::String(string) => content = AMvalue::Str(string.as_bytes().into()),
+            AMresult::Strings(strings) => {
+                content = AMvalue::Strs(AMstrs::new(strings));
             }
             AMresult::SyncMessage(sync_message) => {
                 content = AMvalue::SyncMessage(sync_message);
@@ -891,8 +879,8 @@ pub unsafe extern "C" fn AMresultValue<'a>(result: *mut AMresult) -> AMvalue<'a>
             AMresult::SyncState(sync_state) => {
                 content = AMvalue::SyncState(&mut *sync_state);
             }
-            AMresult::Value(value, value_str) => {
-                content = (&*value, &*value_str).into();
+            AMresult::Value(value) => {
+                content = (&*value).into();
             }
             AMresult::Void => {}
         }

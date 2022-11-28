@@ -7,6 +7,17 @@ use crate::actor_id::AMactorId;
 pub mod item;
 pub mod items;
 
+macro_rules! to_obj_id {
+    ($handle:expr) => {{
+        match $handle.as_ref() {
+            Some(obj_id) => obj_id,
+            None => &automerge::ROOT,
+        }
+    }};
+}
+
+pub(crate) use to_obj_id;
+
 macro_rules! to_obj_type {
     ($am_obj_type:expr) => {{
         match $am_obj_type {

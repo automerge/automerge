@@ -37,7 +37,7 @@ static void test_start_and_commit(void** state) {
     /* const doc = create()                                                  */
     AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     /* doc.commit()                                                          */
-    AMpush(&stack, AMcommit(doc, NULL, NULL), AM_VALUE_CHANGE_HASHES, cmocka_cb);
+    AMpush(&stack, AMcommit(doc, AMstr(NULL), NULL), AM_VALUE_CHANGE_HASHES, cmocka_cb);
 }
 
 /**
@@ -51,7 +51,7 @@ static void test_getting_a_nonexistent_prop_does_not_throw_an_error(void** state
     /* const result = doc.getWithType(root, "hello")                         */
     /* assert.deepEqual(result, undefined)                                   */
     AMpush(&stack,
-           AMmapGet(doc, AM_ROOT, "hello", NULL),
+           AMmapGet(doc, AM_ROOT, AMstr("hello"), NULL),
            AM_VALUE_VOID,
            cmocka_cb);
 }
@@ -64,7 +64,7 @@ static void test_should_be_able_to_set_and_get_a_simple_value(void** state) {
     /* const doc: Automerge = create("aabbcc")                               */
     AMdoc* const doc = AMpush(&stack,
                               AMcreate(AMpush(&stack,
-                                              AMactorIdInitStr("aabbcc"),
+                                              AMactorIdInitStr(AMstr("aabbcc")),
                                               AM_VALUE_ACTOR_ID,
                                               cmocka_cb).actor_id),
                               AM_VALUE_DOC,
@@ -73,41 +73,43 @@ static void test_should_be_able_to_set_and_get_a_simple_value(void** state) {
     /* let result                                                            */
     /*                                                                       */
     /* doc.put(root, "hello", "world")                                       */
-    AMfree(AMmapPutStr(doc, AM_ROOT, "hello", "world"));
+    AMfree(AMmapPutStr(doc, AM_ROOT, AMstr("hello"), AMstr("world")));
     /* doc.put(root, "number1", 5, "uint")                                   */
-    AMfree(AMmapPutUint(doc, AM_ROOT, "number1", 5));
+    AMfree(AMmapPutUint(doc, AM_ROOT, AMstr("number1"), 5));
     /* doc.put(root, "number2", 5)                                           */
-    AMfree(AMmapPutInt(doc, AM_ROOT, "number2", 5));
+    AMfree(AMmapPutInt(doc, AM_ROOT, AMstr("number2"), 5));
     /* doc.put(root, "number3", 5.5)                                         */
-    AMfree(AMmapPutF64(doc, AM_ROOT, "number3", 5.5));
+    AMfree(AMmapPutF64(doc, AM_ROOT, AMstr("number3"), 5.5));
     /* doc.put(root, "number4", 5.5, "f64")                                  */
-    AMfree(AMmapPutF64(doc, AM_ROOT, "number4", 5.5));
+    AMfree(AMmapPutF64(doc, AM_ROOT, AMstr("number4"), 5.5));
     /* doc.put(root, "number5", 5.5, "int")                                  */
-    AMfree(AMmapPutInt(doc, AM_ROOT, "number5", 5.5));
+    AMfree(AMmapPutInt(doc, AM_ROOT, AMstr("number5"), 5.5));
     /* doc.put(root, "bool", true)                                           */
-    AMfree(AMmapPutBool(doc, AM_ROOT, "bool", true));
+    AMfree(AMmapPutBool(doc, AM_ROOT, AMstr("bool"), true));
     /* doc.put(root, "time1", 1000, "timestamp")                             */
-    AMfree(AMmapPutTimestamp(doc, AM_ROOT, "time1", 1000));
+    AMfree(AMmapPutTimestamp(doc, AM_ROOT, AMstr("time1"), 1000));
     /* doc.put(root, "time2", new Date(1001))                                */
-    AMfree(AMmapPutTimestamp(doc, AM_ROOT, "time2", 1001));
+    AMfree(AMmapPutTimestamp(doc, AM_ROOT, AMstr("time2"), 1001));
     /* doc.putObject(root, "list", []);                                      */
-    AMfree(AMmapPutObject(doc, AM_ROOT, "list", AM_OBJ_TYPE_LIST));
+    AMfree(AMmapPutObject(doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST));
     /* doc.put(root, "null", null)                                           */
-    AMfree(AMmapPutNull(doc, AM_ROOT, "null"));
+    AMfree(AMmapPutNull(doc, AM_ROOT, AMstr("null")));
     /*                                                                       */
     /* result = doc.getWithType(root, "hello")                               */
     /* assert.deepEqual(result, ["str", "world"])                            */
     /* assert.deepEqual(doc.get("/", "hello"), "world")                      */
-    assert_string_equal(AMpush(&stack,
-                               AMmapGet(doc, AM_ROOT, "hello", NULL),
-                               AM_VALUE_STR,
-                               cmocka_cb).str, "world");
+    AMbyteSpan str = AMpush(&stack,
+                            AMmapGet(doc, AM_ROOT, AMstr("hello"), NULL),
+                            AM_VALUE_STR,
+                            cmocka_cb).str;
+    assert_int_equal(str.count, strlen("world"));
+    assert_memory_equal(str.src, "world", str.count);
     /* assert.deepEqual(doc.get("/", "hello"), "world")                      */
     /*                                                                       */
     /* result = doc.getWithType(root, "number1")                             */
     /* assert.deepEqual(result, ["uint", 5])                                 */
     assert_int_equal(AMpush(&stack,
-                            AMmapGet(doc, AM_ROOT, "number1", NULL),
+                            AMmapGet(doc, AM_ROOT, AMstr("number1"), NULL),
                             AM_VALUE_UINT,
                             cmocka_cb).uint, 5);
     /* assert.deepEqual(doc.get("/", "number1"), 5)                          */
@@ -115,75 +117,77 @@ static void test_should_be_able_to_set_and_get_a_simple_value(void** state) {
     /* result = doc.getWithType(root, "number2")                             */
     /* assert.deepEqual(result, ["int", 5])                                  */
     assert_int_equal(AMpush(&stack,
-                            AMmapGet(doc, AM_ROOT, "number2", NULL),
+                            AMmapGet(doc, AM_ROOT, AMstr("number2"), NULL),
                             AM_VALUE_INT,
                             cmocka_cb).int_, 5);
     /*                                                                       */
     /* result = doc.getWithType(root, "number3")                             */
     /* assert.deepEqual(result, ["f64", 5.5])                                */
     assert_float_equal(AMpush(&stack,
-                              AMmapGet(doc, AM_ROOT, "number3", NULL),
+                              AMmapGet(doc, AM_ROOT, AMstr("number3"), NULL),
                               AM_VALUE_F64,
                               cmocka_cb).f64, 5.5, DBL_EPSILON);
     /*                                                                       */
     /* result = doc.getWithType(root, "number4")                             */
     /* assert.deepEqual(result, ["f64", 5.5])                                */
     assert_float_equal(AMpush(&stack,
-                              AMmapGet(doc, AM_ROOT, "number4", NULL),
+                              AMmapGet(doc, AM_ROOT, AMstr("number4"), NULL),
                               AM_VALUE_F64,
                               cmocka_cb).f64, 5.5, DBL_EPSILON);
     /*                                                                       */
     /* result = doc.getWithType(root, "number5")                             */
     /* assert.deepEqual(result, ["int", 5])                                  */
     assert_int_equal(AMpush(&stack,
-                            AMmapGet(doc, AM_ROOT, "number5", NULL),
+                            AMmapGet(doc, AM_ROOT, AMstr("number5"), NULL),
                             AM_VALUE_INT,
                             cmocka_cb).int_, 5);
     /*                                                                       */
     /* result = doc.getWithType(root, "bool")                                */
     /* assert.deepEqual(result, ["boolean", true])                           */
     assert_int_equal(AMpush(&stack,
-                            AMmapGet(doc, AM_ROOT, "bool", NULL),
+                            AMmapGet(doc, AM_ROOT, AMstr("bool"), NULL),
                             AM_VALUE_BOOLEAN,
                             cmocka_cb).boolean, true);
     /*                                                                       */
     /* doc.put(root, "bool", false, "boolean")                               */
-    AMfree(AMmapPutBool(doc, AM_ROOT, "bool", false));
+    AMfree(AMmapPutBool(doc, AM_ROOT, AMstr("bool"), false));
     /*                                                                       */
     /* result = doc.getWithType(root, "bool")                                */
     /* assert.deepEqual(result, ["boolean", false])                          */
     assert_int_equal(AMpush(&stack,
-                            AMmapGet(doc, AM_ROOT, "bool", NULL),
+                            AMmapGet(doc, AM_ROOT, AMstr("bool"), NULL),
                             AM_VALUE_BOOLEAN,
                             cmocka_cb).boolean, false);
     /*                                                                       */
     /* result = doc.getWithType(root, "time1")                               */
     /* assert.deepEqual(result, ["timestamp", new Date(1000)])               */
     assert_int_equal(AMpush(&stack,
-                            AMmapGet(doc, AM_ROOT, "time1", NULL),
+                            AMmapGet(doc, AM_ROOT, AMstr("time1"), NULL),
                             AM_VALUE_TIMESTAMP,
                             cmocka_cb).timestamp, 1000);
     /*                                                                       */
     /* result = doc.getWithType(root, "time2")                               */
     /* assert.deepEqual(result, ["timestamp", new Date(1001)])               */
     assert_int_equal(AMpush(&stack,
-                            AMmapGet(doc, AM_ROOT, "time2", NULL),
+                            AMmapGet(doc, AM_ROOT, AMstr("time2"), NULL),
                             AM_VALUE_TIMESTAMP,
                             cmocka_cb).timestamp, 1001);
     /*                                                                       */
     /* result = doc.getWithType(root, "list")                                */
     /* assert.deepEqual(result, ["list", "10@aabbcc"]);                      */
     AMobjId const* const list = AMpush(&stack,
-                                       AMmapGet(doc, AM_ROOT, "list", NULL),
+                                       AMmapGet(doc, AM_ROOT, AMstr("list"), NULL),
                                        AM_VALUE_OBJ_ID,
                                        cmocka_cb).obj_id;
     assert_int_equal(AMobjIdCounter(list), 10);
-    assert_string_equal(AMactorIdStr(AMobjIdActorId(list)), "aabbcc");
+    str = AMactorIdStr(AMobjIdActorId(list));
+    assert_int_equal(str.count, strlen("aabbcc"));
+    assert_memory_equal(str.src, "aabbcc", str.count);
     /*                                                                       */
     /* result = doc.getWithType(root, "null")                                */
     /* assert.deepEqual(result, ["null", null]);                             */
     AMpush(&stack,
-           AMmapGet(doc, AM_ROOT, "null", NULL),
+           AMmapGet(doc, AM_ROOT, AMstr("null"), NULL),
            AM_VALUE_NULL,
            cmocka_cb);
 }
@@ -197,13 +201,13 @@ static void test_should_be_able_to_use_bytes(void** state) {
     AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     /* doc.put("_root", "data1", new Uint8Array([10, 11, 12]));              */
     static uint8_t const DATA1[] = {10, 11, 12};
-    AMfree(AMmapPutBytes(doc, AM_ROOT, "data1", DATA1, sizeof(DATA1)));
+    AMfree(AMmapPutBytes(doc, AM_ROOT, AMstr("data1"), DATA1, sizeof(DATA1)));
     /* doc.put("_root", "data2", new Uint8Array([13, 14, 15]), "bytes");     */
     static uint8_t const DATA2[] = {13, 14, 15};
-    AMfree(AMmapPutBytes(doc, AM_ROOT, "data2", DATA2, sizeof(DATA2)));
+    AMfree(AMmapPutBytes(doc, AM_ROOT, AMstr("data2"), DATA2, sizeof(DATA2)));
     /* const value1 = doc.getWithType("_root", "data1")                      */
     AMbyteSpan const value1 = AMpush(&stack,
-                                     AMmapGet(doc, AM_ROOT, "data1", NULL),
+                                     AMmapGet(doc, AM_ROOT, AMstr("data1"), NULL),
                                      AM_VALUE_BYTES,
                                      cmocka_cb).bytes;
     /* assert.deepEqual(value1, ["bytes", new Uint8Array([10, 11, 12])]);    */
@@ -211,7 +215,7 @@ static void test_should_be_able_to_use_bytes(void** state) {
     assert_memory_equal(value1.src, DATA1, sizeof(DATA1));
     /* const value2 = doc.getWithType("_root", "data2")                      */
     AMbyteSpan const value2 = AMpush(&stack,
-                                     AMmapGet(doc, AM_ROOT, "data2", NULL),
+                                     AMmapGet(doc, AM_ROOT, AMstr("data2"), NULL),
                                      AM_VALUE_BYTES,
                                      cmocka_cb).bytes;
     /* assert.deepEqual(value2, ["bytes", new Uint8Array([13, 14, 15])]);    */
@@ -232,18 +236,18 @@ static void test_should_be_able_to_make_subobjects(void** state) {
     /* const submap = doc.putObject(root, "submap", {})                      */
     AMobjId const* const submap = AMpush(
         &stack,
-        AMmapPutObject(doc, AM_ROOT, "submap", AM_OBJ_TYPE_MAP),
+        AMmapPutObject(doc, AM_ROOT, AMstr("submap"), AM_OBJ_TYPE_MAP),
         AM_VALUE_OBJ_ID,
         cmocka_cb).obj_id;
     /* doc.put(submap, "number", 6, "uint")                                  */
-    AMfree(AMmapPutUint(doc, submap, "number", 6));
+    AMfree(AMmapPutUint(doc, submap, AMstr("number"), 6));
     /* assert.strictEqual(doc.pendingOps(), 2)                               */
     assert_int_equal(AMpendingOps(doc), 2);
     /*                                                                       */
     /* result = doc.getWithType(root, "submap")                              */
     /* assert.deepEqual(result, ["map", submap])                             */
     assert_true(AMobjIdEqual(AMpush(&stack,
-                                    AMmapGet(doc, AM_ROOT, "submap", NULL),
+                                    AMmapGet(doc, AM_ROOT, AMstr("submap"), NULL),
                                     AM_VALUE_OBJ_ID,
                                     cmocka_cb).obj_id,
                              submap));
@@ -251,7 +255,7 @@ static void test_should_be_able_to_make_subobjects(void** state) {
     /* result = doc.getWithType(submap, "number")                            */
     /* assert.deepEqual(result, ["uint", 6])                                 */
     assert_int_equal(AMpush(&stack,
-                            AMmapGet(doc, submap, "number", NULL),
+                            AMmapGet(doc, submap, AMstr("number"), NULL),
                             AM_VALUE_UINT,
                             cmocka_cb).uint,
                      6);
@@ -269,49 +273,59 @@ static void test_should_be_able_to_make_lists(void** state) {
     /* const sublist = doc.putObject(root, "numbers", [])                    */
     AMobjId const* const sublist = AMpush(
         &stack,
-        AMmapPutObject(doc, AM_ROOT, "numbers", AM_OBJ_TYPE_LIST),
+        AMmapPutObject(doc, AM_ROOT, AMstr("numbers"), AM_OBJ_TYPE_LIST),
         AM_VALUE_OBJ_ID,
         cmocka_cb).obj_id;
     /* doc.insert(sublist, 0, "a");                                          */
-    AMfree(AMlistPutStr(doc, sublist, 0, true, "a"));
+    AMfree(AMlistPutStr(doc, sublist, 0, true, AMstr("a")));
     /* doc.insert(sublist, 1, "b");                                          */
-    AMfree(AMlistPutStr(doc, sublist, 1, true, "b"));
+    AMfree(AMlistPutStr(doc, sublist, 1, true, AMstr("b")));
     /* doc.insert(sublist, 2, "c");                                          */
-    AMfree(AMlistPutStr(doc, sublist, 2, true, "c"));
+    AMfree(AMlistPutStr(doc, sublist, 2, true, AMstr("c")));
     /* doc.insert(sublist, 0, "z");                                          */
-    AMfree(AMlistPutStr(doc, sublist, 0, true, "z"));
+    AMfree(AMlistPutStr(doc, sublist, 0, true, AMstr("z")));
     /*                                                                       */
     /* assert.deepEqual(doc.getWithType(sublist, 0), ["str", "z"])           */
-    assert_string_equal(AMpush(&stack,
-                               AMlistGet(doc, sublist, 0, NULL),
-                               AM_VALUE_STR,
-                               cmocka_cb).str, "z");
+    AMbyteSpan str = AMpush(&stack,
+                            AMlistGet(doc, sublist, 0, NULL),
+                            AM_VALUE_STR,
+                            cmocka_cb).str;
+    assert_int_equal(str.count, 1);
+    assert_memory_equal(str.src, "z", str.count);
     /* assert.deepEqual(doc.getWithType(sublist, 1), ["str", "a"])           */
-    assert_string_equal(AMpush(&stack,
-                               AMlistGet(doc, sublist, 1, NULL),
-                               AM_VALUE_STR,
-                               cmocka_cb).str, "a");
+    str = AMpush(&stack,
+                 AMlistGet(doc, sublist, 1, NULL),
+                 AM_VALUE_STR,
+                 cmocka_cb).str;
+    assert_int_equal(str.count, 1);
+    assert_memory_equal(str.src, "a", str.count);
     /* assert.deepEqual(doc.getWithType(sublist, 2), ["str", "b"])           */
-    assert_string_equal(AMpush(&stack,
-                               AMlistGet(doc, sublist, 2, NULL),
-                               AM_VALUE_STR,
-                               cmocka_cb).str, "b");
+    str = AMpush(&stack,
+                 AMlistGet(doc, sublist, 2, NULL),
+                 AM_VALUE_STR,
+                 cmocka_cb).str;
+    assert_int_equal(str.count, 1);
+    assert_memory_equal(str.src, "b", str.count);
     /* assert.deepEqual(doc.getWithType(sublist, 3), ["str", "c"])           */
-    assert_string_equal(AMpush(&stack,
-                               AMlistGet(doc, sublist, 3, NULL),
-                               AM_VALUE_STR,
-                               cmocka_cb).str, "c");
+    str = AMpush(&stack,
+                 AMlistGet(doc, sublist, 3, NULL),
+                 AM_VALUE_STR,
+                 cmocka_cb).str;
+    assert_int_equal(str.count, 1);
+    assert_memory_equal(str.src, "c", str.count);
     /* assert.deepEqual(doc.length(sublist), 4)                              */
     assert_int_equal(AMobjSize(doc, sublist, NULL), 4);
     /*                                                                       */
     /* doc.put(sublist, 2, "b v2");                                          */
-    AMfree(AMlistPutStr(doc, sublist, 2, false, "b v2"));
+    AMfree(AMlistPutStr(doc, sublist, 2, false, AMstr("b v2")));
     /*                                                                       */
     /* assert.deepEqual(doc.getWithType(sublist, 2), ["str", "b v2"])        */
-    assert_string_equal(AMpush(&stack,
-                               AMlistGet(doc, sublist, 2, NULL),
-                               AM_VALUE_STR,
-                               cmocka_cb).str, "b v2");
+    str = AMpush(&stack,
+                 AMlistGet(doc, sublist, 2, NULL),
+                 AM_VALUE_STR,
+                 cmocka_cb).str;
+    assert_int_equal(str.count, 4);
+    assert_memory_equal(str.src, "b v2", str.count);
     /* assert.deepEqual(doc.length(sublist), 4)                              */
     assert_int_equal(AMobjSize(doc, sublist, NULL), 4);
 }
@@ -328,34 +342,38 @@ static void test_lists_have_insert_set_splice_and_push_ops(void** state) {
     /* const sublist = doc.putObject(root, "letters", [])                    */
     AMobjId const* const sublist = AMpush(
         &stack,
-        AMmapPutObject(doc, AM_ROOT, "letters", AM_OBJ_TYPE_LIST),
+        AMmapPutObject(doc, AM_ROOT, AMstr("letters"), AM_OBJ_TYPE_LIST),
         AM_VALUE_OBJ_ID,
         cmocka_cb).obj_id;
     /* doc.insert(sublist, 0, "a");                                          */
-    AMfree(AMlistPutStr(doc, sublist, 0, true, "a"));
+    AMfree(AMlistPutStr(doc, sublist, 0, true, AMstr("a")));
     /* doc.insert(sublist, 0, "b");                                          */
-    AMfree(AMlistPutStr(doc, sublist, 0, true, "b"));
+    AMfree(AMlistPutStr(doc, sublist, 0, true, AMstr("b")));
     /* assert.deepEqual(doc.materialize(), { letters: ["b", "a"] })          */
     AMmapItems doc_items = AMpush(&stack,
-                                  AMmapRange(doc, AM_ROOT, NULL, NULL, NULL),
+                                  AMmapRange(doc, AM_ROOT, AMstr(NULL), AMstr(NULL), NULL),
                                   AM_VALUE_MAP_ITEMS,
                                   cmocka_cb).map_items;
     AMmapItem const* doc_item = AMmapItemsNext(&doc_items, 1);
-    assert_string_equal(AMmapItemKey(doc_item), "letters");
+    AMbyteSpan key = AMmapItemKey(doc_item);
+    assert_int_equal(key.count, strlen("letters"));
+    assert_memory_equal(key.src, "letters", key.count);
     {
         AMlistItems list_items = AMpush(
             &stack,
             AMlistRange(doc, AMmapItemObjId(doc_item), 0, SIZE_MAX, NULL),
             AM_VALUE_LIST_ITEMS,
             cmocka_cb).list_items;
-        assert_string_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).str,
-                            "b");
-        assert_string_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).str,
-                            "a");
+        AMbyteSpan str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "b", str.count);
+        str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "a", str.count);
         assert_null(AMlistItemsNext(&list_items, 1));
     }
     /* doc.push(sublist, "c");                                               */
-    AMfree(AMlistPutStr(doc, sublist, SIZE_MAX, true, "c"));
+    AMfree(AMlistPutStr(doc, sublist, SIZE_MAX, true, AMstr("c")));
     /* const heads = doc.getHeads()                                          */
     AMchangeHashes const heads = AMpush(&stack,
                                         AMgetHeads(doc),
@@ -363,151 +381,185 @@ static void test_lists_have_insert_set_splice_and_push_ops(void** state) {
                                         cmocka_cb).change_hashes;
     /* assert.deepEqual(doc.materialize(), { letters: ["b", "a", "c"] })     */
     doc_items = AMpush(&stack,
-                       AMmapRange(doc, AM_ROOT, NULL, NULL, NULL),
+                       AMmapRange(doc, AM_ROOT, AMstr(NULL), AMstr(NULL), NULL),
                        AM_VALUE_MAP_ITEMS,
                        cmocka_cb).map_items;
     doc_item = AMmapItemsNext(&doc_items, 1);
-    assert_string_equal(AMmapItemKey(doc_item), "letters");
+    key = AMmapItemKey(doc_item);
+    assert_int_equal(key.count, strlen("letters"));
+    assert_memory_equal(key.src, "letters", key.count);
     {
         AMlistItems list_items = AMpush(
             &stack,
             AMlistRange(doc, AMmapItemObjId(doc_item), 0, SIZE_MAX, NULL),
             AM_VALUE_LIST_ITEMS,
             cmocka_cb).list_items;
-        assert_string_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).str,
-                            "b");
-        assert_string_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).str,
-                            "a");
-        assert_string_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).str,
-                            "c");
+        AMbyteSpan str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "b", str.count);
+        str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "a", str.count);
+        str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "c", str.count);
         assert_null(AMlistItemsNext(&list_items, 1));
     }
     /* doc.push(sublist, 3, "timestamp");                                    */
     AMfree(AMlistPutTimestamp(doc, sublist, SIZE_MAX, true, 3));
-    /* assert.deepEqual(doc.materialize(), { letters: ["b", "a", "c", new Date(3)] })*/
+    /* assert.deepEqual(doc.materialize(), { letters: ["b", "a", "c", new Date(3)] } */
     doc_items = AMpush(&stack,
-                       AMmapRange(doc, AM_ROOT, NULL, NULL, NULL),
+                       AMmapRange(doc, AM_ROOT, AMstr(NULL), AMstr(NULL), NULL),
                        AM_VALUE_MAP_ITEMS,
                        cmocka_cb).map_items;
     doc_item = AMmapItemsNext(&doc_items, 1);
-    assert_string_equal(AMmapItemKey(doc_item), "letters");
+    key = AMmapItemKey(doc_item);
+    assert_int_equal(key.count, strlen("letters"));
+    assert_memory_equal(key.src, "letters", key.count);
     {
         AMlistItems list_items = AMpush(
             &stack,
             AMlistRange(doc, AMmapItemObjId(doc_item), 0, SIZE_MAX, NULL),
             AM_VALUE_LIST_ITEMS,
             cmocka_cb).list_items;
-        assert_string_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).str,
-                            "b");
-        assert_string_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).str,
-                            "a");
-        assert_string_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).str,
-                            "c");
+        AMbyteSpan str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "b", str.count);
+        str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "a", str.count);
+        str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "c", str.count);
         assert_int_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).timestamp,
                          3);
         assert_null(AMlistItemsNext(&list_items, 1));
     }
     /* doc.splice(sublist, 1, 1, ["d", "e", "f"]);                           */
-    static AMvalue const DATA[] = {{.str_tag = AM_VALUE_STR, .str = "d"},
-                                   {.str_tag = AM_VALUE_STR, .str = "e"},
-                                   {.str_tag = AM_VALUE_STR, .str = "f"}};
+    static AMvalue const DATA[] = {{.str_tag = AM_VALUE_STR, .str = {.src = "d", .count = 1}},
+                                   {.str_tag = AM_VALUE_STR, .str = {.src = "e", .count = 1}},
+                                   {.str_tag = AM_VALUE_STR, .str = {.src = "f", .count = 1}}};
     AMfree(AMsplice(doc, sublist, 1, 1, DATA, sizeof(DATA)/sizeof(AMvalue)));
-    /* assert.deepEqual(doc.materialize(), { letters: ["b", "d", "e", "f", "c", new Date(3)] })*/
+    /* assert.deepEqual(doc.materialize(), { letters: ["b", "d", "e", "f", "c", new Date(3)] } */
     doc_items = AMpush(&stack,
-                       AMmapRange(doc, AM_ROOT, NULL, NULL, NULL),
+                       AMmapRange(doc, AM_ROOT, AMstr(NULL), AMstr(NULL), NULL),
                        AM_VALUE_MAP_ITEMS,
                        cmocka_cb).map_items;
     doc_item = AMmapItemsNext(&doc_items, 1);
-    assert_string_equal(AMmapItemKey(doc_item), "letters");
+    key = AMmapItemKey(doc_item);
+    assert_int_equal(key.count, strlen("letters"));
+    assert_memory_equal(key.src, "letters", key.count);
     {
         AMlistItems list_items = AMpush(
             &stack,
             AMlistRange(doc, AMmapItemObjId(doc_item), 0, SIZE_MAX, NULL),
             AM_VALUE_LIST_ITEMS,
             cmocka_cb).list_items;
-        assert_string_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).str,
-                            "b");
-        assert_string_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).str,
-                            "d");
-        assert_string_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).str,
-                            "e");
-        assert_string_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).str,
-                            "f");
-        assert_string_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).str,
-                            "c");
+        AMbyteSpan str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "b", str.count);
+        str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "d", str.count);
+        str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "e", str.count);
+        str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "f", str.count);
+        str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "c", str.count);
         assert_int_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).timestamp,
                          3);
         assert_null(AMlistItemsNext(&list_items, 1));
     }
     /* doc.put(sublist, 0, "z");                                             */
-    AMfree(AMlistPutStr(doc, sublist, 0, false, "z"));
-    /* assert.deepEqual(doc.materialize(), { letters: ["z", "d", "e", "f", "c", new Date(3)] })*/
+    AMfree(AMlistPutStr(doc, sublist, 0, false, AMstr("z")));
+    /* assert.deepEqual(doc.materialize(), { letters: ["z", "d", "e", "f", "c", new Date(3)] } */
     doc_items = AMpush(&stack,
-                       AMmapRange(doc, AM_ROOT, NULL, NULL, NULL),
+                       AMmapRange(doc, AM_ROOT, AMstr(NULL), AMstr(NULL), NULL),
                        AM_VALUE_MAP_ITEMS,
                        cmocka_cb).map_items;
     doc_item = AMmapItemsNext(&doc_items, 1);
-    assert_string_equal(AMmapItemKey(doc_item), "letters");
+    key = AMmapItemKey(doc_item);
+    assert_int_equal(key.count, strlen("letters"));
+    assert_memory_equal(key.src, "letters", key.count);
     {
         AMlistItems list_items = AMpush(
             &stack,
             AMlistRange(doc, AMmapItemObjId(doc_item), 0, SIZE_MAX, NULL),
             AM_VALUE_LIST_ITEMS,
             cmocka_cb).list_items;
-        assert_string_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).str,
-                            "z");
-        assert_string_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).str,
-                            "d");
-        assert_string_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).str,
-                            "e");
-        assert_string_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).str,
-                            "f");
-        assert_string_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).str,
-                            "c");
+        AMbyteSpan str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "z", str.count);
+        str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "d", str.count);
+        str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "e", str.count);
+        str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "f", str.count);
+        str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "c", str.count);
         assert_int_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).timestamp,
                          3);
         assert_null(AMlistItemsNext(&list_items, 1));
     }
-    /* assert.deepEqual(doc.materialize(sublist), ["z", "d", "e", "f", "c", new Date(3)])*/
+    /* assert.deepEqual(doc.materialize(sublist), ["z", "d", "e", "f", "c", new Date(3)] */
     AMlistItems sublist_items = AMpush(
                            &stack,
                            AMlistRange(doc, sublist, 0, SIZE_MAX, NULL),
                            AM_VALUE_LIST_ITEMS,
                            cmocka_cb).list_items;
-    assert_string_equal(AMlistItemValue(AMlistItemsNext(&sublist_items, 1)).str,
-                        "z");
-    assert_string_equal(AMlistItemValue(AMlistItemsNext(&sublist_items, 1)).str,
-                        "d");
-    assert_string_equal(AMlistItemValue(AMlistItemsNext(&sublist_items, 1)).str,
-                        "e");
-    assert_string_equal(AMlistItemValue(AMlistItemsNext(&sublist_items, 1)).str,
-                        "f");
-    assert_string_equal(AMlistItemValue(AMlistItemsNext(&sublist_items, 1)).str,
-                        "c");
+    AMbyteSpan str = AMlistItemValue(AMlistItemsNext(&sublist_items, 1)).str;
+    assert_int_equal(str.count, 1);
+    assert_memory_equal(str.src, "z", str.count);
+    str = AMlistItemValue(AMlistItemsNext(&sublist_items, 1)).str;
+    assert_int_equal(str.count, 1);
+    assert_memory_equal(str.src, "d", str.count);
+    str = AMlistItemValue(AMlistItemsNext(&sublist_items, 1)).str;
+    assert_int_equal(str.count, 1);
+    assert_memory_equal(str.src, "e", str.count);
+    str = AMlistItemValue(AMlistItemsNext(&sublist_items, 1)).str;
+    assert_int_equal(str.count, 1);
+    assert_memory_equal(str.src, "f", str.count);
+    str = AMlistItemValue(AMlistItemsNext(&sublist_items, 1)).str;
+    assert_int_equal(str.count, 1);
+    assert_memory_equal(str.src, "c", str.count);
     assert_int_equal(AMlistItemValue(AMlistItemsNext(&sublist_items, 1)).timestamp,
                      3);
     assert_null(AMlistItemsNext(&sublist_items, 1));
     /* assert.deepEqual(doc.length(sublist), 6)                              */
     assert_int_equal(AMobjSize(doc, sublist, NULL), 6);
-    /* assert.deepEqual(doc.materialize("/", heads), { letters: ["b", "a", "c"] })*/
+    /* assert.deepEqual(doc.materialize("/", heads), { letters: ["b", "a", "c"] } */
     doc_items = AMpush(&stack,
-                       AMmapRange(doc, AM_ROOT, NULL, NULL, &heads),
+                       AMmapRange(doc, AM_ROOT, AMstr(NULL), AMstr(NULL), &heads),
                        AM_VALUE_MAP_ITEMS,
                        cmocka_cb).map_items;
     doc_item = AMmapItemsNext(&doc_items, 1);
-    assert_string_equal(AMmapItemKey(doc_item), "letters");
+    key = AMmapItemKey(doc_item);
+    assert_int_equal(key.count, strlen("letters"));
+    assert_memory_equal(key.src, "letters", key.count);
     {
         AMlistItems list_items = AMpush(
             &stack,
             AMlistRange(doc, AMmapItemObjId(doc_item), 0, SIZE_MAX, &heads),
             AM_VALUE_LIST_ITEMS,
             cmocka_cb).list_items;
-        assert_string_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).str,
-                            "b");
-        assert_string_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).str,
-                            "a");
-        assert_string_equal(AMlistItemValue(AMlistItemsNext(&list_items, 1)).str,
-                            "c");
+        AMbyteSpan str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "b", str.count);
+        str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "a", str.count);
+        str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "c", str.count);
         assert_null(AMlistItemsNext(&list_items, 1));
     }
 }
@@ -521,12 +573,12 @@ static void test_should_be_able_to_delete_non_existent_props(void** state) {
     AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     /*                                                                       */
     /* doc.put("_root", "foo", "bar")                                        */
-    AMfree(AMmapPutStr(doc, AM_ROOT, "foo", "bar"));
+    AMfree(AMmapPutStr(doc, AM_ROOT, AMstr("foo"), AMstr("bar")));
     /* doc.put("_root", "bip", "bap")                                        */
-    AMfree(AMmapPutStr(doc, AM_ROOT, "bip", "bap"));
+    AMfree(AMmapPutStr(doc, AM_ROOT, AMstr("bip"), AMstr("bap")));
     /* const hash1 = doc.commit()                                            */
     AMchangeHashes const hash1 = AMpush(&stack,
-                                        AMcommit(doc, NULL, NULL),
+                                        AMcommit(doc, AMstr(NULL), NULL),
                                         AM_VALUE_CHANGE_HASHES,
                                         cmocka_cb).change_hashes;
     /*                                                                       */
@@ -535,16 +587,20 @@ static void test_should_be_able_to_delete_non_existent_props(void** state) {
                          AMkeys(doc, AM_ROOT, NULL),
                          AM_VALUE_STRS,
                          cmocka_cb).strs;
-    assert_string_equal(AMstrsNext(&keys, 1), "bip");
-    assert_string_equal(AMstrsNext(&keys, 1), "foo");
+    AMbyteSpan str = AMstrsNext(&keys, 1);
+    assert_int_equal(str.count, 3);
+    assert_memory_equal(str.src, "bip", str.count);
+    str = AMstrsNext(&keys, 1);
+    assert_int_equal(str.count, 3);
+    assert_memory_equal(str.src, "foo", str.count);
     /*                                                                       */
     /* doc.delete("_root", "foo")                                            */
-    AMfree(AMmapDelete(doc, AM_ROOT, "foo"));
+    AMfree(AMmapDelete(doc, AM_ROOT, AMstr("foo")));
     /* doc.delete("_root", "baz")                                            */
-    AMfree(AMmapDelete(doc, AM_ROOT, "baz"));
+    AMfree(AMmapDelete(doc, AM_ROOT, AMstr("baz")));
     /* const hash2 = doc.commit()                                            */
     AMchangeHashes const hash2 = AMpush(&stack,
-                                        AMcommit(doc, NULL, NULL),
+                                        AMcommit(doc, AMstr(NULL), NULL),
                                         AM_VALUE_CHANGE_HASHES,
                                         cmocka_cb).change_hashes;
     /*                                                                       */
@@ -553,20 +609,28 @@ static void test_should_be_able_to_delete_non_existent_props(void** state) {
                   AMkeys(doc, AM_ROOT, NULL),
                   AM_VALUE_STRS,
                   cmocka_cb).strs;
-    assert_string_equal(AMstrsNext(&keys, 1), "bip");
+    str = AMstrsNext(&keys, 1);
+    assert_int_equal(str.count, 3);
+    assert_memory_equal(str.src, "bip", str.count);
     /* assert.deepEqual(doc.keys("_root", [hash1]), ["bip", "foo"])          */
     keys = AMpush(&stack,
                   AMkeys(doc, AM_ROOT, &hash1),
                   AM_VALUE_STRS,
                   cmocka_cb).strs;
-    assert_string_equal(AMstrsNext(&keys, 1), "bip");
-    assert_string_equal(AMstrsNext(&keys, 1), "foo");
+    str = AMstrsNext(&keys, 1);
+    assert_int_equal(str.count, 3);
+    assert_memory_equal(str.src, "bip", str.count);
+    str = AMstrsNext(&keys, 1);
+    assert_int_equal(str.count, 3);
+    assert_memory_equal(str.src, "foo", str.count);
     /* assert.deepEqual(doc.keys("_root", [hash2]), ["bip"])                 */
     keys = AMpush(&stack,
                   AMkeys(doc, AM_ROOT, &hash2),
                   AM_VALUE_STRS,
                   cmocka_cb).strs;
-    assert_string_equal(AMstrsNext(&keys, 1), "bip");
+    str = AMstrsNext(&keys, 1);
+    assert_int_equal(str.count, 3);
+    assert_memory_equal(str.src, "bip", str.count);
 }
 
 /**
@@ -579,17 +643,19 @@ static void test_should_be_able_to_del(void **state) {
     /* const root = "_root"                                                  */
     /*                                                                       */
     /* doc.put(root, "xxx", "xxx");                                          */
-    AMfree(AMmapPutStr(doc, AM_ROOT, "xxx", "xxx"));
+    AMfree(AMmapPutStr(doc, AM_ROOT, AMstr("xxx"), AMstr("xxx")));
     /* assert.deepEqual(doc.getWithType(root, "xxx"), ["str", "xxx"])        */
-    assert_string_equal(AMpush(&stack,
-                               AMmapGet(doc, AM_ROOT, "xxx", NULL),
-                               AM_VALUE_STR,
-                               cmocka_cb).str, "xxx");
+    AMbyteSpan const str = AMpush(&stack,
+                                  AMmapGet(doc, AM_ROOT, AMstr("xxx"), NULL),
+                                  AM_VALUE_STR,
+                                  cmocka_cb).str;
+    assert_int_equal(str.count, 3);
+    assert_memory_equal(str.src, "xxx", str.count);
     /* doc.delete(root, "xxx");                                              */
-    AMfree(AMmapDelete(doc, AM_ROOT, "xxx"));
+    AMfree(AMmapDelete(doc, AM_ROOT, AMstr("xxx")));
     /* assert.deepEqual(doc.getWithType(root, "xxx"), undefined)             */
     AMpush(&stack,
-           AMmapGet(doc, AM_ROOT, "xxx", NULL),
+           AMmapGet(doc, AM_ROOT, AMstr("xxx"), NULL),
            AM_VALUE_VOID,
            cmocka_cb);
 }
@@ -604,24 +670,24 @@ static void test_should_be_able_to_use_counters(void** state) {
     /* const root = "_root"                                                  */
     /*                                                                       */
     /* doc.put(root, "counter", 10, "counter");                              */
-    AMfree(AMmapPutCounter(doc, AM_ROOT, "counter", 10));
+    AMfree(AMmapPutCounter(doc, AM_ROOT, AMstr("counter"), 10));
     /* assert.deepEqual(doc.getWithType(root, "counter"), ["counter", 10])   */
     assert_int_equal(AMpush(&stack,
-                            AMmapGet(doc, AM_ROOT, "counter", NULL),
+                            AMmapGet(doc, AM_ROOT, AMstr("counter"), NULL),
                             AM_VALUE_COUNTER,
                             cmocka_cb).counter, 10);
     /* doc.increment(root, "counter", 10);                                   */
-    AMfree(AMmapIncrement(doc, AM_ROOT, "counter", 10));
+    AMfree(AMmapIncrement(doc, AM_ROOT, AMstr("counter"), 10));
     /* assert.deepEqual(doc.getWithType(root, "counter"), ["counter", 20])   */
     assert_int_equal(AMpush(&stack,
-                            AMmapGet(doc, AM_ROOT, "counter", NULL),
+                            AMmapGet(doc, AM_ROOT, AMstr("counter"), NULL),
                             AM_VALUE_COUNTER,
                             cmocka_cb).counter, 20);
     /* doc.increment(root, "counter", -5);                                   */
-    AMfree(AMmapIncrement(doc, AM_ROOT, "counter", -5));
+    AMfree(AMmapIncrement(doc, AM_ROOT, AMstr("counter"), -5));
     /* assert.deepEqual(doc.getWithType(root, "counter"), ["counter", 15])   */
     assert_int_equal(AMpush(&stack,
-                            AMmapGet(doc, AM_ROOT, "counter", NULL),
+                            AMmapGet(doc, AM_ROOT, AMstr("counter"), NULL),
                             AM_VALUE_COUNTER,
                             cmocka_cb).counter, 15);
 }
@@ -638,52 +704,64 @@ static void test_should_be_able_to_splice_text(void** state) {
     /* const text = doc.putObject(root, "text", "");                         */
     AMobjId const* const text = AMpush(
         &stack,
-        AMmapPutObject(doc, AM_ROOT, "text", AM_OBJ_TYPE_TEXT),
+        AMmapPutObject(doc, AM_ROOT, AMstr("text"), AM_OBJ_TYPE_TEXT),
         AM_VALUE_OBJ_ID,
         cmocka_cb).obj_id;
     /* doc.splice(text, 0, 0, "hello ")                                      */
-    AMfree(AMspliceText(doc, text, 0, 0, "hello "));
+    AMfree(AMspliceText(doc, text, 0, 0, AMstr("hello ")));
     /* doc.splice(text, 6, 0, ["w", "o", "r", "l", "d"])                     */
-    static AMvalue const WORLD[] = {{.str_tag = AM_VALUE_STR, .str = "w"},
-                                    {.str_tag = AM_VALUE_STR, .str = "o"},
-                                    {.str_tag = AM_VALUE_STR, .str = "r"},
-                                    {.str_tag = AM_VALUE_STR, .str = "l"},
-                                    {.str_tag = AM_VALUE_STR, .str = "d"}};
+    static AMvalue const WORLD[] = {{.str_tag = AM_VALUE_STR, .str = {.src = "w", .count = 1}},
+                                    {.str_tag = AM_VALUE_STR, .str = {.src = "o", .count = 1}},
+                                    {.str_tag = AM_VALUE_STR, .str = {.src = "r", .count = 1}},
+                                    {.str_tag = AM_VALUE_STR, .str = {.src = "l", .count = 1}},
+                                    {.str_tag = AM_VALUE_STR, .str = {.src = "d", .count = 1}}};
     AMfree(AMsplice(doc, text, 6, 0, WORLD, sizeof(WORLD)/sizeof(AMvalue)));
     /* doc.splice(text, 11, 0, ["!", "?"])                                   */
-    static AMvalue const INTERROBANG[] = {{.str_tag = AM_VALUE_STR, .str = "!"},
-                                          {.str_tag = AM_VALUE_STR, .str = "?"}};
+    static AMvalue const INTERROBANG[] = {{.str_tag = AM_VALUE_STR, .str = {.src = "!", .count = 1}},
+                                          {.str_tag = AM_VALUE_STR, .str = {.src = "?", .count = 1}}};
     AMfree(AMsplice(doc, text, 11, 0, INTERROBANG, sizeof(INTERROBANG)/sizeof(AMvalue)));
     /* assert.deepEqual(doc.getWithType(text, 0), ["str", "h"])              */
-    assert_string_equal(AMpush(&stack,
-                               AMlistGet(doc, text, 0, NULL),
-                               AM_VALUE_STR,
-                               cmocka_cb).str, "h");
+    AMbyteSpan str = AMpush(&stack,
+                            AMlistGet(doc, text, 0, NULL),
+                            AM_VALUE_STR,
+                            cmocka_cb).str;
+    assert_int_equal(str.count, 1);
+    assert_memory_equal(str.src, "h", str.count);
     /* assert.deepEqual(doc.getWithType(text, 1), ["str", "e"])              */
-    assert_string_equal(AMpush(&stack,
-                               AMlistGet(doc, text, 1, NULL),
-                               AM_VALUE_STR,
-                               cmocka_cb).str, "e");
+    str = AMpush(&stack,
+                 AMlistGet(doc, text, 1, NULL),
+                 AM_VALUE_STR,
+                 cmocka_cb).str;
+    assert_int_equal(str.count, 1);
+    assert_memory_equal(str.src, "e", str.count);
     /* assert.deepEqual(doc.getWithType(text, 9), ["str", "l"])              */
-    assert_string_equal(AMpush(&stack,
-                               AMlistGet(doc, text, 9, NULL),
-                               AM_VALUE_STR,
-                               cmocka_cb).str, "l");
+    str = AMpush(&stack,
+                 AMlistGet(doc, text, 9, NULL),
+                 AM_VALUE_STR,
+                 cmocka_cb).str;
+    assert_int_equal(str.count, 1);
+    assert_memory_equal(str.src, "l", str.count);
     /* assert.deepEqual(doc.getWithType(text, 10), ["str", "d"])             */
-    assert_string_equal(AMpush(&stack,
-                               AMlistGet(doc, text, 10, NULL),
-                               AM_VALUE_STR,
-                               cmocka_cb).str, "d");
+    str = AMpush(&stack,
+                 AMlistGet(doc, text, 10, NULL),
+                 AM_VALUE_STR,
+                 cmocka_cb).str;
+    assert_int_equal(str.count, 1);
+    assert_memory_equal(str.src, "d", str.count);
     /* assert.deepEqual(doc.getWithType(text, 11), ["str", "!"])             */
-    assert_string_equal(AMpush(&stack,
-                               AMlistGet(doc, text, 11, NULL),
-                               AM_VALUE_STR,
-                               cmocka_cb).str, "!");
+    str = AMpush(&stack,
+                 AMlistGet(doc, text, 11, NULL),
+                 AM_VALUE_STR,
+                 cmocka_cb).str;
+    assert_int_equal(str.count, 1);
+    assert_memory_equal(str.src, "!", str.count);
     /* assert.deepEqual(doc.getWithType(text, 12), ["str", "?"])             */
-    assert_string_equal(AMpush(&stack,
-                               AMlistGet(doc, text, 12, NULL),
-                               AM_VALUE_STR,
-                               cmocka_cb).str, "?");
+    str = AMpush(&stack,
+                 AMlistGet(doc, text, 12, NULL),
+                 AM_VALUE_STR,
+                 cmocka_cb).str;
+    assert_int_equal(str.count, 1);
+    assert_memory_equal(str.src, "?", str.count);
 }
 
 /**
@@ -696,36 +774,40 @@ static void test_should_be_able_to_insert_objects_into_text(void** state) {
     /* const text = doc.putObject("/", "text", "Hello world");               */
     AMobjId const* const text = AMpush(
         &stack,
-        AMmapPutObject(doc, AM_ROOT, "text", AM_OBJ_TYPE_TEXT),
+        AMmapPutObject(doc, AM_ROOT, AMstr("text"), AM_OBJ_TYPE_TEXT),
         AM_VALUE_OBJ_ID,
         cmocka_cb).obj_id;
-    AMfree(AMspliceText(doc, text, 0, 0, "Hello world"));
+    AMfree(AMspliceText(doc, text, 0, 0, AMstr("Hello world")));
     /* const obj = doc.insertObject(text, 6, { hello: "world" });            */
     AMobjId const* const obj = AMpush(
         &stack,
         AMlistPutObject(doc, text, 6, true, AM_OBJ_TYPE_MAP),
         AM_VALUE_OBJ_ID,
         cmocka_cb).obj_id;
-    AMfree(AMmapPutStr(doc, obj, "hello", "world"));
+    AMfree(AMmapPutStr(doc, obj, AMstr("hello"), AMstr("world")));
     /* assert.deepEqual(doc.text(text), "Hello \ufffcworld");                */
-    assert_string_equal(AMpush(&stack,
-                               AMtext(doc, text, NULL),
-                               AM_VALUE_STR,
-                               cmocka_cb).str, u8"Hello \ufffcworld");
+    AMbyteSpan str = AMpush(&stack,
+                            AMtext(doc, text, NULL),
+                            AM_VALUE_STR,
+                            cmocka_cb).str;
+    assert_int_equal(str.count, strlen(u8"Hello \ufffcworld"));
+    assert_memory_equal(str.src, u8"Hello \ufffcworld", str.count);
     /* assert.deepEqual(doc.getWithType(text, 6), ["map", obj]);             */
     assert_true(AMobjIdEqual(AMpush(&stack,
                                     AMlistGet(doc, text, 6, NULL),
                                     AM_VALUE_OBJ_ID,
                                     cmocka_cb).obj_id, obj));
     /* assert.deepEqual(doc.getWithType(obj, "hello"), ["str", "world"]);    */
-    assert_string_equal(AMpush(&stack,
-                               AMmapGet(doc, obj, "hello", NULL),
-                               AM_VALUE_STR,
-                               cmocka_cb).str, "world");
+    str = AMpush(&stack,
+                 AMmapGet(doc, obj, AMstr("hello"), NULL),
+                 AM_VALUE_STR,
+                 cmocka_cb).str;
+    assert_int_equal(str.count, strlen("world"));
+    assert_memory_equal(str.src, "world", str.count);
 }
 
 /**
- * \brief should be able save all or incrementally
+ * \brief should be able to save all or incrementally
  */
 static void test_should_be_able_to_save_all_or_incrementally(void** state) {
     AMresultStack* stack = *state;
@@ -733,7 +815,7 @@ static void test_should_be_able_to_save_all_or_incrementally(void** state) {
     AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     /*                                                                       */
     /* doc.put("_root", "foo", 1)                                            */
-    AMfree(AMmapPutInt(doc, AM_ROOT, "foo", 1));
+    AMfree(AMmapPutInt(doc, AM_ROOT, AMstr("foo"), 1));
     /*                                                                       */
     /* const save1 = doc.save()                                              */
     AMbyteSpan const save1 = AMpush(&stack,
@@ -742,7 +824,7 @@ static void test_should_be_able_to_save_all_or_incrementally(void** state) {
                                     cmocka_cb).bytes;
     /*                                                                       */
     /* doc.put("_root", "bar", 2)                                            */
-    AMfree(AMmapPutInt(doc, AM_ROOT, "bar", 2));
+    AMfree(AMmapPutInt(doc, AM_ROOT, AMstr("bar"), 2));
     /*                                                                       */
     /* const saveMidway = doc.clone().save();                                */
     AMbyteSpan const saveMidway = AMpush(&stack,
@@ -761,7 +843,7 @@ static void test_should_be_able_to_save_all_or_incrementally(void** state) {
                                     cmocka_cb).bytes;
     /*                                                                       */
     /* doc.put("_root", "baz", 3);                                           */
-    AMfree(AMmapPutInt(doc, AM_ROOT, "baz", 3));
+    AMfree(AMmapPutInt(doc, AM_ROOT, AMstr("baz"), 3));
     /*                                                                       */
     /* const save3 = doc.saveIncremental();                                  */
     AMbyteSpan const save3 = AMpush(&stack,
@@ -843,42 +925,48 @@ static void test_should_be_able_to_splice_text_2(void** state) {
     /* const text = doc.putObject("_root", "text", "");                      */
     AMobjId const* const text = AMpush(
         &stack,
-        AMmapPutObject(doc, AM_ROOT, "text", AM_OBJ_TYPE_TEXT),
+        AMmapPutObject(doc, AM_ROOT, AMstr("text"), AM_OBJ_TYPE_TEXT),
         AM_VALUE_OBJ_ID,
         cmocka_cb).obj_id;
     /* doc.splice(text, 0, 0, "hello world");                                */
-    AMfree(AMspliceText(doc, text, 0, 0, "hello world"));
+    AMfree(AMspliceText(doc, text, 0, 0, AMstr("hello world")));
     /* const hash1 = doc.commit();                                           */
     AMchangeHashes const hash1 = AMpush(&stack,
-                                        AMcommit(doc, NULL, NULL),
+                                        AMcommit(doc, AMstr(NULL), NULL),
                                         AM_VALUE_CHANGE_HASHES,
                                         cmocka_cb).change_hashes;
     /* doc.splice(text, 6, 0, "big bad ");                                   */
-    AMfree(AMspliceText(doc, text, 6, 0, "big bad "));
+    AMfree(AMspliceText(doc, text, 6, 0, AMstr("big bad ")));
     /* const hash2 = doc.commit();                                           */
     AMchangeHashes const hash2 = AMpush(&stack,
-                                        AMcommit(doc, NULL, NULL),
+                                        AMcommit(doc, AMstr(NULL), NULL),
                                         AM_VALUE_CHANGE_HASHES,
                                         cmocka_cb).change_hashes;
     /* assert.strictEqual(doc.text(text), "hello big bad world")             */
-    assert_string_equal(AMpush(&stack,
-                               AMtext(doc, text, NULL),
-                               AM_VALUE_STR,
-                               cmocka_cb).str, "hello big bad world");
+    AMbyteSpan str = AMpush(&stack,
+                            AMtext(doc, text, NULL),
+                            AM_VALUE_STR,
+                            cmocka_cb).str;
+    assert_int_equal(str.count, strlen("hello big bad world"));
+    assert_memory_equal(str.src, "hello big bad world", str.count);
     /* assert.strictEqual(doc.length(text), 19)                              */
     assert_int_equal(AMobjSize(doc, text, NULL), 19);
     /* assert.strictEqual(doc.text(text, [hash1]), "hello world")            */
-    assert_string_equal(AMpush(&stack,
-                               AMtext(doc, text, &hash1),
-                               AM_VALUE_STR,
-                               cmocka_cb).str, "hello world");
+    str = AMpush(&stack,
+                 AMtext(doc, text, &hash1),
+                 AM_VALUE_STR,
+                 cmocka_cb).str;
+    assert_int_equal(str.count, strlen("hello world"));
+    assert_memory_equal(str.src, "hello world", str.count);
     /* assert.strictEqual(doc.length(text, [hash1]), 11)                     */
     assert_int_equal(AMobjSize(doc, text, &hash1), 11);
     /* assert.strictEqual(doc.text(text, [hash2]), "hello big bad world")    */
-    assert_string_equal(AMpush(&stack,
-                               AMtext(doc, text, &hash2),
-                               AM_VALUE_STR,
-                               cmocka_cb).str, "hello big bad world");
+    str = AMpush(&stack,
+                 AMtext(doc, text, &hash2),
+                 AM_VALUE_STR,
+                 cmocka_cb).str;
+    assert_int_equal(str.count, strlen("hello big bad world"));
+    assert_memory_equal(str.src, "hello big bad world", str.count);
     /* assert.strictEqual(doc.length(text, [hash2]), 19)                     */
     assert_int_equal(AMobjSize(doc, text, &hash2), 19);
 }
@@ -891,13 +979,13 @@ static void test_local_inc_increments_all_visible_counters_in_a_map(void** state
     /* const doc1 = create("aaaa")                                           */
     AMdoc* const doc1 = AMpush(&stack,
                                AMcreate(AMpush(&stack,
-                                               AMactorIdInitStr("aaaa"),
+                                               AMactorIdInitStr(AMstr("aaaa")),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id),
                                AM_VALUE_DOC,
                                cmocka_cb).doc;
     /* doc1.put("_root", "hello", "world")                                   */
-    AMfree(AMmapPutStr(doc1, AM_ROOT, "hello", "world"));
+    AMfree(AMmapPutStr(doc1, AM_ROOT, AMstr("hello"), AMstr("world")));
     /* const doc2 = load(doc1.save(), "bbbb");                               */
     AMbyteSpan const save = AMpush(&stack,
                                    AMsave(doc1),
@@ -908,7 +996,7 @@ static void test_local_inc_increments_all_visible_counters_in_a_map(void** state
                                AM_VALUE_DOC,
                                cmocka_cb).doc;
     AMfree(AMsetActorId(doc2, AMpush(&stack,
-                                     AMactorIdInitStr("bbbb"),
+                                     AMactorIdInitStr(AMstr("bbbb")),
                                      AM_VALUE_ACTOR_ID,
                                      cmocka_cb).actor_id));
     /* const doc3 = load(doc1.save(), "cccc");                               */
@@ -917,7 +1005,7 @@ static void test_local_inc_increments_all_visible_counters_in_a_map(void** state
                                AM_VALUE_DOC,
                                cmocka_cb).doc;
     AMfree(AMsetActorId(doc3, AMpush(&stack,
-                                     AMactorIdInitStr("cccc"),
+                                     AMactorIdInitStr(AMstr("cccc")),
                                      AM_VALUE_ACTOR_ID,
                                      cmocka_cb).actor_id));
     /* let heads = doc1.getHeads()                                           */
@@ -926,11 +1014,11 @@ static void test_local_inc_increments_all_visible_counters_in_a_map(void** state
                                          AM_VALUE_CHANGE_HASHES,
                                          cmocka_cb).change_hashes;
     /* doc1.put("_root", "cnt", 20)                                          */
-    AMfree(AMmapPutInt(doc1, AM_ROOT, "cnt", 20));
+    AMfree(AMmapPutInt(doc1, AM_ROOT, AMstr("cnt"), 20));
     /* doc2.put("_root", "cnt", 0, "counter")                                */
-    AMfree(AMmapPutCounter(doc2, AM_ROOT, "cnt", 0));
+    AMfree(AMmapPutCounter(doc2, AM_ROOT, AMstr("cnt"), 0));
     /* doc3.put("_root", "cnt", 10, "counter")                               */
-    AMfree(AMmapPutCounter(doc3, AM_ROOT, "cnt", 10));
+    AMfree(AMmapPutCounter(doc3, AM_ROOT, AMstr("cnt"), 10));
     /* doc1.applyChanges(doc2.getChanges(heads))                             */
     AMchanges const changes2 = AMpush(&stack,
                                       AMgetChanges(doc2, &heads1),
@@ -945,7 +1033,7 @@ static void test_local_inc_increments_all_visible_counters_in_a_map(void** state
     AMfree(AMapplyChanges(doc1, &changes3));
     /* let result = doc1.getAll("_root", "cnt")                              */
     AMobjItems result = AMpush(&stack,
-                               AMmapGetAll(doc1, AM_ROOT, "cnt", NULL),
+                               AMmapGetAll(doc1, AM_ROOT, AMstr("cnt"), NULL),
                                AM_VALUE_OBJ_ITEMS,
                                cmocka_cb).obj_items;
     /* assert.deepEqual(result, [
@@ -956,23 +1044,26 @@ static void test_local_inc_increments_all_visible_counters_in_a_map(void** state
     AMobjItem const* result_item = AMobjItemsNext(&result, 1);
     assert_int_equal(AMobjItemValue(result_item).int_, 20);
     assert_int_equal(AMobjIdCounter(AMobjItemObjId(result_item)), 2);
-    assert_string_equal(AMactorIdStr(AMobjIdActorId(AMobjItemObjId(result_item))),
-                        "aaaa");
+    AMbyteSpan str = AMactorIdStr(AMobjIdActorId(AMobjItemObjId(result_item)));
+    assert_int_equal(str.count, 4);
+    assert_memory_equal(str.src, "aaaa", str.count);
     result_item = AMobjItemsNext(&result, 1);
     assert_int_equal(AMobjItemValue(result_item).counter, 0);
     assert_int_equal(AMobjIdCounter(AMobjItemObjId(result_item)), 2);
-    assert_string_equal(AMactorIdStr(AMobjIdActorId(AMobjItemObjId(result_item))),
-                        "bbbb");
+    str = AMactorIdStr(AMobjIdActorId(AMobjItemObjId(result_item)));
+    assert_int_equal(str.count, 4);
+    assert_memory_equal(str.src, "bbbb", str.count);
     result_item = AMobjItemsNext(&result, 1);
     assert_int_equal(AMobjItemValue(result_item).counter, 10);
     assert_int_equal(AMobjIdCounter(AMobjItemObjId(result_item)), 2);
-    assert_string_equal(AMactorIdStr(AMobjIdActorId(AMobjItemObjId(result_item))),
-                        "cccc");
+    str = AMactorIdStr(AMobjIdActorId(AMobjItemObjId(result_item)));
+    assert_int_equal(str.count, 4);
+    assert_memory_equal(str.src, "cccc", str.count);
     /* doc1.increment("_root", "cnt", 5)                                     */
-    AMfree(AMmapIncrement(doc1, AM_ROOT, "cnt", 5));
+    AMfree(AMmapIncrement(doc1, AM_ROOT, AMstr("cnt"), 5));
     /* result = doc1.getAll("_root", "cnt")                                  */
     result = AMpush(&stack,
-                    AMmapGetAll(doc1, AM_ROOT, "cnt", NULL),
+                    AMmapGetAll(doc1, AM_ROOT, AMstr("cnt"), NULL),
                     AM_VALUE_OBJ_ITEMS,
                     cmocka_cb).obj_items;
     /* assert.deepEqual(result, [
@@ -982,13 +1073,15 @@ static void test_local_inc_increments_all_visible_counters_in_a_map(void** state
     result_item = AMobjItemsNext(&result, 1);
     assert_int_equal(AMobjItemValue(result_item).counter, 5);
     assert_int_equal(AMobjIdCounter(AMobjItemObjId(result_item)), 2);
-    assert_string_equal(AMactorIdStr(AMobjIdActorId(AMobjItemObjId(result_item))),
-                        "bbbb");
+    str = AMactorIdStr(AMobjIdActorId(AMobjItemObjId(result_item)));
+    assert_int_equal(str.count, 4);
+    assert_memory_equal(str.src, "bbbb", str.count);
     result_item = AMobjItemsNext(&result, 1);
     assert_int_equal(AMobjItemValue(result_item).counter, 15);
     assert_int_equal(AMobjIdCounter(AMobjItemObjId(result_item)), 2);
-    assert_string_equal(AMactorIdStr(AMobjIdActorId(AMobjItemObjId(result_item))),
-                        "cccc");
+    str = AMactorIdStr(AMobjIdActorId(AMobjItemObjId(result_item)));
+    assert_int_equal(str.count, 4);
+    assert_memory_equal(str.src, "cccc", str.count);
     /*                                                                       */
     /* const save1 = doc1.save()                                             */
     AMbyteSpan const save1 = AMpush(&stack,
@@ -1017,7 +1110,7 @@ static void test_local_inc_increments_all_visible_counters_in_a_sequence(void** 
     /* const doc1 = create("aaaa")                                           */
     AMdoc* const doc1 = AMpush(&stack,
                                AMcreate(AMpush(&stack,
-                                               AMactorIdInitStr("aaaa"),
+                                               AMactorIdInitStr(AMstr("aaaa")),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id),
                                AM_VALUE_DOC,
@@ -1025,11 +1118,11 @@ static void test_local_inc_increments_all_visible_counters_in_a_sequence(void** 
     /* const seq = doc1.putObject("_root", "seq", [])                        */
     AMobjId const* const seq = AMpush(
         &stack,
-        AMmapPutObject(doc1, AM_ROOT, "seq", AM_OBJ_TYPE_LIST),
+        AMmapPutObject(doc1, AM_ROOT, AMstr("seq"), AM_OBJ_TYPE_LIST),
         AM_VALUE_OBJ_ID,
         cmocka_cb).obj_id;
     /* doc1.insert(seq, 0, "hello")                                          */
-    AMfree(AMlistPutStr(doc1, seq, 0, true, "hello"));
+    AMfree(AMlistPutStr(doc1, seq, 0, true, AMstr("hello")));
     /* const doc2 = load(doc1.save(), "bbbb");                               */
     AMbyteSpan const save1 = AMpush(&stack,
                                     AMsave(doc1),
@@ -1040,7 +1133,7 @@ static void test_local_inc_increments_all_visible_counters_in_a_sequence(void** 
                                AM_VALUE_DOC,
                                cmocka_cb).doc;
     AMfree(AMsetActorId(doc2, AMpush(&stack,
-                                     AMactorIdInitStr("bbbb"),
+                                     AMactorIdInitStr(AMstr("bbbb")),
                                      AM_VALUE_ACTOR_ID,
                                      cmocka_cb).actor_id));
     /* const doc3 = load(doc1.save(), "cccc");                               */
@@ -1049,7 +1142,7 @@ static void test_local_inc_increments_all_visible_counters_in_a_sequence(void** 
                                AM_VALUE_DOC,
                                cmocka_cb).doc;
     AMfree(AMsetActorId(doc3, AMpush(&stack,
-                                     AMactorIdInitStr("cccc"),
+                                     AMactorIdInitStr(AMstr("cccc")),
                                      AM_VALUE_ACTOR_ID,
                                      cmocka_cb).actor_id));
     /* let heads = doc1.getHeads()                                           */
@@ -1088,18 +1181,20 @@ static void test_local_inc_increments_all_visible_counters_in_a_sequence(void** 
     AMobjItem const* result_item = AMobjItemsNext(&result, 1);
     assert_int_equal(AMobjItemValue(result_item).int_, 20);
     assert_int_equal(AMobjIdCounter(AMobjItemObjId(result_item)), 3);
-    assert_string_equal(AMactorIdStr(AMobjIdActorId(AMobjItemObjId(result_item))),
-                        "aaaa");
+    AMbyteSpan str = AMactorIdStr(AMobjIdActorId(AMobjItemObjId(result_item)));
+    assert_int_equal(str.count, 4);
+    assert_memory_equal(str.src, "aaaa", str.count);
     result_item = AMobjItemsNext(&result, 1);
     assert_int_equal(AMobjItemValue(result_item).counter, 0);
     assert_int_equal(AMobjIdCounter(AMobjItemObjId(result_item)), 3);
-    assert_string_equal(AMactorIdStr(AMobjIdActorId(AMobjItemObjId(result_item))),
-                        "bbbb");
+    str = AMactorIdStr(AMobjIdActorId(AMobjItemObjId(result_item)));
+    assert_memory_equal(str.src, "bbbb", str.count);
     result_item = AMobjItemsNext(&result, 1);
     assert_int_equal(AMobjItemValue(result_item).counter, 10);
     assert_int_equal(AMobjIdCounter(AMobjItemObjId(result_item)), 3);
-    assert_string_equal(AMactorIdStr(AMobjIdActorId(AMobjItemObjId(result_item))),
-                        "cccc");
+    str = AMactorIdStr(AMobjIdActorId(AMobjItemObjId(result_item)));
+    assert_int_equal(str.count, 4);
+    assert_memory_equal(str.src, "cccc", str.count);
     /* doc1.increment(seq, 0, 5)                                             */
     AMfree(AMlistIncrement(doc1, seq, 0, 5));
     /* result = doc1.getAll(seq, 0)                                          */
@@ -1114,13 +1209,14 @@ static void test_local_inc_increments_all_visible_counters_in_a_sequence(void** 
     result_item = AMobjItemsNext(&result, 1);
     assert_int_equal(AMobjItemValue(result_item).counter, 5);
     assert_int_equal(AMobjIdCounter(AMobjItemObjId(result_item)), 3);
-    assert_string_equal(AMactorIdStr(AMobjIdActorId(AMobjItemObjId(result_item))),
-                        "bbbb");
+    str = AMactorIdStr(AMobjIdActorId(AMobjItemObjId(result_item)));
+    assert_int_equal(str.count, 4);
+    assert_memory_equal(str.src, "bbbb", str.count);
     result_item = AMobjItemsNext(&result, 1);
     assert_int_equal(AMobjItemValue(result_item).counter, 15);
     assert_int_equal(AMobjIdCounter(AMobjItemObjId(result_item)), 3);
-    assert_string_equal(AMactorIdStr(AMobjIdActorId(AMobjItemObjId(result_item))),
-                        "cccc");
+    str = AMactorIdStr(AMobjIdActorId(AMobjItemObjId(result_item)));
+    assert_memory_equal(str.src, "cccc", str.count);
     /*                                                                       */
     /* const save = doc1.save()                                              */
     AMbyteSpan const save = AMpush(&stack,
@@ -1154,7 +1250,7 @@ static void test_should_be_able_to_fetch_changes_by_hash(void** state) {
     /* const doc1 = create("aaaa")                                           */
     AMdoc* const doc1 = AMpush(&stack,
                                AMcreate(AMpush(&stack,
-                                               AMactorIdInitStr("aaaa"),
+                                               AMactorIdInitStr(AMstr("aaaa")),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id),
                                AM_VALUE_DOC,
@@ -1162,15 +1258,15 @@ static void test_should_be_able_to_fetch_changes_by_hash(void** state) {
     /* const doc2 = create("bbbb")                                           */
     AMdoc* const doc2 = AMpush(&stack,
                                AMcreate(AMpush(&stack,
-                                               AMactorIdInitStr("bbbb"),
+                                               AMactorIdInitStr(AMstr("bbbb")),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id),
                                AM_VALUE_DOC,
                                cmocka_cb).doc;
     /* doc1.put("/", "a", "b")                                               */
-    AMfree(AMmapPutStr(doc1, AM_ROOT, "a", "b"));
+    AMfree(AMmapPutStr(doc1, AM_ROOT, AMstr("a"), AMstr("b")));
     /* doc2.put("/", "b", "c")                                               */
-    AMfree(AMmapPutStr(doc2, AM_ROOT, "b", "c"));
+    AMfree(AMmapPutStr(doc2, AM_ROOT, AMstr("b"), AMstr("c")));
     /* const head1 = doc1.getHeads()                                         */
     AMchangeHashes head1 = AMpush(&stack,
                                   AMgetHeads(doc1),
@@ -1182,7 +1278,7 @@ static void test_should_be_able_to_fetch_changes_by_hash(void** state) {
                                   AM_VALUE_CHANGE_HASHES,
                                   cmocka_cb).change_hashes;
     /* const change1 = doc1.getChangeByHash(head1[0])
-       if (change1 === null) { throw new RangeError("change1 should not be null") }*/
+       if (change1 === null) { throw new RangeError("change1 should not be null")  */
     AMbyteSpan const change_hash1 = AMchangeHashesNext(&head1, 1);
     AMchanges change1 = AMpush(
         &stack,
@@ -1210,15 +1306,15 @@ static void test_recursive_sets_are_possible(void** state) {
     /* const doc = create("aaaa")                                            */
     AMdoc* const doc = AMpush(&stack,
                               AMcreate(AMpush(&stack,
-                                              AMactorIdInitStr("aaaa"),
+                                              AMactorIdInitStr(AMstr("aaaa")),
                                               AM_VALUE_ACTOR_ID,
                                               cmocka_cb).actor_id),
                               AM_VALUE_DOC,
                               cmocka_cb).doc;
-    /* const l1 = doc.putObject("_root", "list", [{ foo: "bar" }, [1, 2, 3]])*/
+    /* const l1 = doc.putObject("_root", "list", [{ foo: "bar" }, [1, 2, 3]] */
     AMobjId const* const l1 = AMpush(
         &stack,
-        AMmapPutObject(doc, AM_ROOT, "list", AM_OBJ_TYPE_LIST),
+        AMmapPutObject(doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST),
         AM_VALUE_OBJ_ID,
         cmocka_cb).obj_id;
     {
@@ -1227,7 +1323,7 @@ static void test_recursive_sets_are_possible(void** state) {
             AMlistPutObject(doc, l1, 0, true, AM_OBJ_TYPE_MAP),
             AM_VALUE_OBJ_ID,
             cmocka_cb).obj_id;
-        AMfree(AMmapPutStr(doc, map, "foo", "bar"));
+        AMfree(AMmapPutStr(doc, map, AMstr("foo"), AMstr("bar")));
         AMobjId const* const list = AMpush(
             &stack,
             AMlistPutObject(doc, l1, SIZE_MAX, true, AM_OBJ_TYPE_LIST),
@@ -1246,28 +1342,28 @@ static void test_recursive_sets_are_possible(void** state) {
     {
         AMobjId const* const list = AMpush(
             &stack,
-            AMmapPutObject(doc, l2, "zip", AM_OBJ_TYPE_LIST),
+            AMmapPutObject(doc, l2, AMstr("zip"), AM_OBJ_TYPE_LIST),
             AM_VALUE_OBJ_ID,
             cmocka_cb).obj_id;
-        AMfree(AMlistPutStr(doc, list, SIZE_MAX, true, "a"));
-        AMfree(AMlistPutStr(doc, list, SIZE_MAX, true, "b"));
+        AMfree(AMlistPutStr(doc, list, SIZE_MAX, true, AMstr("a")));
+        AMfree(AMlistPutStr(doc, list, SIZE_MAX, true, AMstr("b")));
     }
-    /* const l3 = doc.putObject("_root", "info1", "hello world") // 'text' object*/
+    /* const l3 = doc.putObject("_root", "info1", "hello world") // 'text' object */
     AMobjId const* const l3 = AMpush(
         &stack,
-        AMmapPutObject(doc, AM_ROOT, "info1", AM_OBJ_TYPE_TEXT),
+        AMmapPutObject(doc, AM_ROOT, AMstr("info1"), AM_OBJ_TYPE_TEXT),
         AM_VALUE_OBJ_ID,
         cmocka_cb).obj_id;
-    AMfree(AMspliceText(doc, l3, 0, 0, "hello world"));
+    AMfree(AMspliceText(doc, l3, 0, 0, AMstr("hello world")));
     /* doc.put("_root", "info2", "hello world")  // 'str'                    */
-    AMfree(AMmapPutStr(doc, AM_ROOT, "info2", "hello world"));
+    AMfree(AMmapPutStr(doc, AM_ROOT, AMstr("info2"), AMstr("hello world")));
     /* const l4 = doc.putObject("_root", "info3", "hello world")             */
     AMobjId const* const l4 = AMpush(
         &stack,
-        AMmapPutObject(doc, AM_ROOT, "info3", AM_OBJ_TYPE_TEXT),
+        AMmapPutObject(doc, AM_ROOT, AMstr("info3"), AM_OBJ_TYPE_TEXT),
         AM_VALUE_OBJ_ID,
         cmocka_cb).obj_id;
-    AMfree(AMspliceText(doc, l4, 0, 0, "hello world"));
+    AMfree(AMspliceText(doc, l4, 0, 0, AMstr("hello world")));
     /* assert.deepEqual(doc.materialize(), {
          "list": [{ zip: ["a", "b"] }, { foo: "bar" }, [1, 2, 3]],
          "info1": "hello world",
@@ -1275,26 +1371,40 @@ static void test_recursive_sets_are_possible(void** state) {
          "info3": "hello world",
        })                                                                       */
     AMmapItems doc_items = AMpush(&stack,
-                                  AMmapRange(doc, AM_ROOT, NULL, NULL, NULL),
+                                  AMmapRange(doc, AM_ROOT, AMstr(NULL), AMstr(NULL), NULL),
                                   AM_VALUE_MAP_ITEMS,
                                   cmocka_cb).map_items;
     AMmapItem const* doc_item = AMmapItemsNext(&doc_items, 1);
-    assert_string_equal(AMmapItemKey(doc_item), "info1");
-    assert_string_equal(AMpush(&stack,
-                               AMtext(doc, AMmapItemObjId(doc_item), NULL),
-                               AM_VALUE_STR,
-                               cmocka_cb).str, "hello world");
+    AMbyteSpan key = AMmapItemKey(doc_item);
+    assert_int_equal(key.count, strlen("info1"));
+    assert_memory_equal(key.src, "info1", key.count);
+    AMbyteSpan str = AMpush(&stack,
+                            AMtext(doc, AMmapItemObjId(doc_item), NULL),
+                            AM_VALUE_STR,
+                            cmocka_cb).str;
+    assert_int_equal(str.count, strlen("hello world"));
+    assert_memory_equal(str.src, "hello world", str.count);
     doc_item = AMmapItemsNext(&doc_items, 1);
-    assert_string_equal(AMmapItemKey(doc_item), "info2");
-    assert_string_equal(AMmapItemValue(doc_item).str, "hello world");
+    key = AMmapItemKey(doc_item);
+    assert_int_equal(key.count, strlen("info2"));
+    assert_memory_equal(key.src, "info2", key.count);
+    str = AMmapItemValue(doc_item).str;
+    assert_int_equal(str.count, strlen("hello world"));
+    assert_memory_equal(str.src, "hello world", str.count);
     doc_item = AMmapItemsNext(&doc_items, 1);
-    assert_string_equal(AMmapItemKey(doc_item), "info3");
-    assert_string_equal(AMpush(&stack,
-                               AMtext(doc, AMmapItemObjId(doc_item), NULL),
-                               AM_VALUE_STR,
-                               cmocka_cb).str, "hello world");
+    key = AMmapItemKey(doc_item);
+    assert_int_equal(key.count, strlen("info3"));
+    assert_memory_equal(key.src, "info3", key.count);
+    str = AMpush(&stack,
+                 AMtext(doc, AMmapItemObjId(doc_item), NULL),
+                 AM_VALUE_STR,
+                 cmocka_cb).str;
+    assert_int_equal(str.count, strlen("hello world"));
+    assert_memory_equal(str.src, "hello world", str.count);
     doc_item = AMmapItemsNext(&doc_items, 1);
-    assert_string_equal(AMmapItemKey(doc_item), "list");
+    key = AMmapItemKey(doc_item);
+    assert_int_equal(key.count, strlen("list"));
+    assert_memory_equal(key.src, "list", key.count);
     {
         AMlistItems list_items = AMpush(
             &stack,
@@ -1305,35 +1415,41 @@ static void test_recursive_sets_are_possible(void** state) {
         {
             AMmapItems map_items = AMpush(
                 &stack,
-                AMmapRange(doc, AMlistItemObjId(list_item), NULL, NULL, NULL),
+                AMmapRange(doc, AMlistItemObjId(list_item), AMstr(NULL), AMstr(NULL), NULL),
                 AM_VALUE_MAP_ITEMS,
                 cmocka_cb).map_items;
             AMmapItem const* map_item = AMmapItemsNext(&map_items, 1);
-            assert_string_equal(AMmapItemKey(map_item), "zip");
+            AMbyteSpan const key = AMmapItemKey(map_item);
+            assert_int_equal(key.count, strlen("zip"));
+            assert_memory_equal(key.src, "zip", key.count);
             {
                 AMlistItems list_items = AMpush(
                     &stack,
                     AMlistRange(doc, AMmapItemObjId(map_item), 0, SIZE_MAX, NULL),
                     AM_VALUE_LIST_ITEMS,
                     cmocka_cb).list_items;
-                assert_string_equal(AMlistItemValue(
-                                        AMlistItemsNext(&list_items, 1)).str,
-                                    "a");
-                assert_string_equal(AMlistItemValue(
-                                        AMlistItemsNext(&list_items, 1)).str,
-                                    "b");
+                AMbyteSpan str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+                assert_int_equal(str.count, 1);
+                assert_memory_equal(str.src, "a", str.count);
+                str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+                assert_int_equal(str.count, 1);
+                assert_memory_equal(str.src, "b", str.count);
             }
         }
         list_item = AMlistItemsNext(&list_items, 1);
         {
             AMmapItems map_items = AMpush(
                 &stack,
-                AMmapRange(doc, AMlistItemObjId(list_item), NULL, NULL, NULL),
+                AMmapRange(doc, AMlistItemObjId(list_item), AMstr(NULL), AMstr(NULL), NULL),
                 AM_VALUE_MAP_ITEMS,
                 cmocka_cb).map_items;
             AMmapItem const* map_item = AMmapItemsNext(&map_items, 1);
-            assert_string_equal(AMmapItemKey(map_item), "foo");
-            assert_string_equal(AMmapItemValue(map_item).str, "bar");
+            AMbyteSpan const key = AMmapItemKey(map_item);
+            assert_int_equal(key.count, strlen("foo"));
+            assert_memory_equal(key.src, "foo", key.count);
+            AMbyteSpan const str = AMmapItemValue(map_item).str;
+            assert_int_equal(str.count, 3);
+            assert_memory_equal(str.src, "bar", str.count);
         }
         list_item = AMlistItemsNext(&list_items, 1);
         {
@@ -1356,25 +1472,27 @@ static void test_recursive_sets_are_possible(void** state) {
     /* assert.deepEqual(doc.materialize(l2), { zip: ["a", "b"] })            */
     AMmapItems map_items = AMpush(
         &stack,
-        AMmapRange(doc, l2, NULL, NULL, NULL),
+        AMmapRange(doc, l2, AMstr(NULL), AMstr(NULL), NULL),
         AM_VALUE_MAP_ITEMS,
         cmocka_cb).map_items;
     AMmapItem const* map_item = AMmapItemsNext(&map_items, 1);
-    assert_string_equal(AMmapItemKey(map_item), "zip");
+    key = AMmapItemKey(map_item);
+    assert_int_equal(key.count, strlen("zip"));
+    assert_memory_equal(key.src, "zip", key.count);
     {
         AMlistItems list_items = AMpush(
             &stack,
             AMlistRange(doc, AMmapItemObjId(map_item), 0, SIZE_MAX, NULL),
             AM_VALUE_LIST_ITEMS,
             cmocka_cb).list_items;
-        assert_string_equal(AMlistItemValue(
-                                AMlistItemsNext(&list_items, 1)).str,
-                            "a");
-        assert_string_equal(AMlistItemValue(
-                                AMlistItemsNext(&list_items, 1)).str,
-                            "b");
+        AMbyteSpan str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "a", str.count);
+        str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+        assert_int_equal(str.count, 1);
+        assert_memory_equal(str.src, "b", str.count);
     }
-    /* assert.deepEqual(doc.materialize(l1), [{ zip: ["a", "b"] }, { foo: "bar" }, [1, 2, 3]])*/
+    /* assert.deepEqual(doc.materialize(l1), [{ zip: ["a", "b"] }, { foo: "bar" }, [1, 2, 3]] */
     AMlistItems list_items = AMpush(
         &stack,
         AMlistRange(doc, l1, 0, SIZE_MAX, NULL),
@@ -1384,33 +1502,41 @@ static void test_recursive_sets_are_possible(void** state) {
     {
         AMmapItems map_items = AMpush(
             &stack,
-            AMmapRange(doc, AMlistItemObjId(list_item), NULL, NULL, NULL),
+            AMmapRange(doc, AMlistItemObjId(list_item), AMstr(NULL), AMstr(NULL), NULL),
             AM_VALUE_MAP_ITEMS,
             cmocka_cb).map_items;
         AMmapItem const* map_item = AMmapItemsNext(&map_items, 1);
-        assert_string_equal(AMmapItemKey(map_item), "zip");
+        AMbyteSpan const key = AMmapItemKey(map_item);
+        assert_int_equal(key.count, strlen("zip"));
+        assert_memory_equal(key.src, "zip", key.count);
         {
             AMlistItems list_items = AMpush(
                 &stack,
                 AMlistRange(doc, AMmapItemObjId(map_item), 0, SIZE_MAX, NULL),
                 AM_VALUE_LIST_ITEMS,
                 cmocka_cb).list_items;
-            assert_string_equal(
-                AMlistItemValue(AMlistItemsNext(&list_items, 1)).str, "a");
-            assert_string_equal(AMlistItemValue(
-                AMlistItemsNext(&list_items, 1)).str, "b");
+            AMbyteSpan str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+            assert_int_equal(str.count, 1);
+            assert_memory_equal(str.src, "a", str.count);
+            str = AMlistItemValue(AMlistItemsNext(&list_items, 1)).str;
+            assert_int_equal(str.count, 1);
+            assert_memory_equal(str.src, "b", str.count);
         }
     }
     list_item = AMlistItemsNext(&list_items, 1);
     {
         AMmapItems map_items = AMpush(
             &stack,
-            AMmapRange(doc, AMlistItemObjId(list_item), NULL, NULL, NULL),
+            AMmapRange(doc, AMlistItemObjId(list_item), AMstr(NULL), AMstr(NULL), NULL),
             AM_VALUE_MAP_ITEMS,
             cmocka_cb).map_items;
         AMmapItem const* map_item = AMmapItemsNext(&map_items, 1);
-        assert_string_equal(AMmapItemKey(map_item), "foo");
-        assert_string_equal(AMmapItemValue(map_item).str, "bar");
+        AMbyteSpan const key = AMmapItemKey(map_item);
+        assert_int_equal(key.count, strlen("foo"));
+        assert_memory_equal(key.src, "foo", key.count);
+        AMbyteSpan const str = AMmapItemValue(map_item).str;
+        assert_int_equal(str.count, 3);
+        assert_memory_equal(str.src, "bar", str.count);
     }
     list_item = AMlistItemsNext(&list_items, 1);
     {
@@ -1427,10 +1553,9 @@ static void test_recursive_sets_are_possible(void** state) {
                          3);
     }
     /* assert.deepEqual(doc.materialize(l4), "hello world")                  */
-    assert_string_equal(AMpush(&stack,
-                               AMtext(doc, l4, NULL),
-                               AM_VALUE_STR,
-                               cmocka_cb).str, "hello world");
+    str = AMpush(&stack, AMtext(doc, l4, NULL), AM_VALUE_STR, cmocka_cb).str;
+    assert_int_equal(str.count, strlen("hello world"));
+    assert_memory_equal(str.src, "hello world", str.count);
 }
 
 /**
@@ -1441,7 +1566,7 @@ static void test_only_returns_an_object_id_when_objects_are_created(void** state
     /* const doc = create("aaaa")                                            */
     AMdoc* const doc = AMpush(&stack,
                               AMcreate(AMpush(&stack,
-                                              AMactorIdInitStr("aaaa"),
+                                              AMactorIdInitStr(AMstr("aaaa")),
                                               AM_VALUE_ACTOR_ID,
                                               cmocka_cb).actor_id),
                               AM_VALUE_DOC,
@@ -1449,31 +1574,31 @@ static void test_only_returns_an_object_id_when_objects_are_created(void** state
     /* const r1 = doc.put("_root", "foo", "bar")
        assert.deepEqual(r1, null);                                           */
     AMpush(&stack,
-           AMmapPutStr(doc, AM_ROOT, "foo", "bar"),
+           AMmapPutStr(doc, AM_ROOT, AMstr("foo"), AMstr("bar")),
            AM_VALUE_VOID,
            cmocka_cb);
     /* const r2 = doc.putObject("_root", "list", [])                         */
     AMobjId const* const r2 = AMpush(
         &stack,
-        AMmapPutObject(doc, AM_ROOT, "list", AM_OBJ_TYPE_LIST),
+        AMmapPutObject(doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST),
         AM_VALUE_OBJ_ID,
         cmocka_cb).obj_id;
     /* const r3 = doc.put("_root", "counter", 10, "counter")
        assert.deepEqual(r3, null);                                           */
     AMpush(&stack,
-           AMmapPutCounter(doc, AM_ROOT, "counter", 10),
+           AMmapPutCounter(doc, AM_ROOT, AMstr("counter"), 10),
            AM_VALUE_VOID,
            cmocka_cb);
     /* const r4 = doc.increment("_root", "counter", 1)
        assert.deepEqual(r4, null);                                           */
     AMpush(&stack,
-           AMmapIncrement(doc, AM_ROOT, "counter", 1),
+           AMmapIncrement(doc, AM_ROOT, AMstr("counter"), 1),
            AM_VALUE_VOID,
            cmocka_cb);
     /* const r5 = doc.delete("_root", "counter")
        assert.deepEqual(r5, null);                                           */
     AMpush(&stack,
-           AMmapDelete(doc, AM_ROOT, "counter"),
+           AMmapDelete(doc, AM_ROOT, AMstr("counter")),
            AM_VALUE_VOID,
            cmocka_cb);
     /* const r6 = doc.insert(r2, 0, 10);
@@ -1489,19 +1614,22 @@ static void test_only_returns_an_object_id_when_objects_are_created(void** state
         AM_VALUE_OBJ_ID,
         cmocka_cb).obj_id;
     /* const r8 = doc.splice(r2, 1, 0, ["a", "b", "c"]);                     */
-    AMvalue const STRS[] = {{.str_tag = AM_VALUE_STR, .str = "a",
-                             .str_tag = AM_VALUE_STR, .str = "b",
-                             .str_tag = AM_VALUE_STR, .str = "c"}};
+    AMvalue const STRS[] = {{.str_tag = AM_VALUE_STR, .str = {.src = "a", .count = 1}},
+                            {.str_tag = AM_VALUE_STR, .str = {.src = "b", .count = 1}},
+                            {.str_tag = AM_VALUE_STR, .str = {.src = "c", .count = 1}}};
     AMpush(&stack,
            AMsplice(doc, r2, 1, 0, STRS, sizeof(STRS)/sizeof(AMvalue)),
            AM_VALUE_VOID,
            cmocka_cb);
     /* assert.deepEqual(r2, "2@aaaa");                                       */
     assert_int_equal(AMobjIdCounter(r2), 2);
-    assert_string_equal(AMactorIdStr(AMobjIdActorId(r2)), "aaaa");
+    AMbyteSpan str = AMactorIdStr(AMobjIdActorId(r2));
+    assert_int_equal(str.count, 4);
+    assert_memory_equal(str.src, "aaaa", str.count);
     /* assert.deepEqual(r7, "7@aaaa");                                       */
     assert_int_equal(AMobjIdCounter(r7), 7);
-    assert_string_equal(AMactorIdStr(AMobjIdActorId(r7)), "aaaa");
+    str = AMactorIdStr(AMobjIdActorId(r7));
+    assert_memory_equal(str.src, "aaaa", str.count);
 }
 
 /**
@@ -1512,7 +1640,7 @@ static void test_objects_without_properties_are_preserved(void** state) {
     /* const doc1 = create("aaaa")                                           */
     AMdoc* const doc1 = AMpush(&stack,
                                AMcreate(AMpush(&stack,
-                                               AMactorIdInitStr("aaaa"),
+                                               AMactorIdInitStr(AMstr("aaaa")),
                                                AM_VALUE_ACTOR_ID,
                                                cmocka_cb).actor_id),
                                AM_VALUE_DOC,
@@ -1520,23 +1648,23 @@ static void test_objects_without_properties_are_preserved(void** state) {
     /* const a = doc1.putObject("_root", "a", {});                           */
     AMobjId const* const a = AMpush(
         &stack,
-        AMmapPutObject(doc1, AM_ROOT, "a", AM_OBJ_TYPE_MAP),
+        AMmapPutObject(doc1, AM_ROOT, AMstr("a"), AM_OBJ_TYPE_MAP),
         AM_VALUE_OBJ_ID,
         cmocka_cb).obj_id;
     /* const b = doc1.putObject("_root", "b", {});                           */
     AMobjId const* const b = AMpush(
         &stack,
-        AMmapPutObject(doc1, AM_ROOT, "b", AM_OBJ_TYPE_MAP),
+        AMmapPutObject(doc1, AM_ROOT, AMstr("b"), AM_OBJ_TYPE_MAP),
         AM_VALUE_OBJ_ID,
         cmocka_cb).obj_id;
     /* const c = doc1.putObject("_root", "c", {});                           */
     AMobjId const* const c = AMpush(
         &stack,
-        AMmapPutObject(doc1, AM_ROOT, "c", AM_OBJ_TYPE_MAP),
+        AMmapPutObject(doc1, AM_ROOT, AMstr("c"), AM_OBJ_TYPE_MAP),
         AM_VALUE_OBJ_ID,
         cmocka_cb).obj_id;
     /* const d = doc1.put(c, "d", "dd");                                     */
-    AMfree(AMmapPutStr(doc1, c, "d", "dd"));
+    AMfree(AMmapPutStr(doc1, c, AMstr("d"), AMstr("dd")));
     /* const saved = doc1.save();                                            */
     AMbyteSpan const saved = AMpush(&stack,
                                     AMsave(doc1),
@@ -1549,7 +1677,7 @@ static void test_objects_without_properties_are_preserved(void** state) {
                                cmocka_cb).doc;
     /* assert.deepEqual(doc2.getWithType("_root", "a"), ["map", a])          */
     AMmapItems doc_items = AMpush(&stack,
-                                  AMmapRange(doc2, AM_ROOT, NULL, NULL, NULL),
+                                  AMmapRange(doc2, AM_ROOT, AMstr(NULL), AMstr(NULL), NULL),
                                   AM_VALUE_MAP_ITEMS,
                                   cmocka_cb).map_items;
     assert_true(AMobjIdEqual(AMmapItemObjId(AMmapItemsNext(&doc_items, 1)), a));
@@ -1568,13 +1696,17 @@ static void test_objects_without_properties_are_preserved(void** state) {
     assert_true(AMobjIdEqual(AMmapItemObjId(AMmapItemsNext(&doc_items, 1)), c));
     /* assert.deepEqual(doc2.keys(c), ["d"])                                 */
     keys = AMpush(&stack, AMkeys(doc1, c, NULL), AM_VALUE_STRS, cmocka_cb).strs;
-    assert_string_equal(AMstrsNext(&keys, 1), "d");
+    AMbyteSpan str = AMstrsNext(&keys, 1);
+    assert_int_equal(str.count, 1);
+    assert_memory_equal(str.src, "d", str.count);
     /* assert.deepEqual(doc2.getWithType(c, "d"), ["str", "dd"])             */
     AMobjItems obj_items = AMpush(&stack,
                                   AMobjValues(doc1, c, NULL),
                                   AM_VALUE_OBJ_ITEMS,
                                   cmocka_cb).obj_items;
-    assert_string_equal(AMobjItemValue(AMobjItemsNext(&obj_items, 1)).str, "dd");
+    str = AMobjItemValue(AMobjItemsNext(&obj_items, 1)).str;
+    assert_int_equal(str.count, 2);
+    assert_memory_equal(str.src, "dd", str.count);
 }
 
 /**
@@ -1585,15 +1717,15 @@ static void test_should_allow_you_to_forkAt_a_heads(void** state) {
     /* const A = create("aaaaaa")                                            */
     AMdoc* const A = AMpush(&stack,
                             AMcreate(AMpush(&stack,
-                                            AMactorIdInitStr("aaaaaa"),
+                                            AMactorIdInitStr(AMstr("aaaaaa")),
                                             AM_VALUE_ACTOR_ID,
                                             cmocka_cb).actor_id),
                             AM_VALUE_DOC,
                             cmocka_cb).doc;
     /* A.put("/", "key1", "val1");                                           */
-    AMfree(AMmapPutStr(A, AM_ROOT, "key1", "val1"));
+    AMfree(AMmapPutStr(A, AM_ROOT, AMstr("key1"), AMstr("val1")));
     /* A.put("/", "key2", "val2");                                           */
-    AMfree(AMmapPutStr(A, AM_ROOT, "key2", "val2"));
+    AMfree(AMmapPutStr(A, AM_ROOT, AMstr("key2"), AMstr("val2")));
     /* const heads1 = A.getHeads();                                          */
     AMchangeHashes const heads1 = AMpush(&stack,
                                          AMgetHeads(A),
@@ -1602,13 +1734,13 @@ static void test_should_allow_you_to_forkAt_a_heads(void** state) {
     /* const B = A.fork("bbbbbb")                                            */
     AMdoc* const B = AMpush(&stack, AMfork(A, NULL), AM_VALUE_DOC, cmocka_cb).doc;
     AMfree(AMsetActorId(B, AMpush(&stack,
-                                  AMactorIdInitStr("bbbbbb"),
+                                  AMactorIdInitStr(AMstr("bbbbbb")),
                                   AM_VALUE_ACTOR_ID,
                                   cmocka_cb).actor_id));
     /* A.put("/", "key3", "val3");                                           */
-    AMfree(AMmapPutStr(A, AM_ROOT, "key3", "val3"));
+    AMfree(AMmapPutStr(A, AM_ROOT, AMstr("key3"), AMstr("val3")));
     /* B.put("/", "key4", "val4");                                           */
-    AMfree(AMmapPutStr(B, AM_ROOT, "key4", "val4"));
+    AMfree(AMmapPutStr(B, AM_ROOT, AMstr("key4"), AMstr("val4")));
     /* A.merge(B)                                                            */
     AMfree(AMmerge(A, B));
     /* const heads2 = A.getHeads();                                          */
@@ -1617,30 +1749,30 @@ static void test_should_allow_you_to_forkAt_a_heads(void** state) {
                                          AM_VALUE_CHANGE_HASHES,
                                          cmocka_cb).change_hashes;
     /* A.put("/", "key5", "val5");                                           */
-    AMfree(AMmapPutStr(A, AM_ROOT, "key5", "val5"));
-    /* assert.deepEqual(A.forkAt(heads1).materialize("/"), A.materialize("/", heads1))*/
+    AMfree(AMmapPutStr(A, AM_ROOT, AMstr("key5"), AMstr("val5")));
+    /* assert.deepEqual(A.forkAt(heads1).materialize("/"), A.materialize("/", heads1) */
     AMmapItems AforkAt1_items = AMpush(
         &stack,
         AMmapRange(
             AMpush(&stack, AMfork(A, &heads1), AM_VALUE_DOC, cmocka_cb).doc,
-            AM_ROOT, NULL, NULL, NULL),
+            AM_ROOT, AMstr(NULL), AMstr(NULL), NULL),
         AM_VALUE_MAP_ITEMS,
         cmocka_cb).map_items;
     AMmapItems A1_items = AMpush(&stack,
-                                 AMmapRange(A, AM_ROOT, NULL, NULL, &heads1),
+                                 AMmapRange(A, AM_ROOT, AMstr(NULL), AMstr(NULL), &heads1),
                                  AM_VALUE_MAP_ITEMS,
                                  cmocka_cb).map_items;
     assert_true(AMmapItemsEqual(&AforkAt1_items, &A1_items));
-    /* assert.deepEqual(A.forkAt(heads2).materialize("/"), A.materialize("/", heads2))*/
+    /* assert.deepEqual(A.forkAt(heads2).materialize("/"), A.materialize("/", heads2) */
     AMmapItems AforkAt2_items = AMpush(
         &stack,
         AMmapRange(
             AMpush(&stack, AMfork(A, &heads2), AM_VALUE_DOC, cmocka_cb).doc,
-            AM_ROOT, NULL, NULL, NULL),
+            AM_ROOT, AMstr(NULL), AMstr(NULL), NULL),
         AM_VALUE_MAP_ITEMS,
         cmocka_cb).map_items;
     AMmapItems A2_items = AMpush(&stack,
-                                 AMmapRange(A, AM_ROOT, NULL, NULL, &heads2),
+                                 AMmapRange(A, AM_ROOT, AMstr(NULL), AMstr(NULL), &heads2),
                                  AM_VALUE_MAP_ITEMS,
                                  cmocka_cb).map_items;
     assert_true(AMmapItemsEqual(&AforkAt2_items, &A2_items));
@@ -1654,7 +1786,7 @@ static void test_should_handle_merging_text_conflicts_then_saving_and_loading(vo
     /* const A = create("aabbcc")                                            */
     AMdoc* const A = AMpush(&stack,
                             AMcreate(AMpush(&stack,
-                                            AMactorIdInitStr("aabbcc"),
+                                            AMactorIdInitStr(AMstr("aabbcc")),
                                             AM_VALUE_ACTOR_ID,
                                             cmocka_cb).actor_id),
                             AM_VALUE_DOC,
@@ -1662,38 +1794,40 @@ static void test_should_handle_merging_text_conflicts_then_saving_and_loading(vo
     /* const At = A.putObject('_root', 'text', "")                           */
     AMobjId const* const At = AMpush(
         &stack,
-        AMmapPutObject(A, AM_ROOT, "text", AM_OBJ_TYPE_TEXT),
+        AMmapPutObject(A, AM_ROOT, AMstr("text"), AM_OBJ_TYPE_TEXT),
         AM_VALUE_OBJ_ID,
         cmocka_cb).obj_id;
     /* A.splice(At, 0, 0, 'hello')                                           */
-    AMfree(AMspliceText(A, At, 0, 0, "hello"));
+    AMfree(AMspliceText(A, At, 0, 0, AMstr("hello")));
     /*                                                                       */
     /* const B = A.fork()                                                    */
     AMdoc* const B = AMpush(&stack, AMfork(A, NULL), AM_VALUE_DOC, cmocka_cb).doc;
     /*                                                                       */
     /* assert.deepEqual(B.getWithType("_root", "text"), ["text", At])        */
-    assert_string_equal(AMpush(&stack,
-                               AMtext(B,
-                                      AMpush(&stack,
-                                             AMmapGet(B, AM_ROOT, "text", NULL),
-                                             AM_VALUE_OBJ_ID,
-                                             cmocka_cb).obj_id,
-                                      NULL),
-                               AM_VALUE_STR,
-                               cmocka_cb).str,
-                        AMpush(&stack,
-                               AMtext(A, At, NULL),
-                               AM_VALUE_STR,
-                               cmocka_cb).str);
+    AMbyteSpan str = AMpush(&stack,
+                            AMtext(B,
+                                    AMpush(&stack,
+                                            AMmapGet(B, AM_ROOT, AMstr("text"), NULL),
+                                            AM_VALUE_OBJ_ID,
+                                            cmocka_cb).obj_id,
+                                    NULL),
+                            AM_VALUE_STR,
+                            cmocka_cb).str;
+    AMbyteSpan const str2 = AMpush(&stack,
+                                   AMtext(A, At, NULL),
+                                   AM_VALUE_STR,
+                                   cmocka_cb).str;
+    assert_int_equal(str.count, str2.count);
+    assert_memory_equal(str.src, str2.src, str.count);
     /*                                                                       */
     /* B.splice(At, 4, 1)                                                    */
-    AMfree(AMspliceText(B, At, 4, 1, NULL));
+    AMfree(AMspliceText(B, At, 4, 1, AMstr(NULL)));
     /* B.splice(At, 4, 0, '!')                                               */
-    AMfree(AMspliceText(B, At, 4, 0, "!"));
+    AMfree(AMspliceText(B, At, 4, 0, AMstr("!")));
     /* B.splice(At, 5, 0, ' ')                                               */
-    AMfree(AMspliceText(B, At, 5, 0, " "));
+    AMfree(AMspliceText(B, At, 5, 0, AMstr(" ")));
     /* B.splice(At, 6, 0, 'world')                                           */
-    AMfree(AMspliceText(B, At, 6, 0, "world"));
+    AMfree(AMspliceText(B, At, 6, 0, AMstr("world")));
     /*                                                                       */
     /* A.merge(B)                                                            */
     AMfree(AMmerge(A, B));
@@ -1710,18 +1844,19 @@ static void test_should_handle_merging_text_conflicts_then_saving_and_loading(vo
                             AM_VALUE_DOC,
                             cmocka_cb).doc;
     /*                                                                       */
-    /* assert.deepEqual(C.getWithType('_root', 'text'), ['text', '1@aabbcc'])*/
+    /* assert.deepEqual(C.getWithType('_root', 'text'), ['text', '1@aabbcc'] */
     AMobjId const* const C_text = AMpush(&stack,
-                                         AMmapGet(C, AM_ROOT, "text", NULL),
+                                         AMmapGet(C, AM_ROOT, AMstr("text"), NULL),
                                          AM_VALUE_OBJ_ID,
                                          cmocka_cb).obj_id;
     assert_int_equal(AMobjIdCounter(C_text), 1);
-    assert_string_equal(AMactorIdStr(AMobjIdActorId(C_text)), "aabbcc");
+    str = AMactorIdStr(AMobjIdActorId(C_text));
+    assert_int_equal(str.count, strlen("aabbcc"));
+    assert_memory_equal(str.src, "aabbcc", str.count);
     /* assert.deepEqual(C.text(At), 'hell! world')                           */
-    assert_string_equal(AMpush(&stack,
-                               AMtext(C, At, NULL),
-                               AM_VALUE_STR,
-                               cmocka_cb).str, "hell! world");
+    str = AMpush(&stack, AMtext(C, At, NULL), AM_VALUE_STR, cmocka_cb).str;
+    assert_int_equal(str.count, strlen("hell! world"));
+    assert_memory_equal(str.src, "hell! world", str.count);
 }
 
 int run_ported_wasm_basic_tests(void) {

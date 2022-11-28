@@ -1,9 +1,9 @@
 use automerge as am;
 use automerge::transaction::Transactable;
-use std::os::raw::c_char;
 
+use crate::byte_span::{to_str, AMbyteSpan};
 use crate::change_hashes::AMchangeHashes;
-use crate::doc::{to_doc, to_doc_mut, to_obj_id, to_str, AMdoc};
+use crate::doc::{to_doc, to_doc_mut, to_obj_id, AMdoc};
 use crate::obj::{to_obj_type, AMobjId, AMobjType};
 use crate::result::{to_result, AMresult};
 
@@ -44,6 +44,7 @@ macro_rules! to_range {
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
@@ -74,6 +75,7 @@ pub unsafe extern "C" fn AMlistDelete(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
@@ -88,10 +90,10 @@ pub unsafe extern "C" fn AMlistGet(
     let doc = to_doc!(doc);
     let obj_id = to_obj_id!(obj_id);
     let (index, _) = adjust!(index, false, doc.length(obj_id));
-    match heads.as_ref() {
-        None => to_result(doc.get(obj_id, index)),
-        Some(heads) => to_result(doc.get_at(obj_id, index, heads.as_ref())),
-    }
+    to_result(match heads.as_ref() {
+        None => doc.get(obj_id, index),
+        Some(heads) => doc.get_at(obj_id, index, heads.as_ref()),
+    })
 }
 
 /// \memberof AMdoc
@@ -110,6 +112,7 @@ pub unsafe extern "C" fn AMlistGet(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
@@ -145,6 +148,7 @@ pub unsafe extern "C" fn AMlistGetAll(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
@@ -179,6 +183,7 @@ pub unsafe extern "C" fn AMlistIncrement(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
@@ -222,6 +227,7 @@ pub unsafe extern "C" fn AMlistPutBool(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
@@ -265,6 +271,7 @@ pub unsafe extern "C" fn AMlistPutBytes(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
@@ -305,6 +312,7 @@ pub unsafe extern "C" fn AMlistPutCounter(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
@@ -344,6 +352,7 @@ pub unsafe extern "C" fn AMlistPutF64(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
@@ -382,6 +391,7 @@ pub unsafe extern "C" fn AMlistPutInt(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
@@ -422,6 +432,7 @@ pub unsafe extern "C" fn AMlistPutNull(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
@@ -455,7 +466,7 @@ pub unsafe extern "C" fn AMlistPutObject(
 ///                  `== true`.
 /// \param[in] insert A flag to insert \p value before \p index instead of
 ///            writing \p value over \p index.
-/// \param[in] value A UTF-8 string.
+/// \param[in] value A UTF-8 string view as an `AMbyteSpan` struct.
 /// \return A pointer to an `AMresult` struct containing a void.
 /// \pre \p doc `!= NULL`.
 /// \pre `0 <=` \p index `<= AMobjSize(`\p obj_id`)` or \p index `== SIZE_MAX`.
@@ -463,6 +474,7 @@ pub unsafe extern "C" fn AMlistPutObject(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
@@ -473,12 +485,12 @@ pub unsafe extern "C" fn AMlistPutStr(
     obj_id: *const AMobjId,
     index: usize,
     insert: bool,
-    value: *const c_char,
+    value: AMbyteSpan,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let obj_id = to_obj_id!(obj_id);
     let (index, insert) = adjust!(index, insert, doc.length(obj_id));
-    let value = to_str(value);
+    let value = to_str!(value);
     to_result(if insert {
         doc.insert(obj_id, index, value)
     } else {
@@ -505,6 +517,7 @@ pub unsafe extern "C" fn AMlistPutStr(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
@@ -545,6 +558,7 @@ pub unsafe extern "C" fn AMlistPutTimestamp(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()
@@ -584,6 +598,7 @@ pub unsafe extern "C" fn AMlistPutUint(
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
 /// \internal
+///
 /// # Safety
 /// doc must be a valid pointer to an AMdoc
 /// obj_id must be a valid pointer to an AMobjId or std::ptr::null()

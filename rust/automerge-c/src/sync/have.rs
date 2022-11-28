@@ -36,6 +36,6 @@ pub unsafe extern "C" fn AMsyncHaveLastSync(sync_have: *const AMsyncHave) -> AMc
     if let Some(sync_have) = sync_have.as_ref() {
         AMchangeHashes::new(&sync_have.as_ref().last_sync)
     } else {
-        AMchangeHashes::default()
+        Default::default()
     }
 }

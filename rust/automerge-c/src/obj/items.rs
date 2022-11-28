@@ -316,7 +316,7 @@ pub unsafe extern "C" fn AMobjItemsReversed(obj_items: *const AMobjItems) -> AMo
     if let Some(obj_items) = obj_items.as_ref() {
         obj_items.reversed()
     } else {
-        AMobjItems::default()
+        Default::default()
     }
 }
 
@@ -336,6 +336,6 @@ pub unsafe extern "C" fn AMobjItemsRewound(obj_items: *const AMobjItems) -> AMob
     if let Some(obj_items) = obj_items.as_ref() {
         obj_items.rewound()
     } else {
-        AMobjItems::default()
+        Default::default()
     }
 }
