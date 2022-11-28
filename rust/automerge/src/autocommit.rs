@@ -469,6 +469,25 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
         )
     }
 
+    fn splice_text<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        pos: usize,
+        del: usize,
+        text: &str,
+    ) -> Result<(), AutomergeError> {
+        self.ensure_transaction_open();
+        let (current, tx) = self.transaction.as_mut().unwrap();
+        tx.splice_text(
+            &mut self.doc,
+            current.observer(),
+            obj.as_ref(),
+            pos,
+            del,
+            text,
+        )
+    }
+
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
         self.doc.text(obj)
     }

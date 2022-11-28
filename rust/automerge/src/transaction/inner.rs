@@ -140,6 +140,15 @@ impl TransactionInner {
         let obj = doc.exid_to_obj(ex_obj)?;
         let value = value.into();
         let prop = prop.into();
+        let obj_type = doc
+            .ops
+            .object_type(&obj)
+            .ok_or(AutomergeError::NotAnObject)?;
+        match (&prop, obj_type) {
+            (Prop::Map(_), ObjType::Map) => Ok(()),
+            (Prop::Seq(_), ObjType::List) => Ok(()),
+            _ => Err(AutomergeError::InvalidOp(obj_type)),
+        }?;
         self.local_op(doc, op_observer, obj, prop, value.into())?;
         Ok(())
     }
@@ -167,6 +176,15 @@ impl TransactionInner {
     ) -> Result<ExId, AutomergeError> {
         let obj = doc.exid_to_obj(ex_obj)?;
         let prop = prop.into();
+        let obj_type = doc
+            .ops
+            .object_type(&obj)
+            .ok_or(AutomergeError::NotAnObject)?;
+        match (&prop, obj_type) {
+            (Prop::Map(_), ObjType::Map) => Ok(()),
+            (Prop::Seq(_), ObjType::List) => Ok(()),
+            _ => Err(AutomergeError::InvalidOp(obj_type)),
+        }?;
         let id = self
             .local_op(doc, op_observer, obj, prop, value.into())?
             .unwrap();
@@ -207,6 +225,13 @@ impl TransactionInner {
         value: V,
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(ex_obj)?;
+        let obj_type = doc
+            .ops
+            .object_type(&obj)
+            .ok_or(AutomergeError::NotAnObject)?;
+        if obj_type != ObjType::List {
+            return Err(AutomergeError::InvalidOp(obj_type));
+        }
         let value = value.into();
         tracing::trace!(obj=?obj, value=?value, "inserting value");
         self.do_insert(doc, op_observer, obj, index, value.into())?;
@@ -222,6 +247,13 @@ impl TransactionInner {
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
         let obj = doc.exid_to_obj(ex_obj)?;
+        let obj_type = doc
+            .ops
+            .object_type(&obj)
+            .ok_or(AutomergeError::NotAnObject)?;
+        if obj_type != ObjType::List {
+            return Err(AutomergeError::InvalidOp(obj_type));
+        }
         let id = self.do_insert(doc, op_observer, obj, index, value.into())?;
         let id = doc.id_to_exid(id);
         Ok(id)
@@ -391,13 +423,54 @@ impl TransactionInner {
     pub(crate) fn splice<Obs: OpObserver>(
         &mut self,
         doc: &mut Automerge,
-        mut op_observer: Option<&mut Obs>,
+        op_observer: Option<&mut Obs>,
         ex_obj: &ExId,
-        mut pos: usize,
+        pos: usize,
         del: usize,
         vals: impl IntoIterator<Item = ScalarValue>,
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(ex_obj)?;
+        let obj_type = doc
+            .ops
+            .object_type(&obj)
+            .ok_or(AutomergeError::NotAnObject)?;
+        if obj_type != ObjType::List {
+            return Err(AutomergeError::InvalidOp(obj_type));
+        }
+        self.inner_splice(doc, op_observer, obj, pos, del, vals)
+    }
+
+    /// Splice string into a text object
+    pub(crate) fn splice_text<Obs: OpObserver>(
+        &mut self,
+        doc: &mut Automerge,
+        op_observer: Option<&mut Obs>,
+        ex_obj: &ExId,
+        pos: usize,
+        del: usize,
+        text: &str,
+    ) -> Result<(), AutomergeError> {
+        let obj = doc.exid_to_obj(ex_obj)?;
+        let obj_type = doc
+            .ops
+            .object_type(&obj)
+            .ok_or(AutomergeError::NotAnObject)?;
+        if obj_type != ObjType::Text {
+            return Err(AutomergeError::InvalidOp(obj_type));
+        }
+        let vals = text.chars().map(ScalarValue::from);
+        self.inner_splice(doc, op_observer, obj, pos, del, vals)
+    }
+
+    pub(crate) fn inner_splice<Obs: OpObserver>(
+        &mut self,
+        doc: &mut Automerge,
+        mut op_observer: Option<&mut Obs>,
+        obj: ObjId,
+        mut pos: usize,
+        del: usize,
+        vals: impl IntoIterator<Item = ScalarValue>,
+    ) -> Result<(), AutomergeError> {
         for _ in 0..del {
             // This unwrap and rewrap of the option is necessary to appeas the borrow checker :(
             if let Some(obs) = op_observer.as_mut() {

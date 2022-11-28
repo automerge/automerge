@@ -154,7 +154,7 @@ Lists are index addressable sets of values.  These values can be any scalar or o
 
 ### Text
 
-Text is a specialized list type intended for modifying a text document.  The primary way to interact with a text document is via the `splice()` method. Spliced strings will be indexable by character (important to note for platforms that index by graphmeme cluster).  Non text can be inserted into a text document and will be represented with the unicode object replacement character.
+Text is a specialized list type intended for modifying a text document.  The primary way to interact with a text document is via the `splice()` method. Spliced strings will be indexable by character (important to note for platforms that index by graphmeme cluster).
 
 ```javascript
     let doc = create("aaaaaa")
@@ -162,12 +162,6 @@ Text is a specialized list type intended for modifying a text document.  The pri
     doc.splice(notes, 6, 5, "everyone")
 
     doc.text(notes)      // returns "Hello everyone"
-
-    let obj = doc.insertObject(notes, 6, { hi: "there" })
-
-    doc.text(notes)       // returns "Hello \ufffceveryone"
-    doc.getWithType(notes, 6)   // returns ["map", obj]
-    doc.get(obj, "hi") // returns "there"
 ```
 
 ### Tables

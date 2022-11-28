@@ -1,7 +1,7 @@
 use crate::storage::load::Error as LoadError;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
-use crate::ChangeHash;
+use crate::{ChangeHash, ObjType};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -45,6 +45,14 @@ pub enum AutomergeError {
     NonChangeCompressed,
     #[error("id was not an object id")]
     NotAnObject,
+    #[error("invalid op for object of type `{0}`")]
+    InvalidOp(ObjType),
+}
+
+impl PartialEq for AutomergeError {
+    fn eq(&self, other: &Self) -> bool {
+        std::mem::discriminant(self) == std::mem::discriminant(other)
+    }
 }
 
 #[cfg(feature = "wasm")]

@@ -495,12 +495,7 @@ function listMethods(target) {
             break;
           }
           case "text": {
-            context.insertObject(objectId, index, value, "text")
-/*
-            const text = context.insertObject(objectId, index, "", "text")
-            const proxyText = textProxy(context, text, [ ... path, index ], readonly);
-            proxyText.splice(0,0,...value)
-*/
+            context.insertObject(objectId, index, value)
             break;
           }
           case "map": {

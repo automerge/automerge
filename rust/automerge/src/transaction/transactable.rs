@@ -91,10 +91,7 @@ pub trait Transactable {
         pos: usize,
         del: usize,
         text: &str,
-    ) -> Result<(), AutomergeError> {
-        let vals = text.chars().map(|c| c.into());
-        self.splice(obj, pos, del, vals)
-    }
+    ) -> Result<(), AutomergeError>;
 
     /// Get the keys of the given object, it should be a map.
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_, '_>;

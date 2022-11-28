@@ -1318,7 +1318,7 @@ fn compute_list_indexes_correctly_when_list_element_is_split_across_tree_nodes()
 fn get_parent_objects() {
     let mut doc = AutoCommit::new();
     let map = doc.put_object(ROOT, "a", ObjType::Map).unwrap();
-    let list = doc.insert_object(&map, 0, ObjType::List).unwrap();
+    let list = doc.put_object(&map, "b", ObjType::List).unwrap();
     doc.insert(&list, 0, 2).unwrap();
     let text = doc.put_object(&list, 0, ObjType::Text).unwrap();
 
@@ -1328,7 +1328,7 @@ fn get_parent_objects() {
     );
     assert_eq!(
         doc.parents(&list).unwrap().next(),
-        Some((map, Prop::Seq(0), true))
+        Some((map, Prop::Map("b".into()), true))
     );
     assert_eq!(
         doc.parents(&text).unwrap().next(),
@@ -1340,7 +1340,7 @@ fn get_parent_objects() {
 fn get_path_to_object() {
     let mut doc = AutoCommit::new();
     let map = doc.put_object(ROOT, "a", ObjType::Map).unwrap();
-    let list = doc.insert_object(&map, 0, ObjType::List).unwrap();
+    let list = doc.put_object(&map, "b", ObjType::List).unwrap();
     doc.insert(&list, 0, 2).unwrap();
     let text = doc.put_object(&list, 0, ObjType::Text).unwrap();
 
@@ -1350,13 +1350,16 @@ fn get_path_to_object() {
     );
     assert_eq!(
         doc.path_to_object(&list).unwrap(),
-        vec![(ROOT, Prop::Map("a".into())), (map.clone(), Prop::Seq(0)),]
+        vec![
+            (ROOT, Prop::Map("a".into())),
+            (map.clone(), Prop::Map("b".into())),
+        ]
     );
     assert_eq!(
         doc.path_to_object(&text).unwrap(),
         vec![
             (ROOT, Prop::Map("a".into())),
-            (map, Prop::Seq(0)),
+            (map, Prop::Map("b".into())),
             (list, Prop::Seq(0)),
         ]
     );
@@ -1366,13 +1369,13 @@ fn get_path_to_object() {
 fn parents_iterator() {
     let mut doc = AutoCommit::new();
     let map = doc.put_object(ROOT, "a", ObjType::Map).unwrap();
-    let list = doc.insert_object(&map, 0, ObjType::List).unwrap();
+    let list = doc.put_object(&map, "b", ObjType::List).unwrap();
     doc.insert(&list, 0, 2).unwrap();
     let text = doc.put_object(&list, 0, ObjType::Text).unwrap();
 
     let mut parents = doc.parents(text).unwrap();
     assert_eq!(parents.next(), Some((list, Prop::Seq(0), true)));
-    assert_eq!(parents.next(), Some((map, Prop::Seq(0), true)));
+    assert_eq!(parents.next(), Some((map, Prop::Map("b".into()), true)));
     assert_eq!(parents.next(), Some((ROOT, Prop::Map("a".into()), true)));
     assert_eq!(parents.next(), None);
 }
@@ -1383,27 +1386,28 @@ fn can_insert_a_grapheme_into_text() {
     let mut tx = doc.transaction();
     let text = tx.put_object(ROOT, "text", ObjType::Text).unwrap();
     let polar_bear = "🐻‍❄️";
-    tx.insert(&text, 0, polar_bear).unwrap();
+    tx.splice_text(&text, 0, 0, polar_bear).unwrap();
     tx.commit();
     let s = doc.text(&text).unwrap();
     assert_eq!(s, polar_bear);
     let len = doc.length(&text);
-    assert_eq!(len, 1); // just one grapheme
+    assert_eq!(len, 4); // 4 utf8 chars
 }
 
 #[test]
-fn can_insert_long_string_into_text() {
+fn long_strings_spliced_into_text_get_segmented_by_utf8_chars() {
     let mut doc = Automerge::new();
     let mut tx = doc.transaction();
     let text = tx.put_object(ROOT, "text", ObjType::Text).unwrap();
     let polar_bear = "🐻‍❄️";
     let polar_bear_army = polar_bear.repeat(100);
-    tx.insert(&text, 0, &polar_bear_army).unwrap();
+    tx.splice_text(&text, 0, 0, &polar_bear_army).unwrap();
     tx.commit();
     let s = doc.text(&text).unwrap();
     assert_eq!(s, polar_bear_army);
     let len = doc.length(&text);
-    assert_eq!(len, 1); // many graphemes
+    assert_eq!(len, polar_bear.chars().count() * 100);
+    assert_eq!(len, 400);
 }
 
 #[test]

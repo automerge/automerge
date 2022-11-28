@@ -1123,8 +1123,7 @@ fn test_merging_test_conflicts_then_saving_and_loading() {
 
     let mut doc1 = new_doc_with_actor(actor1);
     let text = doc1.put_object(ROOT, "text", ObjType::Text).unwrap();
-    doc1.splice(&text, 0, 0, "hello".chars().map(|c| c.to_string().into()))
-        .unwrap();
+    doc1.splice_text(&text, 0, 0, "hello").unwrap();
 
     let mut doc2 = AutoCommit::load(&doc1.save()).unwrap();
     doc2.set_actor(actor2);
@@ -1133,11 +1132,10 @@ fn test_merging_test_conflicts_then_saving_and_loading() {
         "text" => { list![{"h"}, {"e"}, {"l"}, {"l"}, {"o"}]},
     }};
 
-    doc2.splice(&text, 4, 1, Vec::new()).unwrap();
-    doc2.splice(&text, 4, 0, vec!["!".into()]).unwrap();
-    doc2.splice(&text, 5, 0, vec![" ".into()]).unwrap();
-    doc2.splice(&text, 6, 0, "world".chars().map(|c| c.into()))
-        .unwrap();
+    doc2.splice_text(&text, 4, 1, "").unwrap();
+    doc2.splice_text(&text, 4, 0, "!").unwrap();
+    doc2.splice_text(&text, 5, 0, " ").unwrap();
+    doc2.splice_text(&text, 6, 0, "world").unwrap();
 
     assert_doc!(
         doc2.document(),
@@ -1372,4 +1370,30 @@ fn simple_bad_saveload() {
 
     let bytes = doc.save();
     Automerge::load(&bytes).unwrap();
+}
+
+#[test]
+fn ops_on_wrong_objets() -> Result<(), AutomergeError> {
+    let mut doc = AutoCommit::new();
+    let list = doc.put_object(&automerge::ROOT, "list", ObjType::List)?;
+    doc.insert(&list, 0, "a")?;
+    doc.insert(&list, 1, "b")?;
+    let e1 = doc.put(&list, "a", "AAA");
+    assert_eq!(e1, Err(AutomergeError::InvalidOp(ObjType::List)));
+    let e2 = doc.splice_text(&list, 0, 0, "hello world");
+    assert_eq!(e2, Err(AutomergeError::InvalidOp(ObjType::List)));
+    let map = doc.put_object(&automerge::ROOT, "map", ObjType::Map)?;
+    doc.put(&map, "a", "AAA")?;
+    doc.put(&map, "b", "BBB")?;
+    let e3 = doc.insert(&map, 0, "b");
+    assert_eq!(e3, Err(AutomergeError::InvalidOp(ObjType::Map)));
+    let e4 = doc.splice_text(&map, 0, 0, "hello world");
+    assert_eq!(e4, Err(AutomergeError::InvalidOp(ObjType::Map)));
+    let text = doc.put_object(&automerge::ROOT, "text", ObjType::Text)?;
+    doc.splice_text(&text, 0, 0, "hello world")?;
+    let e5 = doc.put(&text, "a", "AAA");
+    assert_eq!(e5, Err(AutomergeError::InvalidOp(ObjType::Text)));
+    let e6 = doc.insert(&text, 0, "b");
+    assert_eq!(e6, Err(AutomergeError::InvalidOp(ObjType::Text)));
+    Ok(())
 }
