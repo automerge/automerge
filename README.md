@@ -40,11 +40,11 @@ in that time.
 
 In general we try and respect semver.
 
-### JavaScript 
+### JavaScript
 
 An alpha release of the javascript package is currently available as
 `@automerge/automerge@2.0.0-alpha.n` where `n` is an integer. We are gathering
-feedback on the API and looking to release a `2.0.0` in the next few weeks. 
+feedback on the API and looking to release a `2.0.0` in the next few weeks.
 
 ### Rust
 
@@ -54,32 +54,79 @@ not well documented. We will be returning to this over the next few months but
 for now you will need to be comfortable reading the tests and asking questions
 to figure out how to use it.
 
-
 ## Repository Organisation
 
-* `./rust` - the rust  rust implementation and also the Rust components of
+- `./rust` - the rust rust implementation and also the Rust components of
   platform specific wrappers (e.g. `automerge-wasm` for the WASM API or
   `automerge-c` for the C FFI bindings)
-* `./javascript` - The javascript library which uses `automerge-wasm`
+- `./javascript` - The javascript library which uses `automerge-wasm`
   internally but presents a more idiomatic javascript interface
-* `./scripts` - scripts which are useful to maintenance of the repository.
+- `./scripts` - scripts which are useful to maintenance of the repository.
   This includes the scripts which are run in CI.
-* `./img` - static assets for use in `.md` files
+- `./img` - static assets for use in `.md` files
 
 ## Building
 
 To build this codebase you will need:
 
 - `rust`
-- `wasm-bindgen-cli`
-- `wasm-opt`
 - `node`
 - `yarn`
 - `cmake`
+- `cmocka`
+
+You will also need to install the following with `cargo install`
+
+- `wasm-bindgen-cli`
+- `wasm-opt`
+- `cargo-deny`
+
+And ensure you have added the `wasm32-unknown-unknown` target for rust cross-compilation.
 
 The various subprojects (the rust code, the wrapper projects) have their own
 build instructions, but to run the tests that will be run in CI you can run
-`./scripts/ci/run`. 
+`./scripts/ci/run`.
+
+### For macOS
+
+These instructions worked to build locally on macOS 13.1 (arm64) as of
+Nov 29th 2022.
+
+```bash
+# clone the repo
+git clone https://github.com/automerge/automerge-rs
+cd automerge-rs
+
+# install rustup
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# install homebrew
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# install cmake, node, cmocka
+brew install cmake node cmocka
+
+# install yarn
+npm install --global yarn
+
+# install rust dependencies
+cargo install wasm-bindgen-cli wasm-opt cargo-deny
+
+# add wasm target in addition to current architecture
+rustup target add wasm32-unknown-unknown
+
+# Run ci script
+./scripts/ci/run
+```
+
+If your build fails to find `cmocka.h` you may need to teach it about homebrew's
+installation location:
+
+```
+export CPATH=/opt/homebrew/include
+export LIBRARY_PATH=/opt/homebrew/lib
+./scripts/ci/run
+```
 
 ## Contributing
 
