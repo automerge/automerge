@@ -124,3 +124,18 @@ impl TryFrom<&AMbyteSpan> for &str {
         }
     }
 }
+
+/// \brief Creates an AMbyteSpan from a pointer + length
+///
+/// \param[in] src  A pointer to a span of bytes
+/// \param[in] count The number of bytes in the span
+/// \return An `AMbyteSpan` struct
+/// \internal
+///
+/// #Safety
+/// AMbytes does not retain the underlying storage, so you must discard the
+/// return value before freeing the bytes.
+#[no_mangle]
+pub unsafe extern "C" fn AMbytes(src: *const u8, count: usize) -> AMbyteSpan {
+    AMbyteSpan { src, count }
+}

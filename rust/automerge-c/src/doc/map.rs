@@ -198,13 +198,12 @@ pub unsafe extern "C" fn AMmapPutBytes(
     doc: *mut AMdoc,
     obj_id: *const AMobjId,
     key: AMbyteSpan,
-    src: *const u8,
-    count: usize,
+    val: AMbyteSpan,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let key = to_str!(key);
     let mut vec = Vec::new();
-    vec.extend_from_slice(std::slice::from_raw_parts(src, count));
+    vec.extend_from_slice(std::slice::from_raw_parts(val.src, val.count));
     to_result(doc.put(to_obj_id!(obj_id), key, vec))
 }
 
