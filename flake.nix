@@ -23,7 +23,18 @@
     in {
       formatter = pkgs.alejandra;
 
-      devShell = pkgs.mkShell {
+      packages = {
+        deadnix = pkgs.runCommand "deadnix" {} ''
+          ${pkgs.deadnix}/bin/deadnix --fail ${./.}
+          mkdir $out
+        '';
+      };
+
+      checks = {
+        inherit (self.packages.${system}) deadnix;
+      };
+
+      devShells.default = pkgs.mkShell {
         buildInputs = with pkgs; [
           (rust.override {
             extensions = ["rust-src"];
