@@ -131,7 +131,10 @@ impl Automerge {
             commit_opts.set_time(time as i64);
         }
         let hash = self.doc.commit_with(commit_opts);
-        JsValue::from_str(&hex::encode(hash.0))
+        match hash {
+            Some(h) => JsValue::from_str(&hex::encode(h.0)),
+            None => JsValue::NULL,
+        }
     }
 
     pub fn merge(&mut self, other: &mut Automerge) -> Result<Array, JsValue> {
@@ -773,6 +776,14 @@ impl Automerge {
                 }
             }
         }
+    }
+
+    #[wasm_bindgen(js_name = emptyChange)]
+    pub fn empty_change(&mut self, message: Option<String>, time: Option<f64>) -> JsValue {
+        let time = time.map(|f| f as i64);
+        let options = CommitOptions { message, time };
+        let hash = self.doc.empty_change(options);
+        JsValue::from_str(&hex::encode(hash))
     }
 }
 

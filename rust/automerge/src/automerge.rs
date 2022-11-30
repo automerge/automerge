@@ -256,6 +256,15 @@ impl Automerge {
         }
     }
 
+    /// Generate an empty change
+    ///
+    /// The main reason to do this is if you want to create a "merge commit", which is a change
+    /// that has all the current heads of the document as dependencies.
+    pub fn empty_commit(&mut self, opts: CommitOptions) -> ChangeHash {
+        let args = self.transaction_args();
+        Transaction::empty(self, args, opts)
+    }
+
     /// Fork this document at the current point for use by a different actor.
     pub fn fork(&self) -> Self {
         let mut f = self.clone();

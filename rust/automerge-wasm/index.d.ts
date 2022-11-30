@@ -168,7 +168,8 @@ export class Automerge {
   toJS(): MaterializeValue;
 
   // transactions
-  commit(message?: string, time?: number): Hash;
+  commit(message?: string, time?: number): Hash | null;
+  emptyChange(message?: string, time?: number): Hash;
   merge(other: Automerge): Heads;
   getActorId(): Actor;
   pendingOps(): number;

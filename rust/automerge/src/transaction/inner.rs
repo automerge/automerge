@@ -44,7 +44,6 @@ impl TransactionInner {
         TransactionInner {
             actor,
             seq,
-            // SAFETY: this unwrap is safe as we always add 1
             start_op,
             time: 0,
             message: None,
@@ -53,14 +52,38 @@ impl TransactionInner {
         }
     }
 
+    /// Create an empty change
+    pub(crate) fn empty(
+        doc: &mut Automerge,
+        args: TransactionArgs,
+        message: Option<String>,
+        time: Option<i64>,
+    ) -> ChangeHash {
+        Self::new(args).commit_impl(doc, message, time)
+    }
+
     pub(crate) fn pending_ops(&self) -> usize {
         self.operations.len()
     }
 
     /// Commit the operations performed in this transaction, returning the hashes corresponding to
     /// the new heads.
+    ///
+    /// Returns `None` if there were no operations to commit
     #[tracing::instrument(skip(self, doc))]
     pub(crate) fn commit(
+        self,
+        doc: &mut Automerge,
+        message: Option<String>,
+        time: Option<i64>,
+    ) -> Option<ChangeHash> {
+        if self.pending_ops() == 0 {
+            return None;
+        }
+        Some(self.commit_impl(doc, message, time))
+    }
+
+    pub(crate) fn commit_impl(
         mut self,
         doc: &mut Automerge,
         message: Option<String>,

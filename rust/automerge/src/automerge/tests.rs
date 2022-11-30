@@ -1080,8 +1080,8 @@ fn delete_nothing_in_map_is_noop() {
     // deleting a missing key in a map should just be a noop
     assert!(tx.delete(ROOT, "a",).is_ok());
     tx.commit();
-    let last_change = doc.get_last_local_change().unwrap();
-    assert_eq!(last_change.len(), 0);
+    let last_change = doc.get_last_local_change();
+    assert!(last_change.is_none());
 
     let bytes = doc.save();
     assert!(Automerge::load(&bytes,).is_ok());

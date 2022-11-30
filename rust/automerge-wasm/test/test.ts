@@ -188,7 +188,9 @@ describe('Automerge', () => {
       const hash2 = doc.commit()
 
       assert.deepEqual(doc.keys("_root"), ["bip"])
+      assert.ok(hash1)
       assert.deepEqual(doc.keys("_root", [hash1]), ["bip", "foo"])
+      assert.ok(hash2)
       assert.deepEqual(doc.keys("_root", [hash2]), ["bip"])
     })
 
@@ -280,9 +282,12 @@ describe('Automerge', () => {
       const hash2 = doc.commit();
       assert.strictEqual(doc.text(text), "hello big bad world")
       assert.strictEqual(doc.length(text), 19)
+      assert.ok(hash1)
       assert.strictEqual(doc.text(text, [hash1]), "hello world")
       assert.strictEqual(doc.length(text, [hash1]), 11)
+      assert.ok(hash2)
       assert.strictEqual(doc.text(text, [hash2]), "hello big bad world")
+      assert.ok(hash2)
       assert.strictEqual(doc.length(text, [hash2]), 19)
     })
 

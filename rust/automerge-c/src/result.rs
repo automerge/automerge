@@ -372,6 +372,15 @@ impl From<am::ChangeHash> for AMresult {
     }
 }
 
+impl From<Option<am::ChangeHash>> for AMresult {
+    fn from(c: Option<am::ChangeHash>) -> Self {
+        match c {
+            Some(c) => c.into(),
+            None => AMresult::Void,
+        }
+    }
+}
+
 impl From<am::Keys<'_, '_>> for AMresult {
     fn from(keys: am::Keys<'_, '_>) -> Self {
         AMresult::Strings(keys.collect())

@@ -301,7 +301,10 @@ export function change<T>(doc: Doc<T>, options: string | ChangeOptions<T> | Chan
     }
 }
 
-function progressDocument<T>(doc: Doc<T>, heads: Heads, callback?: PatchCallback<T>): Doc<T> {
+function progressDocument<T>(doc: Doc<T>, heads: Heads | null, callback?: PatchCallback<T>): Doc<T> {
+    if (heads == null) {
+        return doc
+    }
     let state = _state(doc)
     let nextState = {...state, heads: undefined};
     let nextDoc = state.handle.applyPatches(doc, nextState, callback)
@@ -358,7 +361,7 @@ function _change<T>(doc: Doc<T>, options: ChangeOptions<T>, callback: ChangeFn<T
  * depends on those merged changes so that you can sign the new change with all
  * of the merged changes as part of the new change.
  */
-export function emptyChange<T>(doc: Doc<T>, options: string | ChangeOptions<T>) {
+export function emptyChange<T>(doc: Doc<T>, options: string | ChangeOptions<T> | void) {
     if (options === undefined) {
         options = {}
     }
@@ -376,7 +379,7 @@ export function emptyChange<T>(doc: Doc<T>, options: string | ChangeOptions<T>) 
     }
 
     const heads = state.handle.getHeads()
-    state.handle.commit(options.message, options.time)
+    state.handle.emptyChange(options.message, options.time)
     return progressDocument(doc, heads)
 }
 
