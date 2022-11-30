@@ -19,16 +19,7 @@
         overlays = [rust-overlay.overlays.default];
         inherit system;
       };
-      lib = pkgs.lib;
       rust = pkgs.rust-bin.stable.latest.default;
-      cargoNix = pkgs.callPackage ./Cargo.nix {
-        inherit pkgs;
-        release = true;
-      };
-      debugCargoNix = pkgs.callPackage ./Cargo.nix {
-        inherit pkgs;
-        release = false;
-      };
     in {
       formatter = pkgs.alejandra;
 
