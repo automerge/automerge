@@ -1,7 +1,7 @@
-use automerge::transaction::Transactable;
+use automerge::transaction::{Transactable, CommitOptions};
 use automerge::{
     ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjType, ScalarValue,
-    VecOpObserver, ROOT,
+    VecOpObserver, ROOT
 };
 
 // set up logging for all the tests
@@ -1372,4 +1372,58 @@ fn simple_bad_saveload() {
 
     let bytes = doc.save();
     Automerge::load(&bytes).unwrap();
+}
+
+
+#[test]
+fn empty_transaction_no_commit() -> Result<(), AutomergeError> {
+    let mut doc = Automerge::new();
+
+    // Let's just confirm that _doing absolutely nothing_ generates no changes
+    let _commit_res = doc
+    .transact_with::<_, _, AutomergeError, _>(
+        |_| CommitOptions::default().with_message("Do Nothing".to_owned()),
+        |_tx| {
+            Ok(())
+        },
+    )
+    .unwrap()
+    .result;
+    //assert_eq!(doc.history.len, 0);
+
+    //println!("{:#?}", doc.dump());
+
+    // After that, we can add a small object
+    let card_id = doc
+    .transact_with::<_, _, AutomergeError, _>(
+        |_| CommitOptions::default().with_message("Do Nothing".to_owned()),
+        |tx| {
+            let my_card = tx.put_object(ROOT, "vcard", ObjType::Map).unwrap();
+            tx.put(my_card.clone(), "birthday", "september 22")?;
+            
+            Ok(my_card)
+        },
+    )
+    .unwrap()
+    .result;
+    let temp = doc.dump();
+
+    // And a repeated copy of the same thing should do approximately nothing.
+    let _commit_res = doc
+    .transact_with::<_, _, AutomergeError, _>(
+        |_| CommitOptions::default().with_message("Do Nothing".to_owned()),
+        |tx| {
+            tx.put(card_id, "birthday", "september 22")?;
+            
+            Ok(())
+        },
+    )
+    .unwrap()
+    .result;
+    //assert_eq!(doc.history.len, 1);
+
+    assert_eq!(temp, doc.dump());
+
+
+    Ok(())
 }
