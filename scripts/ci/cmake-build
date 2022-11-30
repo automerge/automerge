@@ -6,7 +6,7 @@ THIS_SCRIPT=$(dirname "$0");
 # "RelWithDebInfo" but custom ones can also be defined so we pass it verbatim.
 BUILD_TYPE=$1;
 LIB_TYPE=$2;
-if [ "${LIB_TYPE,,}" == "shared" ]; then
+if [ "$(echo "${LIB_TYPE}" | tr '[:upper:]' '[:lower:]')" == "shared" ]; then
     SHARED_TOGGLE="ON"
 else
     SHARED_TOGGLE="OFF"
