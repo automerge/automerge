@@ -4,7 +4,7 @@ use crate::Prop;
 use crate::Value;
 
 /// An observer of operations applied to the document.
-pub trait OpObserver: Default + Clone {
+pub trait OpObserver {
     /// A new value has been inserted into the given object.
     ///
     /// - `parents`: A parents iterator that can be used to collect path information
@@ -64,9 +64,7 @@ pub trait OpObserver: Default + Clone {
     /// Called by AutoCommit when creating a new transaction.  Observer branch
     /// will be merged on `commit()` or thrown away on `rollback()`
     ///
-    fn branch(&self) -> Self {
-        Self::default()
-    }
+    fn branch(&self) -> Self;
 
     /// Merge observed information from a transaction.
     ///
@@ -108,6 +106,8 @@ impl OpObserver for () {
     fn delete(&mut self, _parents: Parents<'_>, _objid: ExId, _prop: Prop) {}
 
     fn merge(&mut self, _other: &Self) {}
+
+    fn branch(&self) -> Self {}
 }
 
 /// Capture operations into a [`Vec`] and store them as patches.
@@ -182,6 +182,10 @@ impl OpObserver for VecOpObserver {
 
     fn merge(&mut self, other: &Self) {
         self.patches.extend_from_slice(other.patches.as_slice())
+    }
+
+    fn branch(&self) -> Self {
+        Self::default()
     }
 }
 

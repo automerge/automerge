@@ -31,7 +31,7 @@ impl<O: Observation> AutoCommitWithObs<O> {
     }
 }
 
-impl<O: OpObserver> Default for AutoCommitWithObs<Observed<O>> {
+impl<O: OpObserver + Default> Default for AutoCommitWithObs<Observed<O>> {
     fn default() -> Self {
         let op_observer = O::default();
         AutoCommitWithObs {
