@@ -127,7 +127,9 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
 
     fn ensure_transaction_open(&mut self) {
         if self.transaction.is_none() {
-            self.transaction = Some((self.observation.branch(), self.doc.transaction_inner()));
+            let args = self.doc.transaction_args();
+            let inner = TransactionInner::new(args);
+            self.transaction = Some((self.observation.branch(), inner))
         }
     }
 

@@ -5,7 +5,7 @@ use crate::{Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, ScalarValu
 use crate::{AutomergeError, Keys};
 use crate::{ListRange, ListRangeAt, MapRange, MapRangeAt};
 
-use super::{observation, CommitOptions, Transactable, TransactionInner};
+use super::{observation, CommitOptions, Transactable, TransactionArgs, TransactionInner};
 
 /// A transaction on a document.
 /// Transactions group operations into a single change so that no other operations can happen
@@ -23,10 +23,20 @@ use super::{observation, CommitOptions, Transactable, TransactionInner};
 pub struct Transaction<'a, Obs: observation::Observation> {
     // this is an option so that we can take it during commit and rollback to prevent it being
     // rolled back during drop.
-    pub(crate) inner: Option<TransactionInner>,
+    inner: Option<TransactionInner>,
     // As with `inner` this is an `Option` so we can `take` it during `commit`
-    pub(crate) observation: Option<Obs>,
-    pub(crate) doc: &'a mut Automerge,
+    observation: Option<Obs>,
+    doc: &'a mut Automerge,
+}
+
+impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
+    pub(crate) fn new(doc: &'a mut Automerge, args: TransactionArgs, obs: Obs) -> Self {
+        Self {
+            inner: Some(TransactionInner::new(args)),
+            doc,
+            observation: Some(obs),
+        }
+    }
 }
 
 impl<'a, Obs: OpObserver> Transaction<'a, observation::Observed<Obs>> {
