@@ -14,7 +14,7 @@ use crate::op_set::OpSet;
 use crate::parents::Parents;
 use crate::storage::{self, load, CompressConfig};
 use crate::transaction::{
-    self, CommitOptions, Failure, Observed, Success, Transaction, TransactionInner, UnObserved,
+    self, CommitOptions, Failure, Observed, Success, Transaction, TransactionArgs, UnObserved,
 };
 use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType,
@@ -114,25 +114,19 @@ impl Automerge {
 
     /// Start a transaction.
     pub fn transaction(&mut self) -> Transaction<'_, UnObserved> {
-        Transaction {
-            inner: Some(self.transaction_inner()),
-            doc: self,
-            observation: Some(UnObserved),
-        }
+        let args = self.transaction_args();
+        Transaction::new(self, args, UnObserved)
     }
 
     pub fn transaction_with_observer<Obs: OpObserver>(
         &mut self,
         op_observer: Obs,
     ) -> Transaction<'_, Observed<Obs>> {
-        Transaction {
-            inner: Some(self.transaction_inner()),
-            doc: self,
-            observation: Some(Observed::new(op_observer)),
-        }
+        let args = self.transaction_args();
+        Transaction::new(self, args, Observed::new(op_observer))
     }
 
-    pub(crate) fn transaction_inner(&mut self) -> TransactionInner {
+    pub(crate) fn transaction_args(&mut self) -> TransactionArgs {
         let actor = self.get_actor_index();
         let seq = self.states.get(&actor).map_or(0, |v| v.len()) as u64 + 1;
         let mut deps = self.get_heads();
@@ -142,15 +136,13 @@ impl Automerge {
                 deps.push(last_hash);
             }
         }
+        // SAFETY: this unwrap is safe as we always add 1
+        let start_op = NonZeroU64::new(self.max_op + 1).unwrap();
 
-        TransactionInner {
-            actor,
+        TransactionArgs {
+            actor_index: actor,
             seq,
-            // SAFETY: this unwrap is safe as we always add 1
-            start_op: NonZeroU64::new(self.max_op + 1).unwrap(),
-            time: 0,
-            message: None,
-            operations: vec![],
+            start_op,
             deps,
         }
     }

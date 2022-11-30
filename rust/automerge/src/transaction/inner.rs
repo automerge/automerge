@@ -10,16 +10,49 @@ use crate::{AutomergeError, ObjType, OpType, ScalarValue};
 
 #[derive(Debug, Clone)]
 pub(crate) struct TransactionInner {
-    pub(crate) actor: usize,
+    actor: usize,
+    seq: u64,
+    start_op: NonZeroU64,
+    time: i64,
+    message: Option<String>,
+    deps: Vec<ChangeHash>,
+    operations: Vec<(ObjId, Prop, Op)>,
+}
+
+/// Arguments required to create a new transaction
+pub(crate) struct TransactionArgs {
+    /// The index of the actor ID this transaction will create ops for in the
+    /// [`OpSetMetadata::actors`]
+    pub(crate) actor_index: usize,
+    /// The sequence number of the change this transaction will create
     pub(crate) seq: u64,
+    /// The start op of the change this transaction will create
     pub(crate) start_op: NonZeroU64,
-    pub(crate) time: i64,
-    pub(crate) message: Option<String>,
+    /// The dependencies of the change this transaction will create
     pub(crate) deps: Vec<ChangeHash>,
-    pub(crate) operations: Vec<(ObjId, Prop, Op)>,
 }
 
 impl TransactionInner {
+    pub(crate) fn new(
+        TransactionArgs {
+            actor_index: actor,
+            seq,
+            start_op,
+            deps,
+        }: TransactionArgs,
+    ) -> Self {
+        TransactionInner {
+            actor,
+            seq,
+            // SAFETY: this unwrap is safe as we always add 1
+            start_op,
+            time: 0,
+            message: None,
+            operations: vec![],
+            deps,
+        }
+    }
+
     pub(crate) fn pending_ops(&self) -> usize {
         self.operations.len()
     }

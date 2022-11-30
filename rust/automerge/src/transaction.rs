@@ -7,7 +7,7 @@ mod transactable;
 
 pub use self::commit::CommitOptions;
 pub use self::transactable::Transactable;
-pub(crate) use inner::TransactionInner;
+pub(crate) use inner::{TransactionArgs, TransactionInner};
 pub use manual_transaction::Transaction;
 pub use observation::{Observation, Observed, UnObserved};
 pub use result::Failure;
