@@ -37,7 +37,7 @@ static void test_start_and_commit(void** state) {
     /* const doc = create()                                                  */
     AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     /* doc.commit()                                                          */
-    AMpush(&stack, AMcommit(doc, AMstr(NULL), NULL), AM_VALUE_CHANGE_HASHES, cmocka_cb);
+    AMpush(&stack, AMemptyChange(doc, AMstr(NULL), NULL), AM_VALUE_CHANGE_HASHES, cmocka_cb);
 }
 
 /**

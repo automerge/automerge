@@ -39,6 +39,16 @@ impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
     }
 }
 
+impl<'a> Transaction<'a, observation::UnObserved> {
+    pub(crate) fn empty(
+        doc: &'a mut Automerge,
+        args: TransactionArgs,
+        opts: CommitOptions,
+    ) -> ChangeHash {
+        TransactionInner::empty(doc, args, opts.message, opts.time)
+    }
+}
+
 impl<'a, Obs: OpObserver> Transaction<'a, observation::Observed<Obs>> {
     pub fn observer(&mut self) -> &mut Obs {
         self.observation.as_mut().unwrap().observer()

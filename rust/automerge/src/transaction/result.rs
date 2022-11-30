@@ -5,8 +5,8 @@ use crate::ChangeHash;
 pub struct Success<O, Obs> {
     /// The result of the transaction.
     pub result: O,
-    /// The hash of the change, also the head of the document.
-    pub hash: ChangeHash,
+    /// The hash of the change, will be `None` if the transaction did not create any operations
+    pub hash: Option<ChangeHash>,
     pub op_observer: Obs,
 }
 

@@ -13,7 +13,7 @@ pub trait Observation: private::Sealed {
     type CommitResult;
 
     fn observer(&mut self) -> Option<&mut Self::Obs>;
-    fn make_result(self, hash: ChangeHash) -> Self::CommitResult;
+    fn make_result(self, hash: Option<ChangeHash>) -> Self::CommitResult;
     fn branch(&self) -> Self;
     fn merge(&mut self, other: &Self);
 }
@@ -33,12 +33,12 @@ impl<O: OpObserver> Observed<O> {
 
 impl<Obs: OpObserver> Observation for Observed<Obs> {
     type Obs = Obs;
-    type CommitResult = (Obs, ChangeHash);
+    type CommitResult = (Obs, Option<ChangeHash>);
     fn observer(&mut self) -> Option<&mut Self::Obs> {
         Some(&mut self.0)
     }
 
-    fn make_result(self, hash: ChangeHash) -> Self::CommitResult {
+    fn make_result(self, hash: Option<ChangeHash>) -> Self::CommitResult {
         (self.0, hash)
     }
 
@@ -61,12 +61,12 @@ impl UnObserved {
 
 impl Observation for UnObserved {
     type Obs = ();
-    type CommitResult = ChangeHash;
+    type CommitResult = Option<ChangeHash>;
     fn observer(&mut self) -> Option<&mut Self::Obs> {
         None
     }
 
-    fn make_result(self, hash: ChangeHash) -> Self::CommitResult {
+    fn make_result(self, hash: Option<ChangeHash>) -> Self::CommitResult {
         hash
     }
 

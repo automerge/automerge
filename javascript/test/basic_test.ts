@@ -246,6 +246,22 @@ describe('Automerge', () => {
         })
     })
 
+    describe('emptyChange', () => {
+        it('should generate a hash', () => {
+            let doc = Automerge.init()
+            doc = Automerge.change<any>(doc, d => {
+                d.key = "value"
+            })
+            let _ = Automerge.save(doc)
+            let headsBefore = Automerge.getHeads(doc)
+            headsBefore.sort()
+            doc = Automerge.emptyChange(doc, "empty change")
+            let headsAfter = Automerge.getHeads(doc)
+            headsAfter.sort()
+            assert.notDeepEqual(headsBefore, headsAfter)
+        })
+    })
+
     describe('proxy lists', () => {
         it('behave like arrays', () => {
           let doc = Automerge.from({

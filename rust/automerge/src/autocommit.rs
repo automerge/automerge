@@ -268,11 +268,16 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
         self.doc.get_heads()
     }
 
-    pub fn commit(&mut self) -> ChangeHash {
+    /// Commit any uncommitted changes
+    ///
+    /// Returns `None` if there were no operations to commit
+    pub fn commit(&mut self) -> Option<ChangeHash> {
         self.commit_with(CommitOptions::default())
     }
 
     /// Commit the current operations with some options.
+    ///
+    /// Returns `None` if there were no operations to commit
     ///
     /// ```
     /// # use automerge::transaction::CommitOptions;
@@ -287,7 +292,7 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
     /// i64;
     /// doc.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
     /// ```
-    pub fn commit_with(&mut self, options: CommitOptions) -> ChangeHash {
+    pub fn commit_with(&mut self, options: CommitOptions) -> Option<ChangeHash> {
         // ensure that even no changes triggers a change
         self.ensure_transaction_open();
         let (current, tx) = self.transaction.take().unwrap();
@@ -300,6 +305,21 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
             .take()
             .map(|(_, tx)| tx.rollback(&mut self.doc))
             .unwrap_or(0)
+    }
+
+    /// Generate an empty change
+    ///
+    /// The main reason to do this is if you wish to create a "merge commit" which has all the
+    /// current heads of the documents as dependencies but you have no new operations to create.
+    ///
+    /// Because this structure is an "autocommit" there may actually be outstanding operations to
+    /// submit. If this is the case this function will create two changes, one with the outstanding
+    /// operations and a new one with no operations. The returned `ChangeHash` will always be the
+    /// hash of the empty change.
+    pub fn empty_change(&mut self, options: CommitOptions) -> ChangeHash {
+        self.ensure_transaction_closed();
+        let args = self.doc.transaction_args();
+        TransactionInner::empty(&mut self.doc, args, options.message, options.time)
     }
 }
 

@@ -151,7 +151,8 @@ pub unsafe extern "C" fn AMcreate(actor_id: *const AMactorId) -> *mut AMresult {
 /// \param[in] message A UTF-8 string view as an `AMbyteSpan` struct.
 /// \param[in] timestamp A pointer to a 64-bit integer or `NULL`.
 /// \return A pointer to an `AMresult` struct containing an `AMchangeHashes`
-///         with one element.
+///         with one element if there were operations to commit, or void if
+///         there were no operations to commit.
 /// \pre \p doc `!= NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
@@ -174,6 +175,49 @@ pub unsafe extern "C" fn AMcommit(
         options.set_time(*timestamp);
     }
     to_result(doc.commit_with(options))
+}
+
+/// \memberof AMdoc
+/// \brief Creates an empty change with an optional message and/or *nix
+///        timestamp (milliseconds).
+///
+/// This is useful if you wish to create a "merge commit" which has as its
+/// dependents the current heads of the document but you don't have any
+/// operations to add to the document.
+///
+/// \note If there are outstanding uncommitted changes to the document
+/// then two changes will be created: one for creating the outstanding changes
+/// and one for the empty change. The empty change will always be the
+/// latest change in the document after this call and the returned hash will be
+/// the hash of that empty change.
+///
+/// \param[in,out] doc A pointer to an `AMdoc` struct.
+/// \param[in] message A UTF-8 string view as an `AMbyteSpan` struct.
+/// \param[in] timestamp A pointer to a 64-bit integer or `NULL`.
+/// \return A pointer to an `AMresult` struct containing an `AMchangeHashes`
+///         with one element.
+/// \pre \p doc `!= NULL`.
+/// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
+///          in order to prevent a memory leak.
+/// \internal
+///
+/// # Safety
+/// doc must be a valid pointer to an AMdoc
+#[no_mangle]
+pub unsafe extern "C" fn AMemptyChange(
+    doc: *mut AMdoc,
+    message: AMbyteSpan,
+    timestamp: *const i64,
+) -> *mut AMresult {
+    let doc = to_doc_mut!(doc);
+    let mut options = CommitOptions::default();
+    if !message.is_null() {
+        options.set_message(to_str!(message));
+    }
+    if let Some(timestamp) = timestamp.as_ref() {
+        options.set_time(*timestamp);
+    }
+    to_result(doc.empty_change(options))
 }
 
 /// \memberof AMdoc
