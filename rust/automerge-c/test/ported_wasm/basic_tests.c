@@ -709,17 +709,10 @@ static void test_should_be_able_to_splice_text(void** state) {
         cmocka_cb).obj_id;
     /* doc.splice(text, 0, 0, "hello ")                                      */
     AMfree(AMspliceText(doc, text, 0, 0, AMstr("hello ")));
-    /* doc.splice(text, 6, 0, ["w", "o", "r", "l", "d"])                     */
-    static AMvalue const WORLD[] = {{.str_tag = AM_VALUE_STR, .str = {.src = "w", .count = 1}},
-                                    {.str_tag = AM_VALUE_STR, .str = {.src = "o", .count = 1}},
-                                    {.str_tag = AM_VALUE_STR, .str = {.src = "r", .count = 1}},
-                                    {.str_tag = AM_VALUE_STR, .str = {.src = "l", .count = 1}},
-                                    {.str_tag = AM_VALUE_STR, .str = {.src = "d", .count = 1}}};
-    AMfree(AMsplice(doc, text, 6, 0, WORLD, sizeof(WORLD)/sizeof(AMvalue)));
-    /* doc.splice(text, 11, 0, ["!", "?"])                                   */
-    static AMvalue const INTERROBANG[] = {{.str_tag = AM_VALUE_STR, .str = {.src = "!", .count = 1}},
-                                          {.str_tag = AM_VALUE_STR, .str = {.src = "?", .count = 1}}};
-    AMfree(AMsplice(doc, text, 11, 0, INTERROBANG, sizeof(INTERROBANG)/sizeof(AMvalue)));
+    /* doc.splice(text, 6, 0, "world")                                       */
+    AMfree(AMspliceText(doc, text, 6, 0, AMstr("world")));
+    /* doc.splice(text, 11, 0, "!?")                                         */
+    AMfree(AMspliceText(doc, text, 11, 0, AMstr("!?")));
     /* assert.deepEqual(doc.getWithType(text, 0), ["str", "h"])              */
     AMbyteSpan str = AMpush(&stack,
                             AMlistGet(doc, text, 0, NULL),
@@ -765,9 +758,9 @@ static void test_should_be_able_to_splice_text(void** state) {
 }
 
 /**
- * \brief should be able to insert objects into text
+ * \brief should NOT be able to insert objects into text
  */
-static void test_should_be_able_to_insert_objects_into_text(void** state) {
+static void test_should_be_unable_to_insert_objects_into_text(void** state) {
     AMresultStack* stack = *state;
     /* const doc = create()                                                  */
     AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
@@ -778,32 +771,14 @@ static void test_should_be_able_to_insert_objects_into_text(void** state) {
         AM_VALUE_OBJ_ID,
         cmocka_cb).obj_id;
     AMfree(AMspliceText(doc, text, 0, 0, AMstr("Hello world")));
-    /* const obj = doc.insertObject(text, 6, { hello: "world" });            */
-    AMobjId const* const obj = AMpush(
-        &stack,
-        AMlistPutObject(doc, text, 6, true, AM_OBJ_TYPE_MAP),
-        AM_VALUE_OBJ_ID,
-        cmocka_cb).obj_id;
-    AMfree(AMmapPutStr(doc, obj, AMstr("hello"), AMstr("world")));
-    /* assert.deepEqual(doc.text(text), "Hello \ufffcworld");                */
-    AMbyteSpan str = AMpush(&stack,
-                            AMtext(doc, text, NULL),
-                            AM_VALUE_STR,
-                            cmocka_cb).str;
-    assert_int_equal(str.count, strlen(u8"Hello \ufffcworld"));
-    assert_memory_equal(str.src, u8"Hello \ufffcworld", str.count);
-    /* assert.deepEqual(doc.getWithType(text, 6), ["map", obj]);             */
-    assert_true(AMobjIdEqual(AMpush(&stack,
-                                    AMlistGet(doc, text, 6, NULL),
-                                    AM_VALUE_OBJ_ID,
-                                    cmocka_cb).obj_id, obj));
-    /* assert.deepEqual(doc.getWithType(obj, "hello"), ["str", "world"]);    */
-    str = AMpush(&stack,
-                 AMmapGet(doc, obj, AMstr("hello"), NULL),
-                 AM_VALUE_STR,
-                 cmocka_cb).str;
-    assert_int_equal(str.count, strlen("world"));
-    assert_memory_equal(str.src, "world", str.count);
+    /* assert.throws(() => {
+       doc.insertObject(text, 6, { hello: "world" });
+    })                                                                       */
+    AMpush(&stack,
+           AMlistPutObject(doc, text, 6, true, AM_OBJ_TYPE_MAP),
+           AM_VALUE_VOID,
+           NULL);
+    assert_int_not_equal(AMresultStatus(stack->result), AM_STATUS_OK);
 }
 
 /**
@@ -1873,7 +1848,7 @@ int run_ported_wasm_basic_tests(void) {
         cmocka_unit_test_setup_teardown(test_should_be_able_to_del, setup_stack, teardown_stack),
         cmocka_unit_test_setup_teardown(test_should_be_able_to_use_counters, setup_stack, teardown_stack),
         cmocka_unit_test_setup_teardown(test_should_be_able_to_splice_text, setup_stack, teardown_stack),
-        cmocka_unit_test_setup_teardown(test_should_be_able_to_insert_objects_into_text, setup_stack, teardown_stack),
+        cmocka_unit_test_setup_teardown(test_should_be_unable_to_insert_objects_into_text, setup_stack, teardown_stack),
         cmocka_unit_test_setup_teardown(test_should_be_able_to_save_all_or_incrementally, setup_stack, teardown_stack),
         cmocka_unit_test_setup_teardown(test_should_be_able_to_splice_text_2, setup_stack, teardown_stack),
         cmocka_unit_test_setup_teardown(test_local_inc_increments_all_visible_counters_in_a_map, setup_stack, teardown_stack),
