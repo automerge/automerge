@@ -510,7 +510,7 @@ impl Automerge {
             if !patches.is_empty() {
                 let patches: Array = patches
                     .into_iter()
-                    .map(|p| JsValue::try_from(p))
+                    .map(JsValue::try_from)
                     .collect::<Result<_, _>>()?;
                 c.call3(&JsValue::undefined(), &patches.into(), &before, &object)?;
             }
