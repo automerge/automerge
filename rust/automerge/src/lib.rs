@@ -107,7 +107,7 @@ pub use op_observer::Patch;
 pub use op_observer::VecOpObserver;
 pub use parents::Parents;
 pub use sequence_tree::SequenceTree;
-pub use types::{ActorId, ChangeHash, ObjType, OpType, Prop};
+pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop};
 pub use value::{ScalarValue, Value};
 pub use values::Values;
 

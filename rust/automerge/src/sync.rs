@@ -10,7 +10,7 @@ use crate::{
 mod bloom;
 mod state;
 
-pub use bloom::BloomFilter;
+pub use bloom::{BloomFilter, DecodeError as DecodeBloomError};
 pub use state::DecodeError as DecodeStateError;
 pub use state::{Have, State};
 

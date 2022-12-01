@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::interop::{alloc, js_set};
+use crate::interop::{self, alloc, js_set};
 use automerge::{ObjId, OpObserver, Parents, Prop, SequenceTree, Value};
 use js_sys::{Array, Object};
 use wasm_bindgen::prelude::*;
@@ -237,7 +237,7 @@ impl Patch {
 }
 
 impl TryFrom<Patch> for JsValue {
-    type Error = JsValue;
+    type Error = interop::error::Export;
 
     fn try_from(p: Patch) -> Result<Self, Self::Error> {
         let result = Object::new();

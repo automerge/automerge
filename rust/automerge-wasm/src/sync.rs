@@ -5,7 +5,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::convert::TryInto;
 use wasm_bindgen::prelude::*;
 
-use crate::interop::{to_js_err, AR, JS};
+use crate::interop::{self, to_js_err, AR, JS};
 
 #[wasm_bindgen]
 #[derive(Debug)]
@@ -24,7 +24,10 @@ impl SyncState {
     }
 
     #[wasm_bindgen(setter, js_name = lastSentHeads)]
-    pub fn set_last_sent_heads(&mut self, heads: JsValue) -> Result<(), JsValue> {
+    pub fn set_last_sent_heads(
+        &mut self,
+        heads: JsValue,
+    ) -> Result<(), interop::error::BadChangeHashes> {
         let heads: Vec<ChangeHash> = JS(heads).try_into()?;
         self.0.last_sent_heads = heads;
         Ok(())
@@ -44,10 +47,19 @@ impl SyncState {
         SyncState(self.0.clone())
     }
 
-    pub(crate) fn decode(data: Uint8Array) -> Result<SyncState, JsValue> {
+    pub(crate) fn decode(data: Uint8Array) -> Result<SyncState, DecodeSyncStateErr> {
         let data = data.to_vec();
-        let s = am::sync::State::decode(&data);
-        let s = s.map_err(to_js_err)?;
+        let s = am::sync::State::decode(&data)?;
         Ok(SyncState(s))
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+pub struct DecodeSyncStateErr(#[from] automerge::sync::DecodeStateError);
+
+impl From<DecodeSyncStateErr> for JsValue {
+    fn from(e: DecodeSyncStateErr) -> Self {
+        JsValue::from(e.to_string())
     }
 }
