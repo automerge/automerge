@@ -11,6 +11,7 @@ pub(crate) struct SeekOpWithPatch<'a> {
     pub(crate) succ: Vec<usize>,
     found: bool,
     pub(crate) seen: usize,
+    pub(crate) seen16: usize,
     last_seen: Option<Key>,
     pub(crate) values: Vec<&'a Op>,
     pub(crate) had_value_before: bool,
@@ -26,6 +27,7 @@ impl<'a> SeekOpWithPatch<'a> {
             pos: 0,
             found: false,
             seen: 0,
+            seen16: 0,
             last_seen: None,
             values: vec![],
             had_value_before: false,
@@ -58,6 +60,7 @@ impl<'a> SeekOpWithPatch<'a> {
         }
         if e.visible() && self.last_seen.is_none() {
             self.seen += 1;
+            self.seen16 += e.utf16_len();
             self.last_seen = Some(e.elemid_or_key())
         }
     }
@@ -113,6 +116,7 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                             }
                         }
                         self.seen += num_vis;
+                        self.seen += child.index.visible16;
 
                         // FIXME: this is also wrong: `last_seen` needs to be the elemId of the
                         // last *visible* list element in this subtree, but I think this returns

@@ -20,7 +20,7 @@ pub trait OpObserver: Default + Clone {
         tagged_value: (Value<'_>, ExId),
     );
 
-    fn splice_text(&mut self, doc: &Automerge, objid: ExId, index: usize, value: &str);
+    fn splice_text(&mut self, doc: &Automerge, objid: ExId, index: usize, index_utf16: usize, value: &str);
 
     /// A new value has been put into the given object.
     ///
@@ -108,7 +108,7 @@ impl OpObserver for () {
     ) {
     }
 
-    fn splice_text(&mut self, _doc: &Automerge, _objid: ExId, _index: usize, _value: &str) {}
+    fn splice_text(&mut self, _doc: &Automerge, _objid: ExId, _index: usize, _index_utf16: usize, _value: &str) {}
 
     fn put(
         &mut self,
@@ -172,7 +172,7 @@ impl OpObserver for VecOpObserver {
         }
     }
 
-    fn splice_text(&mut self, doc: &Automerge, obj: ExId, index: usize, value: &str) {
+    fn splice_text(&mut self, doc: &Automerge, obj: ExId, index: usize, _index_utf16: usize, value: &str) {
         if let Ok(mut p) = doc.parents(&obj) {
             self.patches.push(Patch::Splice {
                 obj,

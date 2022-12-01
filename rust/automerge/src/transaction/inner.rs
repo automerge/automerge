@@ -99,7 +99,7 @@ impl TransactionInner {
         for (obj, _prop, op) in self.operations.into_iter().rev() {
             for pred_id in &op.pred {
                 if let Some(p) = doc.ops.search(&obj, OpIdSearch::new(*pred_id)).index() {
-                    doc.ops.replace(&obj, p, |o| o.remove_succ(&op));
+                    doc.ops.change_vis(&obj, p, |o| o.remove_succ(&op));
                 }
             }
             if let Some(pos) = doc.ops.search(&obj, OpIdSearch::new(op.id)).index() {
@@ -462,6 +462,45 @@ impl TransactionInner {
         self.inner_splice(doc, op_observer, obj, pos, del, vals)
     }
 
+    /// Splice string into a text object
+    pub(crate) fn splice_text_utf16<Obs: OpObserver>(
+        &mut self,
+        doc: &mut Automerge,
+        mut op_observer: Option<&mut Obs>,
+        ex_obj: &ExId,
+        mut pos: usize,
+        del: usize,
+        text: &str,
+    ) -> Result<(), AutomergeError> {
+        let obj = doc.exid_to_obj(ex_obj)?;
+        let obj_type = doc
+            .ops
+            .object_type(&obj)
+            .ok_or(AutomergeError::NotAnObject)?;
+        if obj_type != ObjType::Text {
+            return Err(AutomergeError::InvalidOp(obj_type));
+        }
+        let vals = text.chars().map(ScalarValue::from);
+        for _ in 0..del {
+            // This unwrap and rewrap of the option is necessary to appeas the borrow checker :(
+            if let Some(obs) = op_observer.as_mut() {
+                self.local_op(doc, Some(*obs), obj, pos.into(), OpType::Delete)?;
+            } else {
+                self.local_op::<Obs>(doc, None, obj, pos.into(), OpType::Delete)?;
+            }
+        }
+        for v in vals {
+            // As above this unwrap and rewrap of the option is necessary to appeas the borrow checker :(
+            if let Some(obs) = op_observer.as_mut() {
+                self.do_insert(doc, Some(*obs), obj, pos, v.clone().into())?;
+            } else {
+                self.do_insert::<Obs>(doc, None, obj, pos, v.clone().into())?;
+            }
+            pos += 1;
+        }
+        Ok(())
+    }
+
     pub(crate) fn inner_splice<Obs: OpObserver>(
         &mut self,
         doc: &mut Automerge,
@@ -510,7 +549,8 @@ impl TransactionInner {
                         op_observer.insert(doc, ex_obj, index, value)
                     }
                     (Some(ObjType::Text), Prop::Seq(index)) => {
-                        op_observer.splice_text(doc, ex_obj, index, op.to_str())
+                        // FIXME
+                        op_observer.splice_text(doc, ex_obj, index, 0, op.to_str())
                     }
                     // this should be a warning - not a panic
                     _ => panic!("insert into a map"),

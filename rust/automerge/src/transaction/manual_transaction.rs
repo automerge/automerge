@@ -181,6 +181,16 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         self.do_tx(|tx, doc, obs| tx.splice_text(doc, obs, obj.as_ref(), pos, del, text))
     }
 
+    fn splice_text_utf16<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        pos: usize,
+        del: usize,
+        text: &str,
+    ) -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, obs| tx.splice_text_utf16(doc, obs, obj.as_ref(), pos, del, text))
+    }
+
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_, '_> {
         self.doc.keys(obj)
     }

@@ -49,12 +49,11 @@ pub(crate) use seek_op_with_patch::SeekOpWithPatch;
 
 // use a struct for the args for clarity as they are passed up the update chain in the optree
 #[derive(Debug, Clone)]
-pub(crate) struct ReplaceArgs {
-    pub(crate) old_id: OpId,
-    pub(crate) new_id: OpId,
-    pub(crate) old_visible: bool,
-    pub(crate) new_visible: bool,
-    pub(crate) new_key: Key,
+pub(crate) struct ChangeVisibility {
+    pub(crate) old_vis: bool,
+    pub(crate) new_vis: bool,
+    pub(crate) key: Key,
+    pub(crate) utf16_len: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -102,6 +101,7 @@ pub(crate) enum QueryResult {
 pub(crate) struct Index {
     /// The map of visible keys to the number of visible operations for that key.
     pub(crate) visible: HashMap<Key, usize, FxBuildHasher>,
+    pub(crate) visible16: usize,
     /// Set of opids found in this node and below.
     pub(crate) ops: HashSet<OpId, FxBuildHasher>,
 }
@@ -110,6 +110,7 @@ impl Index {
     pub(crate) fn new() -> Self {
         Index {
             visible: Default::default(),
+            visible16: 0,
             ops: Default::default(),
         }
     }
@@ -123,40 +124,47 @@ impl Index {
         self.visible.contains_key(seen)
     }
 
-    pub(crate) fn replace(
-        &mut self,
-        ReplaceArgs {
-            old_id,
-            new_id,
-            old_visible,
-            new_visible,
-            new_key,
-        }: &ReplaceArgs,
-    ) {
-        if old_id != new_id {
-            self.ops.remove(old_id);
-            self.ops.insert(*new_id);
-        }
-
-        match (new_visible, old_visible, new_key) {
-            (false, true, key) => match self.visible.get(key).copied() {
+    pub(crate) fn change_vis(&mut self, change_vis: ChangeVisibility) -> ChangeVisibility {
+        let ChangeVisibility {
+            old_vis,
+            new_vis,
+            key,
+            utf16_len,
+        } = &change_vis;
+        match (old_vis, new_vis) {
+            (true, false) => match self.visible.get(key).copied() {
                 Some(n) if n == 1 => {
                     self.visible.remove(key);
+                    self.visible16 -= *utf16_len;
                 }
                 Some(n) => {
                     self.visible.insert(*key, n - 1);
                 }
                 None => panic!("remove overun in index"),
             },
-            (true, false, key) => *self.visible.entry(*key).or_default() += 1,
+            (false, true) => {
+                if let Some(n) = self.visible.get(key) {
+                  self.visible.insert(*key, n + 1);
+                } else {
+                  self.visible.insert(*key, 1);
+                  self.visible16 += *utf16_len;
+                }
+            }
             _ => {}
         }
+        change_vis
     }
 
     pub(crate) fn insert(&mut self, op: &Op) {
         self.ops.insert(op.id);
         if op.visible() {
-            *self.visible.entry(op.elemid_or_key()).or_default() += 1;
+            let key = op.elemid_or_key();
+            if let Some(n) = self.visible.get(&key) {
+              self.visible.insert(key, n + 1);
+            } else {
+              self.visible.insert(key, 1);
+              self.visible16 += op.utf16_len();
+            }
         }
     }
 
@@ -167,6 +175,7 @@ impl Index {
             match self.visible.get(&key).copied() {
                 Some(n) if n == 1 => {
                     self.visible.remove(&key);
+                    self.visible16 -= op.utf16_len();
                 }
                 Some(n) => {
                     self.visible.insert(key, n - 1);
@@ -180,9 +189,12 @@ impl Index {
         for id in &other.ops {
             self.ops.insert(*id);
         }
-        for (elem, n) in other.visible.iter() {
-            *self.visible.entry(*elem).or_default() += n;
+        for (elem, other_len) in other.visible.iter() {
+            self.visible.entry(*elem)
+                .and_modify(|len| *len += *other_len)
+                .or_insert(*other_len);
         }
+        self.visible16 += other.visible16;
     }
 }
 

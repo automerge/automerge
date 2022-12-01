@@ -1263,6 +1263,7 @@ impl Automerge {
             pos,
             succ,
             seen,
+            seen16,
             values,
             had_value_before,
             ..
@@ -1277,7 +1278,7 @@ impl Automerge {
 
         if op.insert {
             if obj_type == Some(ObjType::Text) {
-                observer.splice_text(self, ex_obj, seen, op.to_str());
+                observer.splice_text(self, ex_obj, seen, seen16, op.to_str());
             } else {
                 let value = (op.value(), self.ops.id_to_exid(op.id));
                 observer.insert(self, ex_obj, seen, value);

@@ -93,6 +93,15 @@ pub trait Transactable {
         text: &str,
     ) -> Result<(), AutomergeError>;
 
+    /// Like [`Self::splice`] but for text.
+    fn splice_text_utf16<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        pos: usize,
+        del: usize,
+        text: &str,
+    ) -> Result<(), AutomergeError>;
+
     /// Get the keys of the given object, it should be a map.
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_, '_>;
 

@@ -491,6 +491,14 @@ impl Op {
         }
     }
 
+    pub(crate) fn utf16_len(&self) -> usize {
+        if let OpType::Put(ScalarValue::Str(s)) = &self.action {
+            s.encode_utf16().count()
+        } else {
+            1 // "\u{fffc}".to_owned().encode_utf16().count()
+        }
+    }
+
     pub(crate) fn to_str(&self) -> &str {
         if let OpType::Put(ScalarValue::Str(s)) = &self.action {
             s

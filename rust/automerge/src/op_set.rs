@@ -171,7 +171,7 @@ impl OpSetInternal {
         }
     }
 
-    pub(crate) fn replace<F>(&mut self, obj: &ObjId, index: usize, f: F)
+    pub(crate) fn change_vis<F>(&mut self, obj: &ObjId, index: usize, f: F)
     where
         F: Fn(&mut Op),
     {
