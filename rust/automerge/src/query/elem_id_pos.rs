@@ -38,7 +38,7 @@ impl<'a> TreeQuery<'a> for ElemIdPos {
             QueryResult::Descend
         } else {
             // not in this node, try the next one
-            self.pos += child.index.visible_len();
+            self.pos += child.index.visible_len(false);
             QueryResult::Next
         }
     }

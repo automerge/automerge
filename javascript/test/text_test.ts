@@ -292,7 +292,6 @@ describe('Automerge.Text', () => {
     s1 = Automerge.from({
       text: '🐦'
     })
-    // TODO utf16 indexing
     assert.strictEqual(s1.text, '🐦')
   })
 })

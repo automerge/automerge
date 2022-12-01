@@ -4,7 +4,7 @@ use crate::automerge::Actor;
 use crate::exid::ExId;
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
-use crate::types::{Key, ObjId, OpId};
+use crate::types::{Key, ObjId, OpId, OpIds};
 use crate::{op_tree::OpSetMetadata, types::Op, Automerge, Change, ChangeHash, OpObserver, Prop};
 use crate::{AutomergeError, ObjType, OpType, ScalarValue};
 
@@ -16,7 +16,7 @@ pub(crate) struct TransactionInner {
     time: i64,
     message: Option<String>,
     deps: Vec<ChangeHash>,
-    operations: Vec<(ObjId, Prop, Op)>,
+    operations: Vec<(ObjId, Op)>,
 }
 
 /// Arguments required to create a new transaction
@@ -117,8 +117,6 @@ impl TransactionInner {
         use crate::storage::{change::PredOutOfOrder, convert::op_as_actor_id};
 
         let actor = metadata.actors.get(self.actor).clone();
-        let ops = self.operations.iter().map(|o| (&o.0, &o.2));
-        //let (ops, other_actors) = encode_change_ops(ops, actor.clone(), actors, props);
         let deps = self.deps.clone();
         let stored = match StoredChange::builder()
             .with_actor(actor)
@@ -128,7 +126,8 @@ impl TransactionInner {
             .with_dependencies(deps)
             .with_timestamp(self.time)
             .build(
-                ops.into_iter()
+                self.operations
+                    .iter()
                     .map(|(obj, op)| op_as_actor_id(obj, op, metadata)),
             ) {
             Ok(s) => s,
@@ -152,10 +151,10 @@ impl TransactionInner {
     pub(crate) fn rollback(self, doc: &mut Automerge) -> usize {
         let num = self.pending_ops();
         // remove in reverse order so sets are removed before makes etc...
-        for (obj, _prop, op) in self.operations.into_iter().rev() {
+        for (obj, op) in self.operations.into_iter().rev() {
             for pred_id in &op.pred {
                 if let Some(p) = doc.ops.search(&obj, OpIdSearch::new(*pred_id)).index() {
-                    doc.ops.replace(&obj, p, |o| o.remove_succ(&op));
+                    doc.ops.change_vis(&obj, p, |o| o.remove_succ(&op));
                 }
             }
             if let Some(pos) = doc.ops.search(&obj, OpIdSearch::new(op.id)).index() {
@@ -252,6 +251,28 @@ impl TransactionInner {
         OpId(self.start_op.get() + self.pending_ops() as u64, self.actor)
     }
 
+    fn next_insert(&mut self, key: Key, value: ScalarValue) -> Op {
+        Op {
+            id: self.next_id(),
+            action: OpType::Put(value),
+            key,
+            succ: Default::default(),
+            pred: Default::default(),
+            insert: true,
+        }
+    }
+
+    fn next_delete(&mut self, key: Key, pred: OpIds) -> Op {
+        Op {
+            id: self.next_id(),
+            action: OpType::Delete,
+            key,
+            succ: Default::default(),
+            pred,
+            insert: false,
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn insert_local_op<Obs: OpObserver>(
         &mut self,
@@ -263,7 +284,7 @@ impl TransactionInner {
         obj: ObjId,
         succ_pos: &[usize],
     ) {
-        doc.ops.add_succ(&obj, succ_pos.iter().copied(), &op);
+        doc.ops.add_succ(&obj, succ_pos, &op);
 
         if !op.is_delete() {
             doc.ops.insert(pos, &obj, op.clone());
@@ -325,7 +346,7 @@ impl TransactionInner {
     ) -> Result<OpId, AutomergeError> {
         let id = self.next_id();
 
-        let query = doc.ops.search(&obj, query::InsertNth::new(index));
+        let query = doc.ops.search(&obj, query::InsertNth::new(index, false));
 
         let key = query.key()?;
 
@@ -416,7 +437,7 @@ impl TransactionInner {
         index: usize,
         action: OpType,
     ) -> Result<Option<OpId>, AutomergeError> {
-        let query = doc.ops.search(&obj, query::Nth::new(index));
+        let query = doc.ops.search(&obj, query::Nth::new(index, false));
 
         let id = self.next_id();
         let pred = doc.ops.m.sorted_opids(query.ops.iter().map(|o| o.id));
@@ -470,7 +491,24 @@ impl TransactionInner {
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(ex_obj)?;
         let prop = prop.into();
-        self.local_op(doc, op_observer, obj, prop, OpType::Delete)?;
+        let obj_type = doc
+            .ops
+            .object_type(&obj)
+            .ok_or(AutomergeError::NotAnObject)?;
+        if obj_type == ObjType::Text {
+            let pos = prop.to_index().ok_or(AutomergeError::InvalidOp(obj_type))?;
+            self.inner_splice(
+                doc,
+                op_observer,
+                obj,
+                pos,
+                1,
+                vec![],
+                SpliceType::Text("", doc.utf16),
+            )?;
+        } else {
+            self.local_op(doc, op_observer, obj, prop, OpType::Delete)?;
+        }
         Ok(())
     }
 
@@ -493,7 +531,8 @@ impl TransactionInner {
         if obj_type != ObjType::List {
             return Err(AutomergeError::InvalidOp(obj_type));
         }
-        self.inner_splice(doc, op_observer, obj, pos, del, vals)
+        let vals = vals.into_iter().collect();
+        self.inner_splice(doc, op_observer, obj, pos, del, vals, SpliceType::List)
     }
 
     /// Splice string into a text object
@@ -514,36 +553,134 @@ impl TransactionInner {
         if obj_type != ObjType::Text {
             return Err(AutomergeError::InvalidOp(obj_type));
         }
-        let vals = text.chars().map(ScalarValue::from);
-        self.inner_splice(doc, op_observer, obj, pos, del, vals)
+        let vals = text.chars().map(ScalarValue::from).collect();
+        self.inner_splice(
+            doc,
+            op_observer,
+            obj,
+            pos,
+            del,
+            vals,
+            SpliceType::Text(text, doc.utf16),
+        )
     }
 
-    pub(crate) fn inner_splice<Obs: OpObserver>(
+    #[allow(clippy::too_many_arguments)]
+    fn inner_splice<Obs: OpObserver>(
         &mut self,
         doc: &mut Automerge,
         mut op_observer: Option<&mut Obs>,
         obj: ObjId,
-        mut pos: usize,
-        del: usize,
-        vals: impl IntoIterator<Item = ScalarValue>,
+        mut index: usize,
+        mut del: usize,
+        vals: Vec<ScalarValue>,
+        splice_type: SpliceType<'_>,
     ) -> Result<(), AutomergeError> {
-        for _ in 0..del {
-            // This unwrap and rewrap of the option is necessary to appeas the borrow checker :(
-            if let Some(obs) = op_observer.as_mut() {
-                self.local_op(doc, Some(*obs), obj, pos.into(), OpType::Delete)?;
+        let ex_obj = doc.ops.id_to_exid(obj.0);
+        let utf16 = splice_type.is_utf16();
+        let mut index8 = index;
+        let mut index16 = index;
+        let mut del16 = 0;
+
+        // delete `del` items - performing the query for each one
+        let mut i = 0;
+        while i < del {
+            // TODO: could do this with a single custom query
+            let query = doc.ops.search(&obj, query::Nth::new(index, utf16));
+
+            // adjust index if we happen to be on a half character
+            index = query.index();
+
+            if i == 0 {
+                // set here incase no inserts
+                index8 = query.index_utf8();
+                index16 = query.index_utf16();
+            }
+
+            let step = if let Some(op) = query.ops.last() {
+                op.width(utf16)
             } else {
-                self.local_op::<Obs>(doc, None, obj, pos.into(), OpType::Delete)?;
+                // truncate the delete if past the end
+                del = i;
+                break;
+            };
+
+            let op = self.next_delete(query.key()?, query.pred(&doc.ops));
+
+            doc.ops.add_succ(&obj, &query.ops_pos, &op);
+
+            self.operations.push((obj, op));
+
+            del16 += step;
+
+            i += step;
+        }
+
+        if del > 0 {
+            if let Some(obs) = op_observer.as_mut() {
+                if utf16 {
+                    obs.delete_utf16(doc, ex_obj.clone(), (index8, index16), (del, del16));
+                } else {
+                    // TODO: obs.delete() should take a length
+                    for _ in 0..del {
+                        obs.delete(doc, ex_obj.clone(), Prop::Seq(index));
+                    }
+                }
             }
         }
-        for v in vals {
-            // As above this unwrap and rewrap of the option is necessary to appeas the borrow checker :(
-            if let Some(obs) = op_observer.as_mut() {
-                self.do_insert(doc, Some(*obs), obj, pos, v.clone().into())?;
-            } else {
-                self.do_insert::<Obs>(doc, None, obj, pos, v.clone().into())?;
+
+        // do the insert query for the first item and then
+        // insert the remaining ops one after the other
+        if !vals.is_empty() {
+            let query = doc.ops.search(&obj, query::InsertNth::new(index, utf16));
+            let mut pos = query.pos();
+            let mut key = query.key()?;
+
+            // set here incase no deletes
+            index8 = query.index_utf8();
+            index16 = query.index_utf16();
+            let len8 = vals.len();
+
+            for v in &vals {
+                let op = self.next_insert(key, v.clone());
+
+                doc.ops.insert(pos, &obj, op.clone());
+
+                pos += 1;
+                key = op.id.into();
+
+                self.operations.push((obj, op));
             }
-            pos += 1;
+
+            // handle the observer
+            if let Some(obs) = op_observer.as_mut() {
+                match splice_type {
+                    SpliceType::List => {
+                        let start = self.operations.len() - len8;
+                        for (offset, v) in vals.iter().enumerate() {
+                            let op = &self.operations[start + offset].1;
+                            let value = (v.clone().into(), doc.ops.id_to_exid(op.id));
+                            obs.insert(doc, ex_obj.clone(), index + offset, value)
+                        }
+                    }
+                    SpliceType::Text(text, utf16) => {
+                        if utf16 {
+                            let len16 = text.encode_utf16().count();
+                            obs.splice_text_utf16(
+                                doc,
+                                ex_obj,
+                                (index8, index16),
+                                (len8, len16),
+                                text,
+                            )
+                        } else {
+                            obs.splice_text(doc, ex_obj, index8, text)
+                        }
+                    }
+                }
+            }
         }
+
         Ok(())
     }
 
@@ -560,32 +697,39 @@ impl TransactionInner {
             let ex_obj = doc.ops.id_to_exid(obj.0);
             if op.insert {
                 let obj_type = doc.ops.object_type(&obj);
-                match (obj_type, prop.clone()) {
+                match (obj_type, prop) {
                     (Some(ObjType::List), Prop::Seq(index)) => {
                         let value = (op.value(), doc.ops.id_to_exid(op.id));
                         op_observer.insert(doc, ex_obj, index, value)
                     }
                     (Some(ObjType::Text), Prop::Seq(index)) => {
+                        // FIXME
                         op_observer.splice_text(doc, ex_obj, index, op.to_str())
                     }
                     // this should be a warning - not a panic
                     _ => panic!("insert into a map"),
                 }
             } else if op.is_delete() {
-                op_observer.delete(doc, ex_obj, prop.clone());
+                op_observer.delete(doc, ex_obj, prop);
             } else if let Some(value) = op.get_increment_value() {
-                op_observer.increment(
-                    doc,
-                    ex_obj,
-                    prop.clone(),
-                    (value, doc.ops.id_to_exid(op.id)),
-                );
+                op_observer.increment(doc, ex_obj, prop, (value, doc.ops.id_to_exid(op.id)));
             } else {
                 let value = (op.value(), doc.ops.id_to_exid(op.id));
-                op_observer.put(doc, ex_obj, prop.clone(), value, false);
+                op_observer.put(doc, ex_obj, prop, value, false);
             }
         }
-        self.operations.push((obj, prop, op));
+        self.operations.push((obj, op));
+    }
+}
+
+enum SpliceType<'a> {
+    List,
+    Text(&'a str, bool /* utf16 */),
+}
+
+impl<'a> SpliceType<'a> {
+    fn is_utf16(&self) -> bool {
+        matches!(self, SpliceType::Text(_, true))
     }
 }
 

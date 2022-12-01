@@ -74,6 +74,7 @@ pub struct Automerge {
 impl Automerge {
     pub fn new(actor: Option<String>) -> Result<Automerge, error::BadActorId> {
         let mut doc = AutoCommit::default();
+        doc.set_utf16(true);
         if let Some(a) = actor {
             let a = automerge::ActorId::from(hex::decode(a)?.to_vec());
             doc.set_actor(a);
@@ -105,11 +106,12 @@ impl Automerge {
         heads: JsValue,
     ) -> Result<Automerge, error::Fork> {
         let heads: Result<Vec<am::ChangeHash>, _> = JS(heads).try_into();
-        let doc = if let Ok(heads) = heads {
+        let mut doc = if let Ok(heads) = heads {
             self.doc.fork_at(&heads)?
         } else {
             self.doc.fork()
         };
+        doc.set_utf16(true);
         let mut automerge = Automerge {
             doc,
             freeze: self.freeze,
@@ -206,9 +208,17 @@ impl Automerge {
         if !vals.is_empty() {
             self.doc.splice(&obj, start, delete_count, vals)?;
         } else {
-            for _ in 0..delete_count {
-                self.doc.delete(&obj, start)?;
-            }
+                // no vals given but we still need to call the text vs splice
+                // bc utf16
+                match self.doc.object_type(&obj) {
+                    Some(am::ObjType::List) => {
+                        self.doc.splice(&obj, start, delete_count, vals)?;
+                    }
+                    Some(am::ObjType::Text) => {
+                        self.doc.splice_text(&obj, start, delete_count, "")?;
+                    }
+                    _ => {}
+                }
         }
         Ok(())
     }
@@ -731,6 +741,7 @@ pub fn load(data: Uint8Array, actor: Option<String>) -> Result<Automerge, error:
     let data = data.to_vec();
     let mut doc =
         am::AutoCommitWithObs::<UnObserved>::load(&data)?.with_observer(Observer::default());
+    doc.set_utf16(true);
     if let Some(s) = actor {
         let actor =
             automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());

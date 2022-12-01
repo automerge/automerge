@@ -58,6 +58,7 @@ pub struct Automerge {
     pub(crate) actor: Actor,
     /// The maximum operation counter this document has seen.
     pub(crate) max_op: u64,
+    pub utf16: bool,
 }
 
 impl Automerge {
@@ -74,6 +75,7 @@ impl Automerge {
             saved: Default::default(),
             actor: Actor::Unused(ActorId::random()),
             max_op: 0,
+            utf16: false,
         }
     }
 
@@ -587,7 +589,7 @@ impl Automerge {
             }
             Prop::Seq(n) => self
                 .ops
-                .search(&obj, query::Nth::new(n))
+                .search(&obj, query::Nth::new(n, false))
                 .ops
                 .into_iter()
                 .map(|o| (o.value(), self.id_to_exid(o.id)))
@@ -690,6 +692,7 @@ impl Automerge {
                     saved: Default::default(),
                     actor: Actor::Unused(ActorId::random()),
                     max_op,
+                    utf16: false,
                 }
             }
             storage::Chunk::Change(stored_change) => {
@@ -1243,7 +1246,7 @@ impl Automerge {
         let succ = q.succ;
         let pos = q.pos;
 
-        self.ops.add_succ(obj, succ.iter().copied(), &op);
+        self.ops.add_succ(obj, &succ, &op);
 
         if !op.is_delete() {
             self.ops.insert(pos, obj, op.clone());
@@ -1257,13 +1260,18 @@ impl Automerge {
         op: Op,
         observer: &mut Obs,
     ) -> Op {
-        let q = self.ops.search(obj, query::SeekOpWithPatch::new(&op));
         let obj_type = self.ops.object_type(obj);
+        let utf16 = self.utf16 && matches!(obj_type, Some(ObjType::Text));
+        let q = self
+            .ops
+            .search(obj, query::SeekOpWithPatch::new(&op, utf16));
 
         let query::SeekOpWithPatch {
             pos,
             succ,
             seen,
+            seen8,
+            last_width,
             values,
             had_value_before,
             ..
@@ -1278,7 +1286,16 @@ impl Automerge {
 
         if op.insert {
             if obj_type == Some(ObjType::Text) {
-                observer.splice_text(self, ex_obj, seen, op.to_str());
+                if utf16 {
+                    let s = op.to_str();
+                    let len8 = s.chars().count();
+                    let len16 = s.encode_utf16().count();
+                    let index8 = seen8;
+                    let index16 = seen;
+                    observer.splice_text_utf16(self, ex_obj, (index8, index16), (len8, len16), s);
+                } else {
+                    observer.splice_text(self, ex_obj, seen, op.to_str());
+                }
             } else {
                 let value = (op.value(), self.ops.id_to_exid(op.id));
                 observer.insert(self, ex_obj, seen, value);
@@ -1289,7 +1306,14 @@ impl Automerge {
                 let conflict = values.len() > 1;
                 observer.expose(self, ex_obj, key, value, conflict);
             } else if had_value_before {
-                observer.delete(self, ex_obj, key);
+                if utf16 {
+                    let len16 = last_width;
+                    let index8 = seen8;
+                    let index16 = seen;
+                    observer.delete_utf16(self, ex_obj, (index8, index16), (1, len16));
+                } else {
+                    observer.delete(self, ex_obj, key);
+                }
             }
         } else if let Some(value) = op.get_increment_value() {
             // only observe this increment if the counter is visible, i.e. the counter's
@@ -1319,7 +1343,7 @@ impl Automerge {
             }
         }
 
-        self.ops.add_succ(obj, succ.iter().copied(), &op);
+        self.ops.add_succ(obj, &succ, &op);
 
         if !op.is_delete() {
             self.ops.insert(pos, obj, op.clone());

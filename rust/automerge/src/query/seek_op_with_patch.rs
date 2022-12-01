@@ -10,7 +10,10 @@ pub(crate) struct SeekOpWithPatch<'a> {
     pub(crate) pos: usize,
     pub(crate) succ: Vec<usize>,
     found: bool,
+    utf16: bool,
     pub(crate) seen: usize,
+    pub(crate) seen8: usize,
+    pub(crate) last_width: usize,
     last_seen: Option<Key>,
     pub(crate) values: Vec<&'a Op>,
     pub(crate) had_value_before: bool,
@@ -19,13 +22,16 @@ pub(crate) struct SeekOpWithPatch<'a> {
 }
 
 impl<'a> SeekOpWithPatch<'a> {
-    pub(crate) fn new(op: &Op) -> Self {
+    pub(crate) fn new(op: &Op, utf16: bool) -> Self {
         SeekOpWithPatch {
             op: op.clone(),
             succ: vec![],
             pos: 0,
             found: false,
+            utf16,
             seen: 0,
+            seen8: 0,
+            last_width: 0,
             last_seen: None,
             values: vec![],
             had_value_before: false,
@@ -57,7 +63,8 @@ impl<'a> SeekOpWithPatch<'a> {
             self.last_seen = None
         }
         if e.visible() && self.last_seen.is_none() {
-            self.seen += 1;
+            self.seen += e.width(self.utf16);
+            self.seen8 += 1;
             self.last_seen = Some(e.elemid_or_key())
         }
     }
@@ -101,7 +108,8 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                     // elements it contains. However, it could happen that a visible element is
                     // split across two tree nodes. To avoid double-counting in this situation, we
                     // subtract one if the last visible element also appears in this tree node.
-                    let mut num_vis = child.index.visible_len();
+                    let mut num_vis = child.index.visible_len(self.utf16);
+                    let mut num_vis8 = child.index.visible_len(false);
                     if num_vis > 0 {
                         // FIXME: I think this is wrong: we should subtract one only if this
                         // subtree contains a *visible* (i.e. empty succs) operation for the list
@@ -110,9 +118,12 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                         if let Some(last_seen) = self.last_seen {
                             if child.index.has_visible(&last_seen) {
                                 num_vis -= 1;
+                                num_vis8 -= 1;
                             }
                         }
                         self.seen += num_vis;
+                        self.seen8 += num_vis8;
+                        //self.seen += child.index.visible16;
 
                         // FIXME: this is also wrong: `last_seen` needs to be the elemId of the
                         // last *visible* list element in this subtree, but I think this returns
@@ -130,7 +141,7 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                 if let Some(start) = self.start {
                     if self.pos + child.len() >= start {
                         // skip empty nodes
-                        if child.index.visible_len() == 0 {
+                        if child.index.visible_len(self.utf16) == 0 {
                             self.pos += child.len();
                             QueryResult::Next
                         } else {
@@ -173,6 +184,7 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                             self.values.push(e);
                         }
                         self.succ.push(self.pos);
+                        self.last_width = e.width(self.utf16);
 
                         if e.visible() {
                             self.had_value_before = true;
@@ -218,6 +230,7 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                                 self.values.push(e);
                             }
                             self.succ.push(self.pos);
+                            self.last_width = e.width(self.utf16);
                         }
                         if e.visible() {
                             self.had_value_before = true;
@@ -235,6 +248,7 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                             self.values.push(e);
                         }
                         self.succ.push(self.pos);
+                        self.last_width = e.width(self.utf16);
                     }
 
                     // If the new op is an insertion, skip over any existing list elements whose elemId is

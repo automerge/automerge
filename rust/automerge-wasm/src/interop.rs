@@ -846,33 +846,20 @@ impl Automerge {
         patch: &Patch,
     ) -> Result<JsValue, error::ApplyPatch> {
         match patch {
-            Patch::DeleteSeq { index, .. } => {
+            Patch::DeleteSeq { index, length, .. } => {
                 let index = *index as u32;
-                let length = string.length();
                 let before = string.slice(0, index);
-                let after = string.slice(index + 1, length);
-                Ok(before.concat(&after).into())
-            }
-            Patch::Insert { index, values, .. } => {
-                let index = *index as u32;
-                let length = string.length();
-                let before = string.slice(0, index);
-                let after = string.slice(index, length);
-                let to_insert: String = values
-                    .iter()
-                    .map(|v| v.0.to_str().unwrap_or("\u{fffc}"))
-                    .collect();
-                Ok(before.concat(&to_insert.into()).concat(&after).into())
+                let after = string.slice(index + *length as u32, string.length());
+                let result = before.concat(&after);
+                Ok(result.into())
             }
             Patch::SpliceText { index, value, .. } => {
-                let index = *index as u32;
+                let index = index.1 as u32;
                 let length = string.length();
                 let before = string.slice(0, index);
                 let after = string.slice(index, length);
-                Ok(before
-                    .concat(&value.to_string().into())
-                    .concat(&after)
-                    .into())
+                let result = before.concat(&value.to_string().into()).concat(&after);
+                Ok(result.into())
             }
             _ => Ok(string.into()),
         }

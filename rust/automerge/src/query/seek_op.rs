@@ -14,6 +14,7 @@ pub(crate) struct SeekOp<'a> {
     pub(crate) succ: Vec<usize>,
     /// whether a position has been found
     found: bool,
+    utf16: bool,
     /// The found start position of the key if there is one yet (for map objects).
     start: Option<usize>,
 }
@@ -25,6 +26,7 @@ impl<'a> SeekOp<'a> {
             succ: vec![],
             pos: 0,
             found: false,
+            utf16: false,
             start: None,
         }
     }
@@ -70,7 +72,7 @@ impl<'a> TreeQuery<'a> for SeekOp<'a> {
                 if let Some(start) = self.start {
                     if self.pos + child.len() >= start {
                         // skip empty nodes
-                        if child.index.visible_len() == 0 {
+                        if child.index.visible_len(false) == 0 {
                             self.pos += child.len();
                             QueryResult::Next
                         } else {

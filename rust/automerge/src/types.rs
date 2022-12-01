@@ -393,6 +393,15 @@ pub enum Prop {
     Seq(usize),
 }
 
+impl Prop {
+    pub(crate) fn to_index(&self) -> Option<usize> {
+        match self {
+            Prop::Map(_) => None,
+            Prop::Seq(n) => Some(*n),
+        }
+    }
+}
+
 impl Display for Prop {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -488,6 +497,18 @@ impl Op {
                 *current -= *n;
                 *increments -= 1;
             }
+        }
+    }
+
+    pub(crate) fn width(&self, utf16: bool) -> usize {
+        if utf16 {
+            if let OpType::Put(ScalarValue::Str(s)) = &self.action {
+                s.encode_utf16().count()
+            } else {
+                1 // "\u{fffc}".to_owned().encode_utf16().count()
+            }
+        } else {
+            1
         }
     }
 

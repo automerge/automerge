@@ -10,6 +10,9 @@ pub(crate) struct InsertNth {
     target: usize,
     /// the number of visible operations seen
     seen: usize,
+    seen8: usize,
+    last_width: usize,
+    utf16: bool,
     //pub pos: usize,
     /// the number of operations (including non-visible) that we have seen
     n: usize,
@@ -22,21 +25,36 @@ pub(crate) struct InsertNth {
 }
 
 impl InsertNth {
-    pub(crate) fn new(target: usize) -> Self {
+    pub(crate) fn new(target: usize, utf16: bool) -> Self {
         let (valid, last_valid_insert) = if target == 0 {
             (Some(0), Some(Key::Seq(HEAD)))
         } else {
             (None, None)
         };
         InsertNth {
+            // seen and target are both in the "native" units (utf8/utf16)
+            // if in utf8 mode seen8 just shadows the value
+            // if in utf16 mode seen will be utf16 and seen8 will be utf8
             target,
             seen: 0,
+            seen8: 0,
+            last_width: 0,
+            utf16,
             n: 0,
             valid,
             last_seen: None,
             last_insert: None,
             last_valid_insert,
         }
+    }
+
+    pub(crate) fn index_utf8(&self) -> usize {
+        self.seen8
+    }
+
+    pub(crate) fn index_utf16(&self) -> usize {
+        // if in utf8 mode this just returns utf8
+        self.seen
     }
 
     pub(crate) fn pos(&self) -> usize {
@@ -46,26 +64,18 @@ impl InsertNth {
     pub(crate) fn key(&self) -> Result<Key, AutomergeError> {
         self.last_valid_insert
             .ok_or(AutomergeError::InvalidIndex(self.target))
-        //if self.target == 0 {
-        /*
-        if self.last_insert.is_none() {
-            Ok(HEAD.into())
-        } else if self.seen == self.target && self.last_insert.is_some() {
-            Ok(Key::Seq(self.last_insert.unwrap()))
-        } else {
-            Err(AutomergeError::InvalidIndex(self.target))
-        }
-        */
     }
 }
 
 impl<'a> TreeQuery<'a> for InsertNth {
     fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
         // if this node has some visible elements then we may find our target within
-        let mut num_vis = child.index.visible_len();
+        let mut num_vis = child.index.visible_len(self.utf16);
+        let mut num_vis8 = child.index.visible_len(false);
         if let Some(last_seen) = self.last_seen {
             if child.index.has_visible(&last_seen) {
                 num_vis -= 1;
+                num_vis8 -= 1;
             }
         }
 
@@ -76,6 +86,7 @@ impl<'a> TreeQuery<'a> for InsertNth {
             // our target is not in this node so try the next one
             self.n += child.len();
             self.seen += num_vis;
+            self.seen8 += num_vis8;
 
             // We have updated seen by the number of visible elements in this index, before we skip it.
             // We also need to keep track of the last elemid that we have seen (and counted as seen).
@@ -103,7 +114,9 @@ impl<'a> TreeQuery<'a> for InsertNth {
             if self.seen >= self.target {
                 return QueryResult::Finish;
             }
-            self.seen += 1;
+            self.last_width = element.width(self.utf16);
+            self.seen += self.last_width;
+            self.seen8 += 1;
             self.last_seen = Some(element.elemid_or_key());
             self.last_valid_insert = self.last_seen
         }

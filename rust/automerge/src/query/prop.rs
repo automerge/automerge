@@ -45,7 +45,7 @@ impl<'a> TreeQuery<'a> for Prop<'a> {
         {
             if self.pos + child.len() >= start {
                 // skip empty nodes
-                if child.index.visible_len() == 0 {
+                if child.index.visible_len(false) == 0 {
                     if self.pos + child.len() >= optree_len {
                         self.pos = optree_len;
                         QueryResult::Finish

@@ -20,7 +20,20 @@ pub trait OpObserver {
         tagged_value: (Value<'_>, ExId),
     );
 
-    fn splice_text(&mut self, doc: &Automerge, objid: ExId, index: usize, value: &str);
+    fn splice_text(&mut self, _doc: &Automerge, _objid: ExId, _index: usize, _value: &str) {
+        panic!("splice_text not implemented in observer")
+    }
+
+    fn splice_text_utf16(
+        &mut self,
+        _doc: &Automerge,
+        _objid: ExId,
+        _index: (usize, usize),
+        _len: (usize, usize),
+        _value: &str,
+    ) {
+        panic!("splice_text_utf16 not supported in observer")
+    }
 
     /// A new value has been put into the given object.
     ///
@@ -80,6 +93,16 @@ pub trait OpObserver {
     /// - `objid`: the object that has been deleted in.
     /// - `prop`: the prop of the value that has been deleted.
     fn delete(&mut self, doc: &Automerge, objid: ExId, prop: Prop);
+
+    fn delete_utf16(
+        &mut self,
+        _doc: &Automerge,
+        _objid: ExId,
+        _index: (usize, usize),
+        _len: (usize, usize),
+    ) {
+        panic!("delete_utf16 not supported in observer")
+    }
 
     /// Branch of a new op_observer later to be merged
     ///

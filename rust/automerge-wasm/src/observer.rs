@@ -51,7 +51,8 @@ pub(crate) enum Patch {
     SpliceText {
         obj: ObjId,
         path: Vec<(ObjId, Prop)>,
-        index: usize,
+        index: (usize, usize),
+        length: (usize, usize),
         value: Rope,
     },
     Increment {
@@ -111,42 +112,109 @@ impl OpObserver for Observer {
         }
     }
 
-    fn splice_text(&mut self, doc: &Automerge, obj: ObjId, index: usize, value: &str) {
+    fn splice_text_utf16(
+        &mut self,
+        doc: &Automerge,
+        obj: ObjId,
+        (index8, index16): (usize, usize),
+        (len8, len16): (usize, usize),
+        value: &str,
+    ) {
         if self.enabled {
+            assert!(len8 <= len16);
+            assert!(index8 <= index16);
             if let Some(Patch::SpliceText {
                 obj: tail_obj,
-                index: tail_index,
+                index: (tail_index8, _),
+                length: (tail_len8, tail_len16),
                 value: prev_value,
                 ..
             }) = self.patches.last_mut()
             {
-                let range = *tail_index..=*tail_index + prev_value.len_chars();
-                if tail_obj == &obj && range.contains(&index) {
-                    prev_value.insert(index - *tail_index, value);
+                let range = *tail_index8..=*tail_index8 + *tail_len8;
+                if tail_obj == &obj && range.contains(&index8) {
+                    prev_value.insert(index8 - *tail_index8, value);
+                    *tail_len16 += len16;
+                    *tail_len8 += len8;
                     return;
                 }
             }
             if let Some(path) = doc.parents(&obj).ok().and_then(|mut p| p.visible_path()) {
+                let value = Rope::from_str(value);
+                assert!(len8 == value.len_chars());
                 let patch = Patch::SpliceText {
                     path,
                     obj,
-                    index,
-                    value: Rope::from_str(value),
+                    index: (index8, index16),
+                    length: (len8, len16),
+                    value,
                 };
                 self.patches.push(patch);
             }
         }
     }
 
+    fn delete_utf16(
+        &mut self,
+        doc: &Automerge,
+        obj: ObjId,
+        (index8, index16): (usize, usize),
+        (len8, len16): (usize, usize),
+    ) {
+        if self.enabled {
+            assert!(len8 <= len16);
+            assert!(index8 <= index16);
+            match self.patches.last_mut() {
+                Some(Patch::SpliceText {
+                    obj: tail_obj,
+                    index: (tail_index8, _),
+                    length: (tail_len8, tail_len16),
+                    value,
+                    ..
+                }) => {
+                    let range = *tail_index8..*tail_index8 + *tail_len8;
+                    if tail_obj == &obj && range.contains(&index8) {
+                        let start = index8 - *tail_index8;
+                        let end = start + len8;
+                        value.remove(start..end);
+                        *tail_len16 -= len8;
+                        *tail_len16 -= len16;
+                        return;
+                    }
+                }
+                Some(Patch::DeleteSeq {
+                    obj: tail_obj,
+                    index: tail_index,
+                    length: tail_length,
+                    ..
+                }) => {
+                    if tail_obj == &obj && index16 == *tail_index {
+                        *tail_length += len16;
+                        return;
+                    }
+                }
+                _ => {}
+            }
+            if let Some(path) = doc.parents(&obj).ok().and_then(|mut p| p.visible_path()) {
+                let patch = Patch::DeleteSeq {
+                    path,
+                    obj,
+                    index: index16,
+                    length: len16,
+                };
+                self.patches.push(patch)
+            }
+        }
+    }
+
     fn delete(&mut self, doc: &Automerge, obj: ObjId, prop: Prop) {
         if self.enabled {
-            match self.patches.last_mut() {
-                Some(Patch::Insert {
+            if let Some(Patch::Insert {
                     obj: tail_obj,
                     index: tail_index,
                     values,
                     ..
-                }) => {
+                }) = self.patches.last_mut() {
                     if let Prop::Seq(index) = prop {
                         let range = *tail_index..*tail_index + values.len();
                         if tail_obj == &obj && range.contains(&index) {
@@ -155,24 +223,6 @@ impl OpObserver for Observer {
                         }
                     }
                 }
-                Some(Patch::SpliceText {
-                    obj: tail_obj,
-                    index: tail_index,
-                    value,
-                    ..
-                }) => {
-                    if let Prop::Seq(index) = prop {
-                        let range = *tail_index..*tail_index + value.len_chars();
-                        if tail_obj == &obj && range.contains(&index) {
-                            let start = index - *tail_index;
-                            let end = start + 1;
-                            value.remove(start..end);
-                            return;
-                        }
-                    }
-                }
-                _ => {}
-            }
             if let Some(path) = doc.parents(&obj).ok().and_then(|mut p| p.visible_path()) {
                 let patch = match prop {
                     Prop::Map(key) => Patch::DeleteMap { path, obj, key },
@@ -374,13 +424,16 @@ impl TryFrom<Patch> for JsValue {
                 Ok(result.into())
             }
             Patch::SpliceText {
-                path, index, value, ..
+                path,
+                index: (_, index16),
+                value,
+                ..
             } => {
                 js_set(&result, "action", "splice")?;
                 js_set(
                     &result,
                     "path",
-                    export_path(path.as_slice(), &Prop::Seq(index)),
+                    export_path(path.as_slice(), &Prop::Seq(index16)),
                 )?;
                 js_set(&result, "value", value.to_string())?;
                 Ok(result.into())

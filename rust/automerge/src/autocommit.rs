@@ -125,6 +125,10 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
         self.doc.get_actor()
     }
 
+    pub fn set_utf16(&mut self, enabled: bool) {
+        self.doc.utf16 = enabled
+    }
+
     fn ensure_transaction_open(&mut self) {
         if self.transaction.is_none() {
             let args = self.doc.transaction_args();

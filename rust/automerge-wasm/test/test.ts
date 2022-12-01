@@ -1928,5 +1928,54 @@ describe('Automerge', () => {
         assert.deepStrictEqual(s1.sharedHeads, [c2, c8].sort())
       })
     })
+
+    it('can handle utf16 text', () => {
+      const doc = create()
+      doc.enablePatches(true)
+      let mat : any = doc.materialize("/")
+
+      doc.putObject("/", "width1", "AAAAAA")
+      doc.putObject("/", "width2", "🐻🐻🐻🐻🐻🐻")
+      doc.putObject("/", "mixed", "A🐻A🐻A🐻")
+      mat = doc.applyPatches(mat)
+
+      const remote = load(doc.save())
+      remote.enablePatches(true)
+      let r_mat : any = remote.materialize("/")
+
+      assert.deepEqual(mat, { width1: "AAAAAA", width2: "🐻🐻🐻🐻🐻🐻", mixed: "A🐻A🐻A🐻" })
+      assert.deepEqual(mat.width1.slice(2,4), "AA")
+      assert.deepEqual(mat.width2.slice(2,4), "🐻")
+      assert.deepEqual(mat.mixed.slice(1,4), "🐻A")
+
+      assert.deepEqual(r_mat, { width1: "AAAAAA", width2: "🐻🐻🐻🐻🐻🐻", mixed: "A🐻A🐻A🐻" })
+      assert.deepEqual(r_mat.width1.slice(2,4), "AA")
+      assert.deepEqual(r_mat.width2.slice(2,4), "🐻")
+      assert.deepEqual(r_mat.mixed.slice(1,4), "🐻A")
+
+      doc.splice("/width1", 2, 2, "🐻")
+      doc.splice("/width2", 2, 2, "A🐻A")
+      doc.splice("/mixed", 3, 3, "X")
+
+      mat = doc.applyPatches(mat)
+      remote.loadIncremental(doc.saveIncremental());
+      r_mat = remote.applyPatches(r_mat)
+
+      assert.deepEqual(mat.width1, "AA🐻AA")
+      assert.deepEqual(mat.width2, "🐻A🐻A🐻🐻🐻🐻")
+      assert.deepEqual(mat.mixed, "A🐻XA🐻")
+
+      assert.deepEqual(r_mat.width1, "AA🐻AA")
+      assert.deepEqual(r_mat.width2, "🐻A🐻A🐻🐻🐻🐻")
+      assert.deepEqual(r_mat.mixed, "A🐻XA🐻")
+
+      // when indexing in the middle of a multibyte char it indexes at the char before
+      doc.splice("/width2", 4, 1, "X")
+      mat = doc.applyPatches(mat)
+      remote.loadIncremental(doc.saveIncremental());
+      r_mat = remote.applyPatches(r_mat)
+
+      assert.deepEqual(mat.width2, "🐻AXA🐻🐻🐻🐻")
+    })
   })
 })

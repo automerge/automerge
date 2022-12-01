@@ -171,7 +171,7 @@ impl OpSetInternal {
         }
     }
 
-    pub(crate) fn replace<F>(&mut self, obj: &ObjId, index: usize, f: F)
+    pub(crate) fn change_vis<F>(&mut self, obj: &ObjId, index: usize, f: F)
     where
         F: Fn(&mut Op),
     {
@@ -181,15 +181,10 @@ impl OpSetInternal {
     }
 
     /// Add `op` as a successor to each op at `op_indices` in `obj`
-    pub(crate) fn add_succ<I: Iterator<Item = usize>>(
-        &mut self,
-        obj: &ObjId,
-        op_indices: I,
-        op: &Op,
-    ) {
+    pub(crate) fn add_succ(&mut self, obj: &ObjId, op_indices: &[usize], op: &Op) {
         if let Some(tree) = self.trees.get_mut(obj) {
             for i in op_indices {
-                tree.internal.update(i, |old_op| {
+                tree.internal.update(*i, |old_op| {
                     old_op.add_succ(op, |left, right| self.m.lamport_cmp(*left, *right))
                 });
             }
@@ -232,100 +227,6 @@ impl OpSetInternal {
             tracing::warn!("attempting to insert op for unknown object");
         }
     }
-
-    /*
-        pub(crate) fn insert_op(&mut self, obj: &ObjId, op: Op) -> Op {
-            let q = self.search(obj, query::SeekOp::new(&op));
-
-            let succ = q.succ;
-            let pos = q.pos;
-
-            self.add_succ(obj, succ.iter().copied(), &op);
-
-            if !op.is_delete() {
-                self.insert(pos, obj, op.clone());
-            }
-            op
-        }
-
-        pub(crate) fn insert_op_with_observer<Obs: OpObserver>(
-            &mut self,
-            obj: &ObjId,
-            op: Op,
-            observer: &mut Obs,
-        ) -> Op {
-            let q = self.search(obj, query::SeekOpWithPatch::new(&op));
-            let obj_type = self.object_type(obj);
-
-            let query::SeekOpWithPatch {
-                pos,
-                succ,
-                seen,
-                values,
-                had_value_before,
-                ..
-            } = q;
-
-            let ex_obj = self.id_to_exid(obj.0);
-            let parents = self.parents(*obj);
-
-            let key = match op.key {
-                Key::Map(index) => self.m.props[index].clone().into(),
-                Key::Seq(_) => seen.into(),
-            };
-
-            if op.insert {
-                if obj_type == Some(ObjType::Text) {
-                    observer.splice_text(parents, ex_obj, seen, op.to_str());
-                } else {
-                    let value = (op.value(), self.id_to_exid(op.id));
-                    observer.insert(parents, ex_obj, seen, value);
-                }
-            } else if op.is_delete() {
-                if let Some(winner) = &values.last() {
-                    let value = (winner.value(), self.id_to_exid(winner.id));
-                    let conflict = values.len() > 1;
-                    observer.expose(parents, ex_obj, key, value, conflict);
-                } else if had_value_before {
-                    observer.delete(parents, ex_obj, key);
-                }
-            } else if let Some(value) = op.get_increment_value() {
-                // only observe this increment if the counter is visible, i.e. the counter's
-                // create op is in the values
-                //if values.iter().any(|value| op.pred.contains(&value.id)) {
-                if values
-                    .last()
-                    .map(|value| op.pred.contains(&value.id))
-                    .unwrap_or_default()
-                {
-                    // we have observed the value
-                    observer.increment(parents, ex_obj, key, (value, self.id_to_exid(op.id)));
-                }
-            } else {
-                let just_conflict = values
-                    .last()
-                    .map(|value| self.m.lamport_cmp(op.id, value.id) != Ordering::Greater)
-                    .unwrap_or(false);
-                let value = (op.value(), self.id_to_exid(op.id));
-                if op.is_list_op() && !had_value_before {
-                    observer.insert(parents, ex_obj, seen, value);
-                } else if just_conflict {
-                    observer.flag_conflict(parents, ex_obj, key);
-                } else {
-                    let conflict = !values.is_empty();
-                    observer.put(parents, ex_obj, key, value, conflict);
-                }
-            }
-
-            self.add_succ(obj, succ.iter().copied(), &op);
-
-            if !op.is_delete() {
-                self.insert(pos, obj, op.clone());
-            }
-
-            op
-        }
-    */
 
     pub(crate) fn object_type(&self, id: &ObjId) -> Option<ObjType> {
         self.trees.get(id).map(|tree| tree.objtype)

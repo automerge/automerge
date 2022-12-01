@@ -1,13 +1,17 @@
 use crate::error::AutomergeError;
+use crate::op_set::OpSet;
 use crate::op_tree::OpTreeNode;
 use crate::query::{QueryResult, TreeQuery};
-use crate::types::{Key, Op};
+use crate::types::{Key, Op, OpIds};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Nth<'a> {
     target: usize,
     seen: usize,
+    seen8: usize,
+    utf16: bool,
+    last_width: usize,
     /// last_seen is the target elemid of the last `seen` operation.
     /// It is used to avoid double counting visible elements (which arise through conflicts) that are split across nodes.
     last_seen: Option<Key>,
@@ -17,15 +21,22 @@ pub(crate) struct Nth<'a> {
 }
 
 impl<'a> Nth<'a> {
-    pub(crate) fn new(target: usize) -> Self {
+    pub(crate) fn new(target: usize, utf16: bool) -> Self {
         Nth {
             target,
             seen: 0,
+            seen8: 0,
+            last_width: 1,
+            utf16,
             last_seen: None,
             ops: vec![],
             ops_pos: vec![],
             pos: 0,
         }
+    }
+
+    pub(crate) fn pred(&self, ops: &OpSet) -> OpIds {
+        ops.m.sorted_opids(self.ops.iter().map(|o| o.id))
     }
 
     /// Get the key
@@ -37,14 +48,28 @@ impl<'a> Nth<'a> {
             Err(AutomergeError::InvalidIndex(self.target))
         }
     }
+
+    pub(crate) fn index(&self) -> usize {
+        self.seen - self.last_width
+    }
+
+    pub(crate) fn index_utf16(&self) -> usize {
+        self.index()
+    }
+
+    pub(crate) fn index_utf8(&self) -> usize {
+        self.seen8 - 1
+    }
 }
 
 impl<'a> TreeQuery<'a> for Nth<'a> {
     fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
-        let mut num_vis = child.index.visible_len();
+        let mut num_vis = child.index.visible_len(self.utf16);
+        let mut num_vis8 = child.index.visible_len(false);
         if let Some(last_seen) = self.last_seen {
             if child.index.has_visible(&last_seen) {
                 num_vis -= 1;
+                num_vis8 -= 1;
             }
         }
 
@@ -54,6 +79,7 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
             // skip this node as no useful ops in it
             self.pos += child.len();
             self.seen += num_vis;
+            self.seen8 += num_vis8;
 
             // We have updated seen by the number of visible elements in this index, before we skip it.
             // We also need to keep track of the last elemid that we have seen (and counted as seen).
@@ -79,11 +105,13 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
         }
         let visible = element.visible();
         if visible && self.last_seen.is_none() {
-            self.seen += 1;
+            self.last_width = element.width(self.utf16);
+            self.seen += self.last_width;
+            self.seen8 += 1;
             // we have a new visible element
             self.last_seen = Some(element.elemid_or_key())
         }
-        if self.seen == self.target + 1 && visible {
+        if self.seen > self.target && visible {
             self.ops.push(element);
             self.ops_pos.push(self.pos);
         }
