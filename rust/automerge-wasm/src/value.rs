@@ -1,4 +1,3 @@
-use crate::to_js_err;
 use automerge::{ObjType, ScalarValue, Value};
 use wasm_bindgen::prelude::*;
 
@@ -113,12 +112,10 @@ impl From<Datatype> for String {
 }
 
 impl TryFrom<JsValue> for Datatype {
-    type Error = JsValue;
+    type Error = InvalidDatatype;
 
     fn try_from(datatype: JsValue) -> Result<Self, Self::Error> {
-        let datatype = datatype
-            .as_string()
-            .ok_or_else(|| to_js_err("datatype is not a string"))?;
+        let datatype = datatype.as_string().ok_or(InvalidDatatype::NotString)?;
         match datatype.as_str() {
             "map" => Ok(Datatype::Map),
             "table" => Ok(Datatype::Table),
@@ -135,9 +132,10 @@ impl TryFrom<JsValue> for Datatype {
             "null" => Ok(Datatype::Null),
             d => {
                 if d.starts_with("unknown") {
-                    todo!() // handle "unknown{}",
+                    // TODO: handle "unknown{}",
+                    Err(InvalidDatatype::UnknownNotImplemented)
                 } else {
-                    Err(to_js_err(format!("unknown datatype {}", d)))
+                    Err(InvalidDatatype::Unknown(d.to_string()))
                 }
             }
         }
@@ -147,5 +145,21 @@ impl TryFrom<JsValue> for Datatype {
 impl From<Datatype> for JsValue {
     fn from(d: Datatype) -> Self {
         String::from(d).into()
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum InvalidDatatype {
+    #[error("unknown datatype")]
+    Unknown(String),
+    #[error("datatype is not a string")]
+    NotString,
+    #[error("cannot handle unknown datatype")]
+    UnknownNotImplemented,
+}
+
+impl From<InvalidDatatype> for JsValue {
+    fn from(e: InvalidDatatype) -> Self {
+        JsValue::from(e.to_string())
     }
 }

@@ -44,7 +44,7 @@ mod value;
 
 use observer::Observer;
 
-use interop::{alloc, get_heads, js_get, js_set, to_js_err, to_objtype, to_prop, AR, JS};
+use interop::{alloc, get_heads, js_set, to_js_err, to_objtype, to_prop, AR, JS};
 use sync::SyncState;
 use value::Datatype;
 
@@ -71,10 +71,10 @@ pub struct Automerge {
 
 #[wasm_bindgen]
 impl Automerge {
-    pub fn new(actor: Option<String>) -> Result<Automerge, JsValue> {
+    pub fn new(actor: Option<String>) -> Result<Automerge, error::BadActorId> {
         let mut doc = AutoCommit::default();
         if let Some(a) = actor {
-            let a = automerge::ActorId::from(hex::decode(a).map_err(to_js_err)?.to_vec());
+            let a = automerge::ActorId::from(hex::decode(a)?.to_vec());
             doc.set_actor(a);
         }
         Ok(Automerge {
@@ -85,20 +85,24 @@ impl Automerge {
     }
 
     #[allow(clippy::should_implement_trait)]
-    pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, JsValue> {
+    pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, error::BadActorId> {
         let mut automerge = Automerge {
             doc: self.doc.clone(),
             freeze: self.freeze,
             external_types: self.external_types.clone(),
         };
         if let Some(s) = actor {
-            let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
+            let actor = automerge::ActorId::from(hex::decode(s)?.to_vec());
             automerge.doc.set_actor(actor);
         }
         Ok(automerge)
     }
 
-    pub fn fork(&mut self, actor: Option<String>, heads: JsValue) -> Result<Automerge, JsValue> {
+    pub fn fork(
+        &mut self,
+        actor: Option<String>,
+        heads: JsValue,
+    ) -> Result<Automerge, error::Fork> {
         let heads: Result<Vec<am::ChangeHash>, _> = JS(heads).try_into();
         let doc = if let Ok(heads) = heads {
             self.doc.fork_at(&heads)?
@@ -111,7 +115,8 @@ impl Automerge {
             external_types: self.external_types.clone(),
         };
         if let Some(s) = actor {
-            let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
+            let actor =
+                automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
             automerge.doc.set_actor(actor);
         }
         Ok(automerge)
@@ -137,7 +142,7 @@ impl Automerge {
         }
     }
 
-    pub fn merge(&mut self, other: &mut Automerge) -> Result<Array, JsValue> {
+    pub fn merge(&mut self, other: &mut Automerge) -> Result<Array, error::Merge> {
         let heads = self.doc.merge(&mut other.doc)?;
         let heads: Array = heads
             .iter()
@@ -150,9 +155,9 @@ impl Automerge {
         self.doc.rollback() as f64
     }
 
-    pub fn keys(&self, obj: JsValue, heads: Option<Array>) -> Result<Array, JsValue> {
-        let obj = self.import(obj)?;
-        let result = if let Some(heads) = get_heads(heads) {
+    pub fn keys(&self, obj: JsValue, heads: Option<Array>) -> Result<Array, error::Get> {
+        let (obj, _) = self.import(obj)?;
+        let result = if let Some(heads) = get_heads(heads)? {
             self.doc
                 .keys_at(&obj, &heads)
                 .map(|s| JsValue::from_str(&s))
@@ -163,9 +168,9 @@ impl Automerge {
         Ok(result)
     }
 
-    pub fn text(&self, obj: JsValue, heads: Option<Array>) -> Result<String, JsValue> {
-        let obj = self.import(obj)?;
-        if let Some(heads) = get_heads(heads) {
+    pub fn text(&self, obj: JsValue, heads: Option<Array>) -> Result<String, error::Get> {
+        let (obj, _) = self.import(obj)?;
+        if let Some(heads) = get_heads(heads)? {
             Ok(self.doc.text_at(&obj, &heads)?)
         } else {
             Ok(self.doc.text(&obj)?)
@@ -178,46 +183,57 @@ impl Automerge {
         start: f64,
         delete_count: f64,
         text: JsValue,
-    ) -> Result<(), JsValue> {
-        let obj = self.import(obj)?;
+    ) -> Result<(), error::Splice> {
+        let (obj, obj_type) = self.import(obj)?;
         let start = start as usize;
         let delete_count = delete_count as usize;
-        let mut vals = vec![];
         if let Some(t) = text.as_string() {
-            self.doc.splice_text(&obj, start, delete_count, &t)?;
-        } else {
-            if let Ok(array) = text.dyn_into::<Array>() {
-                for i in array.iter() {
-                    let value = self
-                        .import_scalar(&i, &None)
-                        .ok_or_else(|| to_js_err("expected scalar"))?;
-                    vals.push(value);
-                }
+            if obj_type == ObjType::Text {
+                self.doc.splice_text(&obj, start, delete_count, &t)?;
+                return Ok(());
             }
-            self.doc
-                .splice(&obj, start, delete_count, vals.into_iter())?;
         }
-        Ok(())
+        let mut vals = vec![];
+        if let Ok(array) = text.dyn_into::<Array>() {
+            for (index, i) in array.iter().enumerate() {
+                let value = self
+                    .import_scalar(&i, &None)
+                    .ok_or(error::Splice::ValueNotPrimitive(index))?;
+                vals.push(value);
+            }
+        }
+        Ok(self
+            .doc
+            .splice(&obj, start, delete_count, vals.into_iter())?)
     }
 
-    pub fn push(&mut self, obj: JsValue, value: JsValue, datatype: JsValue) -> Result<(), JsValue> {
-        let obj = self.import(obj)?;
+    pub fn push(
+        &mut self,
+        obj: JsValue,
+        value: JsValue,
+        datatype: JsValue,
+    ) -> Result<(), error::Insert> {
+        let (obj, _) = self.import(obj)?;
         let value = self
             .import_scalar(&value, &datatype.as_string())
-            .ok_or_else(|| to_js_err("invalid scalar value"))?;
+            .ok_or(error::Insert::ValueNotPrimitive)?;
         let index = self.doc.length(&obj);
         self.doc.insert(&obj, index, value)?;
         Ok(())
     }
 
     #[wasm_bindgen(js_name = pushObject)]
-    pub fn push_object(&mut self, obj: JsValue, value: JsValue) -> Result<Option<String>, JsValue> {
-        let obj = self.import(obj)?;
+    pub fn push_object(
+        &mut self,
+        obj: JsValue,
+        value: JsValue,
+    ) -> Result<Option<String>, error::InsertObject> {
+        let (obj, _) = self.import(obj)?;
         let (value, subvals) =
-            to_objtype(&value, &None).ok_or_else(|| to_js_err("expected object"))?;
+            to_objtype(&value, &None).ok_or(error::InsertObject::ValueNotObject)?;
         let index = self.doc.length(&obj);
         let opid = self.doc.insert_object(&obj, index, value)?;
-        self.subset(&opid, subvals)?;
+        self.subset::<error::InsertObject>(&opid, subvals)?;
         Ok(opid.to_string().into())
     }
 
@@ -227,12 +243,12 @@ impl Automerge {
         index: f64,
         value: JsValue,
         datatype: JsValue,
-    ) -> Result<(), JsValue> {
-        let obj = self.import(obj)?;
+    ) -> Result<(), error::Insert> {
+        let (obj, _) = self.import(obj)?;
         let index = index as f64;
         let value = self
             .import_scalar(&value, &datatype.as_string())
-            .ok_or_else(|| to_js_err("expected scalar value"))?;
+            .ok_or(error::Insert::ValueNotPrimitive)?;
         self.doc.insert(&obj, index as usize, value)?;
         Ok(())
     }
@@ -243,13 +259,13 @@ impl Automerge {
         obj: JsValue,
         index: f64,
         value: JsValue,
-    ) -> Result<Option<String>, JsValue> {
-        let obj = self.import(obj)?;
+    ) -> Result<Option<String>, error::InsertObject> {
+        let (obj, _) = self.import(obj)?;
         let index = index as f64;
         let (value, subvals) =
-            to_objtype(&value, &None).ok_or_else(|| to_js_err("expected object"))?;
+            to_objtype(&value, &None).ok_or(error::InsertObject::ValueNotObject)?;
         let opid = self.doc.insert_object(&obj, index as usize, value)?;
-        self.subset(&opid, subvals)?;
+        self.subset::<error::InsertObject>(&opid, subvals)?;
         Ok(opid.to_string().into())
     }
 
@@ -259,12 +275,12 @@ impl Automerge {
         prop: JsValue,
         value: JsValue,
         datatype: JsValue,
-    ) -> Result<(), JsValue> {
-        let obj = self.import(obj)?;
+    ) -> Result<(), error::Insert> {
+        let (obj, _) = self.import(obj)?;
         let prop = self.import_prop(prop)?;
         let value = self
             .import_scalar(&value, &datatype.as_string())
-            .ok_or_else(|| to_js_err("expected scalar value"))?;
+            .ok_or(error::Insert::ValueNotPrimitive)?;
         self.doc.put(&obj, prop, value)?;
         Ok(())
     }
@@ -275,17 +291,20 @@ impl Automerge {
         obj: JsValue,
         prop: JsValue,
         value: JsValue,
-    ) -> Result<JsValue, JsValue> {
-        let obj = self.import(obj)?;
+    ) -> Result<JsValue, error::InsertObject> {
+        let (obj, _) = self.import(obj)?;
         let prop = self.import_prop(prop)?;
         let (value, subvals) =
-            to_objtype(&value, &None).ok_or_else(|| to_js_err("expected object"))?;
+            to_objtype(&value, &None).ok_or(error::InsertObject::ValueNotObject)?;
         let opid = self.doc.put_object(&obj, prop, value)?;
-        self.subset(&opid, subvals)?;
+        self.subset::<error::InsertObject>(&opid, subvals)?;
         Ok(opid.to_string().into())
     }
 
-    fn subset(&mut self, obj: &am::ObjId, vals: Vec<(am::Prop, JsValue)>) -> Result<(), JsValue> {
+    fn subset<E>(&mut self, obj: &am::ObjId, vals: Vec<(am::Prop, JsValue)>) -> Result<(), E>
+    where
+        E: From<automerge::AutomergeError> + From<error::ImportObj> + From<error::InvalidValue>,
+    {
         for (p, v) in vals {
             let (value, subvals) = self.import_value(&v, None)?;
             //let opid = self.0.set(id, p, value)?;
@@ -306,7 +325,7 @@ impl Automerge {
                 }
             };
             if let Some(opid) = opid {
-                self.subset(&opid, subvals)?;
+                self.subset::<E>(&opid, subvals)?;
             }
         }
         Ok(())
@@ -317,12 +336,10 @@ impl Automerge {
         obj: JsValue,
         prop: JsValue,
         value: JsValue,
-    ) -> Result<(), JsValue> {
-        let obj = self.import(obj)?;
+    ) -> Result<(), error::Increment> {
+        let (obj, _) = self.import(obj)?;
         let prop = self.import_prop(prop)?;
-        let value: f64 = value
-            .as_f64()
-            .ok_or_else(|| to_js_err("increment needs a numeric value"))?;
+        let value: f64 = value.as_f64().ok_or(error::Increment::ValueNotNumeric)?;
         self.doc.increment(&obj, prop, value as i64)?;
         Ok(())
     }
@@ -333,10 +350,10 @@ impl Automerge {
         obj: JsValue,
         prop: JsValue,
         heads: Option<Array>,
-    ) -> Result<JsValue, JsValue> {
-        let obj = self.import(obj)?;
+    ) -> Result<JsValue, error::Get> {
+        let (obj, _) = self.import(obj)?;
         let prop = to_prop(prop);
-        let heads = get_heads(heads);
+        let heads = get_heads(heads)?;
         if let Ok(prop) = prop {
             let value = if let Some(h) = heads {
                 self.doc.get_at(&obj, prop, &h)?
@@ -362,10 +379,10 @@ impl Automerge {
         obj: JsValue,
         prop: JsValue,
         heads: Option<Array>,
-    ) -> Result<JsValue, JsValue> {
-        let obj = self.import(obj)?;
+    ) -> Result<JsValue, error::Get> {
+        let (obj, _) = self.import(obj)?;
         let prop = to_prop(prop);
-        let heads = get_heads(heads);
+        let heads = get_heads(heads)?;
         if let Ok(prop) = prop {
             let value = if let Some(h) = heads {
                 self.doc.get_at(&obj, prop, &h)?
@@ -402,17 +419,16 @@ impl Automerge {
         obj: JsValue,
         arg: JsValue,
         heads: Option<Array>,
-    ) -> Result<Array, JsValue> {
-        let obj = self.import(obj)?;
+    ) -> Result<Array, error::Get> {
+        let (obj, _) = self.import(obj)?;
         let result = Array::new();
         let prop = to_prop(arg);
         if let Ok(prop) = prop {
-            let values = if let Some(heads) = get_heads(heads) {
+            let values = if let Some(heads) = get_heads(heads)? {
                 self.doc.get_all_at(&obj, prop, &heads)
             } else {
                 self.doc.get_all(&obj, prop)
-            }
-            .map_err(to_js_err)?;
+            }?;
             for (value, id) in values {
                 let sub = Array::new();
                 let (datatype, js_value) = alloc(&value);
@@ -451,7 +467,7 @@ impl Automerge {
         &mut self,
         datatype: JsValue,
         function: JsValue,
-    ) -> Result<(), JsValue> {
+    ) -> Result<(), value::InvalidDatatype> {
         let datatype = Datatype::try_from(datatype)?;
         if let Ok(function) = function.dyn_into::<Function>() {
             self.external_types.insert(datatype, function);
@@ -467,8 +483,10 @@ impl Automerge {
         object: JsValue,
         meta: JsValue,
         callback: JsValue,
-    ) -> Result<JsValue, JsValue> {
-        let mut object = object.dyn_into::<Object>()?;
+    ) -> Result<JsValue, error::ApplyPatch> {
+        let mut object = object
+            .dyn_into::<Object>()
+            .map_err(|_| error::ApplyPatch::NotObjectd)?;
         let patches = self.doc.observer().take_patches();
         let callback = callback.dyn_into::<Function>().ok();
 
@@ -484,7 +502,8 @@ impl Automerge {
             if let Some(c) = &callback {
                 let before = object.clone();
                 object = self.apply_patch(object, &p, 0, &meta)?;
-                c.call3(&JsValue::undefined(), &p.try_into()?, &before, &object)?;
+                c.call3(&JsValue::undefined(), &p.try_into()?, &before, &object)
+                    .map_err(error::ApplyPatch::PatchCallback)?;
             } else {
                 object = self.apply_patch(object, &p, 0, &meta)?;
             }
@@ -494,7 +513,7 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = popPatches)]
-    pub fn pop_patches(&mut self) -> Result<Array, JsValue> {
+    pub fn pop_patches(&mut self) -> Result<Array, error::PopPatches> {
         // transactions send out observer updates as they occur, not waiting for them to be
         // committed.
         // If we pop the patches then we won't be able to revert them.
@@ -507,19 +526,19 @@ impl Automerge {
         Ok(result)
     }
 
-    pub fn length(&self, obj: JsValue, heads: Option<Array>) -> Result<f64, JsValue> {
-        let obj = self.import(obj)?;
-        if let Some(heads) = get_heads(heads) {
+    pub fn length(&self, obj: JsValue, heads: Option<Array>) -> Result<f64, error::Get> {
+        let (obj, _) = self.import(obj)?;
+        if let Some(heads) = get_heads(heads)? {
             Ok(self.doc.length_at(&obj, &heads) as f64)
         } else {
             Ok(self.doc.length(&obj) as f64)
         }
     }
 
-    pub fn delete(&mut self, obj: JsValue, prop: JsValue) -> Result<(), JsValue> {
-        let obj = self.import(obj)?;
+    pub fn delete(&mut self, obj: JsValue, prop: JsValue) -> Result<(), error::Get> {
+        let (obj, _) = self.import(obj)?;
         let prop = to_prop(prop)?;
-        self.doc.delete(&obj, prop).map_err(to_js_err)?;
+        self.doc.delete(&obj, prop)?;
         Ok(())
     }
 
@@ -534,21 +553,21 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = loadIncremental)]
-    pub fn load_incremental(&mut self, data: Uint8Array) -> Result<f64, JsValue> {
+    pub fn load_incremental(&mut self, data: Uint8Array) -> Result<f64, error::Load> {
         let data = data.to_vec();
-        let len = self.doc.load_incremental(&data).map_err(to_js_err)?;
+        let len = self.doc.load_incremental(&data)?;
         Ok(len as f64)
     }
 
     #[wasm_bindgen(js_name = applyChanges)]
-    pub fn apply_changes(&mut self, changes: JsValue) -> Result<(), JsValue> {
+    pub fn apply_changes(&mut self, changes: JsValue) -> Result<(), error::ApplyChangesError> {
         let changes: Vec<_> = JS(changes).try_into()?;
-        self.doc.apply_changes(changes).map_err(to_js_err)?;
+        self.doc.apply_changes(changes)?;
         Ok(())
     }
 
     #[wasm_bindgen(js_name = getChanges)]
-    pub fn get_changes(&mut self, have_deps: JsValue) -> Result<Array, JsValue> {
+    pub fn get_changes(&mut self, have_deps: JsValue) -> Result<Array, error::Get> {
         let deps: Vec<_> = JS(have_deps).try_into()?;
         let changes = self.doc.get_changes(&deps)?;
         let changes: Array = changes
@@ -559,8 +578,11 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = getChangeByHash)]
-    pub fn get_change_by_hash(&mut self, hash: JsValue) -> Result<JsValue, JsValue> {
-        let hash = serde_wasm_bindgen::from_value(hash).map_err(to_js_err)?;
+    pub fn get_change_by_hash(
+        &mut self,
+        hash: JsValue,
+    ) -> Result<JsValue, interop::error::BadChangeHash> {
+        let hash = JS(hash).try_into()?;
         let change = self.doc.get_change_by_hash(&hash);
         if let Some(c) = change {
             Ok(Uint8Array::from(c.raw_bytes()).into())
@@ -570,13 +592,13 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = getChangesAdded)]
-    pub fn get_changes_added(&mut self, other: &mut Automerge) -> Result<Array, JsValue> {
+    pub fn get_changes_added(&mut self, other: &mut Automerge) -> Array {
         let changes = self.doc.get_changes_added(&mut other.doc);
         let changes: Array = changes
             .iter()
             .map(|c| Uint8Array::from(c.raw_bytes()))
             .collect();
-        Ok(changes)
+        changes
     }
 
     #[wasm_bindgen(js_name = getHeads)]
@@ -596,11 +618,11 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = getLastLocalChange)]
-    pub fn get_last_local_change(&mut self) -> Result<JsValue, JsValue> {
+    pub fn get_last_local_change(&mut self) -> JsValue {
         if let Some(change) = self.doc.get_last_local_change() {
-            Ok(Uint8Array::from(change.raw_bytes()).into())
+            Uint8Array::from(change.raw_bytes()).into()
         } else {
-            Ok(JsValue::null())
+            JsValue::null()
         }
     }
 
@@ -609,8 +631,8 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = getMissingDeps)]
-    pub fn get_missing_deps(&mut self, heads: Option<Array>) -> Result<Array, JsValue> {
-        let heads = get_heads(heads).unwrap_or_default();
+    pub fn get_missing_deps(&mut self, heads: Option<Array>) -> Result<Array, error::Get> {
+        let heads = get_heads(heads)?.unwrap_or_default();
         let deps = self.doc.get_missing_deps(&heads);
         let deps: Array = deps
             .iter()
@@ -624,26 +646,24 @@ impl Automerge {
         &mut self,
         state: &mut SyncState,
         message: Uint8Array,
-    ) -> Result<(), JsValue> {
+    ) -> Result<(), error::ReceiveSyncMessage> {
         let message = message.to_vec();
-        let message = am::sync::Message::decode(message.as_slice()).map_err(to_js_err)?;
-        self.doc
-            .receive_sync_message(&mut state.0, message)
-            .map_err(to_js_err)?;
+        let message = am::sync::Message::decode(message.as_slice())?;
+        self.doc.receive_sync_message(&mut state.0, message)?;
         Ok(())
     }
 
     #[wasm_bindgen(js_name = generateSyncMessage)]
-    pub fn generate_sync_message(&mut self, state: &mut SyncState) -> Result<JsValue, JsValue> {
+    pub fn generate_sync_message(&mut self, state: &mut SyncState) -> JsValue {
         if let Some(message) = self.doc.generate_sync_message(&mut state.0) {
-            Ok(Uint8Array::from(message.encode().as_slice()).into())
+            Uint8Array::from(message.encode().as_slice()).into()
         } else {
-            Ok(JsValue::null())
+            JsValue::null()
         }
     }
 
     #[wasm_bindgen(js_name = toJS)]
-    pub fn to_js(&mut self, meta: JsValue) -> Result<JsValue, JsValue> {
+    pub fn to_js(&mut self, meta: JsValue) -> Result<JsValue, interop::error::Export> {
         self.export_object(&ROOT, Datatype::Map, None, &meta)
     }
 
@@ -652,65 +672,79 @@ impl Automerge {
         obj: JsValue,
         heads: Option<Array>,
         meta: JsValue,
-    ) -> Result<JsValue, JsValue> {
-        let obj = self.import(obj).unwrap_or(ROOT);
-        let heads = get_heads(heads);
-        let obj_type = self
-            .doc
-            .object_type(&obj)
-            .ok_or_else(|| to_js_err(format!("invalid obj {}", obj)))?;
+    ) -> Result<JsValue, error::Materialize> {
+        let (obj, obj_type) = self.import(obj).unwrap_or((ROOT, ObjType::Map));
+        let heads = get_heads(heads)?;
         let _patches = self.doc.observer().take_patches(); // throw away patches
-        self.export_object(&obj, obj_type.into(), heads.as_ref(), &meta)
+        Ok(self.export_object(&obj, obj_type.into(), heads.as_ref(), &meta)?)
     }
 
-    fn import(&self, id: JsValue) -> Result<ObjId, JsValue> {
+    fn import(&self, id: JsValue) -> Result<(ObjId, ObjType), error::ImportObj> {
         if let Some(s) = id.as_string() {
-            if let Some(post) = s.strip_prefix('/') {
-                let mut obj = ROOT;
-                let mut is_map = true;
-                let parts = post.split('/');
-                for prop in parts {
-                    if prop.is_empty() {
-                        break;
-                    }
-                    let val = if is_map {
-                        self.doc.get(obj, prop)?
-                    } else {
-                        self.doc.get(obj, am::Prop::Seq(prop.parse().unwrap()))?
-                    };
-                    match val {
-                        Some((am::Value::Object(ObjType::Map), id)) => {
-                            is_map = true;
-                            obj = id;
-                        }
-                        Some((am::Value::Object(ObjType::Table), id)) => {
-                            is_map = true;
-                            obj = id;
-                        }
-                        Some((am::Value::Object(_), id)) => {
-                            is_map = false;
-                            obj = id;
-                        }
-                        None => return Err(to_js_err(format!("invalid path '{}'", s))),
-                        _ => return Err(to_js_err(format!("path '{}' is not an object", s))),
-                    };
-                }
-                Ok(obj)
+            if let Some(components) = s.strip_prefix('/').map(|post| post.split('/')) {
+                self.import_path(components)
+                    .map_err(|e| error::ImportObj::InvalidPath(s.to_string(), e))
             } else {
-                Ok(self.doc.import(&s)?)
+                let id = self.doc.import(&s).map_err(error::ImportObj::BadImport)?;
+                // SAFETY: we just looked this up
+                let obj_type = self.doc.object_type(&id).unwrap();
+                Ok((id, obj_type))
             }
         } else {
-            Err(to_js_err("invalid objid"))
+            Err(error::ImportObj::NotString)
         }
     }
 
-    fn import_prop(&self, prop: JsValue) -> Result<Prop, JsValue> {
+    fn import_path<'a, I: Iterator<Item = &'a str>>(
+        &self,
+        components: I,
+    ) -> Result<(ObjId, ObjType), error::ImportPath> {
+        let mut obj = ROOT;
+        let mut obj_type = ObjType::Map;
+        for (i, prop) in components.enumerate() {
+            if prop.is_empty() {
+                break;
+            }
+            let is_map = matches!(obj_type, ObjType::Map | ObjType::Table);
+            let val = if is_map {
+                self.doc.get(obj, prop)?
+            } else {
+                let idx = prop
+                    .parse()
+                    .map_err(|_| error::ImportPath::IndexNotInteger(i, prop.to_string()))?;
+                self.doc.get(obj, am::Prop::Seq(idx))?
+            };
+            match val {
+                Some((am::Value::Object(ObjType::Map), id)) => {
+                    obj_type = ObjType::Map;
+                    obj = id;
+                }
+                Some((am::Value::Object(ObjType::Table), id)) => {
+                    obj_type = ObjType::Table;
+                    obj = id;
+                }
+                Some((am::Value::Object(ObjType::List), id)) => {
+                    obj_type = ObjType::List;
+                    obj = id;
+                }
+                Some((am::Value::Object(ObjType::Text), id)) => {
+                    obj_type = ObjType::Text;
+                    obj = id;
+                }
+                None => return Err(error::ImportPath::NonExistentObject(i, prop.to_string())),
+                _ => return Err(error::ImportPath::NotAnObject),
+            };
+        }
+        Ok((obj, obj_type))
+    }
+
+    fn import_prop(&self, prop: JsValue) -> Result<Prop, error::InvalidProp> {
         if let Some(s) = prop.as_string() {
             Ok(s.into())
         } else if let Some(n) = prop.as_f64() {
             Ok((n as usize).into())
         } else {
-            Err(to_js_err(format!("invalid prop {:?}", prop)))
+            Err(error::InvalidProp)
         }
     }
 
@@ -764,7 +798,7 @@ impl Automerge {
         &self,
         value: &JsValue,
         datatype: Option<String>,
-    ) -> Result<(Value<'static>, Vec<(Prop, JsValue)>), JsValue> {
+    ) -> Result<(Value<'static>, Vec<(Prop, JsValue)>), error::InvalidValue> {
         match self.import_scalar(value, &datatype) {
             Some(val) => Ok((val.into(), vec![])),
             None => {
@@ -772,7 +806,7 @@ impl Automerge {
                     Ok((o.into(), subvals))
                 } else {
                     web_sys::console::log_2(&"Invalid value".into(), value);
-                    Err(to_js_err("invalid value"))
+                    Err(error::InvalidValue)
                 }
             }
         }
@@ -788,19 +822,19 @@ impl Automerge {
 }
 
 #[wasm_bindgen(js_name = create)]
-pub fn init(actor: Option<String>) -> Result<Automerge, JsValue> {
+pub fn init(actor: Option<String>) -> Result<Automerge, error::BadActorId> {
     console_error_panic_hook::set_once();
     Automerge::new(actor)
 }
 
 #[wasm_bindgen(js_name = load)]
-pub fn load(data: Uint8Array, actor: Option<String>) -> Result<Automerge, JsValue> {
+pub fn load(data: Uint8Array, actor: Option<String>) -> Result<Automerge, error::Load> {
     let data = data.to_vec();
-    let mut doc = am::AutoCommitWithObs::<UnObserved>::load(&data)
-        .map_err(to_js_err)?
-        .with_observer(Observer::default());
+    let mut doc =
+        am::AutoCommitWithObs::<UnObserved>::load(&data)?.with_observer(Observer::default());
     if let Some(s) = actor {
-        let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
+        let actor =
+            automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());
         doc.set_actor(actor);
     }
     Ok(Automerge {
@@ -811,22 +845,22 @@ pub fn load(data: Uint8Array, actor: Option<String>) -> Result<Automerge, JsValu
 }
 
 #[wasm_bindgen(js_name = encodeChange)]
-pub fn encode_change(change: JsValue) -> Result<Uint8Array, JsValue> {
+pub fn encode_change(change: JsValue) -> Result<Uint8Array, error::EncodeChange> {
     // Alex: Technically we should be using serde_wasm_bindgen::from_value instead of into_serde.
     // Unfortunately serde_wasm_bindgen::from_value fails for some inscrutable reason, so instead
     // we use into_serde (sorry to future me).
     #[allow(deprecated)]
-    let change: am::ExpandedChange = change.into_serde().map_err(to_js_err)?;
+    let change: am::ExpandedChange = change.into_serde()?;
     let change: Change = change.into();
     Ok(Uint8Array::from(change.raw_bytes()))
 }
 
 #[wasm_bindgen(js_name = decodeChange)]
-pub fn decode_change(change: Uint8Array) -> Result<JsValue, JsValue> {
-    let change = Change::from_bytes(change.to_vec()).map_err(to_js_err)?;
+pub fn decode_change(change: Uint8Array) -> Result<JsValue, error::DecodeChange> {
+    let change = Change::from_bytes(change.to_vec())?;
     let change: am::ExpandedChange = change.decode();
     let serializer = serde_wasm_bindgen::Serializer::json_compatible();
-    change.serialize(&serializer).map_err(to_js_err)
+    Ok(change.serialize(&serializer)?)
 }
 
 #[wasm_bindgen(js_name = initSyncState)]
@@ -836,7 +870,7 @@ pub fn init_sync_state() -> SyncState {
 
 // this is needed to be compatible with the automerge-js api
 #[wasm_bindgen(js_name = importSyncState)]
-pub fn import_sync_state(state: JsValue) -> Result<SyncState, JsValue> {
+pub fn import_sync_state(state: JsValue) -> Result<SyncState, interop::error::BadSyncState> {
     Ok(SyncState(JS(state).try_into()?))
 }
 
@@ -847,46 +881,328 @@ pub fn export_sync_state(state: &SyncState) -> JsValue {
 }
 
 #[wasm_bindgen(js_name = encodeSyncMessage)]
-pub fn encode_sync_message(message: JsValue) -> Result<Uint8Array, JsValue> {
-    let heads = js_get(&message, "heads")?.try_into()?;
-    let need = js_get(&message, "need")?.try_into()?;
-    let changes = js_get(&message, "changes")?.try_into()?;
-    let have = js_get(&message, "have")?.try_into()?;
-    Ok(Uint8Array::from(
-        am::sync::Message {
-            heads,
-            need,
-            have,
-            changes,
-        }
-        .encode()
-        .as_slice(),
-    ))
+pub fn encode_sync_message(message: JsValue) -> Result<Uint8Array, interop::error::BadSyncMessage> {
+    let message: am::sync::Message = JS(message).try_into()?;
+    Ok(Uint8Array::from(message.encode().as_slice()))
 }
 
 #[wasm_bindgen(js_name = decodeSyncMessage)]
-pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, JsValue> {
+pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, error::BadSyncMessage> {
     let data = msg.to_vec();
-    let msg = am::sync::Message::decode(&data).map_err(to_js_err)?;
+    let msg = am::sync::Message::decode(&data)?;
     let heads = AR::from(msg.heads.as_slice());
     let need = AR::from(msg.need.as_slice());
     let changes = AR::from(msg.changes.as_slice());
     let have = AR::from(msg.have.as_slice());
     let obj = Object::new().into();
-    js_set(&obj, "heads", heads)?;
-    js_set(&obj, "need", need)?;
-    js_set(&obj, "have", have)?;
-    js_set(&obj, "changes", changes)?;
+    // SAFETY: we just created this object
+    js_set(&obj, "heads", heads).unwrap();
+    js_set(&obj, "need", need).unwrap();
+    js_set(&obj, "have", have).unwrap();
+    js_set(&obj, "changes", changes).unwrap();
     Ok(obj)
 }
 
 #[wasm_bindgen(js_name = encodeSyncState)]
-pub fn encode_sync_state(state: &SyncState) -> Result<Uint8Array, JsValue> {
-    //let state = state.0.clone();
-    Ok(Uint8Array::from(state.0.encode().as_slice()))
+pub fn encode_sync_state(state: &SyncState) -> Uint8Array {
+    Uint8Array::from(state.0.encode().as_slice())
 }
 
 #[wasm_bindgen(js_name = decodeSyncState)]
-pub fn decode_sync_state(data: Uint8Array) -> Result<SyncState, JsValue> {
+pub fn decode_sync_state(data: Uint8Array) -> Result<SyncState, sync::DecodeSyncStateErr> {
     SyncState::decode(data)
+}
+
+pub mod error {
+    use automerge::AutomergeError;
+    use wasm_bindgen::JsValue;
+
+    use crate::interop::{
+        self,
+        error::{BadChangeHashes, BadJSChanges},
+    };
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("could not parse Actor ID as a hex string: {0}")]
+    pub struct BadActorId(#[from] hex::FromHexError);
+
+    impl From<BadActorId> for JsValue {
+        fn from(s: BadActorId) -> Self {
+            JsValue::from(s.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum ApplyChangesError {
+        #[error(transparent)]
+        DecodeChanges(#[from] BadJSChanges),
+        #[error("error applying changes: {0}")]
+        Apply(#[from] AutomergeError),
+    }
+
+    impl From<ApplyChangesError> for JsValue {
+        fn from(e: ApplyChangesError) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum Fork {
+        #[error(transparent)]
+        BadActor(#[from] BadActorId),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+        #[error(transparent)]
+        BadChangeHashes(#[from] BadChangeHashes),
+    }
+
+    impl From<Fork> for JsValue {
+        fn from(f: Fork) -> Self {
+            JsValue::from(f.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error(transparent)]
+    pub struct Merge(#[from] AutomergeError);
+
+    impl From<Merge> for JsValue {
+        fn from(e: Merge) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum ImportPath {
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+        #[error("path component {0} ({1}) should be an integer to index a sequence")]
+        IndexNotInteger(usize, String),
+        #[error("path component {0} ({1}) referenced a nonexistent object")]
+        NonExistentObject(usize, String),
+        #[error("path did not refer to an object")]
+        NotAnObject,
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum ImportObj {
+        #[error("obj id was not a string")]
+        NotString,
+        #[error("invalid path {0}: {1}")]
+        InvalidPath(String, ImportPath),
+        #[error("unable to import object id: {0}")]
+        BadImport(AutomergeError),
+    }
+
+    impl From<ImportObj> for JsValue {
+        fn from(e: ImportObj) -> Self {
+            JsValue::from(format!("invalid object ID: {}", e))
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum Get {
+        #[error("invalid object ID: {0}")]
+        ImportObj(#[from] ImportObj),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+        #[error("bad heads: {0}")]
+        BadHeads(#[from] interop::error::BadChangeHashes),
+        #[error(transparent)]
+        InvalidProp(#[from] InvalidProp),
+    }
+
+    impl From<Get> for JsValue {
+        fn from(e: Get) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum Splice {
+        #[error("invalid object ID: {0}")]
+        ImportObj(#[from] ImportObj),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+        #[error("value at {0} in values to insert was not a primitive")]
+        ValueNotPrimitive(usize),
+    }
+
+    impl From<Splice> for JsValue {
+        fn from(e: Splice) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum Insert {
+        #[error("invalid object id: {0}")]
+        ImportObj(#[from] ImportObj),
+        #[error("the value to insert was not a primitive")]
+        ValueNotPrimitive,
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+        #[error(transparent)]
+        InvalidProp(#[from] InvalidProp),
+        #[error(transparent)]
+        InvalidValue(#[from] InvalidValue),
+    }
+
+    impl From<Insert> for JsValue {
+        fn from(e: Insert) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum InsertObject {
+        #[error("invalid object id: {0}")]
+        ImportObj(#[from] ImportObj),
+        #[error("the value to insert must be an object")]
+        ValueNotObject,
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+        #[error(transparent)]
+        InvalidProp(#[from] InvalidProp),
+        #[error(transparent)]
+        InvalidValue(#[from] InvalidValue),
+    }
+
+    impl From<InsertObject> for JsValue {
+        fn from(e: InsertObject) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("given property was not a string or integer")]
+    pub struct InvalidProp;
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("given property was not a string or integer")]
+    pub struct InvalidValue;
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum Increment {
+        #[error("invalid object id: {0}")]
+        ImportObj(#[from] ImportObj),
+        #[error(transparent)]
+        InvalidProp(#[from] InvalidProp),
+        #[error("value was not numeric")]
+        ValueNotNumeric,
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+    }
+
+    impl From<Increment> for JsValue {
+        fn from(e: Increment) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum BadSyncMessage {
+        #[error("could not decode sync message: {0}")]
+        ReadMessage(#[from] automerge::sync::ReadMessageError),
+    }
+
+    impl From<BadSyncMessage> for JsValue {
+        fn from(e: BadSyncMessage) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum ApplyPatch {
+        #[error(transparent)]
+        Interop(#[from] interop::error::ApplyPatch),
+        #[error(transparent)]
+        Export(#[from] interop::error::Export),
+        #[error("patch was not an object")]
+        NotObjectd,
+        #[error("error calling patch callback: {0:?}")]
+        PatchCallback(JsValue),
+    }
+
+    impl From<ApplyPatch> for JsValue {
+        fn from(e: ApplyPatch) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("unable to build patches: {0}")]
+    pub struct PopPatches(#[from] interop::error::Export);
+
+    impl From<PopPatches> for JsValue {
+        fn from(e: PopPatches) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum Materialize {
+        #[error(transparent)]
+        Export(#[from] interop::error::Export),
+        #[error("bad heads: {0}")]
+        Heads(#[from] interop::error::BadChangeHashes),
+    }
+
+    impl From<Materialize> for JsValue {
+        fn from(e: Materialize) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum ReceiveSyncMessage {
+        #[error(transparent)]
+        Decode(#[from] automerge::sync::ReadMessageError),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+    }
+
+    impl From<ReceiveSyncMessage> for JsValue {
+        fn from(e: ReceiveSyncMessage) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum Load {
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+        #[error(transparent)]
+        BadActor(#[from] BadActorId),
+    }
+
+    impl From<Load> for JsValue {
+        fn from(e: Load) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("Unable to read JS change: {0}")]
+    pub struct EncodeChange(#[from] serde_json::Error);
+
+    impl From<EncodeChange> for JsValue {
+        fn from(e: EncodeChange) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum DecodeChange {
+        #[error(transparent)]
+        Load(#[from] automerge::LoadChangeError),
+        #[error(transparent)]
+        Serialize(#[from] serde_wasm_bindgen::Error),
+    }
+
+    impl From<DecodeChange> for JsValue {
+        fn from(e: DecodeChange) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
 }
