@@ -201,10 +201,10 @@ static void test_should_be_able_to_use_bytes(void** state) {
     AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
     /* doc.put("_root", "data1", new Uint8Array([10, 11, 12]));              */
     static uint8_t const DATA1[] = {10, 11, 12};
-    AMfree(AMmapPutBytes(doc, AM_ROOT, AMstr("data1"), AMbytes(DATA1, sizeof(DATA1)));
+    AMfree(AMmapPutBytes(doc, AM_ROOT, AMstr("data1"), AMbytes(DATA1, sizeof(DATA1))));
     /* doc.put("_root", "data2", new Uint8Array([13, 14, 15]), "bytes");     */
     static uint8_t const DATA2[] = {13, 14, 15};
-    AMfree(AMmapPutBytes(doc, AM_ROOT, AMstr("data2"), AMbytes(DATA2, sizeof(DATA2)));
+    AMfree(AMmapPutBytes(doc, AM_ROOT, AMstr("data2"), AMbytes(DATA2, sizeof(DATA2))));
     /* const value1 = doc.getWithType("_root", "data1")                      */
     AMbyteSpan const value1 = AMpush(&stack,
                                      AMmapGet(doc, AM_ROOT, AMstr("data1"), NULL),
