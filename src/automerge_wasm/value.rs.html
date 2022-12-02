@@ -151,8 +151,21 @@
 <span id="149">149</span>
 <span id="150">150</span>
 <span id="151">151</span>
-</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::to_js_err;
-<span class="kw">use </span>automerge::{ObjType, ScalarValue, Value};
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+</pre><pre class="rust"><code><span class="kw">use </span>automerge::{ObjType, ScalarValue, Value};
 <span class="kw">use </span>wasm_bindgen::prelude::<span class="kw-2">*</span>;
 
 <span class="attribute">#[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -266,12 +279,10 @@
 }
 
 <span class="kw">impl </span>TryFrom&lt;JsValue&gt; <span class="kw">for </span>Datatype {
-    <span class="kw">type </span>Error = JsValue;
+    <span class="kw">type </span>Error = InvalidDatatype;
 
     <span class="kw">fn </span>try_from(datatype: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, <span class="self">Self</span>::Error&gt; {
-        <span class="kw">let </span>datatype = datatype
-            .as_string()
-            .ok_or_else(|| to_js_err(<span class="string">&quot;datatype is not a string&quot;</span>))<span class="question-mark">?</span>;
+        <span class="kw">let </span>datatype = datatype.as_string().ok_or(InvalidDatatype::NotString)<span class="question-mark">?</span>;
         <span class="kw">match </span>datatype.as_str() {
             <span class="string">&quot;map&quot; </span>=&gt; <span class="prelude-val">Ok</span>(Datatype::Map),
             <span class="string">&quot;table&quot; </span>=&gt; <span class="prelude-val">Ok</span>(Datatype::Table),
@@ -288,9 +299,10 @@
             <span class="string">&quot;null&quot; </span>=&gt; <span class="prelude-val">Ok</span>(Datatype::Null),
             d =&gt; {
                 <span class="kw">if </span>d.starts_with(<span class="string">&quot;unknown&quot;</span>) {
-                    <span class="macro">todo!</span>() <span class="comment">// handle &quot;unknown{}&quot;,
-                </span>} <span class="kw">else </span>{
-                    <span class="prelude-val">Err</span>(to_js_err(<span class="macro">format!</span>(<span class="string">&quot;unknown datatype {}&quot;</span>, d)))
+                    <span class="comment">// TODO: handle &quot;unknown{}&quot;,
+                    </span><span class="prelude-val">Err</span>(InvalidDatatype::UnknownNotImplemented)
+                } <span class="kw">else </span>{
+                    <span class="prelude-val">Err</span>(InvalidDatatype::Unknown(d.to_string()))
                 }
             }
         }
@@ -300,6 +312,22 @@
 <span class="kw">impl </span>From&lt;Datatype&gt; <span class="kw">for </span>JsValue {
     <span class="kw">fn </span>from(d: Datatype) -&gt; <span class="self">Self </span>{
         String::from(d).into()
+    }
+}
+
+<span class="attribute">#[derive(Debug, thiserror::Error)]
+</span><span class="kw">pub enum </span>InvalidDatatype {
+    <span class="attribute">#[error(<span class="string">&quot;unknown datatype&quot;</span>)]
+    </span>Unknown(String),
+    <span class="attribute">#[error(<span class="string">&quot;datatype is not a string&quot;</span>)]
+    </span>NotString,
+    <span class="attribute">#[error(<span class="string">&quot;cannot handle unknown datatype&quot;</span>)]
+    </span>UnknownNotImplemented,
+}
+
+<span class="kw">impl </span>From&lt;InvalidDatatype&gt; <span class="kw">for </span>JsValue {
+    <span class="kw">fn </span>from(e: InvalidDatatype) -&gt; <span class="self">Self </span>{
+        JsValue::from(e.to_string())
     }
 }
 </code></pre></div>
