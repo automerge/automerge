@@ -236,13 +236,17 @@
 <span id="234">234</span>
 <span id="235">235</span>
 <span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 <span class="kw">use </span><span class="kw">crate</span>::Parents;
 <span class="kw">use </span><span class="kw">crate</span>::Prop;
 <span class="kw">use </span><span class="kw">crate</span>::Value;
 
 <span class="doccomment">/// An observer of operations applied to the document.
-</span><span class="kw">pub trait </span>OpObserver: Default + Clone {
+</span><span class="kw">pub trait </span>OpObserver {
     <span class="doccomment">/// A new value has been inserted into the given object.
     ///
     /// - `parents`: A parents iterator that can be used to collect path information
@@ -302,9 +306,7 @@
     /// Called by AutoCommit when creating a new transaction.  Observer branch
     /// will be merged on `commit()` or thrown away on `rollback()`
     ///
-    </span><span class="kw">fn </span>branch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
-        <span class="self">Self</span>::default()
-    }
+    </span><span class="kw">fn </span>branch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>;
 
     <span class="doccomment">/// Merge observed information from a transaction.
     ///
@@ -346,6 +348,8 @@
     <span class="kw">fn </span>delete(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _parents: Parents&lt;<span class="lifetime">&#39;_</span>&gt;, _objid: ExId, _prop: Prop) {}
 
     <span class="kw">fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _other: <span class="kw-2">&amp;</span><span class="self">Self</span>) {}
+
+    <span class="kw">fn </span>branch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{}
 }
 
 <span class="doccomment">/// Capture operations into a [`Vec`] and store them as patches.
@@ -420,6 +424,10 @@
 
     <span class="kw">fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>) {
         <span class="self">self</span>.patches.extend_from_slice(other.patches.as_slice())
+    }
+
+    <span class="kw">fn </span>branch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>::default()
     }
 }
 

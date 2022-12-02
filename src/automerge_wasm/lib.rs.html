@@ -881,6 +881,17 @@
 <span id="879">879</span>
 <span id="880">880</span>
 <span id="881">881</span>
+<span id="882">882</span>
+<span id="883">883</span>
+<span id="884">884</span>
+<span id="885">885</span>
+<span id="886">886</span>
+<span id="887">887</span>
+<span id="888">888</span>
+<span id="889">889</span>
+<span id="890">890</span>
+<span id="891">891</span>
+<span id="892">892</span>
 </pre><pre class="rust"><code><span class="attribute">#![doc(
     html_logo_url = <span class="string">&quot;https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg&quot;</span>,
     html_favicon_url = <span class="string">&quot;https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico&quot;
@@ -1014,7 +1025,10 @@
             commit_opts.set_time(time <span class="kw">as </span>i64);
         }
         <span class="kw">let </span>hash = <span class="self">self</span>.doc.commit_with(commit_opts);
-        JsValue::from_str(<span class="kw-2">&amp;</span>hex::encode(hash.<span class="number">0</span>))
+        <span class="kw">match </span>hash {
+            <span class="prelude-val">Some</span>(h) =&gt; JsValue::from_str(<span class="kw-2">&amp;</span>hex::encode(h.<span class="number">0</span>)),
+            <span class="prelude-val">None </span>=&gt; JsValue::NULL,
+        }
     }
 
     <span class="kw">pub fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;mut </span>Automerge) -&gt; <span class="prelude-ty">Result</span>&lt;Array, JsValue&gt; {
@@ -1656,6 +1670,14 @@
                 }
             }
         }
+    }
+
+    <span class="attribute">#[wasm_bindgen(js_name = emptyChange)]
+    </span><span class="kw">pub fn </span>empty_change(<span class="kw-2">&amp;mut </span><span class="self">self</span>, message: <span class="prelude-ty">Option</span>&lt;String&gt;, time: <span class="prelude-ty">Option</span>&lt;f64&gt;) -&gt; JsValue {
+        <span class="kw">let </span>time = time.map(|f| f <span class="kw">as </span>i64);
+        <span class="kw">let </span>options = CommitOptions { message, time };
+        <span class="kw">let </span>hash = <span class="self">self</span>.doc.empty_change(options);
+        JsValue::from_str(<span class="kw-2">&amp;</span>hex::encode(hash))
     }
 }
 

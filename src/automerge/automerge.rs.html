@@ -1261,6 +1261,7 @@
 <span id="1259">1259</span>
 <span id="1260">1260</span>
 <span id="1261">1261</span>
+<span id="1262">1262</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::cmp::Ordering;
 <span class="kw">use </span>std::collections::{BTreeSet, HashMap, HashSet};
 <span class="kw">use </span>std::fmt::Debug;
@@ -1277,7 +1278,7 @@
 <span class="kw">use </span><span class="kw">crate</span>::parents::Parents;
 <span class="kw">use </span><span class="kw">crate</span>::storage::{<span class="self">self</span>, load, CompressConfig};
 <span class="kw">use </span><span class="kw">crate</span>::transaction::{
-    <span class="self">self</span>, CommitOptions, Failure, Observed, Success, Transaction, TransactionInner, UnObserved,
+    <span class="self">self</span>, CommitOptions, Failure, Observed, Success, Transaction, TransactionArgs, UnObserved,
 };
 <span class="kw">use </span><span class="kw">crate</span>::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType,
@@ -1377,25 +1378,19 @@
 
     <span class="doccomment">/// Start a transaction.
     </span><span class="kw">pub fn </span>transaction(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Transaction&lt;<span class="lifetime">&#39;_</span>, UnObserved&gt; {
-        Transaction {
-            inner: <span class="prelude-val">Some</span>(<span class="self">self</span>.transaction_inner()),
-            doc: <span class="self">self</span>,
-            observation: <span class="prelude-val">Some</span>(UnObserved),
-        }
+        <span class="kw">let </span>args = <span class="self">self</span>.transaction_args();
+        Transaction::new(<span class="self">self</span>, args, UnObserved)
     }
 
     <span class="kw">pub fn </span>transaction_with_observer&lt;Obs: OpObserver&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         op_observer: Obs,
     ) -&gt; Transaction&lt;<span class="lifetime">&#39;_</span>, Observed&lt;Obs&gt;&gt; {
-        Transaction {
-            inner: <span class="prelude-val">Some</span>(<span class="self">self</span>.transaction_inner()),
-            doc: <span class="self">self</span>,
-            observation: <span class="prelude-val">Some</span>(Observed::new(op_observer)),
-        }
+        <span class="kw">let </span>args = <span class="self">self</span>.transaction_args();
+        Transaction::new(<span class="self">self</span>, args, Observed::new(op_observer))
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>transaction_inner(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; TransactionInner {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>transaction_args(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; TransactionArgs {
         <span class="kw">let </span>actor = <span class="self">self</span>.get_actor_index();
         <span class="kw">let </span>seq = <span class="self">self</span>.states.get(<span class="kw-2">&amp;</span>actor).map_or(<span class="number">0</span>, |v| v.len()) <span class="kw">as </span>u64 + <span class="number">1</span>;
         <span class="kw">let </span><span class="kw-2">mut </span>deps = <span class="self">self</span>.get_heads();
@@ -1405,15 +1400,13 @@
                 deps.push(last_hash);
             }
         }
+        <span class="comment">// SAFETY: this unwrap is safe as we always add 1
+        </span><span class="kw">let </span>start_op = NonZeroU64::new(<span class="self">self</span>.max_op + <span class="number">1</span>).unwrap();
 
-        TransactionInner {
-            actor,
+        TransactionArgs {
+            actor_index: actor,
             seq,
-            <span class="comment">// SAFETY: this unwrap is safe as we always add 1
-            </span>start_op: NonZeroU64::new(<span class="self">self</span>.max_op + <span class="number">1</span>).unwrap(),
-            time: <span class="number">0</span>,
-            message: <span class="prelude-val">None</span>,
-            operations: <span class="macro">vec!</span>[],
+            start_op,
             deps,
         }
     }
@@ -1525,6 +1518,15 @@
                 cancelled: tx.rollback(),
             }),
         }
+    }
+
+    <span class="doccomment">/// Generate an empty change
+    ///
+    /// The main reason to do this is if you want to create a &quot;merge commit&quot;, which is a change
+    /// that has all the current heads of the document as dependencies.
+    </span><span class="kw">pub fn </span>empty_commit(<span class="kw-2">&amp;mut </span><span class="self">self</span>, opts: CommitOptions) -&gt; ChangeHash {
+        <span class="kw">let </span>args = <span class="self">self</span>.transaction_args();
+        Transaction::empty(<span class="self">self</span>, args, opts)
     }
 
     <span class="doccomment">/// Fork this document at the current point for use by a different actor.

@@ -301,6 +301,26 @@
 <span id="299">299</span>
 <span id="300">300</span>
 <span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
@@ -308,7 +328,7 @@
 <span class="kw">use crate</span>::{AutomergeError, Keys};
 <span class="kw">use crate</span>::{ListRange, ListRangeAt, MapRange, MapRangeAt};
 
-<span class="kw">use super</span>::{observation, CommitOptions, Transactable, TransactionInner};
+<span class="kw">use super</span>::{observation, CommitOptions, Transactable, TransactionArgs, TransactionInner};
 
 <span class="doccomment">/// A transaction on a document.
 /// Transactions group operations into a single change so that no other operations can happen
@@ -326,10 +346,30 @@
 </span><span class="kw">pub struct </span>Transaction&lt;<span class="lifetime">&#39;a</span>, Obs: observation::Observation&gt; {
     <span class="comment">// this is an option so that we can take it during commit and rollback to prevent it being
     // rolled back during drop.
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) inner: <span class="prelude-ty">Option</span>&lt;TransactionInner&gt;,
+    </span>inner: <span class="prelude-ty">Option</span>&lt;TransactionInner&gt;,
     <span class="comment">// As with `inner` this is an `Option` so we can `take` it during `commit`
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) observation: <span class="prelude-ty">Option</span>&lt;Obs&gt;,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>Automerge,
+    </span>observation: <span class="prelude-ty">Option</span>&lt;Obs&gt;,
+    doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>Automerge,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, Obs: observation::Observation&gt; Transaction&lt;<span class="lifetime">&#39;a</span>, Obs&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>Automerge, args: TransactionArgs, obs: Obs) -&gt; <span class="self">Self </span>{
+        <span class="self">Self </span>{
+            inner: <span class="prelude-val">Some</span>(TransactionInner::new(args)),
+            doc,
+            observation: <span class="prelude-val">Some</span>(obs),
+        }
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Transaction&lt;<span class="lifetime">&#39;a</span>, observation::UnObserved&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>empty(
+        doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>Automerge,
+        args: TransactionArgs,
+        opts: CommitOptions,
+    ) -&gt; ChangeHash {
+        TransactionInner::empty(doc, args, opts.message, opts.time)
+    }
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, Obs: OpObserver&gt; Transaction&lt;<span class="lifetime">&#39;a</span>, observation::Observed&lt;Obs&gt;&gt; {

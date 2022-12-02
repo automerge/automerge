@@ -528,6 +528,28 @@
 <span id="526">526</span>
 <span id="527">527</span>
 <span id="528">528</span>
+<span id="529">529</span>
+<span id="530">530</span>
+<span id="531">531</span>
+<span id="532">532</span>
+<span id="533">533</span>
+<span id="534">534</span>
+<span id="535">535</span>
+<span id="536">536</span>
+<span id="537">537</span>
+<span id="538">538</span>
+<span id="539">539</span>
+<span id="540">540</span>
+<span id="541">541</span>
+<span id="542">542</span>
+<span id="543">543</span>
+<span id="544">544</span>
+<span id="545">545</span>
+<span id="546">546</span>
+<span id="547">547</span>
+<span id="548">548</span>
+<span id="549">549</span>
+<span id="550">550</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
@@ -561,7 +583,7 @@
     }
 }
 
-<span class="kw">impl</span>&lt;O: OpObserver&gt; Default <span class="kw">for </span>AutoCommitWithObs&lt;Observed&lt;O&gt;&gt; {
+<span class="kw">impl</span>&lt;O: OpObserver + Default&gt; Default <span class="kw">for </span>AutoCommitWithObs&lt;Observed&lt;O&gt;&gt; {
     <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
         <span class="kw">let </span>op_observer = O::default();
         AutoCommitWithObs {
@@ -657,7 +679,9 @@
 
     <span class="kw">fn </span>ensure_transaction_open(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
         <span class="kw">if </span><span class="self">self</span>.transaction.is_none() {
-            <span class="self">self</span>.transaction = <span class="prelude-val">Some</span>((<span class="self">self</span>.observation.branch(), <span class="self">self</span>.doc.transaction_inner()));
+            <span class="kw">let </span>args = <span class="self">self</span>.doc.transaction_args();
+            <span class="kw">let </span>inner = TransactionInner::new(args);
+            <span class="self">self</span>.transaction = <span class="prelude-val">Some</span>((<span class="self">self</span>.observation.branch(), inner))
         }
     }
 
@@ -796,11 +820,16 @@
         <span class="self">self</span>.doc.get_heads()
     }
 
-    <span class="kw">pub fn </span>commit(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; ChangeHash {
+    <span class="doccomment">/// Commit any uncommitted changes
+    ///
+    /// Returns `None` if there were no operations to commit
+    </span><span class="kw">pub fn </span>commit(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;ChangeHash&gt; {
         <span class="self">self</span>.commit_with(CommitOptions::default())
     }
 
     <span class="doccomment">/// Commit the current operations with some options.
+    ///
+    /// Returns `None` if there were no operations to commit
     ///
     /// ```
     /// # use automerge::transaction::CommitOptions;
@@ -815,7 +844,7 @@
     /// i64;
     /// doc.commit_with(CommitOptions::default().with_message(&quot;Create todos list&quot;).with_time(now));
     /// ```
-    </span><span class="kw">pub fn </span>commit_with(<span class="kw-2">&amp;mut </span><span class="self">self</span>, options: CommitOptions) -&gt; ChangeHash {
+    </span><span class="kw">pub fn </span>commit_with(<span class="kw-2">&amp;mut </span><span class="self">self</span>, options: CommitOptions) -&gt; <span class="prelude-ty">Option</span>&lt;ChangeHash&gt; {
         <span class="comment">// ensure that even no changes triggers a change
         </span><span class="self">self</span>.ensure_transaction_open();
         <span class="kw">let </span>(current, tx) = <span class="self">self</span>.transaction.take().unwrap();
@@ -828,6 +857,21 @@
             .take()
             .map(|(<span class="kw">_</span>, tx)| tx.rollback(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc))
             .unwrap_or(<span class="number">0</span>)
+    }
+
+    <span class="doccomment">/// Generate an empty change
+    ///
+    /// The main reason to do this is if you wish to create a &quot;merge commit&quot; which has all the
+    /// current heads of the documents as dependencies but you have no new operations to create.
+    ///
+    /// Because this structure is an &quot;autocommit&quot; there may actually be outstanding operations to
+    /// submit. If this is the case this function will create two changes, one with the outstanding
+    /// operations and a new one with no operations. The returned `ChangeHash` will always be the
+    /// hash of the empty change.
+    </span><span class="kw">pub fn </span>empty_change(<span class="kw-2">&amp;mut </span><span class="self">self</span>, options: CommitOptions) -&gt; ChangeHash {
+        <span class="self">self</span>.ensure_transaction_closed();
+        <span class="kw">let </span>args = <span class="self">self</span>.doc.transaction_args();
+        TransactionInner::empty(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, args, options.message, options.time)
     }
 }
 

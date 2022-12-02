@@ -93,7 +93,7 @@
     <span class="kw">type </span>CommitResult;
 
     <span class="kw">fn </span>observer(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span><span class="self">Self</span>::Obs&gt;;
-    <span class="kw">fn </span>make_result(<span class="self">self</span>, hash: ChangeHash) -&gt; <span class="self">Self</span>::CommitResult;
+    <span class="kw">fn </span>make_result(<span class="self">self</span>, hash: <span class="prelude-ty">Option</span>&lt;ChangeHash&gt;) -&gt; <span class="self">Self</span>::CommitResult;
     <span class="kw">fn </span>branch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>;
     <span class="kw">fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>);
 }
@@ -113,12 +113,12 @@
 
 <span class="kw">impl</span>&lt;Obs: OpObserver&gt; Observation <span class="kw">for </span>Observed&lt;Obs&gt; {
     <span class="kw">type </span>Obs = Obs;
-    <span class="kw">type </span>CommitResult = (Obs, ChangeHash);
+    <span class="kw">type </span>CommitResult = (Obs, <span class="prelude-ty">Option</span>&lt;ChangeHash&gt;);
     <span class="kw">fn </span>observer(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span><span class="self">Self</span>::Obs&gt; {
         <span class="prelude-val">Some</span>(<span class="kw-2">&amp;mut </span><span class="self">self</span>.<span class="number">0</span>)
     }
 
-    <span class="kw">fn </span>make_result(<span class="self">self</span>, hash: ChangeHash) -&gt; <span class="self">Self</span>::CommitResult {
+    <span class="kw">fn </span>make_result(<span class="self">self</span>, hash: <span class="prelude-ty">Option</span>&lt;ChangeHash&gt;) -&gt; <span class="self">Self</span>::CommitResult {
         (<span class="self">self</span>.<span class="number">0</span>, hash)
     }
 
@@ -141,12 +141,12 @@
 
 <span class="kw">impl </span>Observation <span class="kw">for </span>UnObserved {
     <span class="kw">type </span>Obs = ();
-    <span class="kw">type </span>CommitResult = ChangeHash;
+    <span class="kw">type </span>CommitResult = <span class="prelude-ty">Option</span>&lt;ChangeHash&gt;;
     <span class="kw">fn </span>observer(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span><span class="self">Self</span>::Obs&gt; {
         <span class="prelude-val">None
     </span>}
 
-    <span class="kw">fn </span>make_result(<span class="self">self</span>, hash: ChangeHash) -&gt; <span class="self">Self</span>::CommitResult {
+    <span class="kw">fn </span>make_result(<span class="self">self</span>, hash: <span class="prelude-ty">Option</span>&lt;ChangeHash&gt;) -&gt; <span class="self">Self</span>::CommitResult {
         hash
     }
 

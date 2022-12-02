@@ -472,6 +472,62 @@
 <span id="470">470</span>
 <span id="471">471</span>
 <span id="472">472</span>
+<span id="473">473</span>
+<span id="474">474</span>
+<span id="475">475</span>
+<span id="476">476</span>
+<span id="477">477</span>
+<span id="478">478</span>
+<span id="479">479</span>
+<span id="480">480</span>
+<span id="481">481</span>
+<span id="482">482</span>
+<span id="483">483</span>
+<span id="484">484</span>
+<span id="485">485</span>
+<span id="486">486</span>
+<span id="487">487</span>
+<span id="488">488</span>
+<span id="489">489</span>
+<span id="490">490</span>
+<span id="491">491</span>
+<span id="492">492</span>
+<span id="493">493</span>
+<span id="494">494</span>
+<span id="495">495</span>
+<span id="496">496</span>
+<span id="497">497</span>
+<span id="498">498</span>
+<span id="499">499</span>
+<span id="500">500</span>
+<span id="501">501</span>
+<span id="502">502</span>
+<span id="503">503</span>
+<span id="504">504</span>
+<span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
+<span id="524">524</span>
+<span id="525">525</span>
+<span id="526">526</span>
+<span id="527">527</span>
+<span id="528">528</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::num::NonZeroU64;
 
 <span class="kw">use </span><span class="kw">crate</span>::automerge::Actor;
@@ -484,24 +540,80 @@
 
 <span class="attribute">#[derive(Debug, Clone)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>TransactionInner {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) actor: usize,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) seq: u64,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) start_op: NonZeroU64,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) time: i64,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) message: <span class="prelude-ty">Option</span>&lt;String&gt;,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) deps: Vec&lt;ChangeHash&gt;,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) operations: Vec&lt;(ObjId, Prop, Op)&gt;,
+    actor: usize,
+    seq: u64,
+    start_op: NonZeroU64,
+    time: i64,
+    message: <span class="prelude-ty">Option</span>&lt;String&gt;,
+    deps: Vec&lt;ChangeHash&gt;,
+    operations: Vec&lt;(ObjId, Prop, Op)&gt;,
+}
+
+<span class="doccomment">/// Arguments required to create a new transaction
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>TransactionArgs {
+    <span class="doccomment">/// The index of the actor ID this transaction will create ops for in the
+    /// [`OpSetMetadata::actors`]
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) actor_index: usize,
+    <span class="doccomment">/// The sequence number of the change this transaction will create
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) seq: u64,
+    <span class="doccomment">/// The start op of the change this transaction will create
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) start_op: NonZeroU64,
+    <span class="doccomment">/// The dependencies of the change this transaction will create
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) deps: Vec&lt;ChangeHash&gt;,
 }
 
 <span class="kw">impl </span>TransactionInner {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(
+        TransactionArgs {
+            actor_index: actor,
+            seq,
+            start_op,
+            deps,
+        }: TransactionArgs,
+    ) -&gt; <span class="self">Self </span>{
+        TransactionInner {
+            actor,
+            seq,
+            start_op,
+            time: <span class="number">0</span>,
+            message: <span class="prelude-val">None</span>,
+            operations: <span class="macro">vec!</span>[],
+            deps,
+        }
+    }
+
+    <span class="doccomment">/// Create an empty change
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>empty(
+        doc: <span class="kw-2">&amp;mut </span>Automerge,
+        args: TransactionArgs,
+        message: <span class="prelude-ty">Option</span>&lt;String&gt;,
+        time: <span class="prelude-ty">Option</span>&lt;i64&gt;,
+    ) -&gt; ChangeHash {
+        <span class="self">Self</span>::new(args).commit_impl(doc, message, time)
+    }
+
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>pending_ops(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
         <span class="self">self</span>.operations.len()
     }
 
     <span class="doccomment">/// Commit the operations performed in this transaction, returning the hashes corresponding to
     /// the new heads.
+    ///
+    /// Returns `None` if there were no operations to commit
     </span><span class="attribute">#[tracing::instrument(skip(<span class="self">self</span>, doc))]
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>commit(
+        <span class="self">self</span>,
+        doc: <span class="kw-2">&amp;mut </span>Automerge,
+        message: <span class="prelude-ty">Option</span>&lt;String&gt;,
+        time: <span class="prelude-ty">Option</span>&lt;i64&gt;,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;ChangeHash&gt; {
+        <span class="kw">if </span><span class="self">self</span>.pending_ops() == <span class="number">0 </span>{
+            <span class="kw">return </span><span class="prelude-val">None</span>;
+        }
+        <span class="prelude-val">Some</span>(<span class="self">self</span>.commit_impl(doc, message, time))
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>commit_impl(
         <span class="kw-2">mut </span><span class="self">self</span>,
         doc: <span class="kw-2">&amp;mut </span>Automerge,
         message: <span class="prelude-ty">Option</span>&lt;String&gt;,

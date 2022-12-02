@@ -27,8 +27,8 @@
 </span><span class="kw">pub struct </span>Success&lt;O, Obs&gt; {
     <span class="doccomment">/// The result of the transaction.
     </span><span class="kw">pub </span>result: O,
-    <span class="doccomment">/// The hash of the change, also the head of the document.
-    </span><span class="kw">pub </span>hash: ChangeHash,
+    <span class="doccomment">/// The hash of the change, will be `None` if the transaction did not create any operations
+    </span><span class="kw">pub </span>hash: <span class="prelude-ty">Option</span>&lt;ChangeHash&gt;,
     <span class="kw">pub </span>op_observer: Obs,
 }
 
