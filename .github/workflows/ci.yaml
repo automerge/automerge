@@ -77,7 +77,19 @@ jobs:
         run: rustup target add wasm32-unknown-unknown
       - name: run tests
         run: ./scripts/ci/wasm_tests
-
+  deno_tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli wasm-opt
+      - name: Install wasm32 target
+        run: rustup target add wasm32-unknown-unknown
+      - name: run tests
+        run: ./scripts/ci/deno_tests
   js_tests:
     runs-on: ubuntu-latest
     steps:
