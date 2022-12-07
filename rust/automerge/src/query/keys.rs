@@ -1,4 +1,4 @@
-use crate::op_tree::OpTreeNode;
+use crate::op_tree::OpTreeInternal;
 use crate::types::Key;
 use std::fmt::Debug;
 
@@ -8,17 +8,17 @@ pub(crate) struct Keys<'a> {
     last_key: Option<Key>,
     index_back: usize,
     last_key_back: Option<Key>,
-    root_child: &'a OpTreeNode,
+    op_tree: &'a OpTreeInternal,
 }
 
 impl<'a> Keys<'a> {
-    pub(crate) fn new(root_child: &'a OpTreeNode) -> Self {
+    pub(crate) fn new(op_tree: &'a OpTreeInternal) -> Self {
         Self {
             index: 0,
             last_key: None,
-            index_back: root_child.len(),
+            index_back: op_tree.len(),
             last_key_back: None,
-            root_child,
+            op_tree,
         }
     }
 }
@@ -28,7 +28,7 @@ impl<'a> Iterator for Keys<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         for i in self.index..self.index_back {
-            let op = self.root_child.get(i)?;
+            let op = self.op_tree.get(i)?;
             self.index += 1;
             if Some(op.elemid_or_key()) != self.last_key && op.visible() {
                 self.last_key = Some(op.elemid_or_key());
@@ -42,7 +42,7 @@ impl<'a> Iterator for Keys<'a> {
 impl<'a> DoubleEndedIterator for Keys<'a> {
     fn next_back(&mut self) -> Option<Self::Item> {
         for i in (self.index..self.index_back).rev() {
-            let op = self.root_child.get(i)?;
+            let op = self.op_tree.get(i)?;
             self.index_back -= 1;
             if Some(op.elemid_or_key()) != self.last_key_back && op.visible() {
                 self.last_key_back = Some(op.elemid_or_key());

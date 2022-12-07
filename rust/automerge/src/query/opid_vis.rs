@@ -28,7 +28,7 @@ impl OpIdVisSearch {
 }
 
 impl<'a> TreeQuery<'a> for OpIdVisSearch {
-    fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
+    fn query_node(&mut self, child: &OpTreeNode, _ops: &[Op]) -> QueryResult {
         if child.index.ops.contains(&self.target) {
             QueryResult::Descend
         } else {

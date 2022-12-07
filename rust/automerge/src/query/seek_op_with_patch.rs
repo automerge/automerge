@@ -72,6 +72,7 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
         &mut self,
         child: &'a OpTreeNode,
         m: &OpSetMetadata,
+        ops: &[Op],
     ) -> QueryResult {
         if self.found {
             return QueryResult::Descend;
@@ -82,7 +83,7 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
             // the opId of the operation being inserted.
             Key::Seq(e) if e == HEAD => {
                 while self.pos < child.len() {
-                    let op = child.get(self.pos).unwrap();
+                    let op = &ops[child.get(self.pos).unwrap()];
                     if op.insert && m.lamport_cmp(op.id, self.op.id) == Ordering::Less {
                         break;
                     }
@@ -123,7 +124,7 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                         // the last operation's elemId regardless of whether it's visible or not.
                         // This will lead to incorrect counting if `last_seen` is not visible: it's
                         // not counted towards `num_vis`, so we shouldn't be subtracting 1.
-                        self.last_seen = Some(child.last().elemid_or_key());
+                        self.last_seen = Some(ops[child.last()].elemid_or_key());
                     }
                     QueryResult::Next
                 }
@@ -148,7 +149,7 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                     // in the root node find the first op position for the key
                     // Search for the place where we need to insert the new operation. First find the
                     // first op with a key >= the key we're updating
-                    let start = binary_search_by(child, |op| m.key_cmp(&op.key, &self.op.key));
+                    let start = binary_search_by(child, ops, |op| m.key_cmp(&op.key, &self.op.key));
                     self.start = Some(start);
                     self.pos = start;
                     QueryResult::Skip(start)

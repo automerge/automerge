@@ -79,11 +79,12 @@ pub(crate) trait TreeQuery<'a>: Clone + Debug {
         &mut self,
         child: &'a OpTreeNode,
         _m: &OpSetMetadata,
+        ops: &[Op],
     ) -> QueryResult {
-        self.query_node(child)
+        self.query_node(child, ops)
     }
 
-    fn query_node(&mut self, _child: &'a OpTreeNode) -> QueryResult {
+    fn query_node(&mut self, _child: &'a OpTreeNode, _ops: &[Op]) -> QueryResult {
         QueryResult::Descend
     }
 
@@ -291,7 +292,7 @@ impl VisWindow {
     }
 }
 
-pub(crate) fn binary_search_by<F>(node: &OpTreeNode, f: F) -> usize
+pub(crate) fn binary_search_by<F>(node: &OpTreeNode, ops: &[Op], f: F) -> usize
 where
     F: Fn(&Op) -> Ordering,
 {
@@ -299,7 +300,7 @@ where
     let mut left = 0;
     while left < right {
         let seq = (left + right) / 2;
-        if f(node.get(seq).unwrap()) == Ordering::Less {
+        if f(&ops[node.get(seq).unwrap()]) == Ordering::Less {
             left = seq + 1;
         } else {
             right = seq;

@@ -28,16 +28,18 @@ fn main() -> Result<(), AutomergeError> {
         tx.splice_text(&text, pos, del, &vals)?;
     }
     tx.commit();
+    println!("Done in {} ms", now.elapsed().as_millis());
     let save = Instant::now();
-    let _bytes = doc.save();
+    let bytes = doc.save();
     println!("Saved in {} ms", save.elapsed().as_millis());
 
-    /*
-        let load = Instant::now();
-        let _ = Automerge::load(&bytes).unwrap();
-        println!("Loaded in {} ms", load.elapsed().as_millis());
-    */
+    let load = Instant::now();
+    let _ = Automerge::load(&bytes).unwrap();
+    println!("Loaded in {} ms", load.elapsed().as_millis());
 
-    println!("Done in {} ms", now.elapsed().as_millis());
+    let get_txt = Instant::now();
+    doc.text(&text)?;
+    println!("Text in {} ms", get_txt.elapsed().as_millis());
+
     Ok(())
 }

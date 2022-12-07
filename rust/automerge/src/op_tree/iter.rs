@@ -21,6 +21,7 @@ impl<'a> OpTreeIter<'a> {
                     },
                     cumulative_index: 0,
                     root_node: root,
+                    ops: &tree.ops,
                 })
                 .unwrap_or(Inner::Empty),
         )
@@ -50,6 +51,7 @@ enum Inner<'a> {
         // How far through the whole optree we are
         cumulative_index: usize,
         root_node: &'a OpTreeNode,
+        ops: &'a [Op],
     },
 }
 
@@ -75,6 +77,7 @@ impl<'a> Iterator for Inner<'a> {
             Inner::Empty => None,
             Inner::NonEmpty {
                 ancestors,
+                ops,
                 current,
                 cumulative_index,
                 ..
@@ -83,10 +86,10 @@ impl<'a> Iterator for Inner<'a> {
                     // If we're in a leaf node and we haven't exhausted it yet we just return the elements
                     // of the leaf node
                     if current.index < current.node.len() {
-                        let result = &current.node.elements[current.index];
+                        let result = current.node.elements[current.index];
                         current.index += 1;
                         *cumulative_index += 1;
-                        Some(result)
+                        Some(&ops[result])
                     } else {
                         // We've exhausted the leaf node, we must find the nearest non-exhausted parent (lol)
                         let node_iter = loop {
@@ -113,10 +116,10 @@ impl<'a> Iterator for Inner<'a> {
                         // return the element from the parent node which is one after the index at which we
                         // descended into the child
                         *current = node_iter;
-                        let result = &current.node.elements[current.index];
+                        let result = current.node.elements[current.index];
                         current.index += 1;
                         *cumulative_index += 1;
-                        Some(result)
+                        Some(&ops[result])
                     }
                 } else {
                     // If we're in a non-leaf node then the last iteration returned an element from the
@@ -147,6 +150,7 @@ impl<'a> Iterator for Inner<'a> {
             Self::Empty => None,
             Self::NonEmpty {
                 root_node,
+                ops,
                 cumulative_index,
                 current,
                 ancestors,
@@ -177,7 +181,7 @@ impl<'a> Iterator for Inner<'a> {
                                 Ordering::Equal => {
                                     *cumulative_index += child.len() + 1;
                                     current.index = child_index + 1;
-                                    return Some(&current.node.elements[child_index]);
+                                    return Some(&ops[current.node.elements[child_index]]);
                                 }
                                 Ordering::Greater => {
                                     current.index = child_index;
@@ -197,7 +201,7 @@ impl<'a> Iterator for Inner<'a> {
                     // we're in a leaf node and we kept track of the cumulative index as we went,
                     let index_in_this_node = n.saturating_sub(*cumulative_index);
                     current.index = index_in_this_node + 1;
-                    Some(&current.node.elements[index_in_this_node])
+                    Some(&ops[current.node.elements[index_in_this_node]])
                 }
             }
         }

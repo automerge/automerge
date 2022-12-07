@@ -1,6 +1,6 @@
 use crate::{
     op_tree::OpTreeNode,
-    types::{ElemId, Key, ListEncoding},
+    types::{ElemId, Key, ListEncoding, Op},
 };
 
 use super::{QueryResult, TreeQuery};
@@ -34,7 +34,7 @@ impl ElemIdPos {
 }
 
 impl<'a> TreeQuery<'a> for ElemIdPos {
-    fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
+    fn query_node(&mut self, child: &OpTreeNode, _ops: &[Op]) -> QueryResult {
         // if index has our element then we can continue
         if child.index.has_visible(&Key::Seq(self.elemid)) {
             // element is in this node somewhere

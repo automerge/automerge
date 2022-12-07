@@ -1,6 +1,6 @@
 use crate::op_tree::OpTreeNode;
 use crate::query::{QueryResult, TreeQuery};
-use crate::types::ListEncoding;
+use crate::types::{ListEncoding, Op};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -16,7 +16,7 @@ impl Len {
 }
 
 impl<'a> TreeQuery<'a> for Len {
-    fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
+    fn query_node(&mut self, child: &OpTreeNode, _ops: &[Op]) -> QueryResult {
         self.len = child.index.visible_len(self.encoding);
         QueryResult::Finish
     }
