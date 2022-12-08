@@ -6,7 +6,7 @@ for other language bindings that have good support for calling into C functions.
 See the main README for instructions on getting your environment set up, then
 you can use `./scripts/ci/cmake-build Release static` to build automerge-c.
 
-It will output two platform-dependant files:
+It will output two files:
 
 - ./build/Cargo/target/include/automerge-c/automerge.h
 - ./build/Cargo/target/release/libautomerge.a
@@ -17,6 +17,24 @@ by configuring the compiler to reference these directories.
 
 - `export LDFLAGS=-L./build/Cargo/target/release -lautomerge`
 - `export CFLAGS=-I./build/Cargo/target/include`
+
+If you'd like to cross compile the library for different platforms you can do so
+using [cross](https://github.com/cross-rs/cross). For example:
+
+- `cross build --manifest-path rust/automerge-c/Cargo.toml -r --target aarch64-unknown-linux-gnu`
+
+This will output a shared library in the directory `rust/target/aarch64-unknown-linux-gnu/release/`.
+
+You can replace `aarch64-unknown-linux-gnu` with any [cross supported targets](https://github.com/cross-rs/cross#supported-targets). The targets below are known to work, though other targets are expected to work too:
+
+- `x86_64-apple-darwin`
+- `aarch64-apple-darwin`
+- `x86_64-unknown-linux-gnu`
+- `aarch64-unknown-linux-gnu`
+
+As a caveat, the header file is currently 32/64-bit dependant. You can re-use it
+for all 64-bit architectures, but you must generate a specific header for 32-bit
+targets.
 
 # Usage
 
