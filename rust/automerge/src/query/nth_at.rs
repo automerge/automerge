@@ -1,5 +1,5 @@
 use crate::query::{QueryResult, TreeQuery, VisWindow};
-use crate::types::{Clock, ElemId, Op};
+use crate::types::{Clock, ElemId, ListEncoding, Op};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -7,6 +7,7 @@ pub(crate) struct NthAt {
     clock: Clock,
     target: usize,
     seen: usize,
+    encoding: ListEncoding,
     last_seen: Option<ElemId>,
     window: VisWindow,
     pub(crate) ops: Vec<Op>,
@@ -15,11 +16,12 @@ pub(crate) struct NthAt {
 }
 
 impl NthAt {
-    pub(crate) fn new(target: usize, clock: Clock) -> Self {
+    pub(crate) fn new(target: usize, clock: Clock, encoding: ListEncoding) -> Self {
         NthAt {
             clock,
             target,
             seen: 0,
+            encoding,
             last_seen: None,
             ops: vec![],
             ops_pos: vec![],
@@ -39,10 +41,10 @@ impl<'a> TreeQuery<'a> for NthAt {
         }
         let visible = self.window.visible_at(element, self.pos, &self.clock);
         if visible && self.last_seen.is_none() {
-            self.seen += 1;
+            self.seen += element.width(self.encoding);
             self.last_seen = element.elemid()
         }
-        if self.seen == self.target + 1 && visible {
+        if self.seen > self.target && visible {
             for (vpos, vop) in self.window.seen_op(element, self.pos) {
                 if vop.is_counter() {
                     // this could be out of order because of inc's - we can find the right place

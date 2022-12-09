@@ -1,7 +1,7 @@
 use crate::storage::load::Error as LoadError;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
-use crate::ChangeHash;
+use crate::{ChangeHash, ObjType};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -28,6 +28,8 @@ pub enum AutomergeError {
     InvalidObjId(String),
     #[error("invalid obj id format `{0}`")]
     InvalidObjIdFormat(String),
+    #[error("invalid op for object of type `{0}`")]
+    InvalidOp(ObjType),
     #[error("seq {0} is out of bounds")]
     InvalidSeq(u64),
     #[error("invalid type of value, expected `{expected}` but received `{unexpected}`")]
@@ -45,6 +47,12 @@ pub enum AutomergeError {
     NonChangeCompressed,
     #[error("id was not an object id")]
     NotAnObject,
+}
+
+impl PartialEq for AutomergeError {
+    fn eq(&self, other: &Self) -> bool {
+        std::mem::discriminant(self) == std::mem::discriminant(other)
+    }
 }
 
 #[cfg(feature = "wasm")]

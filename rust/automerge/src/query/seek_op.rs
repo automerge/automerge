@@ -1,6 +1,6 @@
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
 use crate::query::{binary_search_by, QueryResult, TreeQuery};
-use crate::types::{Key, Op, HEAD};
+use crate::types::{Key, ListEncoding, Op, HEAD};
 use std::cmp::Ordering;
 use std::fmt::Debug;
 
@@ -70,7 +70,7 @@ impl<'a> TreeQuery<'a> for SeekOp<'a> {
                 if let Some(start) = self.start {
                     if self.pos + child.len() >= start {
                         // skip empty nodes
-                        if child.index.visible_len() == 0 {
+                        if child.index.visible_len(ListEncoding::List) == 0 {
                             self.pos += child.len();
                             QueryResult::Next
                         } else {

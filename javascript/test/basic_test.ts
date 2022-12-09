@@ -1,6 +1,7 @@
 import * as assert from 'assert'
 import {Counter} from 'automerge'
 import * as Automerge from '../src'
+import * as WASM from "@automerge/automerge-wasm"
 
 describe('Automerge', () => {
     describe('basics', () => {
@@ -43,7 +44,7 @@ describe('Automerge', () => {
               d.big = "little"
               d.zip = "zop"
               d.app = "dap"
-            assert.deepEqual(d, {  hello: "world", big: "little", zip: "zop", app: "dap" })
+              assert.deepEqual(d, {  hello: "world", big: "little", zip: "zop", app: "dap" })
             })
             assert.deepEqual(doc2, {  hello: "world", big: "little", zip: "zop", app: "dap" })
         })
@@ -198,15 +199,23 @@ describe('Automerge', () => {
         })
         it('handle text', () => {
             let doc1 = Automerge.init()
-            let tmp = new Automerge.Text("hello")
             let doc2 = Automerge.change(doc1, (d) => {
-              d.list = new Automerge.Text("hello")
-              d.list.insertAt(2,"Z")
+              d.list = "hello"
+              Automerge.splice(d, "list", 2, 0, "Z")
             })
             let changes = Automerge.getChanges(doc1, doc2)
             let docB1 = Automerge.init()
             ;let [docB2] = Automerge.applyChanges(docB1, changes)
             assert.deepEqual(docB2, doc2);
+        })
+
+        it('handle non-text strings', () => {
+            let doc1 = WASM.create();
+            doc1.put("_root", "text", "hello world");
+            let doc2 = Automerge.load(doc1.save())
+            assert.throws(() => {
+              Automerge.change(doc2, (d) => { Automerge.splice(d, "text", 1, 0, "Z") })
+            }, /Cannot splice/)
         })
 
         it('have many list methods', () => {
@@ -240,9 +249,9 @@ describe('Automerge', () => {
         })
 
         it('lists and text have indexof', () => {
-          let doc = Automerge.from({ list: [0,1,2,3,4,5,6], text: new Automerge.Text("hello world") })
-          console.log(doc.list.indexOf(5))
-          console.log(doc.text.indexOf("world"))
+          let doc = Automerge.from({ list: [0,1,2,3,4,5,6], text: "hello world" })
+          assert.deepEqual(doc.list.indexOf(5), 5)
+          assert.deepEqual(doc.text.indexOf("world"), 6)
         })
     })
 
@@ -329,7 +338,7 @@ describe('Automerge', () => {
             "date": new Date(),
             "counter": new Automerge.Counter(),
             "bytes": new Uint8Array(10),
-            "text": new Automerge.Text(),
+            "text": "",
             "list": [],
             "map": {}
         })
@@ -348,7 +357,7 @@ describe('Automerge', () => {
         })
 
         it("should return non-null for map, list, text, and objects", () => {
-            assert.notEqual(Automerge.getObjectId(s1.text), null)
+            assert.equal(Automerge.getObjectId(s1.text), null)
             assert.notEqual(Automerge.getObjectId(s1.list), null)
             assert.notEqual(Automerge.getObjectId(s1.map), null)
         })

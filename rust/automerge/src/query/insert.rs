@@ -1,7 +1,7 @@
 use crate::error::AutomergeError;
 use crate::op_tree::OpTreeNode;
-use crate::query::{QueryResult, TreeQuery};
-use crate::types::{ElemId, Key, Op, HEAD};
+use crate::query::{OpTree, QueryResult, TreeQuery};
+use crate::types::{ElemId, Key, ListEncoding, Op, HEAD};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -10,6 +10,8 @@ pub(crate) struct InsertNth {
     target: usize,
     /// the number of visible operations seen
     seen: usize,
+    last_width: usize,
+    encoding: ListEncoding,
     //pub pos: usize,
     /// the number of operations (including non-visible) that we have seen
     n: usize,
@@ -22,7 +24,7 @@ pub(crate) struct InsertNth {
 }
 
 impl InsertNth {
-    pub(crate) fn new(target: usize) -> Self {
+    pub(crate) fn new(target: usize, encoding: ListEncoding) -> Self {
         let (valid, last_valid_insert) = if target == 0 {
             (Some(0), Some(Key::Seq(HEAD)))
         } else {
@@ -31,6 +33,8 @@ impl InsertNth {
         InsertNth {
             target,
             seen: 0,
+            last_width: 0,
+            encoding,
             n: 0,
             valid,
             last_seen: None,
@@ -46,23 +50,30 @@ impl InsertNth {
     pub(crate) fn key(&self) -> Result<Key, AutomergeError> {
         self.last_valid_insert
             .ok_or(AutomergeError::InvalidIndex(self.target))
-        //if self.target == 0 {
-        /*
-        if self.last_insert.is_none() {
-            Ok(HEAD.into())
-        } else if self.seen == self.target && self.last_insert.is_some() {
-            Ok(Key::Seq(self.last_insert.unwrap()))
-        } else {
-            Err(AutomergeError::InvalidIndex(self.target))
-        }
-        */
     }
 }
 
 impl<'a> TreeQuery<'a> for InsertNth {
+    fn equiv(&mut self, other: &Self) -> bool {
+        self.pos() == other.pos() && self.key() == other.key()
+    }
+
+    fn can_shortcut_search(&mut self, tree: &'a OpTree) -> bool {
+        if let Some((index, pos)) = &tree.last_insert {
+            if let Some(op) = tree.internal.get(*pos) {
+                if *index + op.width(self.encoding) == self.target {
+                    self.valid = Some(*pos + 1);
+                    self.last_valid_insert = Some(op.elemid_or_key());
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
         // if this node has some visible elements then we may find our target within
-        let mut num_vis = child.index.visible_len();
+        let mut num_vis = child.index.visible_len(self.encoding);
         if let Some(last_seen) = self.last_seen {
             if child.index.has_visible(&last_seen) {
                 num_vis -= 1;
@@ -103,7 +114,8 @@ impl<'a> TreeQuery<'a> for InsertNth {
             if self.seen >= self.target {
                 return QueryResult::Finish;
             }
-            self.seen += 1;
+            self.last_width = element.width(self.encoding);
+            self.seen += self.last_width;
             self.last_seen = Some(element.elemid_or_key());
             self.last_valid_insert = self.last_seen
         }

@@ -3,3 +3,4 @@ Cargo.lock
 node_modules
 yarn.lock
 flamegraph.svg
+/prof

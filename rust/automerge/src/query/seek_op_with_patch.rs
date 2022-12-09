@@ -1,6 +1,6 @@
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
 use crate::query::{binary_search_by, QueryResult, TreeQuery};
-use crate::types::{Key, Op, HEAD};
+use crate::types::{Key, ListEncoding, Op, HEAD};
 use std::cmp::Ordering;
 use std::fmt::Debug;
 
@@ -10,7 +10,9 @@ pub(crate) struct SeekOpWithPatch<'a> {
     pub(crate) pos: usize,
     pub(crate) succ: Vec<usize>,
     found: bool,
+    encoding: ListEncoding,
     pub(crate) seen: usize,
+    pub(crate) last_width: usize,
     last_seen: Option<Key>,
     pub(crate) values: Vec<&'a Op>,
     pub(crate) had_value_before: bool,
@@ -19,13 +21,15 @@ pub(crate) struct SeekOpWithPatch<'a> {
 }
 
 impl<'a> SeekOpWithPatch<'a> {
-    pub(crate) fn new(op: &Op) -> Self {
+    pub(crate) fn new(op: &Op, encoding: ListEncoding) -> Self {
         SeekOpWithPatch {
             op: op.clone(),
             succ: vec![],
             pos: 0,
             found: false,
+            encoding,
             seen: 0,
+            last_width: 0,
             last_seen: None,
             values: vec![],
             had_value_before: false,
@@ -57,7 +61,7 @@ impl<'a> SeekOpWithPatch<'a> {
             self.last_seen = None
         }
         if e.visible() && self.last_seen.is_none() {
-            self.seen += 1;
+            self.seen += e.width(self.encoding);
             self.last_seen = Some(e.elemid_or_key())
         }
     }
@@ -101,7 +105,7 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                     // elements it contains. However, it could happen that a visible element is
                     // split across two tree nodes. To avoid double-counting in this situation, we
                     // subtract one if the last visible element also appears in this tree node.
-                    let mut num_vis = child.index.visible_len();
+                    let mut num_vis = child.index.visible_len(self.encoding);
                     if num_vis > 0 {
                         // FIXME: I think this is wrong: we should subtract one only if this
                         // subtree contains a *visible* (i.e. empty succs) operation for the list
@@ -130,7 +134,7 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                 if let Some(start) = self.start {
                     if self.pos + child.len() >= start {
                         // skip empty nodes
-                        if child.index.visible_len() == 0 {
+                        if child.index.visible_len(self.encoding) == 0 {
                             self.pos += child.len();
                             QueryResult::Next
                         } else {
@@ -173,6 +177,7 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                             self.values.push(e);
                         }
                         self.succ.push(self.pos);
+                        self.last_width = e.width(self.encoding);
 
                         if e.visible() {
                             self.had_value_before = true;
@@ -218,6 +223,7 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                                 self.values.push(e);
                             }
                             self.succ.push(self.pos);
+                            self.last_width = e.width(self.encoding);
                         }
                         if e.visible() {
                             self.had_value_before = true;
@@ -235,6 +241,7 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                             self.values.push(e);
                         }
                         self.succ.push(self.pos);
+                        self.last_width = e.width(self.encoding);
                     }
 
                     // If the new op is an insertion, skip over any existing list elements whose elemId is

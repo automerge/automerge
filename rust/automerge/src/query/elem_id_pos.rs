@@ -1,23 +1,26 @@
 use crate::{
     op_tree::OpTreeNode,
-    types::{ElemId, Key},
+    types::{ElemId, Key, ListEncoding},
 };
 
 use super::{QueryResult, TreeQuery};
 
 /// Lookup the index in the list that this elemid occupies.
+#[derive(Clone, Debug)]
 pub(crate) struct ElemIdPos {
     elemid: ElemId,
     pos: usize,
     found: bool,
+    encoding: ListEncoding,
 }
 
 impl ElemIdPos {
-    pub(crate) fn new(elemid: ElemId) -> Self {
+    pub(crate) fn new(elemid: ElemId, encoding: ListEncoding) -> Self {
         Self {
             elemid,
             pos: 0,
             found: false,
+            encoding,
         }
     }
 
@@ -38,7 +41,7 @@ impl<'a> TreeQuery<'a> for ElemIdPos {
             QueryResult::Descend
         } else {
             // not in this node, try the next one
-            self.pos += child.index.visible_len();
+            self.pos += child.index.visible_len(self.encoding);
             QueryResult::Next
         }
     }
@@ -49,7 +52,7 @@ impl<'a> TreeQuery<'a> for ElemIdPos {
             self.found = true;
             return QueryResult::Finish;
         } else if element.visible() {
-            self.pos += 1;
+            self.pos += element.width(self.encoding);
         }
         QueryResult::Next
     }

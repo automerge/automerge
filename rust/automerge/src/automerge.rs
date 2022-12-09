@@ -17,8 +17,8 @@ use crate::transaction::{
     self, CommitOptions, Failure, Observed, Success, Transaction, TransactionArgs, UnObserved,
 };
 use crate::types::{
-    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType,
-    ScalarValue, Value,
+    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ListEncoding, ObjId, Op, OpId,
+    OpType, ScalarValue, TextEncoding, Value,
 };
 use crate::{
     query, AutomergeError, Change, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType,
@@ -58,6 +58,7 @@ pub struct Automerge {
     pub(crate) actor: Actor,
     /// The maximum operation counter this document has seen.
     pub(crate) max_op: u64,
+    pub(crate) text_encoding: TextEncoding,
 }
 
 impl Automerge {
@@ -74,7 +75,13 @@ impl Automerge {
             saved: Default::default(),
             actor: Actor::Unused(ActorId::random()),
             max_op: 0,
+            text_encoding: Default::default(),
         }
+    }
+
+    pub fn with_encoding(mut self, encoding: TextEncoding) -> Self {
+        self.text_encoding = encoding;
+        self
     }
 
     /// Set the actor id for this document.
@@ -314,7 +321,7 @@ impl Automerge {
     /// This function may in future be changed to allow getting the parents from the id of a scalar
     /// value.
     pub fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
-        let obj_id = self.exid_to_obj(obj.as_ref())?;
+        let (obj_id, _) = self.exid_to_obj(obj.as_ref())?;
         Ok(self.ops.parents(obj_id))
     }
 
@@ -322,9 +329,7 @@ impl Automerge {
         &self,
         obj: O,
     ) -> Result<Vec<(ExId, Prop)>, AutomergeError> {
-        let mut path = self.parents(obj.as_ref().clone())?.collect::<Vec<_>>();
-        path.reverse();
-        Ok(path)
+        Ok(self.parents(obj.as_ref().clone())?.path())
     }
 
     /// Get the keys of the object `obj`.
@@ -332,7 +337,7 @@ impl Automerge {
     /// For a map this returns the keys of the map.
     /// For a list this returns the element ids (opids) encoded as strings.
     pub fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_, '_> {
-        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
+        if let Ok((obj, _)) = self.exid_to_obj(obj.as_ref()) {
             let iter_keys = self.ops.keys(obj);
             Keys::new(self, iter_keys)
         } else {
@@ -342,7 +347,7 @@ impl Automerge {
 
     /// Historical version of [`keys`](Self::keys).
     pub fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt<'_, '_> {
-        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
+        if let Ok((obj, _)) = self.exid_to_obj(obj.as_ref()) {
             if let Ok(clock) = self.clock_at(heads) {
                 return KeysAt::new(self, self.ops.keys_at(obj, clock));
             }
@@ -356,7 +361,7 @@ impl Automerge {
         obj: O,
         range: R,
     ) -> MapRange<'_, R> {
-        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
+        if let Ok((obj, _)) = self.exid_to_obj(obj.as_ref()) {
             MapRange::new(self, self.ops.map_range(obj, range))
         } else {
             MapRange::new(self, None)
@@ -370,7 +375,7 @@ impl Automerge {
         range: R,
         heads: &[ChangeHash],
     ) -> MapRangeAt<'_, R> {
-        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
+        if let Ok((obj, _)) = self.exid_to_obj(obj.as_ref()) {
             if let Ok(clock) = self.clock_at(heads) {
                 let iter_range = self.ops.map_range_at(obj, range, clock);
                 return MapRangeAt::new(self, iter_range);
@@ -385,7 +390,7 @@ impl Automerge {
         obj: O,
         range: R,
     ) -> ListRange<'_, R> {
-        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
+        if let Ok((obj, _)) = self.exid_to_obj(obj.as_ref()) {
             ListRange::new(self, self.ops.list_range(obj, range))
         } else {
             ListRange::new(self, None)
@@ -399,7 +404,7 @@ impl Automerge {
         range: R,
         heads: &[ChangeHash],
     ) -> ListRangeAt<'_, R> {
-        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
+        if let Ok((obj, _)) = self.exid_to_obj(obj.as_ref()) {
             if let Ok(clock) = self.clock_at(heads) {
                 let iter_range = self.ops.list_range_at(obj, range, clock);
                 return ListRangeAt::new(self, iter_range);
@@ -409,11 +414,11 @@ impl Automerge {
     }
 
     pub fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
-        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
-            match self.ops.object_type(&obj) {
-                Some(t) if t.is_sequence() => Values::new(self, self.ops.list_range(obj, ..)),
-                Some(_) => Values::new(self, self.ops.map_range(obj, ..)),
-                None => Values::empty(self),
+        if let Ok((obj, obj_type)) = self.exid_to_obj(obj.as_ref()) {
+            if obj_type.is_sequence() {
+                Values::new(self, self.ops.list_range(obj, ..))
+            } else {
+                Values::new(self, self.ops.map_range(obj, ..))
             }
         } else {
             Values::empty(self)
@@ -421,18 +426,17 @@ impl Automerge {
     }
 
     pub fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
-        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
+        if let Ok((obj, obj_type)) = self.exid_to_obj(obj.as_ref()) {
             if let Ok(clock) = self.clock_at(heads) {
-                return match self.ops.object_type(&obj) {
-                    Some(ObjType::Map) | Some(ObjType::Table) => {
+                return match obj_type {
+                    ObjType::Map | ObjType::Table => {
                         let iter_range = self.ops.map_range_at(obj, .., clock);
                         Values::new(self, iter_range)
                     }
-                    Some(ObjType::List) | Some(ObjType::Text) => {
+                    ObjType::List | ObjType::Text => {
                         let iter_range = self.ops.list_range_at(obj, .., clock);
                         Values::new(self, iter_range)
                     }
-                    None => Values::empty(self),
                 };
             }
         }
@@ -441,13 +445,12 @@ impl Automerge {
 
     /// Get the length of the given object.
     pub fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
-        if let Ok(inner_obj) = self.exid_to_obj(obj.as_ref()) {
-            match self.ops.object_type(&inner_obj) {
-                Some(ObjType::Map) | Some(ObjType::Table) => self.keys(obj).count(),
-                Some(ObjType::List) | Some(ObjType::Text) => {
-                    self.ops.search(&inner_obj, query::Len::new()).len
-                }
-                None => 0,
+        if let Ok((inner_obj, obj_type)) = self.exid_to_obj(obj.as_ref()) {
+            if obj_type == ObjType::Map || obj_type == ObjType::Table {
+                self.keys(obj).count()
+            } else {
+                let encoding = ListEncoding::new(obj_type, self.text_encoding);
+                self.ops.search(&inner_obj, query::Len::new(encoding)).len
             }
         } else {
             0
@@ -456,14 +459,15 @@ impl Automerge {
 
     /// Historical version of [`length`](Self::length).
     pub fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
-        if let Ok(inner_obj) = self.exid_to_obj(obj.as_ref()) {
+        if let Ok((inner_obj, obj_type)) = self.exid_to_obj(obj.as_ref()) {
             if let Ok(clock) = self.clock_at(heads) {
-                return match self.ops.object_type(&inner_obj) {
-                    Some(ObjType::Map) | Some(ObjType::Table) => self.keys_at(obj, heads).count(),
-                    Some(ObjType::List) | Some(ObjType::Text) => {
-                        self.ops.search(&inner_obj, query::LenAt::new(clock)).len
-                    }
-                    None => 0,
+                return if obj_type == ObjType::Map || obj_type == ObjType::Table {
+                    self.keys_at(obj, heads).count()
+                } else {
+                    let encoding = ListEncoding::new(obj_type, self.text_encoding);
+                    self.ops
+                        .search(&inner_obj, query::LenAt::new(clock, encoding))
+                        .len
                 };
             }
         }
@@ -471,14 +475,14 @@ impl Automerge {
     }
 
     /// Get the type of this object, if it is an object.
-    pub fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Option<ObjType> {
-        let obj = self.exid_to_obj(obj.as_ref()).ok()?;
-        self.ops.object_type(&obj)
+    pub fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
+        let (_, obj_type) = self.exid_to_obj(obj.as_ref())?;
+        Ok(obj_type)
     }
 
-    pub(crate) fn exid_to_obj(&self, id: &ExId) -> Result<ObjId, AutomergeError> {
+    pub(crate) fn exid_to_obj(&self, id: &ExId) -> Result<(ObjId, ObjType), AutomergeError> {
         match id {
-            ExId::Root => Ok(ObjId::root()),
+            ExId::Root => Ok((ObjId::root(), ObjType::Map)),
             ExId::Id(ctr, actor, idx) => {
                 // do a direct get here b/c this could be foriegn and not be within the array
                 // bounds
@@ -494,8 +498,8 @@ impl Automerge {
                         .ok_or(AutomergeError::Fail)?;
                     ObjId(OpId(*ctr, idx))
                 };
-                if self.ops.object_type(&obj).is_some() {
-                    Ok(obj)
+                if let Some(obj_type) = self.ops.object_type(&obj) {
+                    Ok((obj, obj_type))
                 } else {
                     Err(AutomergeError::NotAnObject)
                 }
@@ -509,15 +513,11 @@ impl Automerge {
 
     /// Get the string represented by the given text object.
     pub fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
+        let obj = self.exid_to_obj(obj.as_ref())?.0;
         let query = self.ops.search(&obj, query::ListVals::new());
         let mut buffer = String::new();
         for q in &query.ops {
-            if let OpType::Put(ScalarValue::Str(s)) = &q.action {
-                buffer.push_str(s);
-            } else {
-                buffer.push('\u{fffc}');
-            }
+            buffer.push_str(q.to_str());
         }
         Ok(buffer)
     }
@@ -528,7 +528,7 @@ impl Automerge {
         obj: O,
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
+        let obj = self.exid_to_obj(obj.as_ref())?.0;
         let clock = self.clock_at(heads)?;
         let query = self.ops.search(&obj, query::ListValsAt::new(clock));
         let mut buffer = String::new();
@@ -576,7 +576,7 @@ impl Automerge {
         obj: O,
         prop: P,
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
+        let obj = self.exid_to_obj(obj.as_ref())?.0;
         let mut result = match prop.into() {
             Prop::Map(p) => {
                 let prop = self.ops.m.props.lookup(&p);
@@ -591,13 +591,18 @@ impl Automerge {
                     vec![]
                 }
             }
-            Prop::Seq(n) => self
-                .ops
-                .search(&obj, query::Nth::new(n))
-                .ops
-                .into_iter()
-                .map(|o| (o.value(), self.id_to_exid(o.id)))
-                .collect(),
+            Prop::Seq(n) => {
+                let obj_type = self.ops.object_type(&obj);
+                let encoding = obj_type
+                    .map(|o| ListEncoding::new(o, self.text_encoding))
+                    .unwrap_or_default();
+                self.ops
+                    .search(&obj, query::Nth::new(n, encoding))
+                    .ops
+                    .into_iter()
+                    .map(|o| (o.value(), self.id_to_exid(o.id)))
+                    .collect()
+            }
         };
         result.sort_by(|a, b| b.1.cmp(&a.1));
         Ok(result)
@@ -611,7 +616,7 @@ impl Automerge {
         heads: &[ChangeHash],
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         let prop = prop.into();
-        let obj = self.exid_to_obj(obj.as_ref())?;
+        let obj = self.exid_to_obj(obj.as_ref())?.0;
         let clock = self.clock_at(heads)?;
         let result = match prop {
             Prop::Map(p) => {
@@ -627,13 +632,18 @@ impl Automerge {
                     vec![]
                 }
             }
-            Prop::Seq(n) => self
-                .ops
-                .search(&obj, query::NthAt::new(n, clock))
-                .ops
-                .into_iter()
-                .map(|o| (o.clone_value(), self.id_to_exid(o.id)))
-                .collect(),
+            Prop::Seq(n) => {
+                let obj_type = self.ops.object_type(&obj);
+                let encoding = obj_type
+                    .map(|o| ListEncoding::new(o, self.text_encoding))
+                    .unwrap_or_default();
+                self.ops
+                    .search(&obj, query::NthAt::new(n, clock, encoding))
+                    .ops
+                    .into_iter()
+                    .map(|o| (o.clone_value(), self.id_to_exid(o.id)))
+                    .collect()
+            }
         };
         Ok(result)
     }
@@ -696,6 +706,7 @@ impl Automerge {
                     saved: Default::default(),
                     actor: Actor::Unused(ActorId::random()),
                     max_op,
+                    text_encoding: Default::default(),
                 }
             }
             storage::Chunk::Change(stored_change) => {
@@ -806,11 +817,11 @@ impl Automerge {
         self.update_history(change, ops.len());
         if let Some(observer) = observer {
             for (obj, op) in ops {
-                self.ops.insert_op_with_observer(&obj, op, *observer);
+                self.insert_op_with_observer(&obj, op, *observer);
             }
         } else {
             for (obj, op) in ops {
-                self.ops.insert_op(&obj, op);
+                self.insert_op(&obj, op);
             }
         }
     }
@@ -1160,9 +1171,9 @@ impl Automerge {
         self.deps.insert(change.hash());
     }
 
-    pub fn import(&self, s: &str) -> Result<ExId, AutomergeError> {
+    pub fn import(&self, s: &str) -> Result<(ExId, ObjType), AutomergeError> {
         if s == "_root" {
-            Ok(ExId::Root)
+            Ok((ExId::Root, ObjType::Map))
         } else {
             let n = s
                 .find('@')
@@ -1177,11 +1188,11 @@ impl Automerge {
                 .actors
                 .lookup(&actor)
                 .ok_or_else(|| AutomergeError::InvalidObjId(s.to_owned()))?;
-            Ok(ExId::Id(
-                counter,
-                self.ops.m.actors.cache[actor].clone(),
-                actor,
-            ))
+            let obj = ExId::Id(counter, self.ops.m.actors.cache[actor].clone(), actor);
+            let obj_type = self
+                .object_type(&obj)
+                .map_err(|_| AutomergeError::InvalidObjId(s.to_owned()))?;
+            Ok((obj, obj_type))
         }
     }
 
@@ -1238,9 +1249,113 @@ impl Automerge {
     ///            visualised
     #[cfg(feature = "optree-visualisation")]
     pub fn visualise_optree(&self, objects: Option<Vec<ExId>>) -> String {
-        let objects =
-            objects.map(|os| os.iter().filter_map(|o| self.exid_to_obj(o).ok()).collect());
+        let objects = objects.map(|os| {
+            os.iter()
+                .filter_map(|o| self.exid_to_obj(o).ok())
+                .map(|o| o.0)
+                .collect()
+        });
         self.ops.visualise(objects)
+    }
+
+    pub(crate) fn insert_op(&mut self, obj: &ObjId, op: Op) -> Op {
+        let q = self.ops.search(obj, query::SeekOp::new(&op));
+
+        let succ = q.succ;
+        let pos = q.pos;
+
+        self.ops.add_succ(obj, &succ, &op);
+
+        if !op.is_delete() {
+            self.ops.insert(pos, obj, op.clone());
+        }
+        op
+    }
+
+    pub(crate) fn insert_op_with_observer<Obs: OpObserver>(
+        &mut self,
+        obj: &ObjId,
+        op: Op,
+        observer: &mut Obs,
+    ) -> Op {
+        let obj_type = self.ops.object_type(obj);
+        let encoding = obj_type
+            .map(|o| ListEncoding::new(o, self.text_encoding))
+            .unwrap_or_default();
+        let q = self
+            .ops
+            .search(obj, query::SeekOpWithPatch::new(&op, encoding));
+
+        let query::SeekOpWithPatch {
+            pos,
+            succ,
+            seen,
+            last_width,
+            values,
+            had_value_before,
+            ..
+        } = q;
+
+        let ex_obj = self.ops.id_to_exid(obj.0);
+
+        let key = match op.key {
+            Key::Map(index) => self.ops.m.props[index].clone().into(),
+            Key::Seq(_) => seen.into(),
+        };
+
+        if op.insert {
+            if obj_type == Some(ObjType::Text) {
+                observer.splice_text(self, ex_obj, seen, op.to_str());
+            } else {
+                let value = (op.value(), self.ops.id_to_exid(op.id));
+                observer.insert(self, ex_obj, seen, value);
+            }
+        } else if op.is_delete() {
+            if let Some(winner) = &values.last() {
+                let value = (winner.value(), self.ops.id_to_exid(winner.id));
+                let conflict = values.len() > 1;
+                observer.expose(self, ex_obj, key, value, conflict);
+            } else if had_value_before {
+                match key {
+                    Prop::Map(k) => observer.delete_map(self, ex_obj, &k),
+                    Prop::Seq(index) => observer.delete_seq(self, ex_obj, index, last_width),
+                }
+            }
+        } else if let Some(value) = op.get_increment_value() {
+            // only observe this increment if the counter is visible, i.e. the counter's
+            // create op is in the values
+            //if values.iter().any(|value| op.pred.contains(&value.id)) {
+            if values
+                .last()
+                .map(|value| op.pred.contains(&value.id))
+                .unwrap_or_default()
+            {
+                // we have observed the value
+                observer.increment(self, ex_obj, key, (value, self.ops.id_to_exid(op.id)));
+            }
+        } else {
+            let just_conflict = values
+                .last()
+                .map(|value| self.ops.m.lamport_cmp(op.id, value.id) != Ordering::Greater)
+                .unwrap_or(false);
+            let value = (op.value(), self.ops.id_to_exid(op.id));
+            if op.is_list_op() && !had_value_before {
+                observer.insert(self, ex_obj, seen, value);
+            } else if just_conflict {
+                observer.flag_conflict(self, ex_obj, key);
+            } else {
+                let conflict = !values.is_empty();
+                observer.put(self, ex_obj, key, value, conflict);
+            }
+        }
+
+        self.ops.add_succ(obj, &succ, &op);
+
+        if !op.is_delete() {
+            self.ops.insert(pos, obj, op.clone());
+        }
+
+        op
     }
 }
 

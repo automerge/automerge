@@ -191,6 +191,16 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         self.do_tx(|tx, doc, obs| tx.splice(doc, obs, obj.as_ref(), pos, del, vals))
     }
 
+    fn splice_text<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        pos: usize,
+        del: usize,
+        text: &str,
+    ) -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, obs| tx.splice_text(doc, obs, obj.as_ref(), pos, del, text))
+    }
+
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_, '_> {
         self.doc.keys(obj)
     }
@@ -249,7 +259,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         self.doc.length_at(obj, heads)
     }
 
-    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Option<ObjType> {
+    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
         self.doc.object_type(obj)
     }
 

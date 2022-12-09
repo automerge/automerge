@@ -8,7 +8,7 @@ use crate::{
 };
 use crate::{
     transaction::{Observation, Observed, TransactionInner, UnObserved},
-    ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop, Value, Values,
+    ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop, TextEncoding, Value, Values,
 };
 
 /// An automerge document that automatically manages transactions.
@@ -125,6 +125,11 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
         self.doc.get_actor()
     }
 
+    pub fn with_encoding(mut self, encoding: TextEncoding) -> Self {
+        self.doc.text_encoding = encoding;
+        self
+    }
+
     fn ensure_transaction_open(&mut self) {
         if self.transaction.is_none() {
             let args = self.doc.transaction_args();
@@ -221,7 +226,7 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
         self.doc.get_changes_added(&other.doc)
     }
 
-    pub fn import(&self, s: &str) -> Result<ExId, AutomergeError> {
+    pub fn import(&self, s: &str) -> Result<(ExId, ObjType), AutomergeError> {
         self.doc.import(s)
     }
 
@@ -389,7 +394,7 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
         self.doc.length_at(obj, heads)
     }
 
-    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Option<ObjType> {
+    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
         self.doc.object_type(obj)
     }
 
@@ -488,6 +493,25 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
             pos,
             del,
             vals,
+        )
+    }
+
+    fn splice_text<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        pos: usize,
+        del: usize,
+        text: &str,
+    ) -> Result<(), AutomergeError> {
+        self.ensure_transaction_open();
+        let (current, tx) = self.transaction.as_mut().unwrap();
+        tx.splice_text(
+            &mut self.doc,
+            current.observer(),
+            obj.as_ref(),
+            pos,
+            del,
+            text,
         )
     }
 

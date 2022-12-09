@@ -1,3 +1,10 @@
 automerge
 automerge.h
 automerge.o
+*.cmake
+CMakeFiles
+Makefile
+DartConfiguration.tcl
+config.h
+CMakeCache.txt
+Cargo
