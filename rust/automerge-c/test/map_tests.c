@@ -58,8 +58,7 @@ static void test_AMmapPutBytes(void **state) {
     AMfree(AMmapPutBytes(group_state->doc,
                          AM_ROOT,
                          KEY,
-                         BYTES_VALUE,
-                         BYTES_SIZE));
+                         AMbytes(BYTES_VALUE, BYTES_SIZE)));
     AMbyteSpan const bytes = AMpush(&group_state->stack,
                                     AMmapGet(group_state->doc, AM_ROOT, KEY, NULL),
                                     AM_VALUE_BYTES,

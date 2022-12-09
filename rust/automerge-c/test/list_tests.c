@@ -61,8 +61,7 @@ static void test_AMlistPutBytes_ ## mode(void **state) {                      \
                           AM_ROOT,                                            \
                           0,                                                  \
                           !strcmp(#mode, "insert"),                           \
-                          bytes_value,                                        \
-                          BYTES_SIZE));                                       \
+                          AMbytes(bytes_value, BYTES_SIZE)));                 \
     AMbyteSpan const bytes = AMpush(                                          \
         &group_state->stack,                                                  \
         AMlistGet(group_state->doc, AM_ROOT, 0, NULL),                        \

@@ -238,14 +238,13 @@ pub unsafe extern "C" fn AMlistPutBytes(
     obj_id: *const AMobjId,
     index: usize,
     insert: bool,
-    src: *const u8,
-    count: usize,
+    val: AMbyteSpan,
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let obj_id = to_obj_id!(obj_id);
     let (index, insert) = adjust!(index, insert, doc.length(obj_id));
     let mut value = Vec::new();
-    value.extend_from_slice(std::slice::from_raw_parts(src, count));
+    value.extend_from_slice(std::slice::from_raw_parts(val.src, val.count));
     to_result(if insert {
         doc.insert(obj_id, index, value)
     } else {
