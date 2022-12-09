@@ -1,0 +1,13 @@
+{
+  "name": "badmessage",
+  "version": "1.0.0",
+  "main": "wasm-text.js",
+  "license": "MIT",
+  "scripts": {
+    "wasm": "0x -D prof automerge-wasm.js",
+    "js": "0x -D prof automerge-js.js"
+  },
+  "devDependencies": {
+    "0x": "^5.4.1"
+  }
+}

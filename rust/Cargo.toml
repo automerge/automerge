@@ -6,6 +6,7 @@ members = [
     "automerge-test",
     "automerge-wasm",
     "edit-trace",
+    "badmessage",
 ]
 resolver = "2"
 
