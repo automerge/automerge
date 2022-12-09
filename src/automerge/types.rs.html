@@ -746,6 +746,65 @@
 <span id="744">744</span>
 <span id="745">745</span>
 <span id="746">746</span>
+<span id="747">747</span>
+<span id="748">748</span>
+<span id="749">749</span>
+<span id="750">750</span>
+<span id="751">751</span>
+<span id="752">752</span>
+<span id="753">753</span>
+<span id="754">754</span>
+<span id="755">755</span>
+<span id="756">756</span>
+<span id="757">757</span>
+<span id="758">758</span>
+<span id="759">759</span>
+<span id="760">760</span>
+<span id="761">761</span>
+<span id="762">762</span>
+<span id="763">763</span>
+<span id="764">764</span>
+<span id="765">765</span>
+<span id="766">766</span>
+<span id="767">767</span>
+<span id="768">768</span>
+<span id="769">769</span>
+<span id="770">770</span>
+<span id="771">771</span>
+<span id="772">772</span>
+<span id="773">773</span>
+<span id="774">774</span>
+<span id="775">775</span>
+<span id="776">776</span>
+<span id="777">777</span>
+<span id="778">778</span>
+<span id="779">779</span>
+<span id="780">780</span>
+<span id="781">781</span>
+<span id="782">782</span>
+<span id="783">783</span>
+<span id="784">784</span>
+<span id="785">785</span>
+<span id="786">786</span>
+<span id="787">787</span>
+<span id="788">788</span>
+<span id="789">789</span>
+<span id="790">790</span>
+<span id="791">791</span>
+<span id="792">792</span>
+<span id="793">793</span>
+<span id="794">794</span>
+<span id="795">795</span>
+<span id="796">796</span>
+<span id="797">797</span>
+<span id="798">798</span>
+<span id="799">799</span>
+<span id="800">800</span>
+<span id="801">801</span>
+<span id="802">802</span>
+<span id="803">803</span>
+<span id="804">804</span>
+<span id="805">805</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error;
 <span class="kw">use </span><span class="kw">crate</span>::legacy <span class="kw">as </span>amp;
 <span class="kw">use </span>serde::{Deserialize, Serialize};
@@ -1141,6 +1200,15 @@
     Seq(usize),
 }
 
+<span class="kw">impl </span>Prop {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>to_index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;usize&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            Prop::Map(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+            Prop::Seq(n) =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span>n),
+        }
+    }
+}
+
 <span class="kw">impl </span>Display <span class="kw">for </span>Prop {
     <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; fmt::Result {
         <span class="kw">match </span><span class="self">self </span>{
@@ -1183,6 +1251,40 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>opid(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>OpId {
         <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0
     </span>}
+}
+
+<span class="attribute">#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+</span><span class="kw">pub enum </span>TextEncoding {
+    Utf8,
+    Utf16,
+}
+
+<span class="attribute">#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>ListEncoding {
+    List,
+    Text(TextEncoding),
+}
+
+<span class="kw">impl </span>Default <span class="kw">for </span>ListEncoding {
+    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
+        ListEncoding::List
+    }
+}
+
+<span class="kw">impl </span>Default <span class="kw">for </span>TextEncoding {
+    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
+        TextEncoding::Utf8
+    }
+}
+
+<span class="kw">impl </span>ListEncoding {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(obj: ObjType, text_encoding: TextEncoding) -&gt; <span class="self">Self </span>{
+        <span class="kw">if </span>obj == ObjType::Text {
+            ListEncoding::Text(text_encoding)
+        } <span class="kw">else </span>{
+            ListEncoding::List
+        }
+    }
 }
 
 <span class="attribute">#[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
@@ -1237,6 +1339,22 @@
                 <span class="kw-2">*</span>increments -= <span class="number">1</span>;
             }
         }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>width(<span class="kw-2">&amp;</span><span class="self">self</span>, encoding: ListEncoding) -&gt; usize {
+        <span class="kw">match </span>encoding {
+            ListEncoding::List =&gt; <span class="number">1</span>,
+            ListEncoding::Text(TextEncoding::Utf8) =&gt; <span class="self">self</span>.to_str().chars().count(),
+            ListEncoding::Text(TextEncoding::Utf16) =&gt; <span class="self">self</span>.to_str().encode_utf16().count(),
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>to_str(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>str {
+        <span class="kw">if let </span>OpType::Put(ScalarValue::Str(s)) = <span class="kw-2">&amp;</span><span class="self">self</span>.action {
+            s
+        } <span class="kw">else </span>{
+            <span class="string">&quot;\u{fffc}&quot;
+        </span>}
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>visible(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {

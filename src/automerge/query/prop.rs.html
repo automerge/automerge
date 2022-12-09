@@ -89,7 +89,7 @@
 <span id="87">87</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTreeNode};
 <span class="kw">use </span><span class="kw">crate</span>::query::{binary_search_by, QueryResult, TreeQuery};
-<span class="kw">use </span><span class="kw">crate</span>::types::{Key, Op};
+<span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, Op};
 <span class="kw">use </span>std::fmt::Debug;
 
 <span class="attribute">#[derive(Debug, Clone, PartialEq)]
@@ -134,7 +134,7 @@
         {
             <span class="kw">if </span><span class="self">self</span>.pos + child.len() &gt;= start {
                 <span class="comment">// skip empty nodes
-                </span><span class="kw">if </span>child.index.visible_len() == <span class="number">0 </span>{
+                </span><span class="kw">if </span>child.index.visible_len(ListEncoding::default()) == <span class="number">0 </span>{
                     <span class="kw">if </span><span class="self">self</span>.pos + child.len() &gt;= optree_len {
                         <span class="self">self</span>.pos = optree_len;
                         QueryResult::Finish

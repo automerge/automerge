@@ -161,10 +161,6 @@
 <span id="159">159</span>
 <span id="160">160</span>
 <span id="161">161</span>
-<span id="162">162</span>
-<span id="163">163</span>
-<span id="164">164</span>
-<span id="165">165</span>
 </pre><pre class="rust"><code><span class="kw">use </span>automerge::{ObjType, ScalarValue, Value};
 <span class="kw">use </span>wasm_bindgen::prelude::<span class="kw-2">*</span>;
 
@@ -187,10 +183,6 @@
 }
 
 <span class="kw">impl </span>Datatype {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>is_sequence(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
-        <span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::List | <span class="self">Self</span>::Text)
-    }
-
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>is_scalar(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
         !<span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Map | <span class="self">Self</span>::Table | <span class="self">Self</span>::List | <span class="self">Self</span>::Text)
     }

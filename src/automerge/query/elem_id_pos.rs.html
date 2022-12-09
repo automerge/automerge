@@ -56,26 +56,32 @@
 <span id="54">54</span>
 <span id="55">55</span>
 <span id="56">56</span>
+<span id="57">57</span>
+<span id="58">58</span>
+<span id="59">59</span>
 </pre><pre class="rust"><code><span class="kw">use crate</span>::{
     op_tree::OpTreeNode,
-    types::{ElemId, Key},
+    types::{ElemId, Key, ListEncoding},
 };
 
 <span class="kw">use super</span>::{QueryResult, TreeQuery};
 
 <span class="doccomment">/// Lookup the index in the list that this elemid occupies.
+</span><span class="attribute">#[derive(Clone, Debug)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ElemIdPos {
     elemid: ElemId,
     pos: usize,
     found: bool,
+    encoding: ListEncoding,
 }
 
 <span class="kw">impl </span>ElemIdPos {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(elemid: ElemId) -&gt; <span class="self">Self </span>{
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(elemid: ElemId, encoding: ListEncoding) -&gt; <span class="self">Self </span>{
         <span class="self">Self </span>{
             elemid,
             pos: <span class="number">0</span>,
             found: <span class="bool-val">false</span>,
+            encoding,
         }
     }
 
@@ -96,7 +102,7 @@
             </span>QueryResult::Descend
         } <span class="kw">else </span>{
             <span class="comment">// not in this node, try the next one
-            </span><span class="self">self</span>.pos += child.index.visible_len();
+            </span><span class="self">self</span>.pos += child.index.visible_len(<span class="self">self</span>.encoding);
             QueryResult::Next
         }
     }
@@ -107,7 +113,7 @@
             </span><span class="self">self</span>.found = <span class="bool-val">true</span>;
             <span class="kw">return </span>QueryResult::Finish;
         } <span class="kw">else if </span>element.visible() {
-            <span class="self">self</span>.pos += <span class="number">1</span>;
+            <span class="self">self</span>.pos += element.width(<span class="self">self</span>.encoding);
         }
         QueryResult::Next
     }

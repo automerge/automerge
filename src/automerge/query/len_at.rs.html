@@ -40,8 +40,10 @@
 <span id="38">38</span>
 <span id="39">39</span>
 <span id="40">40</span>
+<span id="41">41</span>
+<span id="42">42</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::query::{QueryResult, TreeQuery, VisWindow};
-<span class="kw">use </span><span class="kw">crate</span>::types::{Clock, ElemId, Op};
+<span class="kw">use </span><span class="kw">crate</span>::types::{Clock, ElemId, ListEncoding, Op};
 <span class="kw">use </span>std::fmt::Debug;
 
 <span class="attribute">#[derive(Debug, Clone, PartialEq)]
@@ -49,16 +51,18 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) len: usize,
     clock: Clock,
     pos: usize,
+    encoding: ListEncoding,
     last: <span class="prelude-ty">Option</span>&lt;ElemId&gt;,
     window: VisWindow,
 }
 
 <span class="kw">impl </span>LenAt {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(clock: Clock) -&gt; <span class="self">Self </span>{
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(clock: Clock, encoding: ListEncoding) -&gt; <span class="self">Self </span>{
         LenAt {
             clock,
             pos: <span class="number">0</span>,
             len: <span class="number">0</span>,
+            encoding,
             last: <span class="prelude-val">None</span>,
             window: Default::default(),
         }
@@ -73,7 +77,7 @@
         <span class="kw">let </span>elem = op.elemid();
         <span class="kw">let </span>visible = <span class="self">self</span>.window.visible_at(op, <span class="self">self</span>.pos, <span class="kw-2">&amp;</span><span class="self">self</span>.clock);
         <span class="kw">if </span>elem != <span class="self">self</span>.last &amp;&amp; visible {
-            <span class="self">self</span>.len += <span class="number">1</span>;
+            <span class="self">self</span>.len += op.width(<span class="self">self</span>.encoding);
             <span class="self">self</span>.last = elem;
         }
         <span class="self">self</span>.pos += <span class="number">1</span>;

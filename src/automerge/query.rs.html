@@ -271,8 +271,48 @@
 <span id="269">269</span>
 <span id="270">270</span>
 <span id="271">271</span>
-</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTreeNode};
-<span class="kw">use </span><span class="kw">crate</span>::types::{Clock, Counter, Key, Op, OpId, OpType, ScalarValue};
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTree, OpTreeNode};
+<span class="kw">use </span><span class="kw">crate</span>::types::{
+    Clock, Counter, Key, ListEncoding, Op, OpId, OpType, ScalarValue, TextEncoding,
+};
 <span class="kw">use </span>fxhash::FxBuildHasher;
 <span class="kw">use </span>std::cmp::Ordering;
 <span class="kw">use </span>std::collections::{HashMap, HashSet};
@@ -293,6 +333,7 @@
 <span class="kw">mod </span>nth;
 <span class="kw">mod </span>nth_at;
 <span class="kw">mod </span>opid;
+<span class="kw">mod </span>opid_vis;
 <span class="kw">mod </span>prop;
 <span class="kw">mod </span>prop_at;
 <span class="kw">mod </span>seek_op;
@@ -313,6 +354,7 @@
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>nth::Nth;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>nth_at::NthAt;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>opid::OpIdSearch;
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>opid_vis::OpIdVisSearch;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>prop::Prop;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>prop_at::PropAt;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>seek_op::SeekOp;
@@ -320,12 +362,10 @@
 
 <span class="comment">// use a struct for the args for clarity as they are passed up the update chain in the optree
 </span><span class="attribute">#[derive(Debug, Clone)]
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ReplaceArgs {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) old_id: OpId,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) new_id: OpId,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) old_visible: bool,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) new_visible: bool,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) new_key: Key,
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ChangeVisibility&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) old_vis: bool,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) new_vis: bool,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
 }
 
 <span class="attribute">#[derive(Debug, Clone, PartialEq)]
@@ -336,7 +376,15 @@
     op: Op,
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">trait </span>TreeQuery&lt;<span class="lifetime">&#39;a</span>&gt; {
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">trait </span>TreeQuery&lt;<span class="lifetime">&#39;a</span>&gt;: Clone + Debug {
+    <span class="kw">fn </span>equiv(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _other: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; bool {
+        <span class="bool-val">false
+    </span>}
+
+    <span class="kw">fn </span>can_shortcut_search(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _tree: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTree) -&gt; bool {
+        <span class="bool-val">false
+    </span>}
+
     <span class="attribute">#[inline(always)]
     </span><span class="kw">fn </span>query_node_with_metadata(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
@@ -373,6 +421,8 @@
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Index {
     <span class="doccomment">/// The map of visible keys to the number of visible operations for that key.
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) visible: HashMap&lt;Key, usize, FxBuildHasher&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) visible16: usize,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) visible8: usize,
     <span class="doccomment">/// Set of opids found in this node and below.
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) ops: HashSet&lt;OpId, FxBuildHasher&gt;,
 }
@@ -381,53 +431,72 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new() -&gt; <span class="self">Self </span>{
         Index {
             visible: Default::default(),
+            visible16: <span class="number">0</span>,
+            visible8: <span class="number">0</span>,
             ops: Default::default(),
         }
     }
 
     <span class="doccomment">/// Get the number of visible elements in this index.
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>visible_len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-        <span class="self">self</span>.visible.len()
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>visible_len(<span class="kw-2">&amp;</span><span class="self">self</span>, encoding: ListEncoding) -&gt; usize {
+        <span class="kw">match </span>encoding {
+            ListEncoding::List =&gt; <span class="self">self</span>.visible.len(),
+            ListEncoding::Text(TextEncoding::Utf8) =&gt; <span class="self">self</span>.visible8,
+            ListEncoding::Text(TextEncoding::Utf16) =&gt; <span class="self">self</span>.visible16,
+        }
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>has_visible(<span class="kw-2">&amp;</span><span class="self">self</span>, seen: <span class="kw-2">&amp;</span>Key) -&gt; bool {
         <span class="self">self</span>.visible.contains_key(seen)
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>replace(
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>change_vis&lt;<span class="lifetime">&#39;a</span>&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        ReplaceArgs {
-            old_id,
-            new_id,
-            old_visible,
-            new_visible,
-            new_key,
-        }: <span class="kw-2">&amp;</span>ReplaceArgs,
-    ) {
-        <span class="kw">if </span>old_id != new_id {
-            <span class="self">self</span>.ops.remove(old_id);
-            <span class="self">self</span>.ops.insert(<span class="kw-2">*</span>new_id);
-        }
-
-        <span class="kw">match </span>(new_visible, old_visible, new_key) {
-            (<span class="bool-val">false</span>, <span class="bool-val">true</span>, key) =&gt; <span class="kw">match </span><span class="self">self</span>.visible.get(key).copied() {
+        change_vis: ChangeVisibility&lt;<span class="lifetime">&#39;a</span>&gt;,
+    ) -&gt; ChangeVisibility&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <span class="kw">let </span>ChangeVisibility {
+            old_vis,
+            new_vis,
+            op,
+        } = <span class="kw-2">&amp;</span>change_vis;
+        <span class="kw">let </span>key = op.elemid_or_key();
+        <span class="kw">match </span>(old_vis, new_vis) {
+            (<span class="bool-val">true</span>, <span class="bool-val">false</span>) =&gt; <span class="kw">match </span><span class="self">self</span>.visible.get(<span class="kw-2">&amp;</span>key).copied() {
                 <span class="prelude-val">Some</span>(n) <span class="kw">if </span>n == <span class="number">1 </span>=&gt; {
-                    <span class="self">self</span>.visible.remove(key);
+                    <span class="self">self</span>.visible.remove(<span class="kw-2">&amp;</span>key);
+                    <span class="self">self</span>.visible8 -= op.width(ListEncoding::Text(TextEncoding::Utf8));
+                    <span class="self">self</span>.visible16 -= op.width(ListEncoding::Text(TextEncoding::Utf16));
                 }
                 <span class="prelude-val">Some</span>(n) =&gt; {
-                    <span class="self">self</span>.visible.insert(<span class="kw-2">*</span>key, n - <span class="number">1</span>);
+                    <span class="self">self</span>.visible.insert(key, n - <span class="number">1</span>);
                 }
                 <span class="prelude-val">None </span>=&gt; <span class="macro">panic!</span>(<span class="string">&quot;remove overun in index&quot;</span>),
             },
-            (<span class="bool-val">true</span>, <span class="bool-val">false</span>, key) =&gt; <span class="kw-2">*</span><span class="self">self</span>.visible.entry(<span class="kw-2">*</span>key).or_default() += <span class="number">1</span>,
+            (<span class="bool-val">false</span>, <span class="bool-val">true</span>) =&gt; {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(n) = <span class="self">self</span>.visible.get(<span class="kw-2">&amp;</span>key) {
+                    <span class="self">self</span>.visible.insert(key, n + <span class="number">1</span>);
+                } <span class="kw">else </span>{
+                    <span class="self">self</span>.visible.insert(key, <span class="number">1</span>);
+                    <span class="self">self</span>.visible8 += op.width(ListEncoding::Text(TextEncoding::Utf8));
+                    <span class="self">self</span>.visible16 += op.width(ListEncoding::Text(TextEncoding::Utf16));
+                }
+            }
             <span class="kw">_ </span>=&gt; {}
         }
+        change_vis
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: <span class="kw-2">&amp;</span>Op) {
         <span class="self">self</span>.ops.insert(op.id);
         <span class="kw">if </span>op.visible() {
-            <span class="kw-2">*</span><span class="self">self</span>.visible.entry(op.elemid_or_key()).or_default() += <span class="number">1</span>;
+            <span class="kw">let </span>key = op.elemid_or_key();
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(n) = <span class="self">self</span>.visible.get(<span class="kw-2">&amp;</span>key) {
+                <span class="self">self</span>.visible.insert(key, n + <span class="number">1</span>);
+            } <span class="kw">else </span>{
+                <span class="self">self</span>.visible.insert(key, <span class="number">1</span>);
+                <span class="self">self</span>.visible8 += op.width(ListEncoding::Text(TextEncoding::Utf8));
+                <span class="self">self</span>.visible16 += op.width(ListEncoding::Text(TextEncoding::Utf16));
+            }
         }
     }
 
@@ -438,6 +507,8 @@
             <span class="kw">match </span><span class="self">self</span>.visible.get(<span class="kw-2">&amp;</span>key).copied() {
                 <span class="prelude-val">Some</span>(n) <span class="kw">if </span>n == <span class="number">1 </span>=&gt; {
                     <span class="self">self</span>.visible.remove(<span class="kw-2">&amp;</span>key);
+                    <span class="self">self</span>.visible8 -= op.width(ListEncoding::Text(TextEncoding::Utf8));
+                    <span class="self">self</span>.visible16 -= op.width(ListEncoding::Text(TextEncoding::Utf16));
                 }
                 <span class="prelude-val">Some</span>(n) =&gt; {
                     <span class="self">self</span>.visible.insert(key, n - <span class="number">1</span>);
@@ -451,9 +522,14 @@
         <span class="kw">for </span>id <span class="kw">in </span><span class="kw-2">&amp;</span>other.ops {
             <span class="self">self</span>.ops.insert(<span class="kw-2">*</span>id);
         }
-        <span class="kw">for </span>(elem, n) <span class="kw">in </span>other.visible.iter() {
-            <span class="kw-2">*</span><span class="self">self</span>.visible.entry(<span class="kw-2">*</span>elem).or_default() += n;
+        <span class="kw">for </span>(elem, other_len) <span class="kw">in </span>other.visible.iter() {
+            <span class="self">self</span>.visible
+                .entry(<span class="kw-2">*</span>elem)
+                .and_modify(|len| <span class="kw-2">*</span>len += <span class="kw-2">*</span>other_len)
+                .or_insert(<span class="kw-2">*</span>other_len);
         }
+        <span class="self">self</span>.visible16 += other.visible16;
+        <span class="self">self</span>.visible8 += other.visible8;
     }
 }
 

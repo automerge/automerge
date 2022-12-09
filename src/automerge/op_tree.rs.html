@@ -804,11 +804,6 @@
 <span id="802">802</span>
 <span id="803">803</span>
 <span id="804">804</span>
-<span id="805">805</span>
-<span id="806">806</span>
-<span id="807">807</span>
-<span id="808">808</span>
-<span id="809">809</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::{
     cmp::{min, Ordering},
     fmt::Debug,
@@ -819,7 +814,7 @@
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="kw">crate</span>::op_set::OpSetMetadata;
 <span class="kw">use crate</span>::{
     clock::Clock,
-    query::{<span class="self">self</span>, Index, QueryResult, ReplaceArgs, TreeQuery},
+    query::{<span class="self">self</span>, ChangeVisibility, Index, QueryResult, TreeQuery},
 };
 <span class="kw">use crate</span>::{
     types::{ObjId, Op, OpId},
@@ -838,6 +833,11 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) objtype: ObjType,
     <span class="doccomment">/// The id of the parent object, root has no parent.
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) parent: <span class="prelude-ty">Option</span>&lt;ObjId&gt;,
+    <span class="doccomment">/// record the last list index and tree position
+    /// inserted into the op_set - this allows us to
+    /// short circuit the query if the follow op is another
+    /// insert or delete at the same spot
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) last_insert: <span class="prelude-ty">Option</span>&lt;(usize, usize)&gt;,
 }
 
 <span class="kw">impl </span>OpTree {
@@ -846,6 +846,7 @@
             internal: Default::default(),
             objtype: ObjType::Map,
             parent: <span class="prelude-val">None</span>,
+            last_insert: <span class="prelude-val">None</span>,
         }
     }
 
@@ -1429,24 +1430,19 @@
     <span class="doccomment">/// Update the operation at the given index using the provided function.
     ///
     /// This handles updating the indices after the update.
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>update&lt;F&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: usize, f: F) -&gt; ReplaceArgs
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>update&lt;F&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: usize, f: F) -&gt; ChangeVisibility&lt;<span class="lifetime">&#39;_</span>&gt;
     <span class="kw">where
         </span>F: FnOnce(<span class="kw-2">&amp;mut </span>Op),
     {
         <span class="kw">if </span><span class="self">self</span>.is_leaf() {
             <span class="kw">let </span>new_element = <span class="self">self</span>.elements.get_mut(index).unwrap();
-            <span class="kw">let </span>old_id = new_element.id;
-            <span class="kw">let </span>old_visible = new_element.visible();
+            <span class="kw">let </span>old_vis = new_element.visible();
             f(new_element);
-            <span class="kw">let </span>replace_args = ReplaceArgs {
-                old_id,
-                new_id: new_element.id,
-                old_visible,
-                new_visible: new_element.visible(),
-                new_key: new_element.elemid_or_key(),
-            };
-            <span class="self">self</span>.index.replace(<span class="kw-2">&amp;</span>replace_args);
-            replace_args
+            <span class="self">self</span>.index.change_vis(ChangeVisibility {
+                old_vis,
+                new_vis: new_element.visible(),
+                op: new_element,
+            })
         } <span class="kw">else </span>{
             <span class="kw">let </span><span class="kw-2">mut </span>cumulative_len = <span class="number">0</span>;
             <span class="kw">let </span>len = <span class="self">self</span>.len();
@@ -1457,23 +1453,17 @@
                     }
                     Ordering::Equal =&gt; {
                         <span class="kw">let </span>new_element = <span class="self">self</span>.elements.get_mut(child_index).unwrap();
-                        <span class="kw">let </span>old_id = new_element.id;
-                        <span class="kw">let </span>old_visible = new_element.visible();
+                        <span class="kw">let </span>old_vis = new_element.visible();
                         f(new_element);
-                        <span class="kw">let </span>replace_args = ReplaceArgs {
-                            old_id,
-                            new_id: new_element.id,
-                            old_visible,
-                            new_visible: new_element.visible(),
-                            new_key: new_element.elemid_or_key(),
-                        };
-                        <span class="self">self</span>.index.replace(<span class="kw-2">&amp;</span>replace_args);
-                        <span class="kw">return </span>replace_args;
+                        <span class="kw">return </span><span class="self">self</span>.index.change_vis(ChangeVisibility {
+                            old_vis,
+                            new_vis: new_element.visible(),
+                            op: new_element,
+                        });
                     }
                     Ordering::Greater =&gt; {
-                        <span class="kw">let </span>replace_args = child.update(index - cumulative_len, f);
-                        <span class="self">self</span>.index.replace(<span class="kw-2">&amp;</span>replace_args);
-                        <span class="kw">return </span>replace_args;
+                        <span class="kw">let </span>vis_args = child.update(index - cumulative_len, f);
+                        <span class="kw">return </span><span class="self">self</span>.index.change_vis(vis_args);
                     }
                 }
             }

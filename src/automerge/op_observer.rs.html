@@ -240,8 +240,128 @@
 <span id="238">238</span>
 <span id="239">239</span>
 <span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+<span id="281">281</span>
+<span id="282">282</span>
+<span id="283">283</span>
+<span id="284">284</span>
+<span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
+<span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
-<span class="kw">use </span><span class="kw">crate</span>::Parents;
+<span class="kw">use </span><span class="kw">crate</span>::Automerge;
 <span class="kw">use </span><span class="kw">crate</span>::Prop;
 <span class="kw">use </span><span class="kw">crate</span>::Value;
 
@@ -249,22 +369,24 @@
 </span><span class="kw">pub trait </span>OpObserver {
     <span class="doccomment">/// A new value has been inserted into the given object.
     ///
-    /// - `parents`: A parents iterator that can be used to collect path information
+    /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
     /// - `objid`: the object that has been inserted into.
     /// - `index`: the index the new value has been inserted at.
     /// - `tagged_value`: the value that has been inserted and the id of the operation that did the
     /// insert.
     </span><span class="kw">fn </span>insert(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        parents: Parents&lt;<span class="lifetime">&#39;_</span>&gt;,
+        doc: <span class="kw-2">&amp;</span>Automerge,
         objid: ExId,
         index: usize,
         tagged_value: (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId),
     );
 
+    <span class="kw">fn </span>splice_text(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _doc: <span class="kw-2">&amp;</span>Automerge, _objid: ExId, _index: usize, _value: <span class="kw-2">&amp;</span>str);
+
     <span class="doccomment">/// A new value has been put into the given object.
     ///
-    /// - `parents`: A parents iterator that can be used to collect path information
+    /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
     /// - `objid`: the object that has been put into.
     /// - `prop`: the prop that the value as been put at.
     /// - `tagged_value`: the value that has been put into the object and the id of the operation
@@ -272,34 +394,74 @@
     /// - `conflict`: whether this put conflicts with other operations.
     </span><span class="kw">fn </span>put(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        parents: Parents&lt;<span class="lifetime">&#39;_</span>&gt;,
+        doc: <span class="kw-2">&amp;</span>Automerge,
         objid: ExId,
         prop: Prop,
         tagged_value: (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId),
         conflict: bool,
     );
 
+    <span class="doccomment">/// When a delete op exposes a previously conflicted value
+    /// Similar to a put op - except for maps, lists and text, edits
+    /// may already exist and need to be queried
+    ///
+    /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
+    /// - `objid`: the object that has been put into.
+    /// - `prop`: the prop that the value as been put at.
+    /// - `tagged_value`: the value that has been put into the object and the id of the operation
+    /// that did the put.
+    /// - `conflict`: whether this put conflicts with other operations.
+    </span><span class="kw">fn </span>expose(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        doc: <span class="kw-2">&amp;</span>Automerge,
+        objid: ExId,
+        prop: Prop,
+        tagged_value: (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId),
+        conflict: bool,
+    );
+
+    <span class="doccomment">/// Flag a new conflict on a value without changing it
+    ///
+    /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
+    /// - `objid`: the object that has been put into.
+    /// - `prop`: the prop that the value as been put at.
+    </span><span class="kw">fn </span>flag_conflict(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _doc: <span class="kw-2">&amp;</span>Automerge, _objid: ExId, _prop: Prop) {}
+
     <span class="doccomment">/// A counter has been incremented.
     ///
-    /// - `parents`: A parents iterator that can be used to collect path information
+    /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
     /// - `objid`: the object that contains the counter.
     /// - `prop`: they prop that the chounter is at.
     /// - `tagged_value`: the amount the counter has been incremented by, and the the id of the
     /// increment operation.
-    </span><span class="kw">fn </span>increment(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        parents: Parents&lt;<span class="lifetime">&#39;_</span>&gt;,
-        objid: ExId,
-        prop: Prop,
-        tagged_value: (i64, ExId),
-    );
+    </span><span class="kw">fn </span>increment(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, objid: ExId, prop: Prop, tagged_value: (i64, ExId));
 
-    <span class="doccomment">/// A value has beeen deleted.
+    <span class="doccomment">/// A map value has beeen deleted.
     ///
-    /// - `parents`: A parents iterator that can be used to collect path information
+    /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
     /// - `objid`: the object that has been deleted in.
-    /// - `prop`: the prop of the value that has been deleted.
-    </span><span class="kw">fn </span>delete(<span class="kw-2">&amp;mut </span><span class="self">self</span>, parents: Parents&lt;<span class="lifetime">&#39;_</span>&gt;, objid: ExId, prop: Prop);
+    /// - `prop`: the prop to be deleted
+    </span><span class="kw">fn </span>delete(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, objid: ExId, prop: Prop) {
+        <span class="kw">match </span>prop {
+            Prop::Map(k) =&gt; <span class="self">self</span>.delete_map(doc, objid, <span class="kw-2">&amp;</span>k),
+            Prop::Seq(i) =&gt; <span class="self">self</span>.delete_seq(doc, objid, i, <span class="number">1</span>),
+        }
+    }
+
+    <span class="doccomment">/// A map value has beeen deleted.
+    ///
+    /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
+    /// - `objid`: the object that has been deleted in.
+    /// - `key`: the map key to be deleted
+    </span><span class="kw">fn </span>delete_map(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, objid: ExId, key: <span class="kw-2">&amp;</span>str);
+
+    <span class="doccomment">/// A one or more list values have beeen deleted.
+    ///
+    /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
+    /// - `objid`: the object that has been deleted in.
+    /// - `index`: the index of the deletion
+    /// - `num`: the number of sequential elements deleted
+    </span><span class="kw">fn </span>delete_seq(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, objid: ExId, index: usize, num: usize);
 
     <span class="doccomment">/// Branch of a new op_observer later to be merged
     ///
@@ -319,16 +481,28 @@
 <span class="kw">impl </span>OpObserver <span class="kw">for </span>() {
     <span class="kw">fn </span>insert(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        _parents: Parents&lt;<span class="lifetime">&#39;_</span>&gt;,
+        _doc: <span class="kw-2">&amp;</span>Automerge,
         _objid: ExId,
         _index: usize,
         _tagged_value: (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId),
     ) {
     }
 
+    <span class="kw">fn </span>splice_text(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _doc: <span class="kw-2">&amp;</span>Automerge, _objid: ExId, _index: usize, _value: <span class="kw-2">&amp;</span>str) {}
+
     <span class="kw">fn </span>put(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        _parents: Parents&lt;<span class="lifetime">&#39;_</span>&gt;,
+        _doc: <span class="kw-2">&amp;</span>Automerge,
+        _objid: ExId,
+        _prop: Prop,
+        _tagged_value: (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId),
+        _conflict: bool,
+    ) {
+    }
+
+    <span class="kw">fn </span>expose(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        _doc: <span class="kw-2">&amp;</span>Automerge,
         _objid: ExId,
         _prop: Prop,
         _tagged_value: (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId),
@@ -338,14 +512,16 @@
 
     <span class="kw">fn </span>increment(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        _parents: Parents&lt;<span class="lifetime">&#39;_</span>&gt;,
+        _doc: <span class="kw-2">&amp;</span>Automerge,
         _objid: ExId,
         _prop: Prop,
         _tagged_value: (i64, ExId),
     ) {
     }
 
-    <span class="kw">fn </span>delete(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _parents: Parents&lt;<span class="lifetime">&#39;_</span>&gt;, _objid: ExId, _prop: Prop) {}
+    <span class="kw">fn </span>delete_map(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _doc: <span class="kw-2">&amp;</span>Automerge, _objid: ExId, _key: <span class="kw-2">&amp;</span>str) {}
+
+    <span class="kw">fn </span>delete_seq(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _doc: <span class="kw-2">&amp;</span>Automerge, _objid: ExId, _index: usize, _num: usize) {}
 
     <span class="kw">fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _other: <span class="kw-2">&amp;</span><span class="self">Self</span>) {}
 
@@ -367,59 +543,97 @@
 }
 
 <span class="kw">impl </span>OpObserver <span class="kw">for </span>VecOpObserver {
-    <span class="kw">fn </span>insert(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        <span class="kw-2">mut </span>parents: Parents&lt;<span class="lifetime">&#39;_</span>&gt;,
-        obj: ExId,
-        index: usize,
-        (value, id): (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId),
-    ) {
-        <span class="kw">let </span>path = parents.path();
-        <span class="self">self</span>.patches.push(Patch::Insert {
-            obj,
-            path,
-            index,
-            value: (value.into_owned(), id),
-        });
+    <span class="kw">fn </span>insert(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, obj: ExId, index: usize, (value, id): (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)) {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="kw-2">mut </span>p) = doc.parents(<span class="kw-2">&amp;</span>obj) {
+            <span class="self">self</span>.patches.push(Patch::Insert {
+                obj,
+                path: p.path(),
+                index,
+                value: (value.into_owned(), id),
+            });
+        }
+    }
+
+    <span class="kw">fn </span>splice_text(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, obj: ExId, index: usize, value: <span class="kw-2">&amp;</span>str) {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="kw-2">mut </span>p) = doc.parents(<span class="kw-2">&amp;</span>obj) {
+            <span class="self">self</span>.patches.push(Patch::Splice {
+                obj,
+                path: p.path(),
+                index,
+                value: value.to_string(),
+            })
+        }
     }
 
     <span class="kw">fn </span>put(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        <span class="kw-2">mut </span>parents: Parents&lt;<span class="lifetime">&#39;_</span>&gt;,
+        doc: <span class="kw-2">&amp;</span>Automerge,
         obj: ExId,
         prop: Prop,
         (value, id): (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId),
         conflict: bool,
     ) {
-        <span class="kw">let </span>path = parents.path();
-        <span class="self">self</span>.patches.push(Patch::Put {
-            obj,
-            path,
-            prop,
-            value: (value.into_owned(), id),
-            conflict,
-        });
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="kw-2">mut </span>p) = doc.parents(<span class="kw-2">&amp;</span>obj) {
+            <span class="self">self</span>.patches.push(Patch::Put {
+                obj,
+                path: p.path(),
+                prop,
+                value: (value.into_owned(), id),
+                conflict,
+            });
+        }
     }
 
-    <span class="kw">fn </span>increment(
+    <span class="kw">fn </span>expose(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        <span class="kw-2">mut </span>parents: Parents&lt;<span class="lifetime">&#39;_</span>&gt;,
+        doc: <span class="kw-2">&amp;</span>Automerge,
         obj: ExId,
         prop: Prop,
-        tagged_value: (i64, ExId),
+        (value, id): (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId),
+        conflict: bool,
     ) {
-        <span class="kw">let </span>path = parents.path();
-        <span class="self">self</span>.patches.push(Patch::Increment {
-            obj,
-            path,
-            prop,
-            value: tagged_value,
-        });
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="kw-2">mut </span>p) = doc.parents(<span class="kw-2">&amp;</span>obj) {
+            <span class="self">self</span>.patches.push(Patch::Expose {
+                obj,
+                path: p.path(),
+                prop,
+                value: (value.into_owned(), id),
+                conflict,
+            });
+        }
     }
 
-    <span class="kw">fn </span>delete(<span class="kw-2">&amp;mut </span><span class="self">self</span>, <span class="kw-2">mut </span>parents: Parents&lt;<span class="lifetime">&#39;_</span>&gt;, obj: ExId, prop: Prop) {
-        <span class="kw">let </span>path = parents.path();
-        <span class="self">self</span>.patches.push(Patch::Delete { obj, path, prop })
+    <span class="kw">fn </span>increment(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, obj: ExId, prop: Prop, tagged_value: (i64, ExId)) {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="kw-2">mut </span>p) = doc.parents(<span class="kw-2">&amp;</span>obj) {
+            <span class="self">self</span>.patches.push(Patch::Increment {
+                obj,
+                path: p.path(),
+                prop,
+                value: tagged_value,
+            });
+        }
+    }
+
+    <span class="kw">fn </span>delete_map(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, obj: ExId, key: <span class="kw-2">&amp;</span>str) {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="kw-2">mut </span>p) = doc.parents(<span class="kw-2">&amp;</span>obj) {
+            <span class="self">self</span>.patches.push(Patch::Delete {
+                obj,
+                path: p.path(),
+                prop: Prop::Map(key.to_owned()),
+                num: <span class="number">1</span>,
+            })
+        }
+    }
+
+    <span class="kw">fn </span>delete_seq(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, obj: ExId, index: usize, num: usize) {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="kw-2">mut </span>p) = doc.parents(<span class="kw-2">&amp;</span>obj) {
+            <span class="self">self</span>.patches.push(Patch::Delete {
+                obj,
+                path: p.path(),
+                prop: Prop::Seq(index),
+                num,
+            })
+        }
     }
 
     <span class="kw">fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>) {
@@ -447,7 +661,20 @@
         <span class="doccomment">/// Whether this put conflicts with another.
         </span>conflict: bool,
     },
-    <span class="doccomment">/// Inserting a new element into a list/text
+    <span class="doccomment">/// Exposing (via delete) an old but conflicted value with a prop in a map, or a list element
+    </span>Expose {
+        <span class="doccomment">/// path to the object
+        </span>path: Vec&lt;(ExId, Prop)&gt;,
+        <span class="doccomment">/// The object that was put into.
+        </span>obj: ExId,
+        <span class="doccomment">/// The prop that the new value was put at.
+        </span>prop: Prop,
+        <span class="doccomment">/// The value that was put, and the id of the operation that put it there.
+        </span>value: (Value&lt;<span class="lifetime">&#39;static</span>&gt;, ExId),
+        <span class="doccomment">/// Whether this put conflicts with another.
+        </span>conflict: bool,
+    },
+    <span class="doccomment">/// Inserting a new element into a list
     </span>Insert {
         <span class="doccomment">/// path to the object
         </span>path: Vec&lt;(ExId, Prop)&gt;,
@@ -457,6 +684,17 @@
         </span>index: usize,
         <span class="doccomment">/// The value that was inserted, and the id of the operation that inserted it there.
         </span>value: (Value&lt;<span class="lifetime">&#39;static</span>&gt;, ExId),
+    },
+    <span class="doccomment">/// Splicing a text object
+    </span>Splice {
+        <span class="doccomment">/// path to the object
+        </span>path: Vec&lt;(ExId, Prop)&gt;,
+        <span class="doccomment">/// The object that was inserted into.
+        </span>obj: ExId,
+        <span class="doccomment">/// The index that the new value was inserted at.
+        </span>index: usize,
+        <span class="doccomment">/// The value that was spliced
+        </span>value: String,
     },
     <span class="doccomment">/// Incrementing a counter.
     </span>Increment {
@@ -478,6 +716,8 @@
         </span>obj: ExId,
         <span class="doccomment">/// The prop that was deleted.
         </span>prop: Prop,
+        <span class="doccomment">/// number of items deleted (for seq)
+        </span>num: usize,
     },
 }
 </code></pre></div>

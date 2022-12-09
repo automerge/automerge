@@ -285,9 +285,16 @@
 <span id="283">283</span>
 <span id="284">284</span>
 <span id="285">285</span>
+<span id="286">286</span>
+<span id="287">287</span>
+<span id="288">288</span>
+<span id="289">289</span>
+<span id="290">290</span>
+<span id="291">291</span>
+<span id="292">292</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTreeNode};
 <span class="kw">use </span><span class="kw">crate</span>::query::{binary_search_by, QueryResult, TreeQuery};
-<span class="kw">use </span><span class="kw">crate</span>::types::{Key, Op, HEAD};
+<span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, Op, HEAD};
 <span class="kw">use </span>std::cmp::Ordering;
 <span class="kw">use </span>std::fmt::Debug;
 
@@ -297,7 +304,9 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) pos: usize,
     <span class="kw">pub</span>(<span class="kw">crate</span>) succ: Vec&lt;usize&gt;,
     found: bool,
+    encoding: ListEncoding,
     <span class="kw">pub</span>(<span class="kw">crate</span>) seen: usize,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) last_width: usize,
     last_seen: <span class="prelude-ty">Option</span>&lt;Key&gt;,
     <span class="kw">pub</span>(<span class="kw">crate</span>) values: Vec&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;,
     <span class="kw">pub</span>(<span class="kw">crate</span>) had_value_before: bool,
@@ -306,13 +315,15 @@
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; SeekOpWithPatch&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(op: <span class="kw-2">&amp;</span>Op) -&gt; <span class="self">Self </span>{
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(op: <span class="kw-2">&amp;</span>Op, encoding: ListEncoding) -&gt; <span class="self">Self </span>{
         SeekOpWithPatch {
             op: op.clone(),
             succ: <span class="macro">vec!</span>[],
             pos: <span class="number">0</span>,
             found: <span class="bool-val">false</span>,
+            encoding,
             seen: <span class="number">0</span>,
+            last_width: <span class="number">0</span>,
             last_seen: <span class="prelude-val">None</span>,
             values: <span class="macro">vec!</span>[],
             had_value_before: <span class="bool-val">false</span>,
@@ -344,7 +355,7 @@
             <span class="self">self</span>.last_seen = <span class="prelude-val">None
         </span>}
         <span class="kw">if </span>e.visible() &amp;&amp; <span class="self">self</span>.last_seen.is_none() {
-            <span class="self">self</span>.seen += <span class="number">1</span>;
+            <span class="self">self</span>.seen += e.width(<span class="self">self</span>.encoding);
             <span class="self">self</span>.last_seen = <span class="prelude-val">Some</span>(e.elemid_or_key())
         }
     }
@@ -388,7 +399,7 @@
                     // elements it contains. However, it could happen that a visible element is
                     // split across two tree nodes. To avoid double-counting in this situation, we
                     // subtract one if the last visible element also appears in this tree node.
-                    </span><span class="kw">let </span><span class="kw-2">mut </span>num_vis = child.index.visible_len();
+                    </span><span class="kw">let </span><span class="kw-2">mut </span>num_vis = child.index.visible_len(<span class="self">self</span>.encoding);
                     <span class="kw">if </span>num_vis &gt; <span class="number">0 </span>{
                         <span class="comment">// FIXME: I think this is wrong: we should subtract one only if this
                         // subtree contains a *visible* (i.e. empty succs) operation for the list
@@ -417,7 +428,7 @@
                 <span class="kw">if let </span><span class="prelude-val">Some</span>(start) = <span class="self">self</span>.start {
                     <span class="kw">if </span><span class="self">self</span>.pos + child.len() &gt;= start {
                         <span class="comment">// skip empty nodes
-                        </span><span class="kw">if </span>child.index.visible_len() == <span class="number">0 </span>{
+                        </span><span class="kw">if </span>child.index.visible_len(<span class="self">self</span>.encoding) == <span class="number">0 </span>{
                             <span class="self">self</span>.pos += child.len();
                             QueryResult::Next
                         } <span class="kw">else </span>{
@@ -460,6 +471,7 @@
                             <span class="self">self</span>.values.push(e);
                         }
                         <span class="self">self</span>.succ.push(<span class="self">self</span>.pos);
+                        <span class="self">self</span>.last_width = e.width(<span class="self">self</span>.encoding);
 
                         <span class="kw">if </span>e.visible() {
                             <span class="self">self</span>.had_value_before = <span class="bool-val">true</span>;
@@ -505,6 +517,7 @@
                                 <span class="self">self</span>.values.push(e);
                             }
                             <span class="self">self</span>.succ.push(<span class="self">self</span>.pos);
+                            <span class="self">self</span>.last_width = e.width(<span class="self">self</span>.encoding);
                         }
                         <span class="kw">if </span>e.visible() {
                             <span class="self">self</span>.had_value_before = <span class="bool-val">true</span>;
@@ -522,6 +535,7 @@
                             <span class="self">self</span>.values.push(e);
                         }
                         <span class="self">self</span>.succ.push(<span class="self">self</span>.pos);
+                        <span class="self">self</span>.last_width = e.width(<span class="self">self</span>.encoding);
                     }
 
                     <span class="comment">// If the new op is an insertion, skip over any existing list elements whose elemId is

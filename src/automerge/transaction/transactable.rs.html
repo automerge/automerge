@@ -198,11 +198,6 @@
 <span id="196">196</span>
 <span id="197">197</span>
 <span id="198">198</span>
-<span id="199">199</span>
-<span id="200">200</span>
-<span id="201">201</span>
-<span id="202">202</span>
-<span id="203">203</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
@@ -296,10 +291,7 @@
         pos: usize,
         del: usize,
         text: <span class="kw-2">&amp;</span>str,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
-        <span class="kw">let </span>vals = text.chars().map(|c| c.into());
-        <span class="self">self</span>.splice(obj, pos, del, vals)
-    }
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt;;
 
     <span class="doccomment">/// Get the keys of the given object, it should be a map.
     </span><span class="kw">fn </span>keys&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; Keys&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt;;
@@ -344,7 +336,7 @@
     </span><span class="kw">fn </span>length_at&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; usize;
 
     <span class="doccomment">/// Get type for object
-    </span><span class="kw">fn </span>object_type&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Option</span>&lt;ObjType&gt;;
+    </span><span class="kw">fn </span>object_type&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;ObjType, AutomergeError&gt;;
 
     <span class="doccomment">/// Get the string that this text object represents.
     </span><span class="kw">fn </span>text&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt;;
@@ -398,9 +390,7 @@
     </span><span class="kw">fn </span>parents&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;Parents&lt;<span class="lifetime">&#39;_</span>&gt;, AutomergeError&gt;;
 
     <span class="kw">fn </span>path_to_object&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(ExId, Prop)&gt;, AutomergeError&gt; {
-        <span class="kw">let </span><span class="kw-2">mut </span>path = <span class="self">self</span>.parents(obj.as_ref().clone())<span class="question-mark">?</span>.collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
-        path.reverse();
-        <span class="prelude-val">Ok</span>(path)
+        <span class="prelude-val">Ok</span>(<span class="self">self</span>.parents(obj.as_ref().clone())<span class="question-mark">?</span>.path())
     }
 
     <span class="doccomment">/// The heads this transaction will be based on

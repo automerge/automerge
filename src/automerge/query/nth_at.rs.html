@@ -65,8 +65,10 @@
 <span id="63">63</span>
 <span id="64">64</span>
 <span id="65">65</span>
+<span id="66">66</span>
+<span id="67">67</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::query::{QueryResult, TreeQuery, VisWindow};
-<span class="kw">use </span><span class="kw">crate</span>::types::{Clock, ElemId, Op};
+<span class="kw">use </span><span class="kw">crate</span>::types::{Clock, ElemId, ListEncoding, Op};
 <span class="kw">use </span>std::fmt::Debug;
 
 <span class="attribute">#[derive(Debug, Clone, PartialEq)]
@@ -74,6 +76,7 @@
     clock: Clock,
     target: usize,
     seen: usize,
+    encoding: ListEncoding,
     last_seen: <span class="prelude-ty">Option</span>&lt;ElemId&gt;,
     window: VisWindow,
     <span class="kw">pub</span>(<span class="kw">crate</span>) ops: Vec&lt;Op&gt;,
@@ -82,11 +85,12 @@
 }
 
 <span class="kw">impl </span>NthAt {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(target: usize, clock: Clock) -&gt; <span class="self">Self </span>{
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(target: usize, clock: Clock, encoding: ListEncoding) -&gt; <span class="self">Self </span>{
         NthAt {
             clock,
             target,
             seen: <span class="number">0</span>,
+            encoding,
             last_seen: <span class="prelude-val">None</span>,
             ops: <span class="macro">vec!</span>[],
             ops_pos: <span class="macro">vec!</span>[],
@@ -106,10 +110,10 @@
         </span>}
         <span class="kw">let </span>visible = <span class="self">self</span>.window.visible_at(element, <span class="self">self</span>.pos, <span class="kw-2">&amp;</span><span class="self">self</span>.clock);
         <span class="kw">if </span>visible &amp;&amp; <span class="self">self</span>.last_seen.is_none() {
-            <span class="self">self</span>.seen += <span class="number">1</span>;
+            <span class="self">self</span>.seen += element.width(<span class="self">self</span>.encoding);
             <span class="self">self</span>.last_seen = element.elemid()
         }
-        <span class="kw">if </span><span class="self">self</span>.seen == <span class="self">self</span>.target + <span class="number">1 </span>&amp;&amp; visible {
+        <span class="kw">if </span><span class="self">self</span>.seen &gt; <span class="self">self</span>.target &amp;&amp; visible {
             <span class="kw">for </span>(vpos, vop) <span class="kw">in </span><span class="self">self</span>.window.seen_op(element, <span class="self">self</span>.pos) {
                 <span class="kw">if </span>vop.is_counter() {
                     <span class="comment">// this could be out of order because of inc&#39;s - we can find the right place

@@ -147,7 +147,7 @@
 <span id="145">145</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTreeNode};
 <span class="kw">use </span><span class="kw">crate</span>::query::{binary_search_by, QueryResult, TreeQuery};
-<span class="kw">use </span><span class="kw">crate</span>::types::{Key, Op, HEAD};
+<span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, Op, HEAD};
 <span class="kw">use </span>std::cmp::Ordering;
 <span class="kw">use </span>std::fmt::Debug;
 
@@ -217,7 +217,7 @@
                 <span class="kw">if let </span><span class="prelude-val">Some</span>(start) = <span class="self">self</span>.start {
                     <span class="kw">if </span><span class="self">self</span>.pos + child.len() &gt;= start {
                         <span class="comment">// skip empty nodes
-                        </span><span class="kw">if </span>child.index.visible_len() == <span class="number">0 </span>{
+                        </span><span class="kw">if </span>child.index.visible_len(ListEncoding::List) == <span class="number">0 </span>{
                             <span class="self">self</span>.pos += child.len();
                             QueryResult::Next
                         } <span class="kw">else </span>{

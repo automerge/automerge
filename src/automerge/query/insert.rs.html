@@ -113,10 +113,22 @@
 <span id="111">111</span>
 <span id="112">112</span>
 <span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error::AutomergeError;
 <span class="kw">use </span><span class="kw">crate</span>::op_tree::OpTreeNode;
-<span class="kw">use </span><span class="kw">crate</span>::query::{QueryResult, TreeQuery};
-<span class="kw">use </span><span class="kw">crate</span>::types::{ElemId, Key, Op, HEAD};
+<span class="kw">use </span><span class="kw">crate</span>::query::{OpTree, QueryResult, TreeQuery};
+<span class="kw">use </span><span class="kw">crate</span>::types::{ElemId, Key, ListEncoding, Op, HEAD};
 <span class="kw">use </span>std::fmt::Debug;
 
 <span class="attribute">#[derive(Debug, Clone, PartialEq)]
@@ -125,6 +137,8 @@
     </span>target: usize,
     <span class="doccomment">/// the number of visible operations seen
     </span>seen: usize,
+    last_width: usize,
+    encoding: ListEncoding,
     <span class="comment">//pub pos: usize,
     </span><span class="doccomment">/// the number of operations (including non-visible) that we have seen
     </span>n: usize,
@@ -137,7 +151,7 @@
 }
 
 <span class="kw">impl </span>InsertNth {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(target: usize) -&gt; <span class="self">Self </span>{
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(target: usize, encoding: ListEncoding) -&gt; <span class="self">Self </span>{
         <span class="kw">let </span>(valid, last_valid_insert) = <span class="kw">if </span>target == <span class="number">0 </span>{
             (<span class="prelude-val">Some</span>(<span class="number">0</span>), <span class="prelude-val">Some</span>(Key::Seq(HEAD)))
         } <span class="kw">else </span>{
@@ -146,6 +160,8 @@
         InsertNth {
             target,
             seen: <span class="number">0</span>,
+            last_width: <span class="number">0</span>,
+            encoding,
             n: <span class="number">0</span>,
             valid,
             last_seen: <span class="prelude-val">None</span>,
@@ -161,23 +177,30 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>key(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Key, AutomergeError&gt; {
         <span class="self">self</span>.last_valid_insert
             .ok_or(AutomergeError::InvalidIndex(<span class="self">self</span>.target))
-        <span class="comment">//if self.target == 0 {
-        /*
-        if self.last_insert.is_none() {
-            Ok(HEAD.into())
-        } else if self.seen == self.target &amp;&amp; self.last_insert.is_some() {
-            Ok(Key::Seq(self.last_insert.unwrap()))
-        } else {
-            Err(AutomergeError::InvalidIndex(self.target))
-        }
-        */
-    </span>}
+    }
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; TreeQuery&lt;<span class="lifetime">&#39;a</span>&gt; <span class="kw">for </span>InsertNth {
+    <span class="kw">fn </span>equiv(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; bool {
+        <span class="self">self</span>.pos() == other.pos() &amp;&amp; <span class="self">self</span>.key() == other.key()
+    }
+
+    <span class="kw">fn </span>can_shortcut_search(<span class="kw-2">&amp;mut </span><span class="self">self</span>, tree: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTree) -&gt; bool {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>((index, pos)) = <span class="kw-2">&amp;</span>tree.last_insert {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(op) = tree.internal.get(<span class="kw-2">*</span>pos) {
+                <span class="kw">if </span><span class="kw-2">*</span>index + op.width(<span class="self">self</span>.encoding) == <span class="self">self</span>.target {
+                    <span class="self">self</span>.valid = <span class="prelude-val">Some</span>(<span class="kw-2">*</span>pos + <span class="number">1</span>);
+                    <span class="self">self</span>.last_valid_insert = <span class="prelude-val">Some</span>(op.elemid_or_key());
+                    <span class="kw">return </span><span class="bool-val">true</span>;
+                }
+            }
+        }
+        <span class="bool-val">false
+    </span>}
+
     <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, child: <span class="kw-2">&amp;</span>OpTreeNode) -&gt; QueryResult {
         <span class="comment">// if this node has some visible elements then we may find our target within
-        </span><span class="kw">let </span><span class="kw-2">mut </span>num_vis = child.index.visible_len();
+        </span><span class="kw">let </span><span class="kw-2">mut </span>num_vis = child.index.visible_len(<span class="self">self</span>.encoding);
         <span class="kw">if let </span><span class="prelude-val">Some</span>(last_seen) = <span class="self">self</span>.last_seen {
             <span class="kw">if </span>child.index.has_visible(<span class="kw-2">&amp;</span>last_seen) {
                 num_vis -= <span class="number">1</span>;
@@ -218,7 +241,8 @@
             <span class="kw">if </span><span class="self">self</span>.seen &gt;= <span class="self">self</span>.target {
                 <span class="kw">return </span>QueryResult::Finish;
             }
-            <span class="self">self</span>.seen += <span class="number">1</span>;
+            <span class="self">self</span>.last_width = element.width(<span class="self">self</span>.encoding);
+            <span class="self">self</span>.seen += <span class="self">self</span>.last_width;
             <span class="self">self</span>.last_seen = <span class="prelude-val">Some</span>(element.elemid_or_key());
             <span class="self">self</span>.last_valid_insert = <span class="self">self</span>.last_seen
         }

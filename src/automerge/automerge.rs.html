@@ -1262,6 +1262,121 @@
 <span id="1260">1260</span>
 <span id="1261">1261</span>
 <span id="1262">1262</span>
+<span id="1263">1263</span>
+<span id="1264">1264</span>
+<span id="1265">1265</span>
+<span id="1266">1266</span>
+<span id="1267">1267</span>
+<span id="1268">1268</span>
+<span id="1269">1269</span>
+<span id="1270">1270</span>
+<span id="1271">1271</span>
+<span id="1272">1272</span>
+<span id="1273">1273</span>
+<span id="1274">1274</span>
+<span id="1275">1275</span>
+<span id="1276">1276</span>
+<span id="1277">1277</span>
+<span id="1278">1278</span>
+<span id="1279">1279</span>
+<span id="1280">1280</span>
+<span id="1281">1281</span>
+<span id="1282">1282</span>
+<span id="1283">1283</span>
+<span id="1284">1284</span>
+<span id="1285">1285</span>
+<span id="1286">1286</span>
+<span id="1287">1287</span>
+<span id="1288">1288</span>
+<span id="1289">1289</span>
+<span id="1290">1290</span>
+<span id="1291">1291</span>
+<span id="1292">1292</span>
+<span id="1293">1293</span>
+<span id="1294">1294</span>
+<span id="1295">1295</span>
+<span id="1296">1296</span>
+<span id="1297">1297</span>
+<span id="1298">1298</span>
+<span id="1299">1299</span>
+<span id="1300">1300</span>
+<span id="1301">1301</span>
+<span id="1302">1302</span>
+<span id="1303">1303</span>
+<span id="1304">1304</span>
+<span id="1305">1305</span>
+<span id="1306">1306</span>
+<span id="1307">1307</span>
+<span id="1308">1308</span>
+<span id="1309">1309</span>
+<span id="1310">1310</span>
+<span id="1311">1311</span>
+<span id="1312">1312</span>
+<span id="1313">1313</span>
+<span id="1314">1314</span>
+<span id="1315">1315</span>
+<span id="1316">1316</span>
+<span id="1317">1317</span>
+<span id="1318">1318</span>
+<span id="1319">1319</span>
+<span id="1320">1320</span>
+<span id="1321">1321</span>
+<span id="1322">1322</span>
+<span id="1323">1323</span>
+<span id="1324">1324</span>
+<span id="1325">1325</span>
+<span id="1326">1326</span>
+<span id="1327">1327</span>
+<span id="1328">1328</span>
+<span id="1329">1329</span>
+<span id="1330">1330</span>
+<span id="1331">1331</span>
+<span id="1332">1332</span>
+<span id="1333">1333</span>
+<span id="1334">1334</span>
+<span id="1335">1335</span>
+<span id="1336">1336</span>
+<span id="1337">1337</span>
+<span id="1338">1338</span>
+<span id="1339">1339</span>
+<span id="1340">1340</span>
+<span id="1341">1341</span>
+<span id="1342">1342</span>
+<span id="1343">1343</span>
+<span id="1344">1344</span>
+<span id="1345">1345</span>
+<span id="1346">1346</span>
+<span id="1347">1347</span>
+<span id="1348">1348</span>
+<span id="1349">1349</span>
+<span id="1350">1350</span>
+<span id="1351">1351</span>
+<span id="1352">1352</span>
+<span id="1353">1353</span>
+<span id="1354">1354</span>
+<span id="1355">1355</span>
+<span id="1356">1356</span>
+<span id="1357">1357</span>
+<span id="1358">1358</span>
+<span id="1359">1359</span>
+<span id="1360">1360</span>
+<span id="1361">1361</span>
+<span id="1362">1362</span>
+<span id="1363">1363</span>
+<span id="1364">1364</span>
+<span id="1365">1365</span>
+<span id="1366">1366</span>
+<span id="1367">1367</span>
+<span id="1368">1368</span>
+<span id="1369">1369</span>
+<span id="1370">1370</span>
+<span id="1371">1371</span>
+<span id="1372">1372</span>
+<span id="1373">1373</span>
+<span id="1374">1374</span>
+<span id="1375">1375</span>
+<span id="1376">1376</span>
+<span id="1377">1377</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::cmp::Ordering;
 <span class="kw">use </span>std::collections::{BTreeSet, HashMap, HashSet};
 <span class="kw">use </span>std::fmt::Debug;
@@ -1281,8 +1396,8 @@
     <span class="self">self</span>, CommitOptions, Failure, Observed, Success, Transaction, TransactionArgs, UnObserved,
 };
 <span class="kw">use </span><span class="kw">crate</span>::types::{
-    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType,
-    ScalarValue, Value,
+    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ListEncoding, ObjId, Op, OpId,
+    OpType, ScalarValue, TextEncoding, Value,
 };
 <span class="kw">use crate</span>::{
     query, AutomergeError, Change, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType,
@@ -1322,6 +1437,7 @@
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) actor: Actor,
     <span class="doccomment">/// The maximum operation counter this document has seen.
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) max_op: u64,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) text_encoding: TextEncoding,
 }
 
 <span class="kw">impl </span>Automerge {
@@ -1338,8 +1454,14 @@
             saved: Default::default(),
             actor: Actor::Unused(ActorId::random()),
             max_op: <span class="number">0</span>,
+            text_encoding: Default::default(),
         }
     }
+
+    <span class="kw">pub fn </span>with_encoding(<span class="kw-2">mut </span><span class="self">self</span>, encoding: TextEncoding) -&gt; <span class="self">Self </span>{
+        <span class="self">self</span>.text_encoding = encoding;
+        <span class="self">self
+    </span>}
 
     <span class="doccomment">/// Set the actor id for this document.
     </span><span class="kw">pub fn </span>with_actor(<span class="kw-2">mut </span><span class="self">self</span>, actor: ActorId) -&gt; <span class="self">Self </span>{
@@ -1578,7 +1700,7 @@
     /// This function may in future be changed to allow getting the parents from the id of a scalar
     /// value.
     </span><span class="kw">pub fn </span>parents&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;Parents&lt;<span class="lifetime">&#39;_</span>&gt;, AutomergeError&gt; {
-        <span class="kw">let </span>obj_id = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>;
+        <span class="kw">let </span>(obj_id, <span class="kw">_</span>) = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(<span class="self">self</span>.ops.parents(obj_id))
     }
 
@@ -1586,9 +1708,7 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         obj: O,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(ExId, Prop)&gt;, AutomergeError&gt; {
-        <span class="kw">let </span><span class="kw-2">mut </span>path = <span class="self">self</span>.parents(obj.as_ref().clone())<span class="question-mark">?</span>.collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
-        path.reverse();
-        <span class="prelude-val">Ok</span>(path)
+        <span class="prelude-val">Ok</span>(<span class="self">self</span>.parents(obj.as_ref().clone())<span class="question-mark">?</span>.path())
     }
 
     <span class="doccomment">/// Get the keys of the object `obj`.
@@ -1596,7 +1716,7 @@
     /// For a map this returns the keys of the map.
     /// For a list this returns the element ids (opids) encoded as strings.
     </span><span class="kw">pub fn </span>keys&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; Keys&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>(obj) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, <span class="kw">_</span>)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
             <span class="kw">let </span>iter_keys = <span class="self">self</span>.ops.keys(obj);
             Keys::new(<span class="self">self</span>, iter_keys)
         } <span class="kw">else </span>{
@@ -1606,7 +1726,7 @@
 
     <span class="doccomment">/// Historical version of [`keys`](Self::keys).
     </span><span class="kw">pub fn </span>keys_at&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; KeysAt&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>(obj) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, <span class="kw">_</span>)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
             <span class="kw">if let </span><span class="prelude-val">Ok</span>(clock) = <span class="self">self</span>.clock_at(heads) {
                 <span class="kw">return </span>KeysAt::new(<span class="self">self</span>, <span class="self">self</span>.ops.keys_at(obj, clock));
             }
@@ -1620,7 +1740,7 @@
         obj: O,
         range: R,
     ) -&gt; MapRange&lt;<span class="lifetime">&#39;_</span>, R&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>(obj) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, <span class="kw">_</span>)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
             MapRange::new(<span class="self">self</span>, <span class="self">self</span>.ops.map_range(obj, range))
         } <span class="kw">else </span>{
             MapRange::new(<span class="self">self</span>, <span class="prelude-val">None</span>)
@@ -1634,7 +1754,7 @@
         range: R,
         heads: <span class="kw-2">&amp;</span>[ChangeHash],
     ) -&gt; MapRangeAt&lt;<span class="lifetime">&#39;_</span>, R&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>(obj) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, <span class="kw">_</span>)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
             <span class="kw">if let </span><span class="prelude-val">Ok</span>(clock) = <span class="self">self</span>.clock_at(heads) {
                 <span class="kw">let </span>iter_range = <span class="self">self</span>.ops.map_range_at(obj, range, clock);
                 <span class="kw">return </span>MapRangeAt::new(<span class="self">self</span>, iter_range);
@@ -1649,7 +1769,7 @@
         obj: O,
         range: R,
     ) -&gt; ListRange&lt;<span class="lifetime">&#39;_</span>, R&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>(obj) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, <span class="kw">_</span>)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
             ListRange::new(<span class="self">self</span>, <span class="self">self</span>.ops.list_range(obj, range))
         } <span class="kw">else </span>{
             ListRange::new(<span class="self">self</span>, <span class="prelude-val">None</span>)
@@ -1663,7 +1783,7 @@
         range: R,
         heads: <span class="kw-2">&amp;</span>[ChangeHash],
     ) -&gt; ListRangeAt&lt;<span class="lifetime">&#39;_</span>, R&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>(obj) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, <span class="kw">_</span>)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
             <span class="kw">if let </span><span class="prelude-val">Ok</span>(clock) = <span class="self">self</span>.clock_at(heads) {
                 <span class="kw">let </span>iter_range = <span class="self">self</span>.ops.list_range_at(obj, range, clock);
                 <span class="kw">return </span>ListRangeAt::new(<span class="self">self</span>, iter_range);
@@ -1673,11 +1793,11 @@
     }
 
     <span class="kw">pub fn </span>values&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; Values&lt;<span class="lifetime">&#39;_</span>&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>(obj) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
-            <span class="kw">match </span><span class="self">self</span>.ops.object_type(<span class="kw-2">&amp;</span>obj) {
-                <span class="prelude-val">Some</span>(t) <span class="kw">if </span>t.is_sequence() =&gt; Values::new(<span class="self">self</span>, <span class="self">self</span>.ops.list_range(obj, ..)),
-                <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; Values::new(<span class="self">self</span>, <span class="self">self</span>.ops.map_range(obj, ..)),
-                <span class="prelude-val">None </span>=&gt; Values::empty(<span class="self">self</span>),
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, obj_type)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
+            <span class="kw">if </span>obj_type.is_sequence() {
+                Values::new(<span class="self">self</span>, <span class="self">self</span>.ops.list_range(obj, ..))
+            } <span class="kw">else </span>{
+                Values::new(<span class="self">self</span>, <span class="self">self</span>.ops.map_range(obj, ..))
             }
         } <span class="kw">else </span>{
             Values::empty(<span class="self">self</span>)
@@ -1685,18 +1805,17 @@
     }
 
     <span class="kw">pub fn </span>values_at&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; Values&lt;<span class="lifetime">&#39;_</span>&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>(obj) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, obj_type)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
             <span class="kw">if let </span><span class="prelude-val">Ok</span>(clock) = <span class="self">self</span>.clock_at(heads) {
-                <span class="kw">return match </span><span class="self">self</span>.ops.object_type(<span class="kw-2">&amp;</span>obj) {
-                    <span class="prelude-val">Some</span>(ObjType::Map) | <span class="prelude-val">Some</span>(ObjType::Table) =&gt; {
+                <span class="kw">return match </span>obj_type {
+                    ObjType::Map | ObjType::Table =&gt; {
                         <span class="kw">let </span>iter_range = <span class="self">self</span>.ops.map_range_at(obj, .., clock);
                         Values::new(<span class="self">self</span>, iter_range)
                     }
-                    <span class="prelude-val">Some</span>(ObjType::List) | <span class="prelude-val">Some</span>(ObjType::Text) =&gt; {
+                    ObjType::List | ObjType::Text =&gt; {
                         <span class="kw">let </span>iter_range = <span class="self">self</span>.ops.list_range_at(obj, .., clock);
                         Values::new(<span class="self">self</span>, iter_range)
                     }
-                    <span class="prelude-val">None </span>=&gt; Values::empty(<span class="self">self</span>),
                 };
             }
         }
@@ -1705,13 +1824,12 @@
 
     <span class="doccomment">/// Get the length of the given object.
     </span><span class="kw">pub fn </span>length&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; usize {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>(inner_obj) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
-            <span class="kw">match </span><span class="self">self</span>.ops.object_type(<span class="kw-2">&amp;</span>inner_obj) {
-                <span class="prelude-val">Some</span>(ObjType::Map) | <span class="prelude-val">Some</span>(ObjType::Table) =&gt; <span class="self">self</span>.keys(obj).count(),
-                <span class="prelude-val">Some</span>(ObjType::List) | <span class="prelude-val">Some</span>(ObjType::Text) =&gt; {
-                    <span class="self">self</span>.ops.search(<span class="kw-2">&amp;</span>inner_obj, query::Len::new()).len
-                }
-                <span class="prelude-val">None </span>=&gt; <span class="number">0</span>,
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>((inner_obj, obj_type)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
+            <span class="kw">if </span>obj_type == ObjType::Map || obj_type == ObjType::Table {
+                <span class="self">self</span>.keys(obj).count()
+            } <span class="kw">else </span>{
+                <span class="kw">let </span>encoding = ListEncoding::new(obj_type, <span class="self">self</span>.text_encoding);
+                <span class="self">self</span>.ops.search(<span class="kw-2">&amp;</span>inner_obj, query::Len::new(encoding)).len
             }
         } <span class="kw">else </span>{
             <span class="number">0
@@ -1720,14 +1838,15 @@
 
     <span class="doccomment">/// Historical version of [`length`](Self::length).
     </span><span class="kw">pub fn </span>length_at&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; usize {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>(inner_obj) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>((inner_obj, obj_type)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
             <span class="kw">if let </span><span class="prelude-val">Ok</span>(clock) = <span class="self">self</span>.clock_at(heads) {
-                <span class="kw">return match </span><span class="self">self</span>.ops.object_type(<span class="kw-2">&amp;</span>inner_obj) {
-                    <span class="prelude-val">Some</span>(ObjType::Map) | <span class="prelude-val">Some</span>(ObjType::Table) =&gt; <span class="self">self</span>.keys_at(obj, heads).count(),
-                    <span class="prelude-val">Some</span>(ObjType::List) | <span class="prelude-val">Some</span>(ObjType::Text) =&gt; {
-                        <span class="self">self</span>.ops.search(<span class="kw-2">&amp;</span>inner_obj, query::LenAt::new(clock)).len
-                    }
-                    <span class="prelude-val">None </span>=&gt; <span class="number">0</span>,
+                <span class="kw">return if </span>obj_type == ObjType::Map || obj_type == ObjType::Table {
+                    <span class="self">self</span>.keys_at(obj, heads).count()
+                } <span class="kw">else </span>{
+                    <span class="kw">let </span>encoding = ListEncoding::new(obj_type, <span class="self">self</span>.text_encoding);
+                    <span class="self">self</span>.ops
+                        .search(<span class="kw-2">&amp;</span>inner_obj, query::LenAt::new(clock, encoding))
+                        .len
                 };
             }
         }
@@ -1735,14 +1854,14 @@
     </span>}
 
     <span class="doccomment">/// Get the type of this object, if it is an object.
-    </span><span class="kw">pub fn </span>object_type&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Option</span>&lt;ObjType&gt; {
-        <span class="kw">let </span>obj = <span class="self">self</span>.exid_to_obj(obj.as_ref()).ok()<span class="question-mark">?</span>;
-        <span class="self">self</span>.ops.object_type(<span class="kw-2">&amp;</span>obj)
+    </span><span class="kw">pub fn </span>object_type&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;ObjType, AutomergeError&gt; {
+        <span class="kw">let </span>(<span class="kw">_</span>, obj_type) = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(obj_type)
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>exid_to_obj(<span class="kw-2">&amp;</span><span class="self">self</span>, id: <span class="kw-2">&amp;</span>ExId) -&gt; <span class="prelude-ty">Result</span>&lt;ObjId, AutomergeError&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>exid_to_obj(<span class="kw-2">&amp;</span><span class="self">self</span>, id: <span class="kw-2">&amp;</span>ExId) -&gt; <span class="prelude-ty">Result</span>&lt;(ObjId, ObjType), AutomergeError&gt; {
         <span class="kw">match </span>id {
-            ExId::Root =&gt; <span class="prelude-val">Ok</span>(ObjId::root()),
+            ExId::Root =&gt; <span class="prelude-val">Ok</span>((ObjId::root(), ObjType::Map)),
             ExId::Id(ctr, actor, idx) =&gt; {
                 <span class="comment">// do a direct get here b/c this could be foriegn and not be within the array
                 // bounds
@@ -1758,8 +1877,8 @@
                         .ok_or(AutomergeError::Fail)<span class="question-mark">?</span>;
                     ObjId(OpId(<span class="kw-2">*</span>ctr, idx))
                 };
-                <span class="kw">if </span><span class="self">self</span>.ops.object_type(<span class="kw-2">&amp;</span>obj).is_some() {
-                    <span class="prelude-val">Ok</span>(obj)
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(obj_type) = <span class="self">self</span>.ops.object_type(<span class="kw-2">&amp;</span>obj) {
+                    <span class="prelude-val">Ok</span>((obj, obj_type))
                 } <span class="kw">else </span>{
                     <span class="prelude-val">Err</span>(AutomergeError::NotAnObject)
                 }
@@ -1773,15 +1892,11 @@
 
     <span class="doccomment">/// Get the string represented by the given text object.
     </span><span class="kw">pub fn </span>text&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt; {
-        <span class="kw">let </span>obj = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>;
+        <span class="kw">let </span>obj = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>.<span class="number">0</span>;
         <span class="kw">let </span>query = <span class="self">self</span>.ops.search(<span class="kw-2">&amp;</span>obj, query::ListVals::new());
         <span class="kw">let </span><span class="kw-2">mut </span>buffer = String::new();
         <span class="kw">for </span>q <span class="kw">in </span><span class="kw-2">&amp;</span>query.ops {
-            <span class="kw">if let </span>OpType::Put(ScalarValue::Str(s)) = <span class="kw-2">&amp;</span>q.action {
-                buffer.push_str(s);
-            } <span class="kw">else </span>{
-                buffer.push(<span class="string">&#39;\u{fffc}&#39;</span>);
-            }
+            buffer.push_str(q.to_str());
         }
         <span class="prelude-val">Ok</span>(buffer)
     }
@@ -1792,7 +1907,7 @@
         obj: O,
         heads: <span class="kw-2">&amp;</span>[ChangeHash],
     ) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt; {
-        <span class="kw">let </span>obj = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>;
+        <span class="kw">let </span>obj = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>.<span class="number">0</span>;
         <span class="kw">let </span>clock = <span class="self">self</span>.clock_at(heads)<span class="question-mark">?</span>;
         <span class="kw">let </span>query = <span class="self">self</span>.ops.search(<span class="kw-2">&amp;</span>obj, query::ListValsAt::new(clock));
         <span class="kw">let </span><span class="kw-2">mut </span>buffer = String::new();
@@ -1840,7 +1955,7 @@
         obj: O,
         prop: P,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
-        <span class="kw">let </span>obj = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>;
+        <span class="kw">let </span>obj = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>.<span class="number">0</span>;
         <span class="kw">let </span><span class="kw-2">mut </span>result = <span class="kw">match </span>prop.into() {
             Prop::Map(p) =&gt; {
                 <span class="kw">let </span>prop = <span class="self">self</span>.ops.m.props.lookup(<span class="kw-2">&amp;</span>p);
@@ -1855,13 +1970,18 @@
                     <span class="macro">vec!</span>[]
                 }
             }
-            Prop::Seq(n) =&gt; <span class="self">self
-                </span>.ops
-                .search(<span class="kw-2">&amp;</span>obj, query::Nth::new(n))
-                .ops
-                .into_iter()
-                .map(|o| (o.value(), <span class="self">self</span>.id_to_exid(o.id)))
-                .collect(),
+            Prop::Seq(n) =&gt; {
+                <span class="kw">let </span>obj_type = <span class="self">self</span>.ops.object_type(<span class="kw-2">&amp;</span>obj);
+                <span class="kw">let </span>encoding = obj_type
+                    .map(|o| ListEncoding::new(o, <span class="self">self</span>.text_encoding))
+                    .unwrap_or_default();
+                <span class="self">self</span>.ops
+                    .search(<span class="kw-2">&amp;</span>obj, query::Nth::new(n, encoding))
+                    .ops
+                    .into_iter()
+                    .map(|o| (o.value(), <span class="self">self</span>.id_to_exid(o.id)))
+                    .collect()
+            }
         };
         result.sort_by(|a, b| b.<span class="number">1</span>.cmp(<span class="kw-2">&amp;</span>a.<span class="number">1</span>));
         <span class="prelude-val">Ok</span>(result)
@@ -1875,7 +1995,7 @@
         heads: <span class="kw-2">&amp;</span>[ChangeHash],
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
         <span class="kw">let </span>prop = prop.into();
-        <span class="kw">let </span>obj = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>;
+        <span class="kw">let </span>obj = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>.<span class="number">0</span>;
         <span class="kw">let </span>clock = <span class="self">self</span>.clock_at(heads)<span class="question-mark">?</span>;
         <span class="kw">let </span>result = <span class="kw">match </span>prop {
             Prop::Map(p) =&gt; {
@@ -1891,13 +2011,18 @@
                     <span class="macro">vec!</span>[]
                 }
             }
-            Prop::Seq(n) =&gt; <span class="self">self
-                </span>.ops
-                .search(<span class="kw-2">&amp;</span>obj, query::NthAt::new(n, clock))
-                .ops
-                .into_iter()
-                .map(|o| (o.clone_value(), <span class="self">self</span>.id_to_exid(o.id)))
-                .collect(),
+            Prop::Seq(n) =&gt; {
+                <span class="kw">let </span>obj_type = <span class="self">self</span>.ops.object_type(<span class="kw-2">&amp;</span>obj);
+                <span class="kw">let </span>encoding = obj_type
+                    .map(|o| ListEncoding::new(o, <span class="self">self</span>.text_encoding))
+                    .unwrap_or_default();
+                <span class="self">self</span>.ops
+                    .search(<span class="kw-2">&amp;</span>obj, query::NthAt::new(n, clock, encoding))
+                    .ops
+                    .into_iter()
+                    .map(|o| (o.clone_value(), <span class="self">self</span>.id_to_exid(o.id)))
+                    .collect()
+            }
         };
         <span class="prelude-val">Ok</span>(result)
     }
@@ -1960,6 +2085,7 @@
                     saved: Default::default(),
                     actor: Actor::Unused(ActorId::random()),
                     max_op,
+                    text_encoding: Default::default(),
                 }
             }
             storage::Chunk::Change(stored_change) =&gt; {
@@ -2070,11 +2196,11 @@
         <span class="self">self</span>.update_history(change, ops.len());
         <span class="kw">if let </span><span class="prelude-val">Some</span>(observer) = observer {
             <span class="kw">for </span>(obj, op) <span class="kw">in </span>ops {
-                <span class="self">self</span>.ops.insert_op_with_observer(<span class="kw-2">&amp;</span>obj, op, <span class="kw-2">*</span>observer);
+                <span class="self">self</span>.insert_op_with_observer(<span class="kw-2">&amp;</span>obj, op, <span class="kw-2">*</span>observer);
             }
         } <span class="kw">else </span>{
             <span class="kw">for </span>(obj, op) <span class="kw">in </span>ops {
-                <span class="self">self</span>.ops.insert_op(<span class="kw-2">&amp;</span>obj, op);
+                <span class="self">self</span>.insert_op(<span class="kw-2">&amp;</span>obj, op);
             }
         }
     }
@@ -2424,9 +2550,9 @@
         <span class="self">self</span>.deps.insert(change.hash());
     }
 
-    <span class="kw">pub fn </span>import(<span class="kw-2">&amp;</span><span class="self">self</span>, s: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;ExId, AutomergeError&gt; {
+    <span class="kw">pub fn </span>import(<span class="kw-2">&amp;</span><span class="self">self</span>, s: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;(ExId, ObjType), AutomergeError&gt; {
         <span class="kw">if </span>s == <span class="string">&quot;_root&quot; </span>{
-            <span class="prelude-val">Ok</span>(ExId::Root)
+            <span class="prelude-val">Ok</span>((ExId::Root, ObjType::Map))
         } <span class="kw">else </span>{
             <span class="kw">let </span>n = s
                 .find(<span class="string">&#39;@&#39;</span>)
@@ -2441,11 +2567,11 @@
                 .actors
                 .lookup(<span class="kw-2">&amp;</span>actor)
                 .ok_or_else(|| AutomergeError::InvalidObjId(s.to_owned()))<span class="question-mark">?</span>;
-            <span class="prelude-val">Ok</span>(ExId::Id(
-                counter,
-                <span class="self">self</span>.ops.m.actors.cache[actor].clone(),
-                actor,
-            ))
+            <span class="kw">let </span>obj = ExId::Id(counter, <span class="self">self</span>.ops.m.actors.cache[actor].clone(), actor);
+            <span class="kw">let </span>obj_type = <span class="self">self
+                </span>.object_type(<span class="kw-2">&amp;</span>obj)
+                .map_err(|<span class="kw">_</span>| AutomergeError::InvalidObjId(s.to_owned()))<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>((obj, obj_type))
         }
     }
 
@@ -2502,9 +2628,113 @@
     ///            visualised
     </span><span class="attribute">#[cfg(feature = <span class="string">&quot;optree-visualisation&quot;</span>)]
     </span><span class="kw">pub fn </span>visualise_optree(<span class="kw-2">&amp;</span><span class="self">self</span>, objects: <span class="prelude-ty">Option</span>&lt;Vec&lt;ExId&gt;&gt;) -&gt; String {
-        <span class="kw">let </span>objects =
-            objects.map(|os| os.iter().filter_map(|o| <span class="self">self</span>.exid_to_obj(o).ok()).collect());
+        <span class="kw">let </span>objects = objects.map(|os| {
+            os.iter()
+                .filter_map(|o| <span class="self">self</span>.exid_to_obj(o).ok())
+                .map(|o| o.<span class="number">0</span>)
+                .collect()
+        });
         <span class="self">self</span>.ops.visualise(objects)
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert_op(<span class="kw-2">&amp;mut </span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>ObjId, op: Op) -&gt; Op {
+        <span class="kw">let </span>q = <span class="self">self</span>.ops.search(obj, query::SeekOp::new(<span class="kw-2">&amp;</span>op));
+
+        <span class="kw">let </span>succ = q.succ;
+        <span class="kw">let </span>pos = q.pos;
+
+        <span class="self">self</span>.ops.add_succ(obj, <span class="kw-2">&amp;</span>succ, <span class="kw-2">&amp;</span>op);
+
+        <span class="kw">if </span>!op.is_delete() {
+            <span class="self">self</span>.ops.insert(pos, obj, op.clone());
+        }
+        op
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>insert_op_with_observer&lt;Obs: OpObserver&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: <span class="kw-2">&amp;</span>ObjId,
+        op: Op,
+        observer: <span class="kw-2">&amp;mut </span>Obs,
+    ) -&gt; Op {
+        <span class="kw">let </span>obj_type = <span class="self">self</span>.ops.object_type(obj);
+        <span class="kw">let </span>encoding = obj_type
+            .map(|o| ListEncoding::new(o, <span class="self">self</span>.text_encoding))
+            .unwrap_or_default();
+        <span class="kw">let </span>q = <span class="self">self
+            </span>.ops
+            .search(obj, query::SeekOpWithPatch::new(<span class="kw-2">&amp;</span>op, encoding));
+
+        <span class="kw">let </span>query::SeekOpWithPatch {
+            pos,
+            succ,
+            seen,
+            last_width,
+            values,
+            had_value_before,
+            ..
+        } = q;
+
+        <span class="kw">let </span>ex_obj = <span class="self">self</span>.ops.id_to_exid(obj.<span class="number">0</span>);
+
+        <span class="kw">let </span>key = <span class="kw">match </span>op.key {
+            Key::Map(index) =&gt; <span class="self">self</span>.ops.m.props[index].clone().into(),
+            Key::Seq(<span class="kw">_</span>) =&gt; seen.into(),
+        };
+
+        <span class="kw">if </span>op.insert {
+            <span class="kw">if </span>obj_type == <span class="prelude-val">Some</span>(ObjType::Text) {
+                observer.splice_text(<span class="self">self</span>, ex_obj, seen, op.to_str());
+            } <span class="kw">else </span>{
+                <span class="kw">let </span>value = (op.value(), <span class="self">self</span>.ops.id_to_exid(op.id));
+                observer.insert(<span class="self">self</span>, ex_obj, seen, value);
+            }
+        } <span class="kw">else if </span>op.is_delete() {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(winner) = <span class="kw-2">&amp;</span>values.last() {
+                <span class="kw">let </span>value = (winner.value(), <span class="self">self</span>.ops.id_to_exid(winner.id));
+                <span class="kw">let </span>conflict = values.len() &gt; <span class="number">1</span>;
+                observer.expose(<span class="self">self</span>, ex_obj, key, value, conflict);
+            } <span class="kw">else if </span>had_value_before {
+                <span class="kw">match </span>key {
+                    Prop::Map(k) =&gt; observer.delete_map(<span class="self">self</span>, ex_obj, <span class="kw-2">&amp;</span>k),
+                    Prop::Seq(index) =&gt; observer.delete_seq(<span class="self">self</span>, ex_obj, index, last_width),
+                }
+            }
+        } <span class="kw">else if let </span><span class="prelude-val">Some</span>(value) = op.get_increment_value() {
+            <span class="comment">// only observe this increment if the counter is visible, i.e. the counter&#39;s
+            // create op is in the values
+            //if values.iter().any(|value| op.pred.contains(&amp;value.id)) {
+            </span><span class="kw">if </span>values
+                .last()
+                .map(|value| op.pred.contains(<span class="kw-2">&amp;</span>value.id))
+                .unwrap_or_default()
+            {
+                <span class="comment">// we have observed the value
+                </span>observer.increment(<span class="self">self</span>, ex_obj, key, (value, <span class="self">self</span>.ops.id_to_exid(op.id)));
+            }
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>just_conflict = values
+                .last()
+                .map(|value| <span class="self">self</span>.ops.m.lamport_cmp(op.id, value.id) != Ordering::Greater)
+                .unwrap_or(<span class="bool-val">false</span>);
+            <span class="kw">let </span>value = (op.value(), <span class="self">self</span>.ops.id_to_exid(op.id));
+            <span class="kw">if </span>op.is_list_op() &amp;&amp; !had_value_before {
+                observer.insert(<span class="self">self</span>, ex_obj, seen, value);
+            } <span class="kw">else if </span>just_conflict {
+                observer.flag_conflict(<span class="self">self</span>, ex_obj, key);
+            } <span class="kw">else </span>{
+                <span class="kw">let </span>conflict = !values.is_empty();
+                observer.put(<span class="self">self</span>, ex_obj, key, value, conflict);
+            }
+        }
+
+        <span class="self">self</span>.ops.add_succ(obj, <span class="kw-2">&amp;</span>succ, <span class="kw-2">&amp;</span>op);
+
+        <span class="kw">if </span>!op.is_delete() {
+            <span class="self">self</span>.ops.insert(pos, obj, op.clone());
+        }
+
+        op
     }
 }
 

@@ -1090,12 +1090,334 @@
 <span id="1088">1088</span>
 <span id="1089">1089</span>
 <span id="1090">1090</span>
-</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::value::Datatype;
+<span id="1091">1091</span>
+<span id="1092">1092</span>
+<span id="1093">1093</span>
+<span id="1094">1094</span>
+<span id="1095">1095</span>
+<span id="1096">1096</span>
+<span id="1097">1097</span>
+<span id="1098">1098</span>
+<span id="1099">1099</span>
+<span id="1100">1100</span>
+<span id="1101">1101</span>
+<span id="1102">1102</span>
+<span id="1103">1103</span>
+<span id="1104">1104</span>
+<span id="1105">1105</span>
+<span id="1106">1106</span>
+<span id="1107">1107</span>
+<span id="1108">1108</span>
+<span id="1109">1109</span>
+<span id="1110">1110</span>
+<span id="1111">1111</span>
+<span id="1112">1112</span>
+<span id="1113">1113</span>
+<span id="1114">1114</span>
+<span id="1115">1115</span>
+<span id="1116">1116</span>
+<span id="1117">1117</span>
+<span id="1118">1118</span>
+<span id="1119">1119</span>
+<span id="1120">1120</span>
+<span id="1121">1121</span>
+<span id="1122">1122</span>
+<span id="1123">1123</span>
+<span id="1124">1124</span>
+<span id="1125">1125</span>
+<span id="1126">1126</span>
+<span id="1127">1127</span>
+<span id="1128">1128</span>
+<span id="1129">1129</span>
+<span id="1130">1130</span>
+<span id="1131">1131</span>
+<span id="1132">1132</span>
+<span id="1133">1133</span>
+<span id="1134">1134</span>
+<span id="1135">1135</span>
+<span id="1136">1136</span>
+<span id="1137">1137</span>
+<span id="1138">1138</span>
+<span id="1139">1139</span>
+<span id="1140">1140</span>
+<span id="1141">1141</span>
+<span id="1142">1142</span>
+<span id="1143">1143</span>
+<span id="1144">1144</span>
+<span id="1145">1145</span>
+<span id="1146">1146</span>
+<span id="1147">1147</span>
+<span id="1148">1148</span>
+<span id="1149">1149</span>
+<span id="1150">1150</span>
+<span id="1151">1151</span>
+<span id="1152">1152</span>
+<span id="1153">1153</span>
+<span id="1154">1154</span>
+<span id="1155">1155</span>
+<span id="1156">1156</span>
+<span id="1157">1157</span>
+<span id="1158">1158</span>
+<span id="1159">1159</span>
+<span id="1160">1160</span>
+<span id="1161">1161</span>
+<span id="1162">1162</span>
+<span id="1163">1163</span>
+<span id="1164">1164</span>
+<span id="1165">1165</span>
+<span id="1166">1166</span>
+<span id="1167">1167</span>
+<span id="1168">1168</span>
+<span id="1169">1169</span>
+<span id="1170">1170</span>
+<span id="1171">1171</span>
+<span id="1172">1172</span>
+<span id="1173">1173</span>
+<span id="1174">1174</span>
+<span id="1175">1175</span>
+<span id="1176">1176</span>
+<span id="1177">1177</span>
+<span id="1178">1178</span>
+<span id="1179">1179</span>
+<span id="1180">1180</span>
+<span id="1181">1181</span>
+<span id="1182">1182</span>
+<span id="1183">1183</span>
+<span id="1184">1184</span>
+<span id="1185">1185</span>
+<span id="1186">1186</span>
+<span id="1187">1187</span>
+<span id="1188">1188</span>
+<span id="1189">1189</span>
+<span id="1190">1190</span>
+<span id="1191">1191</span>
+<span id="1192">1192</span>
+<span id="1193">1193</span>
+<span id="1194">1194</span>
+<span id="1195">1195</span>
+<span id="1196">1196</span>
+<span id="1197">1197</span>
+<span id="1198">1198</span>
+<span id="1199">1199</span>
+<span id="1200">1200</span>
+<span id="1201">1201</span>
+<span id="1202">1202</span>
+<span id="1203">1203</span>
+<span id="1204">1204</span>
+<span id="1205">1205</span>
+<span id="1206">1206</span>
+<span id="1207">1207</span>
+<span id="1208">1208</span>
+<span id="1209">1209</span>
+<span id="1210">1210</span>
+<span id="1211">1211</span>
+<span id="1212">1212</span>
+<span id="1213">1213</span>
+<span id="1214">1214</span>
+<span id="1215">1215</span>
+<span id="1216">1216</span>
+<span id="1217">1217</span>
+<span id="1218">1218</span>
+<span id="1219">1219</span>
+<span id="1220">1220</span>
+<span id="1221">1221</span>
+<span id="1222">1222</span>
+<span id="1223">1223</span>
+<span id="1224">1224</span>
+<span id="1225">1225</span>
+<span id="1226">1226</span>
+<span id="1227">1227</span>
+<span id="1228">1228</span>
+<span id="1229">1229</span>
+<span id="1230">1230</span>
+<span id="1231">1231</span>
+<span id="1232">1232</span>
+<span id="1233">1233</span>
+<span id="1234">1234</span>
+<span id="1235">1235</span>
+<span id="1236">1236</span>
+<span id="1237">1237</span>
+<span id="1238">1238</span>
+<span id="1239">1239</span>
+<span id="1240">1240</span>
+<span id="1241">1241</span>
+<span id="1242">1242</span>
+<span id="1243">1243</span>
+<span id="1244">1244</span>
+<span id="1245">1245</span>
+<span id="1246">1246</span>
+<span id="1247">1247</span>
+<span id="1248">1248</span>
+<span id="1249">1249</span>
+<span id="1250">1250</span>
+<span id="1251">1251</span>
+<span id="1252">1252</span>
+<span id="1253">1253</span>
+<span id="1254">1254</span>
+<span id="1255">1255</span>
+<span id="1256">1256</span>
+<span id="1257">1257</span>
+<span id="1258">1258</span>
+<span id="1259">1259</span>
+<span id="1260">1260</span>
+<span id="1261">1261</span>
+<span id="1262">1262</span>
+<span id="1263">1263</span>
+<span id="1264">1264</span>
+<span id="1265">1265</span>
+<span id="1266">1266</span>
+<span id="1267">1267</span>
+<span id="1268">1268</span>
+<span id="1269">1269</span>
+<span id="1270">1270</span>
+<span id="1271">1271</span>
+<span id="1272">1272</span>
+<span id="1273">1273</span>
+<span id="1274">1274</span>
+<span id="1275">1275</span>
+<span id="1276">1276</span>
+<span id="1277">1277</span>
+<span id="1278">1278</span>
+<span id="1279">1279</span>
+<span id="1280">1280</span>
+<span id="1281">1281</span>
+<span id="1282">1282</span>
+<span id="1283">1283</span>
+<span id="1284">1284</span>
+<span id="1285">1285</span>
+<span id="1286">1286</span>
+<span id="1287">1287</span>
+<span id="1288">1288</span>
+<span id="1289">1289</span>
+<span id="1290">1290</span>
+<span id="1291">1291</span>
+<span id="1292">1292</span>
+<span id="1293">1293</span>
+<span id="1294">1294</span>
+<span id="1295">1295</span>
+<span id="1296">1296</span>
+<span id="1297">1297</span>
+<span id="1298">1298</span>
+<span id="1299">1299</span>
+<span id="1300">1300</span>
+<span id="1301">1301</span>
+<span id="1302">1302</span>
+<span id="1303">1303</span>
+<span id="1304">1304</span>
+<span id="1305">1305</span>
+<span id="1306">1306</span>
+<span id="1307">1307</span>
+<span id="1308">1308</span>
+<span id="1309">1309</span>
+<span id="1310">1310</span>
+<span id="1311">1311</span>
+<span id="1312">1312</span>
+<span id="1313">1313</span>
+<span id="1314">1314</span>
+<span id="1315">1315</span>
+<span id="1316">1316</span>
+<span id="1317">1317</span>
+<span id="1318">1318</span>
+<span id="1319">1319</span>
+<span id="1320">1320</span>
+<span id="1321">1321</span>
+<span id="1322">1322</span>
+<span id="1323">1323</span>
+<span id="1324">1324</span>
+<span id="1325">1325</span>
+<span id="1326">1326</span>
+<span id="1327">1327</span>
+<span id="1328">1328</span>
+<span id="1329">1329</span>
+<span id="1330">1330</span>
+<span id="1331">1331</span>
+<span id="1332">1332</span>
+<span id="1333">1333</span>
+<span id="1334">1334</span>
+<span id="1335">1335</span>
+<span id="1336">1336</span>
+<span id="1337">1337</span>
+<span id="1338">1338</span>
+<span id="1339">1339</span>
+<span id="1340">1340</span>
+<span id="1341">1341</span>
+<span id="1342">1342</span>
+<span id="1343">1343</span>
+<span id="1344">1344</span>
+<span id="1345">1345</span>
+<span id="1346">1346</span>
+<span id="1347">1347</span>
+<span id="1348">1348</span>
+<span id="1349">1349</span>
+<span id="1350">1350</span>
+<span id="1351">1351</span>
+<span id="1352">1352</span>
+<span id="1353">1353</span>
+<span id="1354">1354</span>
+<span id="1355">1355</span>
+<span id="1356">1356</span>
+<span id="1357">1357</span>
+<span id="1358">1358</span>
+<span id="1359">1359</span>
+<span id="1360">1360</span>
+<span id="1361">1361</span>
+<span id="1362">1362</span>
+<span id="1363">1363</span>
+<span id="1364">1364</span>
+<span id="1365">1365</span>
+<span id="1366">1366</span>
+<span id="1367">1367</span>
+<span id="1368">1368</span>
+<span id="1369">1369</span>
+<span id="1370">1370</span>
+<span id="1371">1371</span>
+<span id="1372">1372</span>
+<span id="1373">1373</span>
+<span id="1374">1374</span>
+<span id="1375">1375</span>
+<span id="1376">1376</span>
+<span id="1377">1377</span>
+<span id="1378">1378</span>
+<span id="1379">1379</span>
+<span id="1380">1380</span>
+<span id="1381">1381</span>
+<span id="1382">1382</span>
+<span id="1383">1383</span>
+<span id="1384">1384</span>
+<span id="1385">1385</span>
+<span id="1386">1386</span>
+<span id="1387">1387</span>
+<span id="1388">1388</span>
+<span id="1389">1389</span>
+<span id="1390">1390</span>
+<span id="1391">1391</span>
+<span id="1392">1392</span>
+<span id="1393">1393</span>
+<span id="1394">1394</span>
+<span id="1395">1395</span>
+<span id="1396">1396</span>
+<span id="1397">1397</span>
+<span id="1398">1398</span>
+<span id="1399">1399</span>
+<span id="1400">1400</span>
+<span id="1401">1401</span>
+<span id="1402">1402</span>
+<span id="1403">1403</span>
+<span id="1404">1404</span>
+<span id="1405">1405</span>
+<span id="1406">1406</span>
+<span id="1407">1407</span>
+<span id="1408">1408</span>
+<span id="1409">1409</span>
+<span id="1410">1410</span>
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error::InsertObject;
+<span class="kw">use </span><span class="kw">crate</span>::value::Datatype;
 <span class="kw">use </span><span class="kw">crate</span>::Automerge;
 <span class="kw">use </span>automerge <span class="kw">as </span>am;
 <span class="kw">use </span>automerge::transaction::Transactable;
+<span class="kw">use </span>automerge::ROOT;
 <span class="kw">use </span>automerge::{Change, ChangeHash, ObjType, Prop};
-<span class="kw">use </span>js_sys::{Array, Function, Object, Reflect, Symbol, Uint8Array};
+<span class="kw">use </span>js_sys::{Array, Function, JsString, Object, Reflect, Symbol, Uint8Array};
 <span class="kw">use </span>std::collections::{BTreeSet, HashSet};
 <span class="kw">use </span>std::fmt::Display;
 <span class="kw">use </span>wasm_bindgen::prelude::<span class="kw-2">*</span>;
@@ -1502,49 +1824,82 @@
     )<span class="question-mark">?</span>))
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>to_prop(p: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;Prop, <span class="kw">super</span>::error::InvalidProp&gt; {
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>to_prop(p: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;Prop, error::InvalidProp&gt; {
     <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = p.as_string() {
         <span class="prelude-val">Ok</span>(Prop::Map(s))
     } <span class="kw">else if let </span><span class="prelude-val">Some</span>(n) = p.as_f64() {
         <span class="prelude-val">Ok</span>(Prop::Seq(n <span class="kw">as </span>usize))
     } <span class="kw">else </span>{
-        <span class="prelude-val">Err</span>(<span class="kw">super</span>::error::InvalidProp)
+        <span class="prelude-val">Err</span>(error::InvalidProp)
     }
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>to_objtype(
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>JsObjType {
+    Text(String),
+    Map(Vec&lt;(Prop, JsValue)&gt;),
+    List(Vec&lt;(Prop, JsValue)&gt;),
+}
+
+<span class="kw">impl </span>JsObjType {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>objtype(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ObjType {
+        <span class="kw">match </span><span class="self">self </span>{
+            <span class="self">Self</span>::Text(<span class="kw">_</span>) =&gt; ObjType::Text,
+            <span class="self">Self</span>::Map(<span class="kw">_</span>) =&gt; ObjType::Map,
+            <span class="self">Self</span>::List(<span class="kw">_</span>) =&gt; ObjType::List,
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>text(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt; {
+        <span class="kw">match </span><span class="self">self </span>{
+            <span class="self">Self</span>::Text(s) =&gt; <span class="prelude-val">Some</span>(s.as_ref()),
+            <span class="self">Self</span>::Map(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+            <span class="self">Self</span>::List(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>subvals(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[(Prop, JsValue)] {
+        <span class="kw">match </span><span class="self">self </span>{
+            <span class="self">Self</span>::Text(<span class="kw">_</span>) =&gt; <span class="kw-2">&amp;</span>[],
+            <span class="self">Self</span>::Map(sub) =&gt; sub.as_slice(),
+            <span class="self">Self</span>::List(sub) =&gt; sub.as_slice(),
+        }
+    }
+}
+
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>import_obj(
     value: <span class="kw-2">&amp;</span>JsValue,
     datatype: <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;String&gt;,
-) -&gt; <span class="prelude-ty">Option</span>&lt;(ObjType, Vec&lt;(Prop, JsValue)&gt;)&gt; {
+) -&gt; <span class="prelude-ty">Result</span>&lt;JsObjType, InsertObject&gt; {
     <span class="kw">match </span>datatype.as_deref() {
         <span class="prelude-val">Some</span>(<span class="string">&quot;map&quot;</span>) =&gt; {
-            <span class="kw">let </span>map = value.clone().dyn_into::&lt;js_sys::Object&gt;().ok()<span class="question-mark">?</span>;
+            <span class="kw">let </span>map = value
+                .clone()
+                .dyn_into::&lt;js_sys::Object&gt;()
+                .map_err(|<span class="kw">_</span>| InsertObject::ValueNotObject)<span class="question-mark">?</span>;
             <span class="kw">let </span>map = js_sys::Object::keys(<span class="kw-2">&amp;</span>map)
                 .iter()
                 .zip(js_sys::Object::values(<span class="kw-2">&amp;</span>map).iter())
                 .map(|(key, val)| (key.as_string().unwrap().into(), val))
                 .collect();
-            <span class="prelude-val">Some</span>((ObjType::Map, map))
+            <span class="prelude-val">Ok</span>(JsObjType::Map(map))
         }
         <span class="prelude-val">Some</span>(<span class="string">&quot;list&quot;</span>) =&gt; {
-            <span class="kw">let </span>list = value.clone().dyn_into::&lt;js_sys::Array&gt;().ok()<span class="question-mark">?</span>;
+            <span class="kw">let </span>list = value
+                .clone()
+                .dyn_into::&lt;js_sys::Array&gt;()
+                .map_err(|<span class="kw">_</span>| InsertObject::ValueNotObject)<span class="question-mark">?</span>;
             <span class="kw">let </span>list = list
                 .iter()
                 .enumerate()
                 .map(|(i, e)| (i.into(), e))
                 .collect();
-            <span class="prelude-val">Some</span>((ObjType::List, list))
+            <span class="prelude-val">Ok</span>(JsObjType::List(list))
         }
         <span class="prelude-val">Some</span>(<span class="string">&quot;text&quot;</span>) =&gt; {
-            <span class="kw">let </span>text = value.as_string()<span class="question-mark">?</span>;
-            <span class="kw">let </span>text = text
-                .chars()
-                .enumerate()
-                .map(|(i, ch)| (i.into(), ch.to_string().into()))
-                .collect();
-            <span class="prelude-val">Some</span>((ObjType::Text, text))
+            <span class="kw">let </span>text = value.as_string().ok_or(InsertObject::ValueNotObject)<span class="question-mark">?</span>;
+            <span class="prelude-val">Ok</span>(JsObjType::Text(text))
         }
-        <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+        <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(InsertObject::ValueNotObject),
         <span class="prelude-val">None </span>=&gt; {
             <span class="kw">if let </span><span class="prelude-val">Ok</span>(list) = value.clone().dyn_into::&lt;js_sys::Array&gt;() {
                 <span class="kw">let </span>list = list
@@ -1552,25 +1907,19 @@
                     .enumerate()
                     .map(|(i, e)| (i.into(), e))
                     .collect();
-                <span class="prelude-val">Some</span>((ObjType::List, list))
+                <span class="prelude-val">Ok</span>(JsObjType::List(list))
             } <span class="kw">else if let </span><span class="prelude-val">Ok</span>(map) = value.clone().dyn_into::&lt;js_sys::Object&gt;() {
-                <span class="comment">// FIXME unwrap
-                </span><span class="kw">let </span>map = js_sys::Object::keys(<span class="kw-2">&amp;</span>map)
+                <span class="kw">let </span>map = js_sys::Object::keys(<span class="kw-2">&amp;</span>map)
                     .iter()
                     .zip(js_sys::Object::values(<span class="kw-2">&amp;</span>map).iter())
                     .map(|(key, val)| (key.as_string().unwrap().into(), val))
                     .collect();
-                <span class="prelude-val">Some</span>((ObjType::Map, map))
-            } <span class="kw">else if let </span><span class="prelude-val">Some</span>(text) = value.as_string() {
-                <span class="kw">let </span>text = text
-                    .chars()
-                    .enumerate()
-                    .map(|(i, ch)| (i.into(), ch.to_string().into()))
-                    .collect();
-                <span class="prelude-val">Some</span>((ObjType::Text, text))
+                <span class="prelude-val">Ok</span>(JsObjType::Map(map))
+            } <span class="kw">else if let </span><span class="prelude-val">Some</span>(s) = value.as_string() {
+                <span class="prelude-val">Ok</span>(JsObjType::Text(s))
             } <span class="kw">else </span>{
-                <span class="prelude-val">None
-            </span>}
+                <span class="prelude-val">Err</span>(InsertObject::ValueNotObject)
+            }
         }
     }
 }
@@ -1598,22 +1947,22 @@
         heads: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Vec&lt;ChangeHash&gt;&gt;,
         meta: <span class="kw-2">&amp;</span>JsValue,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, error::Export&gt; {
-        <span class="kw">let </span>result = <span class="kw">if </span>datatype.is_sequence() {
-            <span class="self">self</span>.wrap_object(
-                <span class="self">self</span>.export_list(obj, heads, meta)<span class="question-mark">?</span>,
-                datatype,
-                <span class="kw-2">&amp;</span>obj.to_string().into(),
-                meta,
-            )<span class="question-mark">?
-        </span>} <span class="kw">else </span>{
-            <span class="self">self</span>.wrap_object(
-                <span class="self">self</span>.export_map(obj, heads, meta)<span class="question-mark">?</span>,
-                datatype,
-                <span class="kw-2">&amp;</span>obj.to_string().into(),
-                meta,
-            )<span class="question-mark">?
-        </span>};
-        <span class="prelude-val">Ok</span>(result.into())
+        <span class="kw">let </span>result = <span class="kw">match </span>datatype {
+            Datatype::Text =&gt; {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(heads) = heads {
+                    <span class="self">self</span>.doc.text_at(obj, heads)<span class="question-mark">?</span>.into()
+                } <span class="kw">else </span>{
+                    <span class="self">self</span>.doc.text(obj)<span class="question-mark">?</span>.into()
+                }
+            }
+            Datatype::List =&gt; <span class="self">self
+                </span>.wrap_object(<span class="self">self</span>.export_list(obj, heads, meta)<span class="question-mark">?</span>, datatype, obj, meta)<span class="question-mark">?
+                </span>.into(),
+            <span class="kw">_ </span>=&gt; <span class="self">self
+                </span>.wrap_object(<span class="self">self</span>.export_map(obj, heads, meta)<span class="question-mark">?</span>, datatype, obj, meta)<span class="question-mark">?
+                </span>.into(),
+        };
+        <span class="prelude-val">Ok</span>(result)
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>export_map(
@@ -1693,17 +2042,19 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>unwrap_object(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         ext_val: <span class="kw-2">&amp;</span>Object,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;(Object, Datatype, JsValue), error::Export&gt; {
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(Object, Datatype, ObjId), error::Export&gt; {
         <span class="kw">let </span>inner = js_get_symbol(ext_val, <span class="kw-2">&amp;</span>Symbol::for_(RAW_DATA_SYMBOL))<span class="question-mark">?</span>.<span class="number">0</span>;
 
         <span class="kw">let </span>datatype = js_get_symbol(ext_val, <span class="kw-2">&amp;</span>Symbol::for_(DATATYPE_SYMBOL))<span class="question-mark">?
             </span>.<span class="number">0
             </span>.try_into();
 
-        <span class="kw">let </span><span class="kw-2">mut </span>id = js_get_symbol(ext_val, <span class="kw-2">&amp;</span>Symbol::for_(RAW_OBJECT_SYMBOL))<span class="question-mark">?</span>.<span class="number">0</span>;
-        <span class="kw">if </span>id.is_undefined() {
-            id = <span class="string">&quot;_root&quot;</span>.into();
-        }
+        <span class="kw">let </span>id_val = js_get_symbol(ext_val, <span class="kw-2">&amp;</span>Symbol::for_(RAW_OBJECT_SYMBOL))<span class="question-mark">?</span>.<span class="number">0</span>;
+        <span class="kw">let </span>id = <span class="kw">if </span>id_val.is_undefined() {
+            am::ROOT
+        } <span class="kw">else </span>{
+            <span class="self">self</span>.doc.import(<span class="kw-2">&amp;</span>id_val.as_string().unwrap_or_default())<span class="question-mark">?</span>.<span class="number">0
+        </span>};
 
         <span class="kw">let </span>inner = inner
             .dyn_into::&lt;Object&gt;()
@@ -1734,7 +2085,7 @@
         meta: <span class="kw-2">&amp;</span>JsValue,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, error::Export&gt; {
         <span class="kw">if let </span><span class="prelude-val">Ok</span>(obj) = raw_value.clone().dyn_into::&lt;Object&gt;() {
-            <span class="kw">let </span>result = <span class="self">self</span>.wrap_object(obj, datatype, <span class="kw-2">&amp;</span>id.to_string().into(), meta)<span class="question-mark">?</span>;
+            <span class="kw">let </span>result = <span class="self">self</span>.wrap_object(obj, datatype, id, meta)<span class="question-mark">?</span>;
             <span class="prelude-val">Ok</span>(result.into())
         } <span class="kw">else </span>{
             <span class="self">self</span>.export_value((datatype, raw_value))
@@ -1745,7 +2096,7 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         value: Object,
         datatype: Datatype,
-        id: <span class="kw-2">&amp;</span>JsValue,
+        id: <span class="kw-2">&amp;</span>ObjId,
         meta: <span class="kw-2">&amp;</span>JsValue,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, error::Export&gt; {
         <span class="kw">let </span>value = <span class="kw">if let </span><span class="prelude-val">Some</span>(function) = <span class="self">self</span>.external_types.get(<span class="kw-2">&amp;</span>datatype) {
@@ -1760,8 +2111,12 @@
         } <span class="kw">else </span>{
             value
         };
-        <span class="kw">if </span><span class="macro">matches!</span>(datatype, Datatype::Map | Datatype::List | Datatype::Text) {
-            set_hidden_value(<span class="kw-2">&amp;</span>value, <span class="kw-2">&amp;</span>Symbol::for_(RAW_OBJECT_SYMBOL), id)<span class="question-mark">?</span>;
+        <span class="kw">if </span><span class="macro">matches!</span>(datatype, Datatype::Map | Datatype::List) {
+            set_hidden_value(
+                <span class="kw-2">&amp;</span>value,
+                <span class="kw-2">&amp;</span>Symbol::for_(RAW_OBJECT_SYMBOL),
+                <span class="kw-2">&amp;</span>JsValue::from(<span class="kw-2">&amp;</span>id.to_string()),
+            )<span class="question-mark">?</span>;
         }
         set_hidden_value(<span class="kw-2">&amp;</span>value, <span class="kw-2">&amp;</span>Symbol::for_(DATATYPE_SYMBOL), datatype)<span class="question-mark">?</span>;
         set_hidden_value(<span class="kw-2">&amp;</span>value, <span class="kw-2">&amp;</span>Symbol::for_(META_SYMBOL), meta)<span class="question-mark">?</span>;
@@ -1776,16 +2131,27 @@
         array: <span class="kw-2">&amp;</span>Object,
         patch: <span class="kw-2">&amp;</span>Patch,
         meta: <span class="kw-2">&amp;</span>JsValue,
+        exposed: <span class="kw-2">&amp;mut </span>HashSet&lt;ObjId&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, error::ApplyPatch&gt; {
         <span class="kw">let </span>result = Array::from(array); <span class="comment">// shallow copy
         </span><span class="kw">match </span>patch {
-            Patch::PutSeq { index, value, .. } =&gt; {
-                <span class="kw">let </span>sub_val = <span class="self">self</span>.maybe_wrap_object(alloc(<span class="kw-2">&amp;</span>value.<span class="number">0</span>), <span class="kw-2">&amp;</span>value.<span class="number">1</span>, meta)<span class="question-mark">?</span>;
-                js_set(<span class="kw-2">&amp;</span>result, <span class="kw-2">*</span>index <span class="kw">as </span>f64, <span class="kw-2">&amp;</span>sub_val)<span class="question-mark">?</span>;
+            Patch::PutSeq {
+                index,
+                value,
+                expose,
+                ..
+            } =&gt; {
+                <span class="kw">if </span><span class="kw-2">*</span>expose &amp;&amp; value.<span class="number">0</span>.is_object() {
+                    exposed.insert(value.<span class="number">1</span>.clone());
+                    js_set(<span class="kw-2">&amp;</span>result, <span class="kw-2">*</span>index <span class="kw">as </span>f64, <span class="kw-2">&amp;</span>JsValue::null())<span class="question-mark">?</span>;
+                } <span class="kw">else </span>{
+                    <span class="kw">let </span>sub_val = <span class="self">self</span>.maybe_wrap_object(alloc(<span class="kw-2">&amp;</span>value.<span class="number">0</span>), <span class="kw-2">&amp;</span>value.<span class="number">1</span>, meta)<span class="question-mark">?</span>;
+                    js_set(<span class="kw-2">&amp;</span>result, <span class="kw-2">*</span>index <span class="kw">as </span>f64, <span class="kw-2">&amp;</span>sub_val)<span class="question-mark">?</span>;
+                }
                 <span class="prelude-val">Ok</span>(result.into())
             }
-            Patch::DeleteSeq { index, .. } =&gt; {
-                <span class="prelude-val">Ok</span>(<span class="self">self</span>.sub_splice(result, <span class="kw-2">*</span>index, <span class="number">1</span>, <span class="macro">vec!</span>[], meta)<span class="question-mark">?</span>)
+            Patch::DeleteSeq { index, length, .. } =&gt; {
+                <span class="prelude-val">Ok</span>(<span class="self">self</span>.sub_splice(result, <span class="kw-2">*</span>index, <span class="kw-2">*</span>length, <span class="macro">vec!</span>[], meta)<span class="question-mark">?</span>)
             }
             Patch::Insert { index, values, .. } =&gt; {
                 <span class="prelude-val">Ok</span>(<span class="self">self</span>.sub_splice(result, <span class="kw-2">*</span>index, <span class="number">0</span>, values, meta)<span class="question-mark">?</span>)
@@ -1809,6 +2175,8 @@
             }
             Patch::DeleteMap { .. } =&gt; <span class="prelude-val">Err</span>(error::ApplyPatch::DeleteKeyFromSeq),
             Patch::PutMap { .. } =&gt; <span class="prelude-val">Err</span>(error::ApplyPatch::PutKeyInSeq),
+            <span class="comment">//Patch::SpliceText { .. } =&gt; Err(to_js_err(&quot;cannot splice text in seq&quot;)),
+            </span>Patch::SpliceText { .. } =&gt; <span class="prelude-val">Err</span>(error::ApplyPatch::SpliceTextInSeq),
         }
     }
 
@@ -1817,12 +2185,20 @@
         map: <span class="kw-2">&amp;</span>Object,
         patch: <span class="kw-2">&amp;</span>Patch,
         meta: <span class="kw-2">&amp;</span>JsValue,
+        exposed: <span class="kw-2">&amp;mut </span>HashSet&lt;ObjId&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, error::ApplyPatch&gt; {
         <span class="kw">let </span>result = Object::assign(<span class="kw-2">&amp;</span>Object::new(), map); <span class="comment">// shallow copy
         </span><span class="kw">match </span>patch {
-            Patch::PutMap { key, value, .. } =&gt; {
-                <span class="kw">let </span>sub_val = <span class="self">self</span>.maybe_wrap_object(alloc(<span class="kw-2">&amp;</span>value.<span class="number">0</span>), <span class="kw-2">&amp;</span>value.<span class="number">1</span>, meta)<span class="question-mark">?</span>;
-                js_set(<span class="kw-2">&amp;</span>result, key, <span class="kw-2">&amp;</span>sub_val)<span class="question-mark">?</span>;
+            Patch::PutMap {
+                key, value, expose, ..
+            } =&gt; {
+                <span class="kw">if </span><span class="kw-2">*</span>expose &amp;&amp; value.<span class="number">0</span>.is_object() {
+                    exposed.insert(value.<span class="number">1</span>.clone());
+                    js_set(<span class="kw-2">&amp;</span>result, key, <span class="kw-2">&amp;</span>JsValue::null())<span class="question-mark">?</span>;
+                } <span class="kw">else </span>{
+                    <span class="kw">let </span>sub_val = <span class="self">self</span>.maybe_wrap_object(alloc(<span class="kw-2">&amp;</span>value.<span class="number">0</span>), <span class="kw-2">&amp;</span>value.<span class="number">1</span>, meta)<span class="question-mark">?</span>;
+                    js_set(<span class="kw-2">&amp;</span>result, key, <span class="kw-2">&amp;</span>sub_val)<span class="question-mark">?</span>;
+                }
                 <span class="prelude-val">Ok</span>(result)
             }
             Patch::DeleteMap { key, .. } =&gt; {
@@ -1852,6 +2228,8 @@
             }
             Patch::Insert { .. } =&gt; <span class="prelude-val">Err</span>(error::ApplyPatch::InsertInMap),
             Patch::DeleteSeq { .. } =&gt; <span class="prelude-val">Err</span>(error::ApplyPatch::SpliceInMap),
+            <span class="comment">//Patch::SpliceText { .. } =&gt; Err(to_js_err(&quot;cannot Splice into map&quot;)),
+            </span>Patch::SpliceText { .. } =&gt; <span class="prelude-val">Err</span>(error::ApplyPatch::SpliceTextInMap),
             Patch::PutSeq { .. } =&gt; <span class="prelude-val">Err</span>(error::ApplyPatch::PutIdxInMap),
         }
     }
@@ -1862,12 +2240,24 @@
         patch: <span class="kw-2">&amp;</span>Patch,
         depth: usize,
         meta: <span class="kw-2">&amp;</span>JsValue,
+        exposed: <span class="kw-2">&amp;mut </span>HashSet&lt;ObjId&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, error::ApplyPatch&gt; {
         <span class="kw">let </span>(inner, datatype, id) = <span class="self">self</span>.unwrap_object(<span class="kw-2">&amp;</span>obj)<span class="question-mark">?</span>;
         <span class="kw">let </span>prop = patch.path().get(depth).map(|p| prop_to_js(<span class="kw-2">&amp;</span>p.<span class="number">1</span>));
         <span class="kw">let </span>result = <span class="kw">if let </span><span class="prelude-val">Some</span>(prop) = prop {
-            <span class="kw">if let </span><span class="prelude-val">Ok</span>(sub_obj) = js_get(<span class="kw-2">&amp;</span>inner, <span class="kw-2">&amp;</span>prop)<span class="question-mark">?</span>.<span class="number">0</span>.dyn_into::&lt;Object&gt;() {
-                <span class="kw">let </span>new_value = <span class="self">self</span>.apply_patch(sub_obj, patch, depth + <span class="number">1</span>, meta)<span class="question-mark">?</span>;
+            <span class="kw">let </span>subval = js_get(<span class="kw-2">&amp;</span>inner, <span class="kw-2">&amp;</span>prop)<span class="question-mark">?</span>.<span class="number">0</span>;
+            <span class="kw">if </span>subval.is_string() &amp;&amp; patch.path().len() - <span class="number">1 </span>== depth {
+                <span class="kw">if let </span><span class="prelude-val">Ok</span>(s) = subval.dyn_into::&lt;JsString&gt;() {
+                    <span class="kw">let </span>new_value = <span class="self">self</span>.apply_patch_to_text(<span class="kw-2">&amp;</span>s, patch)<span class="question-mark">?</span>;
+                    <span class="kw">let </span>result = shallow_copy(<span class="kw-2">&amp;</span>inner);
+                    js_set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span>prop, <span class="kw-2">&amp;</span>new_value)<span class="question-mark">?</span>;
+                    <span class="prelude-val">Ok</span>(result)
+                } <span class="kw">else </span>{
+                    <span class="comment">// bad patch - short circuit
+                    </span><span class="prelude-val">Ok</span>(obj)
+                }
+            } <span class="kw">else if let </span><span class="prelude-val">Ok</span>(sub_obj) = js_get(<span class="kw-2">&amp;</span>inner, <span class="kw-2">&amp;</span>prop)<span class="question-mark">?</span>.<span class="number">0</span>.dyn_into::&lt;Object&gt;() {
+                <span class="kw">let </span>new_value = <span class="self">self</span>.apply_patch(sub_obj, patch, depth + <span class="number">1</span>, meta, exposed)<span class="question-mark">?</span>;
                 <span class="kw">let </span>result = shallow_copy(<span class="kw-2">&amp;</span>inner);
                 js_set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span>prop, <span class="kw-2">&amp;</span>new_value)<span class="question-mark">?</span>;
                 <span class="prelude-val">Ok</span>(result)
@@ -1877,13 +2267,47 @@
                 </span><span class="kw">return </span><span class="prelude-val">Ok</span>(obj);
             }
         } <span class="kw">else if </span>Array::is_array(<span class="kw-2">&amp;</span>inner) {
-            <span class="self">self</span>.apply_patch_to_array(<span class="kw-2">&amp;</span>inner, patch, meta)
+            <span class="kw">if </span><span class="kw-2">&amp;</span>id == patch.obj() {
+                <span class="self">self</span>.apply_patch_to_array(<span class="kw-2">&amp;</span>inner, patch, meta, exposed)
+            } <span class="kw">else </span>{
+                <span class="prelude-val">Ok</span>(Array::from(<span class="kw-2">&amp;</span>inner).into())
+            }
+        } <span class="kw">else if </span><span class="kw-2">&amp;</span>id == patch.obj() {
+            <span class="self">self</span>.apply_patch_to_map(<span class="kw-2">&amp;</span>inner, patch, meta, exposed)
         } <span class="kw">else </span>{
-            <span class="self">self</span>.apply_patch_to_map(<span class="kw-2">&amp;</span>inner, patch, meta)
+            <span class="prelude-val">Ok</span>(Object::assign(<span class="kw-2">&amp;</span>Object::new(), <span class="kw-2">&amp;</span>inner))
         }<span class="question-mark">?</span>;
 
         <span class="self">self</span>.wrap_object(result, datatype, <span class="kw-2">&amp;</span>id, meta)
             .map_err(|e| e.into())
+    }
+
+    <span class="kw">fn </span>apply_patch_to_text(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        string: <span class="kw-2">&amp;</span>JsString,
+        patch: <span class="kw-2">&amp;</span>Patch,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, error::ApplyPatch&gt; {
+        <span class="kw">match </span>patch {
+            Patch::DeleteSeq { index, length, .. } =&gt; {
+                <span class="kw">let </span>index = <span class="kw-2">*</span>index <span class="kw">as </span>u32;
+                <span class="kw">let </span>before = string.slice(<span class="number">0</span>, index);
+                <span class="kw">let </span>after = string.slice(index + <span class="kw-2">*</span>length <span class="kw">as </span>u32, string.length());
+                <span class="kw">let </span>result = before.concat(<span class="kw-2">&amp;</span>after);
+                <span class="prelude-val">Ok</span>(result.into())
+            }
+            Patch::SpliceText { index, value, .. } =&gt; {
+                <span class="kw">let </span>index = <span class="kw-2">*</span>index <span class="kw">as </span>u32;
+                <span class="kw">let </span>length = string.length();
+                <span class="kw">let </span>before = string.slice(<span class="number">0</span>, index);
+                <span class="kw">let </span>after = string.slice(index, length);
+                <span class="kw">let </span>bytes: Vec&lt;u16&gt; = value.iter().cloned().collect();
+                <span class="kw">let </span>result = before
+                    .concat(<span class="kw-2">&amp;</span>String::from_utf16_lossy(bytes.as_slice()).into())
+                    .concat(<span class="kw-2">&amp;</span>after);
+                <span class="prelude-val">Ok</span>(result.into())
+            }
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">Ok</span>(string.into()),
+        }
     }
 
     <span class="kw">fn </span>sub_splice&lt;<span class="lifetime">&#39;a</span>, I: IntoIterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>(Value&lt;<span class="lifetime">&#39;a</span>&gt;, ObjId)&gt;&gt;(
@@ -1907,6 +2331,178 @@
         Reflect::apply(<span class="kw-2">&amp;</span>method, <span class="kw-2">&amp;</span>o, <span class="kw-2">&amp;</span>args).map_err(error::Export::CallSplice)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(o.into())
     }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>import(<span class="kw-2">&amp;</span><span class="self">self</span>, id: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;(ObjId, am::ObjType), error::ImportObj&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = id.as_string() {
+            <span class="comment">// valid formats are
+            // 123@aabbcc
+            // 123@aabccc/prop1/prop2/prop3
+            // /prop1/prop2/prop3
+            </span><span class="kw">let </span><span class="kw-2">mut </span>components = s.split(<span class="string">&#39;/&#39;</span>);
+            <span class="kw">let </span>obj = components.next();
+            <span class="kw">let </span>(id, obj_type) = <span class="kw">if </span>obj == <span class="prelude-val">Some</span>(<span class="string">&quot;&quot;</span>) {
+                (ROOT, am::ObjType::Map)
+            } <span class="kw">else </span>{
+                <span class="self">self</span>.doc
+                    .import(obj.unwrap_or_default())
+                    .map_err(error::ImportObj::BadImport)<span class="question-mark">?
+            </span>};
+            <span class="self">self</span>.import_path(id, obj_type, components)
+                .map_err(|e| error::ImportObj::InvalidPath(s.to_string(), e))
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Err</span>(error::ImportObj::NotString)
+        }
+    }
+
+    <span class="kw">fn </span>import_path&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>str&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        <span class="kw-2">mut </span>obj: ObjId,
+        <span class="kw-2">mut </span>obj_type: am::ObjType,
+        components: I,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(ObjId, am::ObjType), error::ImportPath&gt; {
+        <span class="kw">for </span>(i, prop) <span class="kw">in </span>components.enumerate() {
+            <span class="kw">if </span>prop.is_empty() {
+                <span class="kw">break</span>;
+            }
+            <span class="kw">let </span>is_map = <span class="macro">matches!</span>(obj_type, am::ObjType::Map | am::ObjType::Table);
+            <span class="kw">let </span>val = <span class="kw">if </span>is_map {
+                <span class="self">self</span>.doc.get(obj, prop)<span class="question-mark">?
+            </span>} <span class="kw">else </span>{
+                <span class="kw">let </span>idx = prop
+                    .parse()
+                    .map_err(|<span class="kw">_</span>| error::ImportPath::IndexNotInteger(i, prop.to_string()))<span class="question-mark">?</span>;
+                <span class="self">self</span>.doc.get(obj, am::Prop::Seq(idx))<span class="question-mark">?
+            </span>};
+            <span class="kw">match </span>val {
+                <span class="prelude-val">Some</span>((am::Value::Object(am::ObjType::Map), id)) =&gt; {
+                    obj_type = am::ObjType::Map;
+                    obj = id;
+                }
+                <span class="prelude-val">Some</span>((am::Value::Object(am::ObjType::Table), id)) =&gt; {
+                    obj_type = am::ObjType::Table;
+                    obj = id;
+                }
+                <span class="prelude-val">Some</span>((am::Value::Object(am::ObjType::List), id)) =&gt; {
+                    obj_type = am::ObjType::List;
+                    obj = id;
+                }
+                <span class="prelude-val">Some</span>((am::Value::Object(am::ObjType::Text), id)) =&gt; {
+                    obj_type = am::ObjType::Text;
+                    obj = id;
+                }
+                <span class="prelude-val">None </span>=&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(error::ImportPath::NonExistentObject(i, prop.to_string())),
+                <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(error::ImportPath::NotAnObject),
+            };
+        }
+        <span class="prelude-val">Ok</span>((obj, obj_type))
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>import_prop(<span class="kw-2">&amp;</span><span class="self">self</span>, prop: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;Prop, error::InvalidProp&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = prop.as_string() {
+            <span class="prelude-val">Ok</span>(s.into())
+        } <span class="kw">else if let </span><span class="prelude-val">Some</span>(n) = prop.as_f64() {
+            <span class="prelude-val">Ok</span>((n <span class="kw">as </span>usize).into())
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Err</span>(error::InvalidProp)
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>import_scalar(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        value: <span class="kw-2">&amp;</span>JsValue,
+        datatype: <span class="kw-2">&amp;</span><span class="prelude-ty">Option</span>&lt;String&gt;,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;am::ScalarValue&gt; {
+        <span class="kw">match </span>datatype.as_deref() {
+            <span class="prelude-val">Some</span>(<span class="string">&quot;boolean&quot;</span>) =&gt; value.as_bool().map(am::ScalarValue::Boolean),
+            <span class="prelude-val">Some</span>(<span class="string">&quot;int&quot;</span>) =&gt; value.as_f64().map(|v| am::ScalarValue::Int(v <span class="kw">as </span>i64)),
+            <span class="prelude-val">Some</span>(<span class="string">&quot;uint&quot;</span>) =&gt; value.as_f64().map(|v| am::ScalarValue::Uint(v <span class="kw">as </span>u64)),
+            <span class="prelude-val">Some</span>(<span class="string">&quot;str&quot;</span>) =&gt; value.as_string().map(|v| am::ScalarValue::Str(v.into())),
+            <span class="prelude-val">Some</span>(<span class="string">&quot;f64&quot;</span>) =&gt; value.as_f64().map(am::ScalarValue::F64),
+            <span class="prelude-val">Some</span>(<span class="string">&quot;bytes&quot;</span>) =&gt; <span class="prelude-val">Some</span>(am::ScalarValue::Bytes(
+                value.clone().dyn_into::&lt;Uint8Array&gt;().unwrap().to_vec(),
+            )),
+            <span class="prelude-val">Some</span>(<span class="string">&quot;counter&quot;</span>) =&gt; value.as_f64().map(|v| am::ScalarValue::counter(v <span class="kw">as </span>i64)),
+            <span class="prelude-val">Some</span>(<span class="string">&quot;timestamp&quot;</span>) =&gt; {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(v) = value.as_f64() {
+                    <span class="prelude-val">Some</span>(am::ScalarValue::Timestamp(v <span class="kw">as </span>i64))
+                } <span class="kw">else if let </span><span class="prelude-val">Ok</span>(d) = value.clone().dyn_into::&lt;js_sys::Date&gt;() {
+                    <span class="prelude-val">Some</span>(am::ScalarValue::Timestamp(d.get_time() <span class="kw">as </span>i64))
+                } <span class="kw">else </span>{
+                    <span class="prelude-val">None
+                </span>}
+            }
+            <span class="prelude-val">Some</span>(<span class="string">&quot;null&quot;</span>) =&gt; <span class="prelude-val">Some</span>(am::ScalarValue::Null),
+            <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">None</span>,
+            <span class="prelude-val">None </span>=&gt; {
+                <span class="kw">if </span>value.is_null() {
+                    <span class="prelude-val">Some</span>(am::ScalarValue::Null)
+                } <span class="kw">else if let </span><span class="prelude-val">Some</span>(b) = value.as_bool() {
+                    <span class="prelude-val">Some</span>(am::ScalarValue::Boolean(b))
+                } <span class="kw">else if let </span><span class="prelude-val">Some</span>(s) = value.as_string() {
+                    <span class="prelude-val">Some</span>(am::ScalarValue::Str(s.into()))
+                } <span class="kw">else if let </span><span class="prelude-val">Some</span>(n) = value.as_f64() {
+                    <span class="kw">if </span>(n.round() - n).abs() &lt; f64::EPSILON {
+                        <span class="prelude-val">Some</span>(am::ScalarValue::Int(n <span class="kw">as </span>i64))
+                    } <span class="kw">else </span>{
+                        <span class="prelude-val">Some</span>(am::ScalarValue::F64(n))
+                    }
+                } <span class="kw">else if let </span><span class="prelude-val">Ok</span>(d) = value.clone().dyn_into::&lt;js_sys::Date&gt;() {
+                    <span class="prelude-val">Some</span>(am::ScalarValue::Timestamp(d.get_time() <span class="kw">as </span>i64))
+                } <span class="kw">else if let </span><span class="prelude-val">Ok</span>(o) = <span class="kw-2">&amp;</span>value.clone().dyn_into::&lt;Uint8Array&gt;() {
+                    <span class="prelude-val">Some</span>(am::ScalarValue::Bytes(o.to_vec()))
+                } <span class="kw">else </span>{
+                    <span class="prelude-val">None
+                </span>}
+            }
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>import_value(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        value: <span class="kw-2">&amp;</span>JsValue,
+        datatype: <span class="prelude-ty">Option</span>&lt;String&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(Value&lt;<span class="lifetime">&#39;static</span>&gt;, Vec&lt;(Prop, JsValue)&gt;), error::InvalidValue&gt; {
+        <span class="kw">match </span><span class="self">self</span>.import_scalar(value, <span class="kw-2">&amp;</span>datatype) {
+            <span class="prelude-val">Some</span>(val) =&gt; <span class="prelude-val">Ok</span>((val.into(), <span class="macro">vec!</span>[])),
+            <span class="prelude-val">None </span>=&gt; {
+                <span class="kw">if let </span><span class="prelude-val">Ok</span>(js_obj) = import_obj(value, <span class="kw-2">&amp;</span>datatype) {
+                    <span class="prelude-val">Ok</span>((js_obj.objtype().into(), js_obj.subvals().to_vec()))
+                } <span class="kw">else </span>{
+                    web_sys::console::log_2(<span class="kw-2">&amp;</span><span class="string">&quot;Invalid value&quot;</span>.into(), value);
+                    <span class="prelude-val">Err</span>(error::InvalidValue)
+                }
+            }
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>finalize_exposed(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        object: <span class="kw-2">&amp;</span>JsValue,
+        exposed: HashSet&lt;ObjId&gt;,
+        meta: <span class="kw-2">&amp;</span>JsValue,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), error::ApplyPatch&gt; {
+        <span class="kw">for </span>obj <span class="kw">in </span>exposed {
+            <span class="kw">let </span><span class="kw-2">mut </span>pointer = object.clone();
+            <span class="kw">if let </span><span class="prelude-val">Ok</span>(obj_type) = <span class="self">self</span>.doc.object_type(<span class="kw-2">&amp;</span>obj) {
+                <span class="comment">// only valid obj&#39;s should make it to this point ...
+                </span><span class="kw">let </span>path: Vec&lt;<span class="kw">_</span>&gt; = <span class="self">self
+                    </span>.doc
+                    .path_to_object(<span class="kw-2">&amp;</span>obj)<span class="question-mark">?
+                    </span>.iter()
+                    .map(|p| prop_to_js(<span class="kw-2">&amp;</span>p.<span class="number">1</span>))
+                    .collect();
+                <span class="kw">let </span>value = <span class="self">self</span>.export_object(<span class="kw-2">&amp;</span>obj, obj_type.into(), <span class="prelude-val">None</span>, meta)<span class="question-mark">?</span>;
+                <span class="kw">for </span>(i, prop) <span class="kw">in </span>path.iter().enumerate() {
+                    <span class="kw">if </span>i + <span class="number">1 </span>&lt; path.len() {
+                        pointer = js_get(<span class="kw-2">&amp;</span>pointer, prop)<span class="question-mark">?</span>.<span class="number">0</span>;
+                    } <span class="kw">else </span>{
+                        js_set(<span class="kw-2">&amp;</span>pointer, prop, <span class="kw-2">&amp;</span>value)<span class="question-mark">?</span>;
+                    }
+                }
+            }
+        }
+        <span class="prelude-val">Ok</span>(())
+    }
 }
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>alloc(value: <span class="kw-2">&amp;</span>Value&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; (Datatype, JsValue) {
@@ -1915,7 +2511,7 @@
             ObjType::Map =&gt; (Datatype::Map, Object::new().into()),
             ObjType::Table =&gt; (Datatype::Table, Object::new().into()),
             ObjType::List =&gt; (Datatype::List, Array::new().into()),
-            ObjType::Text =&gt; (Datatype::Text, Array::new().into()),
+            ObjType::Text =&gt; (Datatype::Text, <span class="string">&quot;&quot;</span>.into()),
         },
         am::Value::Scalar(s) =&gt; <span class="kw">match </span>s.as_ref() {
             am::ScalarValue::Bytes(v) =&gt; (Datatype::Bytes, Uint8Array::from(v.as_slice()).into()),
@@ -1969,7 +2565,7 @@
 }
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>error {
-    <span class="kw">use </span>automerge::LoadChangeError;
+    <span class="kw">use </span>automerge::{AutomergeError, LoadChangeError};
     <span class="kw">use </span>wasm_bindgen::JsValue;
 
     <span class="attribute">#[derive(Debug, thiserror::Error)]
@@ -2120,6 +2716,8 @@
         </span>GetSplice(JsValue),
         <span class="attribute">#[error(<span class="string">&quot;error calling splice: {0:?}&quot;</span>)]
         </span>CallSplice(JsValue),
+        <span class="attribute">#[error(transparent)]
+        </span>Automerge(<span class="attribute">#[from] </span>AutomergeError),
     }
 
     <span class="kw">impl </span>From&lt;Export&gt; <span class="kw">for </span>JsValue {
@@ -2146,12 +2744,18 @@
         </span>InsertInMap,
         <span class="attribute">#[error(<span class="string">&quot;cannot splice into a map&quot;</span>)]
         </span>SpliceInMap,
+        <span class="attribute">#[error(<span class="string">&quot;cannot splice text into a seq&quot;</span>)]
+        </span>SpliceTextInSeq,
+        <span class="attribute">#[error(<span class="string">&quot;cannot splice text into a map&quot;</span>)]
+        </span>SpliceTextInMap,
         <span class="attribute">#[error(<span class="string">&quot;cannot put a seq index in a map&quot;</span>)]
         </span>PutIdxInMap,
         <span class="attribute">#[error(transparent)]
         </span>GetProp(<span class="attribute">#[from] </span>GetProp),
         <span class="attribute">#[error(transparent)]
         </span>SetProp(<span class="attribute">#[from] </span>SetProp),
+        <span class="attribute">#[error(transparent)]
+        </span>Automerge(<span class="attribute">#[from] </span>AutomergeError),
     }
 
     <span class="kw">impl </span>From&lt;ApplyPatch&gt; <span class="kw">for </span>JsValue {
@@ -2179,6 +2783,42 @@
             JsValue::from(e.to_string())
         }
     }
+
+    <span class="attribute">#[derive(Debug, thiserror::Error)]
+    </span><span class="kw">pub enum </span>ImportObj {
+        <span class="attribute">#[error(<span class="string">&quot;obj id was not a string&quot;</span>)]
+        </span>NotString,
+        <span class="attribute">#[error(<span class="string">&quot;invalid path {0}: {1}&quot;</span>)]
+        </span>InvalidPath(String, ImportPath),
+        <span class="attribute">#[error(<span class="string">&quot;unable to import object id: {0}&quot;</span>)]
+        </span>BadImport(AutomergeError),
+    }
+
+    <span class="kw">impl </span>From&lt;ImportObj&gt; <span class="kw">for </span>JsValue {
+        <span class="kw">fn </span>from(e: ImportObj) -&gt; <span class="self">Self </span>{
+            JsValue::from(<span class="macro">format!</span>(<span class="string">&quot;invalid object ID: {}&quot;</span>, e))
+        }
+    }
+
+    <span class="attribute">#[derive(Debug, thiserror::Error)]
+    </span><span class="kw">pub enum </span>ImportPath {
+        <span class="attribute">#[error(transparent)]
+        </span>Automerge(<span class="attribute">#[from] </span>AutomergeError),
+        <span class="attribute">#[error(<span class="string">&quot;path component {0} ({1}) should be an integer to index a sequence&quot;</span>)]
+        </span>IndexNotInteger(usize, String),
+        <span class="attribute">#[error(<span class="string">&quot;path component {0} ({1}) referenced a nonexistent object&quot;</span>)]
+        </span>NonExistentObject(usize, String),
+        <span class="attribute">#[error(<span class="string">&quot;path did not refer to an object&quot;</span>)]
+        </span>NotAnObject,
+    }
+
+    <span class="attribute">#[derive(Debug, thiserror::Error)]
+    #[error(<span class="string">&quot;given property was not a string or integer&quot;</span>)]
+    </span><span class="kw">pub struct </span>InvalidProp;
+
+    <span class="attribute">#[derive(Debug, thiserror::Error)]
+    #[error(<span class="string">&quot;given property was not a string or integer&quot;</span>)]
+    </span><span class="kw">pub struct </span>InvalidValue;
 }
 </code></pre></div>
 </section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge_wasm" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.65.0 (897e37553 2022-11-02)" ></div></body></html>

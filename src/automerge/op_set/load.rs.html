@@ -87,6 +87,7 @@
 <span id="85">85</span>
 <span id="86">86</span>
 <span id="87">87</span>
+<span id="88">88</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::collections::HashMap;
 
 <span class="kw">use </span>fxhash::FxBuildHasher;
@@ -96,7 +97,7 @@
     op_tree::OpTreeInternal,
     storage::load::{DocObserver, LoadedObject},
     types::{ObjId, Op},
-    OpObserver,
+    Automerge, OpObserver,
 };
 
 <span class="doccomment">/// An opset builder which creates an optree for each object as it finishes loading, inserting the
@@ -126,6 +127,7 @@
             internal,
             objtype: loaded.obj_type,
             parent: loaded.parent,
+            last_insert: <span class="prelude-val">None</span>,
         };
         <span class="self">self</span>.completed_objects.insert(loaded.id, tree);
     }
@@ -167,11 +169,11 @@
     }
 
     <span class="kw">fn </span>finish(<span class="self">self</span>, _metadata: <span class="kw">super</span>::OpSetMetadata) -&gt; <span class="self">Self</span>::Output {
-        <span class="kw">let </span><span class="kw-2">mut </span>opset = OpSet::new();
+        <span class="kw">let </span><span class="kw-2">mut </span>opset = Automerge::new();
         <span class="kw">for </span>(obj, op) <span class="kw">in </span><span class="self">self</span>.ops {
             opset.insert_op_with_observer(<span class="kw-2">&amp;</span>obj, op, <span class="self">self</span>.observer);
         }
-        opset
+        opset.ops
     }
 }
 </code></pre></div>

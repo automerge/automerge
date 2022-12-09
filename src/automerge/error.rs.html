@@ -92,10 +92,18 @@
 <span id="90">90</span>
 <span id="91">91</span>
 <span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::storage::load::Error <span class="kw">as </span>LoadError;
 <span class="kw">use </span><span class="kw">crate</span>::types::{ActorId, ScalarValue};
 <span class="kw">use </span><span class="kw">crate</span>::value::DataType;
-<span class="kw">use </span><span class="kw">crate</span>::ChangeHash;
+<span class="kw">use crate</span>::{ChangeHash, ObjType};
 <span class="kw">use </span>thiserror::Error;
 
 <span class="attribute">#[derive(Error, Debug)]
@@ -122,6 +130,8 @@
     </span>InvalidObjId(String),
     <span class="attribute">#[error(<span class="string">&quot;invalid obj id format `{0}`&quot;</span>)]
     </span>InvalidObjIdFormat(String),
+    <span class="attribute">#[error(<span class="string">&quot;invalid op for object of type `{0}`&quot;</span>)]
+    </span>InvalidOp(ObjType),
     <span class="attribute">#[error(<span class="string">&quot;seq {0} is out of bounds&quot;</span>)]
     </span>InvalidSeq(u64),
     <span class="attribute">#[error(<span class="string">&quot;invalid type of value, expected `{expected}` but received `{unexpected}`&quot;</span>)]
@@ -139,6 +149,12 @@
     </span>NonChangeCompressed,
     <span class="attribute">#[error(<span class="string">&quot;id was not an object id&quot;</span>)]
     </span>NotAnObject,
+}
+
+<span class="kw">impl </span>PartialEq <span class="kw">for </span>AutomergeError {
+    <span class="kw">fn </span>eq(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; bool {
+        std::mem::discriminant(<span class="self">self</span>) == std::mem::discriminant(other)
+    }
 }
 
 <span class="attribute">#[cfg(feature = <span class="string">&quot;wasm&quot;</span>)]
