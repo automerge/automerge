@@ -87,6 +87,7 @@
 <span id="85">85</span>
 <span id="86">86</span>
 <span id="87">87</span>
+<span id="88">88</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTreeNode};
 <span class="kw">use </span><span class="kw">crate</span>::query::{binary_search_by, QueryResult, TreeQuery};
 <span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, Op};
@@ -126,6 +127,7 @@
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode,
         m: <span class="kw-2">&amp;</span>OpSetMetadata,
+        ops: <span class="kw-2">&amp;</span>[Op],
     ) -&gt; QueryResult {
         <span class="kw">if let </span><span class="prelude-val">Some</span>(Start {
             idx: start,
@@ -151,7 +153,7 @@
             }
         } <span class="kw">else </span>{
             <span class="comment">// in the root node find the first op position for the key
-            </span><span class="kw">let </span>start = binary_search_by(child, |op| m.key_cmp(<span class="kw-2">&amp;</span>op.key, <span class="kw-2">&amp;</span><span class="self">self</span>.key));
+            </span><span class="kw">let </span>start = binary_search_by(child, ops, |op| m.key_cmp(<span class="kw-2">&amp;</span>op.key, <span class="kw-2">&amp;</span><span class="self">self</span>.key));
             <span class="self">self</span>.start = <span class="prelude-val">Some</span>(Start {
                 idx: start,
                 optree_len: child.len(),

@@ -107,7 +107,7 @@
 <span id="105">105</span>
 <span id="106">106</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
-<span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTreeNode};
+<span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTreeInternal};
 <span class="kw">use </span><span class="kw">crate</span>::types::{Key, OpId};
 <span class="kw">use </span><span class="kw">crate</span>::values::ValueIter;
 <span class="kw">use crate</span>::{Automerge, Value};
@@ -122,7 +122,7 @@
     next_result: <span class="prelude-ty">Option</span>&lt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>str, Value&lt;<span class="lifetime">&#39;a</span>&gt;, OpId)&gt;,
     index_back: usize,
     last_key_back: <span class="prelude-ty">Option</span>&lt;Key&gt;,
-    root_child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode,
+    op_tree: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeInternal,
     meta: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetMetadata,
 }
 
@@ -133,15 +133,15 @@
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, R: RangeBounds&lt;String&gt;&gt; MapRange&lt;<span class="lifetime">&#39;a</span>, R&gt; {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(range: R, root_child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode, meta: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetMetadata) -&gt; <span class="self">Self </span>{
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(range: R, op_tree: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeInternal, meta: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetMetadata) -&gt; <span class="self">Self </span>{
         <span class="self">Self </span>{
             range,
             index: <span class="number">0</span>,
             last_key: <span class="prelude-val">None</span>,
             next_result: <span class="prelude-val">None</span>,
-            index_back: root_child.len(),
+            index_back: op_tree.len(),
             last_key_back: <span class="prelude-val">None</span>,
-            root_child,
+            op_tree,
             meta,
         }
     }
@@ -155,7 +155,7 @@
     // point and stop at the end point and not needless scan all the ops before and after the range
     </span><span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
         <span class="kw">for </span>i <span class="kw">in </span><span class="self">self</span>.index..<span class="self">self</span>.index_back {
-            <span class="kw">let </span>op = <span class="self">self</span>.root_child.get(i)<span class="question-mark">?</span>;
+            <span class="kw">let </span>op = <span class="self">self</span>.op_tree.get(i)<span class="question-mark">?</span>;
             <span class="self">self</span>.index += <span class="number">1</span>;
             <span class="kw">if </span>op.visible() {
                 <span class="kw">let </span>prop = <span class="kw">match </span>op.key {
@@ -180,7 +180,7 @@
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, R: RangeBounds&lt;String&gt;&gt; DoubleEndedIterator <span class="kw">for </span>MapRange&lt;<span class="lifetime">&#39;a</span>, R&gt; {
     <span class="kw">fn </span>next_back(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
         <span class="kw">for </span>i <span class="kw">in </span>(<span class="self">self</span>.index..<span class="self">self</span>.index_back).rev() {
-            <span class="kw">let </span>op = <span class="self">self</span>.root_child.get(i)<span class="question-mark">?</span>;
+            <span class="kw">let </span>op = <span class="self">self</span>.op_tree.get(i)<span class="question-mark">?</span>;
             <span class="self">self</span>.index_back -= <span class="number">1</span>;
 
             <span class="kw">if </span><span class="prelude-val">Some</span>(op.key) != <span class="self">self</span>.last_key_back &amp;&amp; op.visible() {

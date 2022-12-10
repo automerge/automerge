@@ -438,6 +438,10 @@
 <span id="436">436</span>
 <span id="437">437</span>
 <span id="438">438</span>
+<span id="439">439</span>
+<span id="440">440</span>
+<span id="441">441</span>
+<span id="442">442</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::cmp::Ordering;
 
 <span class="kw">use </span><span class="kw">crate</span>::types::Op;
@@ -461,6 +465,7 @@
                     },
                     cumulative_index: <span class="number">0</span>,
                     root_node: root,
+                    ops: <span class="kw-2">&amp;</span>tree.ops,
                 })
                 .unwrap_or(Inner::Empty),
         )
@@ -490,6 +495,7 @@
         <span class="comment">// How far through the whole optree we are
         </span>cumulative_index: usize,
         root_node: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode,
+        ops: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[Op],
     },
 }
 
@@ -515,6 +521,7 @@
             Inner::Empty =&gt; <span class="prelude-val">None</span>,
             Inner::NonEmpty {
                 ancestors,
+                ops,
                 current,
                 cumulative_index,
                 ..
@@ -523,10 +530,10 @@
                     <span class="comment">// If we&#39;re in a leaf node and we haven&#39;t exhausted it yet we just return the elements
                     // of the leaf node
                     </span><span class="kw">if </span>current.index &lt; current.node.len() {
-                        <span class="kw">let </span>result = <span class="kw-2">&amp;</span>current.node.elements[current.index];
+                        <span class="kw">let </span>result = current.node.elements[current.index];
                         current.index += <span class="number">1</span>;
                         <span class="kw-2">*</span>cumulative_index += <span class="number">1</span>;
-                        <span class="prelude-val">Some</span>(result)
+                        <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>ops[result])
                     } <span class="kw">else </span>{
                         <span class="comment">// We&#39;ve exhausted the leaf node, we must find the nearest non-exhausted parent (lol)
                         </span><span class="kw">let </span>node_iter = <span class="kw">loop </span>{
@@ -553,10 +560,10 @@
                         // return the element from the parent node which is one after the index at which we
                         // descended into the child
                         </span><span class="kw-2">*</span>current = node_iter;
-                        <span class="kw">let </span>result = <span class="kw-2">&amp;</span>current.node.elements[current.index];
+                        <span class="kw">let </span>result = current.node.elements[current.index];
                         current.index += <span class="number">1</span>;
                         <span class="kw-2">*</span>cumulative_index += <span class="number">1</span>;
-                        <span class="prelude-val">Some</span>(result)
+                        <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>ops[result])
                     }
                 } <span class="kw">else </span>{
                     <span class="comment">// If we&#39;re in a non-leaf node then the last iteration returned an element from the
@@ -587,6 +594,7 @@
             <span class="self">Self</span>::Empty =&gt; <span class="prelude-val">None</span>,
             <span class="self">Self</span>::NonEmpty {
                 root_node,
+                ops,
                 cumulative_index,
                 current,
                 ancestors,
@@ -617,7 +625,7 @@
                                 Ordering::Equal =&gt; {
                                     <span class="kw-2">*</span>cumulative_index += child.len() + <span class="number">1</span>;
                                     current.index = child_index + <span class="number">1</span>;
-                                    <span class="kw">return </span><span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>current.node.elements[child_index]);
+                                    <span class="kw">return </span><span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>ops[current.node.elements[child_index]]);
                                 }
                                 Ordering::Greater =&gt; {
                                     current.index = child_index;
@@ -637,7 +645,7 @@
                     <span class="comment">// we&#39;re in a leaf node and we kept track of the cumulative index as we went,
                     </span><span class="kw">let </span>index_in_this_node = n.saturating_sub(<span class="kw-2">*</span>cumulative_index);
                     current.index = index_in_this_node + <span class="number">1</span>;
-                    <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>current.node.elements[index_in_this_node])
+                    <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>ops[current.node.elements[index_in_this_node]])
                 }
             }
         }

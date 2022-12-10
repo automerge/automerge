@@ -202,7 +202,7 @@
         <span class="bool-val">false
     </span>}
 
-    <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, child: <span class="kw-2">&amp;</span>OpTreeNode) -&gt; QueryResult {
+    <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, child: <span class="kw-2">&amp;</span>OpTreeNode, ops: <span class="kw-2">&amp;</span>[Op]) -&gt; QueryResult {
         <span class="kw">let </span><span class="kw-2">mut </span>num_vis = child.index.visible_len(<span class="self">self</span>.encoding);
         <span class="kw">if let </span><span class="prelude-val">Some</span>(last_seen) = <span class="self">self</span>.last_seen {
             <span class="kw">if </span>child.index.has_visible(<span class="kw-2">&amp;</span>last_seen) {
@@ -223,7 +223,7 @@
             // - the insert was at a previous node and this is a long run of overwrites so last_seen should already be set correctly
             // - the visible op is in this node and the elemid references it so it can be set here
             // - the visible op is in a future node and so it will be counted as seen there
-            </span><span class="kw">let </span>last_elemid = child.last().elemid_or_key();
+            </span><span class="kw">let </span>last_elemid = ops[child.last()].elemid_or_key();
             <span class="kw">if </span>child.index.has_visible(<span class="kw-2">&amp;</span>last_elemid) {
                 <span class="self">self</span>.last_seen = <span class="prelude-val">Some</span>(last_elemid);
             }

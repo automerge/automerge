@@ -309,6 +309,7 @@
 <span id="307">307</span>
 <span id="308">308</span>
 <span id="309">309</span>
+<span id="310">310</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTree, OpTreeNode};
 <span class="kw">use </span><span class="kw">crate</span>::types::{
     Clock, Counter, Key, ListEncoding, Op, OpId, OpType, ScalarValue, TextEncoding,
@@ -390,11 +391,12 @@
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode,
         _m: <span class="kw-2">&amp;</span>OpSetMetadata,
+        ops: <span class="kw-2">&amp;</span>[Op],
     ) -&gt; QueryResult {
-        <span class="self">self</span>.query_node(child)
+        <span class="self">self</span>.query_node(child, ops)
     }
 
-    <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode) -&gt; QueryResult {
+    <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode, _ops: <span class="kw-2">&amp;</span>[Op]) -&gt; QueryResult {
         QueryResult::Descend
     }
 
@@ -602,7 +604,7 @@
     }
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>binary_search_by&lt;F&gt;(node: <span class="kw-2">&amp;</span>OpTreeNode, f: F) -&gt; usize
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>binary_search_by&lt;F&gt;(node: <span class="kw-2">&amp;</span>OpTreeNode, ops: <span class="kw-2">&amp;</span>[Op], f: F) -&gt; usize
 <span class="kw">where
     </span>F: Fn(<span class="kw-2">&amp;</span>Op) -&gt; Ordering,
 {
@@ -610,7 +612,7 @@
     <span class="kw">let </span><span class="kw-2">mut </span>left = <span class="number">0</span>;
     <span class="kw">while </span>left &lt; right {
         <span class="kw">let </span>seq = (left + right) / <span class="number">2</span>;
-        <span class="kw">if </span>f(node.get(seq).unwrap()) == Ordering::Less {
+        <span class="kw">if </span>f(<span class="kw-2">&amp;</span>ops[node.get(seq).unwrap()]) == Ordering::Less {
             left = seq + <span class="number">1</span>;
         } <span class="kw">else </span>{
             right = seq;

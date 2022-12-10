@@ -62,6 +62,7 @@
 <span id="60">60</span>
 <span id="61">61</span>
 <span id="62">62</span>
+<span id="63">63</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTreeNode};
 <span class="kw">use </span><span class="kw">crate</span>::query::{binary_search_by, QueryResult, TreeQuery, VisWindow};
 <span class="kw">use </span><span class="kw">crate</span>::types::{Clock, Key, Op};
@@ -93,12 +94,13 @@
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode,
         m: <span class="kw-2">&amp;</span>OpSetMetadata,
+        ops: <span class="kw-2">&amp;</span>[Op],
     ) -&gt; QueryResult {
-        <span class="kw">let </span>start = binary_search_by(child, |op| m.key_cmp(<span class="kw-2">&amp;</span>op.key, <span class="kw-2">&amp;</span><span class="self">self</span>.key));
+        <span class="kw">let </span>start = binary_search_by(child, ops, |op| m.key_cmp(<span class="kw-2">&amp;</span>op.key, <span class="kw-2">&amp;</span><span class="self">self</span>.key));
         <span class="kw">let </span><span class="kw-2">mut </span>window: VisWindow = Default::default();
         <span class="self">self</span>.pos = start;
         <span class="kw">for </span>pos <span class="kw">in </span>start..child.len() {
-            <span class="kw">let </span>op = child.get(pos).unwrap();
+            <span class="kw">let </span>op = <span class="kw-2">&amp;</span>ops[child.get(pos).unwrap()];
             <span class="kw">if </span>op.key != <span class="self">self</span>.key {
                 <span class="kw">break</span>;
             }

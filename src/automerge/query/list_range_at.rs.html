@@ -72,7 +72,7 @@
 <span id="70">70</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">super</span>::VisWindow;
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
-<span class="kw">use </span><span class="kw">crate</span>::op_tree::OpTreeNode;
+<span class="kw">use </span><span class="kw">crate</span>::op_tree::OpTreeInternal;
 <span class="kw">use </span><span class="kw">crate</span>::types::{Clock, ElemId, OpId};
 <span class="kw">use </span><span class="kw">crate</span>::values::ValueIter;
 <span class="kw">use crate</span>::{Automerge, Value};
@@ -87,7 +87,7 @@
     last_elemid: <span class="prelude-ty">Option</span>&lt;ElemId&gt;,
     next_result: <span class="prelude-ty">Option</span>&lt;(usize, Value&lt;<span class="lifetime">&#39;a</span>&gt;, OpId)&gt;,
     index_back: usize,
-    root_child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode,
+    op_tree: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeInternal,
     clock: Clock,
     window: VisWindow,
 }
@@ -99,15 +99,15 @@
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, R: RangeBounds&lt;usize&gt;&gt; ListRangeAt&lt;<span class="lifetime">&#39;a</span>, R&gt; {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(range: R, clock: Clock, root_child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode) -&gt; <span class="self">Self </span>{
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(range: R, clock: Clock, op_tree: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeInternal) -&gt; <span class="self">Self </span>{
         <span class="self">Self </span>{
             range,
             index: <span class="number">0</span>, <span class="comment">// FIXME root_child.seek_to_pos(range.start)
             </span>pos: <span class="number">0</span>,   <span class="comment">// FIXME range.start
             </span>last_elemid: <span class="prelude-val">None</span>,
             next_result: <span class="prelude-val">None</span>,
-            index_back: root_child.len(),
-            root_child,
+            index_back: op_tree.len(),
+            op_tree,
             clock,
             window: VisWindow::default(),
         }
@@ -119,7 +119,7 @@
 
     <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
         <span class="kw">for </span>i <span class="kw">in </span><span class="self">self</span>.index..<span class="self">self</span>.index_back {
-            <span class="kw">let </span>op = <span class="self">self</span>.root_child.get(i)<span class="question-mark">?</span>;
+            <span class="kw">let </span>op = <span class="self">self</span>.op_tree.get(i)<span class="question-mark">?</span>;
             <span class="kw">let </span>visible = <span class="self">self</span>.window.visible_at(op, i, <span class="kw-2">&amp;</span><span class="self">self</span>.clock);
             <span class="self">self</span>.index += <span class="number">1</span>;
             <span class="kw">if </span>visible {

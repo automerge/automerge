@@ -54,7 +54,7 @@
 <span id="52">52</span>
 <span id="53">53</span>
 <span id="54">54</span>
-</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::OpTreeNode;
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::OpTreeInternal;
 <span class="kw">use </span><span class="kw">crate</span>::types::Key;
 <span class="kw">use </span>std::fmt::Debug;
 
@@ -64,17 +64,17 @@
     last_key: <span class="prelude-ty">Option</span>&lt;Key&gt;,
     index_back: usize,
     last_key_back: <span class="prelude-ty">Option</span>&lt;Key&gt;,
-    root_child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode,
+    op_tree: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeInternal,
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Keys&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(root_child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode) -&gt; <span class="self">Self </span>{
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(op_tree: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeInternal) -&gt; <span class="self">Self </span>{
         <span class="self">Self </span>{
             index: <span class="number">0</span>,
             last_key: <span class="prelude-val">None</span>,
-            index_back: root_child.len(),
+            index_back: op_tree.len(),
             last_key_back: <span class="prelude-val">None</span>,
-            root_child,
+            op_tree,
         }
     }
 }
@@ -84,7 +84,7 @@
 
     <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
         <span class="kw">for </span>i <span class="kw">in </span><span class="self">self</span>.index..<span class="self">self</span>.index_back {
-            <span class="kw">let </span>op = <span class="self">self</span>.root_child.get(i)<span class="question-mark">?</span>;
+            <span class="kw">let </span>op = <span class="self">self</span>.op_tree.get(i)<span class="question-mark">?</span>;
             <span class="self">self</span>.index += <span class="number">1</span>;
             <span class="kw">if </span><span class="prelude-val">Some</span>(op.elemid_or_key()) != <span class="self">self</span>.last_key &amp;&amp; op.visible() {
                 <span class="self">self</span>.last_key = <span class="prelude-val">Some</span>(op.elemid_or_key());
@@ -98,7 +98,7 @@
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; DoubleEndedIterator <span class="kw">for </span>Keys&lt;<span class="lifetime">&#39;a</span>&gt; {
     <span class="kw">fn </span>next_back(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
         <span class="kw">for </span>i <span class="kw">in </span>(<span class="self">self</span>.index..<span class="self">self</span>.index_back).rev() {
-            <span class="kw">let </span>op = <span class="self">self</span>.root_child.get(i)<span class="question-mark">?</span>;
+            <span class="kw">let </span>op = <span class="self">self</span>.op_tree.get(i)<span class="question-mark">?</span>;
             <span class="self">self</span>.index_back -= <span class="number">1</span>;
             <span class="kw">if </span><span class="prelude-val">Some</span>(op.elemid_or_key()) != <span class="self">self</span>.last_key_back &amp;&amp; op.visible() {
                 <span class="self">self</span>.last_key_back = <span class="prelude-val">Some</span>(op.elemid_or_key());

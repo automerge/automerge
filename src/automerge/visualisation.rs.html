@@ -272,7 +272,15 @@
 <span id="270">270</span>
 <span id="271">271</span>
 <span id="272">272</span>
-</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::types::ObjId;
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
+<span id="279">279</span>
+<span id="280">280</span>
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::types::{ObjId, Op};
 <span class="kw">use </span>fxhash::FxHasher;
 <span class="kw">use </span>std::{borrow::Cow, collections::HashMap, hash::BuildHasherDefault};
 
@@ -300,7 +308,7 @@
 <span class="attribute">#[derive(Clone)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>NodeType&lt;<span class="lifetime">&#39;a</span>&gt; {
     ObjRoot(<span class="kw">crate</span>::types::ObjId),
-    ObjTreeNode(ObjId, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw">crate</span>::op_tree::OpTreeNode),
+    ObjTreeNode(ObjId, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw">crate</span>::op_tree::OpTreeNode, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[Op]),
 }
 
 <span class="attribute">#[derive(Clone)]
@@ -326,7 +334,13 @@
         <span class="kw">let </span><span class="kw-2">mut </span>nodes = HashMap::new();
         <span class="kw">for </span>(obj_id, tree) <span class="kw">in </span>trees {
             <span class="kw">if let </span><span class="prelude-val">Some</span>(root_node) = <span class="kw-2">&amp;</span>tree.internal.root_node {
-                <span class="kw">let </span>tree_id = <span class="self">Self</span>::construct_nodes(root_node, obj_id, <span class="kw-2">&amp;mut </span>nodes, metadata);
+                <span class="kw">let </span>tree_id = <span class="self">Self</span>::construct_nodes(
+                    root_node,
+                    <span class="kw-2">&amp;</span>tree.internal.ops,
+                    obj_id,
+                    <span class="kw-2">&amp;mut </span>nodes,
+                    metadata,
+                );
                 <span class="kw">let </span>obj_tree_id = NodeId::default();
                 nodes.insert(
                     obj_tree_id,
@@ -351,6 +365,7 @@
 
     <span class="kw">fn </span>construct_nodes(
         node: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw">crate</span>::op_tree::OpTreeNode,
+        ops: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[Op],
         objid: <span class="kw-2">&amp;</span>ObjId,
         nodes: <span class="kw-2">&amp;mut </span>HashMap&lt;NodeId, Node&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
         m: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw">crate</span>::op_set::OpSetMetadata,
@@ -358,7 +373,7 @@
         <span class="kw">let </span>node_id = NodeId::default();
         <span class="kw">let </span><span class="kw-2">mut </span>child_ids = Vec::new();
         <span class="kw">for </span>child <span class="kw">in </span><span class="kw-2">&amp;</span>node.children {
-            <span class="kw">let </span>child_id = <span class="self">Self</span>::construct_nodes(child, objid, nodes, m);
+            <span class="kw">let </span>child_id = <span class="self">Self</span>::construct_nodes(child, ops, objid, nodes, m);
             child_ids.push(child_id);
         }
         nodes.insert(
@@ -366,7 +381,7 @@
             Node {
                 id: node_id,
                 children: child_ids,
-                node_type: NodeType::ObjTreeNode(<span class="kw-2">*</span>objid, node),
+                node_type: NodeType::ObjTreeNode(<span class="kw-2">*</span>objid, node, ops),
                 metadata: m,
             },
         );
@@ -412,7 +427,7 @@
 
     <span class="kw">fn </span>node_shape(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>, node: &amp;&amp;<span class="lifetime">&#39;a </span>Node&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;dot::LabelText&lt;<span class="lifetime">&#39;a</span>&gt;&gt; {
         <span class="kw">let </span>shape = <span class="kw">match </span>node.node_type {
-            NodeType::ObjTreeNode(<span class="kw">_</span>, <span class="kw">_</span>) =&gt; dot::LabelText::label(<span class="string">&quot;none&quot;</span>),
+            NodeType::ObjTreeNode(<span class="kw">_</span>, <span class="kw">_</span>, <span class="kw">_</span>) =&gt; dot::LabelText::label(<span class="string">&quot;none&quot;</span>),
             NodeType::ObjRoot(<span class="kw">_</span>) =&gt; dot::LabelText::label(<span class="string">&quot;ellipse&quot;</span>),
         };
         <span class="prelude-val">Some</span>(shape)
@@ -420,8 +435,8 @@
 
     <span class="kw">fn </span>node_label(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>, n: &amp;&amp;Node&lt;<span class="lifetime">&#39;a</span>&gt;) -&gt; dot::LabelText&lt;<span class="lifetime">&#39;a</span>&gt; {
         <span class="kw">match </span>n.node_type {
-            NodeType::ObjTreeNode(objid, tree_node) =&gt; dot::LabelText::HtmlStr(
-                OpTable::create(tree_node, <span class="kw-2">&amp;</span>objid, n.metadata, <span class="kw-2">&amp;</span><span class="self">self</span>.actor_shorthands)
+            NodeType::ObjTreeNode(objid, tree_node, ops) =&gt; dot::LabelText::HtmlStr(
+                OpTable::create(tree_node, ops, <span class="kw-2">&amp;</span>objid, n.metadata, <span class="kw-2">&amp;</span><span class="self">self</span>.actor_shorthands)
                     .to_html()
                     .into(),
             ),
@@ -439,6 +454,7 @@
 <span class="kw">impl </span>OpTable {
     <span class="kw">fn </span>create&lt;<span class="lifetime">&#39;a</span>&gt;(
         node: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw">crate</span>::op_tree::OpTreeNode,
+        ops: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[Op],
         obj: <span class="kw-2">&amp;</span>ObjId,
         metadata: <span class="kw-2">&amp;</span><span class="kw">crate</span>::op_set::OpSetMetadata,
         actor_shorthands: <span class="kw-2">&amp;</span>HashMap&lt;usize, String&gt;,
@@ -446,7 +462,7 @@
         <span class="kw">let </span>rows = node
             .elements
             .iter()
-            .map(|e| OpTableRow::create(e, obj, metadata, actor_shorthands))
+            .map(|e| OpTableRow::create(<span class="kw-2">&amp;</span>ops[<span class="kw-2">*</span>e], obj, metadata, actor_shorthands))
             .collect();
         OpTable { rows }
     }

@@ -292,6 +292,7 @@
 <span id="290">290</span>
 <span id="291">291</span>
 <span id="292">292</span>
+<span id="293">293</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTreeNode};
 <span class="kw">use </span><span class="kw">crate</span>::query::{binary_search_by, QueryResult, TreeQuery};
 <span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, Op, HEAD};
@@ -366,6 +367,7 @@
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         child: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeNode,
         m: <span class="kw-2">&amp;</span>OpSetMetadata,
+        ops: <span class="kw-2">&amp;</span>[Op],
     ) -&gt; QueryResult {
         <span class="kw">if </span><span class="self">self</span>.found {
             <span class="kw">return </span>QueryResult::Descend;
@@ -376,7 +378,7 @@
             // the opId of the operation being inserted.
             </span>Key::Seq(e) <span class="kw">if </span>e == HEAD =&gt; {
                 <span class="kw">while </span><span class="self">self</span>.pos &lt; child.len() {
-                    <span class="kw">let </span>op = child.get(<span class="self">self</span>.pos).unwrap();
+                    <span class="kw">let </span>op = <span class="kw-2">&amp;</span>ops[child.get(<span class="self">self</span>.pos).unwrap()];
                     <span class="kw">if </span>op.insert &amp;&amp; m.lamport_cmp(op.id, <span class="self">self</span>.op.id) == Ordering::Less {
                         <span class="kw">break</span>;
                     }
@@ -417,7 +419,7 @@
                         // the last operation&#39;s elemId regardless of whether it&#39;s visible or not.
                         // This will lead to incorrect counting if `last_seen` is not visible: it&#39;s
                         // not counted towards `num_vis`, so we shouldn&#39;t be subtracting 1.
-                        </span><span class="self">self</span>.last_seen = <span class="prelude-val">Some</span>(child.last().elemid_or_key());
+                        </span><span class="self">self</span>.last_seen = <span class="prelude-val">Some</span>(ops[child.last()].elemid_or_key());
                     }
                     QueryResult::Next
                 }
@@ -442,7 +444,7 @@
                     <span class="comment">// in the root node find the first op position for the key
                     // Search for the place where we need to insert the new operation. First find the
                     // first op with a key &gt;= the key we&#39;re updating
-                    </span><span class="kw">let </span>start = binary_search_by(child, |op| m.key_cmp(<span class="kw-2">&amp;</span>op.key, <span class="kw-2">&amp;</span><span class="self">self</span>.op.key));
+                    </span><span class="kw">let </span>start = binary_search_by(child, ops, |op| m.key_cmp(<span class="kw-2">&amp;</span>op.key, <span class="kw-2">&amp;</span><span class="self">self</span>.op.key));
                     <span class="self">self</span>.start = <span class="prelude-val">Some</span>(start);
                     <span class="self">self</span>.pos = start;
                     QueryResult::Skip(start)
