@@ -37,6 +37,7 @@ impl<'a> TreeQuery<'a> for Prop<'a> {
         &mut self,
         child: &'a OpTreeNode,
         m: &OpSetMetadata,
+        ops: &[Op],
     ) -> QueryResult {
         if let Some(Start {
             idx: start,
@@ -62,7 +63,7 @@ impl<'a> TreeQuery<'a> for Prop<'a> {
             }
         } else {
             // in the root node find the first op position for the key
-            let start = binary_search_by(child, |op| m.key_cmp(&op.key, &self.key));
+            let start = binary_search_by(child, ops, |op| m.key_cmp(&op.key, &self.key));
             self.start = Some(Start {
                 idx: start,
                 optree_len: child.len(),

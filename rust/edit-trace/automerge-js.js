@@ -2,7 +2,7 @@
 const { edits, finalText } = require('./editing-trace')
 const Automerge = require('../../javascript')
 
-const start = new Date()
+let start = new Date()
 let state = Automerge.from({text: ""})
 
 state = Automerge.change(state, doc => {
@@ -14,9 +14,15 @@ state = Automerge.change(state, doc => {
     Automerge.splice(doc, 'text', ... edit)
   }
 })
-
-let _ = Automerge.save(state)
 console.log(`Done in ${new Date() - start} ms`)
+
+start = new Date()
+let bytes = Automerge.save(state)
+console.log(`Save in ${new Date() - start} ms`)
+
+start = new Date()
+let _load = Automerge.load(bytes)
+console.log(`Load in ${new Date() - start} ms`)
 
 if (state.text !== finalText) {
   throw new RangeError('ERROR: final text did not match expectation')

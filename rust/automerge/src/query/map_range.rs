@@ -1,5 +1,5 @@
 use crate::exid::ExId;
-use crate::op_tree::{OpSetMetadata, OpTreeNode};
+use crate::op_tree::{OpSetMetadata, OpTreeInternal};
 use crate::types::{Key, OpId};
 use crate::values::ValueIter;
 use crate::{Automerge, Value};
@@ -14,7 +14,7 @@ pub(crate) struct MapRange<'a, R: RangeBounds<String>> {
     next_result: Option<(&'a str, Value<'a>, OpId)>,
     index_back: usize,
     last_key_back: Option<Key>,
-    root_child: &'a OpTreeNode,
+    op_tree: &'a OpTreeInternal,
     meta: &'a OpSetMetadata,
 }
 
@@ -25,15 +25,15 @@ impl<'a, R: RangeBounds<String>> ValueIter<'a> for MapRange<'a, R> {
 }
 
 impl<'a, R: RangeBounds<String>> MapRange<'a, R> {
-    pub(crate) fn new(range: R, root_child: &'a OpTreeNode, meta: &'a OpSetMetadata) -> Self {
+    pub(crate) fn new(range: R, op_tree: &'a OpTreeInternal, meta: &'a OpSetMetadata) -> Self {
         Self {
             range,
             index: 0,
             last_key: None,
             next_result: None,
-            index_back: root_child.len(),
+            index_back: op_tree.len(),
             last_key_back: None,
-            root_child,
+            op_tree,
             meta,
         }
     }
@@ -47,7 +47,7 @@ impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
     // point and stop at the end point and not needless scan all the ops before and after the range
     fn next(&mut self) -> Option<Self::Item> {
         for i in self.index..self.index_back {
-            let op = self.root_child.get(i)?;
+            let op = self.op_tree.get(i)?;
             self.index += 1;
             if op.visible() {
                 let prop = match op.key {
@@ -72,7 +72,7 @@ impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
 impl<'a, R: RangeBounds<String>> DoubleEndedIterator for MapRange<'a, R> {
     fn next_back(&mut self) -> Option<Self::Item> {
         for i in (self.index..self.index_back).rev() {
-            let op = self.root_child.get(i)?;
+            let op = self.op_tree.get(i)?;
             self.index_back -= 1;
 
             if Some(op.key) != self.last_key_back && op.visible() {

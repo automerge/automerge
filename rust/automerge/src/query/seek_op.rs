@@ -43,14 +43,19 @@ impl<'a> SeekOp<'a> {
 }
 
 impl<'a> TreeQuery<'a> for SeekOp<'a> {
-    fn query_node_with_metadata(&mut self, child: &OpTreeNode, m: &OpSetMetadata) -> QueryResult {
+    fn query_node_with_metadata(
+        &mut self,
+        child: &OpTreeNode,
+        m: &OpSetMetadata,
+        ops: &[Op],
+    ) -> QueryResult {
         if self.found {
             return QueryResult::Descend;
         }
         match self.op.key {
             Key::Seq(HEAD) => {
                 while self.pos < child.len() {
-                    let op = child.get(self.pos).unwrap();
+                    let op = &ops[child.get(self.pos).unwrap()];
                     if op.insert && m.lamport_cmp(op.id, self.op.id) == Ordering::Less {
                         break;
                     }
@@ -82,7 +87,7 @@ impl<'a> TreeQuery<'a> for SeekOp<'a> {
                     }
                 } else {
                     // in the root node find the first op position for the key
-                    let start = binary_search_by(child, |op| m.key_cmp(&op.key, &self.op.key));
+                    let start = binary_search_by(child, ops, |op| m.key_cmp(&op.key, &self.op.key));
                     self.start = Some(start);
                     self.pos = start;
                     QueryResult::Skip(start)

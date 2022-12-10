@@ -73,7 +73,7 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
         false
     }
 
-    fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
+    fn query_node(&mut self, child: &OpTreeNode, ops: &[Op]) -> QueryResult {
         let mut num_vis = child.index.visible_len(self.encoding);
         if let Some(last_seen) = self.last_seen {
             if child.index.has_visible(&last_seen) {
@@ -94,7 +94,7 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
             // - the insert was at a previous node and this is a long run of overwrites so last_seen should already be set correctly
             // - the visible op is in this node and the elemid references it so it can be set here
             // - the visible op is in a future node and so it will be counted as seen there
-            let last_elemid = child.last().elemid_or_key();
+            let last_elemid = ops[child.last()].elemid_or_key();
             if child.index.has_visible(&last_elemid) {
                 self.last_seen = Some(last_elemid);
             }

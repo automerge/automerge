@@ -4,9 +4,9 @@
   "main": "wasm-text.js",
   "license": "MIT",
   "scripts": {
-    "wasm": "0x -D prof wasm-text.js"
+    "wasm": "0x -D prof automerge-wasm.js"
   },
   "devDependencies": {
-    "0x": "^4.11.0"
+    "0x": "^5.4.1"
   }
 }

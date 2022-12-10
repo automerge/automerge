@@ -19,10 +19,10 @@ impl ListVals {
 }
 
 impl<'a> TreeQuery<'a> for ListVals {
-    fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
+    fn query_node(&mut self, child: &OpTreeNode, ops: &[Op]) -> QueryResult {
         let start = 0;
         for pos in start..child.len() {
-            let op = child.get(pos).unwrap();
+            let op = &ops[child.get(pos).unwrap()];
             if op.insert {
                 self.last_elem = None;
             }

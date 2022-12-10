@@ -29,12 +29,13 @@ impl<'a> TreeQuery<'a> for PropAt {
         &mut self,
         child: &'a OpTreeNode,
         m: &OpSetMetadata,
+        ops: &[Op],
     ) -> QueryResult {
-        let start = binary_search_by(child, |op| m.key_cmp(&op.key, &self.key));
+        let start = binary_search_by(child, ops, |op| m.key_cmp(&op.key, &self.key));
         let mut window: VisWindow = Default::default();
         self.pos = start;
         for pos in start..child.len() {
-            let op = child.get(pos).unwrap();
+            let op = &ops[child.get(pos).unwrap()];
             if op.key != self.key {
                 break;
             }

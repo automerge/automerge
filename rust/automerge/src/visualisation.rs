@@ -1,4 +1,4 @@
-use crate::types::ObjId;
+use crate::types::{ObjId, Op};
 use fxhash::FxHasher;
 use std::{borrow::Cow, collections::HashMap, hash::BuildHasherDefault};
 
@@ -26,7 +26,7 @@ pub(crate) struct Node<'a> {
 #[derive(Clone)]
 pub(crate) enum NodeType<'a> {
     ObjRoot(crate::types::ObjId),
-    ObjTreeNode(ObjId, &'a crate::op_tree::OpTreeNode),
+    ObjTreeNode(ObjId, &'a crate::op_tree::OpTreeNode, &'a [Op]),
 }
 
 #[derive(Clone)]
@@ -52,7 +52,13 @@ impl<'a> GraphVisualisation<'a> {
         let mut nodes = HashMap::new();
         for (obj_id, tree) in trees {
             if let Some(root_node) = &tree.internal.root_node {
-                let tree_id = Self::construct_nodes(root_node, obj_id, &mut nodes, metadata);
+                let tree_id = Self::construct_nodes(
+                    root_node,
+                    &tree.internal.ops,
+                    obj_id,
+                    &mut nodes,
+                    metadata,
+                );
                 let obj_tree_id = NodeId::default();
                 nodes.insert(
                     obj_tree_id,
@@ -77,6 +83,7 @@ impl<'a> GraphVisualisation<'a> {
 
     fn construct_nodes(
         node: &'a crate::op_tree::OpTreeNode,
+        ops: &'a [Op],
         objid: &ObjId,
         nodes: &mut HashMap<NodeId, Node<'a>>,
         m: &'a crate::op_set::OpSetMetadata,
@@ -84,7 +91,7 @@ impl<'a> GraphVisualisation<'a> {
         let node_id = NodeId::default();
         let mut child_ids = Vec::new();
         for child in &node.children {
-            let child_id = Self::construct_nodes(child, objid, nodes, m);
+            let child_id = Self::construct_nodes(child, ops, objid, nodes, m);
             child_ids.push(child_id);
         }
         nodes.insert(
@@ -92,7 +99,7 @@ impl<'a> GraphVisualisation<'a> {
             Node {
                 id: node_id,
                 children: child_ids,
-                node_type: NodeType::ObjTreeNode(*objid, node),
+                node_type: NodeType::ObjTreeNode(*objid, node, ops),
                 metadata: m,
             },
         );
@@ -138,7 +145,7 @@ impl<'a> dot::Labeller<'a, &'a Node<'a>, Edge> for GraphVisualisation<'a> {
 
     fn node_shape(&'a self, node: &&'a Node<'a>) -> Option<dot::LabelText<'a>> {
         let shape = match node.node_type {
-            NodeType::ObjTreeNode(_, _) => dot::LabelText::label("none"),
+            NodeType::ObjTreeNode(_, _, _) => dot::LabelText::label("none"),
             NodeType::ObjRoot(_) => dot::LabelText::label("ellipse"),
         };
         Some(shape)
@@ -146,8 +153,8 @@ impl<'a> dot::Labeller<'a, &'a Node<'a>, Edge> for GraphVisualisation<'a> {
 
     fn node_label(&'a self, n: &&Node<'a>) -> dot::LabelText<'a> {
         match n.node_type {
-            NodeType::ObjTreeNode(objid, tree_node) => dot::LabelText::HtmlStr(
-                OpTable::create(tree_node, &objid, n.metadata, &self.actor_shorthands)
+            NodeType::ObjTreeNode(objid, tree_node, ops) => dot::LabelText::HtmlStr(
+                OpTable::create(tree_node, ops, &objid, n.metadata, &self.actor_shorthands)
                     .to_html()
                     .into(),
             ),
@@ -165,6 +172,7 @@ struct OpTable {
 impl OpTable {
     fn create<'a>(
         node: &'a crate::op_tree::OpTreeNode,
+        ops: &'a [Op],
         obj: &ObjId,
         metadata: &crate::op_set::OpSetMetadata,
         actor_shorthands: &HashMap<usize, String>,
@@ -172,7 +180,7 @@ impl OpTable {
         let rows = node
             .elements
             .iter()
-            .map(|e| OpTableRow::create(e, obj, metadata, actor_shorthands))
+            .map(|e| OpTableRow::create(&ops[*e], obj, metadata, actor_shorthands))
             .collect();
         OpTable { rows }
     }

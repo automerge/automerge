@@ -16,11 +16,17 @@ for (let i = 0; i < edits.length; i++) {
   doc.splice(text, ...edit)
 }
 
-let _ = doc.save()
-
 console.log(`Done in ${new Date() - start} ms`)
 
 let t_time = new Date()
+let saved = doc.save()
+console.log(`doc.save in ${new Date() - t_time} ms`)
+
+t_time = new Date()
+Automerge.load(saved)
+console.log(`doc.load in ${new Date() - t_time} ms`)
+
+t_time = new Date()
 let t = doc.text(text);
 console.log(`doc.text in ${new Date() - t_time} ms`)
 

@@ -1,6 +1,6 @@
 use crate::clock::Clock;
 use crate::exid::ExId;
-use crate::op_tree::{OpSetMetadata, OpTreeNode};
+use crate::op_tree::{OpSetMetadata, OpTreeInternal};
 use crate::types::{Key, OpId};
 use crate::values::ValueIter;
 use crate::{Automerge, Value};
@@ -22,7 +22,7 @@ pub(crate) struct MapRangeAt<'a, R: RangeBounds<String>> {
     index_back: usize,
     last_key_back: Option<Key>,
 
-    root_child: &'a OpTreeNode,
+    op_tree: &'a OpTreeInternal,
     meta: &'a OpSetMetadata,
 }
 
@@ -35,7 +35,7 @@ impl<'a, R: RangeBounds<String>> ValueIter<'a> for MapRangeAt<'a, R> {
 impl<'a, R: RangeBounds<String>> MapRangeAt<'a, R> {
     pub(crate) fn new(
         range: R,
-        root_child: &'a OpTreeNode,
+        op_tree: &'a OpTreeInternal,
         meta: &'a OpSetMetadata,
         clock: Clock,
     ) -> Self {
@@ -46,9 +46,9 @@ impl<'a, R: RangeBounds<String>> MapRangeAt<'a, R> {
             index: 0,
             last_key: None,
             next_result: None,
-            index_back: root_child.len(),
+            index_back: op_tree.len(),
             last_key_back: None,
-            root_child,
+            op_tree,
             meta,
         }
     }
@@ -59,7 +59,7 @@ impl<'a, R: RangeBounds<String>> Iterator for MapRangeAt<'a, R> {
 
     fn next(&mut self) -> Option<Self::Item> {
         for i in self.index..self.index_back {
-            let op = self.root_child.get(i)?;
+            let op = self.op_tree.get(i)?;
             let visible = self.window.visible_at(op, i, &self.clock);
             self.index += 1;
             if visible {
@@ -85,7 +85,7 @@ impl<'a, R: RangeBounds<String>> Iterator for MapRangeAt<'a, R> {
 impl<'a, R: RangeBounds<String>> DoubleEndedIterator for MapRangeAt<'a, R> {
     fn next_back(&mut self) -> Option<Self::Item> {
         for i in (self.index..self.index_back).rev() {
-            let op = self.root_child.get(i)?;
+            let op = self.op_tree.get(i)?;
             let visible = self.window.visible_at(op, i, &self.clock);
             self.index_back -= 1;
             if Some(op.key) != self.last_key_back && visible {
