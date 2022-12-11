@@ -59,8 +59,8 @@ impl Clock {
     }
 
     pub(crate) fn covers(&self, id: &OpId) -> bool {
-        if let Some(data) = self.0.get(&id.1) {
-            data.max_op >= id.0
+        if let Some(data) = self.0.get(&id.actor()) {
+            data.max_op >= id.counter()
         } else {
             false
         }
@@ -123,16 +123,16 @@ mod tests {
         clock.include(1, ClockData { max_op: 20, seq: 1 });
         clock.include(2, ClockData { max_op: 10, seq: 2 });
 
-        assert!(clock.covers(&OpId(10, 1)));
-        assert!(clock.covers(&OpId(20, 1)));
-        assert!(!clock.covers(&OpId(30, 1)));
+        assert!(clock.covers(&OpId::new(10, 1)));
+        assert!(clock.covers(&OpId::new(20, 1)));
+        assert!(!clock.covers(&OpId::new(30, 1)));
 
-        assert!(clock.covers(&OpId(5, 2)));
-        assert!(clock.covers(&OpId(10, 2)));
-        assert!(!clock.covers(&OpId(15, 2)));
+        assert!(clock.covers(&OpId::new(5, 2)));
+        assert!(clock.covers(&OpId::new(10, 2)));
+        assert!(!clock.covers(&OpId::new(15, 2)));
 
-        assert!(!clock.covers(&OpId(1, 3)));
-        assert!(!clock.covers(&OpId(100, 3)));
+        assert!(!clock.covers(&OpId::new(1, 3)));
+        assert!(!clock.covers(&OpId::new(100, 3)));
     }
 
     #[test]

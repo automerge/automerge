@@ -240,7 +240,7 @@ impl TransactionInner {
     }
 
     fn next_id(&mut self) -> OpId {
-        OpId(self.start_op.get() + self.pending_ops() as u64, self.actor)
+        OpId::new(self.start_op.get() + self.pending_ops() as u64, self.actor)
     }
 
     fn next_insert(&mut self, key: Key, value: ScalarValue) -> Op {

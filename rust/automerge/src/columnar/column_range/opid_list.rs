@@ -203,7 +203,7 @@ impl<'a> OpIdListIter<'a> {
                 .map_err(|e| DecodeColumnError::decode_raw("counter", e))?;
             match (actor, counter) {
                 (Some(Some(a)), Some(Some(ctr))) => match ctr.try_into() {
-                    Ok(ctr) => p.push(OpId(ctr, a as usize)),
+                    Ok(ctr) => p.push(OpId::new(ctr, a as usize)),
                     Err(_e) => {
                         return Err(DecodeColumnError::invalid_value(
                             "counter",

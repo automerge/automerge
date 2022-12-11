@@ -133,7 +133,7 @@ impl<'a> ObjIdIter<'a> {
             .map_err(|e| DecodeColumnError::decode_raw("counter", e))?;
         match (actor, counter) {
             (None | Some(None), None | Some(None)) => Ok(Some(ObjId::root())),
-            (Some(Some(a)), Some(Some(c))) => Ok(Some(ObjId(OpId(c, a as usize)))),
+            (Some(Some(a)), Some(Some(c))) => Ok(Some(ObjId(OpId::new(c, a as usize)))),
             (_, Some(Some(0))) => Ok(Some(ObjId::root())),
             (Some(None) | None, _) => Err(DecodeColumnError::unexpected_null("actor")),
             (_, Some(None) | None) => Err(DecodeColumnError::unexpected_null("counter")),

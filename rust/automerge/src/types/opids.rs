@@ -129,7 +129,8 @@ mod tests {
 
     fn gen_opid(actors: Vec<ActorId>) -> impl Strategy<Value = OpId> {
         (0..actors.len()).prop_flat_map(|actor_idx| {
-            (Just(actor_idx), 0..u64::MAX).prop_map(|(actor_idx, counter)| OpId(counter, actor_idx))
+            (Just(actor_idx), 0..u64::MAX)
+                .prop_map(|(actor_idx, counter)| OpId::new(counter, actor_idx))
         })
     }
 
@@ -190,7 +191,7 @@ mod tests {
             (OpId(0, _), OpId(0, _)) => Ordering::Equal,
             (OpId(0, _), OpId(_, _)) => Ordering::Less,
             (OpId(_, _), OpId(0, _)) => Ordering::Greater,
-            (OpId(a, x), OpId(b, y)) if a == b => actors[*x].cmp(&actors[*y]),
+            (OpId(a, x), OpId(b, y)) if a == b => actors[*x as usize].cmp(&actors[*y as usize]),
             (OpId(a, _), OpId(b, _)) => a.cmp(b),
         }
     }

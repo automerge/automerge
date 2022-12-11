@@ -167,11 +167,11 @@ impl<'a> KeyIter<'a> {
                 Ok(Some(Key::Prop(string)))
             }
             (Some(None) | None, Some(Some(0)), Some(None) | None) => {
-                Ok(Some(Key::Elem(ElemId(OpId(0, 0)))))
+                Ok(Some(Key::Elem(ElemId(OpId::new(0, 0)))))
             }
             (Some(Some(actor)), Some(Some(ctr)), Some(None) | None) => match ctr.try_into() {
                 //Ok(ctr) => Some(Ok(Key::Elem(ElemId(OpId(ctr, actor as usize))))),
-                Ok(ctr) => Ok(Some(Key::Elem(ElemId(OpId::new(actor as usize, ctr))))),
+                Ok(ctr) => Ok(Some(Key::Elem(ElemId(OpId::new(ctr, actor as usize))))),
                 Err(_) => Err(DecodeColumnError::invalid_value(
                     "counter",
                     "negative value for counter",

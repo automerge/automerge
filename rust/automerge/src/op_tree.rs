@@ -325,7 +325,7 @@ mod tests {
     use super::*;
 
     fn op() -> Op {
-        let zero = OpId(0, 0);
+        let zero = OpId::new(0, 0);
         Op {
             id: zero,
             action: amp::OpType::Put(0.into()),

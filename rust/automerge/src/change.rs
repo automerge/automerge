@@ -356,7 +356,7 @@ pub(crate) mod gen {
         (0_u64..10)
             .prop_map(|num_ops| {
                 (0..num_ops)
-                    .map(|counter| OpId::new(0, counter))
+                    .map(|counter| OpId::new(counter, 0))
                     .collect::<Vec<_>>()
             })
             .prop_flat_map(move |opids| {
