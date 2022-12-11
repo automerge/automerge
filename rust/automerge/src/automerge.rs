@@ -487,7 +487,7 @@ impl Automerge {
                 // do a direct get here b/c this could be foriegn and not be within the array
                 // bounds
                 let obj = if self.ops.m.actors.cache.get(*idx) == Some(actor) {
-                    ObjId(OpId(*ctr, *idx))
+                    ObjId(OpId::new(*ctr, *idx))
                 } else {
                     // FIXME - make a real error
                     let idx = self
@@ -496,7 +496,7 @@ impl Automerge {
                         .actors
                         .lookup(actor)
                         .ok_or(AutomergeError::Fail)?;
-                    ObjId(OpId(*ctr, idx))
+                    ObjId(OpId::new(*ctr, idx))
                 };
                 if let Some(obj_type) = self.ops.object_type(&obj) {
                     Ok((obj, obj_type))
@@ -859,23 +859,26 @@ impl Automerge {
             .iter_ops()
             .enumerate()
             .map(|(i, c)| {
-                let id = OpId(change.start_op().get() + i as u64, actor);
+                let id = OpId::new(change.start_op().get() + i as u64, actor);
                 let key = match &c.key {
                     EncodedKey::Prop(n) => Key::Map(self.ops.m.props.cache(n.to_string())),
                     EncodedKey::Elem(e) if e.is_head() => Key::Seq(ElemId::head()),
                     EncodedKey::Elem(ElemId(o)) => {
-                        Key::Seq(ElemId(OpId::new(actors[o.actor()], o.counter())))
+                        Key::Seq(ElemId(OpId::new(o.counter(), actors[o.actor()])))
                     }
                 };
                 let obj = if c.obj.is_root() {
                     ObjId::root()
                 } else {
-                    ObjId(OpId(c.obj.opid().counter(), actors[c.obj.opid().actor()]))
+                    ObjId(OpId::new(
+                        c.obj.opid().counter(),
+                        actors[c.obj.opid().actor()],
+                    ))
                 };
                 let pred = c
                     .pred
                     .iter()
-                    .map(|p| OpId::new(actors[p.actor()], p.counter()));
+                    .map(|p| OpId::new(p.counter(), actors[p.actor()]));
                 let pred = self.ops.m.sorted_opids(pred);
                 (
                     obj,

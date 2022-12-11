@@ -3,10 +3,12 @@ use crate::legacy as amp;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cmp::Eq;
+use std::cmp::Ordering;
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
 use tinyvec::{ArrayVec, TinyVec};
+//use crate::indexed_cache::IndexedCache;
 
 mod opids;
 pub(crate) use opids::OpIds;
@@ -253,17 +255,6 @@ pub(crate) trait Exportable {
     fn export(&self) -> Export;
 }
 
-impl OpId {
-    #[inline]
-    pub(crate) fn counter(&self) -> u64 {
-        self.0
-    }
-    #[inline]
-    pub(crate) fn actor(&self) -> usize {
-        self.1
-    }
-}
-
 impl Exportable for ObjId {
     fn export(&self) -> Export {
         if self.0 == ROOT {
@@ -421,11 +412,28 @@ impl Key {
 }
 
 #[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq, Copy, Hash, Default)]
-pub(crate) struct OpId(pub(crate) u64, pub(crate) usize);
+pub(crate) struct OpId(u32, u32);
 
 impl OpId {
-    pub(crate) fn new(actor: usize, counter: u64) -> Self {
-        Self(counter, actor)
+    pub(crate) fn new(counter: u64, actor: usize) -> Self {
+        Self(counter as u32, actor as u32)
+    }
+
+    #[inline]
+    pub(crate) fn counter(&self) -> u64 {
+        self.0 as u64
+    }
+
+    #[inline]
+    pub(crate) fn actor(&self) -> usize {
+        self.1 as usize
+    }
+
+    #[inline]
+    pub(crate) fn lamport_cmp(&self, other: &OpId, actors: &[ActorId]) -> Ordering {
+        self.0
+            .cmp(&other.0)
+            .then_with(|| actors[self.1 as usize].cmp(&actors[other.1 as usize]))
     }
 }
 

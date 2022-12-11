@@ -55,7 +55,11 @@ impl OpSetInternal {
         if id == types::ROOT {
             ExId::Root
         } else {
-            ExId::Id(id.0, self.m.actors.cache[id.1].clone(), id.1)
+            ExId::Id(
+                id.counter(),
+                self.m.actors.cache[id.actor()].clone(),
+                id.actor(),
+            )
         }
     }
 
@@ -355,13 +359,7 @@ impl OpSetMetadata {
     }
 
     pub(crate) fn lamport_cmp(&self, left: OpId, right: OpId) -> Ordering {
-        match (left, right) {
-            (OpId(0, _), OpId(0, _)) => Ordering::Equal,
-            (OpId(0, _), OpId(_, _)) => Ordering::Less,
-            (OpId(_, _), OpId(0, _)) => Ordering::Greater,
-            (OpId(a, x), OpId(b, y)) if a == b => self.actors[x].cmp(&self.actors[y]),
-            (OpId(a, _), OpId(b, _)) => a.cmp(&b),
-        }
+        left.lamport_cmp(&right, &self.actors.cache)
     }
 
     pub(crate) fn sorted_opids<I: Iterator<Item = OpId>>(&self, opids: I) -> OpIds {

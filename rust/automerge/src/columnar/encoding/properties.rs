@@ -139,7 +139,7 @@ pub(crate) fn option_splice_scenario<
 }
 
 pub(crate) fn opid() -> impl Strategy<Value = OpId> + Clone {
-    (0..(i64::MAX as usize), 0..(i64::MAX as u64)).prop_map(|(actor, ctr)| OpId(ctr, actor))
+    (0..(i64::MAX as usize), 0..(i64::MAX as u64)).prop_map(|(actor, ctr)| OpId::new(ctr, actor))
 }
 
 pub(crate) fn elemid() -> impl Strategy<Value = ElemId> + Clone {

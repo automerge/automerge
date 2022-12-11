@@ -262,7 +262,7 @@ mod tests {
     fn op(counter: u64) -> Op {
         Op {
             action: OpType::Put(ScalarValue::Uint(counter)),
-            id: OpId(counter, 0),
+            id: OpId::new(counter, 0),
             key: Key::Map(0),
             succ: Default::default(),
             pred: Default::default(),

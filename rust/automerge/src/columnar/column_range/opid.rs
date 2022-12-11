@@ -105,7 +105,7 @@ impl<'a> OpIdIter<'a> {
             .map_err(|e| DecodeColumnError::decode_raw("counter", e))?;
         match (actor, counter) {
             (Some(Some(a)), Some(Some(c))) => match c.try_into() {
-                Ok(c) => Ok(Some(OpId(c, a as usize))),
+                Ok(c) => Ok(Some(OpId::new(c, a as usize))),
                 Err(_) => Err(DecodeColumnError::invalid_value(
                     "counter",
                     "negative value encountered",
