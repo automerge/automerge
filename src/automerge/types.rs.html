@@ -805,17 +805,27 @@
 <span id="803">803</span>
 <span id="804">804</span>
 <span id="805">805</span>
+<span id="806">806</span>
+<span id="807">807</span>
+<span id="808">808</span>
+<span id="809">809</span>
+<span id="810">810</span>
+<span id="811">811</span>
+<span id="812">812</span>
+<span id="813">813</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error;
 <span class="kw">use </span><span class="kw">crate</span>::legacy <span class="kw">as </span>amp;
 <span class="kw">use </span>serde::{Deserialize, Serialize};
 <span class="kw">use </span>std::borrow::Cow;
 <span class="kw">use </span>std::cmp::Eq;
+<span class="kw">use </span>std::cmp::Ordering;
 <span class="kw">use </span>std::fmt;
 <span class="kw">use </span>std::fmt::Display;
 <span class="kw">use </span>std::str::FromStr;
 <span class="kw">use </span>tinyvec::{ArrayVec, TinyVec};
+<span class="comment">//use crate::indexed_cache::IndexedCache;
 
-<span class="kw">mod </span>opids;
+</span><span class="kw">mod </span>opids;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>opids::OpIds;
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="kw">crate</span>::clock::Clock;
@@ -1060,17 +1070,6 @@
     <span class="kw">fn </span>export(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Export;
 }
 
-<span class="kw">impl </span>OpId {
-    <span class="attribute">#[inline]
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>counter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
-        <span class="self">self</span>.<span class="number">0
-    </span>}
-    <span class="attribute">#[inline]
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>actor(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-        <span class="self">self</span>.<span class="number">1
-    </span>}
-}
-
 <span class="kw">impl </span>Exportable <span class="kw">for </span>ObjId {
     <span class="kw">fn </span>export(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Export {
         <span class="kw">if </span><span class="self">self</span>.<span class="number">0 </span>== ROOT {
@@ -1228,11 +1227,28 @@
 }
 
 <span class="attribute">#[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq, Copy, Hash, Default)]
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpId(<span class="kw">pub</span>(<span class="kw">crate</span>) u64, <span class="kw">pub</span>(<span class="kw">crate</span>) usize);
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpId(u32, u32);
 
 <span class="kw">impl </span>OpId {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(actor: usize, counter: u64) -&gt; <span class="self">Self </span>{
-        <span class="self">Self</span>(counter, actor)
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(counter: u64, actor: usize) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>(counter <span class="kw">as </span>u32, actor <span class="kw">as </span>u32)
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>counter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
+        <span class="self">self</span>.<span class="number">0 </span><span class="kw">as </span>u64
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>actor(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.<span class="number">1 </span><span class="kw">as </span>usize
+    }
+
+    <span class="attribute">#[inline]
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>lamport_cmp(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span>OpId, actors: <span class="kw-2">&amp;</span>[ActorId]) -&gt; Ordering {
+        <span class="self">self</span>.<span class="number">0
+            </span>.cmp(<span class="kw-2">&amp;</span>other.<span class="number">0</span>)
+            .then_with(|| actors[<span class="self">self</span>.<span class="number">1 </span><span class="kw">as </span>usize].cmp(<span class="kw-2">&amp;</span>actors[other.<span class="number">1 </span><span class="kw">as </span>usize]))
     }
 }
 

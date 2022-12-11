@@ -700,7 +700,7 @@
     <span class="kw">use super</span>::<span class="kw-2">*</span>;
 
     <span class="kw">fn </span>op() -&gt; Op {
-        <span class="kw">let </span>zero = OpId(<span class="number">0</span>, <span class="number">0</span>);
+        <span class="kw">let </span>zero = OpId::new(<span class="number">0</span>, <span class="number">0</span>);
         Op {
             id: zero,
             action: amp::OpType::Put(<span class="number">0</span>.into()),

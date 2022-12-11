@@ -760,7 +760,7 @@
         (<span class="number">0_u64</span>..<span class="number">10</span>)
             .prop_map(|num_ops| {
                 (<span class="number">0</span>..num_ops)
-                    .map(|counter| OpId::new(<span class="number">0</span>, counter))
+                    .map(|counter| OpId::new(counter, <span class="number">0</span>))
                     .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;()
             })
             .prop_flat_map(<span class="kw">move </span>|opids| {

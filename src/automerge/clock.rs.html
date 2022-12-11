@@ -228,9 +228,9 @@
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>covers(<span class="kw-2">&amp;</span><span class="self">self</span>, id: <span class="kw-2">&amp;</span>OpId) -&gt; bool {
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(data) = <span class="self">self</span>.<span class="number">0</span>.get(<span class="kw-2">&amp;</span>id.<span class="number">1</span>) {
-            data.max_op &gt;= id.<span class="number">0
-        </span>} <span class="kw">else </span>{
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(data) = <span class="self">self</span>.<span class="number">0</span>.get(<span class="kw-2">&amp;</span>id.actor()) {
+            data.max_op &gt;= id.counter()
+        } <span class="kw">else </span>{
             <span class="bool-val">false
         </span>}
     }
@@ -292,16 +292,16 @@
         clock.include(<span class="number">1</span>, ClockData { max_op: <span class="number">20</span>, seq: <span class="number">1 </span>});
         clock.include(<span class="number">2</span>, ClockData { max_op: <span class="number">10</span>, seq: <span class="number">2 </span>});
 
-        <span class="macro">assert!</span>(clock.covers(<span class="kw-2">&amp;</span>OpId(<span class="number">10</span>, <span class="number">1</span>)));
-        <span class="macro">assert!</span>(clock.covers(<span class="kw-2">&amp;</span>OpId(<span class="number">20</span>, <span class="number">1</span>)));
-        <span class="macro">assert!</span>(!clock.covers(<span class="kw-2">&amp;</span>OpId(<span class="number">30</span>, <span class="number">1</span>)));
+        <span class="macro">assert!</span>(clock.covers(<span class="kw-2">&amp;</span>OpId::new(<span class="number">10</span>, <span class="number">1</span>)));
+        <span class="macro">assert!</span>(clock.covers(<span class="kw-2">&amp;</span>OpId::new(<span class="number">20</span>, <span class="number">1</span>)));
+        <span class="macro">assert!</span>(!clock.covers(<span class="kw-2">&amp;</span>OpId::new(<span class="number">30</span>, <span class="number">1</span>)));
 
-        <span class="macro">assert!</span>(clock.covers(<span class="kw-2">&amp;</span>OpId(<span class="number">5</span>, <span class="number">2</span>)));
-        <span class="macro">assert!</span>(clock.covers(<span class="kw-2">&amp;</span>OpId(<span class="number">10</span>, <span class="number">2</span>)));
-        <span class="macro">assert!</span>(!clock.covers(<span class="kw-2">&amp;</span>OpId(<span class="number">15</span>, <span class="number">2</span>)));
+        <span class="macro">assert!</span>(clock.covers(<span class="kw-2">&amp;</span>OpId::new(<span class="number">5</span>, <span class="number">2</span>)));
+        <span class="macro">assert!</span>(clock.covers(<span class="kw-2">&amp;</span>OpId::new(<span class="number">10</span>, <span class="number">2</span>)));
+        <span class="macro">assert!</span>(!clock.covers(<span class="kw-2">&amp;</span>OpId::new(<span class="number">15</span>, <span class="number">2</span>)));
 
-        <span class="macro">assert!</span>(!clock.covers(<span class="kw-2">&amp;</span>OpId(<span class="number">1</span>, <span class="number">3</span>)));
-        <span class="macro">assert!</span>(!clock.covers(<span class="kw-2">&amp;</span>OpId(<span class="number">100</span>, <span class="number">3</span>)));
+        <span class="macro">assert!</span>(!clock.covers(<span class="kw-2">&amp;</span>OpId::new(<span class="number">1</span>, <span class="number">3</span>)));
+        <span class="macro">assert!</span>(!clock.covers(<span class="kw-2">&amp;</span>OpId::new(<span class="number">100</span>, <span class="number">3</span>)));
     }
 
     <span class="attribute">#[test]

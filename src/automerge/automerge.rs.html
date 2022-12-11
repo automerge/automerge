@@ -1377,6 +1377,9 @@
 <span id="1375">1375</span>
 <span id="1376">1376</span>
 <span id="1377">1377</span>
+<span id="1378">1378</span>
+<span id="1379">1379</span>
+<span id="1380">1380</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::cmp::Ordering;
 <span class="kw">use </span>std::collections::{BTreeSet, HashMap, HashSet};
 <span class="kw">use </span>std::fmt::Debug;
@@ -1866,7 +1869,7 @@
                 <span class="comment">// do a direct get here b/c this could be foriegn and not be within the array
                 // bounds
                 </span><span class="kw">let </span>obj = <span class="kw">if </span><span class="self">self</span>.ops.m.actors.cache.get(<span class="kw-2">*</span>idx) == <span class="prelude-val">Some</span>(actor) {
-                    ObjId(OpId(<span class="kw-2">*</span>ctr, <span class="kw-2">*</span>idx))
+                    ObjId(OpId::new(<span class="kw-2">*</span>ctr, <span class="kw-2">*</span>idx))
                 } <span class="kw">else </span>{
                     <span class="comment">// FIXME - make a real error
                     </span><span class="kw">let </span>idx = <span class="self">self
@@ -1875,7 +1878,7 @@
                         .actors
                         .lookup(actor)
                         .ok_or(AutomergeError::Fail)<span class="question-mark">?</span>;
-                    ObjId(OpId(<span class="kw-2">*</span>ctr, idx))
+                    ObjId(OpId::new(<span class="kw-2">*</span>ctr, idx))
                 };
                 <span class="kw">if let </span><span class="prelude-val">Some</span>(obj_type) = <span class="self">self</span>.ops.object_type(<span class="kw-2">&amp;</span>obj) {
                     <span class="prelude-val">Ok</span>((obj, obj_type))
@@ -2238,23 +2241,26 @@
             .iter_ops()
             .enumerate()
             .map(|(i, c)| {
-                <span class="kw">let </span>id = OpId(change.start_op().get() + i <span class="kw">as </span>u64, actor);
+                <span class="kw">let </span>id = OpId::new(change.start_op().get() + i <span class="kw">as </span>u64, actor);
                 <span class="kw">let </span>key = <span class="kw">match </span><span class="kw-2">&amp;</span>c.key {
                     EncodedKey::Prop(n) =&gt; Key::Map(<span class="self">self</span>.ops.m.props.cache(n.to_string())),
                     EncodedKey::Elem(e) <span class="kw">if </span>e.is_head() =&gt; Key::Seq(ElemId::head()),
                     EncodedKey::Elem(ElemId(o)) =&gt; {
-                        Key::Seq(ElemId(OpId::new(actors[o.actor()], o.counter())))
+                        Key::Seq(ElemId(OpId::new(o.counter(), actors[o.actor()])))
                     }
                 };
                 <span class="kw">let </span>obj = <span class="kw">if </span>c.obj.is_root() {
                     ObjId::root()
                 } <span class="kw">else </span>{
-                    ObjId(OpId(c.obj.opid().counter(), actors[c.obj.opid().actor()]))
+                    ObjId(OpId::new(
+                        c.obj.opid().counter(),
+                        actors[c.obj.opid().actor()],
+                    ))
                 };
                 <span class="kw">let </span>pred = c
                     .pred
                     .iter()
-                    .map(|p| OpId::new(actors[p.actor()], p.counter()));
+                    .map(|p| OpId::new(p.counter(), actors[p.actor()]));
                 <span class="kw">let </span>pred = <span class="self">self</span>.ops.m.sorted_opids(pred);
                 (
                     obj,

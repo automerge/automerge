@@ -706,7 +706,7 @@
     <span class="kw">fn </span>op(counter: u64) -&gt; Op {
         Op {
             action: OpType::Put(ScalarValue::Uint(counter)),
-            id: OpId(counter, <span class="number">0</span>),
+            id: OpId::new(counter, <span class="number">0</span>),
             key: Key::Map(<span class="number">0</span>),
             succ: Default::default(),
             pred: Default::default(),

@@ -427,11 +427,11 @@
                 <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(Key::Prop(string)))
             }
             (<span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) | <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(<span class="number">0</span>)), <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) | <span class="prelude-val">None</span>) =&gt; {
-                <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(Key::Elem(ElemId(OpId(<span class="number">0</span>, <span class="number">0</span>)))))
+                <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(Key::Elem(ElemId(OpId::new(<span class="number">0</span>, <span class="number">0</span>)))))
             }
             (<span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(actor)), <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(ctr)), <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) | <span class="prelude-val">None</span>) =&gt; <span class="kw">match </span>ctr.try_into() {
                 <span class="comment">//Ok(ctr) =&gt; Some(Ok(Key::Elem(ElemId(OpId(ctr, actor as usize))))),
-                </span><span class="prelude-val">Ok</span>(ctr) =&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(Key::Elem(ElemId(OpId::new(actor <span class="kw">as </span>usize, ctr))))),
+                </span><span class="prelude-val">Ok</span>(ctr) =&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(Key::Elem(ElemId(OpId::new(ctr, actor <span class="kw">as </span>usize))))),
                 <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; <span class="prelude-val">Err</span>(DecodeColumnError::invalid_value(
                     <span class="string">&quot;counter&quot;</span>,
                     <span class="string">&quot;negative value for counter&quot;</span>,

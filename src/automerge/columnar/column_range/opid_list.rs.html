@@ -529,7 +529,7 @@
                 .map_err(|e| DecodeColumnError::decode_raw(<span class="string">&quot;counter&quot;</span>, e))<span class="question-mark">?</span>;
             <span class="kw">match </span>(actor, counter) {
                 (<span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(a)), <span class="prelude-val">Some</span>(<span class="prelude-val">Some</span>(ctr))) =&gt; <span class="kw">match </span>ctr.try_into() {
-                    <span class="prelude-val">Ok</span>(ctr) =&gt; p.push(OpId(ctr, a <span class="kw">as </span>usize)),
+                    <span class="prelude-val">Ok</span>(ctr) =&gt; p.push(OpId::new(ctr, a <span class="kw">as </span>usize)),
                     <span class="prelude-val">Err</span>(_e) =&gt; {
                         <span class="kw">return </span><span class="prelude-val">Err</span>(DecodeColumnError::invalid_value(
                             <span class="string">&quot;counter&quot;</span>,

@@ -197,6 +197,7 @@
 <span id="195">195</span>
 <span id="196">196</span>
 <span id="197">197</span>
+<span id="198">198</span>
 </pre><pre class="rust"><code><span class="kw">use </span>itertools::Itertools;
 
 <span class="kw">use </span><span class="kw">super</span>::OpId;
@@ -328,7 +329,8 @@
 
     <span class="kw">fn </span>gen_opid(actors: Vec&lt;ActorId&gt;) -&gt; <span class="kw">impl </span>Strategy&lt;Value = OpId&gt; {
         (<span class="number">0</span>..actors.len()).prop_flat_map(|actor_idx| {
-            (Just(actor_idx), <span class="number">0</span>..u64::MAX).prop_map(|(actor_idx, counter)| OpId(counter, actor_idx))
+            (Just(actor_idx), <span class="number">0</span>..u64::MAX)
+                .prop_map(|(actor_idx, counter)| OpId::new(counter, actor_idx))
         })
     }
 
@@ -389,7 +391,7 @@
             (OpId(<span class="number">0</span>, <span class="kw">_</span>), OpId(<span class="number">0</span>, <span class="kw">_</span>)) =&gt; Ordering::Equal,
             (OpId(<span class="number">0</span>, <span class="kw">_</span>), OpId(<span class="kw">_</span>, <span class="kw">_</span>)) =&gt; Ordering::Less,
             (OpId(<span class="kw">_</span>, <span class="kw">_</span>), OpId(<span class="number">0</span>, <span class="kw">_</span>)) =&gt; Ordering::Greater,
-            (OpId(a, x), OpId(b, y)) <span class="kw">if </span>a == b =&gt; actors[<span class="kw-2">*</span>x].cmp(<span class="kw-2">&amp;</span>actors[<span class="kw-2">*</span>y]),
+            (OpId(a, x), OpId(b, y)) <span class="kw">if </span>a == b =&gt; actors[<span class="kw-2">*</span>x <span class="kw">as </span>usize].cmp(<span class="kw-2">&amp;</span>actors[<span class="kw-2">*</span>y <span class="kw">as </span>usize]),
             (OpId(a, <span class="kw">_</span>), OpId(b, <span class="kw">_</span>)) =&gt; a.cmp(b),
         }
     }
