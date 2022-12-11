@@ -141,9 +141,9 @@ function importOpts<T>(_actor?: ActorId | InitOptions<T>): InitOptions<T> {
  *     random actor ID
  */
 export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
-    let opts = importOpts(_opts)
-    let freeze = !!opts.freeze
-    let patchCallback = opts.patchCallback
+    const opts = importOpts(_opts)
+    const freeze = !!opts.freeze
+    const patchCallback = opts.patchCallback
     const handle = ApiHandler.create(opts.actor)
     handle.enablePatches(true)
     handle.enableFreeze(!!opts.freeze)
@@ -170,7 +170,7 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
 export function view<T>(doc: Doc<T>, heads: Heads): Doc<T> {
     const state = _state(doc)
     const handle = state.handle
-    return state.handle.materialize("/", heads, { ...state, handle, heads }) as any
+    return state.handle.materialize("/", heads, { ...state, handle, heads }) as Doc<T>
 }
 
 /**
@@ -291,9 +291,9 @@ function progressDocument<T>(doc: Doc<T>, heads: Heads | null, callback?: PatchC
     if (heads == null) {
         return doc
     }
-    let state = _state(doc)
-    let nextState = {...state, heads: undefined};
-    let nextDoc = state.handle.applyPatches(doc, nextState, callback)
+    const state = _state(doc)
+    const nextState = {...state, heads: undefined};
+    const nextDoc = state.handle.applyPatches(doc, nextState, callback)
     state.heads = heads
     return nextDoc
 }
@@ -392,7 +392,7 @@ export function load<T>(data: Uint8Array, _opts?: ActorId | InitOptions<T>): Doc
     handle.enablePatches(true)
     handle.enableFreeze(!!opts.freeze)
     handle.registerDatatype("counter", (n) => new Counter(n))
-    const doc: any = handle.materialize("/", undefined, {handle, heads: undefined, patchCallback}) as Doc<T>
+    const doc = handle.materialize("/", undefined, {handle, heads: undefined, patchCallback}) as Doc<T>
     return doc
 }
 
@@ -599,7 +599,7 @@ export function getLastLocalChange<T>(doc: Doc<T>): Change | undefined {
  * This is useful to determine if something is actually an automerge document,
  * if `doc` is not an automerge document this will return null.
  */
-export function getObjectId(doc: any, prop?: Prop): ObjID | null {
+export function getObjectId<T>(doc: Doc<T>, prop?: Prop): ObjID | null {
     if (prop) {
       const state = _state(doc, false)
       const objectId = _obj(doc)
@@ -619,7 +619,6 @@ export function getObjectId(doc: any, prop?: Prop): ObjID | null {
  * Note that this will crash if there are changes in `oldState` which are not in `newState`.
  */
 export function getChanges<T>(oldState: Doc<T>, newState: Doc<T>): Change[] {
-    const o = _state(oldState)
     const n = _state(newState)
     return n.handle.getChanges(getHeads(oldState))
 }
@@ -709,8 +708,8 @@ export function encodeSyncState(state: SyncState): Uint8Array {
  * @group sync
  */
 export function decodeSyncState(state: Uint8Array): SyncState {
-    let sync = ApiHandler.decodeSyncState(state)
-    let result = ApiHandler.exportSyncState(sync)
+    const sync = ApiHandler.decodeSyncState(state)
+    const result = ApiHandler.exportSyncState(sync)
     sync.free()
     return result
 }
@@ -848,7 +847,11 @@ export function toJS<T>(doc: Doc<T>): T {
 }
 
 export function isAutomerge(doc: unknown): boolean {
-  return getObjectId(doc) === "_root" && !!Reflect.get(doc as Object, STATE)
+  if (typeof doc == "object" && doc !== null) {
+    return getObjectId(doc) === "_root" && !!Reflect.get(doc, STATE)
+  } else {
+    return false
+  }
 }
 
 function isObject(obj: unknown): obj is Record<string, unknown> {

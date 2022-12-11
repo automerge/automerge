@@ -3,7 +3,7 @@ import { Automerge, Heads, ObjID } from "@automerge/automerge-wasm"
 import { Prop } from "@automerge/automerge-wasm"
 import { AutomergeValue, ScalarValue, MapValue, ListValue } from "./types"
 import { Counter, getWriteableCounter } from "./counter"
-import { STATE, TRACE, IS_PROXY, OBJECT_ID, COUNTER, INT, UINT, F64, TEXT } from "./constants"
+import { STATE, TRACE, IS_PROXY, OBJECT_ID, COUNTER, INT, UINT, F64 } from "./constants"
 
 function parseListIndex(key) {
   if (typeof key === 'string' && /^[0-9]+$/.test(key)) key = parseInt(key, 10)
@@ -95,7 +95,7 @@ function import_value(value) {
 
 const MapHandler = {
   get (target, key) : AutomergeValue {
-    const { context, objectId, readonly, frozen, heads, cache } = target
+    const { context, objectId, cache } = target
     if (key === Symbol.toStringTag) { return target[Symbol.toStringTag] }
     if (key === OBJECT_ID) return objectId
     if (key === IS_PROXY) return true
@@ -187,7 +187,7 @@ const MapHandler = {
 
 const ListHandler = {
   get (target, index) {
-    const {context, objectId, readonly, frozen, heads } = target
+    const {context, objectId, heads } = target
     index = parseListIndex(index)
     if (index === Symbol.hasInstance) { return (instance) => { return Array.isArray(instance) } }
     if (index === Symbol.toStringTag) { return target[Symbol.toStringTag] }
@@ -236,11 +236,10 @@ const ListHandler = {
         break;
       }
       case "text": {
-        let text
         if (index >= context.length(objectId)) {
-          text = context.insertObject(objectId, index, value, "text")
+          context.insertObject(objectId, index, value, "text")
         } else {
-          text = context.putObject(objectId, index, value, "text")
+          context.putObject(objectId, index, value, "text")
         }
         break;
       }
@@ -534,7 +533,7 @@ function listMethods(target) {
 
     find(f: (AutomergeValue, number) => boolean) : AutomergeValue | undefined {
       let index = 0
-      for (let v of this) {
+      for (const v of this) {
         if (f(v, index)) {
           return v
         }
@@ -544,7 +543,7 @@ function listMethods(target) {
 
     findIndex(f: (AutomergeValue, number) => boolean) : number {
       let index = 0
-      for (let v of this) {
+      for (const v of this) {
         if (f(v, index)) {
           return index
         }
@@ -582,7 +581,7 @@ function listMethods(target) {
 
     some(f: (AutomergeValue, number) => boolean) : boolean {
       let index = 0;
-      for (let v of this) {
+      for (const v of this) {
         if (f(v,index)) {
           return true
         }
@@ -599,50 +598,6 @@ function listMethods(target) {
           i += 1
           value = valueAt(target, i)
       }
-    }
-  }
-  return methods
-}
-
-function textMethods(target) {
-  const {context, objectId, heads } = target
-  const methods = {
-    set (index: number, value) {
-      return this[index] = value
-    },
-    get (index: number) : AutomergeValue {
-      return this[index]
-    },
-    toString () : string {
-      return context.text(objectId, heads).replace(/￼/g,'')
-    },
-    toSpans () : AutomergeValue[] {
-      const spans : AutomergeValue[] = []
-      let chars = ''
-      const length = context.length(objectId)
-      for (let i = 0; i < length; i++) {
-        const value = this[i]
-        if (typeof value === 'string') {
-          chars += value
-        } else {
-          if (chars.length > 0) {
-            spans.push(chars)
-            chars = ''
-          }
-          spans.push(value)
-        }
-      }
-      if (chars.length > 0) {
-        spans.push(chars)
-      }
-      return spans
-    },
-    toJSON () : string {
-      return this.toString()
-    },
-    indexOf(o, start = 0) {
-      const text = context.text(objectId)
-      return text.indexOf(o,start)
     }
   }
   return methods
