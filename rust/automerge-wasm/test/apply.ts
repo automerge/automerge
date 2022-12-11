@@ -164,7 +164,7 @@ describe('Automerge', () => {
 
     it('should set the OBJECT_ID property on lists, maps, and text objects and not on scalars', () => {
         const doc1 = create('aaaa')
-        let mat: any = doc1.materialize("/")
+        const mat: any = doc1.materialize("/")
         doc1.enablePatches(true)
         doc1.registerDatatype("counter", (n: number) => new Counter(n))
         doc1.put("/", "string", "string", "str")
@@ -194,11 +194,11 @@ describe('Automerge', () => {
 
     it('should set the root OBJECT_ID to "_root"', () => {
         const doc1 = create('aaaa')
-        let mat: any = doc1.materialize("/")
+        const mat: any = doc1.materialize("/")
         assert.equal(_obj(mat), "_root")
         doc1.enablePatches(true)
         doc1.put("/", "key", "value")
-        let applied = doc1.applyPatches(mat)
+        const applied = doc1.applyPatches(mat)
         assert.equal(_obj(applied), "_root")
     })
 

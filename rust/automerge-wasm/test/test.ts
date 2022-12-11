@@ -1953,7 +1953,7 @@ describe('Automerge', () => {
       assert.deepEqual(doc.length("/width2"), 12);
       assert.deepEqual(doc.length("/mixed"), 9);
 
-      let heads1 = doc.getHeads();
+      const heads1 = doc.getHeads();
 
       mat = doc.applyPatches(mat)
 
@@ -2013,7 +2013,7 @@ describe('Automerge', () => {
     })
 
     it('can handle non-characters embedded in text', () => {
-      let change : any = {
+      const change : any = {
         ops: [
           { action: 'makeText', obj: '_root', key: 'bad_text', pred: [] },
           { action: 'set', obj: '1@aaaa', elemId: '_head', insert: true, value: 'A', pred: [] },
@@ -2030,7 +2030,7 @@ describe('Automerge', () => {
       }
       const doc = load(encodeChange(change));
       doc.enablePatches(true)
-      let mat : any = doc.materialize("/")
+      const mat : any = doc.materialize("/")
 
       // multi - char strings appear as a span of strings
       // non strings appear as an object replacement unicode char
@@ -2039,27 +2039,27 @@ describe('Automerge', () => {
       assert.deepEqual(doc.materialize("/bad_text"), 'ABBBBB￼C')
 
       // deleting in the middle of a multi-byte character will delete the whole thing
-      let doc1 = doc.fork()
+      const doc1 = doc.fork()
       doc1.splice("/bad_text", 3, 3, "X");
       assert.deepEqual(doc1.text("/bad_text"), 'AX￼C')
 
       // deleting in the middle of a multi-byte character will delete the whole thing
       // and characters past its end
-      let doc2 = doc.fork()
+      const doc2 = doc.fork()
       doc2.splice("/bad_text", 3, 4, "X");
       assert.deepEqual(doc2.text("/bad_text"), 'AXC')
 
-      let doc3 = doc.fork()
+      const doc3 = doc.fork()
       doc3.splice("/bad_text", 3, 5, "X");
       assert.deepEqual(doc3.text("/bad_text"), 'AX')
 
       // inserting in the middle of a mutli-bytes span inserts after
-      let doc4 = doc.fork()
+      const doc4 = doc.fork()
       doc4.splice("/bad_text", 3, 0, "X");
       assert.deepEqual(doc4.text("/bad_text"), 'ABBBBBX￼C')
 
       // deleting into the middle of a multi-byte span deletes the whole thing
-      let doc5 = doc.fork()
+      const doc5 = doc.fork()
       doc5.splice("/bad_text", 0, 2, "X");
       assert.deepEqual(doc5.text("/bad_text"), 'X￼C')
 
