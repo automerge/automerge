@@ -25,7 +25,7 @@ If you're familiar with CRDTs and interested in the design of Automerge in
 particular take a look at https://automerge.org/docs/how-it-works/backend/
 
 Finally, if you want to talk to us about this project please [join the
-Slack](https://join.slack.com/t/automerge/shared_invite/zt-1ho1ieas2-DnWZcRR82BRu65vCD4t3Xw)
+Slack](https://join.slack.com/t/automerge/shared_invite/zt-e4p3760n-kKh7r3KRH1YwwNfiZM8ktw)
 
 ## Status
 
