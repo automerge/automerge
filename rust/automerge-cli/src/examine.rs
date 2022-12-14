@@ -1,6 +1,8 @@
 use automerge as am;
 use thiserror::Error;
 
+use crate::color_json::print_colored_json;
+
 #[derive(Error, Debug)]
 pub enum ExamineError {
     #[error("Error reading change file: {:?}", source)]
@@ -39,7 +41,7 @@ pub fn examine(
         .collect();
     if is_tty {
         let json_changes = serde_json::to_value(uncompressed_changes).unwrap();
-        colored_json::write_colored_json(&json_changes, &mut output).unwrap();
+        print_colored_json(&json_changes).unwrap();
         writeln!(output).unwrap();
     } else {
         let json_changes = serde_json::to_string_pretty(&uncompressed_changes).unwrap();
