@@ -1,6 +1,9 @@
 use std::{borrow::Cow, ops::Range};
 
-use crate::storage::{columns::compression, shift_range, ChunkType, Header, RawColumns};
+use crate::storage::{
+    columns::{compression, raw_column},
+    shift_range, ChunkType, Header, RawColumns,
+};
 
 pub(super) struct Args<'a, T: compression::ColumnCompression, DirArgs> {
     /// The original data of the entire document chunk (compressed or uncompressed)
@@ -23,40 +26,46 @@ pub(super) struct CompressArgs {
 }
 
 /// Compress a document chunk returning the compressed bytes
-pub(super) fn compress<'a>(args: Args<'a, compression::Uncompressed, CompressArgs>) -> Vec<u8> {
+pub(super) fn compress<'a>(
+    args: Args<'a, compression::Uncompressed, CompressArgs>,
+) -> Result<Vec<u8>, raw_column::ParseError> {
     let header_len = args.extra_args.original_header_len;
     let threshold = args.extra_args.threshold;
-    Compression::<'a, Compressing, _>::new(
+    Ok(Compression::<'a, Compressing, _>::new(
         args,
         Compressing {
             threshold,
             header_len,
         },
     )
-    .changes()
-    .ops()
+    .changes()?
+    .ops()?
     .write_data()
-    .finish()
+    .finish())
 }
 
-pub(super) fn decompress<'a>(args: Args<'a, compression::Unknown, ()>) -> Decompressed<'a> {
+pub(super) fn decompress<'a>(
+    args: Args<'a, compression::Unknown, ()>,
+) -> Result<Decompressed<'a>, raw_column::ParseError> {
     match (
         args.changes.raw_columns.uncompressed(),
         args.ops.raw_columns.uncompressed(),
     ) {
-        (Some(changes), Some(ops)) => Decompressed {
+        (Some(changes), Some(ops)) => Ok(Decompressed {
             changes,
             ops,
             compressed: None,
             uncompressed: args.original,
             change_bytes: args.changes.data,
             op_bytes: args.ops.data,
-        },
-        _ => Compression::<'a, Decompressing, _>::new(args, Decompressing)
-            .changes()
-            .ops()
-            .write_data()
-            .finish(),
+        }),
+        _ => Ok(
+            Compression::<'a, Decompressing, _>::new(args, Decompressing)
+                .changes()?
+                .ops()?
+                .write_data()
+                .finish(),
+        ),
     }
 }
 
@@ -108,7 +117,7 @@ trait Direction: std::fmt::Debug {
         input: &[u8],
         out: &mut Vec<u8>,
         meta_out: &mut Vec<u8>,
-    ) -> Cols<Self::Out>;
+    ) -> Result<Cols<Self::Out>, raw_column::ParseError>;
 }
 #[derive(Debug)]
 struct Compressing {
@@ -127,16 +136,16 @@ impl Direction for Compressing {
         input: &[u8],
         out: &mut Vec<u8>,
         meta_out: &mut Vec<u8>,
-    ) -> Cols<Self::Out> {
+    ) -> Result<Cols<Self::Out>, raw_column::ParseError> {
         let start = out.len();
         let raw_columns = cols
             .raw_columns
             .compress(&input[cols.data.clone()], out, self.threshold);
         raw_columns.write(meta_out);
-        Cols {
+        Ok(Cols {
             data: start..out.len(),
             raw_columns,
-        }
+        })
     }
 }
 
@@ -154,14 +163,16 @@ impl Direction for Decompressing {
         input: &[u8],
         out: &mut Vec<u8>,
         meta_out: &mut Vec<u8>,
-    ) -> Cols<Self::Out> {
+    ) -> Result<Cols<Self::Out>, raw_column::ParseError> {
         let start = out.len();
-        let raw_columns = cols.raw_columns.uncompress(&input[cols.data.clone()], out);
+        let raw_columns = cols
+            .raw_columns
+            .uncompress(&input[cols.data.clone()], out)?;
         raw_columns.write(meta_out);
-        Cols {
+        Ok(Cols {
             data: start..out.len(),
             raw_columns,
-        }
+        })
     }
 }
 
@@ -233,7 +244,7 @@ impl<'a, D: Direction> Compression<'a, D, Starting> {
 }
 
 impl<'a, D: Direction> Compression<'a, D, Starting> {
-    fn changes(self) -> Compression<'a, D, Changes<D>> {
+    fn changes(self) -> Result<Compression<'a, D, Changes<D>>, raw_column::ParseError> {
         let Starting {
             mut data_out,
             mut meta_out,
@@ -243,8 +254,8 @@ impl<'a, D: Direction> Compression<'a, D, Starting> {
             &self.args.original,
             &mut data_out,
             &mut meta_out,
-        );
-        Compression {
+        )?;
+        Ok(Compression {
             args: self.args,
             direction: self.direction,
             state: Changes {
@@ -252,12 +263,12 @@ impl<'a, D: Direction> Compression<'a, D, Starting> {
                 meta_out,
                 data_out,
             },
-        }
+        })
     }
 }
 
 impl<'a, D: Direction> Compression<'a, D, Changes<D>> {
-    fn ops(self) -> Compression<'a, D, ChangesAndOps<D>> {
+    fn ops(self) -> Result<Compression<'a, D, ChangesAndOps<D>>, raw_column::ParseError> {
         let Changes {
             change_cols,
             mut meta_out,
@@ -268,8 +279,8 @@ impl<'a, D: Direction> Compression<'a, D, Changes<D>> {
             &self.args.original,
             &mut data_out,
             &mut meta_out,
-        );
-        Compression {
+        )?;
+        Ok(Compression {
             args: self.args,
             direction: self.direction,
             state: ChangesAndOps {
@@ -278,7 +289,7 @@ impl<'a, D: Direction> Compression<'a, D, Changes<D>> {
                 meta_out,
                 data_out,
             },
-        }
+        })
     }
 }
 

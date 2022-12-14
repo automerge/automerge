@@ -73,15 +73,19 @@ impl<T: compression::ColumnCompression> RawColumn<T> {
         }
     }
 
-    fn decompress(&self, input: &[u8], out: &mut Vec<u8>) -> (ColumnSpec, usize) {
+    fn decompress(
+        &self,
+        input: &[u8],
+        out: &mut Vec<u8>,
+    ) -> Result<(ColumnSpec, usize), ParseError> {
         let len = if self.spec.deflate() {
             let mut inflater = flate2::bufread::DeflateDecoder::new(&input[self.data.clone()]);
-            inflater.read_to_end(out).unwrap()
+            inflater.read_to_end(out).map_err(ParseError::Deflate)?
         } else {
             out.extend(&input[self.data.clone()]);
             self.data.len()
         };
-        (self.spec.inflated(), len)
+        Ok((self.spec.inflated(), len))
     }
 }
 
@@ -140,7 +144,7 @@ impl<T: compression::ColumnCompression> RawColumns<T> {
         &self,
         input: &[u8],
         out: &mut Vec<u8>,
-    ) -> RawColumns<compression::Uncompressed> {
+    ) -> Result<RawColumns<compression::Uncompressed>, ParseError> {
         let mut result = Vec::with_capacity(self.0.len());
         let mut start = 0;
         for col in &self.0 {
@@ -148,7 +152,7 @@ impl<T: compression::ColumnCompression> RawColumns<T> {
                 out.extend(&input[decomp.data.clone()]);
                 (decomp.spec, decomp.data.len())
             } else {
-                col.decompress(input, out)
+                col.decompress(input, out)?
             };
             result.push(RawColumn {
                 spec,
@@ -157,7 +161,7 @@ impl<T: compression::ColumnCompression> RawColumns<T> {
             });
             start += len;
         }
-        RawColumns(result)
+        Ok(RawColumns(result))
     }
 }
 
@@ -193,6 +197,8 @@ pub(crate) enum ParseError {
     NotInNormalOrder,
     #[error(transparent)]
     Leb128(#[from] parse::leb128::Error),
+    #[error(transparent)]
+    Deflate(#[from] std::io::Error),
 }
 
 impl RawColumns<compression::Unknown> {
