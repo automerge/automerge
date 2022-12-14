@@ -173,7 +173,8 @@ impl<'a> Document<'a> {
                 raw_columns: ops_meta,
             },
             extra_args: (),
-        });
+        })
+        .map_err(|e| parse::ParseError::Error(ParseError::RawColumns(e)))?;
 
         let ops_layout = Columns::parse(op_bytes.len(), ops.iter()).map_err(|e| {
             parse::ParseError::Error(ParseError::BadColumnLayout {
