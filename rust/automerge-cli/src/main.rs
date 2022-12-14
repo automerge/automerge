@@ -2,8 +2,10 @@ use std::{fs::File, path::PathBuf, str::FromStr};
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
+use is_terminal::IsTerminal;
 
 //mod change;
+mod color_json;
 mod examine;
 mod export;
 mod import;
@@ -16,7 +18,7 @@ struct Opts {
     cmd: Command,
 }
 
-#[derive(Debug)]
+#[derive(clap::ValueEnum, Clone, Debug)]
 enum ExportFormat {
     Json,
     Toml,
@@ -43,11 +45,10 @@ enum Command {
         format: ExportFormat,
 
         /// Path that contains Automerge changes
-        #[clap(parse(from_os_str))]
         changes_file: Option<PathBuf>,
 
         /// The file to write to. If omitted assumes stdout
-        #[clap(parse(from_os_str), long("out"), short('o'))]
+        #[clap(long("out"), short('o'))]
         output_file: Option<PathBuf>,
     },
 
@@ -56,11 +57,10 @@ enum Command {
         #[clap(long, short, default_value = "json")]
         format: ExportFormat,
 
-        #[clap(parse(from_os_str))]
         input_file: Option<PathBuf>,
 
         /// Path to write Automerge changes to
-        #[clap(parse(from_os_str), long("out"), short('o'))]
+        #[clap(long("out"), short('o'))]
         changes_file: Option<PathBuf>,
     },
 
@@ -94,11 +94,10 @@ enum Command {
         script: String,
 
         /// The file to change, if omitted will assume stdin
-        #[clap(parse(from_os_str))]
         input_file: Option<PathBuf>,
 
         /// Path to write Automerge changes to, if omitted will write to stdout
-        #[clap(parse(from_os_str), long("out"), short('o'))]
+        #[clap(long("out"), short('o'))]
         output_file: Option<PathBuf>,
     },
 
@@ -108,15 +107,16 @@ enum Command {
     /// Read one or more automerge documents and output a merged, compacted version of them
     Merge {
         /// The file to write to. If omitted assumes stdout
-        #[clap(parse(from_os_str), long("out"), short('o'))]
+        #[clap(long("out"), short('o'))]
         output_file: Option<PathBuf>,
+
         /// The file(s) to compact. If empty assumes stdin
         input: Vec<PathBuf>,
     },
 }
 
 fn open_file_or_stdin(maybe_path: Option<PathBuf>) -> Result<Box<dyn std::io::Read>> {
-    if atty::is(atty::Stream::Stdin) {
+    if std::io::stdin().is_terminal() {
         if let Some(path) = maybe_path {
             Ok(Box::new(File::open(&path).unwrap()))
         } else {
@@ -130,7 +130,7 @@ fn open_file_or_stdin(maybe_path: Option<PathBuf>) -> Result<Box<dyn std::io::Re
 }
 
 fn create_file_or_stdout(maybe_path: Option<PathBuf>) -> Result<Box<dyn std::io::Write>> {
-    if atty::is(atty::Stream::Stdout) {
+    if std::io::stdout().is_terminal() {
         if let Some(path) = maybe_path {
             Ok(Box::new(File::create(&path).unwrap()))
         } else {
@@ -158,7 +158,7 @@ fn main() -> Result<()> {
             match format {
                 ExportFormat::Json => {
                     let mut in_buffer = open_file_or_stdin(changes_file)?;
-                    export::export_json(&mut in_buffer, output, atty::is(atty::Stream::Stdout))
+                    export::export_json(&mut in_buffer, output, std::io::stdout().is_terminal())
                 }
                 ExportFormat::Toml => unimplemented!(),
             }
@@ -191,7 +191,7 @@ fn main() -> Result<()> {
         Command::Examine { input_file } => {
             let in_buffer = open_file_or_stdin(input_file)?;
             let out_buffer = std::io::stdout();
-            match examine::examine(in_buffer, out_buffer, atty::is(atty::Stream::Stdout)) {
+            match examine::examine(in_buffer, out_buffer, std::io::stdout().is_terminal()) {
                 Ok(()) => {}
                 Err(e) => {
                     eprintln!("Error: {:?}", e);

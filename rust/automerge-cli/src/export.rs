@@ -1,6 +1,8 @@
 use anyhow::Result;
 use automerge as am;
 
+use crate::color_json::print_colored_json;
+
 pub(crate) fn map_to_json(doc: &am::Automerge, obj: &am::ObjId) -> serde_json::Value {
     let keys = doc.keys(obj);
     let mut map = serde_json::Map::new();
@@ -84,7 +86,7 @@ pub fn export_json(
 
     let state_json = get_state_json(input_data)?;
     if is_tty {
-        colored_json::write_colored_json(&state_json, &mut writer).unwrap();
+        print_colored_json(&state_json).unwrap();
         writeln!(writer).unwrap();
     } else {
         writeln!(

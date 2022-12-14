@@ -46,7 +46,6 @@ notice = "warn"
 # output a note when they are encountered.
 ignore = [
     #"RUSTSEC-0000-0000",
-    "RUSTSEC-2021-0127", # serde_cbor is unmaintained, but we only use it in criterion for benchmarks
 ]
 # Threshold for security vulnerabilities, any vulnerability with a CVSS score
 # lower than the range specified will be ignored. Note that ignored advisories
@@ -100,10 +99,6 @@ confidence-threshold = 0.8
 # Allow 1 or more licenses on a per-crate basis, so that particular licenses
 # aren't accepted for every possible crate as with the normal allow list
 exceptions = [
-    # this is a LGPL like license in the CLI
-    # since this is an application not a library people would link to it should be fine
-    { allow = ["EPL-2.0"], name = "colored_json" },
-
     # The Unicode-DFS--2016 license is necessary for unicode-ident because they
     # use data from the unicode tables to generate the tables which are
     # included in the application. We do not distribute those data files so
@@ -177,21 +172,14 @@ deny = [
 ]
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
-    # These are transitive depdendencies of criterion, which is only included for benchmarking anyway
-    { name = "itoa", version = "0.4.8" },
-    { name = "textwrap", version = "0.11.0" },
-    { name = "clap", version = "2.34.0" },
-
-    # These are transitive depdendencies of cbindgen
-    { name = "strsim", version = "0.8.0" },
-    { name = "heck", version = "0.3.3" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate 
 # detection. Unlike skip, it also includes the entire tree of transitive 
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite
 skip-tree = [
-    #{ name = "ansi_term", version = "=0.11.0", depth = 20 },
+    # // We only ever use criterion in benchmarks
+    { name = "criterion", version = "0.4.0", depth=10},
 ]
 
 # This section is considered when running `cargo deny check sources`.
