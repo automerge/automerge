@@ -1,0 +1,33 @@
+{
+  "name": "redis-sync",
+  "version": "0.0.1",
+  "description": "",
+  "types": "./dist/index.d.ts",
+  "module": "./dist/mjs/index.js",
+  "main": "./dist/cjs/index.js",
+  "scripts": {
+    "lint": "eslint src",
+    "build": "tsc -p config/mjs.json && tsc -p config/cjs.json && tsc --emitDeclarationOnly",
+    "test": "ts-mocha test/*.ts",
+    "watch-docs": "typedoc src/index.ts --watch --readme typedoc-readme.md"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@automerge/automerge-wasm": "^0.1.19",
+    "redis": "^4.5.1"
+  },
+  "devDependencies": {
+    "@types/expect": "^24.3.0",
+    "@types/mocha": "^9.1.1",
+    "@types/uuid": "^8.3.4",
+    "@typescript-eslint/eslint-plugin": "^5.25.0",
+    "@typescript-eslint/parser": "^5.25.0",
+    "eslint": "^8.15.0",
+    "mocha": "^10.0.0",
+    "ts-mocha": "^10.0.0",
+    "ts-node": "^10.9.1",
+    "typedoc": "^0.23.16",
+    "typescript": "^4.6.4"
+  }
+}
