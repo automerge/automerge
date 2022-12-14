@@ -1,4 +1,4 @@
-use std::{borrow::Cow, ops::Range};
+use std::{borrow::Cow, convert::Infallible, ops::Range};
 
 use crate::storage::{
     columns::{compression, raw_column},
@@ -26,22 +26,26 @@ pub(super) struct CompressArgs {
 }
 
 /// Compress a document chunk returning the compressed bytes
-pub(super) fn compress<'a>(
-    args: Args<'a, compression::Uncompressed, CompressArgs>,
-) -> Result<Vec<u8>, raw_column::ParseError> {
+pub(super) fn compress(args: Args<'_, compression::Uncompressed, CompressArgs>) -> Vec<u8> {
     let header_len = args.extra_args.original_header_len;
     let threshold = args.extra_args.threshold;
-    Ok(Compression::<'a, Compressing, _>::new(
-        args,
-        Compressing {
-            threshold,
-            header_len,
-        },
-    )
-    .changes()?
-    .ops()?
-    .write_data()
-    .finish())
+    // Wrap in a closure so we can use `?` in the construction but still force the compiler
+    // to check that the error type is `Infallible`
+    let result: Result<_, Infallible> = (|| {
+        Ok(Compression::<Compressing, _>::new(
+            args,
+            Compressing {
+                threshold,
+                header_len,
+            },
+        )
+        .changes()?
+        .ops()?
+        .write_data()
+        .finish())
+    })();
+    // We just checked the error is `Infallible` so unwrap is fine
+    result.unwrap()
 }
 
 pub(super) fn decompress<'a>(
@@ -103,6 +107,7 @@ pub(super) struct Cols<T: compression::ColumnCompression> {
 trait Direction: std::fmt::Debug {
     type Out: compression::ColumnCompression;
     type In: compression::ColumnCompression;
+    type Error;
     type Args;
 
     /// This method represents the (de)compression process for a direction. The arguments are:
@@ -117,7 +122,7 @@ trait Direction: std::fmt::Debug {
         input: &[u8],
         out: &mut Vec<u8>,
         meta_out: &mut Vec<u8>,
-    ) -> Result<Cols<Self::Out>, raw_column::ParseError>;
+    ) -> Result<Cols<Self::Out>, Self::Error>;
 }
 #[derive(Debug)]
 struct Compressing {
@@ -126,6 +131,7 @@ struct Compressing {
 }
 
 impl Direction for Compressing {
+    type Error = Infallible;
     type Out = compression::Unknown;
     type In = compression::Uncompressed;
     type Args = CompressArgs;
@@ -136,7 +142,7 @@ impl Direction for Compressing {
         input: &[u8],
         out: &mut Vec<u8>,
         meta_out: &mut Vec<u8>,
-    ) -> Result<Cols<Self::Out>, raw_column::ParseError> {
+    ) -> Result<Cols<Self::Out>, Self::Error> {
         let start = out.len();
         let raw_columns = cols
             .raw_columns
@@ -153,6 +159,7 @@ impl Direction for Compressing {
 struct Decompressing;
 
 impl Direction for Decompressing {
+    type Error = raw_column::ParseError;
     type Out = compression::Uncompressed;
     type In = compression::Unknown;
     type Args = ();
@@ -244,7 +251,7 @@ impl<'a, D: Direction> Compression<'a, D, Starting> {
 }
 
 impl<'a, D: Direction> Compression<'a, D, Starting> {
-    fn changes(self) -> Result<Compression<'a, D, Changes<D>>, raw_column::ParseError> {
+    fn changes(self) -> Result<Compression<'a, D, Changes<D>>, D::Error> {
         let Starting {
             mut data_out,
             mut meta_out,
@@ -268,7 +275,7 @@ impl<'a, D: Direction> Compression<'a, D, Starting> {
 }
 
 impl<'a, D: Direction> Compression<'a, D, Changes<D>> {
-    fn ops(self) -> Result<Compression<'a, D, ChangesAndOps<D>>, raw_column::ParseError> {
+    fn ops(self) -> Result<Compression<'a, D, ChangesAndOps<D>>, D::Error> {
         let Changes {
             change_cols,
             mut meta_out,
