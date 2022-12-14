@@ -272,26 +272,23 @@ impl<'a> Document<'a> {
         let change_bytes = shift_range(change_start..change_end, header.len());
 
         let compressed_bytes = if let CompressConfig::Threshold(threshold) = compress {
-            let compressed = Cow::Owned(
-                compression::compress(compression::Args {
-                    prefix: prefix_len + header.len(),
-                    suffix: suffix_start + header.len(),
-                    ops: compression::Cols {
-                        raw_columns: ops_meta.raw_columns(),
-                        data: op_bytes.clone(),
-                    },
-                    changes: compression::Cols {
-                        raw_columns: change_meta.raw_columns(),
-                        data: change_bytes.clone(),
-                    },
-                    original: Cow::Borrowed(&bytes),
-                    extra_args: compression::CompressArgs {
-                        threshold,
-                        original_header_len: header_len,
-                    },
-                })
-                .unwrap(), // unwrap should be ok, error is only returned from decompress()
-            );
+            let compressed = Cow::Owned(compression::compress(compression::Args {
+                prefix: prefix_len + header.len(),
+                suffix: suffix_start + header.len(),
+                ops: compression::Cols {
+                    raw_columns: ops_meta.raw_columns(),
+                    data: op_bytes.clone(),
+                },
+                changes: compression::Cols {
+                    raw_columns: change_meta.raw_columns(),
+                    data: change_bytes.clone(),
+                },
+                original: Cow::Borrowed(&bytes),
+                extra_args: compression::CompressArgs {
+                    threshold,
+                    original_header_len: header_len,
+                },
+            }));
             Some(compressed)
         } else {
             None
