@@ -338,9 +338,30 @@
 <span id="336">336</span>
 <span id="337">337</span>
 <span id="338">338</span>
-</pre><pre class="rust"><code><span class="kw">use </span>std::{borrow::Cow, ops::Range};
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+</pre><pre class="rust"><code><span class="kw">use </span>std::{borrow::Cow, convert::Infallible, ops::Range};
 
-<span class="kw">use </span><span class="kw">crate</span>::storage::{columns::compression, shift_range, ChunkType, Header, RawColumns};
+<span class="kw">use </span><span class="kw">crate</span>::storage::{
+    columns::{compression, raw_column},
+    shift_range, ChunkType, Header, RawColumns,
+};
 
 <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct </span>Args&lt;<span class="lifetime">&#39;a</span>, T: compression::ColumnCompression, DirArgs&gt; {
     <span class="doccomment">/// The original data of the entire document chunk (compressed or uncompressed)
@@ -363,40 +384,50 @@
 }
 
 <span class="doccomment">/// Compress a document chunk returning the compressed bytes
-</span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>compress&lt;<span class="lifetime">&#39;a</span>&gt;(args: Args&lt;<span class="lifetime">&#39;a</span>, compression::Uncompressed, CompressArgs&gt;) -&gt; Vec&lt;u8&gt; {
+</span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>compress(args: Args&lt;<span class="lifetime">&#39;_</span>, compression::Uncompressed, CompressArgs&gt;) -&gt; Vec&lt;u8&gt; {
     <span class="kw">let </span>header_len = args.extra_args.original_header_len;
     <span class="kw">let </span>threshold = args.extra_args.threshold;
-    Compression::&lt;<span class="lifetime">&#39;a</span>, Compressing, <span class="kw">_</span>&gt;::new(
-        args,
-        Compressing {
-            threshold,
-            header_len,
-        },
-    )
-    .changes()
-    .ops()
-    .write_data()
-    .finish()
+    <span class="comment">// Wrap in a closure so we can use `?` in the construction but still force the compiler
+    // to check that the error type is `Infallible`
+    </span><span class="kw">let </span>result: <span class="prelude-ty">Result</span>&lt;<span class="kw">_</span>, Infallible&gt; = (|| {
+        <span class="prelude-val">Ok</span>(Compression::&lt;Compressing, <span class="kw">_</span>&gt;::new(
+            args,
+            Compressing {
+                threshold,
+                header_len,
+            },
+        )
+        .changes()<span class="question-mark">?
+        </span>.ops()<span class="question-mark">?
+        </span>.write_data()
+        .finish())
+    })();
+    <span class="comment">// We just checked the error is `Infallible` so unwrap is fine
+    </span>result.unwrap()
 }
 
-<span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>decompress&lt;<span class="lifetime">&#39;a</span>&gt;(args: Args&lt;<span class="lifetime">&#39;a</span>, compression::Unknown, ()&gt;) -&gt; Decompressed&lt;<span class="lifetime">&#39;a</span>&gt; {
+<span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>decompress&lt;<span class="lifetime">&#39;a</span>&gt;(
+    args: Args&lt;<span class="lifetime">&#39;a</span>, compression::Unknown, ()&gt;,
+) -&gt; <span class="prelude-ty">Result</span>&lt;Decompressed&lt;<span class="lifetime">&#39;a</span>&gt;, raw_column::ParseError&gt; {
     <span class="kw">match </span>(
         args.changes.raw_columns.uncompressed(),
         args.ops.raw_columns.uncompressed(),
     ) {
-        (<span class="prelude-val">Some</span>(changes), <span class="prelude-val">Some</span>(ops)) =&gt; Decompressed {
+        (<span class="prelude-val">Some</span>(changes), <span class="prelude-val">Some</span>(ops)) =&gt; <span class="prelude-val">Ok</span>(Decompressed {
             changes,
             ops,
             compressed: <span class="prelude-val">None</span>,
             uncompressed: args.original,
             change_bytes: args.changes.data,
             op_bytes: args.ops.data,
-        },
-        <span class="kw">_ </span>=&gt; Compression::&lt;<span class="lifetime">&#39;a</span>, Decompressing, <span class="kw">_</span>&gt;::new(args, Decompressing)
-            .changes()
-            .ops()
-            .write_data()
-            .finish(),
+        }),
+        <span class="kw">_ </span>=&gt; <span class="prelude-val">Ok</span>(
+            Compression::&lt;<span class="lifetime">&#39;a</span>, Decompressing, <span class="kw">_</span>&gt;::new(args, Decompressing)
+                .changes()<span class="question-mark">?
+                </span>.ops()<span class="question-mark">?
+                </span>.write_data()
+                .finish(),
+        ),
     }
 }
 
@@ -434,6 +465,7 @@
 </span><span class="kw">trait </span>Direction: std::fmt::Debug {
     <span class="kw">type </span>Out: compression::ColumnCompression;
     <span class="kw">type </span>In: compression::ColumnCompression;
+    <span class="kw">type </span>Error;
     <span class="kw">type </span>Args;
 
     <span class="doccomment">/// This method represents the (de)compression process for a direction. The arguments are:
@@ -448,7 +480,7 @@
         input: <span class="kw-2">&amp;</span>[u8],
         out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
         meta_out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
-    ) -&gt; Cols&lt;<span class="self">Self</span>::Out&gt;;
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Cols&lt;<span class="self">Self</span>::Out&gt;, <span class="self">Self</span>::Error&gt;;
 }
 <span class="attribute">#[derive(Debug)]
 </span><span class="kw">struct </span>Compressing {
@@ -457,6 +489,7 @@
 }
 
 <span class="kw">impl </span>Direction <span class="kw">for </span>Compressing {
+    <span class="kw">type </span>Error = Infallible;
     <span class="kw">type </span>Out = compression::Unknown;
     <span class="kw">type </span>In = compression::Uncompressed;
     <span class="kw">type </span>Args = CompressArgs;
@@ -467,16 +500,16 @@
         input: <span class="kw-2">&amp;</span>[u8],
         out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
         meta_out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
-    ) -&gt; Cols&lt;<span class="self">Self</span>::Out&gt; {
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Cols&lt;<span class="self">Self</span>::Out&gt;, <span class="self">Self</span>::Error&gt; {
         <span class="kw">let </span>start = out.len();
         <span class="kw">let </span>raw_columns = cols
             .raw_columns
             .compress(<span class="kw-2">&amp;</span>input[cols.data.clone()], out, <span class="self">self</span>.threshold);
         raw_columns.write(meta_out);
-        Cols {
+        <span class="prelude-val">Ok</span>(Cols {
             data: start..out.len(),
             raw_columns,
-        }
+        })
     }
 }
 
@@ -484,6 +517,7 @@
 </span><span class="kw">struct </span>Decompressing;
 
 <span class="kw">impl </span>Direction <span class="kw">for </span>Decompressing {
+    <span class="kw">type </span>Error = raw_column::ParseError;
     <span class="kw">type </span>Out = compression::Uncompressed;
     <span class="kw">type </span>In = compression::Unknown;
     <span class="kw">type </span>Args = ();
@@ -494,14 +528,16 @@
         input: <span class="kw-2">&amp;</span>[u8],
         out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
         meta_out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
-    ) -&gt; Cols&lt;<span class="self">Self</span>::Out&gt; {
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Cols&lt;<span class="self">Self</span>::Out&gt;, raw_column::ParseError&gt; {
         <span class="kw">let </span>start = out.len();
-        <span class="kw">let </span>raw_columns = cols.raw_columns.uncompress(<span class="kw-2">&amp;</span>input[cols.data.clone()], out);
+        <span class="kw">let </span>raw_columns = cols
+            .raw_columns
+            .uncompress(<span class="kw-2">&amp;</span>input[cols.data.clone()], out)<span class="question-mark">?</span>;
         raw_columns.write(meta_out);
-        Cols {
+        <span class="prelude-val">Ok</span>(Cols {
             data: start..out.len(),
             raw_columns,
-        }
+        })
     }
 }
 
@@ -573,7 +609,7 @@
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, D: Direction&gt; Compression&lt;<span class="lifetime">&#39;a</span>, D, Starting&gt; {
-    <span class="kw">fn </span>changes(<span class="self">self</span>) -&gt; Compression&lt;<span class="lifetime">&#39;a</span>, D, Changes&lt;D&gt;&gt; {
+    <span class="kw">fn </span>changes(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Compression&lt;<span class="lifetime">&#39;a</span>, D, Changes&lt;D&gt;&gt;, D::Error&gt; {
         <span class="kw">let </span>Starting {
             <span class="kw-2">mut </span>data_out,
             <span class="kw-2">mut </span>meta_out,
@@ -583,8 +619,8 @@
             <span class="kw-2">&amp;</span><span class="self">self</span>.args.original,
             <span class="kw-2">&amp;mut </span>data_out,
             <span class="kw-2">&amp;mut </span>meta_out,
-        );
-        Compression {
+        )<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(Compression {
             args: <span class="self">self</span>.args,
             direction: <span class="self">self</span>.direction,
             state: Changes {
@@ -592,12 +628,12 @@
                 meta_out,
                 data_out,
             },
-        }
+        })
     }
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, D: Direction&gt; Compression&lt;<span class="lifetime">&#39;a</span>, D, Changes&lt;D&gt;&gt; {
-    <span class="kw">fn </span>ops(<span class="self">self</span>) -&gt; Compression&lt;<span class="lifetime">&#39;a</span>, D, ChangesAndOps&lt;D&gt;&gt; {
+    <span class="kw">fn </span>ops(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Compression&lt;<span class="lifetime">&#39;a</span>, D, ChangesAndOps&lt;D&gt;&gt;, D::Error&gt; {
         <span class="kw">let </span>Changes {
             change_cols,
             <span class="kw-2">mut </span>meta_out,
@@ -608,8 +644,8 @@
             <span class="kw-2">&amp;</span><span class="self">self</span>.args.original,
             <span class="kw-2">&amp;mut </span>data_out,
             <span class="kw-2">&amp;mut </span>meta_out,
-        );
-        Compression {
+        )<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(Compression {
             args: <span class="self">self</span>.args,
             direction: <span class="self">self</span>.direction,
             state: ChangesAndOps {
@@ -618,7 +654,7 @@
                 meta_out,
                 data_out,
             },
-        }
+        })
     }
 }
 

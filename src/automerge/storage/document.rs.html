@@ -342,6 +342,7 @@
 <span id="340">340</span>
 <span id="341">341</span>
 <span id="342">342</span>
+<span id="343">343</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::{borrow::Cow, ops::Range};
 
 <span class="kw">use super</span>::{parse, shift_range, ChunkType, Columns, Header, RawColumns};
@@ -517,7 +518,8 @@
                 raw_columns: ops_meta,
             },
             extra_args: (),
-        });
+        })
+        .map_err(|e| parse::ParseError::Error(ParseError::RawColumns(e)))<span class="question-mark">?</span>;
 
         <span class="kw">let </span>ops_layout = Columns::parse(op_bytes.len(), ops.iter()).map_err(|e| {
             parse::ParseError::Error(ParseError::BadColumnLayout {

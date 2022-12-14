@@ -263,6 +263,12 @@
 <span id="261">261</span>
 <span id="262">262</span>
 <span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::{io::Read, marker::PhantomData, ops::Range};
 
 <span class="kw">use </span><span class="kw">crate</span>::storage::parse;
@@ -338,15 +344,19 @@
         }
     }
 
-    <span class="kw">fn </span>decompress(<span class="kw-2">&amp;</span><span class="self">self</span>, input: <span class="kw-2">&amp;</span>[u8], out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;) -&gt; (ColumnSpec, usize) {
+    <span class="kw">fn </span>decompress(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        input: <span class="kw-2">&amp;</span>[u8],
+        out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(ColumnSpec, usize), ParseError&gt; {
         <span class="kw">let </span>len = <span class="kw">if </span><span class="self">self</span>.spec.deflate() {
             <span class="kw">let </span><span class="kw-2">mut </span>inflater = flate2::bufread::DeflateDecoder::new(<span class="kw-2">&amp;</span>input[<span class="self">self</span>.data.clone()]);
-            inflater.read_to_end(out).unwrap()
-        } <span class="kw">else </span>{
+            inflater.read_to_end(out).map_err(ParseError::Deflate)<span class="question-mark">?
+        </span>} <span class="kw">else </span>{
             out.extend(<span class="kw-2">&amp;</span>input[<span class="self">self</span>.data.clone()]);
             <span class="self">self</span>.data.len()
         };
-        (<span class="self">self</span>.spec.inflated(), len)
+        <span class="prelude-val">Ok</span>((<span class="self">self</span>.spec.inflated(), len))
     }
 }
 
@@ -405,7 +415,7 @@
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         input: <span class="kw-2">&amp;</span>[u8],
         out: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
-    ) -&gt; RawColumns&lt;compression::Uncompressed&gt; {
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;RawColumns&lt;compression::Uncompressed&gt;, ParseError&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>result = Vec::with_capacity(<span class="self">self</span>.<span class="number">0</span>.len());
         <span class="kw">let </span><span class="kw-2">mut </span>start = <span class="number">0</span>;
         <span class="kw">for </span>col <span class="kw">in </span><span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0 </span>{
@@ -413,8 +423,8 @@
                 out.extend(<span class="kw-2">&amp;</span>input[decomp.data.clone()]);
                 (decomp.spec, decomp.data.len())
             } <span class="kw">else </span>{
-                col.decompress(input, out)
-            };
+                col.decompress(input, out)<span class="question-mark">?
+            </span>};
             result.push(RawColumn {
                 spec,
                 data: start..(start + len),
@@ -422,7 +432,7 @@
             });
             start += len;
         }
-        RawColumns(result)
+        <span class="prelude-val">Ok</span>(RawColumns(result))
     }
 }
 
@@ -458,6 +468,8 @@
     </span>NotInNormalOrder,
     <span class="attribute">#[error(transparent)]
     </span>Leb128(<span class="attribute">#[from] </span>parse::leb128::Error),
+    <span class="attribute">#[error(transparent)]
+    </span>Deflate(<span class="attribute">#[from] </span>std::io::Error),
 }
 
 <span class="kw">impl </span>RawColumns&lt;compression::Unknown&gt; {
