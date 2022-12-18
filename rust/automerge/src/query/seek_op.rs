@@ -76,8 +76,19 @@ impl<'a> TreeQuery<'a> for SeekOp<'a> {
                     if self.pos + child.len() >= start {
                         // skip empty nodes
                         if child.index.visible_len(ListEncoding::List) == 0 {
-                            self.pos += child.len();
-                            QueryResult::Next
+                            let child_contains_key =
+                                child.elements.iter().any(|e| ops[*e].key == self.op.key);
+                            if !child_contains_key {
+                                // If we are in a node which has no visible ops, but none of the
+                                // elements of the node match the key of the op, then we must have
+                                // finished processing and so we can just return.
+                                // See https://github.com/automerge/automerge-rs/pull/480
+                                QueryResult::Finish
+                            } else {
+                                // Otherwise, we need to proceed to the next node
+                                self.pos += child.len();
+                                QueryResult::Next
+                            }
                         } else {
                             QueryResult::Descend
                         }
@@ -146,5 +157,109 @@ impl<'a> TreeQuery<'a> for SeekOp<'a> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        op_set::OpSet,
+        op_tree::B,
+        query::SeekOp,
+        types::{Key, ObjId, Op, OpId},
+        ActorId, ScalarValue,
+    };
+
+    #[test]
+    fn seek_on_page_boundary() {
+        // Create an optree in which the only visible ops are on the boundaries of the nodes,
+        // i.e. the visible elements are in the internal nodes. Like so
+        //
+        //                      .----------------------.
+        //                      | id   |  key  |  succ |
+        //                      | B    |  "a"  |       |
+        //                      | 2B   |  "b"  |       |
+        //                      '----------------------'
+        //                           /      |      \
+        //  ;------------------------.      |       `------------------------------------.
+        //  | id     | op     | succ |      |       | id            | op     | succ      |
+        //  | 0      |set "a" |  1   |      |       | 2B + 1        |set "c" |  2B + 2   |
+        //  | 1      |set "a" |  2   |      |       | 2B + 2        |set "c" |  2B + 3   |
+        //  | 2      |set "a" |  3   |      |       ...
+        //  ...                             |       | 3B            |set "c" |           |
+        //  | B - 1  |set "a" |  B   |      |       '------------------------------------'
+        //  '--------'--------'------'      |
+        //                                  |
+        //                      .-----------------------------.
+        //                      | id         |  key  |  succ  |
+        //                      | B + 1      |  "b"  | B + 2  |
+        //                      | B + 2      |  "b"  | B + 3  |
+        //                      ....
+        //                      | B + (B - 1 |  "b"  |   2B   |
+        //                      '-----------------------------'
+        //
+        // The important point here is that the leaf nodes contain no visible ops for keys "a" and
+        // "b".
+        let mut set = OpSet::new();
+        let actor = set.m.actors.cache(ActorId::random());
+        let a = set.m.props.cache("a".to_string());
+        let b = set.m.props.cache("b".to_string());
+        let c = set.m.props.cache("c".to_string());
+
+        let mut counter = 0;
+        // For each key insert `B` operations with the `pred` and `succ` setup such that the final
+        // operation for each key is the only visible op.
+        for key in [a, b, c] {
+            for iteration in 0..B {
+                // Generate a value to insert
+                let keystr = set.m.props.get(key);
+                let val = keystr.repeat(iteration + 1);
+
+                // Only the last op is visible
+                let pred = if iteration == 0 {
+                    Default::default()
+                } else {
+                    set.m
+                        .sorted_opids(vec![OpId::new(counter - 1, actor)].into_iter())
+                };
+
+                // only the last op is visible
+                let succ = if iteration == B - 1 {
+                    Default::default()
+                } else {
+                    set.m
+                        .sorted_opids(vec![OpId::new(counter, actor)].into_iter())
+                };
+
+                let op = Op {
+                    id: OpId::new(counter, actor),
+                    action: crate::OpType::Put(ScalarValue::Str(val.into())),
+                    key: Key::Map(key),
+                    succ,
+                    pred,
+                    insert: false,
+                };
+                set.insert(counter as usize, &ObjId::root(), op);
+                counter += 1;
+            }
+        }
+
+        // Now try and create an op which inserts at the next index of 'a'
+        let new_op = Op {
+            id: OpId::new(counter, actor),
+            action: crate::OpType::Put(ScalarValue::Str("test".into())),
+            key: Key::Map(a),
+            succ: Default::default(),
+            pred: set
+                .m
+                .sorted_opids(std::iter::once(OpId::new(B as u64 - 1, actor))),
+            insert: false,
+        };
+
+        let q = SeekOp::new(&new_op);
+        let q = set.search(&ObjId::root(), q);
+
+        // we've inserted `B - 1` elements for "a", so the index should be `B`
+        assert_eq!(q.pos, B);
     }
 }

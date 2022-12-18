@@ -5,7 +5,7 @@ use automerge::{
 };
 
 // set up logging for all the tests
-use test_log::test;
+//use test_log::test;
 
 #[allow(unused_imports)]
 use automerge_test::{
@@ -1410,4 +1410,41 @@ fn invalid_deflate_stream() {
     ];
 
     assert!(Automerge::load(&bytes).is_err());
+}
+
+#[test]
+fn bad_change_on_optree_node_boundary() {
+    let mut doc = Automerge::new();
+    doc.transact::<_, _, AutomergeError>(|d| {
+        d.put(ROOT, "a", "z")?;
+        d.put(ROOT, "b", 0)?;
+        d.put(ROOT, "c", 0)?;
+        Ok(())
+    })
+    .unwrap();
+    let iterations = 15_u64;
+    for i in 0_u64..iterations {
+        doc.transact::<_, _, AutomergeError>(|d| {
+            let s = "a".repeat(i as usize);
+            d.put(ROOT, "a", s)?;
+            d.put(ROOT, "b", i + 1)?;
+            d.put(ROOT, "c", i + 1)?;
+            Ok(())
+        })
+        .unwrap();
+    }
+    let mut doc2 = Automerge::load(doc.save().as_slice()).unwrap();
+    doc.transact::<_, _, AutomergeError>(|d| {
+        let i = iterations + 2;
+        let s = "a".repeat(i as usize);
+        d.put(ROOT, "a", s)?;
+        d.put(ROOT, "b", i)?;
+        d.put(ROOT, "c", i)?;
+        Ok(())
+    })
+    .unwrap();
+    let change = doc.get_changes(&doc2.get_heads()).unwrap();
+    doc2.apply_changes(change.into_iter().cloned().collect::<Vec<_>>())
+        .unwrap();
+    Automerge::load(doc2.save().as_slice()).unwrap();
 }
