@@ -8,7 +8,7 @@ use crate::{
 mod change_collector;
 mod reconstruct_document;
 pub(crate) use reconstruct_document::{
-    reconstruct_document, DocObserver, LoadedObject, Reconstructed,
+    reconstruct_document, DocObserver, LoadedObject, Reconstructed, VerificationMode,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -84,7 +84,7 @@ fn load_next_change<'a>(
             let Reconstructed {
                 changes: new_changes,
                 ..
-            } = reconstruct_document(&d, NullObserver)
+            } = reconstruct_document(&d, VerificationMode::DontCheck, NullObserver)
                 .map_err(|e| Error::InflateDocument(Box::new(e)))?;
             changes.extend(new_changes);
         }

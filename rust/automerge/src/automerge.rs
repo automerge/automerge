@@ -12,7 +12,7 @@ use crate::keys::Keys;
 use crate::op_observer::OpObserver;
 use crate::op_set::OpSet;
 use crate::parents::Parents;
-use crate::storage::{self, load, CompressConfig};
+use crate::storage::{self, load, CompressConfig, VerificationMode};
 use crate::transaction::{
     self, CommitOptions, Failure, Observed, Success, Transaction, TransactionArgs, UnObserved,
 };
@@ -650,13 +650,18 @@ impl Automerge {
 
     /// Load a document.
     pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {
-        Self::load_with::<()>(data, None)
+        Self::load_with::<()>(data, VerificationMode::Check, None)
+    }
+
+    pub fn load_unverified_heads(data: &[u8]) -> Result<Self, AutomergeError> {
+        Self::load_with::<()>(data, VerificationMode::DontCheck, None)
     }
 
     /// Load a document.
     #[tracing::instrument(skip(data, observer), err)]
     pub fn load_with<Obs: OpObserver>(
         data: &[u8],
+        mode: VerificationMode,
         mut observer: Option<&mut Obs>,
     ) -> Result<Self, AutomergeError> {
         if data.is_empty() {
@@ -679,8 +684,10 @@ impl Automerge {
                     changes,
                     heads,
                 } = match &mut observer {
-                    Some(o) => storage::load::reconstruct_document(&d, OpSet::observed_builder(*o)),
-                    None => storage::load::reconstruct_document(&d, OpSet::builder()),
+                    Some(o) => {
+                        storage::load::reconstruct_document(&d, mode, OpSet::observed_builder(*o))
+                    }
+                    None => storage::load::reconstruct_document(&d, mode, OpSet::builder()),
                 }
                 .map_err(|e| load::Error::InflateDocument(Box::new(e)))?;
                 let mut hashes_by_index = HashMap::new();
