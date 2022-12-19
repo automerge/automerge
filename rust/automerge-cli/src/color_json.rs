@@ -132,6 +132,15 @@ impl<F: Formatter> Formatter for ColoredFormatter<F> {
         })
     }
 
+    fn write_i128<W>(&mut self, _writer: &mut W, value: i128) -> std::io::Result<()>
+    where
+        W: ?Sized + std::io::Write,
+    {
+        write_colored(self.style.integer_value.clone(), |w| {
+            self.formatter.write_i128(w, value)
+        })
+    }
+
     fn write_u8<W>(&mut self, _writer: &mut W, value: u8) -> std::io::Result<()>
     where
         W: ?Sized + std::io::Write,
@@ -168,6 +177,15 @@ impl<F: Formatter> Formatter for ColoredFormatter<F> {
         })
     }
 
+    fn write_u128<W>(&mut self, _writer: &mut W, value: u128) -> std::io::Result<()>
+    where
+        W: ?Sized + std::io::Write,
+    {
+        write_colored(self.style.integer_value.clone(), |w| {
+            self.formatter.write_u128(w, value)
+        })
+    }
+
     fn write_f32<W>(&mut self, _writer: &mut W, value: f32) -> std::io::Result<()>
     where
         W: ?Sized + std::io::Write,
@@ -199,32 +217,32 @@ impl<F: Formatter> Formatter for ColoredFormatter<F> {
     where
         W: ?Sized + std::io::Write,
     {
-        if self.style.string_include_quotation {
-            let style = if self.in_object_key {
-                &self.style.key
+        let style = if self.style.string_include_quotation {
+            if self.in_object_key {
+                self.style.key.clone()
             } else {
-                &self.style.string_value
-            };
-            write_colored(style.clone(), |w| self.formatter.begin_string(w))
+                self.style.string_value.clone()
+            }
         } else {
-            self.formatter.begin_string(_writer)
-        }
+            ColorSpec::new()
+        };
+        write_colored(style, |w| self.formatter.begin_string(w))
     }
 
     fn end_string<W>(&mut self, _writer: &mut W) -> std::io::Result<()>
     where
         W: ?Sized + std::io::Write,
     {
-        if self.style.string_include_quotation {
-            let style = if self.in_object_key {
-                &self.style.key
+        let style = if self.style.string_include_quotation {
+            if self.in_object_key {
+                self.style.key.clone()
             } else {
-                &self.style.string_value
-            };
-            write_colored(style.clone(), |w| self.formatter.end_string(w))
+                self.style.string_value.clone()
+            }
         } else {
-            self.formatter.end_string(_writer)
-        }
+            ColorSpec::new()
+        };
+        write_colored(style, |w| self.formatter.end_string(w))
     }
 
     fn write_string_fragment<W>(&mut self, _writer: &mut W, fragment: &str) -> std::io::Result<()>
@@ -232,11 +250,11 @@ impl<F: Formatter> Formatter for ColoredFormatter<F> {
         W: ?Sized + std::io::Write,
     {
         let style = if self.in_object_key {
-            &self.style.key
+            self.style.key.clone()
         } else {
-            &self.style.string_value
+            self.style.string_value.clone()
         };
-        write_colored(style.clone(), |w| w.write_all(fragment.as_bytes()))
+        write_colored(style, |w| w.write_all(fragment.as_bytes()))
     }
 
     fn write_char_escape<W>(
@@ -248,13 +266,11 @@ impl<F: Formatter> Formatter for ColoredFormatter<F> {
         W: ?Sized + std::io::Write,
     {
         let style = if self.in_object_key {
-            &self.style.key
+            self.style.key.clone()
         } else {
-            &self.style.string_value
+            self.style.string_value.clone()
         };
-        write_colored(style.clone(), |w| {
-            self.formatter.write_char_escape(w, char_escape)
-        })
+        write_colored(style, |w| self.formatter.write_char_escape(w, char_escape))
     }
 
     fn begin_array<W>(&mut self, _writer: &mut W) -> std::io::Result<()>
@@ -275,18 +291,20 @@ impl<F: Formatter> Formatter for ColoredFormatter<F> {
         })
     }
 
-    fn begin_array_value<W>(&mut self, writer: &mut W, first: bool) -> std::io::Result<()>
+    fn begin_array_value<W>(&mut self, _writer: &mut W, first: bool) -> std::io::Result<()>
     where
         W: ?Sized + std::io::Write,
     {
-        self.formatter.begin_array_value(writer, first)
+        write_colored(ColorSpec::new(), |w| {
+            self.formatter.begin_array_value(w, first)
+        })
     }
 
-    fn end_array_value<W>(&mut self, writer: &mut W) -> std::io::Result<()>
+    fn end_array_value<W>(&mut self, _writer: &mut W) -> std::io::Result<()>
     where
         W: ?Sized + std::io::Write,
     {
-        self.formatter.end_array_value(writer)
+        write_colored(ColorSpec::new(), |w| self.formatter.end_array_value(w))
     }
 
     fn begin_object<W>(&mut self, _writer: &mut W) -> std::io::Result<()>
@@ -307,42 +325,46 @@ impl<F: Formatter> Formatter for ColoredFormatter<F> {
         })
     }
 
-    fn begin_object_key<W>(&mut self, writer: &mut W, first: bool) -> std::io::Result<()>
+    fn begin_object_key<W>(&mut self, _writer: &mut W, first: bool) -> std::io::Result<()>
     where
         W: ?Sized + std::io::Write,
     {
         self.in_object_key = true;
-        self.formatter.begin_object_key(writer, first)
+        write_colored(ColorSpec::new(), |w| {
+            self.formatter.begin_object_key(w, first)
+        })
     }
 
-    fn end_object_key<W>(&mut self, writer: &mut W) -> std::io::Result<()>
+    fn end_object_key<W>(&mut self, _writer: &mut W) -> std::io::Result<()>
     where
         W: ?Sized + std::io::Write,
     {
         self.in_object_key = false;
-        self.formatter.end_object_key(writer)
+        write_colored(ColorSpec::new(), |w| self.formatter.end_object_key(w))
     }
 
-    fn begin_object_value<W>(&mut self, writer: &mut W) -> std::io::Result<()>
+    fn begin_object_value<W>(&mut self, _writer: &mut W) -> std::io::Result<()>
     where
         W: ?Sized + std::io::Write,
     {
         self.in_object_key = false;
-        self.formatter.begin_object_value(writer)
+        write_colored(ColorSpec::new(), |w| self.formatter.begin_object_value(w))
     }
 
-    fn end_object_value<W>(&mut self, writer: &mut W) -> std::io::Result<()>
+    fn end_object_value<W>(&mut self, _writer: &mut W) -> std::io::Result<()>
     where
         W: ?Sized + std::io::Write,
     {
         self.in_object_key = false;
-        self.formatter.end_object_value(writer)
+        write_colored(ColorSpec::new(), |w| self.formatter.end_object_value(w))
     }
 
-    fn write_raw_fragment<W>(&mut self, writer: &mut W, fragment: &str) -> std::io::Result<()>
+    fn write_raw_fragment<W>(&mut self, _writer: &mut W, fragment: &str) -> std::io::Result<()>
     where
         W: ?Sized + std::io::Write,
     {
-        self.formatter.write_raw_fragment(writer, fragment)
+        write_colored(ColorSpec::new(), |w| {
+            self.formatter.write_raw_fragment(w, fragment)
+        })
     }
 }
