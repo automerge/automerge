@@ -9,6 +9,7 @@ use is_terminal::IsTerminal;
 
 mod color_json;
 mod examine;
+mod examine_sync;
 mod export;
 mod import;
 mod merge;
@@ -114,6 +115,9 @@ enum Command {
         skip_verifying_heads: SkipVerifyFlag,
     },
 
+    /// Read an automerge sync messaage and print a JSON representation of it
+    ExamineSync { input_file: Option<PathBuf> },
+
     /// Read one or more automerge documents and output a merged, compacted version of them
     Merge {
         /// The file to write to. If omitted assumes stdout
@@ -203,6 +207,18 @@ fn main() -> Result<()> {
                 skip_verifying_heads,
                 std::io::stdout().is_terminal(),
             ) {
+                Ok(()) => {}
+                Err(e) => {
+                    eprintln!("Error: {:?}", e);
+                }
+            }
+            Ok(())
+        }
+        Command::ExamineSync { input_file } => {
+            let in_buffer = open_file_or_stdin(input_file)?;
+            let out_buffer = std::io::stdout();
+            match examine_sync::examine_sync(in_buffer, out_buffer, std::io::stdout().is_terminal())
+            {
                 Ok(()) => {}
                 Err(e) => {
                     eprintln!("Error: {:?}", e);
