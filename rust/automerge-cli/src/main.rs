@@ -1,10 +1,12 @@
 use std::{fs::File, path::PathBuf, str::FromStr};
 
 use anyhow::{anyhow, Result};
-use clap::Parser;
+use clap::{
+    builder::{BoolishValueParser, TypedValueParser, ValueParserFactory},
+    Parser,
+};
 use is_terminal::IsTerminal;
 
-//mod change;
 mod color_json;
 mod examine;
 mod export;
@@ -22,6 +24,44 @@ struct Opts {
 enum ExportFormat {
     Json,
     Toml,
+}
+
+#[derive(Copy, Clone, Default, Debug)]
+pub(crate) struct SkipVerifyFlag(bool);
+
+impl SkipVerifyFlag {
+    fn load(&self, buf: &[u8]) -> Result<automerge::Automerge, automerge::AutomergeError> {
+        if self.0 {
+            automerge::Automerge::load(buf)
+        } else {
+            automerge::Automerge::load_unverified_heads(buf)
+        }
+    }
+}
+
+#[derive(Clone)]
+struct SkipVerifyFlagParser;
+impl ValueParserFactory for SkipVerifyFlag {
+    type Parser = SkipVerifyFlagParser;
+
+    fn value_parser() -> Self::Parser {
+        SkipVerifyFlagParser
+    }
+}
+
+impl TypedValueParser for SkipVerifyFlagParser {
+    type Value = SkipVerifyFlag;
+
+    fn parse_ref(
+        &self,
+        cmd: &clap::Command,
+        arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        BoolishValueParser::new()
+            .parse_ref(cmd, arg, value)
+            .map(SkipVerifyFlag)
+    }
 }
 
 impl FromStr for ExportFormat {
@@ -50,6 +90,10 @@ enum Command {
         /// The file to write to. If omitted assumes stdout
         #[clap(long("out"), short('o'))]
         output_file: Option<PathBuf>,
+
+        /// Whether to verify the head hashes of a compressed document
+        #[clap(long, action = clap::ArgAction::SetFalse)]
+        skip_verifying_heads: SkipVerifyFlag,
     },
 
     Import {
@@ -64,45 +108,11 @@ enum Command {
         changes_file: Option<PathBuf>,
     },
 
-    /// Read an automerge document from a file or stdin, perform a change on it and write a new
-    /// document to stdout or the specified output file.
-    Change {
-        /// The change script to perform. Change scripts have the form <command> <path> [<JSON value>].
-        /// The possible commands are 'set', 'insert', 'delete', and 'increment'.
-        ///
-        /// Paths look like this: $["mapkey"][0]. They always lways start with a '$', then each
-        /// subsequent segment of the path is either a string in double quotes to index a key in a
-        /// map, or an integer index to address an array element.
-        ///
-        /// Examples
-        ///
-        /// ## set
-        ///
-        /// > automerge change 'set $["someobject"] {"items": []}' somefile
-        ///
-        /// ## insert
-        ///
-        /// > automerge change 'insert $["someobject"]["items"][0] "item1"' somefile
-        ///
-        /// ## increment
-        ///
-        /// > automerge change 'increment $["mycounter"]'
-        ///
-        /// ## delete
-        ///
-        /// > automerge change 'delete $["someobject"]["items"]' somefile
-        script: String,
-
-        /// The file to change, if omitted will assume stdin
-        input_file: Option<PathBuf>,
-
-        /// Path to write Automerge changes to, if omitted will write to stdout
-        #[clap(long("out"), short('o'))]
-        output_file: Option<PathBuf>,
-    },
-
     /// Read an automerge document and print a JSON representation of the changes in it to stdout
-    Examine { input_file: Option<PathBuf> },
+    Examine {
+        input_file: Option<PathBuf>,
+        skip_verifying_heads: SkipVerifyFlag,
+    },
 
     /// Read one or more automerge documents and output a merged, compacted version of them
     Merge {
@@ -149,6 +159,7 @@ fn main() -> Result<()> {
             changes_file,
             format,
             output_file,
+            skip_verifying_heads,
         } => {
             let output: Box<dyn std::io::Write> = if let Some(output_file) = output_file {
                 Box::new(File::create(&output_file)?)
@@ -158,7 +169,12 @@ fn main() -> Result<()> {
             match format {
                 ExportFormat::Json => {
                     let mut in_buffer = open_file_or_stdin(changes_file)?;
-                    export::export_json(&mut in_buffer, output, std::io::stdout().is_terminal())
+                    export::export_json(
+                        &mut in_buffer,
+                        output,
+                        skip_verifying_heads,
+                        std::io::stdout().is_terminal(),
+                    )
                 }
                 ExportFormat::Toml => unimplemented!(),
             }
@@ -175,23 +191,18 @@ fn main() -> Result<()> {
             }
             ExportFormat::Toml => unimplemented!(),
         },
-        Command::Change { ..
-            //input_file,
-            //output_file,
-            //script,
+        Command::Examine {
+            input_file,
+            skip_verifying_heads,
         } => {
-            unimplemented!()
-/*
-            let in_buffer = open_file_or_stdin(input_file)?;
-            let mut out_buffer = create_file_or_stdout(output_file)?;
-                        change::change(in_buffer, &mut out_buffer, script.as_str())
-                            .map_err(|e| anyhow::format_err!("Unable to make changes: {:?}", e))
-*/
-        }
-        Command::Examine { input_file } => {
             let in_buffer = open_file_or_stdin(input_file)?;
             let out_buffer = std::io::stdout();
-            match examine::examine(in_buffer, out_buffer, std::io::stdout().is_terminal()) {
+            match examine::examine(
+                in_buffer,
+                out_buffer,
+                skip_verifying_heads,
+                std::io::stdout().is_terminal(),
+            ) {
                 Ok(()) => {}
                 Err(e) => {
                     eprintln!("Error: {:?}", e);

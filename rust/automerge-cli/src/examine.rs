@@ -1,7 +1,7 @@
 use automerge as am;
 use thiserror::Error;
 
-use crate::color_json::print_colored_json;
+use crate::{color_json::print_colored_json, SkipVerifyFlag};
 
 #[derive(Error, Debug)]
 pub enum ExamineError {
@@ -22,16 +22,18 @@ pub enum ExamineError {
     },
 }
 
-pub fn examine(
+pub(crate) fn examine(
     mut input: impl std::io::Read,
     mut output: impl std::io::Write,
+    skip: SkipVerifyFlag,
     is_tty: bool,
 ) -> Result<(), ExamineError> {
     let mut buf: Vec<u8> = Vec::new();
     input
         .read_to_end(&mut buf)
         .map_err(|e| ExamineError::ReadingChanges { source: e })?;
-    let doc = am::Automerge::load(&buf)
+    let doc = skip
+        .load(&buf)
         .map_err(|e| ExamineError::ApplyingInitialChanges { source: e })?;
     let uncompressed_changes: Vec<_> = doc
         .get_changes(&[])
