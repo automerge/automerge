@@ -14,6 +14,7 @@ pub(crate) use {
     chunk::{CheckSum, Chunk, ChunkType, Header},
     columns::{Columns, MismatchingColumn, RawColumn, RawColumns},
     document::{AsChangeMeta, AsDocOp, ChangeMetadata, CompressConfig, DocOp, Document},
+    load::VerificationMode,
 };
 
 fn shift_range(range: Range<usize>, by: usize) -> Range<usize> {

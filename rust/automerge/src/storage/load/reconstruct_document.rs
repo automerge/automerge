@@ -6,7 +6,7 @@ use crate::{
     change::Change,
     columnar::Key as DocOpKey,
     op_tree::OpSetMetadata,
-    storage::{DocOp, Document},
+    storage::{change::Verified, Change as StoredChange, DocOp, Document},
     types::{ChangeHash, ElemId, Key, ObjId, ObjType, Op, OpId, OpIds, OpType},
     ScalarValue,
 };
@@ -24,11 +24,27 @@ pub(crate) enum Error {
     #[error("invalid changes: {0}")]
     InvalidChanges(#[from] super::change_collector::Error),
     #[error("mismatching heads")]
-    MismatchingHeads,
+    MismatchingHeads(MismatchedHeads),
     #[error("missing operations")]
     MissingOps,
     #[error("succ out of order")]
     SuccOutOfOrder,
+}
+
+pub(crate) struct MismatchedHeads {
+    changes: Vec<StoredChange<'static, Verified>>,
+    expected_heads: BTreeSet<ChangeHash>,
+    derived_heads: BTreeSet<ChangeHash>,
+}
+
+impl std::fmt::Debug for MismatchedHeads {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MismatchedHeads")
+            .field("changes", &self.changes.len())
+            .field("expected_heads", &self.expected_heads)
+            .field("derived_heads", &self.derived_heads)
+            .finish()
+    }
 }
 
 /// All the operations loaded from an object in the document format
@@ -67,9 +83,16 @@ pub(crate) struct Reconstructed<Output> {
     pub(crate) heads: BTreeSet<ChangeHash>,
 }
 
+#[derive(Debug)]
+pub enum VerificationMode {
+    Check,
+    DontCheck,
+}
+
 #[instrument(skip(doc, observer))]
 pub(crate) fn reconstruct_document<'a, O: DocObserver>(
     doc: &'a Document<'a>,
+    mode: VerificationMode,
     mut observer: O,
 ) -> Result<Reconstructed<O::Output>, Error> {
     // The document format does not contain the bytes of the changes which are encoded in it
@@ -185,10 +208,16 @@ pub(crate) fn reconstruct_document<'a, O: DocObserver>(
 
     let super::change_collector::CollectedChanges { history, heads } =
         collector.finish(&metadata)?;
-    let expected_heads: BTreeSet<_> = doc.heads().iter().cloned().collect();
-    if expected_heads != heads {
-        tracing::error!(?expected_heads, ?heads, "mismatching heads");
-        return Err(Error::MismatchingHeads);
+    if matches!(mode, VerificationMode::Check) {
+        let expected_heads: BTreeSet<_> = doc.heads().iter().cloned().collect();
+        if expected_heads != heads {
+            tracing::error!(?expected_heads, ?heads, "mismatching heads");
+            return Err(Error::MismatchingHeads(MismatchedHeads {
+                changes: history,
+                expected_heads,
+                derived_heads: heads,
+            }));
+        }
     }
     let result = observer.finish(metadata);
 
