@@ -1,7 +1,7 @@
 use anyhow::Result;
 use automerge as am;
 
-use crate::color_json::print_colored_json;
+use crate::{color_json::print_colored_json, SkipVerifyFlag};
 
 pub(crate) fn map_to_json(doc: &am::Automerge, obj: &am::ObjId) -> serde_json::Value {
     let keys = doc.keys(obj);
@@ -71,20 +71,21 @@ fn scalar_to_json(val: &am::ScalarValue) -> serde_json::Value {
     }
 }
 
-fn get_state_json(input_data: Vec<u8>) -> Result<serde_json::Value> {
-    let doc = am::Automerge::load(&input_data).unwrap(); // FIXME
+fn get_state_json(input_data: Vec<u8>, skip: SkipVerifyFlag) -> Result<serde_json::Value> {
+    let doc = skip.load(&input_data).unwrap(); // FIXME
     Ok(map_to_json(&doc, &am::ObjId::Root))
 }
 
-pub fn export_json(
+pub(crate) fn export_json(
     mut changes_reader: impl std::io::Read,
     mut writer: impl std::io::Write,
+    skip: SkipVerifyFlag,
     is_tty: bool,
 ) -> Result<()> {
     let mut input_data = vec![];
     changes_reader.read_to_end(&mut input_data)?;
 
-    let state_json = get_state_json(input_data)?;
+    let state_json = get_state_json(input_data, skip)?;
     if is_tty {
         print_colored_json(&state_json).unwrap();
         writeln!(writer).unwrap();
@@ -105,7 +106,10 @@ mod tests {
 
     #[test]
     fn cli_export_with_empty_input() {
-        assert_eq!(get_state_json(vec![]).unwrap(), serde_json::json!({}))
+        assert_eq!(
+            get_state_json(vec![], Default::default()).unwrap(),
+            serde_json::json!({})
+        )
     }
 
     #[test]
@@ -119,7 +123,7 @@ mod tests {
         let mut backend = initialize_from_json(&initial_state_json).unwrap();
         let change_bytes = backend.save();
         assert_eq!(
-            get_state_json(change_bytes).unwrap(),
+            get_state_json(change_bytes, Default::default()).unwrap(),
             serde_json::json!({"sparrows": 15.0})
         )
     }
@@ -146,7 +150,7 @@ mod tests {
         */
         let change_bytes = backend.save();
         assert_eq!(
-            get_state_json(change_bytes).unwrap(),
+            get_state_json(change_bytes, Default::default()).unwrap(),
             serde_json::json!({
                 "birds": {
                     "wrens": 3.0,
