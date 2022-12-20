@@ -149,6 +149,121 @@
 <span id="148">148</span>
 <span id="149">149</span>
 <span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+<span id="218">218</span>
+<span id="219">219</span>
+<span id="220">220</span>
+<span id="221">221</span>
+<span id="222">222</span>
+<span id="223">223</span>
+<span id="224">224</span>
+<span id="225">225</span>
+<span id="226">226</span>
+<span id="227">227</span>
+<span id="228">228</span>
+<span id="229">229</span>
+<span id="230">230</span>
+<span id="231">231</span>
+<span id="232">232</span>
+<span id="233">233</span>
+<span id="234">234</span>
+<span id="235">235</span>
+<span id="236">236</span>
+<span id="237">237</span>
+<span id="238">238</span>
+<span id="239">239</span>
+<span id="240">240</span>
+<span id="241">241</span>
+<span id="242">242</span>
+<span id="243">243</span>
+<span id="244">244</span>
+<span id="245">245</span>
+<span id="246">246</span>
+<span id="247">247</span>
+<span id="248">248</span>
+<span id="249">249</span>
+<span id="250">250</span>
+<span id="251">251</span>
+<span id="252">252</span>
+<span id="253">253</span>
+<span id="254">254</span>
+<span id="255">255</span>
+<span id="256">256</span>
+<span id="257">257</span>
+<span id="258">258</span>
+<span id="259">259</span>
+<span id="260">260</span>
+<span id="261">261</span>
+<span id="262">262</span>
+<span id="263">263</span>
+<span id="264">264</span>
+<span id="265">265</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTreeNode};
 <span class="kw">use </span><span class="kw">crate</span>::query::{binary_search_by, QueryResult, TreeQuery};
 <span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, Op, HEAD};
@@ -227,8 +342,19 @@
                     <span class="kw">if </span><span class="self">self</span>.pos + child.len() &gt;= start {
                         <span class="comment">// skip empty nodes
                         </span><span class="kw">if </span>child.index.visible_len(ListEncoding::List) == <span class="number">0 </span>{
-                            <span class="self">self</span>.pos += child.len();
-                            QueryResult::Next
+                            <span class="kw">let </span>child_contains_key =
+                                child.elements.iter().any(|e| ops[<span class="kw-2">*</span>e].key == <span class="self">self</span>.op.key);
+                            <span class="kw">if </span>!child_contains_key {
+                                <span class="comment">// If we are in a node which has no visible ops, but none of the
+                                // elements of the node match the key of the op, then we must have
+                                // finished processing and so we can just return.
+                                // See https://github.com/automerge/automerge-rs/pull/480
+                                </span>QueryResult::Finish
+                            } <span class="kw">else </span>{
+                                <span class="comment">// Otherwise, we need to proceed to the next node
+                                </span><span class="self">self</span>.pos += child.len();
+                                QueryResult::Next
+                            }
                         } <span class="kw">else </span>{
                             QueryResult::Descend
                         }
@@ -297,6 +423,110 @@
                 }
             }
         }
+    }
+}
+
+<span class="attribute">#[cfg(test)]
+</span><span class="kw">mod </span>tests {
+    <span class="kw">use crate</span>::{
+        op_set::OpSet,
+        op_tree::B,
+        query::SeekOp,
+        types::{Key, ObjId, Op, OpId},
+        ActorId, ScalarValue,
+    };
+
+    <span class="attribute">#[test]
+    </span><span class="kw">fn </span>seek_on_page_boundary() {
+        <span class="comment">// Create an optree in which the only visible ops are on the boundaries of the nodes,
+        // i.e. the visible elements are in the internal nodes. Like so
+        //
+        //                      .----------------------.
+        //                      | id   |  key  |  succ |
+        //                      | B    |  &quot;a&quot;  |       |
+        //                      | 2B   |  &quot;b&quot;  |       |
+        //                      &#39;----------------------&#39;
+        //                           /      |      \
+        //  ;------------------------.      |       `------------------------------------.
+        //  | id     | op     | succ |      |       | id            | op     | succ      |
+        //  | 0      |set &quot;a&quot; |  1   |      |       | 2B + 1        |set &quot;c&quot; |  2B + 2   |
+        //  | 1      |set &quot;a&quot; |  2   |      |       | 2B + 2        |set &quot;c&quot; |  2B + 3   |
+        //  | 2      |set &quot;a&quot; |  3   |      |       ...
+        //  ...                             |       | 3B            |set &quot;c&quot; |           |
+        //  | B - 1  |set &quot;a&quot; |  B   |      |       &#39;------------------------------------&#39;
+        //  &#39;--------&#39;--------&#39;------&#39;      |
+        //                                  |
+        //                      .-----------------------------.
+        //                      | id         |  key  |  succ  |
+        //                      | B + 1      |  &quot;b&quot;  | B + 2  |
+        //                      | B + 2      |  &quot;b&quot;  | B + 3  |
+        //                      ....
+        //                      | B + (B - 1 |  &quot;b&quot;  |   2B   |
+        //                      &#39;-----------------------------&#39;
+        //
+        // The important point here is that the leaf nodes contain no visible ops for keys &quot;a&quot; and
+        // &quot;b&quot;.
+        </span><span class="kw">let </span><span class="kw-2">mut </span>set = OpSet::new();
+        <span class="kw">let </span>actor = set.m.actors.cache(ActorId::random());
+        <span class="kw">let </span>a = set.m.props.cache(<span class="string">&quot;a&quot;</span>.to_string());
+        <span class="kw">let </span>b = set.m.props.cache(<span class="string">&quot;b&quot;</span>.to_string());
+        <span class="kw">let </span>c = set.m.props.cache(<span class="string">&quot;c&quot;</span>.to_string());
+
+        <span class="kw">let </span><span class="kw-2">mut </span>counter = <span class="number">0</span>;
+        <span class="comment">// For each key insert `B` operations with the `pred` and `succ` setup such that the final
+        // operation for each key is the only visible op.
+        </span><span class="kw">for </span>key <span class="kw">in </span>[a, b, c] {
+            <span class="kw">for </span>iteration <span class="kw">in </span><span class="number">0</span>..B {
+                <span class="comment">// Generate a value to insert
+                </span><span class="kw">let </span>keystr = set.m.props.get(key);
+                <span class="kw">let </span>val = keystr.repeat(iteration + <span class="number">1</span>);
+
+                <span class="comment">// Only the last op is visible
+                </span><span class="kw">let </span>pred = <span class="kw">if </span>iteration == <span class="number">0 </span>{
+                    Default::default()
+                } <span class="kw">else </span>{
+                    set.m
+                        .sorted_opids(<span class="macro">vec!</span>[OpId::new(counter - <span class="number">1</span>, actor)].into_iter())
+                };
+
+                <span class="comment">// only the last op is visible
+                </span><span class="kw">let </span>succ = <span class="kw">if </span>iteration == B - <span class="number">1 </span>{
+                    Default::default()
+                } <span class="kw">else </span>{
+                    set.m
+                        .sorted_opids(<span class="macro">vec!</span>[OpId::new(counter, actor)].into_iter())
+                };
+
+                <span class="kw">let </span>op = Op {
+                    id: OpId::new(counter, actor),
+                    action: <span class="kw">crate</span>::OpType::Put(ScalarValue::Str(val.into())),
+                    key: Key::Map(key),
+                    succ,
+                    pred,
+                    insert: <span class="bool-val">false</span>,
+                };
+                set.insert(counter <span class="kw">as </span>usize, <span class="kw-2">&amp;</span>ObjId::root(), op);
+                counter += <span class="number">1</span>;
+            }
+        }
+
+        <span class="comment">// Now try and create an op which inserts at the next index of &#39;a&#39;
+        </span><span class="kw">let </span>new_op = Op {
+            id: OpId::new(counter, actor),
+            action: <span class="kw">crate</span>::OpType::Put(ScalarValue::Str(<span class="string">&quot;test&quot;</span>.into())),
+            key: Key::Map(a),
+            succ: Default::default(),
+            pred: set
+                .m
+                .sorted_opids(std::iter::once(OpId::new(B <span class="kw">as </span>u64 - <span class="number">1</span>, actor))),
+            insert: <span class="bool-val">false</span>,
+        };
+
+        <span class="kw">let </span>q = SeekOp::new(<span class="kw-2">&amp;</span>new_op);
+        <span class="kw">let </span>q = set.search(<span class="kw-2">&amp;</span>ObjId::root(), q);
+
+        <span class="comment">// we&#39;ve inserted `B - 1` elements for &quot;a&quot;, so the index should be `B`
+        </span><span class="macro">assert_eq!</span>(q.pos, B);
     }
 }
 </code></pre></div>
