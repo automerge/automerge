@@ -198,6 +198,7 @@ impl TransactionInner {
         match (&prop, obj_type) {
             (Prop::Map(_), ObjType::Map) => Ok(()),
             (Prop::Seq(_), ObjType::List) => Ok(()),
+            (Prop::Seq(_), ObjType::Text) => Ok(()),
             _ => Err(AutomergeError::InvalidOp(obj_type)),
         }?;
         self.local_op(doc, op_observer, obj, prop, value.into())?;
@@ -294,7 +295,7 @@ impl TransactionInner {
         value: V,
     ) -> Result<(), AutomergeError> {
         let (obj, obj_type) = doc.exid_to_obj(ex_obj)?;
-        if obj_type != ObjType::List {
+        if !matches!(obj_type, ObjType::List | ObjType::Text) {
             return Err(AutomergeError::InvalidOp(obj_type));
         }
         let value = value.into();
@@ -312,7 +313,7 @@ impl TransactionInner {
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
         let (obj, obj_type) = doc.exid_to_obj(ex_obj)?;
-        if obj_type != ObjType::List {
+        if !matches!(obj_type, ObjType::List | ObjType::Text) {
             return Err(AutomergeError::InvalidOp(obj_type));
         }
         let id = self.do_insert(doc, op_observer, obj, index, value.into())?;
@@ -510,7 +511,7 @@ impl TransactionInner {
         vals: impl IntoIterator<Item = ScalarValue>,
     ) -> Result<(), AutomergeError> {
         let (obj, obj_type) = doc.exid_to_obj(ex_obj)?;
-        if obj_type != ObjType::List {
+        if !matches!(obj_type, ObjType::List | ObjType::Text) {
             return Err(AutomergeError::InvalidOp(obj_type));
         }
         let values = vals.into_iter().collect();
@@ -631,7 +632,10 @@ impl TransactionInner {
             // handle the observer
             if let Some(obs) = op_observer.as_mut() {
                 match splice_type {
-                    SpliceType::List => {
+                    SpliceType::Text(text, _) if !obs.text_as_seq() => {
+                        obs.splice_text(doc, ex_obj, index, text)
+                    }
+                    SpliceType::List | SpliceType::Text(..) => {
                         let start = self.operations.len() - values.len();
                         for (offset, v) in values.iter().enumerate() {
                             let op = &self.operations[start + offset].1;
@@ -639,7 +643,6 @@ impl TransactionInner {
                             obs.insert(doc, ex_obj.clone(), index + offset, value)
                         }
                     }
-                    SpliceType::Text(text, _) => obs.splice_text(doc, ex_obj, index, text),
                 }
             }
         }
@@ -668,7 +671,12 @@ impl TransactionInner {
                     }
                     (Some(ObjType::Text), Prop::Seq(index)) => {
                         // FIXME
-                        op_observer.splice_text(doc, ex_obj, index, op.to_str())
+                        if op_observer.text_as_seq() {
+                            let value = (op.value(), doc.ops.id_to_exid(op.id));
+                            op_observer.insert(doc, ex_obj, index, value)
+                        } else {
+                            op_observer.splice_text(doc, ex_obj, index, op.to_str())
+                        }
                     }
                     _ => {}
                 }

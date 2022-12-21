@@ -177,7 +177,7 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
   const opts = importOpts(_opts)
   const freeze = !!opts.freeze
   const patchCallback = opts.patchCallback
-  const handle = ApiHandler.create(opts.actor)
+  const handle = ApiHandler.create(true, opts.actor)
   handle.enablePatches(true)
   handle.enableFreeze(!!opts.freeze)
   handle.registerDatatype("counter", n => new Counter(n))
@@ -460,7 +460,7 @@ export function load<T>(
   const opts = importOpts(_opts)
   const actor = opts.actor
   const patchCallback = opts.patchCallback
-  const handle = ApiHandler.load(data, actor)
+  const handle = ApiHandler.load(data, true, actor)
   handle.enablePatches(true)
   handle.enableFreeze(!!opts.freeze)
   handle.registerDatatype("counter", n => new Counter(n))

@@ -114,6 +114,13 @@ pub trait OpObserver {
     ///
     /// - `other`: Another Op Observer of the same type
     fn merge(&mut self, other: &Self);
+
+    /// Whether to call sequence methods or `splice_text` when encountering changes in text
+    ///
+    /// Returns `false` by default
+    fn text_as_seq(&self) -> bool {
+        false
+    }
 }
 
 impl OpObserver for () {

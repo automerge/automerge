@@ -121,9 +121,9 @@ export type SplicePatch = {
   values: Value[],
 }
 
-export function create(actor?: Actor): Automerge;
-export function load(data: Uint8Array, actor?: Actor): Automerge;
 export function encodeChange(change: ChangeToEncode): Change;
+export function create(text_v2: boolean, actor?: Actor): Automerge;
+export function load(data: Uint8Array, text_v2: boolean, actor?: Actor): Automerge;
 export function decodeChange(change: Change): DecodedChange;
 export function initSyncState(): SyncState;
 export function encodeSyncMessage(message: DecodedSyncMessage): SyncMessage;
@@ -134,8 +134,8 @@ export function exportSyncState(state: SyncState): JsSyncState;
 export function importSyncState(state: JsSyncState): SyncState;
 
 export interface API {
-  create(actor?: Actor): Automerge;
-  load(data: Uint8Array, actor?: Actor): Automerge;
+  create(text_v2: boolean, actor?: Actor): Automerge;
+  load(data: Uint8Array, text_v2: boolean, actor?: Actor): Automerge;
   encodeChange(change: ChangeToEncode): Change;
   decodeChange(change: Change): DecodedChange;
   initSyncState(): SyncState;

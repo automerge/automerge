@@ -20,10 +20,10 @@ export function UseApi(api: API) {
 
 /* eslint-disable */
 export const ApiHandler: API = {
-  create(actor?: Actor): Automerge {
+  create(textV2: boolean, actor?: Actor): Automerge {
     throw new RangeError("Automerge.use() not called")
   },
-  load(data: Uint8Array, actor?: Actor): Automerge {
+  load(data: Uint8Array, textV2: boolean, actor?: Actor): Automerge {
     throw new RangeError("Automerge.use() not called (load)")
   },
   encodeChange(change: ChangeToEncode): Change {

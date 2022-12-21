@@ -24,10 +24,10 @@ describe('Automerge', () => {
   describe('Patch Apply', () => {
     it('apply nested sets on maps', () => {
       const start = { hello: { mellow: { yellow: "world", x: 1 }, y : 2 } }
-      const doc1 = create()
+      const doc1 = create(true)
       doc1.putObject("/", "hello", start.hello);
       let mat = doc1.materialize("/")
-      const doc2 = create()
+      const doc2 = create(true)
       doc2.enablePatches(true)
       doc2.merge(doc1)
 
@@ -47,10 +47,10 @@ describe('Automerge', () => {
 
     it('apply patches on lists', () => {
       const start = { list: [1,2,3,4] }
-      const doc1 = create()
+      const doc1 = create(true)
       doc1.putObject("/", "list", start.list);
       let mat = doc1.materialize("/")
-      const doc2 = create()
+      const doc2 = create(true)
       doc2.enablePatches(true)
       doc2.merge(doc1)
       mat = doc1.materialize("/")
@@ -78,7 +78,7 @@ describe('Automerge', () => {
           ]
         ]
       }
-      const doc1 = create()
+      const doc1 = create(true)
       doc1.enablePatches(true)
       doc1.putObject("/", "list", start.list);
       let base = doc1.applyPatches({})
@@ -99,7 +99,7 @@ describe('Automerge', () => {
     })
 
     it('large inserts should make one splice patch', () => {
-      const doc1 = create()
+      const doc1 = create(true)
       doc1.enablePatches(true)
       doc1.putObject("/", "list", "abc");
       const patches = doc1.popPatches()
@@ -109,7 +109,7 @@ describe('Automerge', () => {
     })
 
     it('it should allow registering type wrappers', () => {
-      const doc1 = create()
+      const doc1 = create(true)
       doc1.enablePatches(true)
       doc1.registerDatatype("counter", (n: number) => new Counter(n))
       const doc2 = doc1.fork()
@@ -133,7 +133,7 @@ describe('Automerge', () => {
     })
 
     it('text can be managed as an array or a string', () => {
-      const doc1 = create("aaaa")
+      const doc1 = create(true, "aaaa")
       doc1.enablePatches(true)
 
       doc1.putObject("/", "notes", "hello world")
@@ -142,7 +142,7 @@ describe('Automerge', () => {
 
       assert.deepEqual( mat, { notes: "hello world" } )
 
-      const doc2 = create()
+      const doc2 = create(true)
       let apply : any = doc2.materialize("/") 
       doc2.enablePatches(true)
       apply = doc2.applyPatches(apply)
@@ -163,7 +163,7 @@ describe('Automerge', () => {
     })
 
     it('should set the OBJECT_ID property on lists, maps, and text objects and not on scalars', () => {
-        const doc1 = create('aaaa')
+        const doc1 = create(true, 'aaaa')
         const mat: any = doc1.materialize("/")
         doc1.enablePatches(true)
         doc1.registerDatatype("counter", (n: number) => new Counter(n))
@@ -193,7 +193,7 @@ describe('Automerge', () => {
     })
 
     it('should set the root OBJECT_ID to "_root"', () => {
-        const doc1 = create('aaaa')
+        const doc1 = create(true, 'aaaa')
         const mat: any = doc1.materialize("/")
         assert.equal(_obj(mat), "_root")
         doc1.enablePatches(true)

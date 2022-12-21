@@ -1,11 +1,12 @@
 use crate::error::InsertObject;
 use crate::value::Datatype;
-use crate::Automerge;
+use crate::{Automerge, TextRepresentation};
 use automerge as am;
 use automerge::transaction::Transactable;
 use automerge::ROOT;
 use automerge::{Change, ChangeHash, ObjType, Prop};
 use js_sys::{Array, Function, JsString, Object, Reflect, Symbol, Uint8Array};
+use std::borrow::Cow;
 use std::collections::{BTreeSet, HashSet};
 use std::fmt::Display;
 use wasm_bindgen::prelude::*;
@@ -445,11 +446,32 @@ impl JsObjType {
         }
     }
 
-    pub(crate) fn subvals(&self) -> &[(Prop, JsValue)] {
+    pub(crate) fn subvals(&self) -> impl Iterator<Item = (Cow<'_, Prop>, JsValue)> + '_ + Clone {
         match self {
-            Self::Text(_) => &[],
-            Self::Map(sub) => sub.as_slice(),
-            Self::List(sub) => sub.as_slice(),
+            Self::Text(s) => SubValIter::Str(s.chars().enumerate()),
+            Self::Map(sub) => SubValIter::Slice(sub.as_slice().iter()),
+            Self::List(sub) => SubValIter::Slice(sub.as_slice().iter()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum SubValIter<'a> {
+    Slice(std::slice::Iter<'a, (Prop, JsValue)>),
+    Str(std::iter::Enumerate<std::str::Chars<'a>>),
+}
+
+impl<'a> Iterator for SubValIter<'a> {
+    type Item = (std::borrow::Cow<'a, Prop>, JsValue);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Slice(i) => i
+                .next()
+                .map(|(p, v)| (std::borrow::Cow::Borrowed(p), v.clone())),
+            Self::Str(i) => i
+                .next()
+                .map(|(n, c)| (std::borrow::Cow::Owned(Prop::Seq(n)), c.to_string().into())),
         }
     }
 }
@@ -536,13 +558,18 @@ impl Automerge {
         meta: &JsValue,
     ) -> Result<JsValue, error::Export> {
         let result = match datatype {
-            Datatype::Text => {
-                if let Some(heads) = heads {
-                    self.doc.text_at(obj, heads)?.into()
-                } else {
-                    self.doc.text(obj)?.into()
+            Datatype::Text => match self.text_rep {
+                TextRepresentation::String => {
+                    if let Some(heads) = heads {
+                        self.doc.text_at(obj, heads)?.into()
+                    } else {
+                        self.doc.text(obj)?.into()
+                    }
                 }
-            }
+                TextRepresentation::Array => self
+                    .wrap_object(self.export_list(obj, heads, meta)?, datatype, obj, meta)?
+                    .into(),
+            },
             Datatype::List => self
                 .wrap_object(self.export_list(obj, heads, meta)?, datatype, obj, meta)?
                 .into(),
@@ -570,7 +597,7 @@ impl Automerge {
             if let Ok(Some((val, id))) = val_and_id {
                 let subval = match val {
                     Value::Object(o) => self.export_object(&id, o.into(), heads, meta)?,
-                    Value::Scalar(_) => self.export_value(alloc(&val))?,
+                    Value::Scalar(_) => self.export_value(alloc(&val, self.text_rep))?,
                 };
                 js_set(&map, &k, &subval)?;
             };
@@ -596,7 +623,7 @@ impl Automerge {
             if let Ok(Some((val, id))) = val_and_id {
                 let subval = match val {
                     Value::Object(o) => self.export_object(&id, o.into(), heads, meta)?,
-                    Value::Scalar(_) => self.export_value(alloc(&val))?,
+                    Value::Scalar(_) => self.export_value(alloc(&val, self.text_rep))?,
                 };
                 array.push(&subval);
             };
@@ -699,7 +726,9 @@ impl Automerge {
         } else {
             value
         };
-        if matches!(datatype, Datatype::Map | Datatype::List) {
+        if matches!(datatype, Datatype::Map | Datatype::List)
+            || (datatype == Datatype::Text && self.text_rep == TextRepresentation::Array)
+        {
             set_hidden_value(
                 &value,
                 &Symbol::for_(RAW_OBJECT_SYMBOL),
@@ -733,7 +762,8 @@ impl Automerge {
                     exposed.insert(value.1.clone());
                     js_set(&result, *index as f64, &JsValue::null())?;
                 } else {
-                    let sub_val = self.maybe_wrap_object(alloc(&value.0), &value.1, meta)?;
+                    let sub_val =
+                        self.maybe_wrap_object(alloc(&value.0, self.text_rep), &value.1, meta)?;
                     js_set(&result, *index as f64, &sub_val)?;
                 }
                 Ok(result.into())
@@ -752,7 +782,11 @@ impl Automerge {
                     if let Some(old) = old_val.as_f64() {
                         let new_value: Value<'_> =
                             am::ScalarValue::counter(old as i64 + *value).into();
-                        js_set(&result, index, &self.export_value(alloc(&new_value))?)?;
+                        js_set(
+                            &result,
+                            index,
+                            &self.export_value(alloc(&new_value, self.text_rep))?,
+                        )?;
                         Ok(result.into())
                     } else {
                         Err(error::ApplyPatch::IncrementNonNumeric)
@@ -763,8 +797,28 @@ impl Automerge {
             }
             Patch::DeleteMap { .. } => Err(error::ApplyPatch::DeleteKeyFromSeq),
             Patch::PutMap { .. } => Err(error::ApplyPatch::PutKeyInSeq),
-            //Patch::SpliceText { .. } => Err(to_js_err("cannot splice text in seq")),
-            Patch::SpliceText { .. } => Err(error::ApplyPatch::SpliceTextInSeq),
+            Patch::SpliceText { index, value, .. } => {
+                match self.text_rep {
+                    TextRepresentation::String => Err(error::ApplyPatch::SpliceTextInSeq),
+                    TextRepresentation::Array => {
+                        let bytes: Vec<u16> = value.iter().cloned().collect();
+                        let val = String::from_utf16_lossy(bytes.as_slice());
+                        let elems = val
+                            .chars()
+                            .map(|c| {
+                                (
+                                    Value::Scalar(std::borrow::Cow::Owned(am::ScalarValue::Str(
+                                        c.to_string().into(),
+                                    ))),
+                                    ObjId::Root, // Using ROOT is okay because this ID is never used as
+                                                 // we're producing ScalarValue::Str
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        Ok(self.sub_splice(result, *index, 0, &elems, meta)?)
+                    }
+                }
+            }
         }
     }
 
@@ -784,7 +838,8 @@ impl Automerge {
                     exposed.insert(value.1.clone());
                     js_set(&result, key, &JsValue::null())?;
                 } else {
-                    let sub_val = self.maybe_wrap_object(alloc(&value.0), &value.1, meta)?;
+                    let sub_val =
+                        self.maybe_wrap_object(alloc(&value.0, self.text_rep), &value.1, meta)?;
                     js_set(&result, key, &sub_val)?;
                 }
                 Ok(result)
@@ -805,7 +860,11 @@ impl Automerge {
                     if let Some(old) = old_val.as_f64() {
                         let new_value: Value<'_> =
                             am::ScalarValue::counter(old as i64 + *value).into();
-                        js_set(&result, key, &self.export_value(alloc(&new_value))?)?;
+                        js_set(
+                            &result,
+                            key,
+                            &self.export_value(alloc(&new_value, self.text_rep))?,
+                        )?;
                         Ok(result)
                     } else {
                         Err(error::ApplyPatch::IncrementNonNumeric)
@@ -908,7 +967,7 @@ impl Automerge {
     ) -> Result<Object, error::Export> {
         let args: Array = values
             .into_iter()
-            .map(|v| self.maybe_wrap_object(alloc(&v.0), &v.1, meta))
+            .map(|v| self.maybe_wrap_object(alloc(&v.0, self.text_rep), &v.1, meta))
             .collect::<Result<_, _>>()?;
         args.unshift(&(num_del as u32).into());
         args.unshift(&(index as u32).into());
@@ -1054,7 +1113,13 @@ impl Automerge {
             Some(val) => Ok((val.into(), vec![])),
             None => {
                 if let Ok(js_obj) = import_obj(value, &datatype) {
-                    Ok((js_obj.objtype().into(), js_obj.subvals().to_vec()))
+                    Ok((
+                        js_obj.objtype().into(),
+                        js_obj
+                            .subvals()
+                            .map(|(p, v)| (p.into_owned(), v))
+                            .collect::<Vec<_>>(),
+                    ))
                 } else {
                     web_sys::console::log_2(&"Invalid value".into(), value);
                     Err(error::InvalidValue)
@@ -1093,13 +1158,16 @@ impl Automerge {
     }
 }
 
-pub(crate) fn alloc(value: &Value<'_>) -> (Datatype, JsValue) {
+pub(crate) fn alloc(value: &Value<'_>, text_rep: TextRepresentation) -> (Datatype, JsValue) {
     match value {
         am::Value::Object(o) => match o {
             ObjType::Map => (Datatype::Map, Object::new().into()),
             ObjType::Table => (Datatype::Table, Object::new().into()),
             ObjType::List => (Datatype::List, Array::new().into()),
-            ObjType::Text => (Datatype::Text, "".into()),
+            ObjType::Text => match text_rep {
+                TextRepresentation::String => (Datatype::Text, "".into()),
+                TextRepresentation::Array => (Datatype::Text, Array::new().into()),
+            },
         },
         am::Value::Scalar(s) => match s.as_ref() {
             am::ScalarValue::Bytes(v) => (Datatype::Bytes, Uint8Array::from(v.as_slice()).into()),

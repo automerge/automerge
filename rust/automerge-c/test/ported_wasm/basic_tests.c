@@ -758,30 +758,6 @@ static void test_should_be_able_to_splice_text(void** state) {
 }
 
 /**
- * \brief should NOT be able to insert objects into text
- */
-static void test_should_be_unable_to_insert_objects_into_text(void** state) {
-    AMresultStack* stack = *state;
-    /* const doc = create()                                                  */
-    AMdoc* const doc = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, cmocka_cb).doc;
-    /* const text = doc.putObject("/", "text", "Hello world");               */
-    AMobjId const* const text = AMpush(
-        &stack,
-        AMmapPutObject(doc, AM_ROOT, AMstr("text"), AM_OBJ_TYPE_TEXT),
-        AM_VALUE_OBJ_ID,
-        cmocka_cb).obj_id;
-    AMfree(AMspliceText(doc, text, 0, 0, AMstr("Hello world")));
-    /* assert.throws(() => {
-       doc.insertObject(text, 6, { hello: "world" });
-    })                                                                       */
-    AMpush(&stack,
-           AMlistPutObject(doc, text, 6, true, AM_OBJ_TYPE_MAP),
-           AM_VALUE_VOID,
-           NULL);
-    assert_int_not_equal(AMresultStatus(stack->result), AM_STATUS_OK);
-}
-
-/**
  * \brief should be able to save all or incrementally
  */
 static void test_should_be_able_to_save_all_or_incrementally(void** state) {
@@ -1848,7 +1824,6 @@ int run_ported_wasm_basic_tests(void) {
         cmocka_unit_test_setup_teardown(test_should_be_able_to_del, setup_stack, teardown_stack),
         cmocka_unit_test_setup_teardown(test_should_be_able_to_use_counters, setup_stack, teardown_stack),
         cmocka_unit_test_setup_teardown(test_should_be_able_to_splice_text, setup_stack, teardown_stack),
-        cmocka_unit_test_setup_teardown(test_should_be_unable_to_insert_objects_into_text, setup_stack, teardown_stack),
         cmocka_unit_test_setup_teardown(test_should_be_able_to_save_all_or_incrementally, setup_stack, teardown_stack),
         cmocka_unit_test_setup_teardown(test_should_be_able_to_splice_text_2, setup_stack, teardown_stack),
         cmocka_unit_test_setup_teardown(test_local_inc_increments_all_visible_counters_in_a_map, setup_stack, teardown_stack),
