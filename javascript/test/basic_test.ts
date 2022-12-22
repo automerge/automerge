@@ -1,5 +1,5 @@
 import * as assert from "assert"
-import * as Automerge from "../src"
+import { unstable as Automerge } from "../src"
 import * as WASM from "@automerge/automerge-wasm"
 
 describe("Automerge", () => {

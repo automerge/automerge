@@ -1,5 +1,6 @@
 {
   "extends": "../tsconfig.json",
+  "exclude": ["../dist/**/*", "../node_modules", "../test/**/*"],
   "compilerOptions": {
     "target": "es6",
     "module": "es6",

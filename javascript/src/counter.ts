@@ -49,14 +49,14 @@ export class Counter {
  */
 class WriteableCounter extends Counter {
   context: Automerge
-  path: string[]
+  path: Prop[]
   objectId: ObjID
   key: Prop
 
   constructor(
     value: number,
     context: Automerge,
-    path: string[],
+    path: Prop[],
     objectId: ObjID,
     key: Prop
   ) {
@@ -97,7 +97,7 @@ class WriteableCounter extends Counter {
 export function getWriteableCounter(
   value: number,
   context: Automerge,
-  path: string[],
+  path: Prop[],
   objectId: ObjID,
   key: Prop
 ) {

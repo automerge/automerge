@@ -2,3 +2,4 @@
 /yarn.lock
 dist
 docs/
+.vim
