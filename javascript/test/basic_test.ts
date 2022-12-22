@@ -1,5 +1,4 @@
 import * as assert from 'assert'
-import {Counter} from 'automerge'
 import * as Automerge from '../src'
 import * as WASM from "@automerge/automerge-wasm"
 
@@ -15,7 +14,7 @@ describe('Automerge', () => {
         })
 
         it('should be able to make a view with specifc heads', () => {
-            let doc1 = Automerge.init()
+            let doc1 = Automerge.init<any>()
             let doc2 = Automerge.change(doc1, (d) => d.value = 1)
             let heads2 = Automerge.getHeads(doc2)
             let doc3 = Automerge.change(doc2, (d) => d.value = 2)
@@ -38,7 +37,7 @@ describe('Automerge', () => {
         })
 
         it('handle basic set and read on root object', () => {
-            let doc1 = Automerge.init()
+            let doc1 = Automerge.init<any>()
             let doc2 = Automerge.change(doc1, (d) => {
               d.hello = "world"
               d.big = "little"
@@ -62,8 +61,8 @@ describe('Automerge', () => {
         })
 
         it('it should recursively freeze the document if requested', () => {
-            let doc1 = Automerge.init({ freeze: true } )
-            let doc2 = Automerge.init()
+            let doc1 = Automerge.init<any>({ freeze: true } )
+            let doc2 = Automerge.init<any>()
 
             assert(Object.isFrozen(doc1))
             assert(!Object.isFrozen(doc2))
@@ -82,7 +81,7 @@ describe('Automerge', () => {
             assert(Object.isFrozen(doc3.sub))
 
             // works on load
-            let doc4 = Automerge.load(Automerge.save(doc3), { freeze: true })
+            let doc4 = Automerge.load<any>(Automerge.save(doc3), { freeze: true })
             assert(Object.isFrozen(doc4))
             assert(Object.isFrozen(doc4.sub))
 
@@ -97,7 +96,7 @@ describe('Automerge', () => {
         })
 
         it('handle basic sets over many changes', () => {
-            let doc1 = Automerge.init()
+            let doc1 = Automerge.init<any>()
             let timestamp = new Date();
             let counter = new Automerge.Counter(100);
             let bytes = new Uint8Array([10,11,12]);
@@ -135,7 +134,7 @@ describe('Automerge', () => {
         })
 
         it('handle overwrites to values', () => {
-            let doc1 = Automerge.init()
+            let doc1 = Automerge.init<any>()
             let doc2 = Automerge.change(doc1, (d) => {
               d.hello = "world1"
             })
@@ -152,7 +151,7 @@ describe('Automerge', () => {
         })
 
         it('handle set with object value', () => {
-            let doc1 = Automerge.init()
+            let doc1 = Automerge.init<any>()
             let doc2 = Automerge.change(doc1, (d) => {
               d.subobj = { hello: "world", subsubobj: { zip: "zop" } }
             })
@@ -160,13 +159,13 @@ describe('Automerge', () => {
         })
 
         it('handle simple list creation', () => {
-            let doc1 = Automerge.init()
+            let doc1 = Automerge.init<any>()
             let doc2 = Automerge.change(doc1, (d) => d.list = [])
             assert.deepEqual(doc2, { list: []})
         })
 
         it('handle simple lists', () => {
-            let doc1 = Automerge.init()
+            let doc1 = Automerge.init<any>()
             let doc2 = Automerge.change(doc1, (d) => {
               d.list = [ 1, 2, 3 ]
             })
@@ -188,7 +187,7 @@ describe('Automerge', () => {
             assert.deepEqual(doc3, { list: [1,"a",3] })
         })
         it('handle simple lists', () => {
-            let doc1 = Automerge.init()
+            let doc1 = Automerge.init<any>()
             let doc2 = Automerge.change(doc1, (d) => {
               d.list = [ 1, 2, 3 ]
             })
@@ -198,7 +197,7 @@ describe('Automerge', () => {
             assert.deepEqual(docB2, doc2);
         })
         it('handle text', () => {
-            let doc1 = Automerge.init()
+            let doc1 = Automerge.init<any>()
             let doc2 = Automerge.change(doc1, (d) => {
               d.list = "hello"
               Automerge.splice(d, "list", 2, 0, "Z")
@@ -212,7 +211,7 @@ describe('Automerge', () => {
         it('handle non-text strings', () => {
             let doc1 = WASM.create();
             doc1.put("_root", "text", "hello world");
-            let doc2 = Automerge.load(doc1.save())
+            let doc2 = Automerge.load<any>(doc1.save())
             assert.throws(() => {
               Automerge.change(doc2, (d) => { Automerge.splice(d, "text", 1, 0, "Z") })
             }, /Cannot splice/)
@@ -238,6 +237,7 @@ describe('Automerge', () => {
             })
             assert.deepEqual(doc5, { list: [2,1,9,10,3,11,12] });
             let doc6 = Automerge.change(doc5, (d) => {
+              // @ts-ignore
               d.list.insertAt(3,100,101)
             })
             assert.deepEqual(doc6, { list: [2,1,9,100,101,10,3,11,12] });
@@ -261,7 +261,7 @@ describe('Automerge', () => {
             doc = Automerge.change<any>(doc, d => {
                 d.key = "value"
             })
-            let _ = Automerge.save(doc)
+            Automerge.save(doc)
             let headsBefore = Automerge.getHeads(doc)
             headsBefore.sort()
             doc = Automerge.emptyChange(doc, "empty change")
@@ -278,24 +278,24 @@ describe('Automerge', () => {
             numbers: [20,3,100],
             repeats: [20,20,3,3,3,3,100,100]
           })
-          let r1 = []
+          let r1: Array<number> = []
           doc = Automerge.change(doc, (d) => {
-            assert.deepEqual(d.chars.concat([1,2]), ["a","b","c",1,2])
+            assert.deepEqual((d.chars as any[]).concat([1,2]), ["a","b","c",1,2])
             assert.deepEqual(d.chars.map((n) => n + "!"), ["a!", "b!", "c!"])
             assert.deepEqual(d.numbers.map((n) => n + 10), [30, 13, 110])
             assert.deepEqual(d.numbers.toString(), "20,3,100")
             assert.deepEqual(d.numbers.toLocaleString(), "20,3,100")
-            assert.deepEqual(d.numbers.forEach((n) => r1.push(n)), undefined)
+            assert.deepEqual(d.numbers.forEach((n: number) => r1.push(n)), undefined)
             assert.deepEqual(d.numbers.every((n) => n > 1), true)
             assert.deepEqual(d.numbers.every((n) => n > 10), false)
             assert.deepEqual(d.numbers.filter((n) => n > 10), [20,100])
             assert.deepEqual(d.repeats.find((n) => n < 10), 3)
-            assert.deepEqual(d.repeats.toArray().find((n) => n < 10), 3)
+            assert.deepEqual(d.repeats.find((n) => n < 10), 3)
             assert.deepEqual(d.repeats.find((n) => n < 0), undefined)
             assert.deepEqual(d.repeats.findIndex((n) => n < 10), 2)
             assert.deepEqual(d.repeats.findIndex((n) => n < 0), -1)
-            assert.deepEqual(d.repeats.toArray().findIndex((n) => n < 10), 2)
-            assert.deepEqual(d.repeats.toArray().findIndex((n) => n < 0), -1)
+            assert.deepEqual(d.repeats.findIndex((n) => n < 10), 2)
+            assert.deepEqual(d.repeats.findIndex((n) => n < 0), -1)
             assert.deepEqual(d.numbers.includes(3), true)
             assert.deepEqual(d.numbers.includes(-3), false)
             assert.deepEqual(d.numbers.join("|"), "20|3|100")
@@ -321,8 +321,8 @@ describe('Automerge', () => {
     })
     
     it('should obtain the same conflicts, regardless of merge order', () => {
-      let s1 = Automerge.init()
-      let s2 = Automerge.init()
+      let s1 = Automerge.init<any>()
+      let s2 = Automerge.init<any>()
       s1 = Automerge.change(s1, doc => { doc.x = 1; doc.y = 2 })
       s2 = Automerge.change(s2, doc => { doc.x = 3; doc.y = 4 })
       const m1 = Automerge.merge(Automerge.clone(s1), Automerge.clone(s2))
@@ -346,7 +346,7 @@ describe('Automerge', () => {
         it("should return null for scalar values", () => {
             assert.equal(Automerge.getObjectId(s1.string), null)
             assert.equal(Automerge.getObjectId(s1.number), null)
-            assert.equal(Automerge.getObjectId(s1.null), null)
+            assert.equal(Automerge.getObjectId(s1.null!), null)
             assert.equal(Automerge.getObjectId(s1.date), null)
             assert.equal(Automerge.getObjectId(s1.counter), null)
             assert.equal(Automerge.getObjectId(s1.bytes), null)

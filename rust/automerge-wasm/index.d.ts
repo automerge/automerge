@@ -82,6 +82,9 @@ export type DecodedChange = {
   ops: Op[]
 }
 
+type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
+export type ChangeToEncode = PartialBy<DecodedChange, 'hash'>
+
 export type Op = {
   action: string,
   obj: ObjID,
@@ -120,7 +123,7 @@ export type SplicePatch = {
 
 export function create(actor?: Actor): Automerge;
 export function load(data: Uint8Array, actor?: Actor): Automerge;
-export function encodeChange(change: DecodedChange): Change;
+export function encodeChange(change: ChangeToEncode): Change;
 export function decodeChange(change: Change): DecodedChange;
 export function initSyncState(): SyncState;
 export function encodeSyncMessage(message: DecodedSyncMessage): SyncMessage;
@@ -133,7 +136,7 @@ export function importSyncState(state: JsSyncState): SyncState;
 export interface API {
   create(actor?: Actor): Automerge;
   load(data: Uint8Array, actor?: Actor): Automerge;
-  encodeChange(change: DecodedChange): Change;
+  encodeChange(change: ChangeToEncode): Change;
   decodeChange(change: Change): DecodedChange;
   initSyncState(): SyncState;
   encodeSyncMessage(message: DecodedSyncMessage): SyncMessage;
@@ -208,7 +211,7 @@ export class Automerge {
   dump(): void;
 
   // experimental api can go here
-  applyPatches<Doc>(obj: Doc, meta?: unknown, callback?: (patch: Patch, before: Doc, after: Doc) => void): Doc;
+  applyPatches<Doc>(obj: Doc, meta?: unknown, callback?: (patch: Array<Patch>, before: Doc, after: Doc) => void): Doc;
 }
 
 export interface JsSyncState {
