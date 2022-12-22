@@ -1,5 +1,6 @@
 
-import { Automerge, Change, DecodedChange, Actor, SyncState, SyncMessage, JsSyncState, DecodedSyncMessage }  from "@automerge/automerge-wasm"
+import { Automerge, Change, DecodedChange, Actor, SyncState, SyncMessage, JsSyncState, DecodedSyncMessage, ChangeToEncode }  from "@automerge/automerge-wasm"
+export { ChangeToEncode } from "@automerge/automerge-wasm"
 import { API } from "@automerge/automerge-wasm"
 
 export function UseApi(api: API) {
@@ -12,7 +13,7 @@ export function UseApi(api: API) {
 export const ApiHandler : API = {
   create(actor?: Actor): Automerge { throw new RangeError("Automerge.use() not called") },
   load(data: Uint8Array, actor?: Actor): Automerge { throw new RangeError("Automerge.use() not called (load)") },
-  encodeChange(change: DecodedChange): Change { throw new RangeError("Automerge.use() not called (encodeChange)") },
+  encodeChange(change: ChangeToEncode): Change { throw new RangeError("Automerge.use() not called (encodeChange)") },
   decodeChange(change: Change): DecodedChange { throw new RangeError("Automerge.use() not called (decodeChange)") },
   initSyncState(): SyncState { throw new RangeError("Automerge.use() not called (initSyncState)") },
   encodeSyncMessage(message: DecodedSyncMessage): SyncMessage { throw new RangeError("Automerge.use() not called (encodeSyncMessage)") },

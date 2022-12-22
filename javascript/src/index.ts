@@ -10,7 +10,7 @@ export {AutomergeValue, Counter, Int, Uint, Float64, ScalarValue} from "./types"
 
 import {type API, type Patch} from "@automerge/automerge-wasm";
 export { type Patch, PutPatch, DelPatch, SplicePatch, IncPatch, SyncMessage, } from "@automerge/automerge-wasm"
-import {ApiHandler, UseApi} from "./low_level"
+import {ApiHandler, ChangeToEncode, UseApi} from "./low_level"
 
 import {Actor as ActorId, Prop, ObjID, Change, DecodedChange, Heads, Automerge, MaterializeValue} from "@automerge/automerge-wasm"
 import {JsSyncState as SyncState, SyncMessage, DecodedSyncMessage} from "@automerge/automerge-wasm"
@@ -56,7 +56,7 @@ export type ChangeFn<T> = (doc: T) => void
  * @param before - The document before the change was made
  * @param after - The document after the change was made
  */
-export type PatchCallback<T> = (patch: Patch, before: Doc<T>, after: Doc<T>) => void
+export type PatchCallback<T> = (patches: Array<Patch>, before: Doc<T>, after: Doc<T>) => void
 
 /** @hidden **/
 export interface State<T> {
@@ -224,8 +224,8 @@ export function free<T>(doc: Doc<T>) {
  * })
  * ```
  */
-export function from<T extends Record<string, unknown>>(initialState: T | Doc<T>, actor?: ActorId): Doc<T> {
-    return change(init(actor), (d) => Object.assign(d, initialState))
+export function from<T extends Record<string, unknown>>(initialState: T | Doc<T>, _opts?: ActorId | InitOptions<T>): Doc<T> {
+    return change(init(_opts), (d) => Object.assign(d, initialState))
 }
 
 /** 
@@ -779,7 +779,7 @@ export function initSyncState(): SyncState {
 }
 
 /** @hidden */
-export function encodeChange(change: DecodedChange): Change {
+export function encodeChange(change: ChangeToEncode): Change {
     return ApiHandler.encodeChange(change)
 }
 
