@@ -74,24 +74,32 @@ import * as automerge from "@automerge/automerge"
 import * as assert from "assert"
 
 let doc = automerge.from({
-    "key1": "value1"
+  key1: "value1",
 })
 
 // Make a clone of the document at this point, maybe this is actually on another
 // peer.
-let doc2 = automerge.clone<any>(doc)
+let doc2 = automerge.clone < any > doc
 
 let heads = automerge.getHeads(doc)
 
-doc = automerge.change<any>(doc, d => {
+doc =
+  automerge.change <
+  any >
+  (doc,
+  d => {
     d.key2 = "value2"
-})
+  })
 
-doc = automerge.change<any>(doc, d => {
+doc =
+  automerge.change <
+  any >
+  (doc,
+  d => {
     d.key3 = "value3"
-})
+  })
 
-// At this point we've generated two separate changes, now we want to send 
+// At this point we've generated two separate changes, now we want to send
 // just those changes to someone else
 
 // view is a cheap reference based copy of a document at a given set of heads
@@ -99,18 +107,18 @@ let before = automerge.view(doc, heads)
 
 // This view doesn't show the last two changes in the document state
 assert.deepEqual(before, {
-    key1: "value1"
+  key1: "value1",
 })
 
 // Get the changes to send to doc2
 let changes = automerge.getChanges(before, doc)
 
 // Apply the changes at doc2
-doc2 = automerge.applyChanges<any>(doc2, changes)[0]
+doc2 = automerge.applyChanges < any > (doc2, changes)[0]
 assert.deepEqual(doc2, {
-    key1: "value1",
-    key2: "value2",
-    key3: "value3"
+  key1: "value1",
+  key2: "value2",
+  key3: "value3",
 })
 ```
 
@@ -126,22 +134,21 @@ generateSyncMessage}. When we receive a message from the peer we call {@link
 receiveSyncMessage}. Here's a simple example of a loop which just keeps two
 peers in sync.
 
-
 ```javascript
 let sync1 = automerge.initSyncState()
 let msg: Uint8Array | null
-[sync1, msg] = automerge.generateSyncMessage(doc1, sync1)
+;[sync1, msg] = automerge.generateSyncMessage(doc1, sync1)
 
 while (true) {
-    if (msg != null) {
-        network.send(msg)
-    }
-    let resp: Uint8Array = network.receive()
-    [doc1, sync1, _ignore] = automerge.receiveSyncMessage(doc1, sync1, resp)
-    [sync1, msg] = automerge.generateSyncMessage(doc1, sync1)
+  if (msg != null) {
+    network.send(msg)
+  }
+  let resp: Uint8Array =
+    (network.receive()[(doc1, sync1, _ignore)] =
+    automerge.receiveSyncMessage(doc1, sync1, resp)[(sync1, msg)] =
+      automerge.generateSyncMessage(doc1, sync1))
 }
 ```
-
 
 ## Conflicts
 
@@ -187,8 +194,7 @@ By default automerge will generate a random actor ID for you, but most methods
 for creating a document allow you to set the actor ID. You can get the actor ID
 associated with the document by calling {@link getActorId}. Actor IDs must not
 be used in concurrent threads of executiong - all changes by a given actor ID
-are expected to be sequential. 
-
+are expected to be sequential.
 
 ## Listening to patches
 
@@ -203,18 +209,18 @@ document which you have two pointers to. For example, in this code:
 
 ```javascript
 let doc1 = automerge.init()
-let doc2 = automerge.change(doc1, d => d.key = "value")
+let doc2 = automerge.change(doc1, d => (d.key = "value"))
 ```
 
 `doc1` and `doc2` are both pointers to the same state. Any attempt to call
 mutating methods on `doc1` will now result in an error like
 
     Attempting to change an out of date document
-    
+
 If you encounter this you need to clone the original document, the above sample
 would work as:
 
 ```javascript
 let doc1 = automerge.init()
-let doc2 = automerge.change(automerge.clone(doc1), d => d.key = "value")
+let doc2 = automerge.change(automerge.clone(doc1), d => (d.key = "value"))
 ```

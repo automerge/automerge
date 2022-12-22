@@ -1,123 +1,149 @@
-
 import { Automerge, Heads, ObjID } from "@automerge/automerge-wasm"
 import { Prop } from "@automerge/automerge-wasm"
 import { AutomergeValue, ScalarValue, MapValue, ListValue } from "./types"
 import { Counter, getWriteableCounter } from "./counter"
-import { STATE, TRACE, IS_PROXY, OBJECT_ID, COUNTER, INT, UINT, F64 } from "./constants"
+import {
+  STATE,
+  TRACE,
+  IS_PROXY,
+  OBJECT_ID,
+  COUNTER,
+  INT,
+  UINT,
+  F64,
+} from "./constants"
 
 function parseListIndex(key) {
-  if (typeof key === 'string' && /^[0-9]+$/.test(key)) key = parseInt(key, 10)
-  if (typeof key !== 'number') {
+  if (typeof key === "string" && /^[0-9]+$/.test(key)) key = parseInt(key, 10)
+  if (typeof key !== "number") {
     return key
   }
   if (key < 0 || isNaN(key) || key === Infinity || key === -Infinity) {
-    throw new RangeError('A list index must be positive, but you passed ' + key)
+    throw new RangeError("A list index must be positive, but you passed " + key)
   }
   return key
 }
 
-function valueAt(target, prop: Prop) : AutomergeValue | undefined {
-      const { context, objectId, path, readonly, heads} = target
-      const value = context.getWithType(objectId, prop, heads)
-      if (value === null) {
-        return
+function valueAt(target, prop: Prop): AutomergeValue | undefined {
+  const { context, objectId, path, readonly, heads } = target
+  const value = context.getWithType(objectId, prop, heads)
+  if (value === null) {
+    return
+  }
+  const datatype = value[0]
+  const val = value[1]
+  switch (datatype) {
+    case undefined:
+      return
+    case "map":
+      return mapProxy(context, val, [...path, prop], readonly, heads)
+    case "list":
+      return listProxy(context, val, [...path, prop], readonly, heads)
+    case "text":
+      return context.text(val, heads)
+    case "str":
+      return val
+    case "uint":
+      return val
+    case "int":
+      return val
+    case "f64":
+      return val
+    case "boolean":
+      return val
+    case "null":
+      return null
+    case "bytes":
+      return val
+    case "timestamp":
+      return val
+    case "counter": {
+      if (readonly) {
+        return new Counter(val)
+      } else {
+        return getWriteableCounter(val, context, path, objectId, prop)
       }
-      const datatype = value[0]
-      const val = value[1]
-      switch (datatype) {
-        case undefined: return;
-        case "map": return mapProxy(context, val, [ ... path, prop ], readonly, heads);
-        case "list": return listProxy(context, val, [ ... path, prop ], readonly, heads);
-        case "text": return context.text(val, heads);
-        case "str": return val;
-        case "uint": return val;
-        case "int": return val;
-        case "f64": return val;
-        case "boolean": return val;
-        case "null": return null;
-        case "bytes": return val;
-        case "timestamp": return val;
-        case "counter": {
-          if (readonly) {
-            return new Counter(val);
-          } else {
-            return getWriteableCounter(val, context, path, objectId, prop)
-          }
-        }
-        default:
-          throw RangeError(`datatype ${datatype} unimplemented`)
-      }
+    }
+    default:
+      throw RangeError(`datatype ${datatype} unimplemented`)
+  }
 }
 
 function import_value(value) {
-    switch (typeof value) {
-      case 'object':
-        if (value == null) {
-          return [ null, "null"]
-        } else if (value[UINT]) {
-          return [ value.value, "uint" ]
-        } else if (value[INT]) {
-          return [ value.value, "int" ]
-        } else if (value[F64]) {
-          return [ value.value, "f64" ]
-        } else if (value[COUNTER]) {
-          return [ value.value, "counter" ]
-        } else if (value instanceof Date) {
-          return [ value.getTime(), "timestamp" ]
-        } else if (value instanceof Uint8Array) {
-          return [ value, "bytes" ]
-        } else if (value instanceof Array) {
-          return [ value, "list" ]
-        } else if (Object.getPrototypeOf(value) === Object.getPrototypeOf({})) {
-          return [ value, "map" ]
-        } else if (value[OBJECT_ID]) {
-          throw new RangeError('Cannot create a reference to an existing document object')
-        } else {
-          throw new RangeError(`Cannot assign unknown object: ${value}`)
-        }
-        break;
-      case 'boolean':
-        return [ value, "boolean" ]
-      case 'number':
-        if (Number.isInteger(value)) {
-          return [ value, "int" ]
-        } else {
-          return [ value, "f64" ]
-        }
-        break;
-      case 'string':
-        return [ value, "text" ]
-        break;
-      default:
-        throw new RangeError(`Unsupported type of value: ${typeof value}`)
-    }
+  switch (typeof value) {
+    case "object":
+      if (value == null) {
+        return [null, "null"]
+      } else if (value[UINT]) {
+        return [value.value, "uint"]
+      } else if (value[INT]) {
+        return [value.value, "int"]
+      } else if (value[F64]) {
+        return [value.value, "f64"]
+      } else if (value[COUNTER]) {
+        return [value.value, "counter"]
+      } else if (value instanceof Date) {
+        return [value.getTime(), "timestamp"]
+      } else if (value instanceof Uint8Array) {
+        return [value, "bytes"]
+      } else if (value instanceof Array) {
+        return [value, "list"]
+      } else if (Object.getPrototypeOf(value) === Object.getPrototypeOf({})) {
+        return [value, "map"]
+      } else if (value[OBJECT_ID]) {
+        throw new RangeError(
+          "Cannot create a reference to an existing document object"
+        )
+      } else {
+        throw new RangeError(`Cannot assign unknown object: ${value}`)
+      }
+      break
+    case "boolean":
+      return [value, "boolean"]
+    case "number":
+      if (Number.isInteger(value)) {
+        return [value, "int"]
+      } else {
+        return [value, "f64"]
+      }
+      break
+    case "string":
+      return [value, "text"]
+      break
+    default:
+      throw new RangeError(`Unsupported type of value: ${typeof value}`)
+  }
 }
 
 const MapHandler = {
-  get (target, key) : AutomergeValue {
+  get(target, key): AutomergeValue {
     const { context, objectId, cache } = target
-    if (key === Symbol.toStringTag) { return target[Symbol.toStringTag] }
+    if (key === Symbol.toStringTag) {
+      return target[Symbol.toStringTag]
+    }
     if (key === OBJECT_ID) return objectId
     if (key === IS_PROXY) return true
     if (key === TRACE) return target.trace
-    if (key === STATE) return { handle: context };
+    if (key === STATE) return { handle: context }
     if (!cache[key]) {
       cache[key] = valueAt(target, key)
     }
     return cache[key]
   },
 
-  set (target, key, val) {
-    const { context, objectId, path, readonly, frozen} = target
+  set(target, key, val) {
+    const { context, objectId, path, readonly, frozen } = target
     target.cache = {} // reset cache on set
     if (val && val[OBJECT_ID]) {
-          throw new RangeError('Cannot create a reference to an existing document object')
+      throw new RangeError(
+        "Cannot create a reference to an existing document object"
+      )
     }
     if (key === TRACE) {
       target.trace = val
       return true
     }
-    const [ value, datatype ] = import_value(val)
+    const [value, datatype] = import_value(val)
     if (frozen) {
       throw new RangeError("Attempting to use an outdated Automerge document")
     }
@@ -127,7 +153,7 @@ const MapHandler = {
     switch (datatype) {
       case "list": {
         const list = context.putObject(objectId, key, [])
-        const proxyList = listProxy(context, list, [ ... path, key ], readonly );
+        const proxyList = listProxy(context, list, [...path, key], readonly)
         for (let i = 0; i < value.length; i++) {
           proxyList[i] = value[i]
         }
@@ -139,11 +165,11 @@ const MapHandler = {
       }
       case "map": {
         const map = context.putObject(objectId, key, {})
-        const proxyMap = mapProxy(context, map, [ ... path, key ], readonly );
+        const proxyMap = mapProxy(context, map, [...path, key], readonly)
         for (const key in value) {
           proxyMap[key] = value[key]
         }
-        break;
+        break
       }
       default:
         context.put(objectId, key, value, datatype)
@@ -151,7 +177,7 @@ const MapHandler = {
     return true
   },
 
-  deleteProperty (target, key) {
+  deleteProperty(target, key) {
     const { context, objectId, readonly } = target
     target.cache = {} // reset cache on delete
     if (readonly) {
@@ -161,62 +187,71 @@ const MapHandler = {
     return true
   },
 
-  has (target, key) {
+  has(target, key) {
     const value = this.get(target, key)
     return value !== undefined
   },
 
-  getOwnPropertyDescriptor (target, key) {
+  getOwnPropertyDescriptor(target, key) {
     // const { context, objectId } = target
     const value = this.get(target, key)
-    if (typeof value !== 'undefined') {
+    if (typeof value !== "undefined") {
       return {
-        configurable: true, enumerable: true, value
+        configurable: true,
+        enumerable: true,
+        value,
       }
     }
   },
 
-  ownKeys (target) {
-    const { context, objectId, heads} = target
+  ownKeys(target) {
+    const { context, objectId, heads } = target
     // FIXME - this is a tmp workaround until fix the dupe key bug in keys()
     const keys = context.keys(objectId, heads)
     return [...new Set<string>(keys)]
   },
 }
 
-
 const ListHandler = {
-  get (target, index) {
-    const {context, objectId, heads } = target
+  get(target, index) {
+    const { context, objectId, heads } = target
     index = parseListIndex(index)
-    if (index === Symbol.hasInstance) { return (instance) => { return Array.isArray(instance) } }
-    if (index === Symbol.toStringTag) { return target[Symbol.toStringTag] }
+    if (index === Symbol.hasInstance) {
+      return instance => {
+        return Array.isArray(instance)
+      }
+    }
+    if (index === Symbol.toStringTag) {
+      return target[Symbol.toStringTag]
+    }
     if (index === OBJECT_ID) return objectId
     if (index === IS_PROXY) return true
     if (index === TRACE) return target.trace
-    if (index === STATE) return { handle: context };
-    if (index === 'length') return context.length(objectId, heads);
-    if (typeof index === 'number') {
+    if (index === STATE) return { handle: context }
+    if (index === "length") return context.length(objectId, heads)
+    if (typeof index === "number") {
       return valueAt(target, index)
     } else {
       return listMethods(target)[index]
     }
   },
 
-  set (target, index, val) {
-    const {context, objectId, path, readonly, frozen } = target
+  set(target, index, val) {
+    const { context, objectId, path, readonly, frozen } = target
     index = parseListIndex(index)
     if (val && val[OBJECT_ID]) {
-      throw new RangeError('Cannot create a reference to an existing document object')
+      throw new RangeError(
+        "Cannot create a reference to an existing document object"
+      )
     }
     if (index === TRACE) {
       target.trace = val
       return true
     }
     if (typeof index == "string") {
-      throw new RangeError('list index must be a number')
+      throw new RangeError("list index must be a number")
     }
-    const [ value, datatype] = import_value(val)
+    const [value, datatype] = import_value(val)
     if (frozen) {
       throw new RangeError("Attempting to use an outdated Automerge document")
     }
@@ -231,9 +266,9 @@ const ListHandler = {
         } else {
           list = context.putObject(objectId, index, [])
         }
-        const proxyList = listProxy(context, list, [ ... path, index ], readonly);
-        proxyList.splice(0,0,...value)
-        break;
+        const proxyList = listProxy(context, list, [...path, index], readonly)
+        proxyList.splice(0, 0, ...value)
+        break
       }
       case "text": {
         if (index >= context.length(objectId)) {
@@ -241,7 +276,7 @@ const ListHandler = {
         } else {
           context.putObject(objectId, index, value, "text")
         }
-        break;
+        break
       }
       case "map": {
         let map
@@ -250,11 +285,11 @@ const ListHandler = {
         } else {
           map = context.putObject(objectId, index, {})
         }
-        const proxyMap = mapProxy(context, map, [ ... path, index ], readonly);
+        const proxyMap = mapProxy(context, map, [...path, index], readonly)
         for (const key in value) {
           proxyMap[key] = value[key]
         }
-        break;
+        break
       }
       default:
         if (index >= context.length(objectId)) {
@@ -266,30 +301,34 @@ const ListHandler = {
     return true
   },
 
-  deleteProperty (target, index) {
-    const {context, objectId} = target
+  deleteProperty(target, index) {
+    const { context, objectId } = target
     index = parseListIndex(index)
     if (context.get(objectId, index)[0] == "counter") {
-      throw new TypeError('Unsupported operation: deleting a counter from a list')
+      throw new TypeError(
+        "Unsupported operation: deleting a counter from a list"
+      )
     }
     context.delete(objectId, index)
     return true
   },
 
-  has (target, index) {
-    const {context, objectId, heads} = target
+  has(target, index) {
+    const { context, objectId, heads } = target
     index = parseListIndex(index)
-    if (typeof index === 'number') {
+    if (typeof index === "number") {
       return index < context.length(objectId, heads)
     }
-    return index === 'length'
+    return index === "length"
   },
 
-  getOwnPropertyDescriptor (target, index) {
-    const {context, objectId, heads} = target
+  getOwnPropertyDescriptor(target, index) {
+    const { context, objectId, heads } = target
 
-    if (index === 'length') return {writable: true, value: context.length(objectId, heads) }
-    if (index === OBJECT_ID) return {configurable: false, enumerable: false, value: objectId}
+    if (index === "length")
+      return { writable: true, value: context.length(objectId, heads) }
+    if (index === OBJECT_ID)
+      return { configurable: false, enumerable: false, value: objectId }
 
     index = parseListIndex(index)
 
@@ -297,38 +336,71 @@ const ListHandler = {
     return { configurable: true, enumerable: true, value }
   },
 
-  getPrototypeOf(target) { return Object.getPrototypeOf(target) },
-  ownKeys (/*target*/) : string[] {
-    const keys : string[] = []
+  getPrototypeOf(target) {
+    return Object.getPrototypeOf(target)
+  },
+  ownKeys(/*target*/): string[] {
+    const keys: string[] = []
     // uncommenting this causes assert.deepEqual() to fail when comparing to a pojo array
     // but not uncommenting it causes for (i in list) {} to not enumerate values properly
     //const {context, objectId, heads } = target
     //for (let i = 0; i < target.context.length(objectId, heads); i++) { keys.push(i.toString()) }
-    keys.push("length");
+    keys.push("length")
     return keys
-  }
+  },
 }
 
-export function mapProxy(context: Automerge, objectId: ObjID, path?: Prop[], readonly?: boolean, heads?: Heads) : MapValue {
-  return new Proxy({context, objectId, path, readonly: !!readonly, frozen: false, heads, cache: {}}, MapHandler)
+export function mapProxy(
+  context: Automerge,
+  objectId: ObjID,
+  path?: Prop[],
+  readonly?: boolean,
+  heads?: Heads
+): MapValue {
+  return new Proxy(
+    {
+      context,
+      objectId,
+      path,
+      readonly: !!readonly,
+      frozen: false,
+      heads,
+      cache: {},
+    },
+    MapHandler
+  )
 }
 
-export function listProxy(context: Automerge, objectId: ObjID, path?: Prop[], readonly?: boolean, heads?: Heads) : ListValue {
+export function listProxy(
+  context: Automerge,
+  objectId: ObjID,
+  path?: Prop[],
+  readonly?: boolean,
+  heads?: Heads
+): ListValue {
   const target = []
-  Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false, heads, cache: {}})
+  Object.assign(target, {
+    context,
+    objectId,
+    path,
+    readonly: !!readonly,
+    frozen: false,
+    heads,
+    cache: {},
+  })
   return new Proxy(target, ListHandler)
 }
 
-export function rootProxy<T>(context: Automerge, readonly?: boolean) : T {
+export function rootProxy<T>(context: Automerge, readonly?: boolean): T {
   /* eslint-disable-next-line */
   return <any>mapProxy(context, "_root", [], !!readonly)
 }
 
 function listMethods(target) {
-  const {context, objectId, path, readonly, frozen, heads} = target
+  const { context, objectId, path, readonly, frozen, heads } = target
   const methods = {
     deleteAt(index, numDelete) {
-      if (typeof numDelete === 'number') {
+      if (typeof numDelete === "number") {
         context.splice(objectId, index, numDelete)
       } else {
         context.delete(objectId, index)
@@ -355,7 +427,7 @@ function listMethods(target) {
       const length = context.length(objectId)
       for (let i = start; i < length; i++) {
         const value = context.getWithType(objectId, i, heads)
-        if (value && value[1] === o[OBJECT_ID] || value[1] === o) {
+        if ((value && value[1] === o[OBJECT_ID]) || value[1] === o) {
           return i
         }
       }
@@ -395,16 +467,20 @@ function listMethods(target) {
       del = parseListIndex(del)
       for (const val of vals) {
         if (val && val[OBJECT_ID]) {
-              throw new RangeError('Cannot create a reference to an existing document object')
+          throw new RangeError(
+            "Cannot create a reference to an existing document object"
+          )
         }
       }
       if (frozen) {
         throw new RangeError("Attempting to use an outdated Automerge document")
       }
       if (readonly) {
-        throw new RangeError("Sequence object cannot be modified outside of a change block")
+        throw new RangeError(
+          "Sequence object cannot be modified outside of a change block"
+        )
       }
-      const result : AutomergeValue[] = []
+      const result: AutomergeValue[] = []
       for (let i = 0; i < del; i++) {
         const value = valueAt(target, index)
         if (value !== undefined) {
@@ -412,26 +488,31 @@ function listMethods(target) {
         }
         context.delete(objectId, index)
       }
-      const values = vals.map((val) => import_value(val))
-      for (const [value,datatype] of values) {
+      const values = vals.map(val => import_value(val))
+      for (const [value, datatype] of values) {
         switch (datatype) {
           case "list": {
             const list = context.insertObject(objectId, index, [])
-            const proxyList = listProxy(context, list, [ ... path, index ], readonly);
-            proxyList.splice(0,0,...value)
-            break;
+            const proxyList = listProxy(
+              context,
+              list,
+              [...path, index],
+              readonly
+            )
+            proxyList.splice(0, 0, ...value)
+            break
           }
           case "text": {
             context.insertObject(objectId, index, value)
-            break;
+            break
           }
           case "map": {
             const map = context.insertObject(objectId, index, {})
-            const proxyMap = mapProxy(context, map, [ ... path, index ], readonly);
+            const proxyMap = mapProxy(context, map, [...path, index], readonly)
             for (const key in value) {
               proxyMap[key] = value[key]
             }
-            break;
+            break
           }
           default:
             context.insert(objectId, index, value, datatype)
@@ -447,35 +528,38 @@ function listMethods(target) {
     },
 
     entries() {
-      const i = 0;
+      const i = 0
       const iterator = {
         next: () => {
           const value = valueAt(target, i)
           if (value === undefined) {
             return { value: undefined, done: true }
           } else {
-            return { value: [ i, value ], done: false }
+            return { value: [i, value], done: false }
           }
-        }
+        },
       }
       return iterator
     },
 
     keys() {
-      let i = 0;
+      let i = 0
       const len = context.length(objectId, heads)
       const iterator = {
         next: () => {
-          let value : undefined | number = undefined
-          if (i < len) { value = i; i++ }
+          let value: undefined | number = undefined
+          if (i < len) {
+            value = i
+            i++
+          }
           return { value, done: true }
-        }
+        },
       }
       return iterator
     },
 
     values() {
-      const i = 0;
+      const i = 0
       const iterator = {
         next: () => {
           const value = valueAt(target, i)
@@ -484,13 +568,13 @@ function listMethods(target) {
           } else {
             return { value, done: false }
           }
-        }
+        },
       }
       return iterator
     },
 
-    toArray() : AutomergeValue[] {
-      const list : AutomergeValue = []
+    toArray(): AutomergeValue[] {
+      const list: AutomergeValue = []
       let value
       do {
         value = valueAt(target, list.length)
@@ -502,36 +586,36 @@ function listMethods(target) {
       return list
     },
 
-    map<T>(f: (AutomergeValue, number) => T) : T[] {
+    map<T>(f: (AutomergeValue, number) => T): T[] {
       return this.toArray().map(f)
     },
 
-    toString() : string {
+    toString(): string {
       return this.toArray().toString()
     },
 
-    toLocaleString() : string {
+    toLocaleString(): string {
       return this.toArray().toLocaleString()
     },
 
-    forEach(f: (AutomergeValue, number) => undefined ) {
+    forEach(f: (AutomergeValue, number) => undefined) {
       return this.toArray().forEach(f)
     },
 
     // todo: real concat function is different
-    concat(other: AutomergeValue[]) : AutomergeValue[] {
+    concat(other: AutomergeValue[]): AutomergeValue[] {
       return this.toArray().concat(other)
     },
 
-    every(f: (AutomergeValue, number) => boolean) : boolean {
+    every(f: (AutomergeValue, number) => boolean): boolean {
       return this.toArray().every(f)
     },
 
-    filter(f: (AutomergeValue, number) => boolean) : AutomergeValue[] {
+    filter(f: (AutomergeValue, number) => boolean): AutomergeValue[] {
       return this.toArray().filter(f)
     },
 
-    find(f: (AutomergeValue, number) => boolean) : AutomergeValue | undefined {
+    find(f: (AutomergeValue, number) => boolean): AutomergeValue | undefined {
       let index = 0
       for (const v of this) {
         if (f(v, index)) {
@@ -541,7 +625,7 @@ function listMethods(target) {
       }
     },
 
-    findIndex(f: (AutomergeValue, number) => boolean) : number {
+    findIndex(f: (AutomergeValue, number) => boolean): number {
       let index = 0
       for (const v of this) {
         if (f(v, index)) {
@@ -552,37 +636,40 @@ function listMethods(target) {
       return -1
     },
 
-    includes(elem: AutomergeValue) : boolean {
-      return this.find((e) => e === elem) !== undefined
+    includes(elem: AutomergeValue): boolean {
+      return this.find(e => e === elem) !== undefined
     },
 
-    join(sep?: string) : string {
+    join(sep?: string): string {
       return this.toArray().join(sep)
     },
 
     // todo: remove the any
-    reduce<T>(f: (any, AutomergeValue) => T, initalValue?: T) : T | undefined {
-      return this.toArray().reduce(f,initalValue)
+    reduce<T>(f: (any, AutomergeValue) => T, initalValue?: T): T | undefined {
+      return this.toArray().reduce(f, initalValue)
     },
 
     // todo: remove the any
-    reduceRight<T>(f: (any, AutomergeValue) => T, initalValue?: T) : T | undefined{
-      return this.toArray().reduceRight(f,initalValue)
+    reduceRight<T>(
+      f: (any, AutomergeValue) => T,
+      initalValue?: T
+    ): T | undefined {
+      return this.toArray().reduceRight(f, initalValue)
     },
 
-    lastIndexOf(search: AutomergeValue, fromIndex = +Infinity) : number {
+    lastIndexOf(search: AutomergeValue, fromIndex = +Infinity): number {
       // this can be faster
-      return this.toArray().lastIndexOf(search,fromIndex)
+      return this.toArray().lastIndexOf(search, fromIndex)
     },
 
-    slice(index?: number, num?: number) : AutomergeValue[] {
-      return this.toArray().slice(index,num)
+    slice(index?: number, num?: number): AutomergeValue[] {
+      return this.toArray().slice(index, num)
     },
 
-    some(f: (AutomergeValue, number) => boolean) : boolean {
-      let index = 0;
+    some(f: (AutomergeValue, number) => boolean): boolean {
+      let index = 0
       for (const v of this) {
-        if (f(v,index)) {
+        if (f(v, index)) {
           return true
         }
         index += 1
@@ -590,16 +677,15 @@ function listMethods(target) {
       return false
     },
 
-    [Symbol.iterator]: function *() {
-      let i = 0;
+    [Symbol.iterator]: function* () {
+      let i = 0
       let value = valueAt(target, i)
       while (value !== undefined) {
-          yield value
-          i += 1
-          value = valueAt(target, i)
+        yield value
+        i += 1
+        value = valueAt(target, i)
       }
-    }
+    },
   }
   return methods
 }
-

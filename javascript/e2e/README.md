@@ -54,7 +54,7 @@ yarn e2e buildexamples -e webpack
 If you're experimenting with a project which is not in the `examples` folder
 you'll need a running registry. `run-registry` builds and publishes
 `automerge-js` and `automerge-wasm` and then runs the registry at
-`localhost:4873`. 
+`localhost:4873`.
 
 ```
 yarn e2e run-registry
@@ -62,7 +62,6 @@ yarn e2e run-registry
 
 You can now run `yarn install --registry http://localhost:4873` to experiment
 with the built packages.
-
 
 ## Using the `dev` build of `automerge-wasm`
 

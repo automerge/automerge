@@ -1,5 +1,5 @@
-import * as assert from 'assert'
-import { Encoder } from './legacy/encoding'
+import * as assert from "assert"
+import { Encoder } from "./legacy/encoding"
 
 // Assertion that succeeds if the first argument deepStrictEquals at least one of the
 // subsequent arguments (but we don't care which one)
@@ -11,7 +11,8 @@ export function assertEqualsOneOf(actual, ...expected) {
       return // if we get here without an exception, that means success
     } catch (e) {
       if (e instanceof assert.AssertionError) {
-        if (!e.name.match(/^AssertionError/) || i === expected.length - 1) throw e
+        if (!e.name.match(/^AssertionError/) || i === expected.length - 1)
+          throw e
       } else {
         throw e
       }
@@ -24,9 +25,10 @@ export function assertEqualsOneOf(actual, ...expected) {
  * sequence as the array `bytes`.
  */
 export function checkEncoded(encoder, bytes, detail?) {
-  const encoded = (encoder instanceof Encoder) ? encoder.buffer : encoder
+  const encoded = encoder instanceof Encoder ? encoder.buffer : encoder
   const expected = new Uint8Array(bytes)
-  const message = (detail ? `${detail}: ` : '') + `${encoded} expected to equal ${expected}`
+  const message =
+    (detail ? `${detail}: ` : "") + `${encoded} expected to equal ${expected}`
   assert(encoded.byteLength === expected.byteLength, message)
   for (let i = 0; i < encoded.byteLength; i++) {
     assert(encoded[i] === expected[i], message)

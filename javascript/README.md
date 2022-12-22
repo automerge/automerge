@@ -19,7 +19,6 @@ data](#make-some-data). If you're in a browser you need a bundler
 
 ### Bundler setup
 
-
 `@automerge/automerge` is a wrapper around a core library which is written in
 rust, compiled to WebAssembly and distributed as a separate package called
 `@automerge/automerge-wasm`. Browsers don't currently support WebAssembly
@@ -54,28 +53,28 @@ import * as automerge from "@automerge/automerge"
 import * as assert from "assert"
 
 let doc1 = automerge.from({
-    tasks: [
-        {description: "feed fish", done: false},
-        {description: "water plants", done: false},
-    ]
+  tasks: [
+    { description: "feed fish", done: false },
+    { description: "water plants", done: false },
+  ],
 })
 
-// Create a new thread of execution 
+// Create a new thread of execution
 let doc2 = automerge.clone(doc1)
 
 // Now we concurrently make changes to doc1 and doc2
 
 // Complete a task in doc2
 doc2 = automerge.change(doc2, d => {
-    d.tasks[0].done = true
+  d.tasks[0].done = true
 })
 
 // Add a task in doc1
 doc1 = automerge.change(doc1, d => {
-    d.tasks.push({
-        description: "water fish",
-        done: false
-    })
+  d.tasks.push({
+    description: "water fish",
+    done: false,
+  })
 })
 
 // Merge changes from both docs
@@ -84,19 +83,19 @@ doc2 = automerge.merge(doc2, doc1)
 
 // Both docs are merged and identical
 assert.deepEqual(doc1, {
-    tasks: [
-        {description: "feed fish", done: true},
-        {description: "water plants", done: false},
-        {description: "water fish", done: false},
-    ]
+  tasks: [
+    { description: "feed fish", done: true },
+    { description: "water plants", done: false },
+    { description: "water fish", done: false },
+  ],
 })
 
 assert.deepEqual(doc2, {
-    tasks: [
-        {description: "feed fish", done: true},
-        {description: "water plants", done: false},
-        {description: "water fish", done: false},
-    ]
+  tasks: [
+    { description: "feed fish", done: true },
+    { description: "water plants", done: false },
+    { description: "water fish", done: false },
+  ],
 })
 ```
 

@@ -2,6 +2,7 @@
 set -eou pipefail
 
 ./scripts/ci/fmt
+./scripts/ci/fmt_js
 ./scripts/ci/lint
 ./scripts/ci/build-test
 ./scripts/ci/rust-docs

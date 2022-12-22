@@ -1,11 +1,10 @@
 import * as Automerge from "@automerge/automerge"
-import logo from './logo.svg';
-import './App.css';
+import logo from "./logo.svg"
+import "./App.css"
 
 let doc = Automerge.init()
-doc = Automerge.change(doc, (d) => d.hello = "from automerge")
+doc = Automerge.change(doc, d => (d.hello = "from automerge"))
 const result = JSON.stringify(doc)
-
 
 function App() {
   return (
@@ -15,7 +14,7 @@ function App() {
         <p>{result}</p>
       </header>
     </div>
-  );
+  )
 }
 
-export default App;
+export default App

@@ -54,6 +54,6 @@ In the root of the project add the following contents to `craco.config.js`
 const cracoWasm = require("craco-wasm")
 
 module.exports = {
-    plugins: [cracoWasm()]
+  plugins: [cracoWasm()],
 }
 ```
