@@ -6,7 +6,7 @@ import { COUNTER } from "./constants"
  * the value trivially converges.
  */
 export class Counter {
-  value : number;
+  value: number
 
   constructor(value?: number) {
     this.value = value || 0
@@ -21,7 +21,7 @@ export class Counter {
    * concatenating it with another string, as in `x + ''`.
    * https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/valueOf
    */
-  valueOf() : number {
+  valueOf(): number {
     return this.value
   }
 
@@ -30,7 +30,7 @@ export class Counter {
    * this method is called e.g. when you do `['value: ', x].join('')` or when
    * you use string interpolation: `value: ${x}`.
    */
-  toString() : string {
+  toString(): string {
     return this.valueOf().toString()
   }
 
@@ -38,7 +38,7 @@ export class Counter {
    * Returns the counter value, so that a JSON serialization of an Automerge
    * document represents the counter simply as an integer.
    */
-  toJSON() : number {
+  toJSON(): number {
     return this.value
   }
 }
@@ -53,20 +53,26 @@ class WriteableCounter extends Counter {
   objectId: ObjID
   key: Prop
 
-  constructor(value: number, context: Automerge, path: string[], objectId: ObjID, key: Prop) {
+  constructor(
+    value: number,
+    context: Automerge,
+    path: string[],
+    objectId: ObjID,
+    key: Prop
+  ) {
     super(value)
     this.context = context
     this.path = path
     this.objectId = objectId
     this.key = key
   }
-  
+
   /**
    * Increases the value of the counter by `delta`. If `delta` is not given,
    * increases the value of the counter by 1.
    */
-  increment(delta: number) : number {
-    delta = typeof delta === 'number' ? delta : 1
+  increment(delta: number): number {
+    delta = typeof delta === "number" ? delta : 1
     this.context.increment(this.objectId, this.key, delta)
     this.value += delta
     return this.value
@@ -76,8 +82,8 @@ class WriteableCounter extends Counter {
    * Decreases the value of the counter by `delta`. If `delta` is not given,
    * decreases the value of the counter by 1.
    */
-  decrement(delta: number) : number {
-    return this.increment(typeof delta === 'number' ? -delta : -1)
+  decrement(delta: number): number {
+    return this.increment(typeof delta === "number" ? -delta : -1)
   }
 }
 
@@ -87,8 +93,14 @@ class WriteableCounter extends Counter {
  * `objectId` is the ID of the object containing the counter, and `key` is
  * the property name (key in map, or index in list) where the counter is
  * located.
-*/
-export function getWriteableCounter(value: number, context: Automerge, path: string[], objectId: ObjID, key: Prop) {
+ */
+export function getWriteableCounter(
+  value: number,
+  context: Automerge,
+  path: string[],
+  objectId: ObjID,
+  key: Prop
+) {
   return new WriteableCounter(value, context, path, objectId, key)
 }
 

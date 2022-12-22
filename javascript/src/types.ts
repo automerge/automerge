@@ -1,10 +1,19 @@
-
-export { Counter  } from "./counter"
-export { Int, Uint, Float64  } from "./numbers"
+export { Counter } from "./counter"
+export { Int, Uint, Float64 } from "./numbers"
 
 import { Counter } from "./counter"
 
-export type AutomergeValue = ScalarValue | { [key: string]: AutomergeValue } | Array<AutomergeValue>
-export type MapValue =  { [key: string]: AutomergeValue }
-export type ListValue = Array<AutomergeValue> 
-export type ScalarValue = string | number | null | boolean | Date | Counter | Uint8Array
+export type AutomergeValue =
+  | ScalarValue
+  | { [key: string]: AutomergeValue }
+  | Array<AutomergeValue>
+export type MapValue = { [key: string]: AutomergeValue }
+export type ListValue = Array<AutomergeValue>
+export type ScalarValue =
+  | string
+  | number
+  | null
+  | boolean
+  | Date
+  | Counter
+  | Uint8Array

@@ -1,6 +1,6 @@
 {
-    "compilerOptions": {
-        "types": ["node"]
-    },
-    "module": "nodenext"
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "module": "nodenext"
 }

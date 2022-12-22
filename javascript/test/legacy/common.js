@@ -1,5 +1,5 @@
 function isObject(obj) {
-  return typeof obj === 'object' && obj !== null
+  return typeof obj === "object" && obj !== null
 }
 
 /**
@@ -20,11 +20,11 @@ function copyObject(obj) {
  * with an actor ID, separated by an `@` sign) and returns an object `{counter, actorId}`.
  */
 function parseOpId(opId) {
-  const match = /^(\d+)@(.*)$/.exec(opId || '')
+  const match = /^(\d+)@(.*)$/.exec(opId || "")
   if (!match) {
     throw new RangeError(`Not a valid opId: ${opId}`)
   }
-  return {counter: parseInt(match[1], 10), actorId: match[2]}
+  return { counter: parseInt(match[1], 10), actorId: match[2] }
 }
 
 /**
@@ -32,7 +32,7 @@ function parseOpId(opId) {
  */
 function equalBytes(array1, array2) {
   if (!(array1 instanceof Uint8Array) || !(array2 instanceof Uint8Array)) {
-    throw new TypeError('equalBytes can only compare Uint8Arrays')
+    throw new TypeError("equalBytes can only compare Uint8Arrays")
   }
   if (array1.byteLength !== array2.byteLength) return false
   for (let i = 0; i < array1.byteLength; i++) {
@@ -51,5 +51,9 @@ function createArrayOfNulls(length) {
 }
 
 module.exports = {
-  isObject, copyObject, parseOpId, equalBytes, createArrayOfNulls
+  isObject,
+  copyObject,
+  parseOpId,
+  equalBytes,
+  createArrayOfNulls,
 }

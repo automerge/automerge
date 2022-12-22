@@ -3,10 +3,16 @@
 import { INT, UINT, F64 } from "./constants"
 
 export class Int {
-  value: number;
+  value: number
 
   constructor(value: number) {
-    if (!(Number.isInteger(value) && value <= Number.MAX_SAFE_INTEGER && value >= Number.MIN_SAFE_INTEGER)) {
+    if (
+      !(
+        Number.isInteger(value) &&
+        value <= Number.MAX_SAFE_INTEGER &&
+        value >= Number.MIN_SAFE_INTEGER
+      )
+    ) {
       throw new RangeError(`Value ${value} cannot be a uint`)
     }
     this.value = value
@@ -16,10 +22,16 @@ export class Int {
 }
 
 export class Uint {
-  value: number;
+  value: number
 
   constructor(value: number) {
-    if (!(Number.isInteger(value) && value <= Number.MAX_SAFE_INTEGER && value >= 0)) {
+    if (
+      !(
+        Number.isInteger(value) &&
+        value <= Number.MAX_SAFE_INTEGER &&
+        value >= 0
+      )
+    ) {
       throw new RangeError(`Value ${value} cannot be a uint`)
     }
     this.value = value
@@ -29,10 +41,10 @@ export class Uint {
 }
 
 export class Float64 {
-  value: number;
+  value: number
 
   constructor(value: number) {
-    if (typeof value !== 'number') {
+    if (typeof value !== "number") {
       throw new RangeError(`Value ${value} cannot be a float64`)
     }
     this.value = value || 0.0
@@ -40,4 +52,3 @@ export class Float64 {
     Object.freeze(this)
   }
 }
-

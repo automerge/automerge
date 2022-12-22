@@ -8,7 +8,7 @@ Rust codebase and can be found in `~/automerge-wasm`). I.e. the responsibility
 of this codebase is
 
 - To map from the javascript data model to the underlying `set`, `make`,
-  `insert`, and `delete` operations of Automerge. 
+  `insert`, and `delete` operations of Automerge.
 - To expose a more convenient interface to functions in `automerge-wasm` which
   generate messages to send over the network or compressed file formats to store
   on disk
@@ -37,4 +37,3 @@ yarn test
 
 If you make changes to the `automerge-wasm` package you will need to re-run
 `yarn e2e buildjs`
-

@@ -17,9 +17,14 @@
  */
 
 const Backend = null //require('./backend')
-const { hexStringToBytes, bytesToHexString, Encoder, Decoder } = require('./encoding')
-const { decodeChangeMeta } = require('./columnar')
-const { copyObject } = require('./common')
+const {
+  hexStringToBytes,
+  bytesToHexString,
+  Encoder,
+  Decoder,
+} = require("./encoding")
+const { decodeChangeMeta } = require("./columnar")
+const { copyObject } = require("./common")
 
 const HASH_SIZE = 32 // 256 bits = 32 bytes
 const MESSAGE_TYPE_SYNC = 0x42 // first byte of a sync message, for identification
@@ -28,7 +33,8 @@ const PEER_STATE_TYPE = 0x43 // first byte of an encoded peer state, for identif
 // These constants correspond to a 1% false positive rate. The values can be changed without
 // breaking compatibility of the network protocol, since the parameters used for a particular
 // Bloom filter are encoded in the wire format.
-const BITS_PER_ENTRY = 10, NUM_PROBES = 7
+const BITS_PER_ENTRY = 10,
+  NUM_PROBES = 7
 
 /**
  * A Bloom filter implementation that can be serialised to a byte array for transmission
@@ -36,13 +42,15 @@ const BITS_PER_ENTRY = 10, NUM_PROBES = 7
  * so this implementation does not perform its own hashing.
  */
 class BloomFilter {
-  constructor (arg) {
+  constructor(arg) {
     if (Array.isArray(arg)) {
       // arg is an array of SHA256 hashes in hexadecimal encoding
       this.numEntries = arg.length
       this.numBitsPerEntry = BITS_PER_ENTRY
       this.numProbes = NUM_PROBES
-      this.bits = new Uint8Array(Math.ceil(this.numEntries * this.numBitsPerEntry / 8))
+      this.bits = new Uint8Array(
+        Math.ceil((this.numEntries * this.numBitsPerEntry) / 8)
+      )
       for (let hash of arg) this.addHash(hash)
     } else if (arg instanceof Uint8Array) {
       if (arg.byteLength === 0) {
@@ -55,10 +63,12 @@ class BloomFilter {
         this.numEntries = decoder.readUint32()
         this.numBitsPerEntry = decoder.readUint32()
         this.numProbes = decoder.readUint32()
-        this.bits = decoder.readRawBytes(Math.ceil(this.numEntries * this.numBitsPerEntry / 8))
+        this.bits = decoder.readRawBytes(
+          Math.ceil((this.numEntries * this.numBitsPerEntry) / 8)
+        )
       }
     } else {
-      throw new TypeError('invalid argument')
+      throw new TypeError("invalid argument")
     }
   }
 
@@ -86,12 +96,32 @@ class BloomFilter {
    * http://www.ccis.northeastern.edu/home/pete/pub/bloom-filters-verification.pdf
    */
   getProbes(hash) {
-    const hashBytes = hexStringToBytes(hash), modulo = 8 * this.bits.byteLength
-    if (hashBytes.byteLength !== 32) throw new RangeError(`Not a 256-bit hash: ${hash}`)
+    const hashBytes = hexStringToBytes(hash),
+      modulo = 8 * this.bits.byteLength
+    if (hashBytes.byteLength !== 32)
+      throw new RangeError(`Not a 256-bit hash: ${hash}`)
     // on the next three lines, the right shift means interpret value as unsigned
-    let x = ((hashBytes[0] | hashBytes[1] << 8 | hashBytes[2]  << 16 | hashBytes[3]  << 24) >>> 0) % modulo
-    let y = ((hashBytes[4] | hashBytes[5] << 8 | hashBytes[6]  << 16 | hashBytes[7]  << 24) >>> 0) % modulo
-    let z = ((hashBytes[8] | hashBytes[9] << 8 | hashBytes[10] << 16 | hashBytes[11] << 24) >>> 0) % modulo
+    let x =
+      ((hashBytes[0] |
+        (hashBytes[1] << 8) |
+        (hashBytes[2] << 16) |
+        (hashBytes[3] << 24)) >>>
+        0) %
+      modulo
+    let y =
+      ((hashBytes[4] |
+        (hashBytes[5] << 8) |
+        (hashBytes[6] << 16) |
+        (hashBytes[7] << 24)) >>>
+        0) %
+      modulo
+    let z =
+      ((hashBytes[8] |
+        (hashBytes[9] << 8) |
+        (hashBytes[10] << 16) |
+        (hashBytes[11] << 24)) >>>
+        0) %
+      modulo
     const probes = [x]
     for (let i = 1; i < this.numProbes; i++) {
       x = (x + y) % modulo
@@ -128,12 +158,14 @@ class BloomFilter {
  * Encodes a sorted array of SHA-256 hashes (as hexadecimal strings) into a byte array.
  */
 function encodeHashes(encoder, hashes) {
-  if (!Array.isArray(hashes)) throw new TypeError('hashes must be an array')
+  if (!Array.isArray(hashes)) throw new TypeError("hashes must be an array")
   encoder.appendUint32(hashes.length)
   for (let i = 0; i < hashes.length; i++) {
-    if (i > 0 && hashes[i - 1] >= hashes[i]) throw new RangeError('hashes must be sorted')
+    if (i > 0 && hashes[i - 1] >= hashes[i])
+      throw new RangeError("hashes must be sorted")
     const bytes = hexStringToBytes(hashes[i])
-    if (bytes.byteLength !== HASH_SIZE) throw new TypeError('heads hashes must be 256 bits')
+    if (bytes.byteLength !== HASH_SIZE)
+      throw new TypeError("heads hashes must be 256 bits")
     encoder.appendRawBytes(bytes)
   }
 }
@@ -143,7 +175,8 @@ function encodeHashes(encoder, hashes) {
  * array of hex strings.
  */
 function decodeHashes(decoder) {
-  let length = decoder.readUint32(), hashes = []
+  let length = decoder.readUint32(),
+    hashes = []
   for (let i = 0; i < length; i++) {
     hashes.push(bytesToHexString(decoder.readRawBytes(HASH_SIZE)))
   }
@@ -183,11 +216,11 @@ function decodeSyncMessage(bytes) {
   const heads = decodeHashes(decoder)
   const need = decodeHashes(decoder)
   const haveCount = decoder.readUint32()
-  let message = {heads, need, have: [], changes: []}
+  let message = { heads, need, have: [], changes: [] }
   for (let i = 0; i < haveCount; i++) {
     const lastSync = decodeHashes(decoder)
     const bloom = decoder.readPrefixedBytes(decoder)
-    message.have.push({lastSync, bloom})
+    message.have.push({ lastSync, bloom })
   }
   const changeCount = decoder.readUint32()
   for (let i = 0; i < changeCount; i++) {
@@ -234,7 +267,7 @@ function decodeSyncState(bytes) {
 function makeBloomFilter(backend, lastSync) {
   const newChanges = Backend.getChanges(backend, lastSync)
   const hashes = newChanges.map(change => decodeChangeMeta(change, true).hash)
-  return {lastSync, bloom: new BloomFilter(hashes).bytes}
+  return { lastSync, bloom: new BloomFilter(hashes).bytes }
 }
 
 /**
@@ -245,20 +278,26 @@ function makeBloomFilter(backend, lastSync) {
  */
 function getChangesToSend(backend, have, need) {
   if (have.length === 0) {
-    return need.map(hash => Backend.getChangeByHash(backend, hash)).filter(change => change !== undefined)
+    return need
+      .map(hash => Backend.getChangeByHash(backend, hash))
+      .filter(change => change !== undefined)
   }
 
-  let lastSyncHashes = {}, bloomFilters = []
+  let lastSyncHashes = {},
+    bloomFilters = []
   for (let h of have) {
     for (let hash of h.lastSync) lastSyncHashes[hash] = true
     bloomFilters.push(new BloomFilter(h.bloom))
   }
 
   // Get all changes that were added since the last sync
-  const changes = Backend.getChanges(backend, Object.keys(lastSyncHashes))
-    .map(change => decodeChangeMeta(change, true))
+  const changes = Backend.getChanges(backend, Object.keys(lastSyncHashes)).map(
+    change => decodeChangeMeta(change, true)
+  )
 
-  let changeHashes = {}, dependents = {}, hashesToSend = {}
+  let changeHashes = {},
+    dependents = {},
+    hashesToSend = {}
   for (let change of changes) {
     changeHashes[change.hash] = true
 
@@ -292,7 +331,8 @@ function getChangesToSend(backend, have, need) {
   let changesToSend = []
   for (let hash of need) {
     hashesToSend[hash] = true
-    if (!changeHashes[hash]) { // Change is not among those returned by getMissingChanges()?
+    if (!changeHashes[hash]) {
+      // Change is not among those returned by getMissingChanges()?
       const change = Backend.getChangeByHash(backend, hash)
       if (change) changesToSend.push(change)
     }
@@ -317,7 +357,7 @@ function initSyncState() {
 }
 
 function compareArrays(a, b) {
-    return (a.length === b.length) && a.every((v, i) => v === b[i])
+  return a.length === b.length && a.every((v, i) => v === b[i])
 }
 
 /**
@@ -329,10 +369,19 @@ function generateSyncMessage(backend, syncState) {
     throw new Error("generateSyncMessage called with no Automerge document")
   }
   if (!syncState) {
-    throw new Error("generateSyncMessage requires a syncState, which can be created with initSyncState()")
+    throw new Error(
+      "generateSyncMessage requires a syncState, which can be created with initSyncState()"
+    )
   }
 
-  let { sharedHeads, lastSentHeads, theirHeads, theirNeed, theirHave, sentHashes } = syncState
+  let {
+    sharedHeads,
+    lastSentHeads,
+    theirHeads,
+    theirNeed,
+    theirHave,
+    sentHashes,
+  } = syncState
   const ourHeads = Backend.getHeads(backend)
 
   // Hashes to explicitly request from the remote peer: any missing dependencies of unapplied
@@ -356,18 +405,28 @@ function generateSyncMessage(backend, syncState) {
     const lastSync = theirHave[0].lastSync
     if (!lastSync.every(hash => Backend.getChangeByHash(backend, hash))) {
       // we need to queue them to send us a fresh sync message, the one they sent is uninteligible so we don't know what they need
-      const resetMsg = {heads: ourHeads, need: [], have: [{ lastSync: [], bloom: new Uint8Array(0) }], changes: []}
+      const resetMsg = {
+        heads: ourHeads,
+        need: [],
+        have: [{ lastSync: [], bloom: new Uint8Array(0) }],
+        changes: [],
+      }
       return [syncState, encodeSyncMessage(resetMsg)]
     }
   }
 
   // XXX: we should limit ourselves to only sending a subset of all the messages, probably limited by a total message size
   //      these changes should ideally be RLE encoded but we haven't implemented that yet.
-  let changesToSend = Array.isArray(theirHave) && Array.isArray(theirNeed) ? getChangesToSend(backend, theirHave, theirNeed) : []
+  let changesToSend =
+    Array.isArray(theirHave) && Array.isArray(theirNeed)
+      ? getChangesToSend(backend, theirHave, theirNeed)
+      : []
 
   // If the heads are equal, we're in sync and don't need to do anything further
-  const headsUnchanged = Array.isArray(lastSentHeads) && compareArrays(ourHeads, lastSentHeads)
-  const headsEqual = Array.isArray(theirHeads) && compareArrays(ourHeads, theirHeads)
+  const headsUnchanged =
+    Array.isArray(lastSentHeads) && compareArrays(ourHeads, lastSentHeads)
+  const headsEqual =
+    Array.isArray(theirHeads) && compareArrays(ourHeads, theirHeads)
   if (headsUnchanged && headsEqual && changesToSend.length === 0) {
     // no need to send a sync message if we know we're synced!
     return [syncState, null]
@@ -375,12 +434,19 @@ function generateSyncMessage(backend, syncState) {
 
   // TODO: this recomputes the SHA-256 hash of each change; we should restructure this to avoid the
   // unnecessary recomputation
-  changesToSend = changesToSend.filter(change => !sentHashes[decodeChangeMeta(change, true).hash])
+  changesToSend = changesToSend.filter(
+    change => !sentHashes[decodeChangeMeta(change, true).hash]
+  )
 
   // Regular response to a sync message: send any changes that the other node
   // doesn't have. We leave the "have" field empty because the previous message
   // generated by `syncStart` already indicated what changes we have.
-  const syncMessage = {heads: ourHeads, have: ourHave, need: ourNeed, changes: changesToSend}
+  const syncMessage = {
+    heads: ourHeads,
+    have: ourHave,
+    need: ourNeed,
+    changes: changesToSend,
+  }
   if (changesToSend.length > 0) {
     sentHashes = copyObject(sentHashes)
     for (const change of changesToSend) {
@@ -388,7 +454,10 @@ function generateSyncMessage(backend, syncState) {
     }
   }
 
-  syncState = Object.assign({}, syncState, {lastSentHeads: ourHeads, sentHashes})
+  syncState = Object.assign({}, syncState, {
+    lastSentHeads: ourHeads,
+    sentHashes,
+  })
   return [syncState, encodeSyncMessage(syncMessage)]
 }
 
@@ -406,12 +475,13 @@ function generateSyncMessage(backend, syncState) {
  * another peer, that means that peer had those changes, and therefore we now both know about them.
  */
 function advanceHeads(myOldHeads, myNewHeads, ourOldSharedHeads) {
-  const newHeads = myNewHeads.filter((head) => !myOldHeads.includes(head))
-  const commonHeads = ourOldSharedHeads.filter((head) => myNewHeads.includes(head))
+  const newHeads = myNewHeads.filter(head => !myOldHeads.includes(head))
+  const commonHeads = ourOldSharedHeads.filter(head =>
+    myNewHeads.includes(head)
+  )
   const advancedHeads = [...new Set([...newHeads, ...commonHeads])].sort()
   return advancedHeads
 }
-
 
 /**
  * Given a backend, a message message and the state of our peer, apply any changes, update what
@@ -422,10 +492,13 @@ function receiveSyncMessage(backend, oldSyncState, binaryMessage) {
     throw new Error("generateSyncMessage called with no Automerge document")
   }
   if (!oldSyncState) {
-    throw new Error("generateSyncMessage requires a syncState, which can be created with initSyncState()")
+    throw new Error(
+      "generateSyncMessage requires a syncState, which can be created with initSyncState()"
+    )
   }
 
-  let { sharedHeads, lastSentHeads, sentHashes } = oldSyncState, patch = null
+  let { sharedHeads, lastSentHeads, sentHashes } = oldSyncState,
+    patch = null
   const message = decodeSyncMessage(binaryMessage)
   const beforeHeads = Backend.getHeads(backend)
 
@@ -434,18 +507,27 @@ function receiveSyncMessage(backend, oldSyncState, binaryMessage) {
   // changes without applying them. The set of changes may also be incomplete if the sender decided
   // to break a large set of changes into chunks.
   if (message.changes.length > 0) {
-    [backend, patch] = Backend.applyChanges(backend, message.changes)
-    sharedHeads = advanceHeads(beforeHeads, Backend.getHeads(backend), sharedHeads)
+    ;[backend, patch] = Backend.applyChanges(backend, message.changes)
+    sharedHeads = advanceHeads(
+      beforeHeads,
+      Backend.getHeads(backend),
+      sharedHeads
+    )
   }
 
   // If heads are equal, indicate we don't need to send a response message
-  if (message.changes.length === 0 && compareArrays(message.heads, beforeHeads)) {
+  if (
+    message.changes.length === 0 &&
+    compareArrays(message.heads, beforeHeads)
+  ) {
     lastSentHeads = message.heads
   }
 
   // If all of the remote heads are known to us, that means either our heads are equal, or we are
   // ahead of the remote peer. In this case, take the remote heads to be our shared heads.
-  const knownHeads = message.heads.filter(head => Backend.getChangeByHash(backend, head))
+  const knownHeads = message.heads.filter(head =>
+    Backend.getChangeByHash(backend, head)
+  )
   if (knownHeads.length === message.heads.length) {
     sharedHeads = message.heads
     // If the remote peer has lost all its data, reset our state to perform a full resync
@@ -467,14 +549,18 @@ function receiveSyncMessage(backend, oldSyncState, binaryMessage) {
     theirHave: message.have, // the information we need to calculate the changes they need
     theirHeads: message.heads,
     theirNeed: message.need,
-    sentHashes
+    sentHashes,
   }
   return [backend, syncState, patch]
 }
 
 module.exports = {
-  receiveSyncMessage, generateSyncMessage,
-  encodeSyncMessage, decodeSyncMessage,
-  initSyncState, encodeSyncState, decodeSyncState,
-  BloomFilter // BloomFilter is a private API, exported only for testing purposes
+  receiveSyncMessage,
+  generateSyncMessage,
+  encodeSyncMessage,
+  decodeSyncMessage,
+  initSyncState,
+  encodeSyncState,
+  decodeSyncState,
+  BloomFilter, // BloomFilter is a private API, exported only for testing purposes
 }

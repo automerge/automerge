@@ -90,6 +90,16 @@ jobs:
         run: rustup target add wasm32-unknown-unknown
       - name: run tests
         run: ./scripts/ci/deno_tests
+
+  js_fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: install
+        run: yarn global add prettier
+      - name: format
+        run: prettier -c javascript/.prettierrc javascript
+
   js_tests:
     runs-on: ubuntu-latest
     steps:

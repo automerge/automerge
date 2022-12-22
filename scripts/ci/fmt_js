@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -eoux pipefail
+
+yarn --cwd javascript prettier -c .
+
