@@ -172,12 +172,19 @@ static void test_repos_with_equal_heads_do_not_need_a_reply_message(void **state
                                        cmocka_cb).obj_id;
     /* n1.commit("", 0)                                                      */
     AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
+
     /* for (let i = 0; i < 10; i++) {                                        */
     for (size_t i = 0; i != 10; ++i) {
         /* n1.insert(list, i, i)                                             */
-        AMfree(AMlistPutUint(test_state->n1, AM_ROOT, i, true, i));
+        AMpush(&test_state->stack,
+            AMlistPutUint(test_state->n1, list, i, true, i),
+            AM_VALUE_VOID,
+            cmocka_cb);
         /* n1.commit("", 0)                                                  */
-        AMfree(AMcommit(test_state->n1, AMstr(""), &TIME_0));
+        AMpush(&test_state->stack,
+            AMcommit(test_state->n1, AMstr(""), &TIME_0),
+            AM_VALUE_CHANGE_HASHES,
+            cmocka_cb);
     /* {                                                                     */
     }
     /* n2.applyChanges(n1.getChanges([]))                                    */

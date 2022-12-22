@@ -151,8 +151,7 @@ pub unsafe extern "C" fn AMcreate(actor_id: *const AMactorId) -> *mut AMresult {
 /// \param[in] message A UTF-8 string view as an `AMbyteSpan` struct.
 /// \param[in] timestamp A pointer to a 64-bit integer or `NULL`.
 /// \return A pointer to an `AMresult` struct containing an `AMchangeHashes`
-///         with one element if there were operations to commit, or void if
-///         there were no operations to commit.
+///         with one element, or an error if there were no operations to commit.
 /// \pre \p doc `!= NULL`.
 /// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
 ///          in order to prevent a memory leak.
@@ -174,7 +173,10 @@ pub unsafe extern "C" fn AMcommit(
     if let Some(timestamp) = timestamp.as_ref() {
         options.set_time(*timestamp);
     }
-    to_result(doc.commit_with(options))
+    match doc.commit_with(options) {
+        Some(change_hash) => to_result(change_hash),
+        None => AMresult::err("Commit is empty").into(),
+    }
 }
 
 /// \memberof AMdoc
