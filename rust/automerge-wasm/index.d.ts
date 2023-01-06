@@ -104,7 +104,7 @@ export type PutPatch = {
 }
 
 export type IncPatch = {
-  action: 'put'
+  action: 'inc'
   path: Prop[],
   value: number
 }
