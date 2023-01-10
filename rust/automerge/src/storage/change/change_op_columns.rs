@@ -177,7 +177,7 @@ impl ChangeOpsColumns {
             obj.append(op.obj());
             key.append(op.key());
             insert.append(op.insert());
-            action.append_value(op.action() as u64);
+            action.append_value(op.action());
             val.append(&op.val());
             pred.append(op.pred());
         }

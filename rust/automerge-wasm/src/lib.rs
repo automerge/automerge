@@ -9,7 +9,6 @@
     rust_2018_idioms,
     unreachable_pub,
     bad_style,
-    const_err,
     dead_code,
     improper_ctypes,
     non_shorthand_field_patterns,
@@ -264,7 +263,6 @@ impl Automerge {
         datatype: JsValue,
     ) -> Result<(), error::Insert> {
         let (obj, _) = self.import(obj)?;
-        let index = index as f64;
         let value = self
             .import_scalar(&value, &datatype.as_string())
             .ok_or(error::Insert::ValueNotPrimitive)?;
@@ -280,7 +278,6 @@ impl Automerge {
         value: JsValue,
     ) -> Result<Option<String>, error::InsertObject> {
         let (obj, _) = self.import(obj)?;
-        let index = index as f64;
         let imported_obj = import_obj(&value, &None)?;
         let opid = self
             .doc

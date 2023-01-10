@@ -132,7 +132,7 @@ enum Command {
 fn open_file_or_stdin(maybe_path: Option<PathBuf>) -> Result<Box<dyn std::io::Read>> {
     if std::io::stdin().is_terminal() {
         if let Some(path) = maybe_path {
-            Ok(Box::new(File::open(&path).unwrap()))
+            Ok(Box::new(File::open(path).unwrap()))
         } else {
             Err(anyhow!(
                 "Must provide file path if not providing input via stdin"
@@ -146,7 +146,7 @@ fn open_file_or_stdin(maybe_path: Option<PathBuf>) -> Result<Box<dyn std::io::Re
 fn create_file_or_stdout(maybe_path: Option<PathBuf>) -> Result<Box<dyn std::io::Write>> {
     if std::io::stdout().is_terminal() {
         if let Some(path) = maybe_path {
-            Ok(Box::new(File::create(&path).unwrap()))
+            Ok(Box::new(File::create(path).unwrap()))
         } else {
             Err(anyhow!("Must provide file path if not piping to stdout"))
         }
@@ -166,7 +166,7 @@ fn main() -> Result<()> {
             skip_verifying_heads,
         } => {
             let output: Box<dyn std::io::Write> = if let Some(output_file) = output_file {
-                Box::new(File::create(&output_file)?)
+                Box::new(File::create(output_file)?)
             } else {
                 Box::new(std::io::stdout())
             };

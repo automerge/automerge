@@ -166,7 +166,7 @@ impl<S: Sink> ObjIdEncoder<S> {
             }
             convert::ObjId::Op(o) => {
                 self.actor.append_value(o.actor() as u64);
-                self.counter.append_value(o.counter() as u64);
+                self.counter.append_value(o.counter());
             }
         }
     }

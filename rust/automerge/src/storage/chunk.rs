@@ -258,7 +258,7 @@ impl Header {
             Header {
                 checksum: checksum_bytes.into(),
                 chunk_type,
-                data_len: data.len() as usize,
+                data_len: data.len(),
                 header_size: header.len(),
                 hash,
             },

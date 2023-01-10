@@ -14,7 +14,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.64.0
+          toolchain: 1.66.0
           default: true
           components: rustfmt
       - uses: Swatinem/rust-cache@v1
@@ -28,7 +28,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.64.0
+          toolchain: 1.66.0
           default: true
           components: clippy
       - uses: Swatinem/rust-cache@v1
@@ -42,7 +42,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.64.0
+          toolchain: 1.66.0
           default: true
       - uses: Swatinem/rust-cache@v1
       - name: Build rust docs
@@ -118,7 +118,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.64.0
+          toolchain: 1.66.0
           default: true
       - uses: Swatinem/rust-cache@v1
       - name: Install CMocka
@@ -157,7 +157,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.64.0
+          toolchain: 1.66.0
           default: true
       - uses: Swatinem/rust-cache@v1
       - run: ./scripts/ci/build-test
@@ -170,7 +170,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.64.0
+          toolchain: 1.66.0
           default: true
       - uses: Swatinem/rust-cache@v1
       - run: ./scripts/ci/build-test
