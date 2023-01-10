@@ -1,7 +1,12 @@
 #![allow(dead_code)]
 
-use crate::interop::{self, alloc, js_set};
-use automerge::{Automerge, ObjId, OpObserver, Prop, SequenceTree, Value};
+use std::borrow::Cow;
+
+use crate::{
+    interop::{self, alloc, js_set},
+    TextRepresentation,
+};
+use automerge::{Automerge, ObjId, OpObserver, Prop, ScalarValue, SequenceTree, Value};
 use js_sys::{Array, Object};
 use wasm_bindgen::prelude::*;
 
@@ -9,6 +14,7 @@ use wasm_bindgen::prelude::*;
 pub(crate) struct Observer {
     enabled: bool,
     patches: Vec<Patch>,
+    text_rep: TextRepresentation,
 }
 
 impl Observer {
@@ -32,6 +38,15 @@ impl Observer {
                 None
             }
         }
+    }
+
+    pub(crate) fn with_text_rep(mut self, text_rep: TextRepresentation) -> Self {
+        self.text_rep = text_rep;
+        self
+    }
+
+    pub(crate) fn set_text_rep(&mut self, text_rep: TextRepresentation) {
+        self.text_rep = text_rep;
     }
 }
 
@@ -121,6 +136,20 @@ impl OpObserver for Observer {
 
     fn splice_text(&mut self, doc: &Automerge, obj: ObjId, index: usize, value: &str) {
         if self.enabled {
+            if self.text_rep == TextRepresentation::Array {
+                for (i, c) in value.chars().enumerate() {
+                    self.insert(
+                        doc,
+                        obj.clone(),
+                        index + i,
+                        (
+                            Value::Scalar(Cow::Owned(ScalarValue::Str(c.to_string().into()))),
+                            ObjId::Root, // We hope this is okay
+                        ),
+                    );
+                }
+                return;
+            }
             if let Some(Patch::SpliceText {
                 obj: tail_obj,
                 index: tail_index,
@@ -316,7 +345,12 @@ impl OpObserver for Observer {
         Observer {
             patches: vec![],
             enabled: self.enabled,
+            text_rep: self.text_rep,
         }
+    }
+
+    fn text_as_seq(&self) -> bool {
+        self.text_rep == TextRepresentation::Array
     }
 }
 
@@ -377,7 +411,11 @@ impl TryFrom<Patch> for JsValue {
                     "path",
                     export_path(path.as_slice(), &Prop::Map(key)),
                 )?;
-                js_set(&result, "value", alloc(&value.0).1)?;
+                js_set(
+                    &result,
+                    "value",
+                    alloc(&value.0, TextRepresentation::String).1,
+                )?;
                 Ok(result.into())
             }
             Patch::PutSeq {
@@ -389,7 +427,11 @@ impl TryFrom<Patch> for JsValue {
                     "path",
                     export_path(path.as_slice(), &Prop::Seq(index)),
                 )?;
-                js_set(&result, "value", alloc(&value.0).1)?;
+                js_set(
+                    &result,
+                    "value",
+                    alloc(&value.0, TextRepresentation::String).1,
+                )?;
                 Ok(result.into())
             }
             Patch::Insert {
@@ -407,7 +449,10 @@ impl TryFrom<Patch> for JsValue {
                 js_set(
                     &result,
                     "values",
-                    values.iter().map(|v| alloc(&v.0).1).collect::<Array>(),
+                    values
+                        .iter()
+                        .map(|v| alloc(&v.0, TextRepresentation::String).1)
+                        .collect::<Array>(),
                 )?;
                 Ok(result.into())
             }

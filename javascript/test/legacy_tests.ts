@@ -1,5 +1,5 @@
 import * as assert from "assert"
-import * as Automerge from "../src"
+import { unstable as Automerge } from "../src"
 import { assertEqualsOneOf } from "./helpers"
 import { decodeChange } from "./legacy/columnar"
 

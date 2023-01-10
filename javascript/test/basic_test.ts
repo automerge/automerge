@@ -1,5 +1,5 @@
 import * as assert from "assert"
-import * as Automerge from "../src"
+import { unstable as Automerge } from "../src"
 import * as WASM from "@automerge/automerge-wasm"
 
 describe("Automerge", () => {
@@ -237,7 +237,7 @@ describe("Automerge", () => {
     })
 
     it("handle non-text strings", () => {
-      let doc1 = WASM.create()
+      let doc1 = WASM.create(true)
       doc1.put("_root", "text", "hello world")
       let doc2 = Automerge.load<any>(doc1.save())
       assert.throws(() => {

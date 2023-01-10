@@ -12,26 +12,10 @@
     "README.md",
     "LICENSE",
     "package.json",
-    "index.d.ts",
-    "dist/*.d.ts",
-    "dist/cjs/constants.js",
-    "dist/cjs/types.js",
-    "dist/cjs/numbers.js",
-    "dist/cjs/index.js",
-    "dist/cjs/uuid.js",
-    "dist/cjs/counter.js",
-    "dist/cjs/low_level.js",
-    "dist/cjs/text.js",
-    "dist/cjs/proxies.js",
-    "dist/mjs/constants.js",
-    "dist/mjs/types.js",
-    "dist/mjs/numbers.js",
-    "dist/mjs/index.js",
-    "dist/mjs/uuid.js",
-    "dist/mjs/counter.js",
-    "dist/mjs/low_level.js",
-    "dist/mjs/text.js",
-    "dist/mjs/proxies.js"
+    "dist/index.d.ts",
+    "dist/cjs/**/*.js",
+    "dist/mjs/**/*.js",
+    "dist/*.d.ts"
   ],
   "types": "./dist/index.d.ts",
   "module": "./dist/mjs/index.js",
@@ -39,9 +23,9 @@
   "license": "MIT",
   "scripts": {
     "lint": "eslint src",
-    "build": "tsc -p config/mjs.json && tsc -p config/cjs.json && tsc --emitDeclarationOnly",
+    "build": "tsc -p config/mjs.json && tsc -p config/cjs.json && tsc -p config/declonly.json --emitDeclarationOnly",
     "test": "ts-mocha test/*.ts",
-    "watch-docs": "typedoc src/index.ts --watch --readme typedoc-readme.md"
+    "watch-docs": "typedoc src/index.ts --watch --readme none"
   },
   "devDependencies": {
     "@types/expect": "^24.3.0",

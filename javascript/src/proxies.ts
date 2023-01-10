@@ -1,6 +1,13 @@
+import { Text } from "./text"
 import { Automerge, Heads, ObjID } from "@automerge/automerge-wasm"
 import { Prop } from "@automerge/automerge-wasm"
-import { AutomergeValue, ScalarValue, MapValue, ListValue } from "./types"
+import {
+  AutomergeValue,
+  ScalarValue,
+  MapValue,
+  ListValue,
+  TextValue,
+} from "./types"
 import { Counter, getWriteableCounter } from "./counter"
 import {
   STATE,
@@ -12,6 +19,19 @@ import {
   UINT,
   F64,
 } from "./constants"
+import { RawString } from "./raw_string"
+
+type Target = {
+  context: Automerge
+  objectId: ObjID
+  path: Array<Prop>
+  readonly: boolean
+  heads?: Array<string>
+  cache: {}
+  trace?: any
+  frozen: boolean
+  textV2: boolean
+}
 
 function parseListIndex(key) {
   if (typeof key === "string" && /^[0-9]+$/.test(key)) key = parseInt(key, 10)
@@ -24,8 +44,8 @@ function parseListIndex(key) {
   return key
 }
 
-function valueAt(target, prop: Prop): AutomergeValue | undefined {
-  const { context, objectId, path, readonly, heads } = target
+function valueAt(target: Target, prop: Prop): AutomergeValue | undefined {
+  const { context, objectId, path, readonly, heads, textV2 } = target
   const value = context.getWithType(objectId, prop, heads)
   if (value === null) {
     return
@@ -36,11 +56,35 @@ function valueAt(target, prop: Prop): AutomergeValue | undefined {
     case undefined:
       return
     case "map":
-      return mapProxy(context, val, [...path, prop], readonly, heads)
+      return mapProxy(
+        context,
+        val as ObjID,
+        textV2,
+        [...path, prop],
+        readonly,
+        heads
+      )
     case "list":
-      return listProxy(context, val, [...path, prop], readonly, heads)
+      return listProxy(
+        context,
+        val as ObjID,
+        textV2,
+        [...path, prop],
+        readonly,
+        heads
+      )
     case "text":
-      return context.text(val, heads)
+      if (textV2) {
+        return context.text(val as ObjID, heads)
+      } else {
+        return textProxy(
+          context,
+          val as ObjID,
+          [...path, prop],
+          readonly,
+          heads
+        )
+      }
     case "str":
       return val
     case "uint":
@@ -59,9 +103,9 @@ function valueAt(target, prop: Prop): AutomergeValue | undefined {
       return val
     case "counter": {
       if (readonly) {
-        return new Counter(val)
+        return new Counter(val as number)
       } else {
-        return getWriteableCounter(val, context, path, objectId, prop)
+        return getWriteableCounter(val as number, context, path, objectId, prop)
       }
     }
     default:
@@ -69,7 +113,7 @@ function valueAt(target, prop: Prop): AutomergeValue | undefined {
   }
 }
 
-function import_value(value) {
+function import_value(value: any, textV2: boolean) {
   switch (typeof value) {
     case "object":
       if (value == null) {
@@ -84,6 +128,10 @@ function import_value(value) {
         return [value.value, "counter"]
       } else if (value instanceof Date) {
         return [value.getTime(), "timestamp"]
+      } else if (value instanceof RawString) {
+        return [value.val, "str"]
+      } else if (value instanceof Text) {
+        return [value, "text"]
       } else if (value instanceof Uint8Array) {
         return [value, "bytes"]
       } else if (value instanceof Array) {
@@ -97,7 +145,6 @@ function import_value(value) {
       } else {
         throw new RangeError(`Cannot assign unknown object: ${value}`)
       }
-      break
     case "boolean":
       return [value, "boolean"]
     case "number":
@@ -106,17 +153,19 @@ function import_value(value) {
       } else {
         return [value, "f64"]
       }
-      break
     case "string":
-      return [value, "text"]
-      break
+      if (textV2) {
+        return [value, "text"]
+      } else {
+        return [value, "str"]
+      }
     default:
       throw new RangeError(`Unsupported type of value: ${typeof value}`)
   }
 }
 
 const MapHandler = {
-  get(target, key): AutomergeValue {
+  get(target: Target, key): AutomergeValue | { handle: Automerge } {
     const { context, objectId, cache } = target
     if (key === Symbol.toStringTag) {
       return target[Symbol.toStringTag]
@@ -131,8 +180,8 @@ const MapHandler = {
     return cache[key]
   },
 
-  set(target, key, val) {
-    const { context, objectId, path, readonly, frozen } = target
+  set(target: Target, key, val) {
+    const { context, objectId, path, readonly, frozen, textV2 } = target
     target.cache = {} // reset cache on set
     if (val && val[OBJECT_ID]) {
       throw new RangeError(
@@ -143,7 +192,7 @@ const MapHandler = {
       target.trace = val
       return true
     }
-    const [value, datatype] = import_value(val)
+    const [value, datatype] = import_value(val, textV2)
     if (frozen) {
       throw new RangeError("Attempting to use an outdated Automerge document")
     }
@@ -153,19 +202,39 @@ const MapHandler = {
     switch (datatype) {
       case "list": {
         const list = context.putObject(objectId, key, [])
-        const proxyList = listProxy(context, list, [...path, key], readonly)
+        const proxyList = listProxy(
+          context,
+          list,
+          textV2,
+          [...path, key],
+          readonly
+        )
         for (let i = 0; i < value.length; i++) {
           proxyList[i] = value[i]
         }
         break
       }
       case "text": {
-        context.putObject(objectId, key, value, "text")
+        if (textV2) {
+          context.putObject(objectId, key, value)
+        } else {
+          const text = context.putObject(objectId, key, "")
+          const proxyText = textProxy(context, text, [...path, key], readonly)
+          for (let i = 0; i < value.length; i++) {
+            proxyText[i] = value.get(i)
+          }
+        }
         break
       }
       case "map": {
         const map = context.putObject(objectId, key, {})
-        const proxyMap = mapProxy(context, map, [...path, key], readonly)
+        const proxyMap = mapProxy(
+          context,
+          map,
+          textV2,
+          [...path, key],
+          readonly
+        )
         for (const key in value) {
           proxyMap[key] = value[key]
         }
@@ -177,7 +246,7 @@ const MapHandler = {
     return true
   },
 
-  deleteProperty(target, key) {
+  deleteProperty(target: Target, key) {
     const { context, objectId, readonly } = target
     target.cache = {} // reset cache on delete
     if (readonly) {
@@ -187,12 +256,12 @@ const MapHandler = {
     return true
   },
 
-  has(target, key) {
+  has(target: Target, key) {
     const value = this.get(target, key)
     return value !== undefined
   },
 
-  getOwnPropertyDescriptor(target, key) {
+  getOwnPropertyDescriptor(target: Target, key) {
     // const { context, objectId } = target
     const value = this.get(target, key)
     if (typeof value !== "undefined") {
@@ -204,7 +273,7 @@ const MapHandler = {
     }
   },
 
-  ownKeys(target) {
+  ownKeys(target: Target) {
     const { context, objectId, heads } = target
     // FIXME - this is a tmp workaround until fix the dupe key bug in keys()
     const keys = context.keys(objectId, heads)
@@ -213,7 +282,7 @@ const MapHandler = {
 }
 
 const ListHandler = {
-  get(target, index) {
+  get(target: Target, index) {
     const { context, objectId, heads } = target
     index = parseListIndex(index)
     if (index === Symbol.hasInstance) {
@@ -236,8 +305,8 @@ const ListHandler = {
     }
   },
 
-  set(target, index, val) {
-    const { context, objectId, path, readonly, frozen } = target
+  set(target: Target, index, val) {
+    const { context, objectId, path, readonly, frozen, textV2 } = target
     index = parseListIndex(index)
     if (val && val[OBJECT_ID]) {
       throw new RangeError(
@@ -251,7 +320,7 @@ const ListHandler = {
     if (typeof index == "string") {
       throw new RangeError("list index must be a number")
     }
-    const [value, datatype] = import_value(val)
+    const [value, datatype] = import_value(val, textV2)
     if (frozen) {
       throw new RangeError("Attempting to use an outdated Automerge document")
     }
@@ -266,15 +335,32 @@ const ListHandler = {
         } else {
           list = context.putObject(objectId, index, [])
         }
-        const proxyList = listProxy(context, list, [...path, index], readonly)
+        const proxyList = listProxy(
+          context,
+          list,
+          textV2,
+          [...path, index],
+          readonly
+        )
         proxyList.splice(0, 0, ...value)
         break
       }
       case "text": {
-        if (index >= context.length(objectId)) {
-          context.insertObject(objectId, index, value, "text")
+        if (textV2) {
+          if (index >= context.length(objectId)) {
+            context.insertObject(objectId, index, value)
+          } else {
+            context.putObject(objectId, index, value)
+          }
         } else {
-          context.putObject(objectId, index, value, "text")
+          let text
+          if (index >= context.length(objectId)) {
+            text = context.insertObject(objectId, index, "")
+          } else {
+            text = context.putObject(objectId, index, "")
+          }
+          const proxyText = textProxy(context, text, [...path, index], readonly)
+          proxyText.splice(0, 0, ...value)
         }
         break
       }
@@ -285,7 +371,13 @@ const ListHandler = {
         } else {
           map = context.putObject(objectId, index, {})
         }
-        const proxyMap = mapProxy(context, map, [...path, index], readonly)
+        const proxyMap = mapProxy(
+          context,
+          map,
+          textV2,
+          [...path, index],
+          readonly
+        )
         for (const key in value) {
           proxyMap[key] = value[key]
         }
@@ -301,10 +393,11 @@ const ListHandler = {
     return true
   },
 
-  deleteProperty(target, index) {
+  deleteProperty(target: Target, index) {
     const { context, objectId } = target
     index = parseListIndex(index)
-    if (context.get(objectId, index)[0] == "counter") {
+    const elem = context.get(objectId, index)
+    if (elem != null && elem[0] == "counter") {
       throw new TypeError(
         "Unsupported operation: deleting a counter from a list"
       )
@@ -313,7 +406,7 @@ const ListHandler = {
     return true
   },
 
-  has(target, index) {
+  has(target: Target, index) {
     const { context, objectId, heads } = target
     index = parseListIndex(index)
     if (typeof index === "number") {
@@ -322,7 +415,7 @@ const ListHandler = {
     return index === "length"
   },
 
-  getOwnPropertyDescriptor(target, index) {
+  getOwnPropertyDescriptor(target: Target, index) {
     const { context, objectId, heads } = target
 
     if (index === "length")
@@ -350,54 +443,114 @@ const ListHandler = {
   },
 }
 
+const TextHandler = Object.assign({}, ListHandler, {
+  get(target: Target, index: any) {
+    const { context, objectId, heads } = target
+    index = parseListIndex(index)
+    if (index === Symbol.hasInstance) {
+      return (instance: any) => {
+        return Array.isArray(instance)
+      }
+    }
+    if (index === Symbol.toStringTag) {
+      return target[Symbol.toStringTag]
+    }
+    if (index === OBJECT_ID) return objectId
+    if (index === IS_PROXY) return true
+    if (index === TRACE) return target.trace
+    if (index === STATE) return { handle: context }
+    if (index === "length") return context.length(objectId, heads)
+    if (typeof index === "number") {
+      return valueAt(target, index)
+    } else {
+      return textMethods(target)[index] || listMethods(target)[index]
+    }
+  },
+  getPrototypeOf(/*target*/) {
+    return Object.getPrototypeOf(new Text())
+  },
+})
+
 export function mapProxy(
   context: Automerge,
   objectId: ObjID,
+  textV2: boolean,
   path?: Prop[],
   readonly?: boolean,
   heads?: Heads
 ): MapValue {
-  return new Proxy(
-    {
-      context,
-      objectId,
-      path,
-      readonly: !!readonly,
-      frozen: false,
-      heads,
-      cache: {},
-    },
-    MapHandler
-  )
+  const target: Target = {
+    context,
+    objectId,
+    path: path || [],
+    readonly: !!readonly,
+    frozen: false,
+    heads,
+    cache: {},
+    textV2,
+  }
+  const proxied = {}
+  Object.assign(proxied, target)
+  let result = new Proxy(proxied, MapHandler)
+  // conversion through unknown is necessary because the types are so different
+  return result as unknown as MapValue
 }
 
 export function listProxy(
   context: Automerge,
   objectId: ObjID,
+  textV2: boolean,
   path?: Prop[],
   readonly?: boolean,
   heads?: Heads
 ): ListValue {
-  const target = []
-  Object.assign(target, {
+  const target: Target = {
     context,
     objectId,
-    path,
+    path: path || [],
     readonly: !!readonly,
     frozen: false,
     heads,
     cache: {},
-  })
-  return new Proxy(target, ListHandler)
+    textV2,
+  }
+  const proxied = []
+  Object.assign(proxied, target)
+  // @ts-ignore
+  return new Proxy(proxied, ListHandler) as unknown as ListValue
 }
 
-export function rootProxy<T>(context: Automerge, readonly?: boolean): T {
+export function textProxy(
+  context: Automerge,
+  objectId: ObjID,
+  path?: Prop[],
+  readonly?: boolean,
+  heads?: Heads
+): TextValue {
+  const target: Target = {
+    context,
+    objectId,
+    path: path || [],
+    readonly: !!readonly,
+    frozen: false,
+    heads,
+    cache: {},
+    textV2: false,
+  }
+  return new Proxy(target, TextHandler) as unknown as TextValue
+}
+
+export function rootProxy<T>(
+  context: Automerge,
+  textV2: boolean,
+  readonly?: boolean
+): T {
   /* eslint-disable-next-line */
-  return <any>mapProxy(context, "_root", [], !!readonly)
+  return <any>mapProxy(context, "_root", textV2, [], !!readonly)
 }
 
-function listMethods(target) {
-  const { context, objectId, path, readonly, frozen, heads } = target
+function listMethods(target: Target) {
+  const { context, objectId, path, readonly, frozen, heads, textV2 } = target
   const methods = {
     deleteAt(index, numDelete) {
       if (typeof numDelete === "number") {
@@ -409,13 +562,13 @@ function listMethods(target) {
     },
 
     fill(val: ScalarValue, start: number, end: number) {
-      const [value, datatype] = import_value(val)
+      const [value, datatype] = import_value(val, textV2)
       const length = context.length(objectId)
       start = parseListIndex(start || 0)
       end = parseListIndex(end || length)
       for (let i = start; i < Math.min(end, length); i++) {
         if (datatype === "text" || datatype === "list" || datatype === "map") {
-          context.putObject(objectId, i, value, datatype)
+          context.putObject(objectId, i, value)
         } else {
           context.put(objectId, i, value, datatype)
         }
@@ -427,7 +580,7 @@ function listMethods(target) {
       const length = context.length(objectId)
       for (let i = start; i < length; i++) {
         const value = context.getWithType(objectId, i, heads)
-        if ((value && value[1] === o[OBJECT_ID]) || value[1] === o) {
+        if (value && (value[1] === o[OBJECT_ID] || value[1] === o)) {
           return i
         }
       }
@@ -488,7 +641,7 @@ function listMethods(target) {
         }
         context.delete(objectId, index)
       }
-      const values = vals.map(val => import_value(val))
+      const values = vals.map(val => import_value(val, textV2))
       for (const [value, datatype] of values) {
         switch (datatype) {
           case "list": {
@@ -496,6 +649,7 @@ function listMethods(target) {
             const proxyList = listProxy(
               context,
               list,
+              textV2,
               [...path, index],
               readonly
             )
@@ -503,12 +657,29 @@ function listMethods(target) {
             break
           }
           case "text": {
-            context.insertObject(objectId, index, value)
+            if (textV2) {
+              context.insertObject(objectId, index, value)
+            } else {
+              const text = context.insertObject(objectId, index, "")
+              const proxyText = textProxy(
+                context,
+                text,
+                [...path, index],
+                readonly
+              )
+              proxyText.splice(0, 0, ...value)
+            }
             break
           }
           case "map": {
             const map = context.insertObject(objectId, index, {})
-            const proxyMap = mapProxy(context, map, [...path, index], readonly)
+            const proxyMap = mapProxy(
+              context,
+              map,
+              textV2,
+              [...path, index],
+              readonly
+            )
             for (const key in value) {
               proxyMap[key] = value[key]
             }
@@ -685,6 +856,50 @@ function listMethods(target) {
         i += 1
         value = valueAt(target, i)
       }
+    },
+  }
+  return methods
+}
+
+function textMethods(target: Target) {
+  const { context, objectId, heads } = target
+  const methods = {
+    set(index: number, value) {
+      return (this[index] = value)
+    },
+    get(index: number): AutomergeValue {
+      return this[index]
+    },
+    toString(): string {
+      return context.text(objectId, heads).replace(/￼/g, "")
+    },
+    toSpans(): AutomergeValue[] {
+      const spans: AutomergeValue[] = []
+      let chars = ""
+      const length = context.length(objectId)
+      for (let i = 0; i < length; i++) {
+        const value = this[i]
+        if (typeof value === "string") {
+          chars += value
+        } else {
+          if (chars.length > 0) {
+            spans.push(chars)
+            chars = ""
+          }
+          spans.push(value)
+        }
+      }
+      if (chars.length > 0) {
+        spans.push(chars)
+      }
+      return spans
+    },
+    toJSON(): string {
+      return this.toString()
+    },
+    indexOf(o, start = 0) {
+      const text = context.text(objectId)
+      return text.indexOf(o, start)
     },
   }
   return methods
