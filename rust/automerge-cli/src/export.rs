@@ -30,7 +30,7 @@ fn list_to_json(doc: &am::Automerge, obj: &am::ObjId) -> serde_json::Value {
     let len = doc.length(obj);
     let mut array = Vec::new();
     for i in 0..len {
-        let val = doc.get(obj, i as usize);
+        let val = doc.get(obj, i);
         match val {
             Ok(Some((am::Value::Object(o), exid)))
                 if o == am::ObjType::Map || o == am::ObjType::Table =>

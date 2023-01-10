@@ -116,7 +116,7 @@ impl DocOpColumns {
         let key = KeyRange::encode(ops.clone().map(|o| o.key()), out);
         let id = OpIdRange::encode(ops.clone().map(|o| o.id()), out);
         let insert = BooleanRange::encode(ops.clone().map(|o| o.insert()), out);
-        let action = RleRange::encode(ops.clone().map(|o| Some(o.action() as u64)), out);
+        let action = RleRange::encode(ops.clone().map(|o| Some(o.action())), out);
         let val = ValueRange::encode(ops.clone().map(|o| o.val()), out);
         let succ = OpIdListRange::encode(ops.map(|o| o.succ()), out);
         Self {

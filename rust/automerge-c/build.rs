@@ -10,7 +10,7 @@ fn main() {
     let config = cbindgen::Config::from_file("cbindgen.toml")
         .expect("Unable to find cbindgen.toml configuration file");
 
-    if let Ok(writer) = cbindgen::generate_with_config(&crate_dir, config) {
+    if let Ok(writer) = cbindgen::generate_with_config(crate_dir, config) {
         // \note CMake sets this environment variable before invoking Cargo so
         //       that it can direct the generated header file into its
         //       out-of-source build directory for post-processing.

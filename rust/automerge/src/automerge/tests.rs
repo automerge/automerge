@@ -1368,7 +1368,7 @@ fn get_path_to_object() {
         ]
     );
     assert_eq!(
-        doc.path_to_object(&text).unwrap(),
+        doc.path_to_object(text).unwrap(),
         vec![
             (ROOT, Prop::Map("a".into())),
             (map, Prop::Map("b".into())),

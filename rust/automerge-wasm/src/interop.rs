@@ -589,9 +589,9 @@ impl Automerge {
         let array = Array::new();
         for i in 0..len {
             let val_and_id = if let Some(heads) = heads {
-                self.doc.get_at(obj, i as usize, heads)
+                self.doc.get_at(obj, i, heads)
             } else {
-                self.doc.get(obj, i as usize)
+                self.doc.get(obj, i)
             };
             if let Ok(Some((val, id))) = val_and_id {
                 let subval = match val {

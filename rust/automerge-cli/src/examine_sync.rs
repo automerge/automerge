@@ -28,7 +28,7 @@ pub(crate) fn examine_sync<W: std::io::Write>(
         .map_err(ExamineSyncError::ReadMessage)?;
 
     let message = automerge::sync::Message::decode(&buf)?;
-    let json = serde_json::to_value(&message).unwrap();
+    let json = serde_json::to_value(message).unwrap();
     if is_tty {
         print_colored_json(&json).map_err(ExamineSyncError::WriteMessage)?;
     } else {
