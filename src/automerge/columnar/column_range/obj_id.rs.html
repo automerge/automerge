@@ -369,7 +369,7 @@
             }
             convert::ObjId::Op(o) =&gt; {
                 <span class="self">self</span>.actor.append_value(o.actor() <span class="kw">as </span>u64);
-                <span class="self">self</span>.counter.append_value(o.counter() <span class="kw">as </span>u64);
+                <span class="self">self</span>.counter.append_value(o.counter());
             }
         }
     }

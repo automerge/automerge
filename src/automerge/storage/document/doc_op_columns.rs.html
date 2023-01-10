@@ -567,7 +567,7 @@
         <span class="kw">let </span>key = KeyRange::encode(ops.clone().map(|o| o.key()), out);
         <span class="kw">let </span>id = OpIdRange::encode(ops.clone().map(|o| o.id()), out);
         <span class="kw">let </span>insert = BooleanRange::encode(ops.clone().map(|o| o.insert()), out);
-        <span class="kw">let </span>action = RleRange::encode(ops.clone().map(|o| <span class="prelude-val">Some</span>(o.action() <span class="kw">as </span>u64)), out);
+        <span class="kw">let </span>action = RleRange::encode(ops.clone().map(|o| <span class="prelude-val">Some</span>(o.action())), out);
         <span class="kw">let </span>val = ValueRange::encode(ops.clone().map(|o| o.val()), out);
         <span class="kw">let </span>succ = OpIdListRange::encode(ops.map(|o| o.succ()), out);
         <span class="self">Self </span>{

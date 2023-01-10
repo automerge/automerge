@@ -1074,9 +1074,6 @@
 <span id="1073">1073</span>
 <span id="1074">1074</span>
 <span id="1075">1075</span>
-<span id="1076">1076</span>
-<span id="1077">1077</span>
-<span id="1078">1078</span>
 </pre><pre class="rust"><code><span class="attribute">#![doc(
     html_logo_url = <span class="string">&quot;https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg&quot;</span>,
     html_favicon_url = <span class="string">&quot;https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico&quot;
@@ -1088,7 +1085,6 @@
     rust_2018_idioms,
     unreachable_pub,
     bad_style,
-    const_err,
     dead_code,
     improper_ctypes,
     non_shorthand_field_patterns,
@@ -1343,7 +1339,6 @@
         datatype: JsValue,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), error::Insert&gt; {
         <span class="kw">let </span>(obj, <span class="kw">_</span>) = <span class="self">self</span>.import(obj)<span class="question-mark">?</span>;
-        <span class="kw">let </span>index = index <span class="kw">as </span>f64;
         <span class="kw">let </span>value = <span class="self">self
             </span>.import_scalar(<span class="kw-2">&amp;</span>value, <span class="kw-2">&amp;</span>datatype.as_string())
             .ok_or(error::Insert::ValueNotPrimitive)<span class="question-mark">?</span>;
@@ -1359,7 +1354,6 @@
         value: JsValue,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;String&gt;, error::InsertObject&gt; {
         <span class="kw">let </span>(obj, <span class="kw">_</span>) = <span class="self">self</span>.import(obj)<span class="question-mark">?</span>;
-        <span class="kw">let </span>index = index <span class="kw">as </span>f64;
         <span class="kw">let </span>imported_obj = import_obj(<span class="kw-2">&amp;</span>value, <span class="kw-2">&amp;</span><span class="prelude-val">None</span>)<span class="question-mark">?</span>;
         <span class="kw">let </span>opid = <span class="self">self
             </span>.doc

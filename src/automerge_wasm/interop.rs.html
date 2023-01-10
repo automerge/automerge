@@ -2000,9 +2000,9 @@
         <span class="kw">let </span>array = Array::new();
         <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..len {
             <span class="kw">let </span>val_and_id = <span class="kw">if let </span><span class="prelude-val">Some</span>(heads) = heads {
-                <span class="self">self</span>.doc.get_at(obj, i <span class="kw">as </span>usize, heads)
+                <span class="self">self</span>.doc.get_at(obj, i, heads)
             } <span class="kw">else </span>{
-                <span class="self">self</span>.doc.get(obj, i <span class="kw">as </span>usize)
+                <span class="self">self</span>.doc.get(obj, i)
             };
             <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>((val, id))) = val_and_id {
                 <span class="kw">let </span>subval = <span class="kw">match </span>val {

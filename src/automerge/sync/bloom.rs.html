@@ -287,7 +287,7 @@
         <span class="kw">let </span>num_entries = hashes.len() <span class="kw">as </span>u32;
         <span class="kw">let </span>num_bits_per_entry = BITS_PER_ENTRY;
         <span class="kw">let </span>num_probes = NUM_PROBES;
-        <span class="kw">let </span>bits = <span class="macro">vec!</span>[<span class="number">0</span>; bits_capacity(num_entries, num_bits_per_entry) <span class="kw">as </span>usize];
+        <span class="kw">let </span>bits = <span class="macro">vec!</span>[<span class="number">0</span>; bits_capacity(num_entries, num_bits_per_entry)];
         <span class="kw">let </span><span class="kw-2">mut </span>filter = <span class="self">Self </span>{
             num_entries,
             num_bits_per_entry,
