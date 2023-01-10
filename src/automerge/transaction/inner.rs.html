@@ -724,6 +724,14 @@
 <span id="723">723</span>
 <span id="724">724</span>
 <span id="725">725</span>
+<span id="726">726</span>
+<span id="727">727</span>
+<span id="728">728</span>
+<span id="729">729</span>
+<span id="730">730</span>
+<span id="731">731</span>
+<span id="732">732</span>
+<span id="733">733</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::num::NonZeroU64;
 
 <span class="kw">use </span><span class="kw">crate</span>::automerge::Actor;
@@ -924,6 +932,7 @@
         <span class="kw">match </span>(<span class="kw-2">&amp;</span>prop, obj_type) {
             (Prop::Map(<span class="kw">_</span>), ObjType::Map) =&gt; <span class="prelude-val">Ok</span>(()),
             (Prop::Seq(<span class="kw">_</span>), ObjType::List) =&gt; <span class="prelude-val">Ok</span>(()),
+            (Prop::Seq(<span class="kw">_</span>), ObjType::Text) =&gt; <span class="prelude-val">Ok</span>(()),
             <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(AutomergeError::InvalidOp(obj_type)),
         }<span class="question-mark">?</span>;
         <span class="self">self</span>.local_op(doc, op_observer, obj, prop, value.into())<span class="question-mark">?</span>;
@@ -1020,7 +1029,7 @@
         value: V,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="kw">let </span>(obj, obj_type) = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
-        <span class="kw">if </span>obj_type != ObjType::List {
+        <span class="kw">if </span>!<span class="macro">matches!</span>(obj_type, ObjType::List | ObjType::Text) {
             <span class="kw">return </span><span class="prelude-val">Err</span>(AutomergeError::InvalidOp(obj_type));
         }
         <span class="kw">let </span>value = value.into();
@@ -1038,7 +1047,7 @@
         value: ObjType,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;ExId, AutomergeError&gt; {
         <span class="kw">let </span>(obj, obj_type) = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
-        <span class="kw">if </span>obj_type != ObjType::List {
+        <span class="kw">if </span>!<span class="macro">matches!</span>(obj_type, ObjType::List | ObjType::Text) {
             <span class="kw">return </span><span class="prelude-val">Err</span>(AutomergeError::InvalidOp(obj_type));
         }
         <span class="kw">let </span>id = <span class="self">self</span>.do_insert(doc, op_observer, obj, index, value.into())<span class="question-mark">?</span>;
@@ -1236,7 +1245,7 @@
         vals: <span class="kw">impl </span>IntoIterator&lt;Item = ScalarValue&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="kw">let </span>(obj, obj_type) = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
-        <span class="kw">if </span>obj_type != ObjType::List {
+        <span class="kw">if </span>!<span class="macro">matches!</span>(obj_type, ObjType::List | ObjType::Text) {
             <span class="kw">return </span><span class="prelude-val">Err</span>(AutomergeError::InvalidOp(obj_type));
         }
         <span class="kw">let </span>values = vals.into_iter().collect();
@@ -1357,7 +1366,10 @@
             <span class="comment">// handle the observer
             </span><span class="kw">if let </span><span class="prelude-val">Some</span>(obs) = op_observer.as_mut() {
                 <span class="kw">match </span>splice_type {
-                    SpliceType::List =&gt; {
+                    SpliceType::Text(text, <span class="kw">_</span>) <span class="kw">if </span>!obs.text_as_seq() =&gt; {
+                        obs.splice_text(doc, ex_obj, index, text)
+                    }
+                    SpliceType::List | SpliceType::Text(..) =&gt; {
                         <span class="kw">let </span>start = <span class="self">self</span>.operations.len() - values.len();
                         <span class="kw">for </span>(offset, v) <span class="kw">in </span>values.iter().enumerate() {
                             <span class="kw">let </span>op = <span class="kw-2">&amp;</span><span class="self">self</span>.operations[start + offset].<span class="number">1</span>;
@@ -1365,7 +1377,6 @@
                             obs.insert(doc, ex_obj.clone(), index + offset, value)
                         }
                     }
-                    SpliceType::Text(text, <span class="kw">_</span>) =&gt; obs.splice_text(doc, ex_obj, index, text),
                 }
             }
         }
@@ -1394,7 +1405,12 @@
                     }
                     (<span class="prelude-val">Some</span>(ObjType::Text), Prop::Seq(index)) =&gt; {
                         <span class="comment">// FIXME
-                        </span>op_observer.splice_text(doc, ex_obj, index, op.to_str())
+                        </span><span class="kw">if </span>op_observer.text_as_seq() {
+                            <span class="kw">let </span>value = (op.value(), doc.ops.id_to_exid(op.id));
+                            op_observer.insert(doc, ex_obj, index, value)
+                        } <span class="kw">else </span>{
+                            op_observer.splice_text(doc, ex_obj, index, op.to_str())
+                        }
                     }
                     <span class="kw">_ </span>=&gt; {}
                 }
