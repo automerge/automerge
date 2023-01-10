@@ -5,7 +5,7 @@
  * ready for a stable release and/or which will result in backwards incompatible
  * API changes. The API of this module may change in arbitrary ways between
  * point releases - we will always document what these changes are in the
- * CHANGELOG below, but only depend on this module if you are prepared to deal
+ * [CHANGELOG](#changelog) below, but only depend on this module if you are prepared to deal
  * with frequent changes.
  *
  * ## Differences from stable

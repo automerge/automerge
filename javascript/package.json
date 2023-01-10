@@ -25,7 +25,7 @@
     "lint": "eslint src",
     "build": "tsc -p config/mjs.json && tsc -p config/cjs.json && tsc -p config/declonly.json --emitDeclarationOnly",
     "test": "ts-mocha test/*.ts",
-    "watch-docs": "typedoc src/index.ts --watch --readme typedoc-readme.md"
+    "watch-docs": "typedoc src/index.ts --watch --readme none"
   },
   "devDependencies": {
     "@types/expect": "^24.3.0",
