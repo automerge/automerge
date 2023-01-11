@@ -12,19 +12,19 @@ jobs:
       wasm_version: ${{ steps.version-updated.outputs.current-package-version }}
       wasm_has_updated: ${{ steps.version-updated.outputs.has-updated }}
     steps:
-      - uses: JiPaix/package-json-updated-action@v1.0.3
+      - uses: JiPaix/package-json-updated-action@v1.0.5
         id: version-updated
         with:
           path: rust/automerge-wasm/package.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          INPUT_PATH: ${{ github.workspace }}/rust/automerge-wasm/package.json
   publish-wasm:
+    name: Publish WASM package
     runs-on: ubuntu-latest
     needs:
       - check_if_wasm_version_upgraded
     # We create release only if the version in the package.json has been upgraded
-    if: needs.check_if_wasm_version_upgraded.outputs.wasm_has_updated
+    if: needs.check_if_wasm_version_upgraded.outputs.wasm_has_updated == 'true'
     steps:
       - uses: denoland/setup-deno@v1
       - uses: actions/checkout@v3
