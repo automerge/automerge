@@ -14,7 +14,7 @@ export type { ChangeToEncode } from "@automerge/automerge-wasm"
 
 export function UseApi(api: API) {
   for (const k in api) {
-    (ApiHandler as any)[k] = (api as any)[k]
+    ;(ApiHandler as any)[k] = (api as any)[k]
   }
 }
 

@@ -5,7 +5,7 @@ import type { InternalState } from "./internal_state"
 export class Text {
   elems: Array<any>
   str: string | undefined
-  spans: Array<any> | undefined
+  spans: Array<any> | undefined;
   [STATE]?: InternalState<any>
 
   constructor(text?: string | string[] | Value[]) {
