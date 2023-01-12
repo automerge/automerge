@@ -1,6 +1,17 @@
 THIS_SCRIPT=$(dirname "$0");
 WASM_PROJECT=$THIS_SCRIPT/../../rust/automerge-wasm;
+JS_PROJECT=$THIS_SCRIPT/../../javascript;
 
+echo "Running Wasm Deno tests";
 yarn --cwd $WASM_PROJECT install;
 yarn --cwd $WASM_PROJECT build;
-deno test $WASM_PROJECT/deno-tests/deno.ts --allow-read
+deno test $WASM_PROJECT/deno-tests/deno.ts --allow-read;
+
+cp $WASM_PROJECT/index.d.ts $WASM_PROJECT/deno;
+sed -i '1i /// <reference types="./index.d.ts" />' $WASM_PROJECT/deno/automerge_wasm.js;
+
+echo "Running JS Deno tests";
+yarn --cwd $JS_PROJECT install;
+ROOT_MODULE=$WASM_PROJECT/deno yarn --cwd $JS_PROJECT deno:build;
+yarn --cwd $JS_PROJECT deno:test;
+

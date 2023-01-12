@@ -1,8 +1,8 @@
 name: Release
 on:
   push:
-#    branches:
-#      - main
+    branches:
+      - main
 
 jobs:
   check_if_wasm_version_upgraded:
@@ -153,7 +153,6 @@ jobs:
           cargo install wasm-bindgen-cli wasm-opt
           rustup target add wasm32-unknown-unknown
           ./scripts/ci/js_tests
-        
       - name: build js release
         id: build_release
         run: |
@@ -161,7 +160,9 @@ jobs:
       - name: build js deno release
         id: build_deno_release
         run: |
-          npm --prefix $GITHUB_WORKSPACE/javascript run deno:build
+          VERSION=$WASM_VERSION npm --prefix $GITHUB_WORKSPACE/javascript run deno:build
+        env:
+          WASM_VERSION: ${{ needs.check_if_wasm_version_upgraded.outputs.wasm_version }}
       - name: run deno tests
         id: deno_tests
         run: |
@@ -183,11 +184,11 @@ jobs:
             echo "Is pre-release version"
             EXTRA_ARGS="$EXTRA_ARGS --tag next"
           fi
-#          if [ "$NODE_AUTH_TOKEN" = "" ]; then
-#            echo "Can't publish on NPM, You need a NPM_TOKEN secret."
-#            false
-#          fi
-#          npm publish $GITHUB_WORKSPACE/javascript $EXTRA_ARGS
+          if [ "$NODE_AUTH_TOKEN" = "" ]; then
+            echo "Can't publish on NPM, You need a NPM_TOKEN secret."
+            false
+          fi
+          npm publish $GITHUB_WORKSPACE/javascript $EXTRA_ARGS
         env:
           NODE_AUTH_TOKEN: ${{secrets.NPM_TOKEN}}
           VERSION: ${{ needs.check_if_js_version_upgraded.outputs.js_version }}
@@ -209,5 +210,5 @@ jobs:
           draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-#      - name: Remove js_tmp_branch
-#        run: git push origin :js_tmp_branch
+      - name: Remove js_tmp_branch
+        run: git push origin :js_tmp_branch
