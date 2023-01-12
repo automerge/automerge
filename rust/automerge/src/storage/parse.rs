@@ -110,7 +110,7 @@ use crate::{ActorId, ChangeHash};
 const HASH_SIZE: usize = 32; // 256 bits = 32 bytes
 
 #[allow(unused_imports)]
-pub(crate) use self::leb128::{leb128_i32, leb128_i64, leb128_u32, leb128_u64, nonzero_leb128_u64};
+pub(crate) use self::leb128::{leb128_i64, leb128_u32, leb128_u64, nonzero_leb128_u64};
 
 pub(crate) type ParseResult<'a, O, E> = Result<(Input<'a>, O), ParseError<E>>;
 
