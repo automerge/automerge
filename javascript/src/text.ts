@@ -1,10 +1,12 @@
 import type { Value } from "@automerge/automerge-wasm"
 import { TEXT, STATE } from "./constants"
+import type { InternalState } from "./internal_state"
 
 export class Text {
   elems: Array<any>
   str: string | undefined
   spans: Array<any> | undefined
+  [STATE]?: InternalState<any>
 
   constructor(text?: string | string[] | Value[]) {
     if (typeof text === "string") {
@@ -208,7 +210,7 @@ export class Text {
     new Text(this.elems.slice(start, end))
   }
 
-  some(test: (Value) => boolean): boolean {
+  some(test: (arg: Value) => boolean): boolean {
     return this.elems.some(test)
   }
 

@@ -15,5 +15,5 @@
     "outDir": "./dist"
   },
   "include": ["src/**/*", "test/**/*"],
-  "exclude": ["./dist/**/*", "./node_modules"]
+  "exclude": ["./dist/**/*", "./node_modules", "./src/**/*.deno.ts"]
 }
