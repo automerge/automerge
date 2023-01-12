@@ -50,12 +50,18 @@ jobs:
       - name: run wasm deno tests
         id: wasm_deno_tests
         run: ./scripts/ci/deno_tests
+      - name: build release
+        id: build_release
+        run: |
+          npm --prefix $GITHUB_WORKSPACE/rust/automerge-wasm run release
       - name: Collate deno release files
         if: steps.wasm_js_tests.outcome == 'success' && steps.wasm_deno_tests.outcome == 'success'
         run: |
           mkdir $GITHUB_WORKSPACE/deno_wasm_dist
           cp $GITHUB_WORKSPACE/rust/automerge-wasm/deno/* $GITHUB_WORKSPACE/deno_wasm_dist
           cp $GITHUB_WORKSPACE/rust/automerge-wasm/index.d.ts $GITHUB_WORKSPACE/deno_wasm_dist
+          cp $GITHUB_WORKSPACE/rust/automerge-wasm/README.md $GITHUB_WORKSPACE/deno_wasm_dist
+          cp $GITHUB_WORKSPACE/rust/automerge-wasm/LICENSE $GITHUB_WORKSPACE/deno_wasm_dist
           sed -i '1i /// <reference types="./index.d.ts" />' $GITHUB_WORKSPACE/deno_wasm_dist/automerge_wasm.js
       - name: Create npm release
         if: steps.wasm_js_tests.outcome == 'success' && steps.wasm_deno_tests.outcome == 'success'
