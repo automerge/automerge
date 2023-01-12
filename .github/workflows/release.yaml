@@ -69,7 +69,7 @@ jobs:
             echo "Can't publish on NPM, You need a NPM_TOKEN secret."
             false
           fi
-          npm --prefix $GITHUB_WORKSPACE/rust/automerge-wasm publish $EXTRA_ARGS
+          npm publish $GITHUB_WORKSPACE/rust/automerge-wasm  $EXTRA_ARGS
         env:
           NODE_AUTH_TOKEN: ${{secrets.NPM_TOKEN}}
           VERSION: ${{ needs.check_if_wasm_version_upgraded.outputs.wasm_version }}
