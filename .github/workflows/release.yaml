@@ -24,8 +24,12 @@ jobs:
     needs:
       - check_if_wasm_version_upgraded
     # We create release only if the version in the package.json has been upgraded
-    if: needs.check_if_wasm_version_upgraded.outputs.wasm_has_updated == 'true'
+    #if: needs.check_if_wasm_version_upgraded.outputs.wasm_has_updated == 'true'
     steps:
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '16.x'
+          registry-url: 'https://registry.npmjs.org'
       - uses: denoland/setup-deno@v1
       - uses: actions/checkout@v3
         with:
