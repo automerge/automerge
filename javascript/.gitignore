@@ -3,3 +3,4 @@
 dist
 docs/
 .vim
+deno_dist/

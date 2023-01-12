@@ -1,6 +1,11 @@
 {
   "extends": "../tsconfig.json",
-  "exclude": ["../dist/**/*", "../node_modules", "../test/**/*"],
+  "exclude": [
+    "../dist/**/*",
+    "../node_modules",
+    "../test/**/*",
+    "../src/**/*.deno.ts"
+  ],
   "emitDeclarationOnly": true,
   "compilerOptions": {
     "outDir": "../dist"

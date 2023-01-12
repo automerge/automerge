@@ -37,7 +37,15 @@
  */
 import { Counter } from "./types"
 
-export { Counter, Doc, Int, Uint, Float64, Patch, PatchCallback } from "./types"
+export {
+  Counter,
+  type Doc,
+  Int,
+  Uint,
+  Float64,
+  type Patch,
+  type PatchCallback,
+} from "./types"
 
 import type { PatchCallback } from "./stable"
 
@@ -59,7 +67,7 @@ export type ScalarValue =
 
 export type Conflicts = { [key: string]: AutomergeValue }
 
-export {
+export type {
   PutPatch,
   DelPatch,
   SplicePatch,

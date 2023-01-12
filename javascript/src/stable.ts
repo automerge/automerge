@@ -4,47 +4,50 @@ export { /** @hidden */ uuid } from "./uuid"
 import { rootProxy, listProxy, mapProxy, textProxy } from "./proxies"
 import { STATE } from "./constants"
 
-import { AutomergeValue, Counter, Doc, PatchCallback } from "./types"
-export {
-  AutomergeValue,
+import {
+  type AutomergeValue,
   Counter,
-  Doc,
+  type Doc,
+  type PatchCallback,
+} from "./types"
+export {
+  type AutomergeValue,
+  Counter,
+  type Doc,
   Int,
   Uint,
   Float64,
-  Patch,
-  PatchCallback,
-  ScalarValue,
+  type Patch,
+  type PatchCallback,
+  type ScalarValue,
   Text,
 } from "./types"
 
 import { Text } from "./text"
 
-import { type API } from "@automerge/automerge-wasm"
-export {
-  PutPatch,
-  DelPatch,
-  SplicePatch,
-  IncPatch,
-  SyncMessage,
-} from "@automerge/automerge-wasm"
-import { ApiHandler, ChangeToEncode, UseApi } from "./low_level"
-
-import {
+import type {
+  API,
   Actor as ActorId,
   Prop,
   ObjID,
   Change,
   DecodedChange,
   Heads,
-  Automerge,
   MaterializeValue,
-} from "@automerge/automerge-wasm"
-import {
   JsSyncState as SyncState,
   SyncMessage,
   DecodedSyncMessage,
 } from "@automerge/automerge-wasm"
+export type {
+  PutPatch,
+  DelPatch,
+  SplicePatch,
+  IncPatch,
+  SyncMessage,
+} from "@automerge/automerge-wasm"
+import { ApiHandler, type ChangeToEncode, UseApi } from "./low_level"
+
+import { Automerge } from "@automerge/automerge-wasm"
 
 import { RawString } from "./raw_string"
 
