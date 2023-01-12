@@ -124,7 +124,10 @@ jobs:
       - check_if_wasm_version_upgraded
       - publish-wasm
     # We create release only if the version in the package.json has been upgraded and after the WASM release
-    if: (needs.publish-wasm.result == 'success' || needs.publish-wasm.result == 'skipped') && needs.check_if_js_version_upgraded.outputs.js_has_updated == 'true'
+    if: |
+      (always() && ! cancelled()) &&
+      (needs.publish-wasm.result == 'success' || needs.publish-wasm.result == 'skipped') && 
+      needs.check_if_js_version_upgraded.outputs.js_has_updated == 'true'
     steps:
       - uses: actions/setup-node@v3
         with:
