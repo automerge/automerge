@@ -1,8 +1,8 @@
 name: Release
 on:
   push:
-    branches:
-      - main
+#    branches:
+#      - main
 
 jobs:
   check_if_wasm_version_upgraded:
