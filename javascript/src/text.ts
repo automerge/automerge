@@ -1,4 +1,4 @@
-import { Value } from "@automerge/automerge-wasm"
+import type { Value } from "@automerge/automerge-wasm"
 import { TEXT, STATE } from "./constants"
 
 export class Text {

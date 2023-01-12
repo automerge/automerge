@@ -1,8 +1,8 @@
-import { ObjID, Heads, Automerge } from "@automerge/automerge-wasm"
+import { type ObjID, type Heads, Automerge } from "@automerge/automerge-wasm"
 
 import { STATE, OBJECT_ID, TRACE, IS_PROXY } from "./constants"
 
-import { type Doc, PatchCallback } from "./types"
+import { type Doc, type PatchCallback } from "./types"
 
 export interface InternalState<T> {
   handle: Automerge

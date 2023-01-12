@@ -1,7 +1,12 @@
 import { Text } from "./text"
-import { Automerge, Heads, ObjID } from "@automerge/automerge-wasm"
-import { Prop } from "@automerge/automerge-wasm"
 import {
+  Automerge,
+  type Heads,
+  type ObjID,
+  type Prop,
+} from "@automerge/automerge-wasm"
+
+import type {
   AutomergeValue,
   ScalarValue,
   MapValue,

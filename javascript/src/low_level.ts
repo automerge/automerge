@@ -1,16 +1,16 @@
 import {
+  type API,
   Automerge,
-  Change,
-  DecodedChange,
-  Actor,
+  type Change,
+  type DecodedChange,
+  type Actor,
   SyncState,
-  SyncMessage,
-  JsSyncState,
-  DecodedSyncMessage,
-  ChangeToEncode,
+  type SyncMessage,
+  type JsSyncState,
+  type DecodedSyncMessage,
+  type ChangeToEncode,
 } from "@automerge/automerge-wasm"
-export { ChangeToEncode } from "@automerge/automerge-wasm"
-import { API } from "@automerge/automerge-wasm"
+export type { ChangeToEncode } from "@automerge/automerge-wasm"
 
 export function UseApi(api: API) {
   for (const k in api) {
