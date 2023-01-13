@@ -62,7 +62,11 @@ impl<'a> DepsIter<'a> {
             }
             None => return Ok(None),
         };
-        let mut result = Vec::with_capacity(num);
+        // We cannot trust `num` because it is provided over the network,
+        // but in the common case it will be correct and small (so we
+        // use with_capacity to make sure the vector is precisely the right
+        // size).
+        let mut result = Vec::with_capacity(std::cmp::min(num, 100));
         while result.len() < num {
             match self
                 .deps

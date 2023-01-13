@@ -3,6 +3,7 @@ use automerge::{
     ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjType, ScalarValue,
     VecOpObserver, ROOT,
 };
+use std::fs;
 
 // set up logging for all the tests
 //use test_log::test;
@@ -1399,17 +1400,16 @@ fn ops_on_wrong_objets() -> Result<(), AutomergeError> {
 }
 
 #[test]
-fn invalid_deflate_stream() {
-    let bytes: [u8; 123] = [
-        133, 111, 74, 131, 48, 48, 48, 48, 0, 113, 1, 16, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
-        48, 48, 48, 48, 48, 48, 1, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
-        48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 6, 1, 2, 3, 2, 32, 2, 48,
-        2, 49, 2, 49, 2, 8, 32, 4, 33, 2, 48, 2, 49, 1, 49, 2, 57, 2, 87, 3, 128, 1, 2, 127, 0,
-        127, 1, 127, 1, 127, 0, 127, 0, 127, 7, 127, 2, 102, 122, 127, 0, 127, 1, 1, 127, 1, 127,
-        54, 239, 191, 189, 127, 0, 0,
-    ];
+fn fuzz_crashers() {
+    let paths = fs::read_dir("./tests/fuzz-crashers").unwrap();
 
-    assert!(Automerge::load(&bytes).is_err());
+    for path in paths {
+        // uncomment this line to figure out which fixture is crashing:
+        // println!("{:?}", path.as_ref().unwrap().path().display());
+        let bytes = fs::read(path.as_ref().unwrap().path());
+        let res = Automerge::load(&bytes.unwrap());
+        assert!(res.is_err());
+    }
 }
 
 #[test]

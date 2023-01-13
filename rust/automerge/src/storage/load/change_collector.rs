@@ -26,6 +26,8 @@ pub(crate) enum Error {
     MissingChange,
     #[error("unable to read change metadata: {0}")]
     ReadChange(Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("incorrect max op")]
+    IncorrectMaxOp,
     #[error("missing ops")]
     MissingOps,
 }
@@ -180,7 +182,18 @@ impl<'a> PartialChange<'a> {
             .ops
             .iter()
             .map(|(obj, op)| op_as_actor_id(obj, op, metadata));
-        let actor = metadata.actors.get(self.actor).clone();
+        let actor = metadata
+            .actors
+            .safe_get(self.actor)
+            .ok_or_else(|| {
+                tracing::error!(actor_index = self.actor, "actor out of bounds");
+                Error::MissingActor
+            })?
+            .clone();
+
+        if num_ops > self.max_op {
+            return Err(Error::IncorrectMaxOp);
+        }
 
         let change = match StoredChange::builder()
             .with_dependencies(deps)
