@@ -136,8 +136,18 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                     if self.pos + child.len() >= start {
                         // skip empty nodes
                         if child.index.visible_len(self.encoding) == 0 {
-                            self.pos += child.len();
-                            QueryResult::Next
+                            let child_contains_key =
+                                child.elements.iter().any(|e| ops[*e].key == self.op.key);
+                            if !child_contains_key {
+                                // If we are in a node which has no visible ops, but none of the
+                                // elements of the node match the key of the op, then we must have
+                                // finished processing and so we can just return.
+                                // See https://github.com/automerge/automerge-rs/pull/480
+                                QueryResult::Finish
+                            } else {
+                                self.pos += child.len();
+                                QueryResult::Next
+                            }
                         } else {
                             QueryResult::Descend
                         }
@@ -289,5 +299,25 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                 result
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{super::seek_op::tests::optree_with_only_internally_visible_ops, SeekOpWithPatch};
+    use crate::{
+        op_tree::B,
+        types::{ListEncoding, ObjId},
+    };
+
+    #[test]
+    fn test_insert_on_internal_only_nodes() {
+        let (set, new_op) = optree_with_only_internally_visible_ops();
+
+        let q = SeekOpWithPatch::new(&new_op, ListEncoding::List);
+        let q = set.search(&ObjId::root(), q);
+
+        // we've inserted `B - 1` elements for "a", so the index should be `B`
+        assert_eq!(q.pos, B);
     }
 }
