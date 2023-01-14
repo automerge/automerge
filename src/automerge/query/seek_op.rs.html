@@ -264,6 +264,19 @@
 <span id="263">263</span>
 <span id="264">264</span>
 <span id="265">265</span>
+<span id="266">266</span>
+<span id="267">267</span>
+<span id="268">268</span>
+<span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
+<span id="273">273</span>
+<span id="274">274</span>
+<span id="275">275</span>
+<span id="276">276</span>
+<span id="277">277</span>
+<span id="278">278</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTreeNode};
 <span class="kw">use </span><span class="kw">crate</span>::query::{binary_search_by, QueryResult, TreeQuery};
 <span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, Op, HEAD};
@@ -427,7 +440,7 @@
 }
 
 <span class="attribute">#[cfg(test)]
-</span><span class="kw">mod </span>tests {
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>tests {
     <span class="kw">use crate</span>::{
         op_set::OpSet,
         op_tree::B,
@@ -436,37 +449,44 @@
         ActorId, ScalarValue,
     };
 
-    <span class="attribute">#[test]
-    </span><span class="kw">fn </span>seek_on_page_boundary() {
-        <span class="comment">// Create an optree in which the only visible ops are on the boundaries of the nodes,
-        // i.e. the visible elements are in the internal nodes. Like so
-        //
-        //                      .----------------------.
-        //                      | id   |  key  |  succ |
-        //                      | B    |  &quot;a&quot;  |       |
-        //                      | 2B   |  &quot;b&quot;  |       |
-        //                      &#39;----------------------&#39;
-        //                           /      |      \
-        //  ;------------------------.      |       `------------------------------------.
-        //  | id     | op     | succ |      |       | id            | op     | succ      |
-        //  | 0      |set &quot;a&quot; |  1   |      |       | 2B + 1        |set &quot;c&quot; |  2B + 2   |
-        //  | 1      |set &quot;a&quot; |  2   |      |       | 2B + 2        |set &quot;c&quot; |  2B + 3   |
-        //  | 2      |set &quot;a&quot; |  3   |      |       ...
-        //  ...                             |       | 3B            |set &quot;c&quot; |           |
-        //  | B - 1  |set &quot;a&quot; |  B   |      |       &#39;------------------------------------&#39;
-        //  &#39;--------&#39;--------&#39;------&#39;      |
-        //                                  |
-        //                      .-----------------------------.
-        //                      | id         |  key  |  succ  |
-        //                      | B + 1      |  &quot;b&quot;  | B + 2  |
-        //                      | B + 2      |  &quot;b&quot;  | B + 3  |
-        //                      ....
-        //                      | B + (B - 1 |  &quot;b&quot;  |   2B   |
-        //                      &#39;-----------------------------&#39;
-        //
-        // The important point here is that the leaf nodes contain no visible ops for keys &quot;a&quot; and
-        // &quot;b&quot;.
-        </span><span class="kw">let </span><span class="kw-2">mut </span>set = OpSet::new();
+    <span class="doccomment">/// Create an optree in which the only visible ops are on the boundaries of the nodes,
+    /// i.e. the visible elements are in the internal nodes. Like so
+    ///
+    /// ```notrust
+    ///
+    ///                      .----------------------.
+    ///                      | id   |  key  |  succ |
+    ///                      | B    |  &quot;a&quot;  |       |
+    ///                      | 2B   |  &quot;b&quot;  |       |
+    ///                      &#39;----------------------&#39;
+    ///                           /      |      \
+    ///  ;------------------------.      |       `------------------------------------.
+    ///  | id     | op     | succ |      |       | id            | op     | succ      |
+    ///  | 0      |set &quot;a&quot; |  1   |      |       | 2B + 1        |set &quot;c&quot; |  2B + 2   |
+    ///  | 1      |set &quot;a&quot; |  2   |      |       | 2B + 2        |set &quot;c&quot; |  2B + 3   |
+    ///  | 2      |set &quot;a&quot; |  3   |      |       ...
+    ///  ...                             |       | 3B            |set &quot;c&quot; |           |
+    ///  | B - 1  |set &quot;a&quot; |  B   |      |       &#39;------------------------------------&#39;
+    ///  &#39;--------&#39;--------&#39;------&#39;      |
+    ///                                  |
+    ///                      .-----------------------------.
+    ///                      | id         |  key  |  succ  |
+    ///                      | B + 1      |  &quot;b&quot;  | B + 2  |
+    ///                      | B + 2      |  &quot;b&quot;  | B + 3  |
+    ///                      ....
+    ///                      | B + (B - 1 |  &quot;b&quot;  |   2B   |
+    ///                      &#39;-----------------------------&#39;
+    /// ```
+    ///
+    /// The important point here is that the leaf nodes contain no visible ops for keys &quot;a&quot; and
+    /// &quot;b&quot;.
+    ///
+    /// # Returns
+    ///
+    /// The opset in question and an op which should be inserted at the next position after the
+    /// internally visible ops.
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>optree_with_only_internally_visible_ops() -&gt; (OpSet, Op) {
+        <span class="kw">let </span><span class="kw-2">mut </span>set = OpSet::new();
         <span class="kw">let </span>actor = set.m.actors.cache(ActorId::random());
         <span class="kw">let </span>a = set.m.props.cache(<span class="string">&quot;a&quot;</span>.to_string());
         <span class="kw">let </span>b = set.m.props.cache(<span class="string">&quot;b&quot;</span>.to_string());
@@ -521,6 +541,12 @@
                 .sorted_opids(std::iter::once(OpId::new(B <span class="kw">as </span>u64 - <span class="number">1</span>, actor))),
             insert: <span class="bool-val">false</span>,
         };
+        (set, new_op)
+    }
+
+    <span class="attribute">#[test]
+    </span><span class="kw">fn </span>seek_on_page_boundary() {
+        <span class="kw">let </span>(set, new_op) = optree_with_only_internally_visible_ops();
 
         <span class="kw">let </span>q = SeekOp::new(<span class="kw-2">&amp;</span>new_op);
         <span class="kw">let </span>q = set.search(<span class="kw-2">&amp;</span>ObjId::root(), q);

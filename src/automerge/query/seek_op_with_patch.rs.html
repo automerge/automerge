@@ -292,6 +292,36 @@
 <span id="291">291</span>
 <span id="292">292</span>
 <span id="293">293</span>
+<span id="294">294</span>
+<span id="295">295</span>
+<span id="296">296</span>
+<span id="297">297</span>
+<span id="298">298</span>
+<span id="299">299</span>
+<span id="300">300</span>
+<span id="301">301</span>
+<span id="302">302</span>
+<span id="303">303</span>
+<span id="304">304</span>
+<span id="305">305</span>
+<span id="306">306</span>
+<span id="307">307</span>
+<span id="308">308</span>
+<span id="309">309</span>
+<span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTreeNode};
 <span class="kw">use </span><span class="kw">crate</span>::query::{binary_search_by, QueryResult, TreeQuery};
 <span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, Op, HEAD};
@@ -430,8 +460,18 @@
                     <span class="kw">if </span><span class="self">self</span>.pos + child.len() &gt;= start {
                         <span class="comment">// skip empty nodes
                         </span><span class="kw">if </span>child.index.visible_len(<span class="self">self</span>.encoding) == <span class="number">0 </span>{
-                            <span class="self">self</span>.pos += child.len();
-                            QueryResult::Next
+                            <span class="kw">let </span>child_contains_key =
+                                child.elements.iter().any(|e| ops[<span class="kw-2">*</span>e].key == <span class="self">self</span>.op.key);
+                            <span class="kw">if </span>!child_contains_key {
+                                <span class="comment">// If we are in a node which has no visible ops, but none of the
+                                // elements of the node match the key of the op, then we must have
+                                // finished processing and so we can just return.
+                                // See https://github.com/automerge/automerge-rs/pull/480
+                                </span>QueryResult::Finish
+                            } <span class="kw">else </span>{
+                                <span class="self">self</span>.pos += child.len();
+                                QueryResult::Next
+                            }
                         } <span class="kw">else </span>{
                             QueryResult::Descend
                         }
@@ -583,6 +623,26 @@
                 result
             }
         }
+    }
+}
+
+<span class="attribute">#[cfg(test)]
+</span><span class="kw">mod </span>tests {
+    <span class="kw">use super</span>::{<span class="kw">super</span>::seek_op::tests::optree_with_only_internally_visible_ops, SeekOpWithPatch};
+    <span class="kw">use crate</span>::{
+        op_tree::B,
+        types::{ListEncoding, ObjId},
+    };
+
+    <span class="attribute">#[test]
+    </span><span class="kw">fn </span>test_insert_on_internal_only_nodes() {
+        <span class="kw">let </span>(set, new_op) = optree_with_only_internally_visible_ops();
+
+        <span class="kw">let </span>q = SeekOpWithPatch::new(<span class="kw-2">&amp;</span>new_op, ListEncoding::List);
+        <span class="kw">let </span>q = set.search(<span class="kw-2">&amp;</span>ObjId::root(), q);
+
+        <span class="comment">// we&#39;ve inserted `B - 1` elements for &quot;a&quot;, so the index should be `B`
+        </span><span class="macro">assert_eq!</span>(q.pos, B);
     }
 }
 </code></pre></div>
