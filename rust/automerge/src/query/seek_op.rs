@@ -161,7 +161,7 @@ impl<'a> TreeQuery<'a> for SeekOp<'a> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use crate::{
         op_set::OpSet,
         op_tree::B,
@@ -170,36 +170,43 @@ mod tests {
         ActorId, ScalarValue,
     };
 
-    #[test]
-    fn seek_on_page_boundary() {
-        // Create an optree in which the only visible ops are on the boundaries of the nodes,
-        // i.e. the visible elements are in the internal nodes. Like so
-        //
-        //                      .----------------------.
-        //                      | id   |  key  |  succ |
-        //                      | B    |  "a"  |       |
-        //                      | 2B   |  "b"  |       |
-        //                      '----------------------'
-        //                           /      |      \
-        //  ;------------------------.      |       `------------------------------------.
-        //  | id     | op     | succ |      |       | id            | op     | succ      |
-        //  | 0      |set "a" |  1   |      |       | 2B + 1        |set "c" |  2B + 2   |
-        //  | 1      |set "a" |  2   |      |       | 2B + 2        |set "c" |  2B + 3   |
-        //  | 2      |set "a" |  3   |      |       ...
-        //  ...                             |       | 3B            |set "c" |           |
-        //  | B - 1  |set "a" |  B   |      |       '------------------------------------'
-        //  '--------'--------'------'      |
-        //                                  |
-        //                      .-----------------------------.
-        //                      | id         |  key  |  succ  |
-        //                      | B + 1      |  "b"  | B + 2  |
-        //                      | B + 2      |  "b"  | B + 3  |
-        //                      ....
-        //                      | B + (B - 1 |  "b"  |   2B   |
-        //                      '-----------------------------'
-        //
-        // The important point here is that the leaf nodes contain no visible ops for keys "a" and
-        // "b".
+    /// Create an optree in which the only visible ops are on the boundaries of the nodes,
+    /// i.e. the visible elements are in the internal nodes. Like so
+    ///
+    /// ```notrust
+    ///
+    ///                      .----------------------.
+    ///                      | id   |  key  |  succ |
+    ///                      | B    |  "a"  |       |
+    ///                      | 2B   |  "b"  |       |
+    ///                      '----------------------'
+    ///                           /      |      \
+    ///  ;------------------------.      |       `------------------------------------.
+    ///  | id     | op     | succ |      |       | id            | op     | succ      |
+    ///  | 0      |set "a" |  1   |      |       | 2B + 1        |set "c" |  2B + 2   |
+    ///  | 1      |set "a" |  2   |      |       | 2B + 2        |set "c" |  2B + 3   |
+    ///  | 2      |set "a" |  3   |      |       ...
+    ///  ...                             |       | 3B            |set "c" |           |
+    ///  | B - 1  |set "a" |  B   |      |       '------------------------------------'
+    ///  '--------'--------'------'      |
+    ///                                  |
+    ///                      .-----------------------------.
+    ///                      | id         |  key  |  succ  |
+    ///                      | B + 1      |  "b"  | B + 2  |
+    ///                      | B + 2      |  "b"  | B + 3  |
+    ///                      ....
+    ///                      | B + (B - 1 |  "b"  |   2B   |
+    ///                      '-----------------------------'
+    /// ```
+    ///
+    /// The important point here is that the leaf nodes contain no visible ops for keys "a" and
+    /// "b".
+    ///
+    /// # Returns
+    ///
+    /// The opset in question and an op which should be inserted at the next position after the
+    /// internally visible ops.
+    pub(crate) fn optree_with_only_internally_visible_ops() -> (OpSet, Op) {
         let mut set = OpSet::new();
         let actor = set.m.actors.cache(ActorId::random());
         let a = set.m.props.cache("a".to_string());
@@ -255,6 +262,12 @@ mod tests {
                 .sorted_opids(std::iter::once(OpId::new(B as u64 - 1, actor))),
             insert: false,
         };
+        (set, new_op)
+    }
+
+    #[test]
+    fn seek_on_page_boundary() {
+        let (set, new_op) = optree_with_only_internally_visible_ops();
 
         let q = SeekOp::new(&new_op);
         let q = set.search(&ObjId::root(), q);
