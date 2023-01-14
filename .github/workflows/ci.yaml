@@ -136,7 +136,7 @@ jobs:
     strategy:
       matrix:
         toolchain:
-          - 1.60.0
+          - 1.66.0
           - nightly
     continue-on-error: ${{ matrix.toolchain == 'nightly' }}
     steps:
