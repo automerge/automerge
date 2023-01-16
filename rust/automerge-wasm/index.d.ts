@@ -94,7 +94,7 @@ export type Op = {
   pred: string[],
 }
 
-export type Patch =  PutPatch | DelPatch | SplicePatch | IncPatch | InsertPatch;
+export type Patch =  PutPatch | DelPatch | SpliceTextPatch | IncPatch | InsertPatch;
 
 export type PutPatch = {
   action: 'put'
