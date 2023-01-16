@@ -115,7 +115,7 @@ export type DelPatch = {
   length?: number,
 }
 
-export type SplicePatch = {
+export type SpliceTextPatch = {
   action: 'splice'
   path: Prop[],
   value: string,
