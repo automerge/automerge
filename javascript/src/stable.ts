@@ -41,7 +41,8 @@ import type {
 export type {
   PutPatch,
   DelPatch,
-  SplicePatch,
+  SpliceTextPatch,
+  InsertPatch,
   IncPatch,
   SyncMessage,
 } from "@automerge/automerge-wasm"
