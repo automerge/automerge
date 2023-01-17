@@ -1413,6 +1413,20 @@ fn fuzz_crashers() {
     }
 }
 
+fn fixture(name: &str) -> Vec<u8> {
+    fs::read("./tests/fixtures/".to_owned() + name).unwrap()
+}
+
+#[test]
+fn overlong_leb() {
+    // the value metadata says "2", but the LEB is only 1-byte long and there's an extra 0
+    assert!(Automerge::load(&fixture("counter_value_has_incorrect_meta.automerge")).is_err());
+    // the LEB is overlong (using 2 bytes where one would have sufficed)
+    assert!(Automerge::load(&fixture("counter_value_is_overlong.automerge")).is_err());
+    // the LEB is correct
+    assert!(Automerge::load(&fixture("counter_value_is_ok.automerge")).is_ok());
+}
+
 #[test]
 fn negative_64() {
     let mut doc = Automerge::new();

@@ -48,6 +48,8 @@ pub(crate) enum DecodeError {
     FromInt(#[from] std::num::TryFromIntError),
     #[error("bad leb128")]
     BadLeb(#[from] ::leb128::read::Error),
+    #[error(transparent)]
+    BadLeb128(#[from] crate::storage::parse::leb128::Error),
     #[error("attempted to allocate {attempted} which is larger than the maximum of {maximum}")]
     OverlargeAllocation { attempted: usize, maximum: usize },
     #[error("invalid string encoding")]

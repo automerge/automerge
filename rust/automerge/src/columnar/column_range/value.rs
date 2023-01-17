@@ -4,9 +4,14 @@ use crate::{
     columnar::{
         encoding::{
             leb128::{lebsize, ulebsize},
-            raw, DecodeColumnError, RawBytes, RawDecoder, RawEncoder, RleDecoder, RleEncoder, Sink,
+            raw, DecodeColumnError, DecodeError, RawBytes, RawDecoder, RawEncoder, RleDecoder,
+            RleEncoder, Sink,
         },
         SpliceError,
+    },
+    storage::parse::{
+        leb128::{leb128_i64, leb128_u64},
+        Input, ParseResult,
     },
     ScalarValue,
 };
@@ -217,18 +222,8 @@ impl<'a> Iterator for ValueIter<'a> {
                     ValueType::Null => Some(Ok(ScalarValue::Null)),
                     ValueType::True => Some(Ok(ScalarValue::Boolean(true))),
                     ValueType::False => Some(Ok(ScalarValue::Boolean(false))),
-                    ValueType::Uleb => self.parse_raw(val_meta, |mut bytes| {
-                        let val = leb128::read::unsigned(&mut bytes).map_err(|e| {
-                            DecodeColumnError::invalid_value("value", e.to_string())
-                        })?;
-                        Ok(ScalarValue::Uint(val))
-                    }),
-                    ValueType::Leb => self.parse_raw(val_meta, |mut bytes| {
-                        let val = leb128::read::signed(&mut bytes).map_err(|e| {
-                            DecodeColumnError::invalid_value("value", e.to_string())
-                        })?;
-                        Ok(ScalarValue::Int(val))
-                    }),
+                    ValueType::Uleb => self.parse_input(val_meta, leb128_u64),
+                    ValueType::Leb => self.parse_input(val_meta, leb128_i64),
                     ValueType::String => self.parse_raw(val_meta, |bytes| {
                         let val = std::str::from_utf8(bytes)
                             .map_err(|e| DecodeColumnError::invalid_value("value", e.to_string()))?
@@ -250,17 +245,11 @@ impl<'a> Iterator for ValueIter<'a> {
                         let val = f64::from_le_bytes(raw);
                         Ok(ScalarValue::F64(val))
                     }),
-                    ValueType::Counter => self.parse_raw(val_meta, |mut bytes| {
-                        let val = leb128::read::signed(&mut bytes).map_err(|e| {
-                            DecodeColumnError::invalid_value("value", e.to_string())
-                        })?;
-                        Ok(ScalarValue::Counter(val.into()))
+                    ValueType::Counter => self.parse_input(val_meta, |input| {
+                        leb128_i64(input).map(|(i, n)| (i, ScalarValue::Counter(n.into())))
                     }),
-                    ValueType::Timestamp => self.parse_raw(val_meta, |mut bytes| {
-                        let val = leb128::read::signed(&mut bytes).map_err(|e| {
-                            DecodeColumnError::invalid_value("value", e.to_string())
-                        })?;
-                        Ok(ScalarValue::Timestamp(val))
+                    ValueType::Timestamp => self.parse_input(val_meta, |input| {
+                        leb128_i64(input).map(|(i, n)| (i, ScalarValue::Timestamp(n)))
                     }),
                     ValueType::Unknown(code) => self.parse_raw(val_meta, |bytes| {
                         Ok(ScalarValue::Unknown {
@@ -284,8 +273,8 @@ impl<'a> Iterator for ValueIter<'a> {
 }
 
 impl<'a> ValueIter<'a> {
-    fn parse_raw<R, F: Fn(&[u8]) -> Result<R, DecodeColumnError>>(
-        &mut self,
+    fn parse_raw<'b, R, F: Fn(&'b [u8]) -> Result<R, DecodeColumnError>>(
+        &'b mut self,
         meta: ValueMeta,
         f: F,
     ) -> Option<Result<R, DecodeColumnError>> {
@@ -298,11 +287,24 @@ impl<'a> ValueIter<'a> {
             }
             Ok(bytes) => bytes,
         };
-        let val = match f(raw) {
-            Ok(v) => v,
-            Err(e) => return Some(Err(e)),
-        };
-        Some(Ok(val))
+        Some(f(raw))
+    }
+
+    fn parse_input<'b, R, F: Fn(Input<'b>) -> ParseResult<'b, R, DecodeError>>(
+        &'b mut self,
+        meta: ValueMeta,
+        f: F,
+    ) -> Option<Result<ScalarValue, DecodeColumnError>>
+    where
+        R: Into<ScalarValue>,
+    {
+        self.parse_raw(meta, |raw| match f(Input::new(raw)) {
+            Err(e) => Err(DecodeColumnError::invalid_value("value", e.to_string())),
+            Ok((i, _)) if !i.is_empty() => {
+                Err(DecodeColumnError::invalid_value("value", "extra bytes"))
+            }
+            Ok((_, v)) => Ok(v.into()),
+        })
     }
 
     pub(crate) fn done(&self) -> bool {
