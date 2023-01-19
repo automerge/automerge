@@ -309,6 +309,11 @@
 <span id="308">308</span>
 <span id="309">309</span>
 <span id="310">310</span>
+<span id="311">311</span>
+<span id="312">312</span>
+<span id="313">313</span>
+<span id="314">314</span>
+<span id="315">315</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTree, OpTreeNode};
 <span class="kw">use </span><span class="kw">crate</span>::types::{
     Clock, Counter, Key, ListEncoding, Op, OpId, OpType, ScalarValue, TextEncoding,
@@ -425,7 +430,7 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) visible16: usize,
     <span class="kw">pub</span>(<span class="kw">crate</span>) visible8: usize,
     <span class="doccomment">/// Set of opids found in this node and below.
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) ops: HashSet&lt;OpId, FxBuildHasher&gt;,
+    </span>ops: HashSet&lt;OpId, FxBuildHasher&gt;,
 }
 
 <span class="kw">impl </span>Index {
@@ -449,6 +454,11 @@
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>has_visible(<span class="kw-2">&amp;</span><span class="self">self</span>, seen: <span class="kw-2">&amp;</span>Key) -&gt; bool {
         <span class="self">self</span>.visible.contains_key(seen)
+    }
+
+    <span class="doccomment">/// Whether `opid` is in this node or any below it
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>has_op(<span class="kw-2">&amp;</span><span class="self">self</span>, opid: <span class="kw-2">&amp;</span>OpId) -&gt; bool {
+        <span class="self">self</span>.ops.contains(opid)
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>change_vis&lt;<span class="lifetime">&#39;a</span>&gt;(

@@ -383,6 +383,8 @@
 <span id="382">382</span>
 <span id="383">383</span>
 <span id="384">384</span>
+<span id="385">385</span>
+<span id="386">386</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::clock::Clock;
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 <span class="kw">use </span><span class="kw">crate</span>::indexed_cache::IndexedCache;
@@ -474,15 +476,17 @@
         })
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>export_key(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: ObjId, key: Key, encoding: ListEncoding) -&gt; Prop {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>export_key(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: ObjId, key: Key, encoding: ListEncoding) -&gt; <span class="prelude-ty">Option</span>&lt;Prop&gt; {
         <span class="kw">match </span>key {
-            Key::Map(m) =&gt; Prop::Map(<span class="self">self</span>.m.props.get(m).into()),
+            Key::Map(m) =&gt; <span class="self">self</span>.m.props.safe_get(m).map(|s| Prop::Map(s.to_string())),
             Key::Seq(opid) =&gt; {
-                <span class="kw">let </span>i = <span class="self">self
-                    </span>.search(<span class="kw-2">&amp;</span>obj, query::ElemIdPos::new(opid, encoding))
-                    .index()
-                    .unwrap();
-                Prop::Seq(i)
+                <span class="kw">if </span>opid.is_head() {
+                    <span class="prelude-val">Some</span>(Prop::Seq(<span class="number">0</span>))
+                } <span class="kw">else </span>{
+                    <span class="self">self</span>.search(<span class="kw-2">&amp;</span>obj, query::ElemIdPos::new(opid, encoding))
+                        .index()
+                        .map(Prop::Seq)
+                }
             }
         }
     }
