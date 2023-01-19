@@ -12,7 +12,7 @@ makeThisModuleAnExecutableReplacer(
       case "@automerge/automerge-wasm":
         {
           const moduleRoot =
-            process.env.MODULE_ROOT ||
+            process.env.ROOT_MODULE ||
             `https://deno.land/x/automerge_wasm@${version}`
           /*
            *We expect not to run against statements like
