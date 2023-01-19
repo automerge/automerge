@@ -93,7 +93,7 @@ pub use change::{Change, LoadError as LoadChangeError};
 pub use error::AutomergeError;
 pub use error::InvalidActorId;
 pub use error::InvalidChangeHashSlice;
-pub use exid::ExId as ObjId;
+pub use exid::{ExId as ObjId, ObjIdFromBytesError};
 pub use keys::Keys;
 pub use keys_at::KeysAt;
 pub use legacy::Change as ExpandedChange;
