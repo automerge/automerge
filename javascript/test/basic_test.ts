@@ -267,7 +267,6 @@ describe("Automerge", () => {
       })
       assert.deepEqual(doc5, { list: [2, 1, 9, 10, 3, 11, 12] })
       let doc6 = Automerge.change(doc5, d => {
-        // @ts-ignore
         d.list.insertAt(3, 100, 101)
       })
       assert.deepEqual(doc6, { list: [2, 1, 9, 100, 101, 10, 3, 11, 12] })

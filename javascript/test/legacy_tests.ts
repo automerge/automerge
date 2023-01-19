@@ -461,12 +461,12 @@ describe("Automerge", () => {
         s1 = Automerge.change(s1, "set foo", doc => {
           doc.foo = "bar"
         })
-        let deleted
+        let deleted: any
         s1 = Automerge.change(s1, "del foo", doc => {
           deleted = delete doc.foo
         })
         assert.strictEqual(deleted, true)
-        let deleted2
+        let deleted2: any
         assert.doesNotThrow(() => {
           s1 = Automerge.change(s1, "del baz", doc => {
             deleted2 = delete doc.baz
@@ -515,7 +515,7 @@ describe("Automerge", () => {
         s1 = Automerge.change(s1, doc => {
           doc.nested = {}
         })
-        let id = Automerge.getObjectId(s1.nested)
+        Automerge.getObjectId(s1.nested)
         assert.strictEqual(
           OPID_PATTERN.test(Automerge.getObjectId(s1.nested)!),
           true
@@ -975,6 +975,7 @@ describe("Automerge", () => {
       it("should allow adding and removing list elements in the same change callback", () => {
         let s1 = Automerge.change(
           Automerge.init<{ noodles: Array<string> }>(),
+          // @ts-ignore
           doc => (doc.noodles = [])
         )
         s1 = Automerge.change(s1, doc => {
