@@ -81,7 +81,143 @@
 <span id="80">80</span>
 <span id="81">81</span>
 <span id="82">82</span>
-</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::ActorId;
+<span id="83">83</span>
+<span id="84">84</span>
+<span id="85">85</span>
+<span id="86">86</span>
+<span id="87">87</span>
+<span id="88">88</span>
+<span id="89">89</span>
+<span id="90">90</span>
+<span id="91">91</span>
+<span id="92">92</span>
+<span id="93">93</span>
+<span id="94">94</span>
+<span id="95">95</span>
+<span id="96">96</span>
+<span id="97">97</span>
+<span id="98">98</span>
+<span id="99">99</span>
+<span id="100">100</span>
+<span id="101">101</span>
+<span id="102">102</span>
+<span id="103">103</span>
+<span id="104">104</span>
+<span id="105">105</span>
+<span id="106">106</span>
+<span id="107">107</span>
+<span id="108">108</span>
+<span id="109">109</span>
+<span id="110">110</span>
+<span id="111">111</span>
+<span id="112">112</span>
+<span id="113">113</span>
+<span id="114">114</span>
+<span id="115">115</span>
+<span id="116">116</span>
+<span id="117">117</span>
+<span id="118">118</span>
+<span id="119">119</span>
+<span id="120">120</span>
+<span id="121">121</span>
+<span id="122">122</span>
+<span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
+<span id="128">128</span>
+<span id="129">129</span>
+<span id="130">130</span>
+<span id="131">131</span>
+<span id="132">132</span>
+<span id="133">133</span>
+<span id="134">134</span>
+<span id="135">135</span>
+<span id="136">136</span>
+<span id="137">137</span>
+<span id="138">138</span>
+<span id="139">139</span>
+<span id="140">140</span>
+<span id="141">141</span>
+<span id="142">142</span>
+<span id="143">143</span>
+<span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
+<span id="213">213</span>
+<span id="214">214</span>
+<span id="215">215</span>
+<span id="216">216</span>
+<span id="217">217</span>
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::storage::parse;
+<span class="kw">use </span><span class="kw">crate</span>::ActorId;
 <span class="kw">use </span>serde::Serialize;
 <span class="kw">use </span>serde::Serializer;
 <span class="kw">use </span>std::cmp::{Ord, Ordering};
@@ -92,6 +228,102 @@
 </span><span class="kw">pub enum </span>ExId {
     Root,
     Id(u64, ActorId, usize),
+}
+
+<span class="kw">const </span>SERIALIZATION_VERSION_TAG: u8 = <span class="number">0</span>;
+<span class="kw">const </span>TYPE_ROOT: u8 = <span class="number">0</span>;
+<span class="kw">const </span>TYPE_ID: u8 = <span class="number">1</span>;
+
+<span class="kw">impl </span>ExId {
+    <span class="doccomment">/// Serialize the ExId to a byte array.
+    </span><span class="kw">pub fn </span>to_bytes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;u8&gt; {
+        <span class="comment">// The serialized format is
+        //
+        // .--------------------------------.
+        // | version   | type   | data      |
+        // +--------------------------------+
+        // |  4 bytes  |4 bytes | variable  |
+        // &#39;--------------------------------&#39;
+        //
+        // Version is currently always `0`
+        //
+        // `data` depends on the type
+        //
+        // * If the type is `TYPE_ROOT` (0) then there is no data
+        // * If the type is `TYPE_ID` (1) then the data is
+        //
+        // .-------------------------------------------------------.
+        // | actor ID len | actor ID bytes | counter | actor index |
+        // &#39;-------------------------------------------------------&#39;
+        //
+        // Where the actor ID len, counter, and actor index are all uLEB encoded
+        // integers. The actor ID bytes is just an array of bytes.
+        //
+        </span><span class="kw">match </span><span class="self">self </span>{
+            ExId::Root =&gt; {
+                <span class="kw">let </span>val: u8 = SERIALIZATION_VERSION_TAG | (TYPE_ROOT &lt;&lt; <span class="number">4</span>);
+                <span class="macro">vec!</span>[val]
+            }
+            ExId::Id(id, actor, counter) =&gt; {
+                <span class="kw">let </span>actor_bytes = actor.to_bytes();
+                <span class="kw">let </span><span class="kw-2">mut </span>bytes = Vec::with_capacity(actor_bytes.len() + <span class="number">4 </span>+ <span class="number">4</span>);
+                <span class="kw">let </span>tag = SERIALIZATION_VERSION_TAG | (TYPE_ID &lt;&lt; <span class="number">4</span>);
+                bytes.push(tag);
+                leb128::write::unsigned(<span class="kw-2">&amp;mut </span>bytes, actor_bytes.len() <span class="kw">as </span>u64).unwrap();
+                bytes.extend_from_slice(actor_bytes);
+                leb128::write::unsigned(<span class="kw-2">&amp;mut </span>bytes, <span class="kw-2">*</span>counter <span class="kw">as </span>u64).unwrap();
+                leb128::write::unsigned(<span class="kw-2">&amp;mut </span>bytes, <span class="kw-2">*</span>id).unwrap();
+                bytes
+            }
+        }
+    }
+}
+
+<span class="attribute">#[derive(Debug, thiserror::Error)]
+</span><span class="kw">pub enum </span>ObjIdFromBytesError {
+    <span class="attribute">#[error(<span class="string">&quot;no version tag&quot;</span>)]
+    </span>NoVersion,
+    <span class="attribute">#[error(<span class="string">&quot;invalid version tag&quot;</span>)]
+    </span>InvalidVersion(u8),
+    <span class="attribute">#[error(<span class="string">&quot;invalid type tag&quot;</span>)]
+    </span>InvalidType(u8),
+    <span class="attribute">#[error(<span class="string">&quot;invalid Actor ID length: {0}&quot;</span>)]
+    </span>ParseActorLen(String),
+    <span class="attribute">#[error(<span class="string">&quot;Not enough bytes in actor ID&quot;</span>)]
+    </span>ParseActor,
+    <span class="attribute">#[error(<span class="string">&quot;invalid counter: {0}&quot;</span>)]
+    </span>ParseCounter(String),
+    <span class="attribute">#[error(<span class="string">&quot;invalid actor index hint: {0}&quot;</span>)]
+    </span>ParseActorIdxHint(String),
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; TryFrom&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8]&gt; <span class="kw">for </span>ExId {
+    <span class="kw">type </span>Error = ObjIdFromBytesError;
+
+    <span class="kw">fn </span>try_from(value: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, <span class="self">Self</span>::Error&gt; {
+        <span class="kw">let </span>i = parse::Input::new(value);
+        <span class="kw">let </span>(i, tag) = parse::take1::&lt;()&gt;(i).map_err(|<span class="kw">_</span>| ObjIdFromBytesError::NoVersion)<span class="question-mark">?</span>;
+        <span class="kw">let </span>version = tag &amp; <span class="number">0b1111</span>;
+        <span class="kw">if </span>version != SERIALIZATION_VERSION_TAG {
+            <span class="kw">return </span><span class="prelude-val">Err</span>(ObjIdFromBytesError::InvalidVersion(version));
+        }
+        <span class="kw">let </span>type_tag = tag &gt;&gt; <span class="number">4</span>;
+        <span class="kw">match </span>type_tag {
+            TYPE_ROOT =&gt; <span class="prelude-val">Ok</span>(ExId::Root),
+            TYPE_ID =&gt; {
+                <span class="kw">let </span>(i, len) = parse::leb128_u64::&lt;parse::leb128::Error&gt;(i)
+                    .map_err(|e| ObjIdFromBytesError::ParseActorLen(e.to_string()))<span class="question-mark">?</span>;
+                <span class="kw">let </span>(i, actor) = parse::take_n::&lt;()&gt;(len <span class="kw">as </span>usize, i)
+                    .map_err(|<span class="kw">_</span>| ObjIdFromBytesError::ParseActor)<span class="question-mark">?</span>;
+                <span class="kw">let </span>(i, counter) = parse::leb128_u64::&lt;parse::leb128::Error&gt;(i)
+                    .map_err(|e| ObjIdFromBytesError::ParseCounter(e.to_string()))<span class="question-mark">?</span>;
+                <span class="kw">let </span>(_i, actor_idx_hint) = parse::leb128_u64::&lt;parse::leb128::Error&gt;(i)
+                    .map_err(|e| ObjIdFromBytesError::ParseActorIdxHint(e.to_string()))<span class="question-mark">?</span>;
+                <span class="prelude-val">Ok</span>(<span class="self">Self</span>::Id(actor_idx_hint, actor.into(), counter <span class="kw">as </span>usize))
+            }
+            other =&gt; <span class="prelude-val">Err</span>(ObjIdFromBytesError::InvalidType(other)),
+        }
+    }
 }
 
 <span class="kw">impl </span>PartialEq <span class="kw">for </span>ExId {
@@ -162,6 +394,44 @@
     <span class="kw">fn </span>as_ref(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>ExId {
         <span class="self">self
     </span>}
+}
+
+<span class="attribute">#[cfg(test)]
+</span><span class="kw">mod </span>tests {
+    <span class="kw">use </span><span class="kw">super</span>::ExId;
+    <span class="kw">use </span>proptest::prelude::<span class="kw-2">*</span>;
+
+    <span class="kw">use </span><span class="kw">crate</span>::ActorId;
+
+    <span class="kw">fn </span>gen_actorid() -&gt; <span class="kw">impl </span>Strategy&lt;Value = ActorId&gt; {
+        proptest::collection::vec(any::&lt;u8&gt;(), <span class="number">0</span>..<span class="number">100</span>).prop_map(ActorId::from)
+    }
+
+    <span class="macro">prop_compose! </span>{
+        <span class="kw">fn </span>gen_non_root_objid()(actor <span class="kw">in </span>gen_actorid(), counter <span class="kw">in </span>any::&lt;usize&gt;(), idx <span class="kw">in </span>any::&lt;usize&gt;()) -&gt; ExId {
+            ExId::Id(idx <span class="kw">as </span>u64, actor, counter)
+        }
+    }
+
+    <span class="kw">fn </span>gen_obji() -&gt; <span class="kw">impl </span>Strategy&lt;Value = ExId&gt; {
+        <span class="macro">prop_oneof!</span>[Just(ExId::Root), gen_non_root_objid()]
+    }
+
+    <span class="macro">proptest! </span>{
+        <span class="attribute">#[test]
+        </span><span class="kw">fn </span>objid_roundtrip(objid <span class="kw">in </span>gen_obji()) {
+            <span class="kw">let </span>bytes = objid.to_bytes();
+            <span class="kw">let </span>objid2 = ExId::try_from(<span class="kw-2">&amp;</span>bytes[..]).unwrap();
+            <span class="macro">assert_eq!</span>(objid, objid2);
+        }
+    }
+
+    <span class="attribute">#[test]
+    </span><span class="kw">fn </span>test_root_roundtrip() {
+        <span class="kw">let </span>bytes = ExId::Root.to_bytes();
+        <span class="kw">let </span>objid2 = ExId::try_from(<span class="kw-2">&amp;</span>bytes[..]).unwrap();
+        <span class="macro">assert_eq!</span>(ExId::Root, objid2);
+    }
 }
 </code></pre></div>
 </section></div></main><div id="rustdoc-vars" data-root-path="../../" data-current-crate="automerge" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.66.1 (90743e729 2023-01-10)" ></div></body></html>
