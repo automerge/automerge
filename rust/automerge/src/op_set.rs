@@ -89,15 +89,17 @@ impl OpSetInternal {
         })
     }
 
-    pub(crate) fn export_key(&self, obj: ObjId, key: Key, encoding: ListEncoding) -> Prop {
+    pub(crate) fn export_key(&self, obj: ObjId, key: Key, encoding: ListEncoding) -> Option<Prop> {
         match key {
-            Key::Map(m) => Prop::Map(self.m.props.get(m).into()),
+            Key::Map(m) => self.m.props.safe_get(m).map(|s| Prop::Map(s.to_string())),
             Key::Seq(opid) => {
-                let i = self
-                    .search(&obj, query::ElemIdPos::new(opid, encoding))
-                    .index()
-                    .unwrap();
-                Prop::Seq(i)
+                if opid.is_head() {
+                    Some(Prop::Seq(0))
+                } else {
+                    self.search(&obj, query::ElemIdPos::new(opid, encoding))
+                        .index()
+                        .map(Prop::Seq)
+                }
             }
         }
     }

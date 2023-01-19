@@ -114,7 +114,7 @@ pub(crate) struct Index {
     pub(crate) visible16: usize,
     pub(crate) visible8: usize,
     /// Set of opids found in this node and below.
-    pub(crate) ops: HashSet<OpId, FxBuildHasher>,
+    ops: HashSet<OpId, FxBuildHasher>,
 }
 
 impl Index {
@@ -138,6 +138,11 @@ impl Index {
 
     pub(crate) fn has_visible(&self, seen: &Key) -> bool {
         self.visible.contains_key(seen)
+    }
+
+    /// Whether `opid` is in this node or any below it
+    pub(crate) fn has_op(&self, opid: &OpId) -> bool {
+        self.ops.contains(opid)
     }
 
     pub(crate) fn change_vis<'a>(
