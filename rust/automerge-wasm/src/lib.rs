@@ -31,6 +31,7 @@ use am::ScalarValue;
 use automerge as am;
 use automerge::{Change, ObjId, Prop, TextEncoding, Value, ROOT};
 use js_sys::{Array, Function, Object, Uint8Array};
+use regex::Regex;
 use serde::ser::Serialize;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -427,6 +428,41 @@ impl Automerge {
         let prop = self.import_prop(prop)?;
         let value: f64 = value.as_f64().ok_or(error::Increment::ValueNotNumeric)?;
         self.doc.increment(&obj, prop, value as i64)?;
+        Ok(())
+    }
+
+    pub fn mark(
+        &mut self,
+        obj: JsValue,
+        range: JsValue,
+        name: JsValue,
+        value: JsValue,
+        datatype: JsValue,
+    ) -> Result<(), JsValue> {
+        let (obj, _) = self.import(obj)?;
+        let re = Regex::new(r"([\[\(])(\d+)\.\.(\d+)([\)\]])").unwrap();
+        let range = range.as_string().ok_or("range must be a string")?;
+        let cap = re.captures_iter(&range).next().ok_or("range must be in the form of (start..end] or [start..end) etc... () for sticky, [] for normal")?;
+        let start: usize = cap[2].parse().map_err(|_| to_js_err("invalid start"))?;
+        let end: usize = cap[3].parse().map_err(|_| to_js_err("invalid end"))?;
+        let start_sticky = &cap[1] == "(";
+        let end_sticky = &cap[4] == ")";
+        let name = name
+            .as_string()
+            .ok_or("invalid mark name")
+            .map_err(to_js_err)?;
+        let value = self
+            .import_scalar(&value, &datatype.as_string())
+            .ok_or_else(|| to_js_err("invalid value"))?;
+        self.doc
+            .mark(
+                &obj,
+                &(start..end),
+                am::marks::RangeExpand::new(start_sticky, end_sticky),
+                &name,
+                value,
+            )
+            .map_err(to_js_err)?;
         Ok(())
     }
 

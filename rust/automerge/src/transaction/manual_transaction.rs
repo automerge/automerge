@@ -1,6 +1,7 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
+use crate::marks::RangeExpand;
 use crate::{Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, ScalarValue, Value, Values};
 use crate::{AutomergeError, Keys};
 use crate::{ListRange, ListRangeAt, MapRange, MapRangeAt};
@@ -199,6 +200,17 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         text: &str,
     ) -> Result<(), AutomergeError> {
         self.do_tx(|tx, doc, obs| tx.splice_text(doc, obs, obj.as_ref(), pos, del, text))
+    }
+
+    fn mark<O: AsRef<ExId>, V: Into<ScalarValue>>(
+        &mut self,
+        obj: O,
+        range: &std::ops::Range<usize>,
+        expand: RangeExpand,
+        mark: &str,
+        value: V,
+    ) -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, obs| tx.mark(doc, obs, obj.as_ref(), range, expand, mark, value))
     }
 
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_, '_> {

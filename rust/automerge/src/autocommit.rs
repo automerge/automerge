@@ -1,6 +1,7 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
+use crate::marks::RangeExpand;
 use crate::op_observer::OpObserver;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::{
@@ -525,6 +526,27 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError> {
         self.doc.text_at(obj, heads)
+    }
+
+    fn mark<O: AsRef<ExId>, V: Into<ScalarValue>>(
+        &mut self,
+        obj: O,
+        range: &std::ops::Range<usize>,
+        expand: RangeExpand,
+        mark: &str,
+        value: V,
+    ) -> Result<(), AutomergeError> {
+        self.ensure_transaction_open();
+        let (current, tx) = self.transaction.as_mut().unwrap();
+        tx.mark(
+            &mut self.doc,
+            current.observer(),
+            obj.as_ref(),
+            range,
+            expand,
+            mark,
+            value,
+        )
     }
 
     // TODO - I need to return these OpId's here **only** to get

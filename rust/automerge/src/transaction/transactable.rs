@@ -1,6 +1,7 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
+use crate::marks::RangeExpand;
 use crate::{
     AutomergeError, ChangeHash, Keys, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt,
     ObjType, Parents, Prop, ScalarValue, Value, Values,
@@ -91,6 +92,15 @@ pub trait Transactable {
         pos: usize,
         del: usize,
         text: &str,
+    ) -> Result<(), AutomergeError>;
+
+    fn mark<O: AsRef<ExId>, V: Into<ScalarValue>>(
+        &mut self,
+        obj: O,
+        range: &std::ops::Range<usize>,
+        expand: RangeExpand,
+        mark: &str,
+        value: V,
     ) -> Result<(), AutomergeError>;
 
     /// Get the keys of the given object, it should be a map.

@@ -2,6 +2,7 @@ use std::num::NonZeroU64;
 
 use crate::automerge::Actor;
 use crate::exid::ExId;
+use crate::marks::RangeExpand;
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
 use crate::types::{Key, ListEncoding, ObjId, OpId, OpIds, TextEncoding};
@@ -648,6 +649,24 @@ impl TransactionInner {
         }
 
         Ok(())
+    }
+
+    pub(crate) fn mark<Obs: OpObserver, V: Into<ScalarValue>>(
+        &mut self,
+        _doc: &mut Automerge,
+        mut _op_observer: Option<&mut Obs>,
+        _ex_obj: &ExId,
+        _range: &std::ops::Range<usize>,
+        expand: RangeExpand,
+        _mark: &str,
+        _value: V,
+    ) -> Result<(), AutomergeError> {
+        match expand {
+            RangeExpand::Neither => todo!(),
+            RangeExpand::ExpandLeft => todo!(),
+            RangeExpand::ExpandRight => todo!(),
+            RangeExpand::ExpandBoth => todo!(),
+        }
     }
 
     fn finalize_op<Obs: OpObserver>(
