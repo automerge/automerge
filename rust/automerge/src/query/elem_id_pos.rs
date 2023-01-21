@@ -1,14 +1,14 @@
 use crate::{
     op_tree::OpTreeNode,
-    types::{ElemId, Key, ListEncoding, Op},
+    types::{ElemId, ListEncoding, Op, OpId},
 };
 
 use super::{QueryResult, TreeQuery};
 
-/// Lookup the index in the list that this elemid occupies.
+/// Lookup the index in the list that this elemid occupies, includes hidden elements.
 #[derive(Clone, Debug)]
 pub(crate) struct ElemIdPos {
-    elemid: ElemId,
+    elem_opid: OpId,
     pos: usize,
     found: bool,
     encoding: ListEncoding,
@@ -16,11 +16,20 @@ pub(crate) struct ElemIdPos {
 
 impl ElemIdPos {
     pub(crate) fn new(elemid: ElemId, encoding: ListEncoding) -> Self {
-        Self {
-            elemid,
-            pos: 0,
-            found: false,
-            encoding,
+        if elemid.is_head() {
+            Self {
+                elem_opid: elemid.0,
+                pos: 0,
+                found: true,
+                encoding,
+            }
+        } else {
+            Self {
+                elem_opid: elemid.0,
+                pos: 0,
+                found: false,
+                encoding,
+            }
         }
     }
 
@@ -35,8 +44,11 @@ impl ElemIdPos {
 
 impl<'a> TreeQuery<'a> for ElemIdPos {
     fn query_node(&mut self, child: &OpTreeNode, _ops: &[Op]) -> QueryResult {
+        if self.found {
+            return QueryResult::Finish;
+        }
         // if index has our element then we can continue
-        if child.index.has_visible(&Key::Seq(self.elemid)) {
+        if child.index.has_op(&self.elem_opid) {
             // element is in this node somewhere
             QueryResult::Descend
         } else {
@@ -47,7 +59,10 @@ impl<'a> TreeQuery<'a> for ElemIdPos {
     }
 
     fn query_element(&mut self, element: &crate::types::Op) -> QueryResult {
-        if element.elemid() == Some(self.elemid) {
+        if self.found {
+            return QueryResult::Finish;
+        }
+        if element.elemid() == Some(ElemId(self.elem_opid)) {
             // this is it
             self.found = true;
             return QueryResult::Finish;

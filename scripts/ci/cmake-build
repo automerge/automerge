@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -eoux pipefail
 
-THIS_SCRIPT=$(dirname "$0");
+# see https://stackoverflow.com/questions/4774054/reliable-way-for-a-bash-script-to-get-the-full-path-to-itself
+THIS_SCRIPT="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 # \note CMake's default build types are "Debug", "MinSizeRel", "Release" and
 # "RelWithDebInfo" but custom ones can also be defined so we pass it verbatim.
 BUILD_TYPE=$1;

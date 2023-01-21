@@ -47,7 +47,10 @@ impl<'a> Iterator for Parents<'a> {
             self.obj = obj;
             Some(Parent {
                 obj: self.ops.id_to_exid(self.obj.0),
-                prop: self.ops.export_key(self.obj, key, ListEncoding::List),
+                prop: self
+                    .ops
+                    .export_key(self.obj, key, ListEncoding::List)
+                    .unwrap(),
                 visible,
             })
         } else {
@@ -61,4 +64,43 @@ pub struct Parent {
     pub obj: ExId,
     pub prop: Prop,
     pub visible: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Parent;
+    use crate::{transaction::Transactable, Prop};
+
+    #[test]
+    fn test_invisible_parents() {
+        // Create a document with a list of objects, then delete one of the objects, then generate
+        // a path to the deleted object.
+
+        let mut doc = crate::AutoCommit::new();
+        let list = doc
+            .put_object(crate::ROOT, "list", crate::ObjType::List)
+            .unwrap();
+        let obj1 = doc.insert_object(&list, 0, crate::ObjType::Map).unwrap();
+        let _obj2 = doc.insert_object(&list, 1, crate::ObjType::Map).unwrap();
+        doc.put(&obj1, "key", "value").unwrap();
+        doc.delete(&list, 0).unwrap();
+
+        let mut parents = doc.parents(&obj1).unwrap().collect::<Vec<_>>();
+        parents.reverse();
+        assert_eq!(
+            parents,
+            vec![
+                Parent {
+                    obj: crate::ROOT,
+                    prop: Prop::Map("list".to_string()),
+                    visible: true,
+                },
+                Parent {
+                    obj: list,
+                    prop: Prop::Seq(0),
+                    visible: false,
+                },
+            ]
+        );
+    }
 }
