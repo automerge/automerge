@@ -159,7 +159,7 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
     ///
     /// This is a cheap operation, it just changes the way indexes are calculated
     pub fn with_encoding(mut self, encoding: TextEncoding) -> Self {
-        self.doc.text_encoding = encoding;
+        self.doc = self.doc.with_encoding(encoding);
         self
     }
 

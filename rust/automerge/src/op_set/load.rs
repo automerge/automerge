@@ -79,10 +79,10 @@ impl<'a, O: OpObserver> DocObserver for ObservedOpSetBuilder<'a, O> {
     }
 
     fn finish(self, _metadata: super::OpSetMetadata) -> Self::Output {
-        let mut opset = Automerge::new();
+        let mut doc = Automerge::new();
         for (obj, op) in self.ops {
-            opset.insert_op_with_observer(&obj, op, self.observer);
+            doc.insert_op_with_observer(&obj, op, self.observer);
         }
-        opset.ops
+        doc.into_ops()
     }
 }

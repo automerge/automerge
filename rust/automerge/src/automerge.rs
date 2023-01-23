@@ -71,26 +71,26 @@ pub(crate) enum Actor {
 #[derive(Debug, Clone)]
 pub struct Automerge {
     /// The list of unapplied changes that are not causally ready.
-    pub(crate) queue: Vec<Change>,
+    queue: Vec<Change>,
     /// The history of changes that form this document, topologically sorted too.
-    pub(crate) history: Vec<Change>,
+    history: Vec<Change>,
     /// Mapping from change hash to index into the history list.
-    pub(crate) history_index: HashMap<ChangeHash, usize>,
+    history_index: HashMap<ChangeHash, usize>,
     /// Mapping from change hash to vector clock at this state.
-    pub(crate) clocks: HashMap<ChangeHash, Clock>,
+    clocks: HashMap<ChangeHash, Clock>,
     /// Mapping from actor index to list of seqs seen for them.
-    pub(crate) states: HashMap<usize, Vec<usize>>,
+    states: HashMap<usize, Vec<usize>>,
     /// Current dependencies of this document (heads hashes).
-    pub(crate) deps: HashSet<ChangeHash>,
+    deps: HashSet<ChangeHash>,
     /// Heads at the last save.
-    pub(crate) saved: Vec<ChangeHash>,
+    saved: Vec<ChangeHash>,
     /// The set of operations that form this document.
-    pub(crate) ops: OpSet,
+    ops: OpSet,
     /// The current actor.
-    pub(crate) actor: Actor,
+    actor: Actor,
     /// The maximum operation counter this document has seen.
-    pub(crate) max_op: u64,
-    pub(crate) text_encoding: TextEncoding,
+    max_op: u64,
+    text_encoding: TextEncoding,
 }
 
 impl Automerge {
@@ -109,6 +109,49 @@ impl Automerge {
             max_op: 0,
             text_encoding: Default::default(),
         }
+    }
+
+    pub(crate) fn ops_mut(&mut self) -> &mut OpSet {
+        &mut self.ops
+    }
+
+    pub(crate) fn ops(&self) -> &OpSet {
+        &self.ops
+    }
+
+    pub(crate) fn into_ops(self) -> OpSet {
+        self.ops
+    }
+
+    pub(crate) fn actor_id(&self) -> &ActorId {
+        match &self.actor {
+            Actor::Unused(id) => id,
+            Actor::Cached(idx) => self.ops.m.actors.get(*idx),
+        }
+    }
+
+    /// Remove the current actor from the opset if it has no ops
+    ///
+    /// If the current actor ID has no ops in the opset then remove it from the cache of actor IDs.
+    /// This us used when rolling back a transaction. If the rolled back ops are the only ops for
+    /// the current actor then we want to remove that actor from the opset so it doesn't end up in
+    /// any saved version of the document.
+    ///
+    /// # Panics
+    ///
+    /// If the last actor in the OpSet is not the actor ID of this document
+    pub(crate) fn rollback_last_actor(&mut self) {
+        if let Actor::Cached(actor_idx) = self.actor {
+            if self.states.get(&actor_idx).is_none() && self.ops.m.actors.len() > 0 {
+                assert!(self.ops.m.actors.len() == actor_idx + 1);
+                let actor = self.ops.m.actors.remove_last();
+                self.actor = Actor::Unused(actor);
+            }
+        }
+    }
+
+    pub(crate) fn text_encoding(&self) -> TextEncoding {
+        self.text_encoding
     }
 
     /// Change the text encoding of this view of the document
