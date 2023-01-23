@@ -266,6 +266,12 @@ impl<'a> From<String> for Value<'a> {
     }
 }
 
+impl<'a> From<SmolStr> for Value<'a> {
+    fn from(s: SmolStr) -> Self {
+        Value::Scalar(Cow::Owned(ScalarValue::Str(s)))
+    }
+}
+
 impl<'a> From<char> for Value<'a> {
     fn from(c: char) -> Self {
         Value::Scalar(Cow::Owned(ScalarValue::Str(SmolStr::new(c.to_string()))))
