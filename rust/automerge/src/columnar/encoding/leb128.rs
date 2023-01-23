@@ -1,29 +1,22 @@
 /// The number of bytes required to encode `val` as a LEB128 integer
-pub(crate) fn lebsize(val: i64) -> u64 {
-    let numbits = numbits_i64(val);
-    (numbits as f64 / 7.0).floor() as u64 + 1
+pub(crate) fn lebsize(mut val: i64) -> u64 {
+    if val < 0 {
+        val = !val
+    }
+    // 1 extra for the sign bit
+    leb_bytes(1 + 64 - val.leading_zeros() as u64)
 }
 
 /// The number of bytes required to encode `val` as a uLEB128 integer
 pub(crate) fn ulebsize(val: u64) -> u64 {
-    if val <= 1 {
+    if val == 0 {
         return 1;
     }
-    let numbits = numbits_u64(val);
-    let mut numblocks = (numbits as f64 / 7.0).floor() as u64;
-    if numbits % 7 != 0 {
-        numblocks += 1;
-    }
-    numblocks
+    leb_bytes(64 - val.leading_zeros() as u64)
 }
 
-fn numbits_i64(val: i64) -> u64 {
-    // Is this right? This feels like it's not right
-    (std::mem::size_of::<i64>() as u32 * 8 - val.abs().leading_zeros()) as u64
-}
-
-fn numbits_u64(val: u64) -> u64 {
-    (std::mem::size_of::<u64>() as u32 * 8 - val.leading_zeros()) as u64
+fn leb_bytes(bits: u64) -> u64 {
+    (bits + 6) / 7
 }
 
 #[cfg(test)]
@@ -51,7 +44,7 @@ mod tests {
 
     #[test]
     fn ulebsize_examples() {
-        let scenarios = vec![0, 1, 127, 128, 129, 169];
+        let scenarios = vec![0, 1, 127, 128, 129, 169, u64::MAX];
         for val in scenarios {
             let mut out = Vec::new();
             leb128::write::unsigned(&mut out, val).unwrap();
@@ -62,7 +55,23 @@ mod tests {
 
     #[test]
     fn lebsize_examples() {
-        let scenarios = vec![0, 1, -1, 127, 128, -127, -128, -2097152, 169];
+        let scenarios = vec![
+            0,
+            1,
+            -1,
+            63,
+            64,
+            -64,
+            -65,
+            127,
+            128,
+            -127,
+            -128,
+            -2097152,
+            169,
+            i64::MIN,
+            i64::MAX,
+        ];
         for val in scenarios {
             let mut out = Vec::new();
             leb128::write::signed(&mut out, val).unwrap();

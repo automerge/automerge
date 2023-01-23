@@ -1413,6 +1413,12 @@ fn invalid_deflate_stream() {
 }
 
 #[test]
+fn negative_64() {
+    let mut doc = Automerge::new();
+    assert!(doc.transact(|d| { d.put(ROOT, "a", -64_i64) }).is_ok())
+}
+
+#[test]
 fn bad_change_on_optree_node_boundary() {
     let mut doc = Automerge::new();
     doc.transact::<_, _, AutomergeError>(|d| {
