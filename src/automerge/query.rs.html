@@ -314,6 +314,53 @@
 <span id="313">313</span>
 <span id="314">314</span>
 <span id="315">315</span>
+<span id="316">316</span>
+<span id="317">317</span>
+<span id="318">318</span>
+<span id="319">319</span>
+<span id="320">320</span>
+<span id="321">321</span>
+<span id="322">322</span>
+<span id="323">323</span>
+<span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
+<span id="330">330</span>
+<span id="331">331</span>
+<span id="332">332</span>
+<span id="333">333</span>
+<span id="334">334</span>
+<span id="335">335</span>
+<span id="336">336</span>
+<span id="337">337</span>
+<span id="338">338</span>
+<span id="339">339</span>
+<span id="340">340</span>
+<span id="341">341</span>
+<span id="342">342</span>
+<span id="343">343</span>
+<span id="344">344</span>
+<span id="345">345</span>
+<span id="346">346</span>
+<span id="347">347</span>
+<span id="348">348</span>
+<span id="349">349</span>
+<span id="350">350</span>
+<span id="351">351</span>
+<span id="352">352</span>
+<span id="353">353</span>
+<span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
+<span id="362">362</span>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTree, OpTreeNode};
 <span class="kw">use </span><span class="kw">crate</span>::types::{
     Clock, Counter, Key, ListEncoding, Op, OpId, OpType, ScalarValue, TextEncoding,
@@ -424,11 +471,64 @@
 }
 
 <span class="attribute">#[derive(Clone, Debug, PartialEq)]
+</span><span class="kw">struct </span>TextWidth {
+    utf8: usize,
+    utf16: usize,
+}
+
+<span class="kw">impl </span>TextWidth {
+    <span class="kw">fn </span>add_op(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: <span class="kw-2">&amp;</span>Op) {
+        <span class="self">self</span>.utf8 += op.width(ListEncoding::Text(TextEncoding::Utf8));
+        <span class="self">self</span>.utf16 += op.width(ListEncoding::Text(TextEncoding::Utf16));
+    }
+
+    <span class="kw">fn </span>remove_op(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: <span class="kw-2">&amp;</span>Op) {
+        <span class="comment">// Why are we using saturating_sub here? Shouldn&#39;t this always be greater than 0?
+        //
+        // In the case of objects which are _not_ `Text` we may end up subtracting more than the
+        // current width. This can happen if the elements in a list are `ScalarValue::str` and
+        // there are conflicting elements for the same index in the list. Like so:
+        //
+        // ```notrust
+        // [
+        //     &quot;element&quot;,
+        //     [&quot;conflict1&quot;, &quot;conflict2_longer&quot;],
+        //     &quot;element&quot;
+        // ]
+        // ```
+        //
+        // Where there are two conflicted elements at index 1
+        //
+        // in `Index::insert` and `Index::change_visibility` we add the width of the inserted op in
+        // utf8 and utf16 to the current width, but only if there was not a previous element for
+        // that index. Imagine that we encounter the &quot;conflict1&quot; op first, then we will add the
+        // length of &#39;conflict1&#39; to the text widths. When &#39;conflict2_longer&#39; is added we don&#39;t do
+        // anything because we&#39;ve already seen an op for this index. Imagine that later we remove
+        // the `conflict2_longer` op, then we will end up subtracting the length of
+        // &#39;conflict2_longer&#39; from the text widths, hence, `saturating_sub`. This isn&#39;t a problem
+        // because for non text objects we don&#39;t need the text widths to be accurate anyway.
+        //
+        // Really this is a sign that we should be tracking the type of the Index (List or Text) at
+        // the type level, but for now we just look the other way.
+        </span><span class="self">self</span>.utf8 = <span class="self">self
+            </span>.utf8
+            .saturating_sub(op.width(ListEncoding::Text(TextEncoding::Utf8)));
+        <span class="self">self</span>.utf16 = <span class="self">self
+            </span>.utf16
+            .saturating_sub(op.width(ListEncoding::Text(TextEncoding::Utf16)));
+    }
+
+    <span class="kw">fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;</span>TextWidth) {
+        <span class="self">self</span>.utf8 += other.utf8;
+        <span class="self">self</span>.utf16 += other.utf16;
+    }
+}
+
+<span class="attribute">#[derive(Clone, Debug, PartialEq)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Index {
     <span class="doccomment">/// The map of visible keys to the number of visible operations for that key.
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) visible: HashMap&lt;Key, usize, FxBuildHasher&gt;,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) visible16: usize,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) visible8: usize,
+    </span>visible: HashMap&lt;Key, usize, FxBuildHasher&gt;,
+    visible_text: TextWidth,
     <span class="doccomment">/// Set of opids found in this node and below.
     </span>ops: HashSet&lt;OpId, FxBuildHasher&gt;,
 }
@@ -437,8 +537,7 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new() -&gt; <span class="self">Self </span>{
         Index {
             visible: Default::default(),
-            visible16: <span class="number">0</span>,
-            visible8: <span class="number">0</span>,
+            visible_text: TextWidth { utf8: <span class="number">0</span>, utf16: <span class="number">0 </span>},
             ops: Default::default(),
         }
     }
@@ -447,8 +546,8 @@
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>visible_len(<span class="kw-2">&amp;</span><span class="self">self</span>, encoding: ListEncoding) -&gt; usize {
         <span class="kw">match </span>encoding {
             ListEncoding::List =&gt; <span class="self">self</span>.visible.len(),
-            ListEncoding::Text(TextEncoding::Utf8) =&gt; <span class="self">self</span>.visible8,
-            ListEncoding::Text(TextEncoding::Utf16) =&gt; <span class="self">self</span>.visible16,
+            ListEncoding::Text(TextEncoding::Utf8) =&gt; <span class="self">self</span>.visible_text.utf8,
+            ListEncoding::Text(TextEncoding::Utf16) =&gt; <span class="self">self</span>.visible_text.utf16,
         }
     }
 
@@ -475,8 +574,7 @@
             (<span class="bool-val">true</span>, <span class="bool-val">false</span>) =&gt; <span class="kw">match </span><span class="self">self</span>.visible.get(<span class="kw-2">&amp;</span>key).copied() {
                 <span class="prelude-val">Some</span>(n) <span class="kw">if </span>n == <span class="number">1 </span>=&gt; {
                     <span class="self">self</span>.visible.remove(<span class="kw-2">&amp;</span>key);
-                    <span class="self">self</span>.visible8 -= op.width(ListEncoding::Text(TextEncoding::Utf8));
-                    <span class="self">self</span>.visible16 -= op.width(ListEncoding::Text(TextEncoding::Utf16));
+                    <span class="self">self</span>.visible_text.remove_op(op);
                 }
                 <span class="prelude-val">Some</span>(n) =&gt; {
                     <span class="self">self</span>.visible.insert(key, n - <span class="number">1</span>);
@@ -488,8 +586,7 @@
                     <span class="self">self</span>.visible.insert(key, n + <span class="number">1</span>);
                 } <span class="kw">else </span>{
                     <span class="self">self</span>.visible.insert(key, <span class="number">1</span>);
-                    <span class="self">self</span>.visible8 += op.width(ListEncoding::Text(TextEncoding::Utf8));
-                    <span class="self">self</span>.visible16 += op.width(ListEncoding::Text(TextEncoding::Utf16));
+                    <span class="self">self</span>.visible_text.add_op(op);
                 }
             }
             <span class="kw">_ </span>=&gt; {}
@@ -505,8 +602,7 @@
                 <span class="self">self</span>.visible.insert(key, n + <span class="number">1</span>);
             } <span class="kw">else </span>{
                 <span class="self">self</span>.visible.insert(key, <span class="number">1</span>);
-                <span class="self">self</span>.visible8 += op.width(ListEncoding::Text(TextEncoding::Utf8));
-                <span class="self">self</span>.visible16 += op.width(ListEncoding::Text(TextEncoding::Utf16));
+                <span class="self">self</span>.visible_text.add_op(op);
             }
         }
     }
@@ -518,8 +614,7 @@
             <span class="kw">match </span><span class="self">self</span>.visible.get(<span class="kw-2">&amp;</span>key).copied() {
                 <span class="prelude-val">Some</span>(n) <span class="kw">if </span>n == <span class="number">1 </span>=&gt; {
                     <span class="self">self</span>.visible.remove(<span class="kw-2">&amp;</span>key);
-                    <span class="self">self</span>.visible8 -= op.width(ListEncoding::Text(TextEncoding::Utf8));
-                    <span class="self">self</span>.visible16 -= op.width(ListEncoding::Text(TextEncoding::Utf16));
+                    <span class="self">self</span>.visible_text.remove_op(op);
                 }
                 <span class="prelude-val">Some</span>(n) =&gt; {
                     <span class="self">self</span>.visible.insert(key, n - <span class="number">1</span>);
@@ -539,8 +634,7 @@
                 .and_modify(|len| <span class="kw-2">*</span>len += <span class="kw-2">*</span>other_len)
                 .or_insert(<span class="kw-2">*</span>other_len);
         }
-        <span class="self">self</span>.visible16 += other.visible16;
-        <span class="self">self</span>.visible8 += other.visible8;
+        <span class="self">self</span>.visible_text.merge(<span class="kw-2">&amp;</span>other.visible_text);
     }
 }
 
