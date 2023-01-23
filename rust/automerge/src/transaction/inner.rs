@@ -98,7 +98,7 @@ impl TransactionInner {
         }
 
         let num_ops = self.pending_ops();
-        let change = self.export(&doc.ops.m);
+        let change = self.export(&doc.ops().m);
         let hash = change.hash();
         #[cfg(not(debug_assertions))]
         tracing::trace!(commit=?hash, deps=?change.deps(), "committing transaction");
@@ -153,20 +153,16 @@ impl TransactionInner {
         // remove in reverse order so sets are removed before makes etc...
         for (obj, op) in self.operations.into_iter().rev() {
             for pred_id in &op.pred {
-                if let Some(p) = doc.ops.search(&obj, OpIdSearch::new(*pred_id)).index() {
-                    doc.ops.change_vis(&obj, p, |o| o.remove_succ(&op));
+                if let Some(p) = doc.ops().search(&obj, OpIdSearch::new(*pred_id)).index() {
+                    doc.ops_mut().change_vis(&obj, p, |o| o.remove_succ(&op));
                 }
             }
-            if let Some(pos) = doc.ops.search(&obj, OpIdSearch::new(op.id)).index() {
-                doc.ops.remove(&obj, pos);
+            if let Some(pos) = doc.ops().search(&obj, OpIdSearch::new(op.id)).index() {
+                doc.ops_mut().remove(&obj, pos);
             }
         }
 
-        // remove the actor from the cache so that it doesn't end up in the saved document
-        if doc.states.get(&self.actor).is_none() && doc.ops.m.actors.len() > 0 {
-            let actor = doc.ops.m.actors.remove_last();
-            doc.actor = Actor::Unused(actor);
-        }
+        doc.rollback_last_actor();
 
         num
     }
@@ -277,10 +273,10 @@ impl TransactionInner {
         obj: ObjId,
         succ_pos: &[usize],
     ) {
-        doc.ops.add_succ(&obj, succ_pos, &op);
+        doc.ops_mut().add_succ(&obj, succ_pos, &op);
 
         if !op.is_delete() {
-            doc.ops.insert(pos, &obj, op.clone());
+            doc.ops_mut().insert(pos, &obj, op.clone());
         }
 
         self.finalize_op(doc, op_observer, obj, prop, op);
@@ -332,7 +328,7 @@ impl TransactionInner {
         let id = self.next_id();
 
         let query = doc
-            .ops
+            .ops()
             .search(&obj, query::InsertNth::new(index, ListEncoding::List));
 
         let key = query.key()?;
@@ -346,7 +342,7 @@ impl TransactionInner {
             insert: true,
         };
 
-        doc.ops.insert(query.pos(), &obj, op.clone());
+        doc.ops_mut().insert(query.pos(), &obj, op.clone());
 
         self.finalize_op(doc, op_observer, obj, Prop::Seq(index), op);
 
@@ -380,8 +376,8 @@ impl TransactionInner {
         }
 
         let id = self.next_id();
-        let prop_index = doc.ops.m.props.cache(prop.clone());
-        let query = doc.ops.search(&obj, query::Prop::new(prop_index));
+        let prop_index = doc.ops_mut().m.props.cache(prop.clone());
+        let query = doc.ops().search(&obj, query::Prop::new(prop_index));
 
         // no key present to delete
         if query.ops.is_empty() && action == OpType::Delete {
@@ -398,7 +394,7 @@ impl TransactionInner {
             return Err(AutomergeError::MissingCounter);
         }
 
-        let pred = doc.ops.m.sorted_opids(query.ops.iter().map(|o| o.id));
+        let pred = doc.ops().m.sorted_opids(query.ops.iter().map(|o| o.id));
 
         let op = Op {
             id,
@@ -425,11 +421,11 @@ impl TransactionInner {
         action: OpType,
     ) -> Result<Option<OpId>, AutomergeError> {
         let query = doc
-            .ops
+            .ops()
             .search(&obj, query::Nth::new(index, ListEncoding::List));
 
         let id = self.next_id();
-        let pred = doc.ops.m.sorted_opids(query.ops.iter().map(|o| o.id));
+        let pred = doc.ops().m.sorted_opids(query.ops.iter().map(|o| o.id));
         let key = query.key()?;
 
         if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
@@ -490,7 +486,7 @@ impl TransactionInner {
                     index,
                     del: 1,
                     values: vec![],
-                    splice_type: SpliceType::Text("", doc.text_encoding),
+                    splice_type: SpliceType::Text("", doc.text_encoding()),
                 },
             )?;
         } else {
@@ -551,7 +547,7 @@ impl TransactionInner {
                 index,
                 del,
                 values,
-                splice_type: SpliceType::Text(text, doc.text_encoding),
+                splice_type: SpliceType::Text(text, doc.text_encoding()),
             },
         )
     }
@@ -568,13 +564,13 @@ impl TransactionInner {
             splice_type,
         }: SpliceArgs<'_>,
     ) -> Result<(), AutomergeError> {
-        let ex_obj = doc.ops.id_to_exid(obj.0);
+        let ex_obj = doc.ops().id_to_exid(obj.0);
         let encoding = splice_type.encoding();
         // delete `del` items - performing the query for each one
         let mut deleted = 0;
         while deleted < del {
             // TODO: could do this with a single custom query
-            let query = doc.ops.search(&obj, query::Nth::new(index, encoding));
+            let query = doc.ops().search(&obj, query::Nth::new(index, encoding));
 
             // if we delete in the middle of a multi-character
             // move cursor back to the beginning and expand the del width
@@ -590,9 +586,10 @@ impl TransactionInner {
                 break;
             };
 
-            let op = self.next_delete(query.key()?, query.pred(&doc.ops));
+            let op = self.next_delete(query.key()?, query.pred(doc.ops()));
 
-            doc.ops.add_succ(&obj, &query.ops_pos, &op);
+            let ops_pos = query.ops_pos;
+            doc.ops_mut().add_succ(&obj, &ops_pos, &op);
 
             self.operations.push((obj, op));
 
@@ -608,7 +605,9 @@ impl TransactionInner {
         // do the insert query for the first item and then
         // insert the remaining ops one after the other
         if !values.is_empty() {
-            let query = doc.ops.search(&obj, query::InsertNth::new(index, encoding));
+            let query = doc
+                .ops()
+                .search(&obj, query::InsertNth::new(index, encoding));
             let mut pos = query.pos();
             let mut key = query.key()?;
             let mut cursor = index;
@@ -617,7 +616,7 @@ impl TransactionInner {
             for v in &values {
                 let op = self.next_insert(key, v.clone());
 
-                doc.ops.insert(pos, &obj, op.clone());
+                doc.ops_mut().insert(pos, &obj, op.clone());
 
                 width = op.width(encoding);
                 cursor += width;
@@ -627,7 +626,7 @@ impl TransactionInner {
                 self.operations.push((obj, op));
             }
 
-            doc.ops.hint(&obj, cursor - width, pos - 1);
+            doc.ops_mut().hint(&obj, cursor - width, pos - 1);
 
             // handle the observer
             if let Some(obs) = op_observer.as_mut() {
@@ -639,7 +638,7 @@ impl TransactionInner {
                         let start = self.operations.len() - values.len();
                         for (offset, v) in values.iter().enumerate() {
                             let op = &self.operations[start + offset].1;
-                            let value = (v.clone().into(), doc.ops.id_to_exid(op.id));
+                            let value = (v.clone().into(), doc.ops().id_to_exid(op.id));
                             obs.insert(doc, ex_obj.clone(), index + offset, value)
                         }
                     }
@@ -660,19 +659,19 @@ impl TransactionInner {
     ) {
         // TODO - id_to_exid should be a noop if not used - change type to Into<ExId>?
         if let Some(op_observer) = op_observer {
-            let ex_obj = doc.ops.id_to_exid(obj.0);
+            let ex_obj = doc.ops().id_to_exid(obj.0);
             if op.insert {
-                let obj_type = doc.ops.object_type(&obj);
+                let obj_type = doc.ops().object_type(&obj);
                 assert!(obj_type.unwrap().is_sequence());
                 match (obj_type, prop) {
                     (Some(ObjType::List), Prop::Seq(index)) => {
-                        let value = (op.value(), doc.ops.id_to_exid(op.id));
+                        let value = (op.value(), doc.ops().id_to_exid(op.id));
                         op_observer.insert(doc, ex_obj, index, value)
                     }
                     (Some(ObjType::Text), Prop::Seq(index)) => {
                         // FIXME
                         if op_observer.text_as_seq() {
-                            let value = (op.value(), doc.ops.id_to_exid(op.id));
+                            let value = (op.value(), doc.ops().id_to_exid(op.id));
                             op_observer.insert(doc, ex_obj, index, value)
                         } else {
                             op_observer.splice_text(doc, ex_obj, index, op.to_str())
@@ -683,9 +682,9 @@ impl TransactionInner {
             } else if op.is_delete() {
                 op_observer.delete(doc, ex_obj, prop);
             } else if let Some(value) = op.get_increment_value() {
-                op_observer.increment(doc, ex_obj, prop, (value, doc.ops.id_to_exid(op.id)));
+                op_observer.increment(doc, ex_obj, prop, (value, doc.ops().id_to_exid(op.id)));
             } else {
-                let value = (op.value(), doc.ops.id_to_exid(op.id));
+                let value = (op.value(), doc.ops().id_to_exid(op.id));
                 op_observer.put(doc, ex_obj, prop, value, false);
             }
         }
