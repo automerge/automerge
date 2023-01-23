@@ -94,7 +94,7 @@ export type Op = {
   pred: string[],
 }
 
-export type Patch =  PutPatch | DelPatch | SplicePatch | IncPatch;
+export type Patch =  PutPatch | DelPatch | SpliceTextPatch | IncPatch | InsertPatch;
 
 export type PutPatch = {
   action: 'put'
@@ -115,8 +115,14 @@ export type DelPatch = {
   length?: number,
 }
 
-export type SplicePatch = {
+export type SpliceTextPatch = {
   action: 'splice'
+  path: Prop[],
+  value: string,
+}
+
+export type InsertPatch = {
+  action: 'insert'
   path: Prop[],
   values: Value[],
 }

@@ -70,7 +70,8 @@ export type Conflicts = { [key: string]: AutomergeValue }
 export type {
   PutPatch,
   DelPatch,
-  SplicePatch,
+  SpliceTextPatch,
+  InsertPatch,
   IncPatch,
   SyncMessage,
 } from "@automerge/automerge-wasm"
