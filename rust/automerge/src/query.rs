@@ -108,11 +108,64 @@ pub(crate) enum QueryResult {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+struct TextWidth {
+    utf8: usize,
+    utf16: usize,
+}
+
+impl TextWidth {
+    fn add_op(&mut self, op: &Op) {
+        self.utf8 += op.width(ListEncoding::Text(TextEncoding::Utf8));
+        self.utf16 += op.width(ListEncoding::Text(TextEncoding::Utf16));
+    }
+
+    fn remove_op(&mut self, op: &Op) {
+        // Why are we using saturating_sub here? Shouldn't this always be greater than 0?
+        //
+        // In the case of objects which are _not_ `Text` we may end up subtracting more than the
+        // current width. This can happen if the elements in a list are `ScalarValue::str` and
+        // there are conflicting elements for the same index in the list. Like so:
+        //
+        // ```notrust
+        // [
+        //     "element",
+        //     ["conflict1", "conflict2_longer"],
+        //     "element"
+        // ]
+        // ```
+        //
+        // Where there are two conflicted elements at index 1
+        //
+        // in `Index::insert` and `Index::change_visibility` we add the width of the inserted op in
+        // utf8 and utf16 to the current width, but only if there was not a previous element for
+        // that index. Imagine that we encounter the "conflict1" op first, then we will add the
+        // length of 'conflict1' to the text widths. When 'conflict2_longer' is added we don't do
+        // anything because we've already seen an op for this index. Imagine that later we remove
+        // the `conflict2_longer` op, then we will end up subtracting the length of
+        // 'conflict2_longer' from the text widths, hence, `saturating_sub`. This isn't a problem
+        // because for non text objects we don't need the text widths to be accurate anyway.
+        //
+        // Really this is a sign that we should be tracking the type of the Index (List or Text) at
+        // the type level, but for now we just look the other way.
+        self.utf8 = self
+            .utf8
+            .saturating_sub(op.width(ListEncoding::Text(TextEncoding::Utf8)));
+        self.utf16 = self
+            .utf16
+            .saturating_sub(op.width(ListEncoding::Text(TextEncoding::Utf16)));
+    }
+
+    fn merge(&mut self, other: &TextWidth) {
+        self.utf8 += other.utf8;
+        self.utf16 += other.utf16;
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Index {
     /// The map of visible keys to the number of visible operations for that key.
-    pub(crate) visible: HashMap<Key, usize, FxBuildHasher>,
-    pub(crate) visible16: usize,
-    pub(crate) visible8: usize,
+    visible: HashMap<Key, usize, FxBuildHasher>,
+    visible_text: TextWidth,
     /// Set of opids found in this node and below.
     ops: HashSet<OpId, FxBuildHasher>,
 }
@@ -121,8 +174,7 @@ impl Index {
     pub(crate) fn new() -> Self {
         Index {
             visible: Default::default(),
-            visible16: 0,
-            visible8: 0,
+            visible_text: TextWidth { utf8: 0, utf16: 0 },
             ops: Default::default(),
         }
     }
@@ -131,8 +183,8 @@ impl Index {
     pub(crate) fn visible_len(&self, encoding: ListEncoding) -> usize {
         match encoding {
             ListEncoding::List => self.visible.len(),
-            ListEncoding::Text(TextEncoding::Utf8) => self.visible8,
-            ListEncoding::Text(TextEncoding::Utf16) => self.visible16,
+            ListEncoding::Text(TextEncoding::Utf8) => self.visible_text.utf8,
+            ListEncoding::Text(TextEncoding::Utf16) => self.visible_text.utf16,
         }
     }
 
@@ -159,8 +211,7 @@ impl Index {
             (true, false) => match self.visible.get(&key).copied() {
                 Some(n) if n == 1 => {
                     self.visible.remove(&key);
-                    self.visible8 -= op.width(ListEncoding::Text(TextEncoding::Utf8));
-                    self.visible16 -= op.width(ListEncoding::Text(TextEncoding::Utf16));
+                    self.visible_text.remove_op(op);
                 }
                 Some(n) => {
                     self.visible.insert(key, n - 1);
@@ -172,8 +223,7 @@ impl Index {
                     self.visible.insert(key, n + 1);
                 } else {
                     self.visible.insert(key, 1);
-                    self.visible8 += op.width(ListEncoding::Text(TextEncoding::Utf8));
-                    self.visible16 += op.width(ListEncoding::Text(TextEncoding::Utf16));
+                    self.visible_text.add_op(op);
                 }
             }
             _ => {}
@@ -189,8 +239,7 @@ impl Index {
                 self.visible.insert(key, n + 1);
             } else {
                 self.visible.insert(key, 1);
-                self.visible8 += op.width(ListEncoding::Text(TextEncoding::Utf8));
-                self.visible16 += op.width(ListEncoding::Text(TextEncoding::Utf16));
+                self.visible_text.add_op(op);
             }
         }
     }
@@ -202,8 +251,7 @@ impl Index {
             match self.visible.get(&key).copied() {
                 Some(n) if n == 1 => {
                     self.visible.remove(&key);
-                    self.visible8 -= op.width(ListEncoding::Text(TextEncoding::Utf8));
-                    self.visible16 -= op.width(ListEncoding::Text(TextEncoding::Utf16));
+                    self.visible_text.remove_op(op);
                 }
                 Some(n) => {
                     self.visible.insert(key, n - 1);
@@ -223,8 +271,7 @@ impl Index {
                 .and_modify(|len| *len += *other_len)
                 .or_insert(*other_len);
         }
-        self.visible16 += other.visible16;
-        self.visible8 += other.visible8;
+        self.visible_text.merge(&other.visible_text);
     }
 }
 
