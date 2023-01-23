@@ -72,33 +72,35 @@
 <span id="71">71</span>
 <span id="72">72</span>
 <span id="73">73</span>
+<span id="74">74</span>
+<span id="75">75</span>
+<span id="76">76</span>
+<span id="77">77</span>
+<span id="78">78</span>
+<span id="79">79</span>
+<span id="80">80</span>
+<span id="81">81</span>
+<span id="82">82</span>
 </pre><pre class="rust"><code><span class="doccomment">/// The number of bytes required to encode `val` as a LEB128 integer
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>lebsize(val: i64) -&gt; u64 {
-    <span class="kw">let </span>numbits = numbits_i64(val);
-    (numbits <span class="kw">as </span>f64 / <span class="number">7.0</span>).floor() <span class="kw">as </span>u64 + <span class="number">1
-</span>}
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>lebsize(<span class="kw-2">mut </span>val: i64) -&gt; u64 {
+    <span class="kw">if </span>val &lt; <span class="number">0 </span>{
+        val = !val
+    }
+    <span class="comment">// 1 extra for the sign bit
+    </span>leb_bytes(<span class="number">1 </span>+ <span class="number">64 </span>- val.leading_zeros() <span class="kw">as </span>u64)
+}
 
 <span class="doccomment">/// The number of bytes required to encode `val` as a uLEB128 integer
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>ulebsize(val: u64) -&gt; u64 {
-    <span class="kw">if </span>val &lt;= <span class="number">1 </span>{
+    <span class="kw">if </span>val == <span class="number">0 </span>{
         <span class="kw">return </span><span class="number">1</span>;
     }
-    <span class="kw">let </span>numbits = numbits_u64(val);
-    <span class="kw">let </span><span class="kw-2">mut </span>numblocks = (numbits <span class="kw">as </span>f64 / <span class="number">7.0</span>).floor() <span class="kw">as </span>u64;
-    <span class="kw">if </span>numbits % <span class="number">7 </span>!= <span class="number">0 </span>{
-        numblocks += <span class="number">1</span>;
-    }
-    numblocks
+    leb_bytes(<span class="number">64 </span>- val.leading_zeros() <span class="kw">as </span>u64)
 }
 
-<span class="kw">fn </span>numbits_i64(val: i64) -&gt; u64 {
-    <span class="comment">// Is this right? This feels like it&#39;s not right
-    </span>(std::mem::size_of::&lt;i64&gt;() <span class="kw">as </span>u32 * <span class="number">8 </span>- val.abs().leading_zeros()) <span class="kw">as </span>u64
-}
-
-<span class="kw">fn </span>numbits_u64(val: u64) -&gt; u64 {
-    (std::mem::size_of::&lt;u64&gt;() <span class="kw">as </span>u32 * <span class="number">8 </span>- val.leading_zeros()) <span class="kw">as </span>u64
-}
+<span class="kw">fn </span>leb_bytes(bits: u64) -&gt; u64 {
+    (bits + <span class="number">6</span>) / <span class="number">7
+</span>}
 
 <span class="attribute">#[cfg(test)]
 </span><span class="kw">mod </span>tests {
@@ -125,7 +127,7 @@
 
     <span class="attribute">#[test]
     </span><span class="kw">fn </span>ulebsize_examples() {
-        <span class="kw">let </span>scenarios = <span class="macro">vec!</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">127</span>, <span class="number">128</span>, <span class="number">129</span>, <span class="number">169</span>];
+        <span class="kw">let </span>scenarios = <span class="macro">vec!</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">127</span>, <span class="number">128</span>, <span class="number">129</span>, <span class="number">169</span>, u64::MAX];
         <span class="kw">for </span>val <span class="kw">in </span>scenarios {
             <span class="kw">let </span><span class="kw-2">mut </span>out = Vec::new();
             leb128::write::unsigned(<span class="kw-2">&amp;mut </span>out, val).unwrap();
@@ -136,7 +138,23 @@
 
     <span class="attribute">#[test]
     </span><span class="kw">fn </span>lebsize_examples() {
-        <span class="kw">let </span>scenarios = <span class="macro">vec!</span>[<span class="number">0</span>, <span class="number">1</span>, -<span class="number">1</span>, <span class="number">127</span>, <span class="number">128</span>, -<span class="number">127</span>, -<span class="number">128</span>, -<span class="number">2097152</span>, <span class="number">169</span>];
+        <span class="kw">let </span>scenarios = <span class="macro">vec!</span>[
+            <span class="number">0</span>,
+            <span class="number">1</span>,
+            -<span class="number">1</span>,
+            <span class="number">63</span>,
+            <span class="number">64</span>,
+            -<span class="number">64</span>,
+            -<span class="number">65</span>,
+            <span class="number">127</span>,
+            <span class="number">128</span>,
+            -<span class="number">127</span>,
+            -<span class="number">128</span>,
+            -<span class="number">2097152</span>,
+            <span class="number">169</span>,
+            i64::MIN,
+            i64::MAX,
+        ];
         <span class="kw">for </span>val <span class="kw">in </span>scenarios {
             <span class="kw">let </span><span class="kw-2">mut </span>out = Vec::new();
             leb128::write::signed(<span class="kw-2">&amp;mut </span>out, val).unwrap();
