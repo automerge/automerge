@@ -4,6 +4,7 @@ use crate::{
 };
 use std::collections::HashMap;
 
+#[derive(Debug, Clone)]
 pub(crate) struct Clocks(HashMap<ChangeHash, Clock>);
 
 #[derive(Debug, thiserror::Error)]
@@ -20,11 +21,7 @@ impl Clocks {
         change: &Change,
         actor_index: usize,
     ) -> Result<(), MissingDep> {
-        let mut clock = Clock::new();
-        for hash in change.deps() {
-            let c = self.0.get(hash).ok_or(MissingDep(*hash))?;
-            clock.merge(c);
-        }
+        let mut clock = self.at(change.deps())?;
         clock.include(
             actor_index,
             ClockData {
@@ -34,6 +31,33 @@ impl Clocks {
         );
         self.0.insert(change.hash(), clock);
         Ok(())
+    }
+
+    pub(crate) fn get(&self, hash: &ChangeHash) -> Option<&Clock> {
+        self.0.get(hash)
+    }
+
+    pub(crate) fn insert(&mut self, hash: ChangeHash, clock: Clock) -> Option<Clock> {
+        self.0.insert(hash, clock)
+    }
+
+    pub(crate) fn at(&self, heads: &[ChangeHash]) -> Result<Clock, MissingDep> {
+        if let Some(first_hash) = heads.first() {
+            let mut clock = self
+                .0
+                .get(first_hash)
+                .ok_or(MissingDep(*first_hash))?
+                .clone();
+
+            for hash in &heads[1..] {
+                let c = self.0.get(hash).ok_or(MissingDep(*hash))?;
+                clock.merge(c);
+            }
+
+            Ok(clock)
+        } else {
+            Ok(Clock::new())
+        }
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::types::OpId;
 use fxhash::FxBuildHasher;
-use std::{cmp::Ordering, collections::HashMap};
+use std::cmp::Ordering;
 
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ClockData {
@@ -19,7 +19,7 @@ impl PartialOrd for ClockData {
 
 /// Vector clock mapping actor indices to the max op counter of the changes created by that actor.
 #[derive(Default, Debug, Clone, PartialEq)]
-pub(crate) struct Clock(HashMap<usize, ClockData, FxBuildHasher>);
+pub(crate) struct Clock(im::hashmap::HashMap<usize, ClockData, FxBuildHasher>);
 
 // A general clock is greater if it has one element the other does not or has a counter higher than
 // the other for a given actor.

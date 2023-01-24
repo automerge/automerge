@@ -10,9 +10,30 @@ use automerge::{Automerge, ObjId, OpObserver, Prop, ScalarValue, SequenceTree, V
 use js_sys::{Array, Object};
 use wasm_bindgen::prelude::*;
 
+#[derive(Debug, Clone, PartialEq, Default, Copy)]
+pub(crate) enum ObserverState {
+    #[default]
+    Disabled,
+    Enabled,
+    Overflow,
+}
+
+impl ObserverState {
+    fn set(&mut self, enabled: bool) {
+        match enabled {
+            true => *self = Self::Enabled,
+            false => *self = Self::Disabled,
+        }
+    }
+
+    fn is_enabled(&self) -> bool {
+        matches!(self, Self::Enabled)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Observer {
-    enabled: bool,
+    state: ObserverState,
     patches: Vec<Patch>,
     text_rep: TextRepresentation,
 }
@@ -21,13 +42,25 @@ impl Observer {
     pub(crate) fn take_patches(&mut self) -> Vec<Patch> {
         std::mem::take(&mut self.patches)
     }
+
     pub(crate) fn enable(&mut self, enable: bool) -> bool {
-        if self.enabled && !enable {
+        if !enable {
             self.patches.truncate(0)
         }
-        let old_enabled = self.enabled;
-        self.enabled = enable;
-        old_enabled
+        let old_state = self.state.is_enabled();
+        self.state.set(enable);
+        old_state
+    }
+
+    pub(crate) fn has_overflowed(&mut self) -> bool {
+        self.state == ObserverState::Overflow
+    }
+
+    fn check_overflow(&mut self) {
+        if self.patches.len() > 100 || self.state == ObserverState::Overflow {
+            self.patches.truncate(0);
+            self.state = ObserverState::Overflow;
+        }
     }
 
     fn get_path(&mut self, doc: &Automerge, obj: &ObjId) -> Option<Vec<(ObjId, Prop)>> {
@@ -105,7 +138,7 @@ impl OpObserver for Observer {
         index: usize,
         tagged_value: (Value<'_>, ObjId),
     ) {
-        if self.enabled {
+        if self.state.is_enabled() {
             let value = (tagged_value.0.to_owned(), tagged_value.1);
             if let Some(Patch::Insert {
                 obj: tail_obj,
@@ -131,11 +164,12 @@ impl OpObserver for Observer {
                 };
                 self.patches.push(patch);
             }
+            self.check_overflow();
         }
     }
 
     fn splice_text(&mut self, doc: &Automerge, obj: ObjId, index: usize, value: &str) {
-        if self.enabled {
+        if self.state.is_enabled() {
             if self.text_rep == TextRepresentation::Array {
                 for (i, c) in value.chars().enumerate() {
                     self.insert(
@@ -179,11 +213,12 @@ impl OpObserver for Observer {
                 };
                 self.patches.push(patch);
             }
+            self.check_overflow();
         }
     }
 
     fn delete_seq(&mut self, doc: &Automerge, obj: ObjId, index: usize, length: usize) {
-        if self.enabled {
+        if self.state.is_enabled() {
             match self.patches.last_mut() {
                 Some(Patch::SpliceText {
                     obj: tail_obj,
@@ -241,11 +276,12 @@ impl OpObserver for Observer {
                 };
                 self.patches.push(patch)
             }
+            self.check_overflow();
         }
     }
 
     fn delete_map(&mut self, doc: &Automerge, obj: ObjId, key: &str) {
-        if self.enabled {
+        if self.state.is_enabled() {
             if let Some(path) = self.get_path(doc, &obj) {
                 let patch = Patch::DeleteMap {
                     path,
@@ -254,6 +290,7 @@ impl OpObserver for Observer {
                 };
                 self.patches.push(patch)
             }
+            self.check_overflow();
         }
     }
 
@@ -265,7 +302,7 @@ impl OpObserver for Observer {
         tagged_value: (Value<'_>, ObjId),
         _conflict: bool,
     ) {
-        if self.enabled {
+        if self.state.is_enabled() {
             let expose = false;
             if let Some(path) = self.get_path(doc, &obj) {
                 let value = (tagged_value.0.to_owned(), tagged_value.1);
@@ -287,6 +324,7 @@ impl OpObserver for Observer {
                 };
                 self.patches.push(patch);
             }
+            self.check_overflow();
         }
     }
 
@@ -298,7 +336,7 @@ impl OpObserver for Observer {
         tagged_value: (Value<'_>, ObjId),
         _conflict: bool,
     ) {
-        if self.enabled {
+        if self.state.is_enabled() {
             let expose = true;
             if let Some(path) = self.get_path(doc, &obj) {
                 let value = (tagged_value.0.to_owned(), tagged_value.1);
@@ -320,11 +358,12 @@ impl OpObserver for Observer {
                 };
                 self.patches.push(patch);
             }
+            self.check_overflow();
         }
     }
 
     fn increment(&mut self, doc: &Automerge, obj: ObjId, prop: Prop, tagged_value: (i64, ObjId)) {
-        if self.enabled {
+        if self.state.is_enabled() {
             if let Some(path) = self.get_path(doc, &obj) {
                 let value = tagged_value.0;
                 self.patches.push(Patch::Increment {
@@ -334,17 +373,20 @@ impl OpObserver for Observer {
                     value,
                 })
             }
+            self.check_overflow();
         }
     }
 
     fn merge(&mut self, other: &Self) {
-        self.patches.extend_from_slice(other.patches.as_slice())
+        self.patches.extend_from_slice(other.patches.as_slice());
+        self.state = other.state;
+        self.check_overflow();
     }
 
     fn branch(&self) -> Self {
         Observer {
             patches: vec![],
-            enabled: self.enabled,
+            state: self.state,
             text_rep: self.text_rep,
         }
     }

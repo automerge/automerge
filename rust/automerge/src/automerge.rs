@@ -45,7 +45,7 @@ pub struct Automerge {
     /// Mapping from change hash to index into the history list.
     pub(crate) history_index: HashMap<ChangeHash, usize>,
     /// Mapping from change hash to vector clock at this state.
-    pub(crate) clocks: HashMap<ChangeHash, Clock>,
+    pub(crate) clocks: Clocks,
     /// Mapping from actor index to list of seqs seen for them.
     pub(crate) states: HashMap<usize, Vec<usize>>,
     /// Current dependencies of this document (heads hashes).
@@ -68,7 +68,7 @@ impl Automerge {
             queue: vec![],
             history: vec![],
             history_index: HashMap::new(),
-            clocks: HashMap::new(),
+            clocks: Clocks::new(),
             states: HashMap::new(),
             ops: Default::default(),
             deps: Default::default(),
@@ -690,7 +690,7 @@ impl Automerge {
                     None => storage::load::reconstruct_document(&d, mode, OpSet::builder()),
                 }
                 .map_err(|e| load::Error::InflateDocument(Box::new(e)))?;
-                let mut hashes_by_index = HashMap::new();
+                let mut history_index = HashMap::new();
                 let mut actor_to_history: HashMap<usize, Vec<usize>> = HashMap::new();
                 let mut clocks = Clocks::new();
                 for (index, change) in changes.iter().enumerate() {
@@ -698,16 +698,15 @@ impl Automerge {
                     // all the changes
                     let actor_index = op_set.m.actors.lookup(change.actor_id()).unwrap();
                     actor_to_history.entry(actor_index).or_default().push(index);
-                    hashes_by_index.insert(index, change.hash());
+                    history_index.insert(change.hash(), index);
                     clocks.add_change(change, actor_index)?;
                 }
-                let history_index = hashes_by_index.into_iter().map(|(k, v)| (v, k)).collect();
                 Self {
                     queue: vec![],
                     history: changes,
                     history_index,
                     states: actor_to_history,
-                    clocks: clocks.into(),
+                    clocks,
                     ops: op_set,
                     deps: heads.into_iter().collect(),
                     saved: Default::default(),
@@ -1066,25 +1065,7 @@ impl Automerge {
     }
 
     fn clock_at(&self, heads: &[ChangeHash]) -> Result<Clock, AutomergeError> {
-        if let Some(first_hash) = heads.first() {
-            let mut clock = self
-                .clocks
-                .get(first_hash)
-                .ok_or(AutomergeError::MissingHash(*first_hash))?
-                .clone();
-
-            for hash in &heads[1..] {
-                let c = self
-                    .clocks
-                    .get(hash)
-                    .ok_or(AutomergeError::MissingHash(*hash))?;
-                clock.merge(c);
-            }
-
-            Ok(clock)
-        } else {
-            Ok(Clock::new())
-        }
+        Ok(self.clocks.at(heads)?)
     }
 
     /// Get a change by its hash.
@@ -1151,14 +1132,9 @@ impl Automerge {
             .push(history_index);
 
         self.history_index.insert(change.hash(), history_index);
-        let mut clock = Clock::new();
-        for hash in change.deps() {
-            let c = self
-                .clocks
-                .get(hash)
-                .expect("Change's deps should already be in the document");
-            clock.merge(c);
-        }
+        let mut clock = self
+            .clock_at(change.deps())
+            .expect("Change's deps should already be in the document");
         clock.include(
             actor_index,
             ClockData {

@@ -574,6 +574,12 @@ impl Automerge {
         let mut object = object
             .dyn_into::<Object>()
             .map_err(|_| error::ApplyPatch::NotObjectd)?;
+
+        if self.doc.observer().has_overflowed() {
+            self.doc.observer().enable(true);
+            return Ok(self.export_object(&am::ROOT, Datatype::Map, None, &meta)?);
+        }
+
         let patches = self.doc.observer().take_patches();
         let callback = callback.dyn_into::<Function>().ok();
 
