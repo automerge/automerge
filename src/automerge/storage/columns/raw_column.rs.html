@@ -268,6 +268,9 @@
 <span id="267">267</span>
 <span id="268">268</span>
 <span id="269">269</span>
+<span id="270">270</span>
+<span id="271">271</span>
+<span id="272">272</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::{io::Read, marker::PhantomData, ops::Range};
 
 <span class="kw">use </span><span class="kw">crate</span>::storage::parse;
@@ -489,7 +492,10 @@
         <span class="kw">let </span>columns: Vec&lt;RawColumn&lt;compression::Unknown&gt;&gt; = specs_and_lens
             .into_iter()
             .scan(<span class="number">0_usize</span>, |offset, (spec, len)| {
-                <span class="kw">let </span>end = <span class="kw-2">*</span>offset + len <span class="kw">as </span>usize;
+                <span class="comment">// Note: we use a saturating add here as len was passed over the network
+                // and so could be anything. If the addition does every saturate we would
+                // expect parsing to fail later (but at least it won&#39;t panic!).
+                </span><span class="kw">let </span>end = offset.saturating_add(len <span class="kw">as </span>usize);
                 <span class="kw">let </span>data = <span class="kw-2">*</span>offset..end;
                 <span class="kw-2">*</span>offset = end;
                 <span class="prelude-val">Some</span>(RawColumn {

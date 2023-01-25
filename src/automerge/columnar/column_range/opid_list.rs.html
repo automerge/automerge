@@ -323,6 +323,11 @@
 <span id="322">322</span>
 <span id="323">323</span>
 <span id="324">324</span>
+<span id="325">325</span>
+<span id="326">326</span>
+<span id="327">327</span>
+<span id="328">328</span>
+<span id="329">329</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::{convert::Infallible, ops::Range};
 
 <span class="kw">use super</span>::{DeltaRange, RleRange};
@@ -514,7 +519,12 @@
             <span class="prelude-val">Some</span>(<span class="prelude-val">None</span>) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(DecodeColumnError::unexpected_null(<span class="string">&quot;num&quot;</span>)),
             <span class="prelude-val">None </span>=&gt; <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>),
         };
-        <span class="kw">let </span><span class="kw-2">mut </span>p = Vec::with_capacity(num <span class="kw">as </span>usize);
+
+        <span class="comment">// We cannot trust `num` because it is provided over the network,
+        // but in the common case it will be correct and small (so we
+        // use with_capacity to make sure the vector is precisely the right
+        // size).
+        </span><span class="kw">let </span><span class="kw-2">mut </span>p = Vec::with_capacity(std::cmp::min(num, <span class="number">100</span>) <span class="kw">as </span>usize);
         <span class="kw">for _ in </span><span class="number">0</span>..num {
             <span class="kw">let </span>actor = <span class="self">self
                 </span>.actor
