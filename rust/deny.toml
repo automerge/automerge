@@ -110,6 +110,9 @@ exceptions = [
     # should be revied more fully before release
     { allow = ["MPL-2.0"], name = "cbindgen" },
     { allow = ["BSD-3-Clause"], name = "instant" },
+
+    # we only use prettytable in tests
+    { allow = ["BSD-3-Clause"], name = "prettytable" },
 ]
 
 # Some crates don't have (easily) machine readable licensing information,
