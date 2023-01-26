@@ -1,6 +1,5 @@
 use std::num::NonZeroU64;
 
-use crate::automerge::Actor;
 use crate::exid::ExId;
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;

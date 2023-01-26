@@ -26,6 +26,8 @@ use crate::{
 };
 use serde::Serialize;
 
+mod current_state;
+
 #[cfg(test)]
 mod tests;
 
@@ -117,17 +119,6 @@ impl Automerge {
 
     pub(crate) fn ops(&self) -> &OpSet {
         &self.ops
-    }
-
-    pub(crate) fn into_ops(self) -> OpSet {
-        self.ops
-    }
-
-    pub(crate) fn actor_id(&self) -> &ActorId {
-        match &self.actor {
-            Actor::Unused(id) => id,
-            Actor::Cached(idx) => self.ops.m.actors.get(*idx),
-        }
     }
 
     /// Remove the current actor from the opset if it has no ops
@@ -455,13 +446,8 @@ impl Automerge {
                     result: op_set,
                     changes,
                     heads,
-                } = match &mut observer {
-                    Some(o) => {
-                        storage::load::reconstruct_document(&d, mode, OpSet::observed_builder(*o))
-                    }
-                    None => storage::load::reconstruct_document(&d, mode, OpSet::builder()),
-                }
-                .map_err(|e| load::Error::InflateDocument(Box::new(e)))?;
+                } = storage::load::reconstruct_document(&d, mode, OpSet::builder())
+                    .map_err(|e| load::Error::InflateDocument(Box::new(e)))?;
                 let mut hashes_by_index = HashMap::new();
                 let mut actor_to_history: HashMap<usize, Vec<usize>> = HashMap::new();
                 let mut clocks = Clocks::new();
@@ -516,6 +502,9 @@ impl Automerge {
                 }
             }
             load::LoadedChanges::Partial { error, .. } => return Err(error.into()),
+        }
+        if let Some(observer) = &mut observer {
+            current_state::observe_current_state(&am, *observer);
         }
         Ok(am)
     }
@@ -715,7 +704,7 @@ impl Automerge {
         let c = self.history.iter();
         let bytes = crate::storage::save::save_document(
             c,
-            self.ops.iter(),
+            self.ops.iter().map(|(objid, _, op)| (objid, op)),
             &self.ops.m.actors,
             &self.ops.m.props,
             &heads,
@@ -731,7 +720,7 @@ impl Automerge {
         let c = self.history.iter();
         let bytes = crate::storage::save::save_document(
             c,
-            self.ops.iter(),
+            self.ops.iter().map(|(objid, _, op)| (objid, op)),
             &self.ops.m.actors,
             &self.ops.m.props,
             &heads,
@@ -944,7 +933,7 @@ impl Automerge {
             "pred",
             "succ"
         );
-        for (obj, op) in self.ops.iter() {
+        for (obj, _, op) in self.ops.iter() {
             let id = self.to_string(op.id);
             let obj = self.to_string(obj);
             let key = match op.key {

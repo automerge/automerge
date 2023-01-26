@@ -524,7 +524,7 @@ impl Message {
 
         encode_many(&mut buf, self.changes.iter_mut(), |buf, change| {
             leb128::write::unsigned(buf, change.raw_bytes().len() as u64).unwrap();
-            buf.extend(change.raw_bytes().as_ref())
+            buf.extend::<&[u8]>(change.raw_bytes().as_ref())
         });
 
         buf

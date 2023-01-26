@@ -6,8 +6,7 @@ use super::{OpSet, OpTree};
 use crate::{
     op_tree::OpTreeInternal,
     storage::load::{DocObserver, LoadedObject},
-    types::{ObjId, Op},
-    Automerge, OpObserver,
+    types::ObjId,
 };
 
 /// An opset builder which creates an optree for each object as it finishes loading, inserting the
@@ -49,40 +48,5 @@ impl DocObserver for OpSetBuilder {
             length: len,
             m: metadata,
         }
-    }
-}
-
-/// A DocObserver which just accumulates ops until the document has finished reconstructing and
-/// then inserts all of the ops using `OpSet::insert_op_with_observer`
-pub(crate) struct ObservedOpSetBuilder<'a, O: OpObserver> {
-    observer: &'a mut O,
-    ops: Vec<(ObjId, Op)>,
-}
-
-impl<'a, O: OpObserver> ObservedOpSetBuilder<'a, O> {
-    pub(crate) fn new(observer: &'a mut O) -> Self {
-        Self {
-            observer,
-            ops: Vec::new(),
-        }
-    }
-}
-
-impl<'a, O: OpObserver> DocObserver for ObservedOpSetBuilder<'a, O> {
-    type Output = OpSet;
-
-    fn object_loaded(&mut self, object: LoadedObject) {
-        self.ops.reserve(object.ops.len());
-        for op in object.ops {
-            self.ops.push((object.id, op));
-        }
-    }
-
-    fn finish(self, _metadata: super::OpSetMetadata) -> Self::Output {
-        let mut doc = Automerge::new();
-        for (obj, op) in self.ops {
-            doc.insert_op_with_observer(&obj, op, self.observer);
-        }
-        doc.into_ops()
     }
 }
