@@ -22,9 +22,9 @@
  * This leads to the following differences from `stable`:
  *
  * * There is no `unstable.Text` class, all strings are text objects
- * * Reading strings in a `future` document is the same as reading any other
+ * * Reading strings in an `unstable` document is the same as reading any other
  *   javascript string
- * * To modify strings in a `future` document use {@link splice}
+ * * To modify strings in an `unstable` document use {@link splice}
  * * The {@link AutomergeValue} type does not include the {@link Text}
  *   class but the  {@link RawString} class is included in the {@link ScalarValue}
  *   type
@@ -35,7 +35,6 @@
  *
  * @module
  */
-import { Counter } from "./types"
 
 export {
   Counter,
@@ -45,27 +44,14 @@ export {
   Float64,
   type Patch,
   type PatchCallback,
-} from "./types"
+  type AutomergeValue,
+  type ScalarValue,
+} from "./unstable_types"
 
 import type { PatchCallback } from "./stable"
 
-export type AutomergeValue =
-  | ScalarValue
-  | { [key: string]: AutomergeValue }
-  | Array<AutomergeValue>
-export type MapValue = { [key: string]: AutomergeValue }
-export type ListValue = Array<AutomergeValue>
-export type ScalarValue =
-  | string
-  | number
-  | null
-  | boolean
-  | Date
-  | Counter
-  | Uint8Array
-  | RawString
-
-export type Conflicts = { [key: string]: AutomergeValue }
+import { type UnstableConflicts as Conflicts } from "./conflicts"
+import { unstableConflictAt } from "./conflicts"
 
 export type {
   PutPatch,
@@ -125,7 +111,6 @@ export { RawString } from "./raw_string"
 export const getBackend = stable.getBackend
 
 import { _is_proxy, _state, _obj } from "./internal_state"
-import { RawString } from "./raw_string"
 
 /**
  * Create a new automerge document
@@ -137,7 +122,7 @@ import { RawString } from "./raw_string"
  *     random actor ID
  */
 export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
-  let opts = importOpts(_opts)
+  const opts = importOpts(_opts)
   opts.enableTextV2 = true
   return stable.init(opts)
 }
@@ -161,7 +146,7 @@ export function clone<T>(
   doc: Doc<T>,
   _opts?: ActorId | InitOptions<T>
 ): Doc<T> {
-  let opts = importOpts(_opts)
+  const opts = importOpts(_opts)
   opts.enableTextV2 = true
   return stable.clone(doc, opts)
 }
@@ -296,6 +281,14 @@ export function getConflicts<T>(
   doc: Doc<T>,
   prop: stable.Prop
 ): Conflicts | undefined {
-  // this function only exists to get the types to line up with future.AutomergeValue
-  return stable.getConflicts(doc, prop)
+  const state = _state(doc, false)
+  if (!state.textV2) {
+    throw new Error("use getConflicts for a stable document")
+  }
+  const objectId = _obj(doc)
+  if (objectId != null) {
+    return unstableConflictAt(state.handle, objectId, prop)
+  } else {
+    return undefined
+  }
 }

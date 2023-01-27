@@ -1,7 +1,7 @@
 /** @hidden **/
 export { /** @hidden */ uuid } from "./uuid"
 
-import { rootProxy, listProxy, mapProxy, textProxy } from "./proxies"
+import { rootProxy } from "./proxies"
 import { STATE } from "./constants"
 
 import {
@@ -20,10 +20,10 @@ export {
   type Patch,
   type PatchCallback,
   type ScalarValue,
-  Text,
 } from "./types"
 
 import { Text } from "./text"
+export { Text } from "./text"
 
 import type {
   API,
@@ -54,6 +54,8 @@ import { RawString } from "./raw_string"
 
 import { _state, _is_proxy, _trace, _obj } from "./internal_state"
 
+import { stableConflictAt } from "./conflicts"
+
 /** Options passed to {@link change}, and {@link emptyChange}
  * @typeParam T - The type of value contained in the document
  */
@@ -72,12 +74,35 @@ export type ChangeOptions<T> = {
 export type ApplyOptions<T> = { patchCallback?: PatchCallback<T> }
 
 /**
+ * A List is an extended Array that adds the two helper methods `deleteAt` and `insertAt`.
+ */
+export interface List<T> extends Array<T> {
+  insertAt(index: number, ...args: T[]): List<T>
+  deleteAt(index: number, numDelete?: number): List<T>
+}
+
+/**
+ * To extend an arbitrary type, we have to turn any arrays that are part of the type's definition into Lists.
+ * So we recurse through the properties of T, turning any Arrays we find into Lists.
+ */
+export type Extend<T> =
+  // is it an array? make it a list (we recursively extend the type of the array's elements as well)
+  T extends Array<infer T>
+    ? List<Extend<T>>
+    : // is it an object? recursively extend all of its properties
+    // eslint-disable-next-line @typescript-eslint/ban-types
+    T extends Object
+    ? { [P in keyof T]: Extend<T[P]> }
+    : // otherwise leave the type alone
+      T
+
+/**
  * Function which is called by {@link change} when making changes to a `Doc<T>`
  * @typeParam T - The type of value contained in the document
  *
  * This function may mutate `doc`
  */
-export type ChangeFn<T> = (doc: T) => void
+export type ChangeFn<T> = (doc: Extend<T>) => void
 
 /** @hidden **/
 export interface State<T> {
@@ -136,11 +161,12 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
   const handle = ApiHandler.create(opts.enableTextV2 || false, opts.actor)
   handle.enablePatches(true)
   handle.enableFreeze(!!opts.freeze)
-  handle.registerDatatype("counter", (n: any) => new Counter(n))
-  let textV2 = opts.enableTextV2 || false
+  handle.registerDatatype("counter", (n: number) => new Counter(n))
+  const textV2 = opts.enableTextV2 || false
   if (textV2) {
     handle.registerDatatype("str", (n: string) => new RawString(n))
   } else {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     handle.registerDatatype("text", (n: any) => new Text(n))
   }
   const doc = handle.materialize("/", undefined, {
@@ -204,7 +230,7 @@ export function clone<T>(
 
   // `change` uses the presence of state.heads to determine if we are in a view
   // set it to undefined to indicate that this is a full fat document
-  const { heads: oldHeads, ...stateSansHeads } = state
+  const { heads: _oldHeads, ...stateSansHeads } = state
   return handle.applyPatches(doc, { ...stateSansHeads, handle })
 }
 
@@ -343,7 +369,7 @@ function _change<T>(
   try {
     state.heads = heads
     const root: T = rootProxy(state.handle, state.textV2)
-    callback(root)
+    callback(root as Extend<T>)
     if (state.handle.pendingOps() === 0) {
       state.heads = undefined
       return doc
@@ -541,62 +567,6 @@ export function getActorId<T>(doc: Doc<T>): ActorId {
  */
 type Conflicts = { [key: string]: AutomergeValue }
 
-function conflictAt(
-  context: Automerge,
-  objectId: ObjID,
-  prop: Prop,
-  textV2: boolean
-): Conflicts | undefined {
-  const values = context.getAll(objectId, prop)
-  if (values.length <= 1) {
-    return
-  }
-  const result: Conflicts = {}
-  for (const fullVal of values) {
-    switch (fullVal[0]) {
-      case "map":
-        result[fullVal[1]] = mapProxy(context, fullVal[1], textV2, [prop], true)
-        break
-      case "list":
-        result[fullVal[1]] = listProxy(
-          context,
-          fullVal[1],
-          textV2,
-          [prop],
-          true
-        )
-        break
-      case "text":
-        if (textV2) {
-          result[fullVal[1]] = context.text(fullVal[1])
-        } else {
-          result[fullVal[1]] = textProxy(context, objectId, [prop], true)
-        }
-        break
-      //case "table":
-      //case "cursor":
-      case "str":
-      case "uint":
-      case "int":
-      case "f64":
-      case "boolean":
-      case "bytes":
-      case "null":
-        result[fullVal[2]] = fullVal[1]
-        break
-      case "counter":
-        result[fullVal[2]] = new Counter(fullVal[1])
-        break
-      case "timestamp":
-        result[fullVal[2]] = new Date(fullVal[1])
-        break
-      default:
-        throw RangeError(`datatype ${fullVal[0]} unimplemented`)
-    }
-  }
-  return result
-}
-
 /**
  * Get the conflicts associated with a property
  *
@@ -646,9 +616,12 @@ export function getConflicts<T>(
   prop: Prop
 ): Conflicts | undefined {
   const state = _state(doc, false)
+  if (state.textV2) {
+    throw new Error("use unstable.getConflicts for an unstable document")
+  }
   const objectId = _obj(doc)
   if (objectId != null) {
-    return conflictAt(state.handle, objectId, prop, state.textV2)
+    return stableConflictAt(state.handle, objectId, prop)
   } else {
     return undefined
   }
@@ -672,6 +645,7 @@ export function getLastLocalChange<T>(doc: Doc<T>): Change | undefined {
  * This is useful to determine if something is actually an automerge document,
  * if `doc` is not an automerge document this will return null.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function getObjectId(doc: any, prop?: Prop): ObjID | null {
   if (prop) {
     const state = _state(doc, false)

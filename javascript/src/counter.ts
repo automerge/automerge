@@ -100,7 +100,7 @@ export function getWriteableCounter(
   path: Prop[],
   objectId: ObjID,
   key: Prop
-) {
+): WriteableCounter {
   return new WriteableCounter(value, context, path, objectId, key)
 }
 
