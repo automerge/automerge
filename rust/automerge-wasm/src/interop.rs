@@ -2,7 +2,7 @@ use crate::error::InsertObject;
 use crate::value::Datatype;
 use crate::{Automerge, TextRepresentation};
 use automerge as am;
-use automerge::transaction::Transactable;
+use automerge::ReadDoc;
 use automerge::ROOT;
 use automerge::{Change, ChangeHash, ObjType, Prop};
 use js_sys::{Array, Function, JsString, Object, Reflect, Symbol, Uint8Array};

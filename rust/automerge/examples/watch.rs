@@ -3,6 +3,7 @@ use automerge::transaction::Transactable;
 use automerge::Automerge;
 use automerge::AutomergeError;
 use automerge::Patch;
+use automerge::ReadDoc;
 use automerge::VecOpObserver;
 use automerge::ROOT;
 

@@ -1,4 +1,5 @@
 use automerge::ObjType;
+use automerge::ReadDoc;
 use automerge::{transaction::Transactable, Automerge, AutomergeError, ROOT};
 use std::time::Instant;
 

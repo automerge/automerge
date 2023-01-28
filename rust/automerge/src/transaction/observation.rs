@@ -1,15 +1,17 @@
 //! This module is essentially a type level Option. It is used in sitations where we know at
 //! compile time whether an `OpObserver` is available to track changes in a transaction.
-use crate::{ChangeHash, OpObserver};
+use crate::{op_observer::BranchableObserver, ChangeHash, OpObserver};
 
 mod private {
+    use crate::op_observer::BranchableObserver;
+
     pub trait Sealed {}
-    impl<O: super::OpObserver> Sealed for super::Observed<O> {}
+    impl<O: super::OpObserver + BranchableObserver> Sealed for super::Observed<O> {}
     impl Sealed for super::UnObserved {}
 }
 
 pub trait Observation: private::Sealed {
-    type Obs: OpObserver;
+    type Obs: OpObserver + BranchableObserver;
     type CommitResult;
 
     fn observer(&mut self) -> Option<&mut Self::Obs>;
@@ -19,9 +21,9 @@ pub trait Observation: private::Sealed {
 }
 
 #[derive(Clone, Debug)]
-pub struct Observed<Obs: OpObserver>(Obs);
+pub struct Observed<Obs: OpObserver + BranchableObserver>(Obs);
 
-impl<O: OpObserver> Observed<O> {
+impl<O: OpObserver + BranchableObserver> Observed<O> {
     pub(crate) fn new(o: O) -> Self {
         Self(o)
     }
@@ -31,7 +33,7 @@ impl<O: OpObserver> Observed<O> {
     }
 }
 
-impl<Obs: OpObserver> Observation for Observed<Obs> {
+impl<Obs: OpObserver + BranchableObserver> Observation for Observed<Obs> {
     type Obs = Obs;
     type CommitResult = (Obs, Option<ChangeHash>);
     fn observer(&mut self) -> Option<&mut Self::Obs> {

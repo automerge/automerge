@@ -3,6 +3,9 @@ use crate::{exid::ExId, Value};
 use crate::{query, Automerge};
 use std::ops::RangeBounds;
 
+/// An iterator over the elements of a list object
+///
+/// This is returned by the [`crate::ReadDoc::list_range`] method
 #[derive(Debug)]
 pub struct ListRange<'a, R: RangeBounds<usize>> {
     range: Option<query::ListRange<'a, R>>,
