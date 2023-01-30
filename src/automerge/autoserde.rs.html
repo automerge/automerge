@@ -108,21 +108,51 @@
 <a href="#107" id="107">107</a>
 <a href="#108" id="108">108</a>
 <a href="#109" id="109">109</a>
+<a href="#110" id="110">110</a>
+<a href="#111" id="111">111</a>
+<a href="#112" id="112">112</a>
+<a href="#113" id="113">113</a>
+<a href="#114" id="114">114</a>
+<a href="#115" id="115">115</a>
+<a href="#116" id="116">116</a>
+<a href="#117" id="117">117</a>
+<a href="#118" id="118">118</a>
+<a href="#119" id="119">119</a>
+<a href="#120" id="120">120</a>
+<a href="#121" id="121">121</a>
+<a href="#122" id="122">122</a>
+<a href="#123" id="123">123</a>
+<a href="#124" id="124">124</a>
 </pre><pre class="rust"><code><span class="kw">use </span>serde::ser::{SerializeMap, SerializeSeq};
 
-<span class="kw">use crate</span>::{Automerge, ObjId, ObjType, Value};
+<span class="kw">use crate</span>::{ObjId, ObjType, ReadDoc, Value};
 
-<span class="doccomment">/// A wrapper type which implements [`serde::Serialize`] for an [`Automerge`].
+<span class="doccomment">/// A wrapper type which implements [`serde::Serialize`] for a [`ReadDoc`].
+///
+/// # Example
+///
+/// ```
+/// # fn main() -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+/// use automerge::{AutoCommit, AutomergeError, Value, transaction::Transactable};
+/// let mut doc = AutoCommit::new();
+/// doc.put(automerge::ROOT, &quot;key&quot;, &quot;value&quot;)?;
+///
+/// let serialized = serde_json::to_string(&amp;automerge::AutoSerde::from(&amp;doc)).unwrap();
+///
+/// assert_eq!(serialized, r#&quot;{&quot;key&quot;:&quot;value&quot;}&quot;#);
+/// # Ok(())
+/// # }
+/// ```
 </span><span class="attr">#[derive(Debug)]
-</span><span class="kw">pub struct </span>AutoSerde&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge);
+</span><span class="kw">pub struct </span>AutoSerde&lt;<span class="lifetime">&#39;a</span>, R: <span class="kw">crate</span>::ReadDoc&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>R);
 
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge&gt; <span class="kw">for </span>AutoSerde&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">fn </span>from(a: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge) -&gt; <span class="self">Self </span>{
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, R: ReadDoc&gt; From&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>R&gt; <span class="kw">for </span>AutoSerde&lt;<span class="lifetime">&#39;a</span>, R&gt; {
+    <span class="kw">fn </span>from(a: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>R) -&gt; <span class="self">Self </span>{
         AutoSerde(a)
     }
 }
 
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; serde::Serialize <span class="kw">for </span>AutoSerde&lt;<span class="lifetime">&#39;a</span>&gt; {
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, R: <span class="kw">crate</span>::ReadDoc&gt; serde::Serialize <span class="kw">for </span>AutoSerde&lt;<span class="lifetime">&#39;a</span>, R&gt; {
     <span class="kw">fn </span>serialize&lt;S&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, serializer: S) -&gt; <span class="prelude-ty">Result</span>&lt;S::Ok, S::Error&gt;
     <span class="kw">where
         </span>S: serde::Serializer,
@@ -135,12 +165,12 @@
     }
 }
 
-<span class="kw">struct </span>AutoSerdeMap&lt;<span class="lifetime">&#39;a</span>&gt; {
-    doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
+<span class="kw">struct </span>AutoSerdeMap&lt;<span class="lifetime">&#39;a</span>, R&gt; {
+    doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>R,
     obj: ObjId,
 }
 
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; serde::Serialize <span class="kw">for </span>AutoSerdeMap&lt;<span class="lifetime">&#39;a</span>&gt; {
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, R: <span class="kw">crate</span>::ReadDoc&gt; serde::Serialize <span class="kw">for </span>AutoSerdeMap&lt;<span class="lifetime">&#39;a</span>, R&gt; {
     <span class="kw">fn </span>serialize&lt;S&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, serializer: S) -&gt; <span class="prelude-ty">Result</span>&lt;S::Ok, S::Error&gt;
     <span class="kw">where
         </span>S: serde::Serializer,
@@ -161,12 +191,12 @@
     }
 }
 
-<span class="kw">struct </span>AutoSerdeSeq&lt;<span class="lifetime">&#39;a</span>&gt; {
-    doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
+<span class="kw">struct </span>AutoSerdeSeq&lt;<span class="lifetime">&#39;a</span>, R&gt; {
+    doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>R,
     obj: ObjId,
 }
 
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; serde::Serialize <span class="kw">for </span>AutoSerdeSeq&lt;<span class="lifetime">&#39;a</span>&gt; {
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, R: <span class="kw">crate</span>::ReadDoc&gt; serde::Serialize <span class="kw">for </span>AutoSerdeSeq&lt;<span class="lifetime">&#39;a</span>, R&gt; {
     <span class="kw">fn </span>serialize&lt;S&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, serializer: S) -&gt; <span class="prelude-ty">Result</span>&lt;S::Ok, S::Error&gt;
     <span class="kw">where
         </span>S: serde::Serializer,
@@ -187,13 +217,13 @@
     }
 }
 
-<span class="kw">struct </span>AutoSerdeVal&lt;<span class="lifetime">&#39;a</span>&gt; {
-    doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
+<span class="kw">struct </span>AutoSerdeVal&lt;<span class="lifetime">&#39;a</span>, R&gt; {
+    doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>R,
     val: Value&lt;<span class="lifetime">&#39;a</span>&gt;,
     obj: ObjId,
 }
 
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; serde::Serialize <span class="kw">for </span>AutoSerdeVal&lt;<span class="lifetime">&#39;a</span>&gt; {
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, R: <span class="kw">crate</span>::ReadDoc&gt; serde::Serialize <span class="kw">for </span>AutoSerdeVal&lt;<span class="lifetime">&#39;a</span>, R&gt; {
     <span class="kw">fn </span>serialize&lt;S&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, serializer: S) -&gt; <span class="prelude-ty">Result</span>&lt;S::Ok, S::Error&gt;
     <span class="kw">where
         </span>S: serde::Serializer,

@@ -739,6 +739,14 @@
 <a href="#738" id="738">738</a>
 <a href="#739" id="739">739</a>
 <a href="#740" id="740">740</a>
+<a href="#741" id="741">741</a>
+<a href="#742" id="742">742</a>
+<a href="#743" id="743">743</a>
+<a href="#744" id="744">744</a>
+<a href="#745" id="745">745</a>
+<a href="#746" id="746">746</a>
+<a href="#747" id="747">747</a>
+<a href="#748" id="748">748</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error;
 <span class="kw">use </span><span class="kw">crate</span>::types::ObjType;
 <span class="kw">use </span>serde::{Deserialize, Serialize, Serializer};
@@ -746,10 +754,13 @@
 <span class="kw">use </span>std::borrow::Cow;
 <span class="kw">use </span>std::fmt;
 
-<span class="attr">#[derive(Debug, Clone, PartialEq)]
+<span class="doccomment">/// The type of values in an automerge document
+</span><span class="attr">#[derive(Debug, Clone, PartialEq)]
 </span><span class="kw">pub enum </span>Value&lt;<span class="lifetime">&#39;a</span>&gt; {
-    Object(ObjType),
-    <span class="comment">// TODO: if we don&#39;t have to store this in patches any more then it might be able to be just a
+    <span class="doccomment">/// An composite object of type `ObjType`
+    </span>Object(ObjType),
+    <span class="doccomment">/// A non composite value
+    </span><span class="comment">// TODO: if we don&#39;t have to store this in patches any more then it might be able to be just a
     // &amp;&#39;a ScalarValue rather than a Cow
     </span>Scalar(Cow&lt;<span class="lifetime">&#39;a</span>, ScalarValue&gt;),
 }
@@ -1172,7 +1183,8 @@
     }
 }
 
-<span class="attr">#[derive(Serialize, PartialEq, Debug, Clone)]
+<span class="doccomment">/// A value which is not a composite value
+</span><span class="attr">#[derive(Serialize, PartialEq, Debug, Clone)]
 #[serde(untagged)]
 </span><span class="kw">pub enum </span>ScalarValue {
     Bytes(Vec&lt;u8&gt;),
@@ -1183,7 +1195,11 @@
     Counter(Counter),
     Timestamp(i64),
     Boolean(bool),
-    Unknown { type_code: u8, bytes: Vec&lt;u8&gt; },
+    <span class="doccomment">/// A value from a future version of automerge
+    </span>Unknown {
+        type_code: u8,
+        bytes: Vec&lt;u8&gt;,
+    },
     Null,
 }
 

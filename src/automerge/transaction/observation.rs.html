@@ -77,18 +77,22 @@
 <a href="#76" id="76">76</a>
 <a href="#77" id="77">77</a>
 <a href="#78" id="78">78</a>
+<a href="#79" id="79">79</a>
+<a href="#80" id="80">80</a>
 </pre><pre class="rust"><code><span class="doccomment">//! This module is essentially a type level Option. It is used in sitations where we know at
 //! compile time whether an `OpObserver` is available to track changes in a transaction.
-</span><span class="kw">use crate</span>::{ChangeHash, OpObserver};
+</span><span class="kw">use crate</span>::{op_observer::BranchableObserver, ChangeHash, OpObserver};
 
 <span class="kw">mod </span>private {
+    <span class="kw">use </span><span class="kw">crate</span>::op_observer::BranchableObserver;
+
     <span class="kw">pub trait </span>Sealed {}
-    <span class="kw">impl</span>&lt;O: <span class="kw">super</span>::OpObserver&gt; Sealed <span class="kw">for </span><span class="kw">super</span>::Observed&lt;O&gt; {}
+    <span class="kw">impl</span>&lt;O: <span class="kw">super</span>::OpObserver + BranchableObserver&gt; Sealed <span class="kw">for </span><span class="kw">super</span>::Observed&lt;O&gt; {}
     <span class="kw">impl </span>Sealed <span class="kw">for </span><span class="kw">super</span>::UnObserved {}
 }
 
 <span class="kw">pub trait </span>Observation: private::Sealed {
-    <span class="kw">type </span>Obs: OpObserver;
+    <span class="kw">type </span>Obs: OpObserver + BranchableObserver;
     <span class="kw">type </span>CommitResult;
 
     <span class="kw">fn </span>observer(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span><span class="self">Self</span>::Obs&gt;;
@@ -98,9 +102,9 @@
 }
 
 <span class="attr">#[derive(Clone, Debug)]
-</span><span class="kw">pub struct </span>Observed&lt;Obs: OpObserver&gt;(Obs);
+</span><span class="kw">pub struct </span>Observed&lt;Obs: OpObserver + BranchableObserver&gt;(Obs);
 
-<span class="kw">impl</span>&lt;O: OpObserver&gt; Observed&lt;O&gt; {
+<span class="kw">impl</span>&lt;O: OpObserver + BranchableObserver&gt; Observed&lt;O&gt; {
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(o: O) -&gt; <span class="self">Self </span>{
         <span class="self">Self</span>(o)
     }
@@ -110,7 +114,7 @@
     </span>}
 }
 
-<span class="kw">impl</span>&lt;Obs: OpObserver&gt; Observation <span class="kw">for </span>Observed&lt;Obs&gt; {
+<span class="kw">impl</span>&lt;Obs: OpObserver + BranchableObserver&gt; Observation <span class="kw">for </span>Observed&lt;Obs&gt; {
     <span class="kw">type </span>Obs = Obs;
     <span class="kw">type </span>CommitResult = (Obs, <span class="prelude-ty">Option</span>&lt;ChangeHash&gt;);
     <span class="kw">fn </span>observer(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span><span class="self">Self</span>::Obs&gt; {

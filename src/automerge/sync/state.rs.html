@@ -99,6 +99,16 @@
 <a href="#98" id="98">98</a>
 <a href="#99" id="99">99</a>
 <a href="#100" id="100">100</a>
+<a href="#101" id="101">101</a>
+<a href="#102" id="102">102</a>
+<a href="#103" id="103">103</a>
+<a href="#104" id="104">104</a>
+<a href="#105" id="105">105</a>
+<a href="#106" id="106">106</a>
+<a href="#107" id="107">107</a>
+<a href="#108" id="108">108</a>
+<a href="#109" id="109">109</a>
+<a href="#110" id="110">110</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::collections::BTreeSet;
 
 <span class="kw">use super</span>::{encode_hashes, BloomFilter};
@@ -124,14 +134,24 @@
 }
 
 <span class="doccomment">/// The state of synchronisation with a peer.
+///
+/// This should be persisted using [`Self::encode`] when you know you will be interacting with the
+/// same peer in multiple sessions. [`Self::encode`] only encodes state which should be reused
+/// across connections.
 </span><span class="attr">#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 </span><span class="kw">pub struct </span>State {
-    <span class="kw">pub </span>shared_heads: Vec&lt;ChangeHash&gt;,
-    <span class="kw">pub </span>last_sent_heads: Vec&lt;ChangeHash&gt;,
-    <span class="kw">pub </span>their_heads: <span class="prelude-ty">Option</span>&lt;Vec&lt;ChangeHash&gt;&gt;,
-    <span class="kw">pub </span>their_need: <span class="prelude-ty">Option</span>&lt;Vec&lt;ChangeHash&gt;&gt;,
-    <span class="kw">pub </span>their_have: <span class="prelude-ty">Option</span>&lt;Vec&lt;Have&gt;&gt;,
-    <span class="kw">pub </span>sent_hashes: BTreeSet&lt;ChangeHash&gt;,
+    <span class="doccomment">/// The hashes which we know both peers have
+    </span><span class="kw">pub </span>shared_heads: Vec&lt;ChangeHash&gt;,
+    <span class="doccomment">/// The heads we last sent
+    </span><span class="kw">pub </span>last_sent_heads: Vec&lt;ChangeHash&gt;,
+    <span class="doccomment">/// The heads we last received from them
+    </span><span class="kw">pub </span>their_heads: <span class="prelude-ty">Option</span>&lt;Vec&lt;ChangeHash&gt;&gt;,
+    <span class="doccomment">/// Any specific changes they last said they needed
+    </span><span class="kw">pub </span>their_need: <span class="prelude-ty">Option</span>&lt;Vec&lt;ChangeHash&gt;&gt;,
+    <span class="doccomment">/// The bloom filters summarising what they said they have
+    </span><span class="kw">pub </span>their_have: <span class="prelude-ty">Option</span>&lt;Vec&lt;Have&gt;&gt;,
+    <span class="doccomment">/// The hashes we have sent in this session
+    </span><span class="kw">pub </span>sent_hashes: BTreeSet&lt;ChangeHash&gt;,
 
     <span class="doccomment">/// `generate_sync_message` should return `None` if there are no new changes to send. In
     /// particular, if there are changes in flight which the other end has not yet acknowledged we

@@ -26,12 +26,18 @@
 <a href="#25" id="25">25</a>
 <a href="#26" id="26">26</a>
 <a href="#27" id="27">27</a>
+<a href="#28" id="28">28</a>
+<a href="#29" id="29">29</a>
+<a href="#30" id="30">30</a>
 </pre><pre class="rust"><code><span class="kw">use crate</span>::{exid::ExId, Value};
 
 <span class="kw">use crate</span>::{query, Automerge};
 <span class="kw">use </span>std::ops::RangeBounds;
 
-<span class="attr">#[derive(Debug)]
+<span class="doccomment">/// An iterator over the elements of a list object
+///
+/// This is returned by the [`crate::ReadDoc::list_range`] method
+</span><span class="attr">#[derive(Debug)]
 </span><span class="kw">pub struct </span>ListRange&lt;<span class="lifetime">&#39;a</span>, R: RangeBounds&lt;usize&gt;&gt; {
     range: <span class="prelude-ty">Option</span>&lt;query::ListRange&lt;<span class="lifetime">&#39;a</span>, R&gt;&gt;,
     doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,

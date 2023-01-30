@@ -330,10 +330,30 @@
 <a href="#329" id="329">329</a>
 <a href="#330" id="330">330</a>
 <a href="#331" id="331">331</a>
+<a href="#332" id="332">332</a>
+<a href="#333" id="333">333</a>
+<a href="#334" id="334">334</a>
+<a href="#335" id="335">335</a>
+<a href="#336" id="336">336</a>
+<a href="#337" id="337">337</a>
+<a href="#338" id="338">338</a>
+<a href="#339" id="339">339</a>
+<a href="#340" id="340">340</a>
+<a href="#341" id="341">341</a>
+<a href="#342" id="342">342</a>
+<a href="#343" id="343">343</a>
+<a href="#344" id="344">344</a>
+<a href="#345" id="345">345</a>
+<a href="#346" id="346">346</a>
+<a href="#347" id="347">347</a>
+<a href="#348" id="348">348</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
-<span class="kw">use crate</span>::{Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, ScalarValue, Value, Values};
+<span class="kw">use </span><span class="kw">crate</span>::op_observer::BranchableObserver;
+<span class="kw">use crate</span>::{
+    Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, ReadDoc, ScalarValue, Value, Values,
+};
 <span class="kw">use crate</span>::{AutomergeError, Keys};
 <span class="kw">use crate</span>::{ListRange, ListRangeAt, MapRange, MapRangeAt};
 
@@ -381,7 +401,7 @@
     }
 }
 
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, Obs: OpObserver&gt; Transaction&lt;<span class="lifetime">&#39;a</span>, observation::Observed&lt;Obs&gt;&gt; {
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, Obs: OpObserver + BranchableObserver&gt; Transaction&lt;<span class="lifetime">&#39;a</span>, observation::Observed&lt;Obs&gt;&gt; {
     <span class="kw">pub fn </span>observer(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut </span>Obs {
         <span class="self">self</span>.observation.as_mut().unwrap().observer()
     }
@@ -444,95 +464,7 @@
     }
 }
 
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, Obs: observation::Observation&gt; Transactable <span class="kw">for </span>Transaction&lt;<span class="lifetime">&#39;a</span>, Obs&gt; {
-    <span class="doccomment">/// Get the number of pending operations in this transaction.
-    </span><span class="kw">fn </span>pending_ops(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-        <span class="self">self</span>.inner.as_ref().unwrap().pending_ops()
-    }
-
-    <span class="doccomment">/// Set the value of property `P` to value `V` in object `obj`.
-    ///
-    /// # Errors
-    ///
-    /// This will return an error if
-    /// - The object does not exist
-    /// - The key is the wrong type for the object
-    /// - The key does not exist in the object
-    </span><span class="kw">fn </span>put&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;, V: Into&lt;ScalarValue&gt;&gt;(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        obj: O,
-        prop: P,
-        value: V,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
-        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.put(doc, obs, obj.as_ref(), prop, value))
-    }
-
-    <span class="kw">fn </span>put_object&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        obj: O,
-        prop: P,
-        value: ObjType,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;ExId, AutomergeError&gt; {
-        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.put_object(doc, obs, obj.as_ref(), prop, value))
-    }
-
-    <span class="kw">fn </span>insert&lt;O: AsRef&lt;ExId&gt;, V: Into&lt;ScalarValue&gt;&gt;(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        obj: O,
-        index: usize,
-        value: V,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
-        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.insert(doc, obs, obj.as_ref(), index, value))
-    }
-
-    <span class="kw">fn </span>insert_object&lt;O: AsRef&lt;ExId&gt;&gt;(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        obj: O,
-        index: usize,
-        value: ObjType,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;ExId, AutomergeError&gt; {
-        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.insert_object(doc, obs, obj.as_ref(), index, value))
-    }
-
-    <span class="kw">fn </span>increment&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        obj: O,
-        prop: P,
-        value: i64,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
-        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.increment(doc, obs, obj.as_ref(), prop, value))
-    }
-
-    <span class="kw">fn </span>delete&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        obj: O,
-        prop: P,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
-        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.delete(doc, obs, obj.as_ref(), prop))
-    }
-
-    <span class="doccomment">/// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
-    /// the new elements
-    </span><span class="kw">fn </span>splice&lt;O: AsRef&lt;ExId&gt;, V: IntoIterator&lt;Item = ScalarValue&gt;&gt;(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        obj: O,
-        pos: usize,
-        del: usize,
-        vals: V,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
-        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.splice(doc, obs, obj.as_ref(), pos, del, vals))
-    }
-
-    <span class="kw">fn </span>splice_text&lt;O: AsRef&lt;ExId&gt;&gt;(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        obj: O,
-        pos: usize,
-        del: usize,
-        text: <span class="kw-2">&amp;</span>str,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
-        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.splice_text(doc, obs, obj.as_ref(), pos, del, text))
-    }
-
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, Obs: observation::Observation&gt; ReadDoc <span class="kw">for </span>Transaction&lt;<span class="lifetime">&#39;a</span>, Obs&gt; {
     <span class="kw">fn </span>keys&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; Keys&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt; {
         <span class="self">self</span>.doc.keys(obj)
     }
@@ -643,6 +575,108 @@
 
     <span class="kw">fn </span>parents&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw">crate</span>::Parents&lt;<span class="lifetime">&#39;_</span>&gt;, AutomergeError&gt; {
         <span class="self">self</span>.doc.parents(obj)
+    }
+
+    <span class="kw">fn </span>path_to_object&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(ExId, Prop)&gt;, AutomergeError&gt; {
+        <span class="self">self</span>.doc.path_to_object(obj)
+    }
+
+    <span class="kw">fn </span>get_missing_deps(<span class="kw-2">&amp;</span><span class="self">self</span>, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; Vec&lt;ChangeHash&gt; {
+        <span class="self">self</span>.doc.get_missing_deps(heads)
+    }
+
+    <span class="kw">fn </span>get_change_by_hash(<span class="kw-2">&amp;</span><span class="self">self</span>, hash: <span class="kw-2">&amp;</span>ChangeHash) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="kw">crate</span>::Change&gt; {
+        <span class="self">self</span>.doc.get_change_by_hash(hash)
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, Obs: observation::Observation&gt; Transactable <span class="kw">for </span>Transaction&lt;<span class="lifetime">&#39;a</span>, Obs&gt; {
+    <span class="doccomment">/// Get the number of pending operations in this transaction.
+    </span><span class="kw">fn </span>pending_ops(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.inner.as_ref().unwrap().pending_ops()
+    }
+
+    <span class="doccomment">/// Set the value of property `P` to value `V` in object `obj`.
+    ///
+    /// # Errors
+    ///
+    /// This will return an error if
+    /// - The object does not exist
+    /// - The key is the wrong type for the object
+    /// - The key does not exist in the object
+    </span><span class="kw">fn </span>put&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;, V: Into&lt;ScalarValue&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: O,
+        prop: P,
+        value: V,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
+        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.put(doc, obs, obj.as_ref(), prop, value))
+    }
+
+    <span class="kw">fn </span>put_object&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: O,
+        prop: P,
+        value: ObjType,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;ExId, AutomergeError&gt; {
+        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.put_object(doc, obs, obj.as_ref(), prop, value))
+    }
+
+    <span class="kw">fn </span>insert&lt;O: AsRef&lt;ExId&gt;, V: Into&lt;ScalarValue&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: O,
+        index: usize,
+        value: V,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
+        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.insert(doc, obs, obj.as_ref(), index, value))
+    }
+
+    <span class="kw">fn </span>insert_object&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: O,
+        index: usize,
+        value: ObjType,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;ExId, AutomergeError&gt; {
+        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.insert_object(doc, obs, obj.as_ref(), index, value))
+    }
+
+    <span class="kw">fn </span>increment&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: O,
+        prop: P,
+        value: i64,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
+        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.increment(doc, obs, obj.as_ref(), prop, value))
+    }
+
+    <span class="kw">fn </span>delete&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: O,
+        prop: P,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
+        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.delete(doc, obs, obj.as_ref(), prop))
+    }
+
+    <span class="doccomment">/// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
+    /// the new elements
+    </span><span class="kw">fn </span>splice&lt;O: AsRef&lt;ExId&gt;, V: IntoIterator&lt;Item = ScalarValue&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: O,
+        pos: usize,
+        del: usize,
+        vals: V,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
+        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.splice(doc, obs, obj.as_ref(), pos, del, vals))
+    }
+
+    <span class="kw">fn </span>splice_text&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: O,
+        pos: usize,
+        del: usize,
+        text: <span class="kw-2">&amp;</span>str,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
+        <span class="self">self</span>.do_tx(|tx, doc, obs| tx.splice_text(doc, obs, obj.as_ref(), pos, del, text))
     }
 
     <span class="kw">fn </span>base_heads(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;ChangeHash&gt; {

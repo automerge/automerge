@@ -812,6 +812,25 @@
 <a href="#811" id="811">811</a>
 <a href="#812" id="812">812</a>
 <a href="#813" id="813">813</a>
+<a href="#814" id="814">814</a>
+<a href="#815" id="815">815</a>
+<a href="#816" id="816">816</a>
+<a href="#817" id="817">817</a>
+<a href="#818" id="818">818</a>
+<a href="#819" id="819">819</a>
+<a href="#820" id="820">820</a>
+<a href="#821" id="821">821</a>
+<a href="#822" id="822">822</a>
+<a href="#823" id="823">823</a>
+<a href="#824" id="824">824</a>
+<a href="#825" id="825">825</a>
+<a href="#826" id="826">826</a>
+<a href="#827" id="827">827</a>
+<a href="#828" id="828">828</a>
+<a href="#829" id="829">829</a>
+<a href="#830" id="830">830</a>
+<a href="#831" id="831">831</a>
+<a href="#832" id="832">832</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error;
 <span class="kw">use </span><span class="kw">crate</span>::legacy <span class="kw">as </span>amp;
 <span class="kw">use </span>serde::{Deserialize, Serialize};
@@ -957,13 +976,18 @@
     }
 }
 
-<span class="attr">#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, Copy, Hash)]
+<span class="doccomment">/// The type of an object
+</span><span class="attr">#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, Copy, Hash)]
 #[serde(rename_all = <span class="string">&quot;camelCase&quot;</span>, untagged)]
 </span><span class="kw">pub enum </span>ObjType {
-    Map,
-    Table,
-    List,
-    Text,
+    <span class="doccomment">/// A map
+    </span>Map,
+    <span class="doccomment">/// Retained for backwards compatibility, tables are identical to maps
+    </span>Table,
+    <span class="doccomment">/// A sequence of arbitrary values
+    </span>List,
+    <span class="doccomment">/// A sequence of characters
+    </span>Text,
 }
 
 <span class="kw">impl </span>ObjType {
@@ -1192,10 +1216,16 @@
     Seq(ElemId),
 }
 
-<span class="attr">#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone)]
+<span class="doccomment">/// A property of an object
+///
+/// This is either a string representing a property in a map, or an integer
+/// which is the index into a sequence
+</span><span class="attr">#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone)]
 </span><span class="kw">pub enum </span>Prop {
-    Map(String),
-    Seq(usize),
+    <span class="doccomment">/// A property in a map
+    </span>Map(String),
+    <span class="doccomment">/// An index into a sequence
+    </span>Seq(usize),
 }
 
 <span class="kw">impl </span>Prop {
@@ -1268,10 +1298,18 @@
     </span>}
 }
 
-<span class="attr">#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+<span class="doccomment">/// How indexes into text sequeces are calculated
+///
+/// Automerge text objects are internally sequences of utf8 characters. This
+/// means that in environments (such as javascript) which use a different
+/// encoding the indexes into the text sequence will be different. This enum
+/// represents the different ways indexes can be calculated.
+</span><span class="attr">#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 </span><span class="kw">pub enum </span>TextEncoding {
-    Utf8,
-    Utf16,
+    <span class="doccomment">/// The indexes are calculated using the utf8 encoding
+    </span>Utf8,
+    <span class="doccomment">/// The indexes are calculated using the utf16 encoding
+    </span>Utf16,
 }
 
 <span class="attr">#[derive(Debug, Copy, Clone, PartialEq, Eq)]

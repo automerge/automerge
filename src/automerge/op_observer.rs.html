@@ -366,10 +366,38 @@
 <a href="#365" id="365">365</a>
 <a href="#366" id="366">366</a>
 <a href="#367" id="367">367</a>
+<a href="#368" id="368">368</a>
+<a href="#369" id="369">369</a>
+<a href="#370" id="370">370</a>
+<a href="#371" id="371">371</a>
+<a href="#372" id="372">372</a>
+<a href="#373" id="373">373</a>
+<a href="#374" id="374">374</a>
+<a href="#375" id="375">375</a>
+<a href="#376" id="376">376</a>
+<a href="#377" id="377">377</a>
+<a href="#378" id="378">378</a>
+<a href="#379" id="379">379</a>
+<a href="#380" id="380">380</a>
+<a href="#381" id="381">381</a>
+<a href="#382" id="382">382</a>
+<a href="#383" id="383">383</a>
+<a href="#384" id="384">384</a>
+<a href="#385" id="385">385</a>
+<a href="#386" id="386">386</a>
+<a href="#387" id="387">387</a>
+<a href="#388" id="388">388</a>
+<a href="#389" id="389">389</a>
+<a href="#390" id="390">390</a>
+<a href="#391" id="391">391</a>
+<a href="#392" id="392">392</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
-<span class="kw">use </span><span class="kw">crate</span>::Automerge;
 <span class="kw">use </span><span class="kw">crate</span>::Prop;
+<span class="kw">use </span><span class="kw">crate</span>::ReadDoc;
 <span class="kw">use </span><span class="kw">crate</span>::Value;
+
+<span class="kw">mod </span>compose;
+<span class="kw">pub use </span>compose::compose;
 
 <span class="doccomment">/// An observer of operations applied to the document.
 </span><span class="kw">pub trait </span>OpObserver {
@@ -380,15 +408,16 @@
     /// - `index`: the index the new value has been inserted at.
     /// - `tagged_value`: the value that has been inserted and the id of the operation that did the
     /// insert.
-    </span><span class="kw">fn </span>insert(
+    </span><span class="kw">fn </span>insert&lt;R: ReadDoc&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        doc: <span class="kw-2">&amp;</span>Automerge,
+        doc: <span class="kw-2">&amp;</span>R,
         objid: ExId,
         index: usize,
         tagged_value: (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId),
     );
 
-    <span class="kw">fn </span>splice_text(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _doc: <span class="kw-2">&amp;</span>Automerge, _objid: ExId, _index: usize, _value: <span class="kw-2">&amp;</span>str);
+    <span class="doccomment">/// Some text has been spliced into a text object
+    </span><span class="kw">fn </span>splice_text&lt;R: ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _doc: <span class="kw-2">&amp;</span>R, _objid: ExId, _index: usize, _value: <span class="kw-2">&amp;</span>str);
 
     <span class="doccomment">/// A new value has been put into the given object.
     ///
@@ -398,9 +427,9 @@
     /// - `tagged_value`: the value that has been put into the object and the id of the operation
     /// that did the put.
     /// - `conflict`: whether this put conflicts with other operations.
-    </span><span class="kw">fn </span>put(
+    </span><span class="kw">fn </span>put&lt;R: ReadDoc&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        doc: <span class="kw-2">&amp;</span>Automerge,
+        doc: <span class="kw-2">&amp;</span>R,
         objid: ExId,
         prop: Prop,
         tagged_value: (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId),
@@ -417,9 +446,9 @@
     /// - `tagged_value`: the value that has been put into the object and the id of the operation
     /// that did the put.
     /// - `conflict`: whether this put conflicts with other operations.
-    </span><span class="kw">fn </span>expose(
+    </span><span class="kw">fn </span>expose&lt;R: ReadDoc&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        doc: <span class="kw-2">&amp;</span>Automerge,
+        doc: <span class="kw-2">&amp;</span>R,
         objid: ExId,
         prop: Prop,
         tagged_value: (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId),
@@ -431,7 +460,7 @@
     /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
     /// - `objid`: the object that has been put into.
     /// - `prop`: the prop that the value as been put at.
-    </span><span class="kw">fn </span>flag_conflict(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _doc: <span class="kw-2">&amp;</span>Automerge, _objid: ExId, _prop: Prop) {}
+    </span><span class="kw">fn </span>flag_conflict&lt;R: ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _doc: <span class="kw-2">&amp;</span>R, _objid: ExId, _prop: Prop) {}
 
     <span class="doccomment">/// A counter has been incremented.
     ///
@@ -440,14 +469,20 @@
     /// - `prop`: they prop that the chounter is at.
     /// - `tagged_value`: the amount the counter has been incremented by, and the the id of the
     /// increment operation.
-    </span><span class="kw">fn </span>increment(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, objid: ExId, prop: Prop, tagged_value: (i64, ExId));
+    </span><span class="kw">fn </span>increment&lt;R: ReadDoc&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        doc: <span class="kw-2">&amp;</span>R,
+        objid: ExId,
+        prop: Prop,
+        tagged_value: (i64, ExId),
+    );
 
     <span class="doccomment">/// A map value has beeen deleted.
     ///
     /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
     /// - `objid`: the object that has been deleted in.
     /// - `prop`: the prop to be deleted
-    </span><span class="kw">fn </span>delete(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, objid: ExId, prop: Prop) {
+    </span><span class="kw">fn </span>delete&lt;R: ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>R, objid: ExId, prop: Prop) {
         <span class="kw">match </span>prop {
             Prop::Map(k) =&gt; <span class="self">self</span>.delete_map(doc, objid, <span class="kw-2">&amp;</span>k),
             Prop::Seq(i) =&gt; <span class="self">self</span>.delete_seq(doc, objid, i, <span class="number">1</span>),
@@ -459,7 +494,7 @@
     /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
     /// - `objid`: the object that has been deleted in.
     /// - `key`: the map key to be deleted
-    </span><span class="kw">fn </span>delete_map(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, objid: ExId, key: <span class="kw-2">&amp;</span>str);
+    </span><span class="kw">fn </span>delete_map&lt;R: ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>R, objid: ExId, key: <span class="kw-2">&amp;</span>str);
 
     <span class="doccomment">/// A one or more list values have beeen deleted.
     ///
@@ -467,21 +502,7 @@
     /// - `objid`: the object that has been deleted in.
     /// - `index`: the index of the deletion
     /// - `num`: the number of sequential elements deleted
-    </span><span class="kw">fn </span>delete_seq(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, objid: ExId, index: usize, num: usize);
-
-    <span class="doccomment">/// Branch of a new op_observer later to be merged
-    ///
-    /// Called by AutoCommit when creating a new transaction.  Observer branch
-    /// will be merged on `commit()` or thrown away on `rollback()`
-    ///
-    </span><span class="kw">fn </span>branch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>;
-
-    <span class="doccomment">/// Merge observed information from a transaction.
-    ///
-    /// Called by AutoCommit on `commit()`
-    ///
-    /// - `other`: Another Op Observer of the same type
-    </span><span class="kw">fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>);
+    </span><span class="kw">fn </span>delete_seq&lt;R: ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>R, objid: ExId, index: usize, num: usize);
 
     <span class="doccomment">/// Whether to call sequence methods or `splice_text` when encountering changes in text
     ///
@@ -491,21 +512,41 @@
     </span>}
 }
 
+<span class="doccomment">/// An observer which can be branched
+///
+/// This is used when observing operations in a transaction. In this case `branch` will be called
+/// at the beginning of the transaction to return a new observer and then `merge` will be called
+/// with the branched observer as `other` when the transaction is comitted.
+</span><span class="kw">pub trait </span>BranchableObserver {
+    <span class="doccomment">/// Branch of a new op_observer later to be merged
+    ///
+    /// Called when creating a new transaction.  Observer branch will be merged on `commit()` or
+    /// thrown away on `rollback()`
+    </span><span class="kw">fn </span>branch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>;
+
+    <span class="doccomment">/// Merge observed information from a transaction.
+    ///
+    /// Called by AutoCommit on `commit()`
+    ///
+    /// - `other`: Another Op Observer of the same type
+    </span><span class="kw">fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>);
+}
+
 <span class="kw">impl </span>OpObserver <span class="kw">for </span>() {
-    <span class="kw">fn </span>insert(
+    <span class="kw">fn </span>insert&lt;R: ReadDoc&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        _doc: <span class="kw-2">&amp;</span>Automerge,
+        _doc: <span class="kw-2">&amp;</span>R,
         _objid: ExId,
         _index: usize,
         _tagged_value: (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId),
     ) {
     }
 
-    <span class="kw">fn </span>splice_text(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _doc: <span class="kw-2">&amp;</span>Automerge, _objid: ExId, _index: usize, _value: <span class="kw-2">&amp;</span>str) {}
+    <span class="kw">fn </span>splice_text&lt;R: ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _doc: <span class="kw-2">&amp;</span>R, _objid: ExId, _index: usize, _value: <span class="kw-2">&amp;</span>str) {}
 
-    <span class="kw">fn </span>put(
+    <span class="kw">fn </span>put&lt;R: ReadDoc&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        _doc: <span class="kw-2">&amp;</span>Automerge,
+        _doc: <span class="kw-2">&amp;</span>R,
         _objid: ExId,
         _prop: Prop,
         _tagged_value: (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId),
@@ -513,9 +554,9 @@
     ) {
     }
 
-    <span class="kw">fn </span>expose(
+    <span class="kw">fn </span>expose&lt;R: ReadDoc&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        _doc: <span class="kw-2">&amp;</span>Automerge,
+        _doc: <span class="kw-2">&amp;</span>R,
         _objid: ExId,
         _prop: Prop,
         _tagged_value: (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId),
@@ -523,21 +564,22 @@
     ) {
     }
 
-    <span class="kw">fn </span>increment(
+    <span class="kw">fn </span>increment&lt;R: ReadDoc&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        _doc: <span class="kw-2">&amp;</span>Automerge,
+        _doc: <span class="kw-2">&amp;</span>R,
         _objid: ExId,
         _prop: Prop,
         _tagged_value: (i64, ExId),
     ) {
     }
 
-    <span class="kw">fn </span>delete_map(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _doc: <span class="kw-2">&amp;</span>Automerge, _objid: ExId, _key: <span class="kw-2">&amp;</span>str) {}
+    <span class="kw">fn </span>delete_map&lt;R: ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _doc: <span class="kw-2">&amp;</span>R, _objid: ExId, _key: <span class="kw-2">&amp;</span>str) {}
 
-    <span class="kw">fn </span>delete_seq(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _doc: <span class="kw-2">&amp;</span>Automerge, _objid: ExId, _index: usize, _num: usize) {}
+    <span class="kw">fn </span>delete_seq&lt;R: ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _doc: <span class="kw-2">&amp;</span>R, _objid: ExId, _index: usize, _num: usize) {}
+}
 
+<span class="kw">impl </span>BranchableObserver <span class="kw">for </span>() {
     <span class="kw">fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _other: <span class="kw-2">&amp;</span><span class="self">Self</span>) {}
-
     <span class="kw">fn </span>branch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{}
 }
 
@@ -556,8 +598,14 @@
 }
 
 <span class="kw">impl </span>OpObserver <span class="kw">for </span>VecOpObserver {
-    <span class="kw">fn </span>insert(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, obj: ExId, index: usize, (value, id): (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)) {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="kw-2">mut </span>p) = doc.parents(<span class="kw-2">&amp;</span>obj) {
+    <span class="kw">fn </span>insert&lt;R: ReadDoc&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        doc: <span class="kw-2">&amp;</span>R,
+        obj: ExId,
+        index: usize,
+        (value, id): (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId),
+    ) {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>(p) = doc.parents(<span class="kw-2">&amp;</span>obj) {
             <span class="self">self</span>.patches.push(Patch::Insert {
                 obj,
                 path: p.path(),
@@ -567,8 +615,8 @@
         }
     }
 
-    <span class="kw">fn </span>splice_text(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, obj: ExId, index: usize, value: <span class="kw-2">&amp;</span>str) {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="kw-2">mut </span>p) = doc.parents(<span class="kw-2">&amp;</span>obj) {
+    <span class="kw">fn </span>splice_text&lt;R: ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>R, obj: ExId, index: usize, value: <span class="kw-2">&amp;</span>str) {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>(p) = doc.parents(<span class="kw-2">&amp;</span>obj) {
             <span class="self">self</span>.patches.push(Patch::Splice {
                 obj,
                 path: p.path(),
@@ -578,15 +626,15 @@
         }
     }
 
-    <span class="kw">fn </span>put(
+    <span class="kw">fn </span>put&lt;R: ReadDoc&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        doc: <span class="kw-2">&amp;</span>Automerge,
+        doc: <span class="kw-2">&amp;</span>R,
         obj: ExId,
         prop: Prop,
         (value, id): (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId),
         conflict: bool,
     ) {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="kw-2">mut </span>p) = doc.parents(<span class="kw-2">&amp;</span>obj) {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>(p) = doc.parents(<span class="kw-2">&amp;</span>obj) {
             <span class="self">self</span>.patches.push(Patch::Put {
                 obj,
                 path: p.path(),
@@ -597,15 +645,15 @@
         }
     }
 
-    <span class="kw">fn </span>expose(
+    <span class="kw">fn </span>expose&lt;R: ReadDoc&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        doc: <span class="kw-2">&amp;</span>Automerge,
+        doc: <span class="kw-2">&amp;</span>R,
         obj: ExId,
         prop: Prop,
         (value, id): (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId),
         conflict: bool,
     ) {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="kw-2">mut </span>p) = doc.parents(<span class="kw-2">&amp;</span>obj) {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>(p) = doc.parents(<span class="kw-2">&amp;</span>obj) {
             <span class="self">self</span>.patches.push(Patch::Expose {
                 obj,
                 path: p.path(),
@@ -616,8 +664,8 @@
         }
     }
 
-    <span class="kw">fn </span>increment(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, obj: ExId, prop: Prop, tagged_value: (i64, ExId)) {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="kw-2">mut </span>p) = doc.parents(<span class="kw-2">&amp;</span>obj) {
+    <span class="kw">fn </span>increment&lt;R: ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>R, obj: ExId, prop: Prop, tagged_value: (i64, ExId)) {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>(p) = doc.parents(<span class="kw-2">&amp;</span>obj) {
             <span class="self">self</span>.patches.push(Patch::Increment {
                 obj,
                 path: p.path(),
@@ -627,8 +675,8 @@
         }
     }
 
-    <span class="kw">fn </span>delete_map(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, obj: ExId, key: <span class="kw-2">&amp;</span>str) {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="kw-2">mut </span>p) = doc.parents(<span class="kw-2">&amp;</span>obj) {
+    <span class="kw">fn </span>delete_map&lt;R: ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>R, obj: ExId, key: <span class="kw-2">&amp;</span>str) {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>(p) = doc.parents(<span class="kw-2">&amp;</span>obj) {
             <span class="self">self</span>.patches.push(Patch::Delete {
                 obj,
                 path: p.path(),
@@ -638,8 +686,8 @@
         }
     }
 
-    <span class="kw">fn </span>delete_seq(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, obj: ExId, index: usize, num: usize) {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>(<span class="kw-2">mut </span>p) = doc.parents(<span class="kw-2">&amp;</span>obj) {
+    <span class="kw">fn </span>delete_seq&lt;R: ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>R, obj: ExId, index: usize, num: usize) {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>(p) = doc.parents(<span class="kw-2">&amp;</span>obj) {
             <span class="self">self</span>.patches.push(Patch::Delete {
                 obj,
                 path: p.path(),
@@ -648,7 +696,9 @@
             })
         }
     }
+}
 
+<span class="kw">impl </span>BranchableObserver <span class="kw">for </span>VecOpObserver {
     <span class="kw">fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>) {
         <span class="self">self</span>.patches.extend_from_slice(other.patches.as_slice())
     }

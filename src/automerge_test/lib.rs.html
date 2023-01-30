@@ -491,11 +491,16 @@
 <a href="#491" id="491">491</a>
 <a href="#492" id="492">492</a>
 <a href="#493" id="493">493</a>
+<a href="#494" id="494">494</a>
+<a href="#495" id="495">495</a>
+<a href="#496" id="496">496</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::{
     collections::{BTreeMap, BTreeSet},
     convert::TryInto,
     hash::Hash,
 };
+
+<span class="kw">use </span>automerge::ReadDoc;
 
 <span class="kw">use </span>serde::ser::{SerializeMap, SerializeSeq};
 
@@ -541,7 +546,7 @@
 /// let title = doc.put(todo, &quot;title&quot;, &quot;water plants&quot;).unwrap();
 ///
 /// assert_doc!(
-///     &amp;doc.document(),
+///     &amp;doc,
 ///     map!{
 ///         &quot;todos&quot; =&gt; {
 ///             list![
@@ -560,6 +565,7 @@
 /// ```rust
 /// # use automerge_test::{assert_doc, map};
 /// # use automerge::transaction::Transactable;
+/// # use automerge::ReadDoc;
 ///
 /// let mut doc1 = automerge::AutoCommit::new();
 /// let mut doc2 = automerge::AutoCommit::new();
@@ -567,7 +573,7 @@
 /// doc2.put(automerge::ROOT, &quot;field&quot;, &quot;two&quot;).unwrap();
 /// doc1.merge(&amp;mut doc2);
 /// assert_doc!(
-///     &amp;doc1.document(),
+///     doc1.document(),
 ///     map!{
 ///         &quot;field&quot; =&gt; {
 ///             &quot;one&quot;,
@@ -823,12 +829,12 @@
     }
 }
 
-<span class="kw">pub fn </span>realize(doc: <span class="kw-2">&amp;</span>automerge::Automerge) -&gt; RealizedObject {
+<span class="kw">pub fn </span>realize&lt;R: ReadDoc&gt;(doc: <span class="kw-2">&amp;</span>R) -&gt; RealizedObject {
     realize_obj(doc, <span class="kw-2">&amp;</span>automerge::ROOT, automerge::ObjType::Map)
 }
 
-<span class="kw">pub fn </span>realize_prop&lt;P: Into&lt;automerge::Prop&gt;&gt;(
-    doc: <span class="kw-2">&amp;</span>automerge::Automerge,
+<span class="kw">pub fn </span>realize_prop&lt;R: ReadDoc, P: Into&lt;automerge::Prop&gt;&gt;(
+    doc: <span class="kw-2">&amp;</span>R,
     obj_id: <span class="kw-2">&amp;</span>automerge::ObjId,
     prop: P,
 ) -&gt; RealizedObject {
@@ -839,8 +845,8 @@
     }
 }
 
-<span class="kw">pub fn </span>realize_obj(
-    doc: <span class="kw-2">&amp;</span>automerge::Automerge,
+<span class="kw">pub fn </span>realize_obj&lt;R: ReadDoc&gt;(
+    doc: <span class="kw-2">&amp;</span>R,
     obj_id: <span class="kw-2">&amp;</span>automerge::ObjId,
     objtype: automerge::ObjType,
 ) -&gt; RealizedObject {
@@ -863,8 +869,8 @@
     }
 }
 
-<span class="kw">fn </span>realize_values&lt;K: Into&lt;automerge::Prop&gt;&gt;(
-    doc: <span class="kw-2">&amp;</span>automerge::Automerge,
+<span class="kw">fn </span>realize_values&lt;R: ReadDoc, K: Into&lt;automerge::Prop&gt;&gt;(
+    doc: <span class="kw-2">&amp;</span>R,
     obj_id: <span class="kw-2">&amp;</span>automerge::ObjId,
     key: K,
 ) -&gt; BTreeSet&lt;RealizedObject&gt; {

@@ -56,14 +56,14 @@
 <a href="#55" id="55">55</a>
 <a href="#56" id="56">56</a>
 <a href="#57" id="57">57</a>
-<a href="#58" id="58">58</a>
-<a href="#59" id="59">59</a>
-<a href="#60" id="60">60</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 <span class="kw">use crate</span>::{Automerge, Value};
 <span class="kw">use </span>std::fmt;
 
-<span class="kw">pub struct </span>Values&lt;<span class="lifetime">&#39;a</span>&gt; {
+<span class="doccomment">/// An iterator over the values in an object
+///
+/// This is returned by the [`crate::ReadDoc::values`] and [`crate::ReadDoc::values_at`] methods
+</span><span class="kw">pub struct </span>Values&lt;<span class="lifetime">&#39;a</span>&gt; {
     range: Box&lt;<span class="kw">dyn </span><span class="lifetime">&#39;a </span>+ ValueIter&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
     doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
 }
@@ -111,12 +111,6 @@
 
     <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
         <span class="self">self</span>.range.next_value(<span class="self">self</span>.doc)
-    }
-}
-
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; DoubleEndedIterator <span class="kw">for </span>Values&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">fn </span>next_back(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
-        <span class="macro">unimplemented!</span>()
     }
 }
 </code></pre></div>

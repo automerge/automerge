@@ -507,6 +507,14 @@
 <a href="#506" id="506">506</a>
 <a href="#507" id="507">507</a>
 <a href="#508" id="508">508</a>
+<a href="#509" id="509">509</a>
+<a href="#510" id="510">510</a>
+<a href="#511" id="511">511</a>
+<a href="#512" id="512">512</a>
+<a href="#513" id="513">513</a>
+<a href="#514" id="514">514</a>
+<a href="#515" id="515">515</a>
+<a href="#516" id="516">516</a>
 </pre><pre class="rust"><code><span class="attr">#![allow(dead_code)]
 
 </span><span class="kw">use </span>std::borrow::Cow;
@@ -515,7 +523,7 @@
     interop::{<span class="self">self</span>, alloc, js_set},
     TextRepresentation,
 };
-<span class="kw">use </span>automerge::{Automerge, ObjId, OpObserver, Prop, ScalarValue, SequenceTree, Value};
+<span class="kw">use </span>automerge::{ObjId, OpObserver, Prop, ReadDoc, ScalarValue, SequenceTree, Value};
 <span class="kw">use </span>js_sys::{Array, Object};
 <span class="kw">use </span>wasm_bindgen::prelude::<span class="kw-2">*</span>;
 
@@ -539,9 +547,9 @@
         old_enabled
     }
 
-    <span class="kw">fn </span>get_path(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, obj: <span class="kw-2">&amp;</span>ObjId) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;(ObjId, Prop)&gt;&gt; {
+    <span class="kw">fn </span>get_path&lt;R: ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>R, obj: <span class="kw-2">&amp;</span>ObjId) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;(ObjId, Prop)&gt;&gt; {
         <span class="kw">match </span>doc.parents(obj) {
-            <span class="prelude-val">Ok</span>(<span class="kw-2">mut </span>parents) =&gt; parents.visible_path(),
+            <span class="prelude-val">Ok</span>(parents) =&gt; parents.visible_path(),
             <span class="prelude-val">Err</span>(e) =&gt; {
                 <span class="macro">automerge::log!</span>(<span class="string">&quot;error generating patch : {:?}&quot;</span>, e);
                 <span class="prelude-val">None
@@ -607,9 +615,9 @@
 }
 
 <span class="kw">impl </span>OpObserver <span class="kw">for </span>Observer {
-    <span class="kw">fn </span>insert(
+    <span class="kw">fn </span>insert&lt;R: ReadDoc&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        doc: <span class="kw-2">&amp;</span>Automerge,
+        doc: <span class="kw-2">&amp;</span>R,
         obj: ObjId,
         index: usize,
         tagged_value: (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ObjId),
@@ -643,7 +651,7 @@
         }
     }
 
-    <span class="kw">fn </span>splice_text(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, obj: ObjId, index: usize, value: <span class="kw-2">&amp;</span>str) {
+    <span class="kw">fn </span>splice_text&lt;R: ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>R, obj: ObjId, index: usize, value: <span class="kw-2">&amp;</span>str) {
         <span class="kw">if </span><span class="self">self</span>.enabled {
             <span class="kw">if </span><span class="self">self</span>.text_rep == TextRepresentation::Array {
                 <span class="kw">for </span>(i, c) <span class="kw">in </span>value.chars().enumerate() {
@@ -691,7 +699,7 @@
         }
     }
 
-    <span class="kw">fn </span>delete_seq(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, obj: ObjId, index: usize, length: usize) {
+    <span class="kw">fn </span>delete_seq&lt;R: ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>R, obj: ObjId, index: usize, length: usize) {
         <span class="kw">if </span><span class="self">self</span>.enabled {
             <span class="kw">match </span><span class="self">self</span>.patches.last_mut() {
                 <span class="prelude-val">Some</span>(Patch::SpliceText {
@@ -753,7 +761,7 @@
         }
     }
 
-    <span class="kw">fn </span>delete_map(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, obj: ObjId, key: <span class="kw-2">&amp;</span>str) {
+    <span class="kw">fn </span>delete_map&lt;R: ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>R, obj: ObjId, key: <span class="kw-2">&amp;</span>str) {
         <span class="kw">if </span><span class="self">self</span>.enabled {
             <span class="kw">if let </span><span class="prelude-val">Some</span>(path) = <span class="self">self</span>.get_path(doc, <span class="kw-2">&amp;</span>obj) {
                 <span class="kw">let </span>patch = Patch::DeleteMap {
@@ -766,9 +774,9 @@
         }
     }
 
-    <span class="kw">fn </span>put(
+    <span class="kw">fn </span>put&lt;R: ReadDoc&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        doc: <span class="kw-2">&amp;</span>Automerge,
+        doc: <span class="kw-2">&amp;</span>R,
         obj: ObjId,
         prop: Prop,
         tagged_value: (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ObjId),
@@ -799,9 +807,9 @@
         }
     }
 
-    <span class="kw">fn </span>expose(
+    <span class="kw">fn </span>expose&lt;R: ReadDoc&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        doc: <span class="kw-2">&amp;</span>Automerge,
+        doc: <span class="kw-2">&amp;</span>R,
         obj: ObjId,
         prop: Prop,
         tagged_value: (Value&lt;<span class="lifetime">&#39;_</span>&gt;, ObjId),
@@ -832,7 +840,13 @@
         }
     }
 
-    <span class="kw">fn </span>increment(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>Automerge, obj: ObjId, prop: Prop, tagged_value: (i64, ObjId)) {
+    <span class="kw">fn </span>increment&lt;R: ReadDoc&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        doc: <span class="kw-2">&amp;</span>R,
+        obj: ObjId,
+        prop: Prop,
+        tagged_value: (i64, ObjId),
+    ) {
         <span class="kw">if </span><span class="self">self</span>.enabled {
             <span class="kw">if let </span><span class="prelude-val">Some</span>(path) = <span class="self">self</span>.get_path(doc, <span class="kw-2">&amp;</span>obj) {
                 <span class="kw">let </span>value = tagged_value.<span class="number">0</span>;
@@ -846,6 +860,12 @@
         }
     }
 
+    <span class="kw">fn </span>text_as_seq(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="self">self</span>.text_rep == TextRepresentation::Array
+    }
+}
+
+<span class="kw">impl </span>automerge::op_observer::BranchableObserver <span class="kw">for </span>Observer {
     <span class="kw">fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>) {
         <span class="self">self</span>.patches.extend_from_slice(other.patches.as_slice())
     }
@@ -856,10 +876,6 @@
             enabled: <span class="self">self</span>.enabled,
             text_rep: <span class="self">self</span>.text_rep,
         }
-    }
-
-    <span class="kw">fn </span>text_as_seq(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
-        <span class="self">self</span>.text_rep == TextRepresentation::Array
     }
 }
 

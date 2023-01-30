@@ -105,21 +105,45 @@
 <a href="#104" id="104">104</a>
 <a href="#105" id="105">105</a>
 <a href="#106" id="106">106</a>
+<a href="#107" id="107">107</a>
+<a href="#108" id="108">108</a>
+<a href="#109" id="109">109</a>
+<a href="#110" id="110">110</a>
+<a href="#111" id="111">111</a>
+<a href="#112" id="112">112</a>
+<a href="#113" id="113">113</a>
+<a href="#114" id="114">114</a>
+<a href="#115" id="115">115</a>
+<a href="#116" id="116">116</a>
+<a href="#117" id="117">117</a>
+<a href="#118" id="118">118</a>
+<a href="#119" id="119">119</a>
+<a href="#120" id="120">120</a>
+<a href="#121" id="121">121</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_set;
 <span class="kw">use </span><span class="kw">crate</span>::op_set::OpSet;
 <span class="kw">use </span><span class="kw">crate</span>::types::{ListEncoding, ObjId};
 <span class="kw">use crate</span>::{exid::ExId, Prop};
 
-<span class="attr">#[derive(Debug)]
+<span class="doccomment">/// An iterator over the &quot;parents&quot; of an object
+///
+/// The &quot;parent&quot; of an object in this context is the ([`ExId`], [`Prop`]) pair which specifies the
+/// location of this object in the composite object which contains it. Each element in the iterator
+/// is a [`Parent`], yielded in reverse order. This means that once the iterator returns `None` you
+/// have reached the root of the document.
+///
+/// This is returned by [`crate::ReadDoc::parents`]
+</span><span class="attr">#[derive(Debug)]
 </span><span class="kw">pub struct </span>Parents&lt;<span class="lifetime">&#39;a</span>&gt; {
     <span class="kw">pub</span>(<span class="kw">crate</span>) obj: ObjId,
     <span class="kw">pub</span>(<span class="kw">crate</span>) ops: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSet,
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Parents&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="comment">// returns the path to the object
-    // works even if the object or a parent has been deleted
-    </span><span class="kw">pub fn </span>path(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Vec&lt;(ExId, Prop)&gt; {
+    <span class="doccomment">/// Return the path this `Parents` represents
+    ///
+    /// This is _not_ in reverse order.
+    </span><span class="kw">pub fn </span>path(<span class="self">self</span>) -&gt; Vec&lt;(ExId, Prop)&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>path = <span class="self">self
             </span>.map(|Parent { obj, prop, .. }| (obj, prop))
             .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
@@ -127,10 +151,8 @@
         path
     }
 
-    <span class="comment">// returns the path to the object
-    // if the object or one of its parents has been deleted or conflicted out
-    // returns none
-    </span><span class="kw">pub fn </span>visible_path(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;(ExId, Prop)&gt;&gt; {
+    <span class="doccomment">/// Like `path` but returns `None` if the target is not visible
+    </span><span class="kw">pub fn </span>visible_path(<span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Vec&lt;(ExId, Prop)&gt;&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>path = Vec::new();
         <span class="kw">for </span>Parent { obj, prop, visible } <span class="kw">in </span><span class="self">self </span>{
             <span class="kw">if </span>!visible {
@@ -166,17 +188,25 @@
     }
 }
 
-<span class="attr">#[derive(Debug, PartialEq, Eq)]
+<span class="doccomment">/// A component of a path to an object
+</span><span class="attr">#[derive(Debug, PartialEq, Eq)]
 </span><span class="kw">pub struct </span>Parent {
-    <span class="kw">pub </span>obj: ExId,
-    <span class="kw">pub </span>prop: Prop,
-    <span class="kw">pub </span>visible: bool,
+    <span class="doccomment">/// The object ID this component refers to
+    </span><span class="kw">pub </span>obj: ExId,
+    <span class="doccomment">/// The property within `obj` this component refers to
+    </span><span class="kw">pub </span>prop: Prop,
+    <span class="doccomment">/// Whether this component is &quot;visible&quot;
+    ///
+    /// An &quot;invisible&quot; component is one where the property is hidden, either because it has been
+    /// deleted or because there is a conflict on this (object, property) pair and this value does
+    /// not win the conflict.
+    </span><span class="kw">pub </span>visible: bool,
 }
 
 <span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>tests {
     <span class="kw">use </span><span class="kw">super</span>::Parent;
-    <span class="kw">use crate</span>::{transaction::Transactable, Prop};
+    <span class="kw">use crate</span>::{transaction::Transactable, Prop, ReadDoc};
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>test_invisible_parents() {

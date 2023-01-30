@@ -573,13 +573,113 @@
 <a href="#572" id="572">572</a>
 <a href="#573" id="573">573</a>
 <a href="#574" id="574">574</a>
+<a href="#575" id="575">575</a>
+<a href="#576" id="576">576</a>
+<a href="#577" id="577">577</a>
+<a href="#578" id="578">578</a>
+<a href="#579" id="579">579</a>
+<a href="#580" id="580">580</a>
+<a href="#581" id="581">581</a>
+<a href="#582" id="582">582</a>
+<a href="#583" id="583">583</a>
+<a href="#584" id="584">584</a>
+<a href="#585" id="585">585</a>
+<a href="#586" id="586">586</a>
+<a href="#587" id="587">587</a>
+<a href="#588" id="588">588</a>
+<a href="#589" id="589">589</a>
+<a href="#590" id="590">590</a>
+<a href="#591" id="591">591</a>
+<a href="#592" id="592">592</a>
+<a href="#593" id="593">593</a>
+<a href="#594" id="594">594</a>
+<a href="#595" id="595">595</a>
+<a href="#596" id="596">596</a>
+<a href="#597" id="597">597</a>
+<a href="#598" id="598">598</a>
+<a href="#599" id="599">599</a>
+<a href="#600" id="600">600</a>
+<a href="#601" id="601">601</a>
+<a href="#602" id="602">602</a>
+<a href="#603" id="603">603</a>
+<a href="#604" id="604">604</a>
+<a href="#605" id="605">605</a>
+<a href="#606" id="606">606</a>
+<a href="#607" id="607">607</a>
+<a href="#608" id="608">608</a>
+<a href="#609" id="609">609</a>
+<a href="#610" id="610">610</a>
+<a href="#611" id="611">611</a>
+<a href="#612" id="612">612</a>
+<a href="#613" id="613">613</a>
+<a href="#614" id="614">614</a>
+<a href="#615" id="615">615</a>
+<a href="#616" id="616">616</a>
+<a href="#617" id="617">617</a>
+<a href="#618" id="618">618</a>
+<a href="#619" id="619">619</a>
+<a href="#620" id="620">620</a>
+<a href="#621" id="621">621</a>
+<a href="#622" id="622">622</a>
+<a href="#623" id="623">623</a>
+<a href="#624" id="624">624</a>
+<a href="#625" id="625">625</a>
+<a href="#626" id="626">626</a>
+<a href="#627" id="627">627</a>
+<a href="#628" id="628">628</a>
+<a href="#629" id="629">629</a>
+<a href="#630" id="630">630</a>
+<a href="#631" id="631">631</a>
+<a href="#632" id="632">632</a>
+<a href="#633" id="633">633</a>
+<a href="#634" id="634">634</a>
+<a href="#635" id="635">635</a>
+<a href="#636" id="636">636</a>
+<a href="#637" id="637">637</a>
+<a href="#638" id="638">638</a>
+<a href="#639" id="639">639</a>
+<a href="#640" id="640">640</a>
+<a href="#641" id="641">641</a>
+<a href="#642" id="642">642</a>
+<a href="#643" id="643">643</a>
+<a href="#644" id="644">644</a>
+<a href="#645" id="645">645</a>
+<a href="#646" id="646">646</a>
+<a href="#647" id="647">647</a>
+<a href="#648" id="648">648</a>
+<a href="#649" id="649">649</a>
+<a href="#650" id="650">650</a>
+<a href="#651" id="651">651</a>
+<a href="#652" id="652">652</a>
+<a href="#653" id="653">653</a>
+<a href="#654" id="654">654</a>
+<a href="#655" id="655">655</a>
+<a href="#656" id="656">656</a>
+<a href="#657" id="657">657</a>
+<a href="#658" id="658">658</a>
+<a href="#659" id="659">659</a>
+<a href="#660" id="660">660</a>
+<a href="#661" id="661">661</a>
+<a href="#662" id="662">662</a>
+<a href="#663" id="663">663</a>
+<a href="#664" id="664">664</a>
+<a href="#665" id="665">665</a>
+<a href="#666" id="666">666</a>
+<a href="#667" id="667">667</a>
+<a href="#668" id="668">668</a>
+<a href="#669" id="669">669</a>
+<a href="#670" id="670">670</a>
+<a href="#671" id="671">671</a>
+<a href="#672" id="672">672</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
-<span class="kw">use </span><span class="kw">crate</span>::op_observer::OpObserver;
+<span class="kw">use </span><span class="kw">crate</span>::op_observer::{BranchableObserver, OpObserver};
+<span class="kw">use </span><span class="kw">crate</span>::sync::SyncDoc;
 <span class="kw">use </span><span class="kw">crate</span>::transaction::{CommitOptions, Transactable};
 <span class="kw">use crate</span>::{
-    sync, Keys, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType, Parents, ScalarValue,
+    sync, Keys, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType, Parents, ReadDoc,
+    ScalarValue,
 };
 <span class="kw">use crate</span>::{
     transaction::{Observation, Observed, TransactionInner, UnObserved},
@@ -587,6 +687,41 @@
 };
 
 <span class="doccomment">/// An automerge document that automatically manages transactions.
+///
+/// An `AutoCommit` can optionally manage an [`OpObserver`]. This observer will be notified of all
+/// changes made by both remote and local changes. The type parameter `O` tracks whether this
+/// document is observed or not.
+///
+/// ## Creating, loading, merging and forking documents
+///
+/// A new document can be created with [`Self::new`], which will create a document with a random
+/// [`ActorId`]. Existing documents can be loaded with [`Self::load`].
+///
+/// If you have two documents and you want to merge the changes from one into the other you can use
+/// [`Self::merge`].
+///
+/// If you have a document you want to split into two concurrent threads of execution you can use
+/// [`Self::fork`]. If you want to split a document from ealier in its history you can use
+/// [`Self::fork_at`].
+///
+/// ## Reading values
+///
+/// [`Self`] implements [`ReadDoc`], which provides methods for reading values from the document.
+///
+/// ## Modifying a document
+///
+/// This type implements [`Transactable`] directly, so you can modify it using methods from [`Transactable`].
+///
+/// ## Synchronization
+///
+/// To synchronise call [`Self::sync`] which returns an implementation of [`SyncDoc`]
+///
+/// ## Observers
+///
+/// An `AutoCommit` can optionally manage an [`OpObserver`]. [`Self::new`] will return a document
+/// with no observer but you can set an observer using [`Self::with_observer`]. The observer must
+/// implement both [`OpObserver`] and [`BranchableObserver`]. If you have an observed autocommit
+/// then you can obtain a mutable reference to the observer with [`Self::observer`]
 </span><span class="attr">#[derive(Debug, Clone)]
 </span><span class="kw">pub struct </span>AutoCommitWithObs&lt;Obs: Observation&gt; {
     doc: Automerge,
@@ -594,19 +729,12 @@
     observation: Obs,
 }
 
-<span class="kw">pub type </span>AutoCommit = AutoCommitWithObs&lt;UnObserved&gt;;
+<span class="doccomment">/// An autocommit document with no observer
+///
+/// See [`AutoCommitWithObs`]
+</span><span class="kw">pub type </span>AutoCommit = AutoCommitWithObs&lt;UnObserved&gt;;
 
-<span class="kw">impl</span>&lt;O: Observation&gt; AutoCommitWithObs&lt;O&gt; {
-    <span class="kw">pub fn </span>unobserved() -&gt; AutoCommitWithObs&lt;UnObserved&gt; {
-        AutoCommitWithObs {
-            doc: Automerge::new(),
-            transaction: <span class="prelude-val">None</span>,
-            observation: UnObserved::new(),
-        }
-    }
-}
-
-<span class="kw">impl</span>&lt;O: OpObserver + Default&gt; Default <span class="kw">for </span>AutoCommitWithObs&lt;Observed&lt;O&gt;&gt; {
+<span class="kw">impl</span>&lt;O: OpObserver + BranchableObserver + Default&gt; Default <span class="kw">for </span>AutoCommitWithObs&lt;Observed&lt;O&gt;&gt; {
     <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
         <span class="kw">let </span>op_observer = O::default();
         AutoCommitWithObs {
@@ -636,7 +764,7 @@
     }
 }
 
-<span class="kw">impl</span>&lt;Obs: OpObserver&gt; AutoCommitWithObs&lt;Observed&lt;Obs&gt;&gt; {
+<span class="kw">impl</span>&lt;Obs: OpObserver + BranchableObserver&gt; AutoCommitWithObs&lt;Observed&lt;Obs&gt;&gt; {
     <span class="kw">pub fn </span>observer(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut </span>Obs {
         <span class="self">self</span>.ensure_transaction_closed();
         <span class="self">self</span>.observation.observer()
@@ -664,7 +792,7 @@
 }
 
 <span class="kw">impl</span>&lt;Obs: Observation&gt; AutoCommitWithObs&lt;Obs&gt; {
-    <span class="kw">pub fn </span>with_observer&lt;Obs2: OpObserver&gt;(
+    <span class="kw">pub fn </span>with_observer&lt;Obs2: OpObserver + BranchableObserver&gt;(
         <span class="self">self</span>,
         op_observer: Obs2,
     ) -&gt; AutoCommitWithObs&lt;Observed&lt;Obs2&gt;&gt; {
@@ -700,7 +828,10 @@
         <span class="self">self</span>.doc.get_actor()
     }
 
-    <span class="kw">pub fn </span>with_encoding(<span class="kw-2">mut </span><span class="self">self</span>, encoding: TextEncoding) -&gt; <span class="self">Self </span>{
+    <span class="doccomment">/// Change the text encoding of this view of the document
+    ///
+    /// This is a cheap operation, it just changes the way indexes are calculated
+    </span><span class="kw">pub fn </span>with_encoding(<span class="kw-2">mut </span><span class="self">self</span>, encoding: TextEncoding) -&gt; <span class="self">Self </span>{
         <span class="self">self</span>.doc.text_encoding = encoding;
         <span class="self">self
     </span>}
@@ -720,7 +851,14 @@
         }
     }
 
-    <span class="kw">pub fn </span>load_incremental(<span class="kw-2">&amp;mut </span><span class="self">self</span>, data: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;usize, AutomergeError&gt; {
+    <span class="doccomment">/// Load an incremental save of a document.
+    ///
+    /// Unlike `load` this imports changes into an existing document. It will work with both the
+    /// output of [`Self::save`] and [`Self::save_incremental`]
+    ///
+    /// The return value is the number of ops which were applied, this is not useful and will
+    /// change in future.
+    </span><span class="kw">pub fn </span>load_incremental(<span class="kw-2">&amp;mut </span><span class="self">self</span>, data: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;usize, AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_closed();
         <span class="comment">// TODO - would be nice to pass None here instead of &amp;mut ()
         </span><span class="kw">if let </span><span class="prelude-val">Some</span>(observer) = <span class="self">self</span>.observation.observer() {
@@ -756,17 +894,24 @@
         }
     }
 
-    <span class="kw">pub fn </span>save(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Vec&lt;u8&gt; {
+    <span class="doccomment">/// Save the entirety of this document in a compact form.
+    </span><span class="kw">pub fn </span>save(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Vec&lt;u8&gt; {
         <span class="self">self</span>.ensure_transaction_closed();
         <span class="self">self</span>.doc.save()
     }
 
-    <span class="kw">pub fn </span>save_nocompress(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Vec&lt;u8&gt; {
+    <span class="doccomment">/// Save this document, but don&#39;t run it through DEFLATE afterwards
+    </span><span class="kw">pub fn </span>save_nocompress(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Vec&lt;u8&gt; {
         <span class="self">self</span>.ensure_transaction_closed();
         <span class="self">self</span>.doc.save_nocompress()
     }
 
-    <span class="comment">// should this return an empty vec instead of None?
+    <span class="doccomment">/// Save the changes since the last call to [Self::save`]
+    ///
+    /// The output of this will not be a compressed document format, but a series of individual
+    /// changes. This is useful if you know you have only made a small change since the last `save`
+    /// and you want to immediately send it somewhere (e.g. you&#39;ve inserted a single character in a
+    /// text object).
     </span><span class="kw">pub fn </span>save_incremental(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Vec&lt;u8&gt; {
         <span class="self">self</span>.ensure_transaction_closed();
         <span class="self">self</span>.doc.save_incremental()
@@ -777,7 +922,8 @@
         <span class="self">self</span>.doc.get_missing_deps(heads)
     }
 
-    <span class="kw">pub fn </span>get_last_local_change(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Change&gt; {
+    <span class="doccomment">/// Get the last change made by this documents actor ID
+    </span><span class="kw">pub fn </span>get_last_local_change(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Change&gt; {
         <span class="self">self</span>.ensure_transaction_closed();
         <span class="self">self</span>.doc.get_last_local_change()
     }
@@ -795,38 +941,22 @@
         <span class="self">self</span>.doc.get_change_by_hash(hash)
     }
 
-    <span class="kw">pub fn </span>get_changes_added&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span><span class="self">Self</span>) -&gt; Vec&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Change&gt; {
+    <span class="doccomment">/// Get changes in `other` that are not in `self
+    </span><span class="kw">pub fn </span>get_changes_added&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span><span class="self">Self</span>) -&gt; Vec&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Change&gt; {
         <span class="self">self</span>.ensure_transaction_closed();
         other.ensure_transaction_closed();
         <span class="self">self</span>.doc.get_changes_added(<span class="kw-2">&amp;</span>other.doc)
     }
 
-    <span class="kw">pub fn </span>import(<span class="kw-2">&amp;</span><span class="self">self</span>, s: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;(ExId, ObjType), AutomergeError&gt; {
+    <span class="attr">#[doc(hidden)]
+    </span><span class="kw">pub fn </span>import(<span class="kw-2">&amp;</span><span class="self">self</span>, s: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;(ExId, ObjType), AutomergeError&gt; {
         <span class="self">self</span>.doc.import(s)
     }
 
-    <span class="kw">pub fn </span>dump(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+    <span class="attr">#[doc(hidden)]
+    </span><span class="kw">pub fn </span>dump(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
         <span class="self">self</span>.ensure_transaction_closed();
         <span class="self">self</span>.doc.dump()
-    }
-
-    <span class="kw">pub fn </span>generate_sync_message(<span class="kw-2">&amp;mut </span><span class="self">self</span>, sync_state: <span class="kw-2">&amp;mut </span>sync::State) -&gt; <span class="prelude-ty">Option</span>&lt;sync::Message&gt; {
-        <span class="self">self</span>.ensure_transaction_closed();
-        <span class="self">self</span>.doc.generate_sync_message(sync_state)
-    }
-
-    <span class="kw">pub fn </span>receive_sync_message(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        sync_state: <span class="kw-2">&amp;mut </span>sync::State,
-        message: sync::Message,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
-        <span class="self">self</span>.ensure_transaction_closed();
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(observer) = <span class="self">self</span>.observation.observer() {
-            <span class="self">self</span>.doc
-                .receive_sync_message_with(sync_state, message, <span class="prelude-val">Some</span>(observer))
-        } <span class="kw">else </span>{
-            <span class="self">self</span>.doc.receive_sync_message(sync_state, message)
-        }
     }
 
     <span class="doccomment">/// Return a graphviz representation of the opset.
@@ -880,7 +1010,8 @@
         tx.commit(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, options.message, options.time)
     }
 
-    <span class="kw">pub fn </span>rollback(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; usize {
+    <span class="doccomment">/// Remove any changes that have been made in the current transaction from the document
+    </span><span class="kw">pub fn </span>rollback(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; usize {
         <span class="self">self</span>.transaction
             .take()
             .map(|(<span class="kw">_</span>, tx)| tx.rollback(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc))
@@ -901,14 +1032,24 @@
         <span class="kw">let </span>args = <span class="self">self</span>.doc.transaction_args();
         TransactionInner::empty(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, args, options.message, options.time)
     }
+
+    <span class="doccomment">/// An implementation of [`crate::sync::SyncDoc`] for this autocommit
+    ///
+    /// This ensures that any outstanding transactions for this document are committed before
+    /// taking part in the sync protocol
+    </span><span class="kw">pub fn </span>sync(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="kw">impl </span>SyncDoc + <span class="lifetime">&#39;_ </span>{
+        <span class="self">self</span>.ensure_transaction_closed();
+        SyncWrapper { inner: <span class="self">self </span>}
+    }
 }
 
-<span class="kw">impl</span>&lt;Obs: Observation&gt; Transactable <span class="kw">for </span>AutoCommitWithObs&lt;Obs&gt; {
-    <span class="kw">fn </span>pending_ops(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-        <span class="self">self</span>.transaction
-            .as_ref()
-            .map(|(<span class="kw">_</span>, t)| t.pending_ops())
-            .unwrap_or(<span class="number">0</span>)
+<span class="kw">impl</span>&lt;Obs: Observation&gt; ReadDoc <span class="kw">for </span>AutoCommitWithObs&lt;Obs&gt; {
+    <span class="kw">fn </span>parents&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;Parents&lt;<span class="lifetime">&#39;_</span>&gt;, AutomergeError&gt; {
+        <span class="self">self</span>.doc.parents(obj)
+    }
+
+    <span class="kw">fn </span>path_to_object&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(ExId, Prop)&gt;, AutomergeError&gt; {
+        <span class="self">self</span>.doc.path_to_object(obj)
     }
 
     <span class="kw">fn </span>keys&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; Keys&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt; {
@@ -971,6 +1112,69 @@
 
     <span class="kw">fn </span>object_type&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;ObjType, AutomergeError&gt; {
         <span class="self">self</span>.doc.object_type(obj)
+    }
+
+    <span class="kw">fn </span>text&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt; {
+        <span class="self">self</span>.doc.text(obj)
+    }
+
+    <span class="kw">fn </span>text_at&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        heads: <span class="kw-2">&amp;</span>[ChangeHash],
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt; {
+        <span class="self">self</span>.doc.text_at(obj, heads)
+    }
+
+    <span class="kw">fn </span>get&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        prop: P,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
+        <span class="self">self</span>.doc.get(obj, prop)
+    }
+
+    <span class="kw">fn </span>get_at&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        prop: P,
+        heads: <span class="kw-2">&amp;</span>[ChangeHash],
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
+        <span class="self">self</span>.doc.get_at(obj, prop, heads)
+    }
+
+    <span class="kw">fn </span>get_all&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        prop: P,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
+        <span class="self">self</span>.doc.get_all(obj, prop)
+    }
+
+    <span class="kw">fn </span>get_all_at&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        prop: P,
+        heads: <span class="kw-2">&amp;</span>[ChangeHash],
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
+        <span class="self">self</span>.doc.get_all_at(obj, prop, heads)
+    }
+
+    <span class="kw">fn </span>get_missing_deps(<span class="kw-2">&amp;</span><span class="self">self</span>, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; Vec&lt;ChangeHash&gt; {
+        <span class="self">self</span>.doc.get_missing_deps(heads)
+    }
+
+    <span class="kw">fn </span>get_change_by_hash(<span class="kw-2">&amp;</span><span class="self">self</span>, hash: <span class="kw-2">&amp;</span>ChangeHash) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Change&gt; {
+        <span class="self">self</span>.doc.get_change_by_hash(hash)
+    }
+}
+
+<span class="kw">impl</span>&lt;Obs: Observation&gt; Transactable <span class="kw">for </span>AutoCommitWithObs&lt;Obs&gt; {
+    <span class="kw">fn </span>pending_ops(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.transaction
+            .as_ref()
+            .map(|(<span class="kw">_</span>, t)| t.pending_ops())
+            .unwrap_or(<span class="number">0</span>)
     }
 
     <span class="kw">fn </span>put&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;, V: Into&lt;ScalarValue&gt;&gt;(
@@ -1090,61 +1294,53 @@
         )
     }
 
-    <span class="kw">fn </span>text&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt; {
-        <span class="self">self</span>.doc.text(obj)
-    }
-
-    <span class="kw">fn </span>text_at&lt;O: AsRef&lt;ExId&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        obj: O,
-        heads: <span class="kw-2">&amp;</span>[ChangeHash],
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt; {
-        <span class="self">self</span>.doc.text_at(obj, heads)
-    }
-
-    <span class="comment">// TODO - I need to return these OpId&#39;s here **only** to get
-    // the legacy conflicts format of { [opid]: value }
-    // Something better?
-    </span><span class="kw">fn </span>get&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        obj: O,
-        prop: P,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
-        <span class="self">self</span>.doc.get(obj, prop)
-    }
-
-    <span class="kw">fn </span>get_at&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        obj: O,
-        prop: P,
-        heads: <span class="kw-2">&amp;</span>[ChangeHash],
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
-        <span class="self">self</span>.doc.get_at(obj, prop, heads)
-    }
-
-    <span class="kw">fn </span>get_all&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        obj: O,
-        prop: P,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
-        <span class="self">self</span>.doc.get_all(obj, prop)
-    }
-
-    <span class="kw">fn </span>get_all_at&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        obj: O,
-        prop: P,
-        heads: <span class="kw-2">&amp;</span>[ChangeHash],
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
-        <span class="self">self</span>.doc.get_all_at(obj, prop, heads)
-    }
-
-    <span class="kw">fn </span>parents&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;Parents&lt;<span class="lifetime">&#39;_</span>&gt;, AutomergeError&gt; {
-        <span class="self">self</span>.doc.parents(obj)
-    }
-
     <span class="kw">fn </span>base_heads(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;ChangeHash&gt; {
         <span class="self">self</span>.doc.get_heads()
+    }
+}
+
+<span class="comment">// A wrapper we return from `AutoCommit::sync` to ensure that transactions are closed before we
+// start syncing
+</span><span class="kw">struct </span>SyncWrapper&lt;<span class="lifetime">&#39;a</span>, Obs: Observation&gt; {
+    inner: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>AutoCommitWithObs&lt;Obs&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, Obs: Observation&gt; SyncDoc <span class="kw">for </span>SyncWrapper&lt;<span class="lifetime">&#39;a</span>, Obs&gt; {
+    <span class="kw">fn </span>generate_sync_message(<span class="kw-2">&amp;</span><span class="self">self</span>, sync_state: <span class="kw-2">&amp;mut </span>sync::State) -&gt; <span class="prelude-ty">Option</span>&lt;sync::Message&gt; {
+        <span class="self">self</span>.inner.doc.generate_sync_message(sync_state)
+    }
+
+    <span class="kw">fn </span>receive_sync_message(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        sync_state: <span class="kw-2">&amp;mut </span>sync::State,
+        message: sync::Message,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
+        <span class="self">self</span>.inner.ensure_transaction_closed();
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(observer) = <span class="self">self</span>.inner.observation.observer() {
+            <span class="self">self</span>.inner
+                .doc
+                .receive_sync_message_with(sync_state, message, observer)
+        } <span class="kw">else </span>{
+            <span class="self">self</span>.inner.doc.receive_sync_message(sync_state, message)
+        }
+    }
+
+    <span class="kw">fn </span>receive_sync_message_with&lt;Obs2: OpObserver&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        sync_state: <span class="kw-2">&amp;mut </span>sync::State,
+        message: sync::Message,
+        op_observer: <span class="kw-2">&amp;mut </span>Obs2,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(our_observer) = <span class="self">self</span>.inner.observation.observer() {
+            <span class="kw">let </span><span class="kw-2">mut </span>composed = <span class="kw">crate</span>::op_observer::compose(our_observer, op_observer);
+            <span class="self">self</span>.inner
+                .doc
+                .receive_sync_message_with(sync_state, message, <span class="kw-2">&amp;mut </span>composed)
+        } <span class="kw">else </span>{
+            <span class="self">self</span>.inner
+                .doc
+                .receive_sync_message_with(sync_state, message, op_observer)
+        }
     }
 }
 </code></pre></div>

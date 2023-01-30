@@ -35,12 +35,18 @@
 <a href="#34" id="34">34</a>
 <a href="#35" id="35">35</a>
 <a href="#36" id="36">36</a>
+<a href="#37" id="37">37</a>
+<a href="#38" id="38">38</a>
+<a href="#39" id="39">39</a>
 </pre><pre class="rust"><code><span class="kw">use crate</span>::{exid::ExId, Value};
 <span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use crate</span>::{query, Automerge};
 
-<span class="attr">#[derive(Debug)]
+<span class="doccomment">/// An iterator over the keys and values of a map object as at a particuar heads
+///
+/// This is returned by the [`crate::ReadDoc::map_range_at`] method
+</span><span class="attr">#[derive(Debug)]
 </span><span class="kw">pub struct </span>MapRangeAt&lt;<span class="lifetime">&#39;a</span>, R: RangeBounds&lt;String&gt;&gt; {
     range: <span class="prelude-ty">Option</span>&lt;query::MapRangeAt&lt;<span class="lifetime">&#39;a</span>, R&gt;&gt;,
     doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,

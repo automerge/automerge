@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["Patch","A notification to the application that something has changed in a document."]],"fn":[["compose",""]],"struct":[["VecOpObserver","Capture operations into a [`Vec`] and store them as patches."]],"trait":[["BranchableObserver","An observer which can be branched"],["OpObserver","An observer of operations applied to the document."]]};

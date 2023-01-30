@@ -1386,6 +1386,20 @@
 <a href="#1385" id="1385">1385</a>
 <a href="#1386" id="1386">1386</a>
 <a href="#1387" id="1387">1387</a>
+<a href="#1388" id="1388">1388</a>
+<a href="#1389" id="1389">1389</a>
+<a href="#1390" id="1390">1390</a>
+<a href="#1391" id="1391">1391</a>
+<a href="#1392" id="1392">1392</a>
+<a href="#1393" id="1393">1393</a>
+<a href="#1394" id="1394">1394</a>
+<a href="#1395" id="1395">1395</a>
+<a href="#1396" id="1396">1396</a>
+<a href="#1397" id="1397">1397</a>
+<a href="#1398" id="1398">1398</a>
+<a href="#1399" id="1399">1399</a>
+<a href="#1400" id="1400">1400</a>
+<a href="#1401" id="1401">1401</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::cmp::Ordering;
 <span class="kw">use </span>std::collections::{BTreeSet, HashMap, HashSet};
 <span class="kw">use </span>std::fmt::Debug;
@@ -1397,7 +1411,7 @@
 <span class="kw">use </span><span class="kw">crate</span>::columnar::Key <span class="kw">as </span>EncodedKey;
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 <span class="kw">use </span><span class="kw">crate</span>::keys::Keys;
-<span class="kw">use </span><span class="kw">crate</span>::op_observer::OpObserver;
+<span class="kw">use </span><span class="kw">crate</span>::op_observer::{BranchableObserver, OpObserver};
 <span class="kw">use </span><span class="kw">crate</span>::op_set::OpSet;
 <span class="kw">use </span><span class="kw">crate</span>::parents::Parents;
 <span class="kw">use </span><span class="kw">crate</span>::storage::{<span class="self">self</span>, load, CompressConfig, VerificationMode};
@@ -1410,7 +1424,7 @@
 };
 <span class="kw">use crate</span>::{
     query, AutomergeError, Change, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType,
-    Prop, Values,
+    Prop, ReadDoc, Values,
 };
 <span class="kw">use </span>serde::Serialize;
 
@@ -1423,7 +1437,39 @@
     Cached(usize),
 }
 
-<span class="doccomment">/// An automerge document.
+<span class="doccomment">/// An automerge document which does not manage transactions for you.
+///
+/// ## Creating, loading, merging and forking documents
+///
+/// A new document can be created with [`Self::new`], which will create a document with a random
+/// [`ActorId`]. Existing documents can be loaded with [`Self::load`], or [`Self::load_with`].
+///
+/// If you have two documents and you want to merge the changes from one into the other you can use
+/// [`Self::merge`] or [`Self::merge_with`].
+///
+/// If you have a document you want to split into two concurrent threads of execution you can use
+/// [`Self::fork`]. If you want to split a document from ealier in its history you can use
+/// [`Self::fork_at`].
+///
+/// ## Reading values
+///
+/// [`Self`] implements [`ReadDoc`], which provides methods for reading values from the document.
+///
+/// ## Modifying a document (Transactions)
+///
+/// [`Automerge`] provides an interface for viewing and modifying automerge documents which does
+/// not manage transactions for you. To create changes you use either [`Automerge::transaction`] or
+/// [`Automerge::transact`] (or the `_with` variants).
+///
+/// ## Sync
+///
+/// This type implements [`crate::sync::SyncDoc`]
+///
+/// ## Observers
+///
+/// Many of the methods on this type have an `_with` or `_observed` variant
+/// which allow you to pass in an [`OpObserver`] to observe any changes which
+/// occur.
 </span><span class="attr">#[derive(Debug, Clone)]
 </span><span class="kw">pub struct </span>Automerge {
     <span class="doccomment">/// The list of unapplied changes that are not causally ready.
@@ -1467,7 +1513,10 @@
         }
     }
 
-    <span class="kw">pub fn </span>with_encoding(<span class="kw-2">mut </span><span class="self">self</span>, encoding: TextEncoding) -&gt; <span class="self">Self </span>{
+    <span class="doccomment">/// Change the text encoding of this view of the document
+    ///
+    /// This is a cheap operation, it just changes the way indexes are calculated
+    </span><span class="kw">pub fn </span>with_encoding(<span class="kw-2">mut </span><span class="self">self</span>, encoding: TextEncoding) -&gt; <span class="self">Self </span>{
         <span class="self">self</span>.text_encoding = encoding;
         <span class="self">self
     </span>}
@@ -1513,7 +1562,8 @@
         Transaction::new(<span class="self">self</span>, args, UnObserved)
     }
 
-    <span class="kw">pub fn </span>transaction_with_observer&lt;Obs: OpObserver&gt;(
+    <span class="doccomment">/// Start a transaction with an observer
+    </span><span class="kw">pub fn </span>transaction_with_observer&lt;Obs: OpObserver + BranchableObserver&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         op_observer: Obs,
     ) -&gt; Transaction&lt;<span class="lifetime">&#39;_</span>, Observed&lt;Obs&gt;&gt; {
@@ -1560,8 +1610,7 @@
         <span class="self">self</span>.transact_with_impl(<span class="prelude-val">Some</span>(c), f)
     }
 
-    <span class="doccomment">/// Like [`Self::transact`] but with a function for generating the commit options.
-    </span><span class="kw">fn </span>transact_with_impl&lt;F, O, E, C&gt;(
+    <span class="kw">fn </span>transact_with_impl&lt;F, O, E, C&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         c: <span class="prelude-ty">Option</span>&lt;C&gt;,
         f: F,
@@ -1598,7 +1647,7 @@
     </span><span class="kw">pub fn </span>transact_observed&lt;F, O, E, Obs&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, f: F) -&gt; transaction::Result&lt;O, Obs, E&gt;
     <span class="kw">where
         </span>F: FnOnce(<span class="kw-2">&amp;mut </span>Transaction&lt;<span class="lifetime">&#39;_</span>, Observed&lt;Obs&gt;&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;O, E&gt;,
-        Obs: OpObserver + Default,
+        Obs: OpObserver + BranchableObserver + Default,
     {
         <span class="self">self</span>.transact_observed_with_impl(<span class="prelude-val">None</span>::&lt;<span class="kw-2">&amp;</span><span class="kw">dyn </span>Fn(<span class="kw-2">&amp;</span>O) -&gt; CommitOptions&gt;, f)
     }
@@ -1612,7 +1661,7 @@
     <span class="kw">where
         </span>F: FnOnce(<span class="kw-2">&amp;mut </span>Transaction&lt;<span class="lifetime">&#39;_</span>, Observed&lt;Obs&gt;&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;O, E&gt;,
         C: FnOnce(<span class="kw-2">&amp;</span>O) -&gt; CommitOptions,
-        Obs: OpObserver + Default,
+        Obs: OpObserver + BranchableObserver + Default,
     {
         <span class="self">self</span>.transact_observed_with_impl(<span class="prelude-val">Some</span>(c), f)
     }
@@ -1625,7 +1674,7 @@
     <span class="kw">where
         </span>F: FnOnce(<span class="kw-2">&amp;mut </span>Transaction&lt;<span class="lifetime">&#39;_</span>, Observed&lt;Obs&gt;&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;O, E&gt;,
         C: FnOnce(<span class="kw-2">&amp;</span>O) -&gt; CommitOptions,
-        Obs: OpObserver + Default,
+        Obs: OpObserver + BranchableObserver + Default,
     {
         <span class="kw">let </span>observer = Obs::default();
         <span class="kw">let </span><span class="kw-2">mut </span>tx = <span class="self">self</span>.transaction_with_observer(observer);
@@ -1661,13 +1710,17 @@
     }
 
     <span class="doccomment">/// Fork this document at the current point for use by a different actor.
+    ///
+    /// This will create a new actor ID for the forked document
     </span><span class="kw">pub fn </span>fork(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
         <span class="kw">let </span><span class="kw-2">mut </span>f = <span class="self">self</span>.clone();
         f.set_actor(ActorId::random());
         f
     }
 
-    <span class="doccomment">/// Fork this document at the give heads
+    <span class="doccomment">/// Fork this document at the given heads
+    ///
+    /// This will create a new actor ID for the forked document
     </span><span class="kw">pub fn </span>fork_at(<span class="kw-2">&amp;</span><span class="self">self</span>, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, AutomergeError&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>seen = heads.iter().cloned().collect::&lt;HashSet&lt;<span class="kw">_</span>&gt;&gt;();
         <span class="kw">let </span><span class="kw-2">mut </span>heads = heads.to_vec();
@@ -1690,182 +1743,6 @@
         f.set_actor(ActorId::random());
         f.apply_changes(changes.into_iter().rev().cloned())<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(f)
-    }
-
-    <span class="comment">// KeysAt::()
-    // LenAt::()
-    // PropAt::()
-    // NthAt::()
-
-    </span><span class="doccomment">/// Get the parents of an object in the document tree.
-    ///
-    /// ### Errors
-    ///
-    /// Returns an error when the id given is not the id of an object in this document.
-    /// This function does not get the parents of scalar values contained within objects.
-    ///
-    /// ### Experimental
-    ///
-    /// This function may in future be changed to allow getting the parents from the id of a scalar
-    /// value.
-    </span><span class="kw">pub fn </span>parents&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;Parents&lt;<span class="lifetime">&#39;_</span>&gt;, AutomergeError&gt; {
-        <span class="kw">let </span>(obj_id, <span class="kw">_</span>) = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(<span class="self">self</span>.ops.parents(obj_id))
-    }
-
-    <span class="kw">pub fn </span>path_to_object&lt;O: AsRef&lt;ExId&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        obj: O,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(ExId, Prop)&gt;, AutomergeError&gt; {
-        <span class="prelude-val">Ok</span>(<span class="self">self</span>.parents(obj.as_ref().clone())<span class="question-mark">?</span>.path())
-    }
-
-    <span class="doccomment">/// Get the keys of the object `obj`.
-    ///
-    /// For a map this returns the keys of the map.
-    /// For a list this returns the element ids (opids) encoded as strings.
-    </span><span class="kw">pub fn </span>keys&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; Keys&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, <span class="kw">_</span>)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
-            <span class="kw">let </span>iter_keys = <span class="self">self</span>.ops.keys(obj);
-            Keys::new(<span class="self">self</span>, iter_keys)
-        } <span class="kw">else </span>{
-            Keys::new(<span class="self">self</span>, <span class="prelude-val">None</span>)
-        }
-    }
-
-    <span class="doccomment">/// Historical version of [`keys`](Self::keys).
-    </span><span class="kw">pub fn </span>keys_at&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; KeysAt&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, <span class="kw">_</span>)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
-            <span class="kw">if let </span><span class="prelude-val">Ok</span>(clock) = <span class="self">self</span>.clock_at(heads) {
-                <span class="kw">return </span>KeysAt::new(<span class="self">self</span>, <span class="self">self</span>.ops.keys_at(obj, clock));
-            }
-        }
-        KeysAt::new(<span class="self">self</span>, <span class="prelude-val">None</span>)
-    }
-
-    <span class="doccomment">/// Iterate over the keys and values of the map `obj` in the given range.
-    </span><span class="kw">pub fn </span>map_range&lt;O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;String&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        obj: O,
-        range: R,
-    ) -&gt; MapRange&lt;<span class="lifetime">&#39;_</span>, R&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, <span class="kw">_</span>)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
-            MapRange::new(<span class="self">self</span>, <span class="self">self</span>.ops.map_range(obj, range))
-        } <span class="kw">else </span>{
-            MapRange::new(<span class="self">self</span>, <span class="prelude-val">None</span>)
-        }
-    }
-
-    <span class="doccomment">/// Historical version of [`map_range`](Self::map_range).
-    </span><span class="kw">pub fn </span>map_range_at&lt;O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;String&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        obj: O,
-        range: R,
-        heads: <span class="kw-2">&amp;</span>[ChangeHash],
-    ) -&gt; MapRangeAt&lt;<span class="lifetime">&#39;_</span>, R&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, <span class="kw">_</span>)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
-            <span class="kw">if let </span><span class="prelude-val">Ok</span>(clock) = <span class="self">self</span>.clock_at(heads) {
-                <span class="kw">let </span>iter_range = <span class="self">self</span>.ops.map_range_at(obj, range, clock);
-                <span class="kw">return </span>MapRangeAt::new(<span class="self">self</span>, iter_range);
-            }
-        }
-        MapRangeAt::new(<span class="self">self</span>, <span class="prelude-val">None</span>)
-    }
-
-    <span class="doccomment">/// Iterate over the indexes and values of the list `obj` in the given range.
-    </span><span class="kw">pub fn </span>list_range&lt;O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;usize&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        obj: O,
-        range: R,
-    ) -&gt; ListRange&lt;<span class="lifetime">&#39;_</span>, R&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, <span class="kw">_</span>)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
-            ListRange::new(<span class="self">self</span>, <span class="self">self</span>.ops.list_range(obj, range))
-        } <span class="kw">else </span>{
-            ListRange::new(<span class="self">self</span>, <span class="prelude-val">None</span>)
-        }
-    }
-
-    <span class="doccomment">/// Historical version of [`list_range`](Self::list_range).
-    </span><span class="kw">pub fn </span>list_range_at&lt;O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;usize&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        obj: O,
-        range: R,
-        heads: <span class="kw-2">&amp;</span>[ChangeHash],
-    ) -&gt; ListRangeAt&lt;<span class="lifetime">&#39;_</span>, R&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, <span class="kw">_</span>)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
-            <span class="kw">if let </span><span class="prelude-val">Ok</span>(clock) = <span class="self">self</span>.clock_at(heads) {
-                <span class="kw">let </span>iter_range = <span class="self">self</span>.ops.list_range_at(obj, range, clock);
-                <span class="kw">return </span>ListRangeAt::new(<span class="self">self</span>, iter_range);
-            }
-        }
-        ListRangeAt::new(<span class="self">self</span>, <span class="prelude-val">None</span>)
-    }
-
-    <span class="kw">pub fn </span>values&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; Values&lt;<span class="lifetime">&#39;_</span>&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, obj_type)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
-            <span class="kw">if </span>obj_type.is_sequence() {
-                Values::new(<span class="self">self</span>, <span class="self">self</span>.ops.list_range(obj, ..))
-            } <span class="kw">else </span>{
-                Values::new(<span class="self">self</span>, <span class="self">self</span>.ops.map_range(obj, ..))
-            }
-        } <span class="kw">else </span>{
-            Values::empty(<span class="self">self</span>)
-        }
-    }
-
-    <span class="kw">pub fn </span>values_at&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; Values&lt;<span class="lifetime">&#39;_</span>&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, obj_type)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
-            <span class="kw">if let </span><span class="prelude-val">Ok</span>(clock) = <span class="self">self</span>.clock_at(heads) {
-                <span class="kw">return match </span>obj_type {
-                    ObjType::Map | ObjType::Table =&gt; {
-                        <span class="kw">let </span>iter_range = <span class="self">self</span>.ops.map_range_at(obj, .., clock);
-                        Values::new(<span class="self">self</span>, iter_range)
-                    }
-                    ObjType::List | ObjType::Text =&gt; {
-                        <span class="kw">let </span>iter_range = <span class="self">self</span>.ops.list_range_at(obj, .., clock);
-                        Values::new(<span class="self">self</span>, iter_range)
-                    }
-                };
-            }
-        }
-        Values::empty(<span class="self">self</span>)
-    }
-
-    <span class="doccomment">/// Get the length of the given object.
-    </span><span class="kw">pub fn </span>length&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; usize {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>((inner_obj, obj_type)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
-            <span class="kw">if </span>obj_type == ObjType::Map || obj_type == ObjType::Table {
-                <span class="self">self</span>.keys(obj).count()
-            } <span class="kw">else </span>{
-                <span class="kw">let </span>encoding = ListEncoding::new(obj_type, <span class="self">self</span>.text_encoding);
-                <span class="self">self</span>.ops.search(<span class="kw-2">&amp;</span>inner_obj, query::Len::new(encoding)).len
-            }
-        } <span class="kw">else </span>{
-            <span class="number">0
-        </span>}
-    }
-
-    <span class="doccomment">/// Historical version of [`length`](Self::length).
-    </span><span class="kw">pub fn </span>length_at&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; usize {
-        <span class="kw">if let </span><span class="prelude-val">Ok</span>((inner_obj, obj_type)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
-            <span class="kw">if let </span><span class="prelude-val">Ok</span>(clock) = <span class="self">self</span>.clock_at(heads) {
-                <span class="kw">return if </span>obj_type == ObjType::Map || obj_type == ObjType::Table {
-                    <span class="self">self</span>.keys_at(obj, heads).count()
-                } <span class="kw">else </span>{
-                    <span class="kw">let </span>encoding = ListEncoding::new(obj_type, <span class="self">self</span>.text_encoding);
-                    <span class="self">self</span>.ops
-                        .search(<span class="kw-2">&amp;</span>inner_obj, query::LenAt::new(clock, encoding))
-                        .len
-                };
-            }
-        }
-        <span class="number">0
-    </span>}
-
-    <span class="doccomment">/// Get the type of this object, if it is an object.
-    </span><span class="kw">pub fn </span>object_type&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;ObjType, AutomergeError&gt; {
-        <span class="kw">let </span>(<span class="kw">_</span>, obj_type) = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(obj_type)
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>exid_to_obj(<span class="kw-2">&amp;</span><span class="self">self</span>, id: <span class="kw-2">&amp;</span>ExId) -&gt; <span class="prelude-ty">Result</span>&lt;(ObjId, ObjType), AutomergeError&gt; {
@@ -1899,153 +1776,19 @@
         <span class="self">self</span>.ops.id_to_exid(id)
     }
 
-    <span class="doccomment">/// Get the string represented by the given text object.
-    </span><span class="kw">pub fn </span>text&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt; {
-        <span class="kw">let </span>obj = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>.<span class="number">0</span>;
-        <span class="kw">let </span>query = <span class="self">self</span>.ops.search(<span class="kw-2">&amp;</span>obj, query::ListVals::new());
-        <span class="kw">let </span><span class="kw-2">mut </span>buffer = String::new();
-        <span class="kw">for </span>q <span class="kw">in </span><span class="kw-2">&amp;</span>query.ops {
-            buffer.push_str(q.to_str());
-        }
-        <span class="prelude-val">Ok</span>(buffer)
-    }
-
-    <span class="doccomment">/// Historical version of [`text`](Self::text).
-    </span><span class="kw">pub fn </span>text_at&lt;O: AsRef&lt;ExId&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        obj: O,
-        heads: <span class="kw-2">&amp;</span>[ChangeHash],
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt; {
-        <span class="kw">let </span>obj = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>.<span class="number">0</span>;
-        <span class="kw">let </span>clock = <span class="self">self</span>.clock_at(heads)<span class="question-mark">?</span>;
-        <span class="kw">let </span>query = <span class="self">self</span>.ops.search(<span class="kw-2">&amp;</span>obj, query::ListValsAt::new(clock));
-        <span class="kw">let </span><span class="kw-2">mut </span>buffer = String::new();
-        <span class="kw">for </span>q <span class="kw">in </span><span class="kw-2">&amp;</span>query.ops {
-            <span class="kw">if let </span>OpType::Put(ScalarValue::Str(s)) = <span class="kw-2">&amp;</span>q.action {
-                buffer.push_str(s);
-            } <span class="kw">else </span>{
-                buffer.push(<span class="string">&#39;\u{fffc}&#39;</span>);
-            }
-        }
-        <span class="prelude-val">Ok</span>(buffer)
-    }
-
-    <span class="comment">// TODO - I need to return these OpId&#39;s here **only** to get
-    // the legacy conflicts format of { [opid]: value }
-    // Something better?
-    </span><span class="doccomment">/// Get a value out of the document.
-    ///
-    /// Returns both the value and the id of the operation that created it, useful for handling
-    /// conflicts and serves as the object id if the value is an object.
-    </span><span class="kw">pub fn </span>get&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        obj: O,
-        prop: P,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
-        <span class="prelude-val">Ok</span>(<span class="self">self</span>.get_all(obj, prop.into())<span class="question-mark">?</span>.last().cloned())
-    }
-
-    <span class="doccomment">/// Historical version of [`get`](Self::get).
-    </span><span class="kw">pub fn </span>get_at&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        obj: O,
-        prop: P,
-        heads: <span class="kw-2">&amp;</span>[ChangeHash],
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
-        <span class="prelude-val">Ok</span>(<span class="self">self</span>.get_all_at(obj, prop, heads)<span class="question-mark">?</span>.last().cloned())
-    }
-
-    <span class="doccomment">/// Get all conflicting values out of the document at this prop that conflict.
-    ///
-    /// Returns both the value and the id of the operation that created it, useful for handling
-    /// conflicts and serves as the object id if the value is an object.
-    </span><span class="kw">pub fn </span>get_all&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        obj: O,
-        prop: P,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
-        <span class="kw">let </span>obj = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>.<span class="number">0</span>;
-        <span class="kw">let </span><span class="kw-2">mut </span>result = <span class="kw">match </span>prop.into() {
-            Prop::Map(p) =&gt; {
-                <span class="kw">let </span>prop = <span class="self">self</span>.ops.m.props.lookup(<span class="kw-2">&amp;</span>p);
-                <span class="kw">if let </span><span class="prelude-val">Some</span>(p) = prop {
-                    <span class="self">self</span>.ops
-                        .search(<span class="kw-2">&amp;</span>obj, query::Prop::new(p))
-                        .ops
-                        .into_iter()
-                        .map(|o| (o.value(), <span class="self">self</span>.id_to_exid(o.id)))
-                        .collect()
-                } <span class="kw">else </span>{
-                    <span class="macro">vec!</span>[]
-                }
-            }
-            Prop::Seq(n) =&gt; {
-                <span class="kw">let </span>obj_type = <span class="self">self</span>.ops.object_type(<span class="kw-2">&amp;</span>obj);
-                <span class="kw">let </span>encoding = obj_type
-                    .map(|o| ListEncoding::new(o, <span class="self">self</span>.text_encoding))
-                    .unwrap_or_default();
-                <span class="self">self</span>.ops
-                    .search(<span class="kw-2">&amp;</span>obj, query::Nth::new(n, encoding))
-                    .ops
-                    .into_iter()
-                    .map(|o| (o.value(), <span class="self">self</span>.id_to_exid(o.id)))
-                    .collect()
-            }
-        };
-        result.sort_by(|a, b| b.<span class="number">1</span>.cmp(<span class="kw-2">&amp;</span>a.<span class="number">1</span>));
-        <span class="prelude-val">Ok</span>(result)
-    }
-
-    <span class="doccomment">/// Historical version of [`get_all`](Self::get_all).
-    </span><span class="kw">pub fn </span>get_all_at&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        obj: O,
-        prop: P,
-        heads: <span class="kw-2">&amp;</span>[ChangeHash],
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
-        <span class="kw">let </span>prop = prop.into();
-        <span class="kw">let </span>obj = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>.<span class="number">0</span>;
-        <span class="kw">let </span>clock = <span class="self">self</span>.clock_at(heads)<span class="question-mark">?</span>;
-        <span class="kw">let </span>result = <span class="kw">match </span>prop {
-            Prop::Map(p) =&gt; {
-                <span class="kw">let </span>prop = <span class="self">self</span>.ops.m.props.lookup(<span class="kw-2">&amp;</span>p);
-                <span class="kw">if let </span><span class="prelude-val">Some</span>(p) = prop {
-                    <span class="self">self</span>.ops
-                        .search(<span class="kw-2">&amp;</span>obj, query::PropAt::new(p, clock))
-                        .ops
-                        .into_iter()
-                        .map(|o| (o.clone_value(), <span class="self">self</span>.id_to_exid(o.id)))
-                        .collect()
-                } <span class="kw">else </span>{
-                    <span class="macro">vec!</span>[]
-                }
-            }
-            Prop::Seq(n) =&gt; {
-                <span class="kw">let </span>obj_type = <span class="self">self</span>.ops.object_type(<span class="kw-2">&amp;</span>obj);
-                <span class="kw">let </span>encoding = obj_type
-                    .map(|o| ListEncoding::new(o, <span class="self">self</span>.text_encoding))
-                    .unwrap_or_default();
-                <span class="self">self</span>.ops
-                    .search(<span class="kw-2">&amp;</span>obj, query::NthAt::new(n, clock, encoding))
-                    .ops
-                    .into_iter()
-                    .map(|o| (o.clone_value(), <span class="self">self</span>.id_to_exid(o.id)))
-                    .collect()
-            }
-        };
-        <span class="prelude-val">Ok</span>(result)
-    }
-
     <span class="doccomment">/// Load a document.
     </span><span class="kw">pub fn </span>load(data: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, AutomergeError&gt; {
         <span class="self">Self</span>::load_with::&lt;()&gt;(data, VerificationMode::Check, <span class="prelude-val">None</span>)
     }
 
-    <span class="kw">pub fn </span>load_unverified_heads(data: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, AutomergeError&gt; {
+    <span class="doccomment">/// Load a document without verifying the head hashes
+    ///
+    /// This is useful for debugging as it allows you to examine a corrupted document.
+    </span><span class="kw">pub fn </span>load_unverified_heads(data: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, AutomergeError&gt; {
         <span class="self">Self</span>::load_with::&lt;()&gt;(data, VerificationMode::DontCheck, <span class="prelude-val">None</span>)
     }
 
-    <span class="doccomment">/// Load a document.
+    <span class="doccomment">/// Load a document with an observer
     </span><span class="attr">#[tracing::instrument(skip(data, observer), err)]
     </span><span class="kw">pub fn </span>load_with&lt;Obs: OpObserver&gt;(
         data: <span class="kw-2">&amp;</span>[u8],
@@ -2137,11 +1880,17 @@
     }
 
     <span class="doccomment">/// Load an incremental save of a document.
+    ///
+    /// Unlike `load` this imports changes into an existing document. It will work with both the
+    /// output of [`Self::save`] and [`Self::save_incremental`]
+    ///
+    /// The return value is the number of ops which were applied, this is not useful and will
+    /// change in future.
     </span><span class="kw">pub fn </span>load_incremental(<span class="kw-2">&amp;mut </span><span class="self">self</span>, data: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;usize, AutomergeError&gt; {
         <span class="self">self</span>.load_incremental_with::&lt;()&gt;(data, <span class="prelude-val">None</span>)
     }
 
-    <span class="doccomment">/// Load an incremental save of a document.
+    <span class="doccomment">/// Like [`Self::load_incremental`] but with an observer
     </span><span class="kw">pub fn </span>load_incremental_with&lt;Obs: OpObserver&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         data: <span class="kw-2">&amp;</span>[u8],
@@ -2171,6 +1920,9 @@
     }
 
     <span class="doccomment">/// Apply changes to this document.
+    ///
+    /// This is idemptotent in the sense that if a change has already been applied it will be
+    /// ignored.
     </span><span class="kw">pub fn </span>apply_changes(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         changes: <span class="kw">impl </span>IntoIterator&lt;Item = Change&gt;,
@@ -2178,7 +1930,7 @@
         <span class="self">self</span>.apply_changes_with::&lt;<span class="kw">_</span>, ()&gt;(changes, <span class="prelude-val">None</span>)
     }
 
-    <span class="doccomment">/// Apply changes to this document.
+    <span class="doccomment">/// Like [`Self::apply_changes`] but with an observer
     </span><span class="kw">pub fn </span>apply_changes_with&lt;I: IntoIterator&lt;Item = Change&gt;, Obs: OpObserver&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         changes: I,
@@ -2313,6 +2065,10 @@
     }
 
     <span class="doccomment">/// Save the entirety of this document in a compact form.
+    ///
+    /// This takes a mutable reference to self because it saves the heads of the last save so that
+    /// `save_incremental` can be used to produce only the changes since the last `save`. This API
+    /// will be changing in future.
     </span><span class="kw">pub fn </span>save(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Vec&lt;u8&gt; {
         <span class="kw">let </span>heads = <span class="self">self</span>.get_heads();
         <span class="kw">let </span>c = <span class="self">self</span>.history.iter();
@@ -2328,7 +2084,8 @@
         bytes
     }
 
-    <span class="kw">pub fn </span>save_nocompress(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Vec&lt;u8&gt; {
+    <span class="doccomment">/// Save this document, but don&#39;t run it through DEFLATE afterwards
+    </span><span class="kw">pub fn </span>save_nocompress(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Vec&lt;u8&gt; {
         <span class="kw">let </span>heads = <span class="self">self</span>.get_heads();
         <span class="kw">let </span>c = <span class="self">self</span>.history.iter();
         <span class="kw">let </span>bytes = <span class="kw">crate</span>::storage::save::save_document(
@@ -2343,7 +2100,12 @@
         bytes
     }
 
-    <span class="doccomment">/// Save the changes since last save in a compact form.
+    <span class="doccomment">/// Save the changes since the last call to [Self::save`]
+    ///
+    /// The output of this will not be a compressed document format, but a series of individual
+    /// changes. This is useful if you know you have only made a small change since the last `save`
+    /// and you want to immediately send it somewhere (e.g. you&#39;ve inserted a single character in a
+    /// text object).
     </span><span class="kw">pub fn </span>save_incremental(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Vec&lt;u8&gt; {
         <span class="kw">let </span>changes = <span class="self">self
             </span>.get_changes(<span class="self">self</span>.saved.as_slice())
@@ -2385,33 +2147,6 @@
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="doccomment">/// Get the hashes of the changes in this document that aren&#39;t transitive dependencies of the
-    /// given `heads`.
-    </span><span class="kw">pub fn </span>get_missing_deps(<span class="kw-2">&amp;</span><span class="self">self</span>, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; Vec&lt;ChangeHash&gt; {
-        <span class="kw">let </span>in_queue: HashSet&lt;<span class="kw">_</span>&gt; = <span class="self">self</span>.queue.iter().map(|change| change.hash()).collect();
-        <span class="kw">let </span><span class="kw-2">mut </span>missing = HashSet::new();
-
-        <span class="kw">for </span>head <span class="kw">in </span><span class="self">self</span>.queue.iter().flat_map(|change| change.deps()) {
-            <span class="kw">if </span>!<span class="self">self</span>.history_index.contains_key(head) {
-                missing.insert(head);
-            }
-        }
-
-        <span class="kw">for </span>head <span class="kw">in </span>heads {
-            <span class="kw">if </span>!<span class="self">self</span>.history_index.contains_key(head) {
-                missing.insert(head);
-            }
-        }
-
-        <span class="kw">let </span><span class="kw-2">mut </span>missing = missing
-            .into_iter()
-            .filter(|hash| !in_queue.contains(hash))
-            .copied()
-            .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
-        missing.sort();
-        missing
-    }
-
     <span class="doccomment">/// Get the changes since `have_deps` in this document using a clock internally.
     </span><span class="kw">fn </span>get_changes_clock(<span class="kw-2">&amp;</span><span class="self">self</span>, have_deps: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw-2">&amp;</span>Change&gt;, AutomergeError&gt; {
         <span class="comment">// get the clock for the given deps
@@ -2438,10 +2173,6 @@
             .into_iter()
             .map(|i| <span class="kw-2">&amp;</span><span class="self">self</span>.history[i])
             .collect())
-    }
-
-    <span class="kw">pub fn </span>get_changes(<span class="kw-2">&amp;</span><span class="self">self</span>, have_deps: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw-2">&amp;</span>Change&gt;, AutomergeError&gt; {
-        <span class="self">self</span>.get_changes_clock(have_deps)
     }
 
     <span class="doccomment">/// Get the last change this actor made to the document.
@@ -2473,47 +2204,6 @@
         } <span class="kw">else </span>{
             <span class="prelude-val">Ok</span>(Clock::new())
         }
-    }
-
-    <span class="doccomment">/// Get a change by its hash.
-    </span><span class="kw">pub fn </span>get_change_by_hash(<span class="kw-2">&amp;</span><span class="self">self</span>, hash: <span class="kw-2">&amp;</span>ChangeHash) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Change&gt; {
-        <span class="self">self</span>.history_index
-            .get(hash)
-            .and_then(|index| <span class="self">self</span>.history.get(<span class="kw-2">*</span>index))
-    }
-
-    <span class="doccomment">/// Get the changes that the other document added compared to this document.
-    </span><span class="attr">#[tracing::instrument(skip(<span class="self">self</span>, other))]
-    </span><span class="kw">pub fn </span>get_changes_added&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">Self</span>) -&gt; Vec&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Change&gt; {
-        <span class="comment">// Depth-first traversal from the heads through the dependency graph,
-        // until we reach a change that is already present in other
-        </span><span class="kw">let </span><span class="kw-2">mut </span>stack: Vec&lt;<span class="kw">_</span>&gt; = other.get_heads();
-        <span class="macro">tracing::trace!</span>(their_heads=<span class="question-mark">?</span>stack, <span class="string">&quot;finding changes to merge&quot;</span>);
-        <span class="kw">let </span><span class="kw-2">mut </span>seen_hashes = HashSet::new();
-        <span class="kw">let </span><span class="kw-2">mut </span>added_change_hashes = Vec::new();
-        <span class="kw">while let </span><span class="prelude-val">Some</span>(hash) = stack.pop() {
-            <span class="kw">if </span>!seen_hashes.contains(<span class="kw-2">&amp;</span>hash) &amp;&amp; <span class="self">self</span>.get_change_by_hash(<span class="kw-2">&amp;</span>hash).is_none() {
-                seen_hashes.insert(hash);
-                added_change_hashes.push(hash);
-                <span class="kw">if let </span><span class="prelude-val">Some</span>(change) = other.get_change_by_hash(<span class="kw-2">&amp;</span>hash) {
-                    stack.extend(change.deps());
-                }
-            }
-        }
-        <span class="comment">// Return those changes in the reverse of the order in which the depth-first search
-        // found them. This is not necessarily a topological sort, but should usually be close.
-        </span>added_change_hashes.reverse();
-        added_change_hashes
-            .into_iter()
-            .filter_map(|h| other.get_change_by_hash(<span class="kw-2">&amp;</span>h))
-            .collect()
-    }
-
-    <span class="doccomment">/// Get the heads of this document.
-    </span><span class="kw">pub fn </span>get_heads(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;ChangeHash&gt; {
-        <span class="kw">let </span><span class="kw-2">mut </span>deps: Vec&lt;<span class="kw">_</span>&gt; = <span class="self">self</span>.deps.iter().copied().collect();
-        deps.sort_unstable();
-        deps
     }
 
     <span class="kw">fn </span>get_hash(<span class="kw-2">&amp;</span><span class="self">self</span>, actor: usize, seq: u64) -&gt; <span class="prelude-ty">Result</span>&lt;ChangeHash, AutomergeError&gt; {
@@ -2569,7 +2259,8 @@
         <span class="self">self</span>.deps.insert(change.hash());
     }
 
-    <span class="kw">pub fn </span>import(<span class="kw-2">&amp;</span><span class="self">self</span>, s: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;(ExId, ObjType), AutomergeError&gt; {
+    <span class="attr">#[doc(hidden)]
+    </span><span class="kw">pub fn </span>import(<span class="kw-2">&amp;</span><span class="self">self</span>, s: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;(ExId, ObjType), AutomergeError&gt; {
         <span class="kw">if </span>s == <span class="string">&quot;_root&quot; </span>{
             <span class="prelude-val">Ok</span>((ExId::Root, ObjType::Map))
         } <span class="kw">else </span>{
@@ -2754,6 +2445,343 @@
         }
 
         op
+    }
+
+    <span class="doccomment">/// Get the heads of this document.
+    </span><span class="kw">pub fn </span>get_heads(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;ChangeHash&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>deps: Vec&lt;<span class="kw">_</span>&gt; = <span class="self">self</span>.deps.iter().copied().collect();
+        deps.sort_unstable();
+        deps
+    }
+
+    <span class="kw">pub fn </span>get_changes(<span class="kw-2">&amp;</span><span class="self">self</span>, have_deps: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw-2">&amp;</span>Change&gt;, AutomergeError&gt; {
+        <span class="self">self</span>.get_changes_clock(have_deps)
+    }
+
+    <span class="doccomment">/// Get changes in `other` that are not in `self
+    </span><span class="kw">pub fn </span>get_changes_added&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">Self</span>) -&gt; Vec&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Change&gt; {
+        <span class="comment">// Depth-first traversal from the heads through the dependency graph,
+        // until we reach a change that is already present in other
+        </span><span class="kw">let </span><span class="kw-2">mut </span>stack: Vec&lt;<span class="kw">_</span>&gt; = other.get_heads();
+        <span class="macro">tracing::trace!</span>(their_heads=<span class="question-mark">?</span>stack, <span class="string">&quot;finding changes to merge&quot;</span>);
+        <span class="kw">let </span><span class="kw-2">mut </span>seen_hashes = HashSet::new();
+        <span class="kw">let </span><span class="kw-2">mut </span>added_change_hashes = Vec::new();
+        <span class="kw">while let </span><span class="prelude-val">Some</span>(hash) = stack.pop() {
+            <span class="kw">if </span>!seen_hashes.contains(<span class="kw-2">&amp;</span>hash) &amp;&amp; <span class="self">self</span>.get_change_by_hash(<span class="kw-2">&amp;</span>hash).is_none() {
+                seen_hashes.insert(hash);
+                added_change_hashes.push(hash);
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(change) = other.get_change_by_hash(<span class="kw-2">&amp;</span>hash) {
+                    stack.extend(change.deps());
+                }
+            }
+        }
+        <span class="comment">// Return those changes in the reverse of the order in which the depth-first search
+        // found them. This is not necessarily a topological sort, but should usually be close.
+        </span>added_change_hashes.reverse();
+        added_change_hashes
+            .into_iter()
+            .filter_map(|h| other.get_change_by_hash(<span class="kw-2">&amp;</span>h))
+            .collect()
+    }
+}
+
+<span class="kw">impl </span>ReadDoc <span class="kw">for </span>Automerge {
+    <span class="kw">fn </span>parents&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;Parents&lt;<span class="lifetime">&#39;_</span>&gt;, AutomergeError&gt; {
+        <span class="kw">let </span>(obj_id, <span class="kw">_</span>) = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(<span class="self">self</span>.ops.parents(obj_id))
+    }
+
+    <span class="kw">fn </span>path_to_object&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(ExId, Prop)&gt;, AutomergeError&gt; {
+        <span class="prelude-val">Ok</span>(<span class="self">self</span>.parents(obj.as_ref().clone())<span class="question-mark">?</span>.path())
+    }
+
+    <span class="kw">fn </span>keys&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; Keys&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, <span class="kw">_</span>)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
+            <span class="kw">let </span>iter_keys = <span class="self">self</span>.ops.keys(obj);
+            Keys::new(<span class="self">self</span>, iter_keys)
+        } <span class="kw">else </span>{
+            Keys::new(<span class="self">self</span>, <span class="prelude-val">None</span>)
+        }
+    }
+
+    <span class="kw">fn </span>keys_at&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; KeysAt&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, <span class="kw">_</span>)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
+            <span class="kw">if let </span><span class="prelude-val">Ok</span>(clock) = <span class="self">self</span>.clock_at(heads) {
+                <span class="kw">return </span>KeysAt::new(<span class="self">self</span>, <span class="self">self</span>.ops.keys_at(obj, clock));
+            }
+        }
+        KeysAt::new(<span class="self">self</span>, <span class="prelude-val">None</span>)
+    }
+
+    <span class="kw">fn </span>map_range&lt;O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;String&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        range: R,
+    ) -&gt; MapRange&lt;<span class="lifetime">&#39;_</span>, R&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, <span class="kw">_</span>)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
+            MapRange::new(<span class="self">self</span>, <span class="self">self</span>.ops.map_range(obj, range))
+        } <span class="kw">else </span>{
+            MapRange::new(<span class="self">self</span>, <span class="prelude-val">None</span>)
+        }
+    }
+
+    <span class="kw">fn </span>map_range_at&lt;O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;String&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        range: R,
+        heads: <span class="kw-2">&amp;</span>[ChangeHash],
+    ) -&gt; MapRangeAt&lt;<span class="lifetime">&#39;_</span>, R&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, <span class="kw">_</span>)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
+            <span class="kw">if let </span><span class="prelude-val">Ok</span>(clock) = <span class="self">self</span>.clock_at(heads) {
+                <span class="kw">let </span>iter_range = <span class="self">self</span>.ops.map_range_at(obj, range, clock);
+                <span class="kw">return </span>MapRangeAt::new(<span class="self">self</span>, iter_range);
+            }
+        }
+        MapRangeAt::new(<span class="self">self</span>, <span class="prelude-val">None</span>)
+    }
+
+    <span class="kw">fn </span>list_range&lt;O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;usize&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        range: R,
+    ) -&gt; ListRange&lt;<span class="lifetime">&#39;_</span>, R&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, <span class="kw">_</span>)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
+            ListRange::new(<span class="self">self</span>, <span class="self">self</span>.ops.list_range(obj, range))
+        } <span class="kw">else </span>{
+            ListRange::new(<span class="self">self</span>, <span class="prelude-val">None</span>)
+        }
+    }
+
+    <span class="kw">fn </span>list_range_at&lt;O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;usize&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        range: R,
+        heads: <span class="kw-2">&amp;</span>[ChangeHash],
+    ) -&gt; ListRangeAt&lt;<span class="lifetime">&#39;_</span>, R&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, <span class="kw">_</span>)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
+            <span class="kw">if let </span><span class="prelude-val">Ok</span>(clock) = <span class="self">self</span>.clock_at(heads) {
+                <span class="kw">let </span>iter_range = <span class="self">self</span>.ops.list_range_at(obj, range, clock);
+                <span class="kw">return </span>ListRangeAt::new(<span class="self">self</span>, iter_range);
+            }
+        }
+        ListRangeAt::new(<span class="self">self</span>, <span class="prelude-val">None</span>)
+    }
+
+    <span class="kw">fn </span>values&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; Values&lt;<span class="lifetime">&#39;_</span>&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, obj_type)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
+            <span class="kw">if </span>obj_type.is_sequence() {
+                Values::new(<span class="self">self</span>, <span class="self">self</span>.ops.list_range(obj, ..))
+            } <span class="kw">else </span>{
+                Values::new(<span class="self">self</span>, <span class="self">self</span>.ops.map_range(obj, ..))
+            }
+        } <span class="kw">else </span>{
+            Values::empty(<span class="self">self</span>)
+        }
+    }
+
+    <span class="kw">fn </span>values_at&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; Values&lt;<span class="lifetime">&#39;_</span>&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>((obj, obj_type)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
+            <span class="kw">if let </span><span class="prelude-val">Ok</span>(clock) = <span class="self">self</span>.clock_at(heads) {
+                <span class="kw">return match </span>obj_type {
+                    ObjType::Map | ObjType::Table =&gt; {
+                        <span class="kw">let </span>iter_range = <span class="self">self</span>.ops.map_range_at(obj, .., clock);
+                        Values::new(<span class="self">self</span>, iter_range)
+                    }
+                    ObjType::List | ObjType::Text =&gt; {
+                        <span class="kw">let </span>iter_range = <span class="self">self</span>.ops.list_range_at(obj, .., clock);
+                        Values::new(<span class="self">self</span>, iter_range)
+                    }
+                };
+            }
+        }
+        Values::empty(<span class="self">self</span>)
+    }
+
+    <span class="kw">fn </span>length&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; usize {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>((inner_obj, obj_type)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
+            <span class="kw">if </span>obj_type == ObjType::Map || obj_type == ObjType::Table {
+                <span class="self">self</span>.keys(obj).count()
+            } <span class="kw">else </span>{
+                <span class="kw">let </span>encoding = ListEncoding::new(obj_type, <span class="self">self</span>.text_encoding);
+                <span class="self">self</span>.ops.search(<span class="kw-2">&amp;</span>inner_obj, query::Len::new(encoding)).len
+            }
+        } <span class="kw">else </span>{
+            <span class="number">0
+        </span>}
+    }
+
+    <span class="kw">fn </span>length_at&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; usize {
+        <span class="kw">if let </span><span class="prelude-val">Ok</span>((inner_obj, obj_type)) = <span class="self">self</span>.exid_to_obj(obj.as_ref()) {
+            <span class="kw">if let </span><span class="prelude-val">Ok</span>(clock) = <span class="self">self</span>.clock_at(heads) {
+                <span class="kw">return if </span>obj_type == ObjType::Map || obj_type == ObjType::Table {
+                    <span class="self">self</span>.keys_at(obj, heads).count()
+                } <span class="kw">else </span>{
+                    <span class="kw">let </span>encoding = ListEncoding::new(obj_type, <span class="self">self</span>.text_encoding);
+                    <span class="self">self</span>.ops
+                        .search(<span class="kw-2">&amp;</span>inner_obj, query::LenAt::new(clock, encoding))
+                        .len
+                };
+            }
+        }
+        <span class="number">0
+    </span>}
+
+    <span class="kw">fn </span>object_type&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;ObjType, AutomergeError&gt; {
+        <span class="kw">let </span>(<span class="kw">_</span>, obj_type) = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(obj_type)
+    }
+
+    <span class="kw">fn </span>text&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt; {
+        <span class="kw">let </span>obj = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>.<span class="number">0</span>;
+        <span class="kw">let </span>query = <span class="self">self</span>.ops.search(<span class="kw-2">&amp;</span>obj, query::ListVals::new());
+        <span class="kw">let </span><span class="kw-2">mut </span>buffer = String::new();
+        <span class="kw">for </span>q <span class="kw">in </span><span class="kw-2">&amp;</span>query.ops {
+            buffer.push_str(q.to_str());
+        }
+        <span class="prelude-val">Ok</span>(buffer)
+    }
+
+    <span class="kw">fn </span>text_at&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        heads: <span class="kw-2">&amp;</span>[ChangeHash],
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt; {
+        <span class="kw">let </span>obj = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>.<span class="number">0</span>;
+        <span class="kw">let </span>clock = <span class="self">self</span>.clock_at(heads)<span class="question-mark">?</span>;
+        <span class="kw">let </span>query = <span class="self">self</span>.ops.search(<span class="kw-2">&amp;</span>obj, query::ListValsAt::new(clock));
+        <span class="kw">let </span><span class="kw-2">mut </span>buffer = String::new();
+        <span class="kw">for </span>q <span class="kw">in </span><span class="kw-2">&amp;</span>query.ops {
+            <span class="kw">if let </span>OpType::Put(ScalarValue::Str(s)) = <span class="kw-2">&amp;</span>q.action {
+                buffer.push_str(s);
+            } <span class="kw">else </span>{
+                buffer.push(<span class="string">&#39;\u{fffc}&#39;</span>);
+            }
+        }
+        <span class="prelude-val">Ok</span>(buffer)
+    }
+
+    <span class="kw">fn </span>get&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        prop: P,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
+        <span class="prelude-val">Ok</span>(<span class="self">self</span>.get_all(obj, prop.into())<span class="question-mark">?</span>.last().cloned())
+    }
+
+    <span class="kw">fn </span>get_at&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        prop: P,
+        heads: <span class="kw-2">&amp;</span>[ChangeHash],
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
+        <span class="prelude-val">Ok</span>(<span class="self">self</span>.get_all_at(obj, prop, heads)<span class="question-mark">?</span>.last().cloned())
+    }
+
+    <span class="kw">fn </span>get_all&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        prop: P,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
+        <span class="kw">let </span>obj = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>.<span class="number">0</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>result = <span class="kw">match </span>prop.into() {
+            Prop::Map(p) =&gt; {
+                <span class="kw">let </span>prop = <span class="self">self</span>.ops.m.props.lookup(<span class="kw-2">&amp;</span>p);
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(p) = prop {
+                    <span class="self">self</span>.ops
+                        .search(<span class="kw-2">&amp;</span>obj, query::Prop::new(p))
+                        .ops
+                        .into_iter()
+                        .map(|o| (o.value(), <span class="self">self</span>.id_to_exid(o.id)))
+                        .collect()
+                } <span class="kw">else </span>{
+                    <span class="macro">vec!</span>[]
+                }
+            }
+            Prop::Seq(n) =&gt; {
+                <span class="kw">let </span>obj_type = <span class="self">self</span>.ops.object_type(<span class="kw-2">&amp;</span>obj);
+                <span class="kw">let </span>encoding = obj_type
+                    .map(|o| ListEncoding::new(o, <span class="self">self</span>.text_encoding))
+                    .unwrap_or_default();
+                <span class="self">self</span>.ops
+                    .search(<span class="kw-2">&amp;</span>obj, query::Nth::new(n, encoding))
+                    .ops
+                    .into_iter()
+                    .map(|o| (o.value(), <span class="self">self</span>.id_to_exid(o.id)))
+                    .collect()
+            }
+        };
+        result.sort_by(|a, b| b.<span class="number">1</span>.cmp(<span class="kw-2">&amp;</span>a.<span class="number">1</span>));
+        <span class="prelude-val">Ok</span>(result)
+    }
+
+    <span class="kw">fn </span>get_all_at&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        prop: P,
+        heads: <span class="kw-2">&amp;</span>[ChangeHash],
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(Value&lt;<span class="lifetime">&#39;_</span>&gt;, ExId)&gt;, AutomergeError&gt; {
+        <span class="kw">let </span>prop = prop.into();
+        <span class="kw">let </span>obj = <span class="self">self</span>.exid_to_obj(obj.as_ref())<span class="question-mark">?</span>.<span class="number">0</span>;
+        <span class="kw">let </span>clock = <span class="self">self</span>.clock_at(heads)<span class="question-mark">?</span>;
+        <span class="kw">let </span>result = <span class="kw">match </span>prop {
+            Prop::Map(p) =&gt; {
+                <span class="kw">let </span>prop = <span class="self">self</span>.ops.m.props.lookup(<span class="kw-2">&amp;</span>p);
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(p) = prop {
+                    <span class="self">self</span>.ops
+                        .search(<span class="kw-2">&amp;</span>obj, query::PropAt::new(p, clock))
+                        .ops
+                        .into_iter()
+                        .map(|o| (o.clone_value(), <span class="self">self</span>.id_to_exid(o.id)))
+                        .collect()
+                } <span class="kw">else </span>{
+                    <span class="macro">vec!</span>[]
+                }
+            }
+            Prop::Seq(n) =&gt; {
+                <span class="kw">let </span>obj_type = <span class="self">self</span>.ops.object_type(<span class="kw-2">&amp;</span>obj);
+                <span class="kw">let </span>encoding = obj_type
+                    .map(|o| ListEncoding::new(o, <span class="self">self</span>.text_encoding))
+                    .unwrap_or_default();
+                <span class="self">self</span>.ops
+                    .search(<span class="kw-2">&amp;</span>obj, query::NthAt::new(n, clock, encoding))
+                    .ops
+                    .into_iter()
+                    .map(|o| (o.clone_value(), <span class="self">self</span>.id_to_exid(o.id)))
+                    .collect()
+            }
+        };
+        <span class="prelude-val">Ok</span>(result)
+    }
+
+    <span class="kw">fn </span>get_missing_deps(<span class="kw-2">&amp;</span><span class="self">self</span>, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; Vec&lt;ChangeHash&gt; {
+        <span class="kw">let </span>in_queue: HashSet&lt;<span class="kw">_</span>&gt; = <span class="self">self</span>.queue.iter().map(|change| change.hash()).collect();
+        <span class="kw">let </span><span class="kw-2">mut </span>missing = HashSet::new();
+
+        <span class="kw">for </span>head <span class="kw">in </span><span class="self">self</span>.queue.iter().flat_map(|change| change.deps()) {
+            <span class="kw">if </span>!<span class="self">self</span>.history_index.contains_key(head) {
+                missing.insert(head);
+            }
+        }
+
+        <span class="kw">for </span>head <span class="kw">in </span>heads {
+            <span class="kw">if </span>!<span class="self">self</span>.history_index.contains_key(head) {
+                missing.insert(head);
+            }
+        }
+
+        <span class="kw">let </span><span class="kw-2">mut </span>missing = missing
+            .into_iter()
+            .filter(|hash| !in_queue.contains(hash))
+            .copied()
+            .collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;();
+        missing.sort();
+        missing
+    }
+
+    <span class="kw">fn </span>get_change_by_hash(<span class="kw-2">&amp;</span><span class="self">self</span>, hash: <span class="kw-2">&amp;</span>ChangeHash) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Change&gt; {
+        <span class="self">self</span>.history_index
+            .get(hash)
+            .and_then(|index| <span class="self">self</span>.history.get(<span class="kw-2">*</span>index))
     }
 }
 
