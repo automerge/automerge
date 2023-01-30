@@ -1,5 +1,6 @@
 use anyhow::Result;
 use automerge as am;
+use automerge::ReadDoc;
 
 use crate::{color_json::print_colored_json, SkipVerifyFlag};
 

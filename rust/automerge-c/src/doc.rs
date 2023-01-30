@@ -1,5 +1,7 @@
 use automerge as am;
+use automerge::sync::SyncDoc;
 use automerge::transaction::{CommitOptions, Transactable};
+use automerge::ReadDoc;
 use std::ops::{Deref, DerefMut};
 
 use crate::actor_id::{to_actor_id, AMactorId};
@@ -291,7 +293,7 @@ pub unsafe extern "C" fn AMgenerateSyncMessage(
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let sync_state = to_sync_state_mut!(sync_state);
-    to_result(doc.generate_sync_message(sync_state.as_mut()))
+    to_result(doc.sync().generate_sync_message(sync_state.as_mut()))
 }
 
 /// \memberof AMdoc
@@ -708,7 +710,10 @@ pub unsafe extern "C" fn AMreceiveSyncMessage(
     let doc = to_doc_mut!(doc);
     let sync_state = to_sync_state_mut!(sync_state);
     let sync_message = to_sync_message!(sync_message);
-    to_result(doc.receive_sync_message(sync_state.as_mut(), sync_message.as_ref().clone()))
+    to_result(
+        doc.sync()
+            .receive_sync_message(sync_state.as_mut(), sync_message.as_ref().clone()),
+    )
 }
 
 /// \memberof AMdoc

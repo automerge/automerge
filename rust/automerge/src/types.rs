@@ -143,12 +143,17 @@ impl fmt::Display for ActorId {
     }
 }
 
+/// The type of an object
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, Copy, Hash)]
 #[serde(rename_all = "camelCase", untagged)]
 pub enum ObjType {
+    /// A map
     Map,
+    /// Retained for backwards compatibility, tables are identical to maps
     Table,
+    /// A sequence of arbitrary values
     List,
+    /// A sequence of characters
     Text,
 }
 
@@ -378,9 +383,15 @@ pub(crate) enum Key {
     Seq(ElemId),
 }
 
+/// A property of an object
+///
+/// This is either a string representing a property in a map, or an integer
+/// which is the index into a sequence
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone)]
 pub enum Prop {
+    /// A property in a map
     Map(String),
+    /// An index into a sequence
     Seq(usize),
 }
 
@@ -454,9 +465,17 @@ impl ObjId {
     }
 }
 
+/// How indexes into text sequeces are calculated
+///
+/// Automerge text objects are internally sequences of utf8 characters. This
+/// means that in environments (such as javascript) which use a different
+/// encoding the indexes into the text sequence will be different. This enum
+/// represents the different ways indexes can be calculated.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TextEncoding {
+    /// The indexes are calculated using the utf8 encoding
     Utf8,
+    /// The indexes are calculated using the utf16 encoding
     Utf16,
 }
 

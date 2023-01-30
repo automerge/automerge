@@ -3,6 +3,14 @@ use crate::op_set::OpSet;
 use crate::types::{ListEncoding, ObjId};
 use crate::{exid::ExId, Prop};
 
+/// An iterator over the "parents" of an object
+///
+/// The "parent" of an object in this context is the ([`ExId`], [`Prop`]) pair which specifies the
+/// location of this object in the composite object which contains it. Each element in the iterator
+/// is a [`Parent`], yielded in reverse order. This means that once the iterator returns `None` you
+/// have reached the root of the document.
+///
+/// This is returned by [`crate::ReadDoc::parents`]
 #[derive(Debug)]
 pub struct Parents<'a> {
     pub(crate) obj: ObjId,
@@ -10,9 +18,10 @@ pub struct Parents<'a> {
 }
 
 impl<'a> Parents<'a> {
-    // returns the path to the object
-    // works even if the object or a parent has been deleted
-    pub fn path(&mut self) -> Vec<(ExId, Prop)> {
+    /// Return the path this `Parents` represents
+    ///
+    /// This is _not_ in reverse order.
+    pub fn path(self) -> Vec<(ExId, Prop)> {
         let mut path = self
             .map(|Parent { obj, prop, .. }| (obj, prop))
             .collect::<Vec<_>>();
@@ -20,10 +29,8 @@ impl<'a> Parents<'a> {
         path
     }
 
-    // returns the path to the object
-    // if the object or one of its parents has been deleted or conflicted out
-    // returns none
-    pub fn visible_path(&mut self) -> Option<Vec<(ExId, Prop)>> {
+    /// Like `path` but returns `None` if the target is not visible
+    pub fn visible_path(self) -> Option<Vec<(ExId, Prop)>> {
         let mut path = Vec::new();
         for Parent { obj, prop, visible } in self {
             if !visible {
@@ -59,17 +66,25 @@ impl<'a> Iterator for Parents<'a> {
     }
 }
 
+/// A component of a path to an object
 #[derive(Debug, PartialEq, Eq)]
 pub struct Parent {
+    /// The object ID this component refers to
     pub obj: ExId,
+    /// The property within `obj` this component refers to
     pub prop: Prop,
+    /// Whether this component is "visible"
+    ///
+    /// An "invisible" component is one where the property is hidden, either because it has been
+    /// deleted or because there is a conflict on this (object, property) pair and this value does
+    /// not win the conflict.
     pub visible: bool,
 }
 
 #[cfg(test)]
 mod tests {
     use super::Parent;
-    use crate::{transaction::Transactable, Prop};
+    use crate::{transaction::Transactable, Prop, ReadDoc};
 
     #[test]
     fn test_invisible_parents() {

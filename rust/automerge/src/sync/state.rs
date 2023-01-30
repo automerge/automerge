@@ -23,13 +23,23 @@ impl From<parse::leb128::Error> for DecodeError {
 }
 
 /// The state of synchronisation with a peer.
+///
+/// This should be persisted using [`Self::encode`] when you know you will be interacting with the
+/// same peer in multiple sessions. [`Self::encode`] only encodes state which should be reused
+/// across connections.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct State {
+    /// The hashes which we know both peers have
     pub shared_heads: Vec<ChangeHash>,
+    /// The heads we last sent
     pub last_sent_heads: Vec<ChangeHash>,
+    /// The heads we last received from them
     pub their_heads: Option<Vec<ChangeHash>>,
+    /// Any specific changes they last said they needed
     pub their_need: Option<Vec<ChangeHash>>,
+    /// The bloom filters summarising what they said they have
     pub their_have: Option<Vec<Have>>,
+    /// The hashes we have sent in this session
     pub sent_hashes: BTreeSet<ChangeHash>,
 
     /// `generate_sync_message` should return `None` if there are no new changes to send. In

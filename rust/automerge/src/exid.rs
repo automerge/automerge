@@ -6,6 +6,10 @@ use std::cmp::{Ord, Ordering};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
+/// An identifier for an object in a document
+///
+/// This can be persisted using `to_bytes` and `TryFrom<&[u8]>` breaking changes to the
+/// serialization format will be considered breaking changes for this library version.
 #[derive(Debug, Clone)]
 pub enum ExId {
     Root,
@@ -17,7 +21,10 @@ const TYPE_ROOT: u8 = 0;
 const TYPE_ID: u8 = 1;
 
 impl ExId {
-    /// Serialize the ExId to a byte array.
+    /// Serialize this object ID to a byte array.
+    ///
+    /// This serialization format is versioned and incompatible changes to it will be considered a
+    /// breaking change for the version of this library.
     pub fn to_bytes(&self) -> Vec<u8> {
         // The serialized format is
         //

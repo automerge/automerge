@@ -2,6 +2,9 @@ use crate::exid::ExId;
 use crate::{Automerge, Value};
 use std::fmt;
 
+/// An iterator over the values in an object
+///
+/// This is returned by the [`crate::ReadDoc::values`] and [`crate::ReadDoc::values_at`] methods
 pub struct Values<'a> {
     range: Box<dyn 'a + ValueIter<'a>>,
     doc: &'a Automerge,
@@ -50,11 +53,5 @@ impl<'a> Iterator for Values<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.range.next_value(self.doc)
-    }
-}
-
-impl<'a> DoubleEndedIterator for Values<'a> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        unimplemented!()
     }
 }

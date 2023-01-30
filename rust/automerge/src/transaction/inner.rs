@@ -717,7 +717,7 @@ struct SpliceArgs<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{transaction::Transactable, ROOT};
+    use crate::{transaction::Transactable, ReadDoc, ROOT};
 
     use super::*;
 

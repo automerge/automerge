@@ -1,5 +1,9 @@
 use crate::{query, Automerge};
 
+/// An iterator over the keys of an object
+///
+/// This is returned by [`crate::ReadDoc::keys`] and method. The returned item is either
+/// the keys of a map, or the encoded element IDs of a sequence.
 #[derive(Debug)]
 pub struct Keys<'a, 'k> {
     keys: Option<query::Keys<'k>>,

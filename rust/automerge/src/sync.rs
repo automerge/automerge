@@ -1,10 +1,79 @@
+//! # Sync Protocol
+//!
+//! The sync protocol is based on this paper:
+//! <https://arxiv.org/abs/2012.00472>, it assumes a reliable in-order stream
+//! between two peers who are synchronizing a document.
+//!
+//! Each peer maintains a [`State`] for each peer they are synchronizing with.
+//! This state tracks things like what the heads of the other peer are and
+//! whether there are in-flight messages. Anything which implements [`SyncDoc`]
+//! can take part in the sync protocol. The flow goes something like this:
+//!
+//! * The initiating peer creates an empty [`State`] and then calls
+//!   [`SyncDoc::generate_sync_message`] to generate new sync message and sends
+//!   it to the receiving peer.
+//! * The receiving peer receives a message from the initiator, creates a new
+//!   [`State`], and calls [`SyncDoc::receive_sync_message`] on it's view of the
+//!   document
+//! * The receiving peer then calls [`SyncDoc::generate_sync_message`] to generate
+//!   a new sync message and send it back to the initiator
+//! * From this point on each peer operates in a loop, receiving a sync message
+//!   from the other peer and then generating a new message to send back.
+//!
+//! ## Example
+//!
+//! ```
+//! use automerge::{transaction::Transactable, sync::{self, SyncDoc}, ReadDoc};
+//! # fn main() -> Result<(), automerge::AutomergeError> {
+//! // Create a document on peer1
+//! let mut peer1 = automerge::AutoCommit::new();
+//! peer1.put(automerge::ROOT, "key", "value")?;
+//!
+//! // Create a state to track our sync with peer2
+//! let mut peer1_state = sync::State::new();
+//! // Generate the initial message to send to peer2, unwrap for brevity
+//! let message1to2 = peer1.sync().generate_sync_message(&mut peer1_state).unwrap();
+//!
+//! // We receive the message on peer2. We don't have a document at all yet
+//! // so we create one
+//! let mut peer2 = automerge::AutoCommit::new();
+//! // We don't have a state for peer1 (it's a new connection), so we create one
+//! let mut peer2_state = sync::State::new();
+//! // Now receive the message from peer 1
+//! peer2.sync().receive_sync_message(&mut peer2_state, message1to2)?;
+//!
+//! // Now we loop, sending messages from one to two and two to one until
+//! // neither has anything new to send
+//!
+//! loop {
+//!     let two_to_one = peer2.sync().generate_sync_message(&mut peer2_state);
+//!     if let Some(message) = two_to_one.as_ref() {
+//!         println!("two to one");
+//!         peer1.sync().receive_sync_message(&mut peer1_state, message.clone())?;
+//!     }
+//!     let one_to_two = peer1.sync().generate_sync_message(&mut peer1_state);
+//!     if let Some(message) = one_to_two.as_ref() {
+//!         println!("one to two");
+//!         peer2.sync().receive_sync_message(&mut peer2_state, message.clone())?;
+//!     }
+//!     if two_to_one.is_none() && one_to_two.is_none() {
+//!         break;
+//!     }
+//! }
+//!
+//! assert_eq!(peer2.get(automerge::ROOT, "key")?.unwrap().0.to_str(), Some("value"));
+//!
+//! # Ok(())
+//! # }
+//! ```
+
 use itertools::Itertools;
 use serde::ser::SerializeMap;
 use std::collections::{HashMap, HashSet};
 
 use crate::{
     storage::{parse, Change as StoredChange, ReadChangeOpError},
-    Automerge, AutomergeError, Change, ChangeHash, OpObserver,
+    Automerge, AutomergeError, Change, ChangeHash, OpObserver, ReadDoc,
 };
 
 mod bloom;
@@ -14,10 +83,38 @@ pub use bloom::{BloomFilter, DecodeError as DecodeBloomError};
 pub use state::DecodeError as DecodeStateError;
 pub use state::{Have, State};
 
+/// A document which can take part in the sync protocol
+///
+/// See the [module level documentation](crate::sync) for more details.
+pub trait SyncDoc {
+    /// Generate a sync message for the remote peer represented by `sync_state`
+    ///
+    /// If this returns `None` then there are no new messages to send, either because we are
+    /// waiting for an acknolwedgement of an in-flight message, or because the remote is up to
+    /// date.
+    fn generate_sync_message(&self, sync_state: &mut State) -> Option<Message>;
+
+    /// Apply a received sync message to this document and `sync_state`
+    fn receive_sync_message(
+        &mut self,
+        sync_state: &mut State,
+        message: Message,
+    ) -> Result<(), AutomergeError>;
+
+    /// Apply a received sync message to this document and `sync_state`, observing any changes with
+    /// `op_observer`
+    fn receive_sync_message_with<Obs: OpObserver>(
+        &mut self,
+        sync_state: &mut State,
+        message: Message,
+        op_observer: &mut Obs,
+    ) -> Result<(), AutomergeError>;
+}
+
 const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identification
 
-impl Automerge {
-    pub fn generate_sync_message(&self, sync_state: &mut State) -> Option<Message> {
+impl SyncDoc for Automerge {
+    fn generate_sync_message(&self, sync_state: &mut State) -> Option<Message> {
         let our_heads = self.get_heads();
 
         let our_need = self.get_missing_deps(sync_state.their_heads.as_ref().unwrap_or(&vec![]));
@@ -106,80 +203,25 @@ impl Automerge {
         Some(sync_message)
     }
 
-    pub fn receive_sync_message(
+    fn receive_sync_message(
         &mut self,
         sync_state: &mut State,
         message: Message,
     ) -> Result<(), AutomergeError> {
-        self.receive_sync_message_with::<()>(sync_state, message, None)
+        self.do_receive_sync_message::<()>(sync_state, message, None)
     }
 
-    pub fn receive_sync_message_with<Obs: OpObserver>(
+    fn receive_sync_message_with<Obs: OpObserver>(
         &mut self,
         sync_state: &mut State,
         message: Message,
-        op_observer: Option<&mut Obs>,
+        op_observer: &mut Obs,
     ) -> Result<(), AutomergeError> {
-        let before_heads = self.get_heads();
-
-        let Message {
-            heads: message_heads,
-            changes: message_changes,
-            need: message_need,
-            have: message_have,
-        } = message;
-
-        let changes_is_empty = message_changes.is_empty();
-        if !changes_is_empty {
-            self.apply_changes_with(message_changes, op_observer)?;
-            sync_state.shared_heads = advance_heads(
-                &before_heads.iter().collect(),
-                &self.get_heads().into_iter().collect(),
-                &sync_state.shared_heads,
-            );
-        }
-
-        // trim down the sent hashes to those that we know they haven't seen
-        self.filter_changes(&message_heads, &mut sync_state.sent_hashes)?;
-
-        if changes_is_empty && message_heads == before_heads {
-            sync_state.last_sent_heads = message_heads.clone();
-        }
-
-        if sync_state.sent_hashes.is_empty() {
-            sync_state.in_flight = false;
-        }
-
-        let known_heads = message_heads
-            .iter()
-            .filter(|head| self.get_change_by_hash(head).is_some())
-            .collect::<Vec<_>>();
-        if known_heads.len() == message_heads.len() {
-            sync_state.shared_heads = message_heads.clone();
-            sync_state.in_flight = false;
-            // If the remote peer has lost all its data, reset our state to perform a full resync
-            if message_heads.is_empty() {
-                sync_state.last_sent_heads = Default::default();
-                sync_state.sent_hashes = Default::default();
-            }
-        } else {
-            sync_state.shared_heads = sync_state
-                .shared_heads
-                .iter()
-                .chain(known_heads)
-                .copied()
-                .unique()
-                .sorted()
-                .collect::<Vec<_>>();
-        }
-
-        sync_state.their_have = Some(message_have);
-        sync_state.their_heads = Some(message_heads);
-        sync_state.their_need = Some(message_need);
-
-        Ok(())
+        self.do_receive_sync_message(sync_state, message, Some(op_observer))
     }
+}
 
+impl Automerge {
     fn make_bloom_filter(&self, last_sync: Vec<ChangeHash>) -> Have {
         let new_changes = self
             .get_changes(&last_sync)
@@ -260,6 +302,72 @@ impl Automerge {
             }
             Ok(changes_to_send)
         }
+    }
+
+    fn do_receive_sync_message<Obs: OpObserver>(
+        &mut self,
+        sync_state: &mut State,
+        message: Message,
+        op_observer: Option<&mut Obs>,
+    ) -> Result<(), AutomergeError> {
+        let before_heads = self.get_heads();
+
+        let Message {
+            heads: message_heads,
+            changes: message_changes,
+            need: message_need,
+            have: message_have,
+        } = message;
+
+        let changes_is_empty = message_changes.is_empty();
+        if !changes_is_empty {
+            self.apply_changes_with(message_changes, op_observer)?;
+            sync_state.shared_heads = advance_heads(
+                &before_heads.iter().collect(),
+                &self.get_heads().into_iter().collect(),
+                &sync_state.shared_heads,
+            );
+        }
+
+        // trim down the sent hashes to those that we know they haven't seen
+        self.filter_changes(&message_heads, &mut sync_state.sent_hashes)?;
+
+        if changes_is_empty && message_heads == before_heads {
+            sync_state.last_sent_heads = message_heads.clone();
+        }
+
+        if sync_state.sent_hashes.is_empty() {
+            sync_state.in_flight = false;
+        }
+
+        let known_heads = message_heads
+            .iter()
+            .filter(|head| self.get_change_by_hash(head).is_some())
+            .collect::<Vec<_>>();
+        if known_heads.len() == message_heads.len() {
+            sync_state.shared_heads = message_heads.clone();
+            sync_state.in_flight = false;
+            // If the remote peer has lost all its data, reset our state to perform a full resync
+            if message_heads.is_empty() {
+                sync_state.last_sent_heads = Default::default();
+                sync_state.sent_hashes = Default::default();
+            }
+        } else {
+            sync_state.shared_heads = sync_state
+                .shared_heads
+                .iter()
+                .chain(known_heads)
+                .copied()
+                .unique()
+                .sorted()
+                .collect::<Vec<_>>();
+        }
+
+        sync_state.their_have = Some(message_have);
+        sync_state.their_heads = Some(message_heads);
+        sync_state.their_need = Some(message_need);
+
+        Ok(())
     }
 }
 
@@ -545,8 +653,8 @@ mod tests {
         doc.put(crate::ROOT, "key", "value").unwrap();
         let mut sync_state = State::new();
 
-        assert!(doc.generate_sync_message(&mut sync_state).is_some());
-        assert!(doc.generate_sync_message(&mut sync_state).is_none());
+        assert!(doc.sync().generate_sync_message(&mut sync_state).is_some());
+        assert!(doc.sync().generate_sync_message(&mut sync_state).is_none());
     }
 
     #[test]
@@ -556,11 +664,12 @@ mod tests {
         let mut s1 = State::new();
         let mut s2 = State::new();
         let m1 = doc1
+            .sync()
             .generate_sync_message(&mut s1)
             .expect("message was none");
 
-        doc2.receive_sync_message(&mut s2, m1).unwrap();
-        let m2 = doc2.generate_sync_message(&mut s2);
+        doc2.sync().receive_sync_message(&mut s2, m1).unwrap();
+        let m2 = doc2.sync().generate_sync_message(&mut s2);
         assert!(m2.is_none());
     }
 
@@ -584,9 +693,11 @@ mod tests {
 
         //// both sides report what they have but have no shared peer state
         let msg1to2 = doc1
+            .sync()
             .generate_sync_message(&mut s1)
             .expect("initial sync from 1 to 2 was None");
         let msg2to1 = doc2
+            .sync()
             .generate_sync_message(&mut s2)
             .expect("initial sync message from 2 to 1 was None");
         assert_eq!(msg1to2.changes.len(), 0);
@@ -595,52 +706,57 @@ mod tests {
         assert_eq!(msg2to1.have[0].last_sync.len(), 0);
 
         //// doc1 and doc2 receive that message and update sync state
-        doc1.receive_sync_message(&mut s1, msg2to1).unwrap();
-        doc2.receive_sync_message(&mut s2, msg1to2).unwrap();
+        doc1.sync().receive_sync_message(&mut s1, msg2to1).unwrap();
+        doc2.sync().receive_sync_message(&mut s2, msg1to2).unwrap();
 
         //// now both reply with their local changes the other lacks
         //// (standard warning that 1% of the time this will result in a "need" message)
         let msg1to2 = doc1
+            .sync()
             .generate_sync_message(&mut s1)
             .expect("first reply from 1 to 2 was None");
         assert_eq!(msg1to2.changes.len(), 5);
 
         let msg2to1 = doc2
+            .sync()
             .generate_sync_message(&mut s2)
             .expect("first reply from 2 to 1 was None");
         assert_eq!(msg2to1.changes.len(), 5);
 
         //// both should now apply the changes
-        doc1.receive_sync_message(&mut s1, msg2to1).unwrap();
+        doc1.sync().receive_sync_message(&mut s1, msg2to1).unwrap();
         assert_eq!(doc1.get_missing_deps(&[]), Vec::new());
 
-        doc2.receive_sync_message(&mut s2, msg1to2).unwrap();
+        doc2.sync().receive_sync_message(&mut s2, msg1to2).unwrap();
         assert_eq!(doc2.get_missing_deps(&[]), Vec::new());
 
         //// The response acknowledges the changes received and sends no further changes
         let msg1to2 = doc1
+            .sync()
             .generate_sync_message(&mut s1)
             .expect("second reply from 1 to 2 was None");
         assert_eq!(msg1to2.changes.len(), 0);
         let msg2to1 = doc2
+            .sync()
             .generate_sync_message(&mut s2)
             .expect("second reply from 2 to 1 was None");
         assert_eq!(msg2to1.changes.len(), 0);
 
         //// After receiving acknowledgements, their shared heads should be equal
-        doc1.receive_sync_message(&mut s1, msg2to1).unwrap();
-        doc2.receive_sync_message(&mut s2, msg1to2).unwrap();
+        doc1.sync().receive_sync_message(&mut s1, msg2to1).unwrap();
+        doc2.sync().receive_sync_message(&mut s2, msg1to2).unwrap();
 
         assert_eq!(s1.shared_heads, s2.shared_heads);
 
         //// We're in sync, no more messages required
-        assert!(doc1.generate_sync_message(&mut s1).is_none());
-        assert!(doc2.generate_sync_message(&mut s2).is_none());
+        assert!(doc1.sync().generate_sync_message(&mut s1).is_none());
+        assert!(doc2.sync().generate_sync_message(&mut s2).is_none());
 
         //// If we make one more change and start another sync then its lastSync should be updated
         doc1.put(crate::ROOT, "x", 5).unwrap();
         doc1.commit();
         let msg1to2 = doc1
+            .sync()
             .generate_sync_message(&mut s1)
             .expect("third reply from 1 to 2 was None");
         let mut expected_heads = vec![head1, head2];
@@ -782,8 +898,8 @@ mod tests {
         let mut iterations = 0;
 
         loop {
-            let a_to_b = a.generate_sync_message(a_sync_state);
-            let b_to_a = b.generate_sync_message(b_sync_state);
+            let a_to_b = a.sync().generate_sync_message(a_sync_state);
+            let b_to_a = b.sync().generate_sync_message(b_sync_state);
             if a_to_b.is_none() && b_to_a.is_none() {
                 break;
             }
@@ -791,10 +907,10 @@ mod tests {
                 panic!("failed to sync in {} iterations", MAX_ITER);
             }
             if let Some(msg) = a_to_b {
-                b.receive_sync_message(b_sync_state, msg).unwrap()
+                b.sync().receive_sync_message(b_sync_state, msg).unwrap()
             }
             if let Some(msg) = b_to_a {
-                a.receive_sync_message(a_sync_state, msg).unwrap()
+                a.sync().receive_sync_message(a_sync_state, msg).unwrap()
             }
             iterations += 1;
         }
