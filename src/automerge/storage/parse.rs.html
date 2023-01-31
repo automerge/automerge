@@ -705,7 +705,7 @@
 <span class="kw">const </span>HASH_SIZE: usize = <span class="number">32</span>; <span class="comment">// 256 bits = 32 bytes
 
 </span><span class="attr">#[allow(unused_imports)]
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="self">self</span>::leb128::{leb128_i32, leb128_i64, leb128_u32, leb128_u64, nonzero_leb128_u64};
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="self">self</span>::leb128::{leb128_i64, leb128_u32, leb128_u64, nonzero_leb128_u64};
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">type </span>ParseResult&lt;<span class="lifetime">&#39;a</span>, O, E&gt; = <span class="prelude-ty">Result</span>&lt;(Input&lt;<span class="lifetime">&#39;a</span>&gt;, O), ParseError&lt;E&gt;&gt;;
 
