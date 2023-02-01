@@ -26,7 +26,7 @@ import { Text } from "./text"
 export { Text } from "./text"
 
 import type {
-  API,
+  API as WasmAPI,
   Actor as ActorId,
   Prop,
   ObjID,
@@ -34,7 +34,7 @@ import type {
   DecodedChange,
   Heads,
   MaterializeValue,
-  JsSyncState as SyncState,
+  JsSyncState,
   SyncMessage,
   DecodedSyncMessage,
 } from "@automerge/automerge-wasm"
@@ -46,6 +46,17 @@ export type {
   IncPatch,
   SyncMessage,
 } from "@automerge/automerge-wasm"
+
+/** @hidden **/
+type API = WasmAPI
+
+const SyncStateSymbol = Symbol("_syncstate")
+
+/**
+ * An opaque type tracking the state of sync with a remote peer
+ */
+type SyncState = JsSyncState & { _opaque: typeof SyncStateSymbol }
+
 import { ApiHandler, type ChangeToEncode, UseApi } from "./low_level"
 
 import { Automerge } from "@automerge/automerge-wasm"
@@ -772,7 +783,7 @@ export function decodeSyncState(state: Uint8Array): SyncState {
   const sync = ApiHandler.decodeSyncState(state)
   const result = ApiHandler.exportSyncState(sync)
   sync.free()
-  return result
+  return result as SyncState
 }
 
 /**
@@ -793,7 +804,7 @@ export function generateSyncMessage<T>(
   const state = _state(doc)
   const syncState = ApiHandler.importSyncState(inState)
   const message = state.handle.generateSyncMessage(syncState)
-  const outState = ApiHandler.exportSyncState(syncState)
+  const outState = ApiHandler.exportSyncState(syncState) as SyncState
   return [outState, message]
 }
 
@@ -835,7 +846,7 @@ export function receiveSyncMessage<T>(
   }
   const heads = state.handle.getHeads()
   state.handle.receiveSyncMessage(syncState, message)
-  const outSyncState = ApiHandler.exportSyncState(syncState)
+  const outSyncState = ApiHandler.exportSyncState(syncState) as SyncState
   return [
     progressDocument(doc, heads, opts.patchCallback || state.patchCallback),
     outSyncState,
@@ -852,7 +863,7 @@ export function receiveSyncMessage<T>(
  * @group sync
  */
 export function initSyncState(): SyncState {
-  return ApiHandler.exportSyncState(ApiHandler.initSyncState())
+  return ApiHandler.exportSyncState(ApiHandler.initSyncState()) as SyncState
 }
 
 /** @hidden */
