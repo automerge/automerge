@@ -1849,9 +1849,8 @@ describe("Automerge", () => {
       })
       assert.deepStrictEqual(patches, [
         { action: "put", path: ["birds"], value: [] },
-        { action: "insert", path: ["birds", 0], values: [""] },
+        { action: "insert", path: ["birds", 0], values: ["", ""] },
         { action: "splice", path: ["birds", 0, 0], value: "Goldfinch" },
-        { action: "insert", path: ["birds", 1], values: [""] },
         { action: "splice", path: ["birds", 1, 0], value: "Chaffinch" },
       ])
     })
