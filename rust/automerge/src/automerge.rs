@@ -37,6 +37,15 @@ pub(crate) enum Actor {
     Cached(usize),
 }
 
+/// What to do when loading a document partially succeeds
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OnPartialLoad {
+    /// Ignore the error and return the loaded changes
+    Ignore,
+    /// Fail the entire load
+    Error,
+}
+
 /// An automerge document which does not manage transactions for you.
 ///
 /// ## Creating, loading, merging and forking documents
@@ -119,6 +128,18 @@ impl Automerge {
 
     pub(crate) fn ops(&self) -> &OpSet {
         &self.ops
+    }
+
+    /// Whether this document has any operations
+    pub fn is_empty(&self) -> bool {
+        self.history.is_empty() && self.queue.is_empty()
+    }
+
+    pub(crate) fn actor_id(&self) -> ActorId {
+        match &self.actor {
+            Actor::Unused(id) => id.clone(),
+            Actor::Cached(idx) => self.ops.m.actors[*idx].clone(),
+        }
     }
 
     /// Remove the current actor from the opset if it has no ops
@@ -410,20 +431,26 @@ impl Automerge {
 
     /// Load a document.
     pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {
-        Self::load_with::<()>(data, VerificationMode::Check, None)
+        Self::load_with::<()>(data, OnPartialLoad::Error, VerificationMode::Check, None)
     }
 
     /// Load a document without verifying the head hashes
     ///
     /// This is useful for debugging as it allows you to examine a corrupted document.
     pub fn load_unverified_heads(data: &[u8]) -> Result<Self, AutomergeError> {
-        Self::load_with::<()>(data, VerificationMode::DontCheck, None)
+        Self::load_with::<()>(
+            data,
+            OnPartialLoad::Error,
+            VerificationMode::DontCheck,
+            None,
+        )
     }
 
     /// Load a document with an observer
     #[tracing::instrument(skip(data, observer), err)]
     pub fn load_with<Obs: OpObserver>(
         data: &[u8],
+        on_error: OnPartialLoad,
         mode: VerificationMode,
         mut observer: Option<&mut Obs>,
     ) -> Result<Self, AutomergeError> {
@@ -501,7 +528,11 @@ impl Automerge {
                     am.apply_change(change, &mut observer);
                 }
             }
-            load::LoadedChanges::Partial { error, .. } => return Err(error.into()),
+            load::LoadedChanges::Partial { error, .. } => {
+                if on_error == OnPartialLoad::Error {
+                    return Err(error.into());
+                }
+            }
         }
         if let Some(observer) = &mut observer {
             current_state::observe_current_state(&am, *observer);
@@ -526,6 +557,18 @@ impl Automerge {
         data: &[u8],
         op_observer: Option<&mut Obs>,
     ) -> Result<usize, AutomergeError> {
+        if self.is_empty() {
+            let mut doc =
+                Self::load_with::<()>(data, OnPartialLoad::Ignore, VerificationMode::Check, None)?;
+            doc = doc
+                .with_encoding(self.text_encoding)
+                .with_actor(self.actor_id());
+            if let Some(obs) = op_observer {
+                current_state::observe_current_state(&doc, obs);
+            }
+            *self = doc;
+            return Ok(self.ops.len());
+        }
         let changes = match load::load_changes(storage::parse::Input::new(data)) {
             load::LoadedChanges::Complete(c) => c,
             load::LoadedChanges::Partial { error, loaded, .. } => {
@@ -566,6 +609,11 @@ impl Automerge {
         changes: I,
         mut op_observer: Option<&mut Obs>,
     ) -> Result<(), AutomergeError> {
+        // Record this so we can avoid observing each individual change and instead just observe
+        // the final state after all the changes have been applied. We can only do this for an
+        // empty document right now, once we have logic to produce the diffs between arbitrary
+        // states of the OpSet we can make this cleaner.
+        let empty_at_start = self.is_empty();
         for c in changes {
             if !self.history_index.contains_key(&c.hash()) {
                 if self.duplicate_seq(&c) {
@@ -575,7 +623,11 @@ impl Automerge {
                     ));
                 }
                 if self.is_causally_ready(&c) {
-                    self.apply_change(c, &mut op_observer);
+                    if empty_at_start {
+                        self.apply_change::<()>(c, &mut None);
+                    } else {
+                        self.apply_change(c, &mut op_observer);
+                    }
                 } else {
                     self.queue.push(c);
                 }
@@ -583,7 +635,16 @@ impl Automerge {
         }
         while let Some(c) = self.pop_next_causally_ready_change() {
             if !self.history_index.contains_key(&c.hash()) {
-                self.apply_change(c, &mut op_observer);
+                if empty_at_start {
+                    self.apply_change::<()>(c, &mut None);
+                } else {
+                    self.apply_change(c, &mut op_observer);
+                }
+            }
+        }
+        if empty_at_start {
+            if let Some(observer) = &mut op_observer {
+                current_state::observe_current_state(self, *observer);
             }
         }
         Ok(())
