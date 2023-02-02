@@ -464,6 +464,7 @@ impl Automerge {
             return Err(load::Error::BadChecksum.into());
         }
 
+        let mut change: Option<Change> = None;
         let mut am = match first_chunk {
             storage::Chunk::Document(d) => {
                 tracing::trace!("first chunk is document chunk, inflating");
@@ -501,30 +502,31 @@ impl Automerge {
                 }
             }
             storage::Chunk::Change(stored_change) => {
-                tracing::trace!("first chunk is change chunk, applying");
-                let change = Change::new_from_unverified(stored_change.into_owned(), None)
-                    .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?;
-                let mut am = Self::new();
-                am.apply_change::<Obs>(change, &mut None);
-                am
+                tracing::trace!("first chunk is change chunk");
+                change = Some(
+                    Change::new_from_unverified(stored_change.into_owned(), None)
+                        .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?,
+                );
+                Self::new()
             }
             storage::Chunk::CompressedChange(stored_change, compressed) => {
-                tracing::trace!("first chunk is compressed change, decompressing and applying");
-                let change = Change::new_from_unverified(
-                    stored_change.into_owned(),
-                    Some(compressed.into_owned()),
-                )
-                .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?;
-                let mut am = Self::new();
-                am.apply_change::<Obs>(change, &mut None);
-                am
+                tracing::trace!("first chunk is compressed change");
+                change = Some(
+                    Change::new_from_unverified(
+                        stored_change.into_owned(),
+                        Some(compressed.into_owned()),
+                    )
+                    .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?,
+                );
+                Self::new()
             }
         };
-        tracing::trace!("first chunk loaded, loading remaining chunks");
+        tracing::trace!("loading change chunks");
         match load::load_changes(remaining.reset()) {
             load::LoadedChanges::Complete(c) => {
-                for change in c {
-                    am.apply_change::<Obs>(change, &mut None);
+                am.apply_changes(change.into_iter().chain(c))?;
+                if !am.queue.is_empty() {
+                    return Err(AutomergeError::MissingDeps);
                 }
             }
             load::LoadedChanges::Partial { error, .. } => {
