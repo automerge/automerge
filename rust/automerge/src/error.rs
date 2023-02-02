@@ -7,7 +7,7 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum AutomergeError {
     #[error(transparent)]
-    Clocks(#[from] crate::clocks::MissingDep),
+    ChangeGraph(#[from] crate::change_graph::MissingDep),
     #[error("failed to load compressed data: {0}")]
     Deflate(#[source] std::io::Error),
     #[error("duplicate seq {0} found for actor {1}")]
