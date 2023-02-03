@@ -1443,7 +1443,7 @@
 
         encode_many(<span class="kw-2">&amp;mut </span>buf, <span class="self">self</span>.changes.iter_mut(), |buf, change| {
             leb128::write::unsigned(buf, change.raw_bytes().len() <span class="kw">as </span>u64).unwrap();
-            buf.extend(change.raw_bytes().as_ref())
+            buf.extend::&lt;<span class="kw-2">&amp;</span>[u8]&gt;(change.raw_bytes().as_ref())
         });
 
         buf

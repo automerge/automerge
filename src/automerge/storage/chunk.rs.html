@@ -580,7 +580,7 @@
 <span class="kw">fn </span>hash(typ: ChunkType, data: <span class="kw-2">&amp;</span>[u8]) -&gt; ChangeHash {
     <span class="kw">let </span><span class="kw-2">mut </span>out = <span class="macro">vec!</span>[u8::from(typ)];
     leb128::write::unsigned(<span class="kw-2">&amp;mut </span>out, data.len() <span class="kw">as </span>u64).unwrap();
-    out.extend(data.as_ref());
+    out.extend(data);
     <span class="kw">let </span>hash_result = Sha256::digest(out);
     <span class="kw">let </span>array: [u8; <span class="number">32</span>] = hash_result.into();
     ChangeHash(array)

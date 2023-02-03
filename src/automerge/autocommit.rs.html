@@ -832,7 +832,7 @@
     ///
     /// This is a cheap operation, it just changes the way indexes are calculated
     </span><span class="kw">pub fn </span>with_encoding(<span class="kw-2">mut </span><span class="self">self</span>, encoding: TextEncoding) -&gt; <span class="self">Self </span>{
-        <span class="self">self</span>.doc.text_encoding = encoding;
+        <span class="self">self</span>.doc = <span class="self">self</span>.doc.with_encoding(encoding);
         <span class="self">self
     </span>}
 

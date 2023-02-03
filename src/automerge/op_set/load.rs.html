@@ -51,42 +51,6 @@
 <a href="#50" id="50">50</a>
 <a href="#51" id="51">51</a>
 <a href="#52" id="52">52</a>
-<a href="#53" id="53">53</a>
-<a href="#54" id="54">54</a>
-<a href="#55" id="55">55</a>
-<a href="#56" id="56">56</a>
-<a href="#57" id="57">57</a>
-<a href="#58" id="58">58</a>
-<a href="#59" id="59">59</a>
-<a href="#60" id="60">60</a>
-<a href="#61" id="61">61</a>
-<a href="#62" id="62">62</a>
-<a href="#63" id="63">63</a>
-<a href="#64" id="64">64</a>
-<a href="#65" id="65">65</a>
-<a href="#66" id="66">66</a>
-<a href="#67" id="67">67</a>
-<a href="#68" id="68">68</a>
-<a href="#69" id="69">69</a>
-<a href="#70" id="70">70</a>
-<a href="#71" id="71">71</a>
-<a href="#72" id="72">72</a>
-<a href="#73" id="73">73</a>
-<a href="#74" id="74">74</a>
-<a href="#75" id="75">75</a>
-<a href="#76" id="76">76</a>
-<a href="#77" id="77">77</a>
-<a href="#78" id="78">78</a>
-<a href="#79" id="79">79</a>
-<a href="#80" id="80">80</a>
-<a href="#81" id="81">81</a>
-<a href="#82" id="82">82</a>
-<a href="#83" id="83">83</a>
-<a href="#84" id="84">84</a>
-<a href="#85" id="85">85</a>
-<a href="#86" id="86">86</a>
-<a href="#87" id="87">87</a>
-<a href="#88" id="88">88</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::collections::HashMap;
 
 <span class="kw">use </span>fxhash::FxBuildHasher;
@@ -95,8 +59,7 @@
 <span class="kw">use crate</span>::{
     op_tree::OpTreeInternal,
     storage::load::{DocObserver, LoadedObject},
-    types::{ObjId, Op},
-    Automerge, OpObserver,
+    types::ObjId,
 };
 
 <span class="doccomment">/// An opset builder which creates an optree for each object as it finishes loading, inserting the
@@ -138,41 +101,6 @@
             length: len,
             m: metadata,
         }
-    }
-}
-
-<span class="doccomment">/// A DocObserver which just accumulates ops until the document has finished reconstructing and
-/// then inserts all of the ops using `OpSet::insert_op_with_observer`
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ObservedOpSetBuilder&lt;<span class="lifetime">&#39;a</span>, O: OpObserver&gt; {
-    observer: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>O,
-    ops: Vec&lt;(ObjId, Op)&gt;,
-}
-
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, O: OpObserver&gt; ObservedOpSetBuilder&lt;<span class="lifetime">&#39;a</span>, O&gt; {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(observer: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>O) -&gt; <span class="self">Self </span>{
-        <span class="self">Self </span>{
-            observer,
-            ops: Vec::new(),
-        }
-    }
-}
-
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, O: OpObserver&gt; DocObserver <span class="kw">for </span>ObservedOpSetBuilder&lt;<span class="lifetime">&#39;a</span>, O&gt; {
-    <span class="kw">type </span>Output = OpSet;
-
-    <span class="kw">fn </span>object_loaded(<span class="kw-2">&amp;mut </span><span class="self">self</span>, object: LoadedObject) {
-        <span class="self">self</span>.ops.reserve(object.ops.len());
-        <span class="kw">for </span>op <span class="kw">in </span>object.ops {
-            <span class="self">self</span>.ops.push((object.id, op));
-        }
-    }
-
-    <span class="kw">fn </span>finish(<span class="self">self</span>, _metadata: <span class="kw">super</span>::OpSetMetadata) -&gt; <span class="self">Self</span>::Output {
-        <span class="kw">let </span><span class="kw-2">mut </span>opset = Automerge::new();
-        <span class="kw">for </span>(obj, op) <span class="kw">in </span><span class="self">self</span>.ops {
-            opset.insert_op_with_observer(<span class="kw-2">&amp;</span>obj, op, <span class="self">self</span>.observer);
-        }
-        opset.ops
     }
 }
 </code></pre></div>

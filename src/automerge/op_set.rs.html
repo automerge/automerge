@@ -385,6 +385,25 @@
 <a href="#384" id="384">384</a>
 <a href="#385" id="385">385</a>
 <a href="#386" id="386">386</a>
+<a href="#387" id="387">387</a>
+<a href="#388" id="388">388</a>
+<a href="#389" id="389">389</a>
+<a href="#390" id="390">390</a>
+<a href="#391" id="391">391</a>
+<a href="#392" id="392">392</a>
+<a href="#393" id="393">393</a>
+<a href="#394" id="394">394</a>
+<a href="#395" id="395">395</a>
+<a href="#396" id="396">396</a>
+<a href="#397" id="397">397</a>
+<a href="#398" id="398">398</a>
+<a href="#399" id="399">399</a>
+<a href="#400" id="400">400</a>
+<a href="#401" id="401">401</a>
+<a href="#402" id="402">402</a>
+<a href="#403" id="403">403</a>
+<a href="#404" id="404">404</a>
+<a href="#405" id="405">405</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::clock::Clock;
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 <span class="kw">use </span><span class="kw">crate</span>::indexed_cache::IndexedCache;
@@ -392,7 +411,7 @@
 <span class="kw">use </span><span class="kw">crate</span>::parents::Parents;
 <span class="kw">use </span><span class="kw">crate</span>::query::{<span class="self">self</span>, OpIdVisSearch, TreeQuery};
 <span class="kw">use </span><span class="kw">crate</span>::types::{<span class="self">self</span>, ActorId, Key, ListEncoding, ObjId, Op, OpId, OpIds, OpType, Prop};
-<span class="kw">use crate</span>::{ObjType, OpObserver};
+<span class="kw">use </span><span class="kw">crate</span>::ObjType;
 <span class="kw">use </span>fxhash::FxBuildHasher;
 <span class="kw">use </span>std::borrow::Borrow;
 <span class="kw">use </span>std::cmp::Ordering;
@@ -400,7 +419,7 @@
 <span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">mod </span>load;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>load::{ObservedOpSetBuilder, OpSetBuilder};
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>load::OpSetBuilder;
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">type </span>OpSet = OpSetInternal;
 
@@ -417,12 +436,6 @@
 <span class="kw">impl </span>OpSetInternal {
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>builder() -&gt; OpSetBuilder {
         OpSetBuilder::new()
-    }
-
-    <span class="doccomment">/// Create a builder which passes each operation to `observer`. This will be significantly
-    /// slower than `OpSetBuilder`
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>observed_builder&lt;O: OpObserver&gt;(observer: <span class="kw-2">&amp;mut </span>O) -&gt; ObservedOpSetBuilder&lt;<span class="lifetime">&#39;_</span>, O&gt; {
-        ObservedOpSetBuilder::new(observer)
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new() -&gt; <span class="self">Self </span>{
@@ -451,12 +464,23 @@
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>iter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Iter&lt;<span class="lifetime">&#39;_</span>&gt; {
-        <span class="kw">let </span><span class="kw-2">mut </span>objs: Vec&lt;<span class="kw">_</span>&gt; = <span class="self">self</span>.trees.iter().collect();
+        <span class="kw">let </span><span class="kw-2">mut </span>objs: Vec&lt;<span class="kw">_</span>&gt; = <span class="self">self</span>.trees.iter().map(|t| (t.<span class="number">0</span>, t.<span class="number">1</span>.objtype, t.<span class="number">1</span>)).collect();
         objs.sort_by(|a, b| <span class="self">self</span>.m.lamport_cmp((a.<span class="number">0</span>).<span class="number">0</span>, (b.<span class="number">0</span>).<span class="number">0</span>));
         Iter {
             opset: <span class="self">self</span>,
             trees: objs.into_iter(),
             current: <span class="prelude-val">None</span>,
+        }
+    }
+
+    <span class="doccomment">/// Iterate over objects in the opset in causal order
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>iter_objs(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+    ) -&gt; <span class="kw">impl </span>Iterator&lt;Item = (<span class="kw-2">&amp;</span>ObjId, ObjType, op_tree::OpTreeIter&lt;<span class="lifetime">&#39;_</span>&gt;)&gt; + <span class="lifetime">&#39;_ </span>{
+        <span class="kw">let </span><span class="kw-2">mut </span>objs: Vec&lt;<span class="kw">_</span>&gt; = <span class="self">self</span>.trees.iter().map(|t| (t.<span class="number">0</span>, t.<span class="number">1</span>.objtype, t.<span class="number">1</span>)).collect();
+        objs.sort_by(|a, b| <span class="self">self</span>.m.lamport_cmp((a.<span class="number">0</span>).<span class="number">0</span>, (b.<span class="number">0</span>).<span class="number">0</span>));
+        IterObjs {
+            trees: objs.into_iter(),
         }
     }
 
@@ -673,7 +697,7 @@
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; IntoIterator <span class="kw">for </span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetInternal {
-    <span class="kw">type </span>Item = (<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op);
+    <span class="kw">type </span>Item = (<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId, ObjType, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op);
 
     <span class="kw">type </span>IntoIter = Iter&lt;<span class="lifetime">&#39;a</span>&gt;;
 
@@ -682,27 +706,41 @@
     }
 }
 
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>IterObjs&lt;<span class="lifetime">&#39;a</span>&gt; {
+    trees: std::vec::IntoIter&lt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId, ObjType, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>op_tree::OpTree)&gt;,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>IterObjs&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">type </span>Item = (<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId, ObjType, op_tree::OpTreeIter&lt;<span class="lifetime">&#39;a</span>&gt;);
+
+    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
+        <span class="self">self</span>.trees
+            .next()
+            .map(|(id, typ, tree)| (id, typ, tree.iter()))
+    }
+}
+
 <span class="attr">#[derive(Clone)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Iter&lt;<span class="lifetime">&#39;a</span>&gt; {
     opset: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSet,
-    trees: std::vec::IntoIter&lt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>op_tree::OpTree)&gt;,
-    current: <span class="prelude-ty">Option</span>&lt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId, op_tree::OpTreeIter&lt;<span class="lifetime">&#39;a</span>&gt;)&gt;,
+    trees: std::vec::IntoIter&lt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId, ObjType, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>op_tree::OpTree)&gt;,
+    current: <span class="prelude-ty">Option</span>&lt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId, ObjType, op_tree::OpTreeIter&lt;<span class="lifetime">&#39;a</span>&gt;)&gt;,
 }
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>Iter&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">type </span>Item = (<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op);
+    <span class="kw">type </span>Item = (<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ObjId, ObjType, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op);
 
     <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Some</span>((id, tree)) = <span class="kw-2">&amp;mut </span><span class="self">self</span>.current {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>((id, typ, tree)) = <span class="kw-2">&amp;mut </span><span class="self">self</span>.current {
             <span class="kw">if let </span><span class="prelude-val">Some</span>(next) = tree.next() {
-                <span class="kw">return </span><span class="prelude-val">Some</span>((id, next));
+                <span class="kw">return </span><span class="prelude-val">Some</span>((id, <span class="kw-2">*</span>typ, next));
             }
         }
 
         <span class="kw">loop </span>{
-            <span class="self">self</span>.current = <span class="self">self</span>.trees.next().map(|o| (o.<span class="number">0</span>, o.<span class="number">1</span>.iter()));
-            <span class="kw">if let </span><span class="prelude-val">Some</span>((obj, tree)) = <span class="kw-2">&amp;mut </span><span class="self">self</span>.current {
+            <span class="self">self</span>.current = <span class="self">self</span>.trees.next().map(|o| (o.<span class="number">0</span>, o.<span class="number">1</span>, o.<span class="number">2</span>.iter()));
+            <span class="kw">if let </span><span class="prelude-val">Some</span>((obj, typ, tree)) = <span class="kw-2">&amp;mut </span><span class="self">self</span>.current {
                 <span class="kw">if let </span><span class="prelude-val">Some</span>(next) = tree.next() {
-                    <span class="kw">return </span><span class="prelude-val">Some</span>((obj, next));
+                    <span class="kw">return </span><span class="prelude-val">Some</span>((obj, <span class="kw-2">*</span>typ, next));
                 }
             } <span class="kw">else </span>{
                 <span class="kw">return </span><span class="prelude-val">None</span>;

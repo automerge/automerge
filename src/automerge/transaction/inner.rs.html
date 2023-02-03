@@ -730,11 +730,8 @@
 <a href="#729" id="729">729</a>
 <a href="#730" id="730">730</a>
 <a href="#731" id="731">731</a>
-<a href="#732" id="732">732</a>
-<a href="#733" id="733">733</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::num::NonZeroU64;
 
-<span class="kw">use </span><span class="kw">crate</span>::automerge::Actor;
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 <span class="kw">use </span><span class="kw">crate</span>::query::{<span class="self">self</span>, OpIdSearch};
 <span class="kw">use </span><span class="kw">crate</span>::storage::Change <span class="kw">as </span>StoredChange;
@@ -832,7 +829,7 @@
         }
 
         <span class="kw">let </span>num_ops = <span class="self">self</span>.pending_ops();
-        <span class="kw">let </span>change = <span class="self">self</span>.export(<span class="kw-2">&amp;</span>doc.ops.m);
+        <span class="kw">let </span>change = <span class="self">self</span>.export(<span class="kw-2">&amp;</span>doc.ops().m);
         <span class="kw">let </span>hash = change.hash();
         <span class="attr">#[cfg(not(debug_assertions))]
         </span><span class="macro">tracing::trace!</span>(commit=<span class="question-mark">?</span>hash, deps=<span class="question-mark">?</span>change.deps(), <span class="string">&quot;committing transaction&quot;</span>);
@@ -887,20 +884,16 @@
         <span class="comment">// remove in reverse order so sets are removed before makes etc...
         </span><span class="kw">for </span>(obj, op) <span class="kw">in </span><span class="self">self</span>.operations.into_iter().rev() {
             <span class="kw">for </span>pred_id <span class="kw">in </span><span class="kw-2">&amp;</span>op.pred {
-                <span class="kw">if let </span><span class="prelude-val">Some</span>(p) = doc.ops.search(<span class="kw-2">&amp;</span>obj, OpIdSearch::new(<span class="kw-2">*</span>pred_id)).index() {
-                    doc.ops.change_vis(<span class="kw-2">&amp;</span>obj, p, |o| o.remove_succ(<span class="kw-2">&amp;</span>op));
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(p) = doc.ops().search(<span class="kw-2">&amp;</span>obj, OpIdSearch::new(<span class="kw-2">*</span>pred_id)).index() {
+                    doc.ops_mut().change_vis(<span class="kw-2">&amp;</span>obj, p, |o| o.remove_succ(<span class="kw-2">&amp;</span>op));
                 }
             }
-            <span class="kw">if let </span><span class="prelude-val">Some</span>(pos) = doc.ops.search(<span class="kw-2">&amp;</span>obj, OpIdSearch::new(op.id)).index() {
-                doc.ops.remove(<span class="kw-2">&amp;</span>obj, pos);
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(pos) = doc.ops().search(<span class="kw-2">&amp;</span>obj, OpIdSearch::new(op.id)).index() {
+                doc.ops_mut().remove(<span class="kw-2">&amp;</span>obj, pos);
             }
         }
 
-        <span class="comment">// remove the actor from the cache so that it doesn&#39;t end up in the saved document
-        </span><span class="kw">if </span>doc.states.get(<span class="kw-2">&amp;</span><span class="self">self</span>.actor).is_none() &amp;&amp; doc.ops.m.actors.len() &gt; <span class="number">0 </span>{
-            <span class="kw">let </span>actor = doc.ops.m.actors.remove_last();
-            doc.actor = Actor::Unused(actor);
-        }
+        doc.rollback_last_actor();
 
         num
     }
@@ -1011,10 +1004,10 @@
         obj: ObjId,
         succ_pos: <span class="kw-2">&amp;</span>[usize],
     ) {
-        doc.ops.add_succ(<span class="kw-2">&amp;</span>obj, succ_pos, <span class="kw-2">&amp;</span>op);
+        doc.ops_mut().add_succ(<span class="kw-2">&amp;</span>obj, succ_pos, <span class="kw-2">&amp;</span>op);
 
         <span class="kw">if </span>!op.is_delete() {
-            doc.ops.insert(pos, <span class="kw-2">&amp;</span>obj, op.clone());
+            doc.ops_mut().insert(pos, <span class="kw-2">&amp;</span>obj, op.clone());
         }
 
         <span class="self">self</span>.finalize_op(doc, op_observer, obj, prop, op);
@@ -1066,7 +1059,7 @@
         <span class="kw">let </span>id = <span class="self">self</span>.next_id();
 
         <span class="kw">let </span>query = doc
-            .ops
+            .ops()
             .search(<span class="kw-2">&amp;</span>obj, query::InsertNth::new(index, ListEncoding::List));
 
         <span class="kw">let </span>key = query.key()<span class="question-mark">?</span>;
@@ -1080,7 +1073,7 @@
             insert: <span class="bool-val">true</span>,
         };
 
-        doc.ops.insert(query.pos(), <span class="kw-2">&amp;</span>obj, op.clone());
+        doc.ops_mut().insert(query.pos(), <span class="kw-2">&amp;</span>obj, op.clone());
 
         <span class="self">self</span>.finalize_op(doc, op_observer, obj, Prop::Seq(index), op);
 
@@ -1114,8 +1107,8 @@
         }
 
         <span class="kw">let </span>id = <span class="self">self</span>.next_id();
-        <span class="kw">let </span>prop_index = doc.ops.m.props.cache(prop.clone());
-        <span class="kw">let </span>query = doc.ops.search(<span class="kw-2">&amp;</span>obj, query::Prop::new(prop_index));
+        <span class="kw">let </span>prop_index = doc.ops_mut().m.props.cache(prop.clone());
+        <span class="kw">let </span>query = doc.ops().search(<span class="kw-2">&amp;</span>obj, query::Prop::new(prop_index));
 
         <span class="comment">// no key present to delete
         </span><span class="kw">if </span>query.ops.is_empty() &amp;&amp; action == OpType::Delete {
@@ -1132,7 +1125,7 @@
             <span class="kw">return </span><span class="prelude-val">Err</span>(AutomergeError::MissingCounter);
         }
 
-        <span class="kw">let </span>pred = doc.ops.m.sorted_opids(query.ops.iter().map(|o| o.id));
+        <span class="kw">let </span>pred = doc.ops().m.sorted_opids(query.ops.iter().map(|o| o.id));
 
         <span class="kw">let </span>op = Op {
             id,
@@ -1159,11 +1152,11 @@
         action: OpType,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;OpId&gt;, AutomergeError&gt; {
         <span class="kw">let </span>query = doc
-            .ops
+            .ops()
             .search(<span class="kw-2">&amp;</span>obj, query::Nth::new(index, ListEncoding::List));
 
         <span class="kw">let </span>id = <span class="self">self</span>.next_id();
-        <span class="kw">let </span>pred = doc.ops.m.sorted_opids(query.ops.iter().map(|o| o.id));
+        <span class="kw">let </span>pred = doc.ops().m.sorted_opids(query.ops.iter().map(|o| o.id));
         <span class="kw">let </span>key = query.key()<span class="question-mark">?</span>;
 
         <span class="kw">if </span>query.ops.len() == <span class="number">1 </span>&amp;&amp; query.ops[<span class="number">0</span>].is_noop(<span class="kw-2">&amp;</span>action) {
@@ -1224,7 +1217,7 @@
                     index,
                     del: <span class="number">1</span>,
                     values: <span class="macro">vec!</span>[],
-                    splice_type: SpliceType::Text(<span class="string">&quot;&quot;</span>, doc.text_encoding),
+                    splice_type: SpliceType::Text(<span class="string">&quot;&quot;</span>, doc.text_encoding()),
                 },
             )<span class="question-mark">?</span>;
         } <span class="kw">else </span>{
@@ -1285,7 +1278,7 @@
                 index,
                 del,
                 values,
-                splice_type: SpliceType::Text(text, doc.text_encoding),
+                splice_type: SpliceType::Text(text, doc.text_encoding()),
             },
         )
     }
@@ -1302,13 +1295,13 @@
             splice_type,
         }: SpliceArgs&lt;<span class="lifetime">&#39;_</span>&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
-        <span class="kw">let </span>ex_obj = doc.ops.id_to_exid(obj.<span class="number">0</span>);
+        <span class="kw">let </span>ex_obj = doc.ops().id_to_exid(obj.<span class="number">0</span>);
         <span class="kw">let </span>encoding = splice_type.encoding();
         <span class="comment">// delete `del` items - performing the query for each one
         </span><span class="kw">let </span><span class="kw-2">mut </span>deleted = <span class="number">0</span>;
         <span class="kw">while </span>deleted &lt; del {
             <span class="comment">// TODO: could do this with a single custom query
-            </span><span class="kw">let </span>query = doc.ops.search(<span class="kw-2">&amp;</span>obj, query::Nth::new(index, encoding));
+            </span><span class="kw">let </span>query = doc.ops().search(<span class="kw-2">&amp;</span>obj, query::Nth::new(index, encoding));
 
             <span class="comment">// if we delete in the middle of a multi-character
             // move cursor back to the beginning and expand the del width
@@ -1324,9 +1317,10 @@
                 <span class="kw">break</span>;
             };
 
-            <span class="kw">let </span>op = <span class="self">self</span>.next_delete(query.key()<span class="question-mark">?</span>, query.pred(<span class="kw-2">&amp;</span>doc.ops));
+            <span class="kw">let </span>op = <span class="self">self</span>.next_delete(query.key()<span class="question-mark">?</span>, query.pred(doc.ops()));
 
-            doc.ops.add_succ(<span class="kw-2">&amp;</span>obj, <span class="kw-2">&amp;</span>query.ops_pos, <span class="kw-2">&amp;</span>op);
+            <span class="kw">let </span>ops_pos = query.ops_pos;
+            doc.ops_mut().add_succ(<span class="kw-2">&amp;</span>obj, <span class="kw-2">&amp;</span>ops_pos, <span class="kw-2">&amp;</span>op);
 
             <span class="self">self</span>.operations.push((obj, op));
 
@@ -1342,7 +1336,9 @@
         <span class="comment">// do the insert query for the first item and then
         // insert the remaining ops one after the other
         </span><span class="kw">if </span>!values.is_empty() {
-            <span class="kw">let </span>query = doc.ops.search(<span class="kw-2">&amp;</span>obj, query::InsertNth::new(index, encoding));
+            <span class="kw">let </span>query = doc
+                .ops()
+                .search(<span class="kw-2">&amp;</span>obj, query::InsertNth::new(index, encoding));
             <span class="kw">let </span><span class="kw-2">mut </span>pos = query.pos();
             <span class="kw">let </span><span class="kw-2">mut </span>key = query.key()<span class="question-mark">?</span>;
             <span class="kw">let </span><span class="kw-2">mut </span>cursor = index;
@@ -1351,7 +1347,7 @@
             <span class="kw">for </span>v <span class="kw">in </span><span class="kw-2">&amp;</span>values {
                 <span class="kw">let </span>op = <span class="self">self</span>.next_insert(key, v.clone());
 
-                doc.ops.insert(pos, <span class="kw-2">&amp;</span>obj, op.clone());
+                doc.ops_mut().insert(pos, <span class="kw-2">&amp;</span>obj, op.clone());
 
                 width = op.width(encoding);
                 cursor += width;
@@ -1361,7 +1357,7 @@
                 <span class="self">self</span>.operations.push((obj, op));
             }
 
-            doc.ops.hint(<span class="kw-2">&amp;</span>obj, cursor - width, pos - <span class="number">1</span>);
+            doc.ops_mut().hint(<span class="kw-2">&amp;</span>obj, cursor - width, pos - <span class="number">1</span>);
 
             <span class="comment">// handle the observer
             </span><span class="kw">if let </span><span class="prelude-val">Some</span>(obs) = op_observer.as_mut() {
@@ -1373,7 +1369,7 @@
                         <span class="kw">let </span>start = <span class="self">self</span>.operations.len() - values.len();
                         <span class="kw">for </span>(offset, v) <span class="kw">in </span>values.iter().enumerate() {
                             <span class="kw">let </span>op = <span class="kw-2">&amp;</span><span class="self">self</span>.operations[start + offset].<span class="number">1</span>;
-                            <span class="kw">let </span>value = (v.clone().into(), doc.ops.id_to_exid(op.id));
+                            <span class="kw">let </span>value = (v.clone().into(), doc.ops().id_to_exid(op.id));
                             obs.insert(doc, ex_obj.clone(), index + offset, value)
                         }
                     }
@@ -1394,19 +1390,19 @@
     ) {
         <span class="comment">// TODO - id_to_exid should be a noop if not used - change type to Into&lt;ExId&gt;?
         </span><span class="kw">if let </span><span class="prelude-val">Some</span>(op_observer) = op_observer {
-            <span class="kw">let </span>ex_obj = doc.ops.id_to_exid(obj.<span class="number">0</span>);
+            <span class="kw">let </span>ex_obj = doc.ops().id_to_exid(obj.<span class="number">0</span>);
             <span class="kw">if </span>op.insert {
-                <span class="kw">let </span>obj_type = doc.ops.object_type(<span class="kw-2">&amp;</span>obj);
+                <span class="kw">let </span>obj_type = doc.ops().object_type(<span class="kw-2">&amp;</span>obj);
                 <span class="macro">assert!</span>(obj_type.unwrap().is_sequence());
                 <span class="kw">match </span>(obj_type, prop) {
                     (<span class="prelude-val">Some</span>(ObjType::List), Prop::Seq(index)) =&gt; {
-                        <span class="kw">let </span>value = (op.value(), doc.ops.id_to_exid(op.id));
+                        <span class="kw">let </span>value = (op.value(), doc.ops().id_to_exid(op.id));
                         op_observer.insert(doc, ex_obj, index, value)
                     }
                     (<span class="prelude-val">Some</span>(ObjType::Text), Prop::Seq(index)) =&gt; {
                         <span class="comment">// FIXME
                         </span><span class="kw">if </span>op_observer.text_as_seq() {
-                            <span class="kw">let </span>value = (op.value(), doc.ops.id_to_exid(op.id));
+                            <span class="kw">let </span>value = (op.value(), doc.ops().id_to_exid(op.id));
                             op_observer.insert(doc, ex_obj, index, value)
                         } <span class="kw">else </span>{
                             op_observer.splice_text(doc, ex_obj, index, op.to_str())
@@ -1417,9 +1413,9 @@
             } <span class="kw">else if </span>op.is_delete() {
                 op_observer.delete(doc, ex_obj, prop);
             } <span class="kw">else if let </span><span class="prelude-val">Some</span>(value) = op.get_increment_value() {
-                op_observer.increment(doc, ex_obj, prop, (value, doc.ops.id_to_exid(op.id)));
+                op_observer.increment(doc, ex_obj, prop, (value, doc.ops().id_to_exid(op.id)));
             } <span class="kw">else </span>{
-                <span class="kw">let </span>value = (op.value(), doc.ops.id_to_exid(op.id));
+                <span class="kw">let </span>value = (op.value(), doc.ops().id_to_exid(op.id));
                 op_observer.put(doc, ex_obj, prop, value, <span class="bool-val">false</span>);
             }
         }
