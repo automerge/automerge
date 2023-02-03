@@ -108,7 +108,7 @@
 <span class="attr">#[derive(Error, Debug)]
 </span><span class="kw">pub enum </span>AutomergeError {
     <span class="attr">#[error(transparent)]
-    </span>Clocks(<span class="attr">#[from] </span><span class="kw">crate</span>::clocks::MissingDep),
+    </span>ChangeGraph(<span class="attr">#[from] </span><span class="kw">crate</span>::change_graph::MissingDep),
     <span class="attr">#[error(<span class="string">&quot;failed to load compressed data: {0}&quot;</span>)]
     </span>Deflate(<span class="attr">#[source] </span>std::io::Error),
     <span class="attr">#[error(<span class="string">&quot;duplicate seq {0} found for actor {1}&quot;</span>)]
