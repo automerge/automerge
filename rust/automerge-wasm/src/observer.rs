@@ -6,9 +6,11 @@ use crate::{
     interop::{self, alloc, js_set},
     TextRepresentation,
 };
-use automerge::{ObjId, OpObserver, Prop, ReadDoc, ScalarValue, SequenceTree, Value};
+use automerge::{ObjId, OpObserver, Prop, ReadDoc, ScalarValue, Value};
 use js_sys::{Array, Object};
 use wasm_bindgen::prelude::*;
+
+use crate::sequence_tree::SequenceTree;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Observer {

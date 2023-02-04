@@ -264,7 +264,6 @@ mod op_tree;
 mod parents;
 mod query;
 mod read;
-mod sequence_tree;
 mod storage;
 pub mod sync;
 pub mod transaction;
@@ -294,8 +293,6 @@ pub use op_observer::Patch;
 pub use op_observer::VecOpObserver;
 pub use parents::{Parent, Parents};
 pub use read::ReadDoc;
-#[doc(hidden)]
-pub use sequence_tree::SequenceTree;
 pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, TextEncoding};
 pub use value::{ScalarValue, Value};
 pub use values::Values;
