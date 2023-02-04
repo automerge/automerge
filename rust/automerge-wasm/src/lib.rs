@@ -41,6 +41,7 @@ use wasm_bindgen::JsCast;
 
 mod interop;
 mod observer;
+mod sequence_tree;
 mod sync;
 mod value;
 

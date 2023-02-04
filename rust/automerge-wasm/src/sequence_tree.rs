@@ -5,10 +5,10 @@ use std::{
 };
 
 pub(crate) const B: usize = 16;
-pub type SequenceTree<T> = SequenceTreeInternal<T>;
+pub(crate) type SequenceTree<T> = SequenceTreeInternal<T>;
 
 #[derive(Clone, Debug)]
-pub struct SequenceTreeInternal<T> {
+pub(crate) struct SequenceTreeInternal<T> {
     root_node: Option<SequenceTreeNode<T>>,
 }
 
@@ -24,22 +24,17 @@ where
     T: Clone + Debug,
 {
     /// Construct a new, empty, sequence.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { root_node: None }
     }
 
     /// Get the length of the sequence.
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.root_node.as_ref().map_or(0, |n| n.len())
     }
 
-    /// Check if the sequence is empty.
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
     /// Create an iterator through the sequence.
-    pub fn iter(&self) -> Iter<'_, T> {
+    pub(crate) fn iter(&self) -> Iter<'_, T> {
         Iter {
             inner: self,
             index: 0,
@@ -51,7 +46,7 @@ where
     /// # Panics
     ///
     /// Panics if `index > len`.
-    pub fn insert(&mut self, index: usize, element: T) {
+    pub(crate) fn insert(&mut self, index: usize, element: T) {
         let old_len = self.len();
         if let Some(root) = self.root_node.as_mut() {
             #[cfg(debug_assertions)]
@@ -94,19 +89,14 @@ where
     }
 
     /// Push the `element` onto the back of the sequence.
-    pub fn push(&mut self, element: T) {
+    pub(crate) fn push(&mut self, element: T) {
         let l = self.len();
         self.insert(l, element)
     }
 
     /// Get the `element` at `index` in the sequence.
-    pub fn get(&self, index: usize) -> Option<&T> {
+    pub(crate) fn get(&self, index: usize) -> Option<&T> {
         self.root_node.as_ref().and_then(|n| n.get(index))
-    }
-
-    /// Get the `element` at `index` in the sequence.
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
-        self.root_node.as_mut().and_then(|n| n.get_mut(index))
     }
 
     /// Removes the element at `index` from the sequence.
@@ -114,7 +104,7 @@ where
     /// # Panics
     ///
     /// Panics if `index` is out of bounds.
-    pub fn remove(&mut self, index: usize) -> T {
+    pub(crate) fn remove(&mut self, index: usize) -> T {
         if let Some(root) = self.root_node.as_mut() {
             #[cfg(debug_assertions)]
             let len = root.check();
@@ -134,15 +124,6 @@ where
         } else {
             panic!("remove from empty tree")
         }
-    }
-
-    /// Update the `element` at `index` in the sequence, returning the old value.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `index > len`
-    pub fn set(&mut self, index: usize, element: T) -> T {
-        self.root_node.as_mut().unwrap().set(index, element)
     }
 }
 
@@ -432,30 +413,6 @@ where
         assert!(self.is_full());
     }
 
-    pub(crate) fn set(&mut self, index: usize, element: T) -> T {
-        if self.is_leaf() {
-            let old_element = self.elements.get_mut(index).unwrap();
-            mem::replace(old_element, element)
-        } else {
-            let mut cumulative_len = 0;
-            for (child_index, child) in self.children.iter_mut().enumerate() {
-                match (cumulative_len + child.len()).cmp(&index) {
-                    Ordering::Less => {
-                        cumulative_len += child.len() + 1;
-                    }
-                    Ordering::Equal => {
-                        let old_element = self.elements.get_mut(child_index).unwrap();
-                        return mem::replace(old_element, element);
-                    }
-                    Ordering::Greater => {
-                        return child.set(index - cumulative_len, element);
-                    }
-                }
-            }
-            panic!("Invalid index to set: {} but len was {}", index, self.len())
-        }
-    }
-
     pub(crate) fn get(&self, index: usize) -> Option<&T> {
         if self.is_leaf() {
             return self.elements.get(index);
@@ -469,26 +426,6 @@ where
                     Ordering::Equal => return self.elements.get(child_index),
                     Ordering::Greater => {
                         return child.get(index - cumulative_len);
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    pub(crate) fn get_mut(&mut self, index: usize) -> Option<&mut T> {
-        if self.is_leaf() {
-            return self.elements.get_mut(index);
-        } else {
-            let mut cumulative_len = 0;
-            for (child_index, child) in self.children.iter_mut().enumerate() {
-                match (cumulative_len + child.len()).cmp(&index) {
-                    Ordering::Less => {
-                        cumulative_len += child.len() + 1;
-                    }
-                    Ordering::Equal => return self.elements.get_mut(child_index),
-                    Ordering::Greater => {
-                        return child.get_mut(index - cumulative_len);
                     }
                 }
             }
