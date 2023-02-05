@@ -54,6 +54,7 @@
 
           nodejs
           yarn
+          deno
 
           # c deps
           cmake
