@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -eoux pipefail
 
-cd rust
+# see https://stackoverflow.com/questions/4774054/reliable-way-for-a-bash-script-to-get-the-full-path-to-itself
+THIS_SCRIPT="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+cd $THIS_SCRIPT/../../rust
 RUSTDOCFLAGS="-D rustdoc::broken-intra-doc-links -D warnings" \
 cargo doc --no-deps --workspace --document-private-items

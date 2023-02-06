@@ -3,6 +3,9 @@ use std::ops::RangeBounds;
 
 use crate::{query, Automerge};
 
+/// An iterator over the keys and values of a map object
+///
+/// This is returned by the [`crate::ReadDoc::map_range`] method
 #[derive(Debug)]
 pub struct MapRange<'a, R: RangeBounds<String>> {
     range: Option<query::MapRange<'a, R>>,

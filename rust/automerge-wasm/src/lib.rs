@@ -29,7 +29,7 @@ use am::transaction::CommitOptions;
 use am::transaction::{Observed, Transactable, UnObserved};
 use am::ScalarValue;
 use automerge as am;
-use automerge::{Change, ObjId, Prop, TextEncoding, Value, ROOT};
+use automerge::{sync::SyncDoc, Change, ObjId, Prop, ReadDoc, TextEncoding, Value, ROOT};
 use js_sys::{Array, Function, Object, Uint8Array};
 use regex::Regex;
 use serde::ser::Serialize;
@@ -42,6 +42,7 @@ use wasm_bindgen::JsCast;
 
 mod interop;
 mod observer;
+mod sequence_tree;
 mod sync;
 mod value;
 
@@ -782,13 +783,15 @@ impl Automerge {
     ) -> Result<(), error::ReceiveSyncMessage> {
         let message = message.to_vec();
         let message = am::sync::Message::decode(message.as_slice())?;
-        self.doc.receive_sync_message(&mut state.0, message)?;
+        self.doc
+            .sync()
+            .receive_sync_message(&mut state.0, message)?;
         Ok(())
     }
 
     #[wasm_bindgen(js_name = generateSyncMessage)]
     pub fn generate_sync_message(&mut self, state: &mut SyncState) -> JsValue {
-        if let Some(message) = self.doc.generate_sync_message(&mut state.0) {
+        if let Some(message) = self.doc.sync().generate_sync_message(&mut state.0) {
             Uint8Array::from(message.encode().as_slice()).into()
         } else {
             JsValue::null()

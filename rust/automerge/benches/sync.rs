@@ -1,4 +1,8 @@
-use automerge::{sync, transaction::Transactable, Automerge, ROOT};
+use automerge::{
+    sync::{self, SyncDoc},
+    transaction::Transactable,
+    Automerge, ROOT,
+};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 
 #[derive(Default)]

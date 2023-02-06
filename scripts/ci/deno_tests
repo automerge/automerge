@@ -1,17 +1,21 @@
-THIS_SCRIPT=$(dirname "$0");
+#!/usr/bin/env bash
+set -eou pipefail
+# see https://stackoverflow.com/questions/4774054/reliable-way-for-a-bash-script-to-get-the-full-path-to-itself
+THIS_SCRIPT="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 WASM_PROJECT=$THIS_SCRIPT/../../rust/automerge-wasm;
 JS_PROJECT=$THIS_SCRIPT/../../javascript;
+E2E_PROJECT=$THIS_SCRIPT/../../javascript/e2e;
 
-echo "Running Wasm Deno tests";
-yarn --cwd $WASM_PROJECT install;
-yarn --cwd $WASM_PROJECT build;
-deno test $WASM_PROJECT/deno-tests/deno.ts --allow-read;
-
-cp $WASM_PROJECT/index.d.ts $WASM_PROJECT/deno;
+echo "building wasm and js"
+yarn --cwd $E2E_PROJECT install;
+yarn --cwd $E2E_PROJECT e2e buildjs;
+cp $WASM_PROJECT/index.d.ts $WASM_PROJECT/deno/;
 sed -i '1i /// <reference types="./index.d.ts" />' $WASM_PROJECT/deno/automerge_wasm.js;
 
+echo "Running Wasm Deno tests";
+deno test $WASM_PROJECT/deno-tests/deno.ts --allow-read;
+
 echo "Running JS Deno tests";
-yarn --cwd $JS_PROJECT install;
 ROOT_MODULE=$WASM_PROJECT/deno yarn --cwd $JS_PROJECT deno:build;
 yarn --cwd $JS_PROJECT deno:test;
 

@@ -6,9 +6,11 @@ use crate::{
     interop::{self, alloc, js_set},
     TextRepresentation,
 };
-use automerge::{Automerge, ObjId, OpObserver, Prop, ScalarValue, SequenceTree, Value};
+use automerge::{ObjId, OpObserver, Prop, ReadDoc, ScalarValue, Value};
 use js_sys::{Array, Object};
 use wasm_bindgen::prelude::*;
+
+use crate::sequence_tree::SequenceTree;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Observer {
@@ -30,9 +32,9 @@ impl Observer {
         old_enabled
     }
 
-    fn get_path(&mut self, doc: &Automerge, obj: &ObjId) -> Option<Vec<(ObjId, Prop)>> {
+    fn get_path<R: ReadDoc>(&mut self, doc: &R, obj: &ObjId) -> Option<Vec<(ObjId, Prop)>> {
         match doc.parents(obj) {
-            Ok(mut parents) => parents.visible_path(),
+            Ok(parents) => parents.visible_path(),
             Err(e) => {
                 automerge::log!("error generating patch : {:?}", e);
                 None
@@ -98,9 +100,9 @@ pub(crate) enum Patch {
 }
 
 impl OpObserver for Observer {
-    fn insert(
+    fn insert<R: ReadDoc>(
         &mut self,
-        doc: &Automerge,
+        doc: &R,
         obj: ObjId,
         index: usize,
         tagged_value: (Value<'_>, ObjId),
@@ -134,7 +136,7 @@ impl OpObserver for Observer {
         }
     }
 
-    fn splice_text(&mut self, doc: &Automerge, obj: ObjId, index: usize, value: &str) {
+    fn splice_text<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, index: usize, value: &str) {
         if self.enabled {
             if self.text_rep == TextRepresentation::Array {
                 for (i, c) in value.chars().enumerate() {
@@ -182,7 +184,7 @@ impl OpObserver for Observer {
         }
     }
 
-    fn delete_seq(&mut self, doc: &Automerge, obj: ObjId, index: usize, length: usize) {
+    fn delete_seq<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, index: usize, length: usize) {
         if self.enabled {
             match self.patches.last_mut() {
                 Some(Patch::SpliceText {
@@ -244,7 +246,7 @@ impl OpObserver for Observer {
         }
     }
 
-    fn delete_map(&mut self, doc: &Automerge, obj: ObjId, key: &str) {
+    fn delete_map<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, key: &str) {
         if self.enabled {
             if let Some(path) = self.get_path(doc, &obj) {
                 let patch = Patch::DeleteMap {
@@ -257,9 +259,9 @@ impl OpObserver for Observer {
         }
     }
 
-    fn put(
+    fn put<R: ReadDoc>(
         &mut self,
-        doc: &Automerge,
+        doc: &R,
         obj: ObjId,
         prop: Prop,
         tagged_value: (Value<'_>, ObjId),
@@ -290,9 +292,9 @@ impl OpObserver for Observer {
         }
     }
 
-    fn expose(
+    fn expose<R: ReadDoc>(
         &mut self,
-        doc: &Automerge,
+        doc: &R,
         obj: ObjId,
         prop: Prop,
         tagged_value: (Value<'_>, ObjId),
@@ -323,7 +325,13 @@ impl OpObserver for Observer {
         }
     }
 
-    fn increment(&mut self, doc: &Automerge, obj: ObjId, prop: Prop, tagged_value: (i64, ObjId)) {
+    fn increment<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        obj: ObjId,
+        prop: Prop,
+        tagged_value: (i64, ObjId),
+    ) {
         if self.enabled {
             if let Some(path) = self.get_path(doc, &obj) {
                 let value = tagged_value.0;
@@ -337,6 +345,12 @@ impl OpObserver for Observer {
         }
     }
 
+    fn text_as_seq(&self) -> bool {
+        self.text_rep == TextRepresentation::Array
+    }
+}
+
+impl automerge::op_observer::BranchableObserver for Observer {
     fn merge(&mut self, other: &Self) {
         self.patches.extend_from_slice(other.patches.as_slice())
     }
@@ -347,10 +361,6 @@ impl OpObserver for Observer {
             enabled: self.enabled,
             text_rep: self.text_rep,
         }
-    }
-
-    fn text_as_seq(&self) -> bool {
-        self.text_rep == TextRepresentation::Array
     }
 }
 

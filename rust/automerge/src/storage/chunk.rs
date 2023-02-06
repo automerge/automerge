@@ -286,7 +286,7 @@ impl Header {
 fn hash(typ: ChunkType, data: &[u8]) -> ChangeHash {
     let mut out = vec![u8::from(typ)];
     leb128::write::unsigned(&mut out, data.len() as u64).unwrap();
-    out.extend(data.as_ref());
+    out.extend(data);
     let hash_result = Sha256::digest(out);
     let array: [u8; 32] = hash_result.into();
     ChangeHash(array)

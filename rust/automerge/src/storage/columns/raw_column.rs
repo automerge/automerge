@@ -219,7 +219,10 @@ impl RawColumns<compression::Unknown> {
         let columns: Vec<RawColumn<compression::Unknown>> = specs_and_lens
             .into_iter()
             .scan(0_usize, |offset, (spec, len)| {
-                let end = *offset + len as usize;
+                // Note: we use a saturating add here as len was passed over the network
+                // and so could be anything. If the addition does every saturate we would
+                // expect parsing to fail later (but at least it won't panic!).
+                let end = offset.saturating_add(len as usize);
                 let data = *offset..end;
                 *offset = end;
                 Some(RawColumn {

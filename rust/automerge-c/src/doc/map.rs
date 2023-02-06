@@ -1,5 +1,6 @@
 use automerge as am;
 use automerge::transaction::Transactable;
+use automerge::ReadDoc;
 
 use crate::byte_span::{to_str, AMbyteSpan};
 use crate::change_hashes::AMchangeHashes;

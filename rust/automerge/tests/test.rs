@@ -1,8 +1,9 @@
 use automerge::transaction::Transactable;
 use automerge::{
-    ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjType, ScalarValue,
-    VecOpObserver, ROOT,
+    ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjType, ReadDoc,
+    ScalarValue, VecOpObserver, ROOT,
 };
+use std::fs;
 
 // set up logging for all the tests
 //use test_log::test;
@@ -20,7 +21,7 @@ fn no_conflict_on_repeated_assignment() {
     doc.put(&automerge::ROOT, "foo", 1).unwrap();
     doc.put(&automerge::ROOT, "foo", 2).unwrap();
     assert_doc!(
-        doc.document(),
+        &doc,
         map! {
             "foo" => { 2 },
         }
@@ -40,7 +41,7 @@ fn repeated_map_assignment_which_resolves_conflict_not_ignored() {
 
     doc1.put(&automerge::ROOT, "field", 123).unwrap();
     assert_doc!(
-        doc1.document(),
+        &doc1,
         map! {
             "field" => { 123 }
         }
@@ -61,7 +62,7 @@ fn repeated_list_assignment_which_resolves_conflict_not_ignored() {
     doc1.put(&list_id, 0, 789).unwrap();
 
     assert_doc!(
-        doc1.document(),
+        &doc1,
         map! {
             "list" => {
                  list![
@@ -83,7 +84,7 @@ fn list_deletion() {
     doc.insert(&list_id, 2, 789).unwrap();
     doc.delete(&list_id, 1).unwrap();
     assert_doc!(
-        doc.document(),
+        &doc,
         map! {
             "list" => { list![
                 { 123 },
@@ -105,7 +106,7 @@ fn merge_concurrent_map_prop_updates() {
         "bar".into()
     );
     assert_doc!(
-        doc1.document(),
+        &doc1,
         map! {
             "foo" => {  "bar" },
             "hello" => { "world" },
@@ -113,7 +114,7 @@ fn merge_concurrent_map_prop_updates() {
     );
     doc2.merge(&mut doc1).unwrap();
     assert_doc!(
-        doc2.document(),
+        &doc2,
         map! {
             "foo" => { "bar" },
             "hello" => { "world" },
@@ -133,7 +134,7 @@ fn add_concurrent_increments_of_same_property() {
     doc2.increment(&automerge::ROOT, "counter", 2).unwrap();
     doc1.merge(&mut doc2).unwrap();
     assert_doc!(
-        doc1.document(),
+        &doc1,
         map! {
             "counter" => {
                 mk_counter(3)
@@ -160,7 +161,7 @@ fn add_increments_only_to_preceeded_values() {
     doc1.merge(&mut doc2).unwrap();
 
     assert_doc!(
-        doc1.document(),
+        &doc1,
         map! {
             "counter" => {
                 mk_counter(1),
@@ -180,7 +181,7 @@ fn concurrent_updates_of_same_field() {
     doc1.merge(&mut doc2).unwrap();
 
     assert_doc!(
-        doc1.document(),
+        &doc1,
         map! {
             "field" => {
                  "one",
@@ -205,7 +206,7 @@ fn concurrent_updates_of_same_list_element() {
     doc1.merge(&mut doc2).unwrap();
 
     assert_doc!(
-        doc1.document(),
+        &doc1,
         map! {
             "birds" => {
                  list![{
@@ -231,7 +232,7 @@ fn assignment_conflicts_of_different_types() {
     doc1.merge(&mut doc3).unwrap();
 
     assert_doc!(
-        doc1.document(),
+        &doc1,
         map! {
             "field" => {
                 "string",
@@ -254,7 +255,7 @@ fn changes_within_conflicting_map_field() {
     doc1.merge(&mut doc2).unwrap();
 
     assert_doc!(
-        doc1.document(),
+        &doc1,
         map! {
             "field" => {
                 "string",
@@ -291,7 +292,7 @@ fn changes_within_conflicting_list_element() {
     doc1.merge(&mut doc2).unwrap();
 
     assert_doc!(
-        doc1.document(),
+        &doc1,
         map! {
             "list" => {
                 list![
@@ -329,7 +330,7 @@ fn concurrently_assigned_nested_maps_should_not_merge() {
     doc1.merge(&mut doc2).unwrap();
 
     assert_doc!(
-        doc1.document(),
+        &doc1,
         map! {
             "config" => {
                 map!{
@@ -363,7 +364,7 @@ fn concurrent_insertions_at_different_list_positions() {
     doc1.merge(&mut doc2).unwrap();
 
     assert_doc!(
-        doc1.document(),
+        &doc1,
         map! {
             "list" => {
                 list![
@@ -395,7 +396,7 @@ fn concurrent_insertions_at_same_list_position() {
     doc1.merge(&mut doc2).unwrap();
 
     assert_doc!(
-        doc1.document(),
+        &doc1,
         map! {
             "birds" => {
                  list![
@@ -426,7 +427,7 @@ fn concurrent_assignment_and_deletion_of_a_map_entry() {
     doc1.merge(&mut doc2).unwrap();
 
     assert_doc!(
-        doc1.document(),
+        &doc1,
         map! {
             "bestBird" => {
                 "magpie",
@@ -450,7 +451,7 @@ fn concurrent_assignment_and_deletion_of_list_entry() {
     doc2.delete(&list_id, 1).unwrap();
 
     assert_doc!(
-        doc2.document(),
+        &doc2,
         map! {
             "birds" => {list![
                 {"blackbird"},
@@ -460,7 +461,7 @@ fn concurrent_assignment_and_deletion_of_list_entry() {
     );
 
     assert_doc!(
-        doc1.document(),
+        &doc1,
         map! {
             "birds" => {list![
                 { "blackbird" },
@@ -473,7 +474,7 @@ fn concurrent_assignment_and_deletion_of_list_entry() {
     doc1.merge(&mut doc2).unwrap();
 
     assert_doc!(
-        doc1.document(),
+        &doc1,
         map! {
             "birds" => {list![
                 { "blackbird" },
@@ -506,7 +507,7 @@ fn insertion_after_a_deleted_list_element() {
     doc1.merge(&mut doc2).unwrap();
 
     assert_doc!(
-        doc1.document(),
+        &doc1,
         map! {
             "birds" => {list![
                 { "blackbird" },
@@ -517,7 +518,7 @@ fn insertion_after_a_deleted_list_element() {
 
     doc2.merge(&mut doc1).unwrap();
     assert_doc!(
-        doc2.document(),
+        &doc2,
         map! {
             "birds" => {list![
                 { "blackbird" },
@@ -548,7 +549,7 @@ fn concurrent_deletion_of_same_list_element() {
     doc1.merge(&mut doc2).unwrap();
 
     assert_doc!(
-        doc1.document(),
+        &doc1,
         map! {
             "birds" => {list![
                 { "albatross" },
@@ -559,7 +560,7 @@ fn concurrent_deletion_of_same_list_element() {
 
     doc2.merge(&mut doc1).unwrap();
     assert_doc!(
-        doc2.document(),
+        &doc2,
         map! {
             "birds" => {list![
                 { "albatross" },
@@ -592,7 +593,7 @@ fn concurrent_updates_at_different_levels() {
     doc1.merge(&mut doc2).unwrap();
 
     assert_obj!(
-        doc1.document(),
+        &doc1,
         &automerge::ROOT,
         "animals",
         map! {
@@ -634,7 +635,7 @@ fn concurrent_updates_of_concurrently_deleted_objects() {
     doc1.merge(&mut doc2).unwrap();
 
     assert_doc!(
-        doc1.document(),
+        &doc1,
         map! {
             "birds" => {
                 map!{},
@@ -685,7 +686,7 @@ fn does_not_interleave_sequence_insertions_at_same_position() {
     doc1.merge(&mut doc2).unwrap();
 
     assert_doc!(
-        doc1.document(),
+        &doc1,
         map! {
             "wisdom" => {list![
                 {"to"},
@@ -718,7 +719,7 @@ fn mutliple_insertions_at_same_list_position_with_insertion_by_greater_actor_id(
 
     doc2.insert(&list, 0, "one").unwrap();
     assert_doc!(
-        doc2.document(),
+        &doc2,
         map! {
             "list" => { list![
                 { "one" },
@@ -743,7 +744,7 @@ fn mutliple_insertions_at_same_list_position_with_insertion_by_lesser_actor_id()
 
     doc2.insert(&list, 0, "one").unwrap();
     assert_doc!(
-        doc2.document(),
+        &doc2,
         map! {
             "list" => { list![
                 { "one" },
@@ -770,7 +771,7 @@ fn insertion_consistent_with_causality() {
     doc2.insert(&list, 0, "one").unwrap();
 
     assert_doc!(
-        doc2.document(),
+        &doc2,
         map! {
             "list" => { list![
                 {"one"},
@@ -1128,7 +1129,7 @@ fn test_merging_test_conflicts_then_saving_and_loading() {
     let mut doc2 = AutoCommit::load(&doc1.save()).unwrap();
     doc2.set_actor(actor2);
 
-    assert_doc! {doc2.document(), map!{
+    assert_doc! {&doc2, map!{
         "text" => { list![{"h"}, {"e"}, {"l"}, {"l"}, {"o"}]},
     }};
 
@@ -1138,16 +1139,16 @@ fn test_merging_test_conflicts_then_saving_and_loading() {
     doc2.splice_text(&text, 6, 0, "world").unwrap();
 
     assert_doc!(
-        doc2.document(),
+        &doc2,
         map! {
             "text" => { list![{"h"}, {"e"}, {"l"}, {"l"}, {"!"}, {" "}, {"w"} , {"o"}, {"r"}, {"l"}, {"d"}]}
         }
     );
 
-    let mut doc3 = AutoCommit::load(&doc2.save()).unwrap();
+    let doc3 = AutoCommit::load(&doc2.save()).unwrap();
 
     assert_doc!(
-        doc3.document(),
+        &doc3,
         map! {
             "text" => { list![{"h"}, {"e"}, {"l"}, {"l"}, {"!"}, {" "}, {"w"} , {"o"}, {"r"}, {"l"}, {"d"}]}
         }
@@ -1399,17 +1400,22 @@ fn ops_on_wrong_objets() -> Result<(), AutomergeError> {
 }
 
 #[test]
-fn invalid_deflate_stream() {
-    let bytes: [u8; 123] = [
-        133, 111, 74, 131, 48, 48, 48, 48, 0, 113, 1, 16, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
-        48, 48, 48, 48, 48, 48, 1, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
-        48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 6, 1, 2, 3, 2, 32, 2, 48,
-        2, 49, 2, 49, 2, 8, 32, 4, 33, 2, 48, 2, 49, 1, 49, 2, 57, 2, 87, 3, 128, 1, 2, 127, 0,
-        127, 1, 127, 1, 127, 0, 127, 0, 127, 7, 127, 2, 102, 122, 127, 0, 127, 1, 1, 127, 1, 127,
-        54, 239, 191, 189, 127, 0, 0,
-    ];
+fn fuzz_crashers() {
+    let paths = fs::read_dir("./tests/fuzz-crashers").unwrap();
 
-    assert!(Automerge::load(&bytes).is_err());
+    for path in paths {
+        // uncomment this line to figure out which fixture is crashing:
+        // println!("{:?}", path.as_ref().unwrap().path().display());
+        let bytes = fs::read(path.as_ref().unwrap().path());
+        let res = Automerge::load(&bytes.unwrap());
+        assert!(res.is_err());
+    }
+}
+
+#[test]
+fn negative_64() {
+    let mut doc = Automerge::new();
+    assert!(doc.transact(|d| { d.put(ROOT, "a", -64_i64) }).is_ok())
 }
 
 #[test]

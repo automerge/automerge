@@ -1,12 +1,13 @@
 [package]
 name = "automerge"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/automerge/automerge-rs"
 documentation = "https://automerge.org/automerge-rs/automerge/"
 rust-version = "1.57.0"
 description = "A JSON-like data structure (a CRDT) that can be modified concurrently by different users, and merged again automatically"
+readme = "./README.md"
 
 [features]
 optree-visualisation = ["dot", "rand"]
@@ -46,6 +47,7 @@ criterion = "0.4.0"
 test-log = { version = "0.2.10", features=["trace"], default-features = false}
 tracing-subscriber = {version = "0.3.9", features = ["fmt", "env-filter"] }
 automerge-test = { path = "../automerge-test" }
+prettytable = "0.10.0"
 
 [[bench]]
 name = "range"

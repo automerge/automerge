@@ -4,6 +4,8 @@ use std::{
     hash::Hash,
 };
 
+use automerge::ReadDoc;
+
 use serde::ser::{SerializeMap, SerializeSeq};
 
 pub fn new_doc() -> automerge::AutoCommit {
@@ -48,7 +50,7 @@ pub fn sorted_actors() -> (automerge::ActorId, automerge::ActorId) {
 /// let title = doc.put(todo, "title", "water plants").unwrap();
 ///
 /// assert_doc!(
-///     &doc.document(),
+///     &doc,
 ///     map!{
 ///         "todos" => {
 ///             list![
@@ -67,6 +69,7 @@ pub fn sorted_actors() -> (automerge::ActorId, automerge::ActorId) {
 /// ```rust
 /// # use automerge_test::{assert_doc, map};
 /// # use automerge::transaction::Transactable;
+/// # use automerge::ReadDoc;
 ///
 /// let mut doc1 = automerge::AutoCommit::new();
 /// let mut doc2 = automerge::AutoCommit::new();
@@ -74,7 +77,7 @@ pub fn sorted_actors() -> (automerge::ActorId, automerge::ActorId) {
 /// doc2.put(automerge::ROOT, "field", "two").unwrap();
 /// doc1.merge(&mut doc2);
 /// assert_doc!(
-///     &doc1.document(),
+///     doc1.document(),
 ///     map!{
 ///         "field" => {
 ///             "one",
@@ -330,12 +333,12 @@ impl serde::Serialize for RealizedObject {
     }
 }
 
-pub fn realize(doc: &automerge::Automerge) -> RealizedObject {
+pub fn realize<R: ReadDoc>(doc: &R) -> RealizedObject {
     realize_obj(doc, &automerge::ROOT, automerge::ObjType::Map)
 }
 
-pub fn realize_prop<P: Into<automerge::Prop>>(
-    doc: &automerge::Automerge,
+pub fn realize_prop<R: ReadDoc, P: Into<automerge::Prop>>(
+    doc: &R,
     obj_id: &automerge::ObjId,
     prop: P,
 ) -> RealizedObject {
@@ -346,8 +349,8 @@ pub fn realize_prop<P: Into<automerge::Prop>>(
     }
 }
 
-pub fn realize_obj(
-    doc: &automerge::Automerge,
+pub fn realize_obj<R: ReadDoc>(
+    doc: &R,
     obj_id: &automerge::ObjId,
     objtype: automerge::ObjType,
 ) -> RealizedObject {
@@ -370,8 +373,8 @@ pub fn realize_obj(
     }
 }
 
-fn realize_values<K: Into<automerge::Prop>>(
-    doc: &automerge::Automerge,
+fn realize_values<R: ReadDoc, K: Into<automerge::Prop>>(
+    doc: &R,
     obj_id: &automerge::ObjId,
     key: K,
 ) -> BTreeSet<RealizedObject> {

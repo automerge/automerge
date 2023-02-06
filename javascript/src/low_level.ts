@@ -14,6 +14,7 @@ export type { ChangeToEncode } from "@automerge/automerge-wasm"
 
 export function UseApi(api: API) {
   for (const k in api) {
+    // eslint-disable-next-line @typescript-eslint/no-extra-semi,@typescript-eslint/no-explicit-any
     ;(ApiHandler as any)[k] = (api as any)[k]
   }
 }

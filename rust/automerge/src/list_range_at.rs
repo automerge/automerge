@@ -3,6 +3,9 @@ use std::ops::RangeBounds;
 
 use crate::{query, Automerge};
 
+/// An iterator over the elements of a list object at a particular set of heads
+///
+/// This is returned by the [`crate::ReadDoc::list_range_at`] method
 #[derive(Debug)]
 pub struct ListRangeAt<'a, R: RangeBounds<usize>> {
     range: Option<query::ListRangeAt<'a, R>>,

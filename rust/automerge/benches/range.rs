@@ -1,4 +1,4 @@
-use automerge::{transaction::Transactable, Automerge, ROOT};
+use automerge::{transaction::Transactable, Automerge, ReadDoc, ROOT};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn doc(n: u64) -> Automerge {
@@ -16,18 +16,8 @@ fn range(doc: &Automerge) {
     range.for_each(drop);
 }
 
-fn range_rev(doc: &Automerge) {
-    let range = doc.values(ROOT).rev();
-    range.for_each(drop);
-}
-
 fn range_at(doc: &Automerge) {
     let range = doc.values_at(ROOT, &doc.get_heads());
-    range.for_each(drop);
-}
-
-fn range_at_rev(doc: &Automerge) {
-    let range = doc.values_at(ROOT, &doc.get_heads()).rev();
     range.for_each(drop);
 }
 
@@ -37,14 +27,8 @@ fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function(&format!("range {}", n), |b| {
         b.iter(|| range(black_box(&doc)))
     });
-    c.bench_function(&format!("range rev {}", n), |b| {
-        b.iter(|| range_rev(black_box(&doc)))
-    });
     c.bench_function(&format!("range_at {}", n), |b| {
         b.iter(|| range_at(black_box(&doc)))
-    });
-    c.bench_function(&format!("range_at rev {}", n), |b| {
-        b.iter(|| range_at_rev(black_box(&doc)))
     });
 }
 

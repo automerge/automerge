@@ -2,7 +2,7 @@ use automerge::transaction::CommitOptions;
 use automerge::transaction::Transactable;
 use automerge::AutomergeError;
 use automerge::ObjType;
-use automerge::{Automerge, ROOT};
+use automerge::{Automerge, ReadDoc, ROOT};
 
 // Based on https://automerge.github.io/docs/quickstart
 fn main() {

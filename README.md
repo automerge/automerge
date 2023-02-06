@@ -42,9 +42,10 @@ In general we try and respect semver.
 
 ### JavaScript
 
-An alpha release of the javascript package is currently available as
-`@automerge/automerge@2.0.0-alpha.n` where `n` is an integer. We are gathering
-feedback on the API and looking to release a `2.0.0` in the next few weeks.
+A stable release of the javascript package is currently available as
+`@automerge/automerge@2.0.0` where. pre-release verisions of the `2.0.1` are
+available as `2.0.1-alpha.n`. `2.0.1*` packages are also available for Deno at
+https://deno.land/x/automerge
 
 ### Rust
 
@@ -52,7 +53,10 @@ The rust codebase is currently oriented around producing a performant backend
 for the Javascript wrapper and as such the API for Rust code is low level and
 not well documented. We will be returning to this over the next few months but
 for now you will need to be comfortable reading the tests and asking questions
-to figure out how to use it.
+to figure out how to use it. If you are looking to build rust applications which
+use automerge you may want to look into
+[autosurgeon](https://github.com/alexjg/autosurgeon)
+
 
 ## Repository Organisation
 

@@ -3,9 +3,12 @@ import { TEXT, STATE } from "./constants"
 import type { InternalState } from "./internal_state"
 
 export class Text {
+  //eslint-disable-next-line @typescript-eslint/no-explicit-any
   elems: Array<any>
   str: string | undefined
+  //eslint-disable-next-line @typescript-eslint/no-explicit-any
   spans: Array<any> | undefined;
+  //eslint-disable-next-line @typescript-eslint/no-explicit-any
   [STATE]?: InternalState<any>
 
   constructor(text?: string | string[] | Value[]) {
@@ -25,6 +28,7 @@ export class Text {
     return this.elems.length
   }
 
+  //eslint-disable-next-line @typescript-eslint/no-explicit-any
   get(index: number): any {
     return this.elems[index]
   }
@@ -73,7 +77,7 @@ export class Text {
    * For example, the value `['a', 'b', {x: 3}, 'c', 'd']` has spans:
    * `=> ['ab', {x: 3}, 'cd']`
    */
-  toSpans(): Array<Value | Object> {
+  toSpans(): Array<Value | object> {
     if (!this.spans) {
       this.spans = []
       let chars = ""
@@ -118,7 +122,7 @@ export class Text {
   /**
    * Inserts new list items `values` starting at position `index`.
    */
-  insertAt(index: number, ...values: Array<Value | Object>) {
+  insertAt(index: number, ...values: Array<Value | object>) {
     if (this[STATE]) {
       throw new RangeError(
         "object cannot be modified outside of a change block"
@@ -140,7 +144,7 @@ export class Text {
     this.elems.splice(index, numDelete)
   }
 
-  map<T>(callback: (e: Value | Object) => T) {
+  map<T>(callback: (e: Value | object) => T) {
     this.elems.map(callback)
   }
 

@@ -5,9 +5,12 @@ use smol_str::SmolStr;
 use std::borrow::Cow;
 use std::fmt;
 
+/// The type of values in an automerge document
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value<'a> {
+    /// An composite object of type `ObjType`
     Object(ObjType),
+    /// A non composite value
     // TODO: if we don't have to store this in patches any more then it might be able to be just a
     // &'a ScalarValue rather than a Cow
     Scalar(Cow<'a, ScalarValue>),
@@ -266,6 +269,12 @@ impl<'a> From<String> for Value<'a> {
     }
 }
 
+impl<'a> From<SmolStr> for Value<'a> {
+    fn from(s: SmolStr) -> Self {
+        Value::Scalar(Cow::Owned(ScalarValue::Str(s)))
+    }
+}
+
 impl<'a> From<char> for Value<'a> {
     fn from(c: char) -> Self {
         Value::Scalar(Cow::Owned(ScalarValue::Str(SmolStr::new(c.to_string()))))
@@ -425,6 +434,7 @@ impl From<&Counter> for f64 {
     }
 }
 
+/// A value which is not a composite value
 #[derive(Serialize, PartialEq, Debug, Clone)]
 #[serde(untagged)]
 pub enum ScalarValue {
@@ -436,7 +446,11 @@ pub enum ScalarValue {
     Counter(Counter),
     Timestamp(i64),
     Boolean(bool),
-    Unknown { type_code: u8, bytes: Vec<u8> },
+    /// A value from a future version of automerge
+    Unknown {
+        type_code: u8,
+        bytes: Vec<u8>,
+    },
     Null,
 }
 

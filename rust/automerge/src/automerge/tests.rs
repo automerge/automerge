@@ -1507,6 +1507,11 @@ fn observe_counter_change_application() {
     let changes = doc.get_changes(&[]).unwrap().into_iter().cloned();
 
     let mut new_doc = AutoCommit::new().with_observer(VecOpObserver::default());
+    // make a new change to the doc to stop the empty doc logic from skipping the intermediate
+    // patches. The is probably not really necessary, we could update this test to just test that
+    // the correct final state is emitted. For now though, we leave it as is.
+    new_doc.put(ROOT, "foo", "bar").unwrap();
+    new_doc.observer().take_patches();
     new_doc.apply_changes(changes).unwrap();
     assert_eq!(
         new_doc.observer().take_patches(),
@@ -1539,7 +1544,7 @@ fn observe_counter_change_application() {
 
 #[test]
 fn get_changes_heads_empty() {
-    let mut doc = AutoCommit::unobserved();
+    let mut doc = AutoCommit::new();
     doc.put(ROOT, "key1", 1).unwrap();
     doc.commit();
     doc.put(ROOT, "key2", 1).unwrap();

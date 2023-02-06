@@ -1,5 +1,9 @@
 use crate::{query, Automerge};
 
+/// An iterator over the keys of an object at a particular point in history
+///
+/// This is returned by [`crate::ReadDoc::keys_at`] method. The returned item is either the keys of a map,
+/// or the encoded element IDs of a sequence.
 #[derive(Debug)]
 pub struct KeysAt<'a, 'k> {
     keys: Option<query::KeysAt<'k>>,

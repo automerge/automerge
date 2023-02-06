@@ -2,7 +2,10 @@ use std::ops::RangeBounds;
 
 use crate::exid::ExId;
 use crate::marks::RangeExpand;
-use crate::{Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, ScalarValue, Value, Values};
+use crate::op_observer::BranchableObserver;
+use crate::{
+    Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, ReadDoc, ScalarValue, Value, Values,
+};
 use crate::{AutomergeError, Keys};
 use crate::{ListRange, ListRangeAt, MapRange, MapRangeAt};
 
@@ -50,7 +53,7 @@ impl<'a> Transaction<'a, observation::UnObserved> {
     }
 }
 
-impl<'a, Obs: OpObserver> Transaction<'a, observation::Observed<Obs>> {
+impl<'a, Obs: OpObserver + BranchableObserver> Transaction<'a, observation::Observed<Obs>> {
     pub fn observer(&mut self) -> &mut Obs {
         self.observation.as_mut().unwrap().observer()
     }
@@ -113,106 +116,7 @@ impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
     }
 }
 
-impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
-    /// Get the number of pending operations in this transaction.
-    fn pending_ops(&self) -> usize {
-        self.inner.as_ref().unwrap().pending_ops()
-    }
-
-    /// Set the value of property `P` to value `V` in object `obj`.
-    ///
-    /// # Errors
-    ///
-    /// This will return an error if
-    /// - The object does not exist
-    /// - The key is the wrong type for the object
-    /// - The key does not exist in the object
-    fn put<O: AsRef<ExId>, P: Into<Prop>, V: Into<ScalarValue>>(
-        &mut self,
-        obj: O,
-        prop: P,
-        value: V,
-    ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.put(doc, obs, obj.as_ref(), prop, value))
-    }
-
-    fn put_object<O: AsRef<ExId>, P: Into<Prop>>(
-        &mut self,
-        obj: O,
-        prop: P,
-        value: ObjType,
-    ) -> Result<ExId, AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.put_object(doc, obs, obj.as_ref(), prop, value))
-    }
-
-    fn insert<O: AsRef<ExId>, V: Into<ScalarValue>>(
-        &mut self,
-        obj: O,
-        index: usize,
-        value: V,
-    ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.insert(doc, obs, obj.as_ref(), index, value))
-    }
-
-    fn insert_object<O: AsRef<ExId>>(
-        &mut self,
-        obj: O,
-        index: usize,
-        value: ObjType,
-    ) -> Result<ExId, AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.insert_object(doc, obs, obj.as_ref(), index, value))
-    }
-
-    fn increment<O: AsRef<ExId>, P: Into<Prop>>(
-        &mut self,
-        obj: O,
-        prop: P,
-        value: i64,
-    ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.increment(doc, obs, obj.as_ref(), prop, value))
-    }
-
-    fn delete<O: AsRef<ExId>, P: Into<Prop>>(
-        &mut self,
-        obj: O,
-        prop: P,
-    ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.delete(doc, obs, obj.as_ref(), prop))
-    }
-
-    /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
-    /// the new elements
-    fn splice<O: AsRef<ExId>, V: IntoIterator<Item = ScalarValue>>(
-        &mut self,
-        obj: O,
-        pos: usize,
-        del: usize,
-        vals: V,
-    ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.splice(doc, obs, obj.as_ref(), pos, del, vals))
-    }
-
-    fn splice_text<O: AsRef<ExId>>(
-        &mut self,
-        obj: O,
-        pos: usize,
-        del: usize,
-        text: &str,
-    ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.splice_text(doc, obs, obj.as_ref(), pos, del, text))
-    }
-
-    fn mark<O: AsRef<ExId>, V: Into<ScalarValue>>(
-        &mut self,
-        obj: O,
-        range: &std::ops::Range<usize>,
-        expand: RangeExpand,
-        mark: &str,
-        value: V,
-    ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.mark(doc, obs, obj.as_ref(), range, expand, mark, value))
-    }
-
+impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_, '_> {
         self.doc.keys(obj)
     }
@@ -323,6 +227,119 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
 
     fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<crate::Parents<'_>, AutomergeError> {
         self.doc.parents(obj)
+    }
+
+    fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<(ExId, Prop)>, AutomergeError> {
+        self.doc.path_to_object(obj)
+    }
+
+    fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
+        self.doc.get_missing_deps(heads)
+    }
+
+    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&crate::Change> {
+        self.doc.get_change_by_hash(hash)
+    }
+}
+
+impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
+    /// Get the number of pending operations in this transaction.
+    fn pending_ops(&self) -> usize {
+        self.inner.as_ref().unwrap().pending_ops()
+    }
+
+    /// Set the value of property `P` to value `V` in object `obj`.
+    ///
+    /// # Errors
+    ///
+    /// This will return an error if
+    /// - The object does not exist
+    /// - The key is the wrong type for the object
+    /// - The key does not exist in the object
+    fn put<O: AsRef<ExId>, P: Into<Prop>, V: Into<ScalarValue>>(
+        &mut self,
+        obj: O,
+        prop: P,
+        value: V,
+    ) -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, obs| tx.put(doc, obs, obj.as_ref(), prop, value))
+    }
+
+    fn put_object<O: AsRef<ExId>, P: Into<Prop>>(
+        &mut self,
+        obj: O,
+        prop: P,
+        value: ObjType,
+    ) -> Result<ExId, AutomergeError> {
+        self.do_tx(|tx, doc, obs| tx.put_object(doc, obs, obj.as_ref(), prop, value))
+    }
+
+    fn insert<O: AsRef<ExId>, V: Into<ScalarValue>>(
+        &mut self,
+        obj: O,
+        index: usize,
+        value: V,
+    ) -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, obs| tx.insert(doc, obs, obj.as_ref(), index, value))
+    }
+
+    fn insert_object<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        index: usize,
+        value: ObjType,
+    ) -> Result<ExId, AutomergeError> {
+        self.do_tx(|tx, doc, obs| tx.insert_object(doc, obs, obj.as_ref(), index, value))
+    }
+
+    fn increment<O: AsRef<ExId>, P: Into<Prop>>(
+        &mut self,
+        obj: O,
+        prop: P,
+        value: i64,
+    ) -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, obs| tx.increment(doc, obs, obj.as_ref(), prop, value))
+    }
+
+    fn delete<O: AsRef<ExId>, P: Into<Prop>>(
+        &mut self,
+        obj: O,
+        prop: P,
+    ) -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, obs| tx.delete(doc, obs, obj.as_ref(), prop))
+    }
+
+    /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
+    /// the new elements
+    fn splice<O: AsRef<ExId>, V: IntoIterator<Item = ScalarValue>>(
+        &mut self,
+        obj: O,
+        pos: usize,
+        del: usize,
+        vals: V,
+    ) -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, obs| tx.splice(doc, obs, obj.as_ref(), pos, del, vals))
+    }
+
+    fn splice_text<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        pos: usize,
+        del: usize,
+        text: &str,
+    ) -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, obs| tx.splice_text(doc, obs, obj.as_ref(), pos, del, text))
+    }
+
+    fn mark<O: AsRef<ExId>, V: Into<ScalarValue>>(
+        &mut self,
+        obj: O,
+        range: &std::ops::Range<usize>,
+        expand: RangeExpand,
+        mark: &str,
+        value: V,
+    ) -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, obs| tx.mark(doc, obs, obj.as_ref(), range, expand, mark, value))
     }
 
     fn base_heads(&self) -> Vec<ChangeHash> {

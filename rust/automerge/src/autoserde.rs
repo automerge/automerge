@@ -1,18 +1,33 @@
 use serde::ser::{SerializeMap, SerializeSeq};
 
-use crate::{Automerge, ObjId, ObjType, Value};
+use crate::{ObjId, ObjType, ReadDoc, Value};
 
-/// A wrapper type which implements [`serde::Serialize`] for an [`Automerge`].
+/// A wrapper type which implements [`serde::Serialize`] for a [`ReadDoc`].
+///
+/// # Example
+///
+/// ```
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// use automerge::{AutoCommit, AutomergeError, Value, transaction::Transactable};
+/// let mut doc = AutoCommit::new();
+/// doc.put(automerge::ROOT, "key", "value")?;
+///
+/// let serialized = serde_json::to_string(&automerge::AutoSerde::from(&doc)).unwrap();
+///
+/// assert_eq!(serialized, r#"{"key":"value"}"#);
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug)]
-pub struct AutoSerde<'a>(&'a Automerge);
+pub struct AutoSerde<'a, R: crate::ReadDoc>(&'a R);
 
-impl<'a> From<&'a Automerge> for AutoSerde<'a> {
-    fn from(a: &'a Automerge) -> Self {
+impl<'a, R: ReadDoc> From<&'a R> for AutoSerde<'a, R> {
+    fn from(a: &'a R) -> Self {
         AutoSerde(a)
     }
 }
 
-impl<'a> serde::Serialize for AutoSerde<'a> {
+impl<'a, R: crate::ReadDoc> serde::Serialize for AutoSerde<'a, R> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -25,12 +40,12 @@ impl<'a> serde::Serialize for AutoSerde<'a> {
     }
 }
 
-struct AutoSerdeMap<'a> {
-    doc: &'a Automerge,
+struct AutoSerdeMap<'a, R> {
+    doc: &'a R,
     obj: ObjId,
 }
 
-impl<'a> serde::Serialize for AutoSerdeMap<'a> {
+impl<'a, R: crate::ReadDoc> serde::Serialize for AutoSerdeMap<'a, R> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -51,12 +66,12 @@ impl<'a> serde::Serialize for AutoSerdeMap<'a> {
     }
 }
 
-struct AutoSerdeSeq<'a> {
-    doc: &'a Automerge,
+struct AutoSerdeSeq<'a, R> {
+    doc: &'a R,
     obj: ObjId,
 }
 
-impl<'a> serde::Serialize for AutoSerdeSeq<'a> {
+impl<'a, R: crate::ReadDoc> serde::Serialize for AutoSerdeSeq<'a, R> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -77,13 +92,13 @@ impl<'a> serde::Serialize for AutoSerdeSeq<'a> {
     }
 }
 
-struct AutoSerdeVal<'a> {
-    doc: &'a Automerge,
+struct AutoSerdeVal<'a, R> {
+    doc: &'a R,
     val: Value<'a>,
     obj: ObjId,
 }
 
-impl<'a> serde::Serialize for AutoSerdeVal<'a> {
+impl<'a, R: crate::ReadDoc> serde::Serialize for AutoSerdeVal<'a, R> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
