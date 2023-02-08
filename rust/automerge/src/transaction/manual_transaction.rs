@@ -1,10 +1,11 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
-use crate::marks::RangeExpand;
+use crate::marks::MarkRange;
 use crate::op_observer::BranchableObserver;
 use crate::{
-    Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, ReadDoc, ScalarValue, Value, Values,
+    query, Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, ReadDoc, ScalarValue, Value,
+    Values,
 };
 use crate::{AutomergeError, Keys};
 use crate::{ListRange, ListRangeAt, MapRange, MapRangeAt};
@@ -240,6 +241,32 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&crate::Change> {
         self.doc.get_change_by_hash(hash)
     }
+
+    fn raw_spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::SpanInfo>, AutomergeError> {
+        self.doc.raw_spans(obj)
+    }
+
+    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::Span<'_>>, AutomergeError> {
+        self.doc.spans(obj)
+    }
+
+    fn attribute<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        baseline: &[ChangeHash],
+        change_sets: &[Vec<ChangeHash>],
+    ) -> Result<Vec<query::ChangeSet>, AutomergeError> {
+        self.doc.attribute(obj, baseline, change_sets)
+    }
+
+    fn attribute2<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        baseline: &[ChangeHash],
+        change_sets: &[Vec<ChangeHash>],
+    ) -> Result<Vec<query::ChangeSet2>, AutomergeError> {
+        self.doc.attribute2(obj, baseline, change_sets)
+    }
 }
 
 impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
@@ -334,12 +361,19 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
     fn mark<O: AsRef<ExId>, V: Into<ScalarValue>>(
         &mut self,
         obj: O,
-        range: &std::ops::Range<usize>,
-        expand: RangeExpand,
+        range: &MarkRange,
         mark: &str,
         value: V,
     ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.mark(doc, obs, obj.as_ref(), range, expand, mark, value))
+        self.do_tx(|tx, doc, obs| tx.mark(doc, obs, obj.as_ref(), range, mark, value))
+    }
+
+    fn unmark<O: AsRef<ExId>, M: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        mark: M,
+    ) -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, obs| tx.unmark(doc, obs, obj.as_ref(), mark.as_ref()))
     }
 
     fn base_heads(&self) -> Vec<ChangeHash> {

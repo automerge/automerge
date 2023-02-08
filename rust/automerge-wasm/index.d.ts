@@ -165,6 +165,15 @@ export class Automerge {
   increment(obj: ObjID, prop: Prop, value: number): void;
   delete(obj: ObjID, prop: Prop): void;
 
+  // marks
+  mark(obj: ObjID, name: string, range: string, value: Value, datatype?: Datatype): void;
+  unmark(obj: ObjID, mark: ObjID): void;
+  spans(obj: ObjID): any;
+  raw_spans(obj: ObjID): any;
+  blame(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet[];
+  attribute(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet[];
+  attribute2(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet[];
+
   // returns a single value - if there is a conflict return the winner
   get(obj: ObjID, prop: Prop, heads?: Heads): Value | undefined;
   getWithType(obj: ObjID, prop: Prop, heads?: Heads): FullValue | null;

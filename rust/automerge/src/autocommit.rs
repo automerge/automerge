@@ -1,17 +1,18 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
-use crate::marks::RangeExpand;
+use crate::marks::MarkRange;
 use crate::op_observer::{BranchableObserver, OpObserver};
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::{
-    sync, Keys, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType, Parents, ReadDoc,
-    ScalarValue,
-};
-use crate::{
+    query,
     transaction::{Observation, Observed, TransactionInner, UnObserved},
     ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop, TextEncoding, Value, Values,
+};
+use crate::{
+    sync, Keys, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType, Parents, ReadDoc,
+    ScalarValue,
 };
 
 /// An automerge document that automatically manages transactions.
@@ -495,6 +496,32 @@ impl<Obs: Observation> ReadDoc for AutoCommitWithObs<Obs> {
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&Change> {
         self.doc.get_change_by_hash(hash)
     }
+
+    fn raw_spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::SpanInfo>, AutomergeError> {
+        self.doc.raw_spans(obj)
+    }
+
+    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::Span<'_>>, AutomergeError> {
+        self.doc.spans(obj)
+    }
+
+    fn attribute<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        baseline: &[ChangeHash],
+        change_sets: &[Vec<ChangeHash>],
+    ) -> Result<Vec<query::ChangeSet>, AutomergeError> {
+        self.doc.attribute(obj, baseline, change_sets)
+    }
+
+    fn attribute2<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        baseline: &[ChangeHash],
+        change_sets: &[Vec<ChangeHash>],
+    ) -> Result<Vec<query::ChangeSet2>, AutomergeError> {
+        self.doc.attribute2(obj, baseline, change_sets)
+    }
 }
 
 impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
@@ -625,8 +652,7 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
     fn mark<O: AsRef<ExId>, V: Into<ScalarValue>>(
         &mut self,
         obj: O,
-        range: &std::ops::Range<usize>,
-        expand: RangeExpand,
+        range: &MarkRange,
         mark: &str,
         value: V,
     ) -> Result<(), AutomergeError> {
@@ -637,9 +663,23 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
             current.observer(),
             obj.as_ref(),
             range,
-            expand,
             mark,
             value,
+        )
+    }
+
+    fn unmark<O: AsRef<ExId>, M: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        mark: M,
+    ) -> Result<(), AutomergeError> {
+        self.ensure_transaction_open();
+        let (current, tx) = self.transaction.as_mut().unwrap();
+        tx.unmark(
+            &mut self.doc,
+            current.observer(),
+            obj.as_ref(),
+            mark.as_ref(),
         )
     }
 

@@ -1,7 +1,7 @@
 use crate::{
     error::AutomergeError, exid::ExId, keys::Keys, keys_at::KeysAt, list_range::ListRange,
     list_range_at::ListRangeAt, map_range::MapRange, map_range_at::MapRangeAt, parents::Parents,
-    values::Values, Change, ChangeHash, ObjType, Prop, Value,
+    query, values::Values, Change, ChangeHash, ObjType, Prop, Value,
 };
 
 use std::ops::RangeBounds;
@@ -196,4 +196,22 @@ pub trait ReadDoc {
 
     /// Get a change by its hash.
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&Change>;
+
+    fn raw_spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::SpanInfo>, AutomergeError>;
+
+    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::Span<'_>>, AutomergeError>;
+
+    fn attribute<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        baseline: &[ChangeHash],
+        change_sets: &[Vec<ChangeHash>],
+    ) -> Result<Vec<query::ChangeSet>, AutomergeError>;
+
+    fn attribute2<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        baseline: &[ChangeHash],
+        change_sets: &[Vec<ChangeHash>],
+    ) -> Result<Vec<query::ChangeSet2>, AutomergeError>;
 }

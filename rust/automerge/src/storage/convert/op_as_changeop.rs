@@ -96,6 +96,8 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
             OpType::Make(..) | OpType::Delete => Cow::Owned(ScalarValue::Null),
             OpType::Increment(i) => Cow::Owned(ScalarValue::Int(*i)),
             OpType::Put(s) => Cow::Borrowed(s),
+            OpType::MarkBegin(_) => todo!(),
+            OpType::MarkEnd(_) => todo!(),
         }
     }
 

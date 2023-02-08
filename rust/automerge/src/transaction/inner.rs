@@ -1,7 +1,7 @@
 use std::num::NonZeroU64;
 
 use crate::exid::ExId;
-use crate::marks::RangeExpand;
+use crate::marks::MarkRange;
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
 use crate::types::{Key, ListEncoding, ObjId, OpId, OpIds, TextEncoding};
@@ -651,20 +651,56 @@ impl TransactionInner {
 
     pub(crate) fn mark<Obs: OpObserver, V: Into<ScalarValue>>(
         &mut self,
+        doc: &mut Automerge,
+        op_observer: Option<&mut Obs>,
+        ex_obj: &ExId,
+        range: &MarkRange,
+        mark: &str,
+        value: V,
+    ) -> Result<(), AutomergeError> {
+        let (obj, _obj_type) = doc.exid_to_obj(ex_obj)?;
+        if let Some(obs) = op_observer {
+            self.do_insert(
+                doc,
+                Some(obs),
+                obj,
+                range.start,
+                OpType::mark(mark.to_owned(), range.expand_left, value.into()),
+            )?;
+            self.do_insert(
+                doc,
+                Some(obs),
+                obj,
+                range.end,
+                OpType::MarkEnd(range.expand_right),
+            )?;
+        } else {
+            self.do_insert::<Obs>(
+                doc,
+                None,
+                obj,
+                range.start,
+                OpType::mark(mark.to_owned(), range.expand_left, value.into()),
+            )?;
+            self.do_insert::<Obs>(
+                doc,
+                None,
+                obj,
+                range.end,
+                OpType::MarkEnd(range.expand_right),
+            )?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn unmark<Obs: OpObserver>(
+        &mut self,
         _doc: &mut Automerge,
         mut _op_observer: Option<&mut Obs>,
         _ex_obj: &ExId,
-        _range: &std::ops::Range<usize>,
-        expand: RangeExpand,
-        _mark: &str,
-        _value: V,
+        _mark: &ExId,
     ) -> Result<(), AutomergeError> {
-        match expand {
-            RangeExpand::Neither => todo!(),
-            RangeExpand::ExpandLeft => todo!(),
-            RangeExpand::ExpandRight => todo!(),
-            RangeExpand::ExpandBoth => todo!(),
-        }
+        unimplemented!()
     }
 
     fn finalize_op<Obs: OpObserver>(
@@ -679,23 +715,25 @@ impl TransactionInner {
         if let Some(op_observer) = op_observer {
             let ex_obj = doc.ops().id_to_exid(obj.0);
             if op.insert {
-                let obj_type = doc.ops().object_type(&obj);
-                assert!(obj_type.unwrap().is_sequence());
-                match (obj_type, prop) {
-                    (Some(ObjType::List), Prop::Seq(index)) => {
-                        let value = (op.value(), doc.ops().id_to_exid(op.id));
-                        op_observer.insert(doc, ex_obj, index, value)
-                    }
-                    (Some(ObjType::Text), Prop::Seq(index)) => {
-                        // FIXME
-                        if op_observer.text_as_seq() {
+                if !op.is_mark() {
+                    let obj_type = doc.ops().object_type(&obj);
+                    assert!(obj_type.unwrap().is_sequence());
+                    match (obj_type, prop) {
+                        (Some(ObjType::List), Prop::Seq(index)) => {
                             let value = (op.value(), doc.ops().id_to_exid(op.id));
                             op_observer.insert(doc, ex_obj, index, value)
-                        } else {
-                            op_observer.splice_text(doc, ex_obj, index, op.to_str())
                         }
+                        (Some(ObjType::Text), Prop::Seq(index)) => {
+                            // FIXME
+                            if op_observer.text_as_seq() {
+                                let value = (op.value(), doc.ops().id_to_exid(op.id));
+                                op_observer.insert(doc, ex_obj, index, value)
+                            } else {
+                                op_observer.splice_text(doc, ex_obj, index, op.to_str())
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             } else if op.is_delete() {
                 op_observer.delete(doc, ex_obj, prop);

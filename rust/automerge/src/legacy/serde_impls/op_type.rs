@@ -18,6 +18,8 @@ impl Serialize for OpType {
             OpType::Delete => RawOpType::Del,
             OpType::Increment(_) => RawOpType::Inc,
             OpType::Put(_) => RawOpType::Set,
+            OpType::MarkBegin(_) => todo!(),
+            OpType::MarkEnd(_) => todo!(),
         };
         raw_type.serialize(serializer)
     }

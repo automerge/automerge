@@ -198,6 +198,25 @@ pub enum OpType {
     Delete,
     Increment(i64),
     Put(ScalarValue),
+    MarkBegin(MarkData),
+    MarkEnd(bool),
+}
+
+#[derive(PartialEq, Debug, Clone)]
+pub struct MarkData {
+    pub name: String,
+    pub value: ScalarValue,
+    pub expand: bool,
+}
+
+impl Display for MarkData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "name={} value={} expand={}",
+            self.name, self.value, self.expand
+        )
+    }
 }
 
 impl OpType {
@@ -213,7 +232,17 @@ impl OpType {
             Self::Make(ObjType::Text) => 4,
             Self::Increment(_) => 5,
             Self::Make(ObjType::Table) => 6,
+            Self::MarkBegin(_) => todo!(),
+            Self::MarkEnd(_) => todo!(),
         }
+    }
+
+    pub(crate) fn mark(name: String, expand: bool, value: ScalarValue) -> OpType {
+        OpType::MarkBegin(MarkData {
+            name,
+            value,
+            expand,
+        })
     }
 
     pub(crate) fn from_index_and_value(
@@ -446,6 +475,11 @@ impl OpId {
             .cmp(&other.0)
             .then_with(|| actors[self.1 as usize].cmp(&actors[other.1 as usize]))
     }
+
+    #[inline]
+    pub(crate) fn prev(&self) -> OpId {
+        OpId(self.0 - 1, self.1)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
@@ -572,13 +606,15 @@ impl Op {
     pub(crate) fn to_str(&self) -> &str {
         if let OpType::Put(ScalarValue::Str(s)) = &self.action {
             s
+        } else if self.is_mark() {
+            ""
         } else {
             "\u{fffc}"
         }
     }
 
     pub(crate) fn visible(&self) -> bool {
-        if self.is_inc() {
+        if self.is_inc() || self.is_mark() {
             false
         } else if self.is_counter() {
             self.succ.len() <= self.incs()
@@ -605,6 +641,18 @@ impl Op {
 
     pub(crate) fn is_counter(&self) -> bool {
         matches!(&self.action, OpType::Put(ScalarValue::Counter(_)))
+    }
+
+    pub(crate) fn is_mark(&self) -> bool {
+        matches!(&self.action, OpType::MarkBegin(_) | OpType::MarkEnd(_))
+    }
+
+    pub(crate) fn valid_mark_anchor(&self) -> bool {
+        self.succ.is_empty()
+            && matches!(
+                &self.action,
+                OpType::MarkBegin(MarkData { expand: true, .. }) | OpType::MarkEnd(false)
+            )
     }
 
     pub(crate) fn is_noop(&self, action: &OpType) -> bool {
@@ -643,6 +691,10 @@ impl Op {
         match &self.action {
             OpType::Make(obj_type) => Value::Object(*obj_type),
             OpType::Put(scalar) => Value::Scalar(Cow::Borrowed(scalar)),
+            OpType::MarkBegin(mark) => Value::Scalar(Cow::Owned(
+                format!("markBegin[{}]={}", mark.name, mark.value).into(),
+            )),
+            OpType::MarkEnd(_) => Value::Scalar(Cow::Owned("markEnd".into())),
             _ => panic!("cant convert op into a value - {:?}", self),
         }
     }
@@ -663,6 +715,8 @@ impl Op {
             OpType::Make(obj) => format!("make{}", obj),
             OpType::Increment(val) => format!("inc:{}", val),
             OpType::Delete => "del".to_string(),
+            OpType::MarkBegin(_) => "markBegin".to_string(),
+            OpType::MarkEnd(_) => "markEnd".to_string(),
         }
     }
 }

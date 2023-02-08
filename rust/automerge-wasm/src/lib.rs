@@ -432,41 +432,6 @@ impl Automerge {
         Ok(())
     }
 
-    pub fn mark(
-        &mut self,
-        obj: JsValue,
-        range: JsValue,
-        name: JsValue,
-        value: JsValue,
-        datatype: JsValue,
-    ) -> Result<(), JsValue> {
-        let (obj, _) = self.import(obj)?;
-        let re = Regex::new(r"([\[\(])(\d+)\.\.(\d+)([\)\]])").unwrap();
-        let range = range.as_string().ok_or("range must be a string")?;
-        let cap = re.captures_iter(&range).next().ok_or("range must be in the form of (start..end] or [start..end) etc... () for sticky, [] for normal")?;
-        let start: usize = cap[2].parse().map_err(|_| to_js_err("invalid start"))?;
-        let end: usize = cap[3].parse().map_err(|_| to_js_err("invalid end"))?;
-        let start_sticky = &cap[1] == "(";
-        let end_sticky = &cap[4] == ")";
-        let name = name
-            .as_string()
-            .ok_or("invalid mark name")
-            .map_err(to_js_err)?;
-        let value = self
-            .import_scalar(&value, &datatype.as_string())
-            .ok_or_else(|| to_js_err("invalid value"))?;
-        self.doc
-            .mark(
-                &obj,
-                &(start..end),
-                am::marks::RangeExpand::new(start_sticky, end_sticky),
-                &name,
-                value,
-            )
-            .map_err(to_js_err)?;
-        Ok(())
-    }
-
     #[wasm_bindgen(js_name = get)]
     pub fn get(
         &self,
@@ -821,6 +786,213 @@ impl Automerge {
         let options = CommitOptions { message, time };
         let hash = self.doc.empty_change(options);
         JsValue::from_str(&hex::encode(hash))
+    }
+
+    pub fn mark(
+        &mut self,
+        obj: JsValue,
+        range: JsValue,
+        name: JsValue,
+        value: JsValue,
+        datatype: JsValue,
+    ) -> Result<(), JsValue> {
+        let (obj, _) = self.import(obj)?;
+        let re = Regex::new(r"([\[\(])(\d+)\.\.(\d+)([\)\]])").unwrap();
+        let range = range.as_string().ok_or("range must be a string")?;
+        let cap = re.captures_iter(&range).next().ok_or("range must be in the form of (start..end] or [start..end) etc... () for sticky, [] for normal")?;
+        let start: usize = cap[2].parse().map_err(|_| to_js_err("invalid start"))?;
+        let end: usize = cap[3].parse().map_err(|_| to_js_err("invalid end"))?;
+        let start_sticky = &cap[1] == "(";
+        let end_sticky = &cap[4] == ")";
+        let name = name
+            .as_string()
+            .ok_or("invalid mark name")
+            .map_err(to_js_err)?;
+        let value = self
+            .import_scalar(&value, &datatype.as_string())
+            .ok_or_else(|| to_js_err("invalid value"))?;
+        self.doc
+            .mark(
+                &obj,
+                &am::marks::MarkRange::new(start, end, start_sticky, end_sticky),
+                &name,
+                value,
+            )
+            .map_err(to_js_err)?;
+        Ok(())
+    }
+
+    pub fn unmark(&mut self, obj: JsValue, mark: JsValue) -> Result<(), JsValue> {
+        let (obj, _) = self.import(obj)?;
+        let (mark, _) = self.import(mark)?;
+        self.doc.unmark(&obj, &mark).map_err(to_js_err)?;
+        Ok(())
+    }
+
+    pub fn spans(&mut self, obj: JsValue) -> Result<JsValue, JsValue> {
+        let (obj, _) = self.import(obj)?;
+        let text = self.doc.text(&obj)?;
+        let spans = self.doc.spans(&obj).map_err(to_js_err)?;
+        let mut last_pos = 0;
+        let result = Array::new();
+        for s in spans {
+            let marks = Array::new();
+            for m in s.marks {
+                let mark = Array::new();
+                mark.push(&m.0.into()); // span name
+                let (datatype, value) = alloc(&am::Value::Scalar(m.1.clone()), self.text_rep);
+                mark.push(&datatype.into());
+                mark.push(&value);
+                marks.push(&mark.into());
+            }
+            let text_span = &text.get(last_pos..s.pos); //.slice(last_pos, s.pos);
+            if let Some(t) = text_span {
+                if !t.is_empty() {
+                    result.push(&t.to_string().into());
+                }
+            }
+            result.push(&marks);
+            last_pos = s.pos;
+            //let obj = Object::new().into();
+            //js_set(&obj, "pos", s.pos as i32)?;
+            //js_set(&obj, "marks", marks)?;
+            //result.push(&obj.into());
+        }
+        let text_span = &text.get(last_pos..);
+        if let Some(t) = text_span {
+            result.push(&t.to_string().into());
+        }
+        Ok(result.into())
+    }
+
+    pub fn raw_spans(&mut self, obj: JsValue) -> Result<Array, JsValue> {
+        let (obj, _) = self.import(obj)?;
+        let spans = self.doc.raw_spans(obj).map_err(to_js_err)?;
+        let result = Array::new();
+        for s in spans {
+            //#[allow(deprecated)]
+            //result.push(&JsValue::from_serde(&s).map_err(to_js_err)?);
+            result.push(&serde_wasm_bindgen::to_value(&s)?);
+        }
+        Ok(result)
+    }
+
+    pub fn blame(
+        &mut self,
+        obj: JsValue,
+        baseline: JsValue,
+        change_sets: JsValue,
+    ) -> Result<Array, JsValue> {
+        am::log!("doc.blame() is depricated - please use doc.attribute()");
+        self.attribute(obj, baseline, change_sets)
+    }
+
+    pub fn attribute(
+        &mut self,
+        obj: JsValue,
+        baseline: JsValue,
+        change_sets: JsValue,
+    ) -> Result<Array, JsValue> {
+        let (obj, _) = self.import(obj)?;
+        let baseline = baseline.dyn_into::<Array>()?;
+        let baseline = get_heads(Some(baseline))?.unwrap(); // we know its an array
+        let change_sets = change_sets.dyn_into::<Array>()?;
+        let change_sets = change_sets
+            .iter()
+            .filter_map(|o| get_heads(o.dyn_into::<Array>().ok()).transpose())
+            .collect::<Result<Vec<_>, _>>()?;
+        let result = self.doc.attribute(obj, &baseline, &change_sets)?;
+        let result = result
+            .into_iter()
+            .map(|cs| {
+                let add = cs
+                    .add
+                    .iter()
+                    .map::<Result<JsValue, JsValue>, _>(|range| {
+                        let r = Object::new();
+                        js_set(&r, "start", range.start as f64)?;
+                        js_set(&r, "end", range.end as f64)?;
+                        Ok(JsValue::from(&r))
+                    })
+                    .collect::<Result<Vec<JsValue>, JsValue>>()?
+                    .iter()
+                    .collect::<Array>();
+                let del = cs
+                    .del
+                    .iter()
+                    .map::<Result<JsValue, JsValue>, _>(|d| {
+                        let r = Object::new();
+                        js_set(&r, "pos", d.0 as f64)?;
+                        js_set(&r, "val", &d.1)?;
+                        Ok(JsValue::from(&r))
+                    })
+                    .collect::<Result<Vec<JsValue>, JsValue>>()?
+                    .iter()
+                    .collect::<Array>();
+                let obj = Object::new();
+                js_set(&obj, "add", add)?;
+                js_set(&obj, "del", del)?;
+                Ok(obj.into())
+            })
+            .collect::<Result<Vec<JsValue>, JsValue>>()?
+            .iter()
+            .collect::<Array>();
+        Ok(result)
+    }
+
+    pub fn attribute2(
+        &mut self,
+        obj: JsValue,
+        baseline: JsValue,
+        change_sets: JsValue,
+    ) -> Result<Array, JsValue> {
+        let (obj, _) = self.import(obj)?;
+        let baseline = baseline.dyn_into::<Array>()?;
+        let baseline = get_heads(Some(baseline))?.unwrap();
+        let change_sets = change_sets.dyn_into::<Array>()?;
+        let change_sets = change_sets
+            .iter()
+            .filter_map(|o| get_heads(o.dyn_into::<Array>().ok()).transpose())
+            .collect::<Result<Vec<_>, _>>()?;
+        let result = self.doc.attribute2(obj, &baseline, &change_sets)?;
+        let result = result
+            .into_iter()
+            .map(|cs| {
+                let add = cs
+                    .add
+                    .iter()
+                    .map::<Result<JsValue, JsValue>, _>(|a| {
+                        let r = Object::new();
+                        js_set(&r, "actor", a.actor)?;
+                        js_set(&r, "start", a.range.start as f64)?;
+                        js_set(&r, "end", a.range.end as f64)?;
+                        Ok(JsValue::from(&r))
+                    })
+                    .collect::<Result<Vec<JsValue>, JsValue>>()?
+                    .iter()
+                    .collect::<Array>();
+                let del = cs
+                    .del
+                    .iter()
+                    .map::<Result<JsValue, JsValue>, _>(|d| {
+                        let r = Object::new();
+                        js_set(&r, "actor", d.actor)?;
+                        js_set(&r, "pos", d.pos as f64)?;
+                        js_set(&r, "val", &d.span)?;
+                        Ok(JsValue::from(&r))
+                    })
+                    .collect::<Result<Vec<JsValue>, JsValue>>()?
+                    .iter()
+                    .collect::<Array>();
+                let obj = Object::new();
+                js_set(&obj, "add", add)?;
+                js_set(&obj, "del", del)?;
+                Ok(obj.into())
+            })
+            .collect::<Result<Vec<JsValue>, JsValue>>()?
+            .iter()
+            .collect::<Array>();
+        Ok(result)
     }
 }
 

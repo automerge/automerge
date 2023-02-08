@@ -1,12 +1,16 @@
+use crate::exid::ExId;
 use crate::op_tree::{OpSetMetadata, OpTree, OpTreeNode};
 use crate::types::{
     Clock, Counter, Key, ListEncoding, Op, OpId, OpType, ScalarValue, TextEncoding,
 };
 use fxhash::FxBuildHasher;
+use serde::Serialize;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
+mod attribute;
+mod attribute2;
 mod elem_id_pos;
 mod insert;
 mod keys;
@@ -25,9 +29,13 @@ mod opid;
 mod opid_vis;
 mod prop;
 mod prop_at;
+mod raw_spans;
 mod seek_op;
 mod seek_op_with_patch;
+mod spans;
 
+pub(crate) use attribute::{Attribute, ChangeSet};
+pub(crate) use attribute2::{Attribute2, ChangeSet2};
 pub(crate) use elem_id_pos::ElemIdPos;
 pub(crate) use insert::InsertNth;
 pub(crate) use keys::Keys;
@@ -46,8 +54,20 @@ pub(crate) use opid::OpIdSearch;
 pub(crate) use opid_vis::OpIdVisSearch;
 pub(crate) use prop::Prop;
 pub(crate) use prop_at::PropAt;
+pub(crate) use raw_spans::RawSpans;
 pub(crate) use seek_op::SeekOp;
 pub(crate) use seek_op_with_patch::SeekOpWithPatch;
+pub(crate) use spans::{Span, Spans};
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
+pub struct SpanInfo {
+    pub id: ExId,
+    pub start: usize,
+    pub end: usize,
+    #[serde(rename = "type")]
+    pub span_type: String,
+    pub value: ScalarValue,
+}
 
 // use a struct for the args for clarity as they are passed up the update chain in the optree
 #[derive(Debug, Clone)]
