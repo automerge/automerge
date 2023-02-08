@@ -232,8 +232,8 @@ impl OpType {
             Self::Make(ObjType::Text) => 4,
             Self::Increment(_) => 5,
             Self::Make(ObjType::Table) => 6,
-            Self::MarkBegin(_) => todo!(),
-            Self::MarkEnd(_) => todo!(),
+            Self::MarkBegin(_) => 7,
+            Self::MarkEnd(_) => 8,
         }
     }
 
@@ -261,6 +261,18 @@ impl OpType {
                 _ => Err(error::InvalidOpType::NonNumericInc),
             },
             6 => Ok(Self::Make(ObjType::Table)),
+            7 => match value {
+                let (name, value, expand) = ScalarValue::Bytes(b) => todo!();
+                Ok(MarkBegin(MarkData {
+                    name,
+                    value,
+                    expand,
+                }))
+            },
+            8 => match value {
+                ScalarValue::Bool(b) => Ok(Self::MarkEnd(b)),
+                _ => Err(error::InvalidOpType::InvalidMark),
+            },
             other => Err(error::InvalidOpType::UnknownAction(other)),
         }
     }

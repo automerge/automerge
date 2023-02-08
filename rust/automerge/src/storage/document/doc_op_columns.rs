@@ -1,5 +1,7 @@
 use std::{borrow::Cow, convert::TryFrom};
 
+use smol_str::SmolStr;
+
 use crate::{
     columnar::{
         column_range::{
@@ -18,7 +20,7 @@ use crate::{
         columns::{compression, ColumnId, ColumnSpec, ColumnType},
         Columns, MismatchingColumn, RawColumn, RawColumns,
     },
-    types::{ObjId, OpId, ScalarValue},
+    types::{ObjId, OpId, ScalarValue, ElemId},
 };
 
 const OBJ_COL_ID: ColumnId = ColumnId::new(0);
@@ -34,7 +36,8 @@ const SUCC_COL_ID: ColumnId = ColumnId::new(8);
 pub(crate) struct DocOp {
     pub(crate) id: OpId,
     pub(crate) object: ObjId,
-    pub(crate) key: Key,
+    pub(crate) prop: Option<SmolStr>,
+    pub(crate) elem_id: Option<ElemId>,
     pub(crate) insert: bool,
     pub(crate) action: usize,
     pub(crate) value: ScalarValue,
@@ -44,7 +47,8 @@ pub(crate) struct DocOp {
 #[derive(Debug, Clone)]
 pub(crate) struct DocOpColumns {
     obj: Option<ObjIdRange>,
-    key: KeyRange,
+    prop: RleRange<smol_str::SmolStr>,
+    elem: OpIdRange,
     id: OpIdRange,
     insert: BooleanRange,
     action: RleRange<u64>,
@@ -85,7 +89,9 @@ pub(crate) trait AsDocOp<'a> {
 
     fn obj(&self) -> convert::ObjId<Self::OpId>;
     fn id(&self) -> Self::OpId;
-    fn key(&self) -> convert::Key<'a, Self::OpId>;
+    //fn key(&self) -> convert::Key<'a, Self::OpId>;
+    fn prop(&self) -> Option<Cow<'a, SmolStr>>;
+    fn elem(&self) -> Option<OpId>;
     fn insert(&self) -> bool;
     fn action(&self) -> u64;
     fn val(&self) -> Cow<'a, ScalarValue>;
@@ -99,11 +105,7 @@ impl DocOpColumns {
         O: convert::OpId<usize>,
         C: AsDocOp<'a, OpId = O>,
     {
-        if ops.len() > 30000 {
-            Self::encode_rowwise(ops, out)
-        } else {
-            Self::encode_columnwise(ops, out)
-        }
+        Self::encode_rowwise(ops, out)
     }
 
     fn encode_columnwise<'a, I, O, C>(ops: I, out: &mut Vec<u8>) -> DocOpColumns
@@ -113,15 +115,17 @@ impl DocOpColumns {
         C: AsDocOp<'a, OpId = O>,
     {
         let obj = ObjIdRange::encode(ops.clone().map(|o| o.obj()), out);
-        let key = KeyRange::encode(ops.clone().map(|o| o.key()), out);
         let id = OpIdRange::encode(ops.clone().map(|o| o.id()), out);
+        let prop = RleRange::encode(ops.clone().map(|o| o.prop()), out);
+        let elem = OpIdRange::encode_optional(ops.clone().map(|o| o.elem().map(|o| o)), out);
         let insert = BooleanRange::encode(ops.clone().map(|o| o.insert()), out);
         let action = RleRange::encode(ops.clone().map(|o| Some(o.action())), out);
         let val = ValueRange::encode(ops.clone().map(|o| o.val()), out);
         let succ = OpIdListRange::encode(ops.map(|o| o.succ()), out);
         Self {
             obj,
-            key,
+            prop,
+            elem,
             id,
             insert,
             action,
@@ -138,7 +142,8 @@ impl DocOpColumns {
         C: AsDocOp<'a, OpId = O>,
     {
         let mut obj = ObjIdEncoder::new();
-        let mut key = KeyEncoder::new();
+        let mut prop = RleEncoder::<_, SmolStr>::new(Vec::new());
+        let mut elem = OpIdEncoder::new();
         let mut id = OpIdEncoder::new();
         let mut insert = BooleanEncoder::new();
         let mut action = RleEncoder::<_, u64>::from(Vec::new());
@@ -146,16 +151,22 @@ impl DocOpColumns {
         let mut succ = OpIdListEncoder::new();
         for op in ops {
             obj.append(op.obj());
-            key.append(op.key());
-            id.append(op.id());
+            prop.append(op.prop());
+            elem.append(op.elem());
+            id.append(Some(op.id()));
             insert.append(op.insert());
-            action.append(Some(op.action()));
             val.append(&op.val());
             succ.append(op.succ());
         }
         let obj = obj.finish(out);
-        let key = key.finish(out);
         let id = id.finish(out);
+
+        let elem = elem.finish(out);
+
+        let prop_start = out.len();
+        let (prop_out, _prop_end) = prop.finish();
+        out.extend(prop_out);
+        let prop = RleRange::from(prop_start..out.len());
 
         let insert_start = out.len();
         let (insert_out, _) = insert.finish();
@@ -171,8 +182,9 @@ impl DocOpColumns {
         let succ = succ.finish(out);
         DocOpColumns {
             obj,
-            key,
             id,
+            elem,
+            prop,
             insert,
             action,
             val,
@@ -186,7 +198,9 @@ impl DocOpColumns {
             id: self.id.iter(data),
             action: self.action.decoder(data),
             objs: self.obj.as_ref().map(|o| o.iter(data)),
-            keys: self.key.iter(data),
+            //keys: self.key.iter(data),
+            elem: self.elem.iter(data),
+            prop: self.prop.decoder(data),
             insert: self.insert.decoder(data),
             value: self.val.iter(data),
             succ: self.succ.iter(data),
@@ -211,15 +225,15 @@ impl DocOpColumns {
             ),
             RawColumn::new(
                 ColumnSpec::new(KEY_COL_ID, ColumnType::Actor, false),
-                self.key.actor_range().clone().into(),
+                self.elem.actor_range().clone().into(),
             ),
             RawColumn::new(
                 ColumnSpec::new(KEY_COL_ID, ColumnType::DeltaInteger, false),
-                self.key.counter_range().clone().into(),
+                self.elem.counter_range().clone().into(),
             ),
             RawColumn::new(
                 ColumnSpec::new(KEY_COL_ID, ColumnType::String, false),
-                self.key.string_range().clone().into(),
+                self.prop.into(),
             ),
             RawColumn::new(
                 ColumnSpec::new(ID_COL_ID, ColumnType::Actor, false),
@@ -273,7 +287,9 @@ pub(crate) struct DocOpColumnIter<'a> {
     id: OpIdIter<'a>,
     action: RleDecoder<'a, u64>,
     objs: Option<ObjIdIter<'a>>,
-    keys: KeyIter<'a>,
+    //keys: KeyIter<'a>,
+    prop: RleDecoder<'a, SmolStr>,
+    elem: OpIdIter<'a>,
     insert: BooleanDecoder<'a>,
     value: ValueIter<'a>,
     succ: OpIdListIter<'a>,
@@ -317,7 +333,8 @@ impl<'a> DocOpColumnIter<'a> {
             } else {
                 ObjId::root()
             };
-            let key = self.keys.next_in_col("key")?;
+            let prop = self.prop.maybe_next_in_col("key:prop")?;
+            let elem_id = self.elem.maybe_next_in_col("key:elem")?.map(|o| o.into());
             let value = self.value.next_in_col("value")?;
             let succ = self.succ.next_in_col("succ")?;
             let insert = self.insert.next_in_col("insert")?;
@@ -326,7 +343,8 @@ impl<'a> DocOpColumnIter<'a> {
                 value,
                 action: action as usize,
                 object: obj,
-                key,
+                elem_id,
+                prop,
                 succ,
                 insert,
             }))
@@ -427,10 +445,10 @@ impl TryFrom<Columns> for DocOpColumns {
                 obj_actor.unwrap_or_else(|| (0..0).into()),
                 obj_ctr.unwrap_or_else(|| (0..0).into()),
             ),
-            key: KeyRange::new(
+            prop: key_str.unwrap_or_else(|| (0..0).into()),
+            elem: OpIdRange::new(
                 key_actor.unwrap_or_else(|| (0..0).into()),
                 key_ctr.unwrap_or_else(|| (0..0).into()),
-                key_str.unwrap_or_else(|| (0..0).into()),
             ),
             id: OpIdRange::new(
                 id_actor.unwrap_or_else(|| (0..0).into()),

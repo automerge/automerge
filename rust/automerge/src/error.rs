@@ -97,4 +97,6 @@ pub(crate) enum InvalidOpType {
     UnknownAction(u64),
     #[error("non numeric argument for inc op")]
     NonNumericInc,
+    #[error("Invalid mark value")]
+    InvalidMark,
 }

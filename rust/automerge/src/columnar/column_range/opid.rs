@@ -48,6 +48,16 @@ impl OpIdRange {
         Self { actor, counter }
     }
 
+    pub(crate) fn encode_optional<I, O>(opids: I, out: &mut Vec<u8>) -> Self
+    where
+        O: convert::OpId<usize>,
+        I: Iterator<Item = Option<O>> + Clone,
+    {
+        let actor = RleRange::encode(opids.clone().map(|o| o.map(|o| o.actor() as u64)), out);
+        let counter = DeltaRange::encode(opids.map(|o| o.map(|o| o.counter() as i64)), out);
+        Self { actor, counter }
+    }
+
     #[allow(dead_code)]
     pub(crate) fn splice<I, E, O>(
         &self,
@@ -88,6 +98,10 @@ pub(crate) struct OpIdIter<'a> {
 impl<'a> OpIdIter<'a> {
     pub(crate) fn done(&self) -> bool {
         self.counter.done()
+    }
+
+    pub(crate) fn actor_range(&self) -> Range<usize> {
+        self.actor.range()
     }
 }
 
@@ -134,9 +148,21 @@ pub(crate) struct OpIdEncoder<S> {
 }
 
 impl<S: Sink> OpIdEncoder<S> {
-    pub(crate) fn append<O: convert::OpId<usize>>(&mut self, opid: O) {
-        self.actor.append_value(opid.actor() as u64);
-        self.counter.append_value(opid.counter() as i64);
+    pub(crate) fn append<O: convert::OpId<usize>>(&mut self, opid: Option<O>) {
+        match opid {
+            Some(o) => {
+                self.actor.append_value(o.actor() as u64);
+                self.counter.append_value(o.counter() as i64);
+            },
+            None => {
+                self.append_null()
+            }
+        }
+    }
+
+    pub(crate) fn append_null(&mut self) {
+        self.actor.append_null();
+        self.counter.append_null();
     }
 }
 
@@ -162,6 +188,14 @@ impl OpIdEncoder<Vec<u8>> {
             actor: (start..actor_end).into(),
             counter: (actor_end..counter_end).into(),
         }
+    }
+
+    pub(crate) fn actor_range(&self) -> Range<usize> {
+        self.actor.range()
+    }
+
+    pub(crate) fn counter_range(&self) -> Range<usize> {
+        self.counter.range()
     }
 }
 
