@@ -48,7 +48,7 @@ export {
   type ScalarValue,
 } from "./unstable_types"
 
-import type { PatchCallback } from "./stable"
+import type { Extend, PatchCallback } from "./stable"
 
 import { type UnstableConflicts as Conflicts } from "./conflicts"
 import { unstableConflictAt } from "./conflicts"
@@ -211,17 +211,17 @@ function importOpts<T>(
 }
 
 export function splice<T>(
-  doc: Doc<T>,
+  doc: Extend<T>,
   prop: stable.Prop,
   index: number,
   del: number,
   newText?: string
 ) {
-  if (!_is_proxy(doc)) {
+  if (!_is_proxy(doc as Doc<T>)) {
     throw new RangeError("object cannot be modified outside of a change block")
   }
-  const state = _state(doc, false)
-  const objectId = _obj(doc)
+  const state = _state(doc as Doc<T>, false)
+  const objectId = _obj(doc as Doc<T>)
   if (!objectId) {
     throw new RangeError("invalid object for splice")
   }
