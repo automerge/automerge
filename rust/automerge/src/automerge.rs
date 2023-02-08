@@ -5,7 +5,7 @@ use std::num::NonZeroU64;
 use std::ops::RangeBounds;
 
 use crate::change_graph::ChangeGraph;
-use crate::columnar::Key as EncodedKey;
+//use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
 use crate::keys::Keys;
 use crate::op_observer::{BranchableObserver, OpObserver};
@@ -697,10 +697,10 @@ impl Automerge {
             .enumerate()
             .map(|(i, c)| {
                 let id = OpId::new(change.start_op().get() + i as u64, actor);
-                let key = match &c.key {
-                    EncodedKey::Prop(n) => Key::Map(self.ops.m.props.cache(n.to_string())),
-                    EncodedKey::Elem(e) if e.is_head() => Key::Seq(ElemId::head()),
-                    EncodedKey::Elem(ElemId(o)) => {
+                let key = match (&c.elem_id, &c.prop) {
+                    (None, Some(n)) => Key::Map(self.ops.m.props.cache(n.to_string())),
+                    (Some(e), _) if e.is_head() => Key::Seq(ElemId::head()),
+                    (Some(ElemId(o)), _) => {
                         Key::Seq(ElemId(OpId::new(o.counter(), actors[o.actor()])))
                     }
                 };
@@ -721,7 +721,8 @@ impl Automerge {
                     obj,
                     Op {
                         id,
-                        action: OpType::from_index_and_value(c.action, c.val, c.insert, None).unwrap(),
+                        action: OpType::from_index_and_value(c.action, c.val, c.insert, c.prop)
+                            .unwrap(),
                         key,
                         succ: Default::default(),
                         pred,

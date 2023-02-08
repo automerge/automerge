@@ -429,7 +429,7 @@ pub(crate) trait AsChangeOp<'a> {
     type PredIter: Iterator<Item = Self::OpId> + ExactSizeIterator;
 
     fn obj(&self) -> convert::ObjId<Self::OpId>;
-    fn prop(&self) -> Option<&smol_str::SmolStr>;
+    fn prop(&self) -> Option<Cow<'a, smol_str::SmolStr>>;
     fn elem(&self) -> Option<convert::ElemId<Self::OpId>>;
     fn insert(&self) -> bool;
     fn action(&self) -> u64;

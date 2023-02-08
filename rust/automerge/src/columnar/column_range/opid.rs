@@ -149,10 +149,8 @@ impl<S: Sink> OpIdEncoder<S> {
             Some(o) => {
                 self.actor.append_value(o.actor() as u64);
                 self.counter.append_value(o.counter() as i64);
-            },
-            None => {
-                self.append_null()
             }
+            None => self.append_null(),
         }
     }
 

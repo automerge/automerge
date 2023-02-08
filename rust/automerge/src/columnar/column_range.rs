@@ -16,6 +16,6 @@ mod value;
 pub(crate) use value::{ValueEncoder, ValueIter, ValueRange};
 pub(crate) mod generic;
 mod key;
-pub(crate) use key::{Key, KeyEncoder, KeyIter, KeyRange};
+pub(crate) use key::{ElemEncoder, ElemIter, ElemRange};
 mod obj_id;
 pub(crate) use obj_id::{ObjIdEncoder, ObjIdIter, ObjIdRange};

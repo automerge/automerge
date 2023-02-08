@@ -120,11 +120,27 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
         }
     }
 
-    fn key(&self) -> convert::Key<'a, Self::OpId> {
+    fn prop(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
         match &self.op.key {
-            Key::Map(idx) => convert::Key::Prop(Cow::Owned(self.metadata.props.get(*idx).into())),
-            Key::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
-            Key::Seq(e) => convert::Key::Elem(convert::ElemId::Op(self.wrap(&e.0))),
+            Key::Map(idx) => Some(Cow::Owned(self.metadata.props.get(*idx).into())),
+            _ => None,
         }
     }
+
+    fn elem(&self) -> Option<convert::ElemId<Self::OpId>> {
+        match &self.op.key {
+            Key::Seq(e) if e.is_head() => Some(convert::ElemId::Head),
+            Key::Seq(e) => Some(convert::ElemId::Op(self.wrap(&e.0))),
+            _ => None,
+        }
+    }
+    /*
+        fn key(&self) -> convert::Key<'a, Self::OpId> {
+            match &self.op.key {
+                Key::Map(idx) => convert::Key::Prop(Cow::Owned(self.metadata.props.get(*idx).into())),
+                Key::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
+                Key::Seq(e) => convert::Key::Elem(convert::ElemId::Op(self.wrap(&e.0))),
+            }
+        }
+    */
 }

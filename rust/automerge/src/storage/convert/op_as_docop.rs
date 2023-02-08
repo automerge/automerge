@@ -76,15 +76,32 @@ impl<'a> AsDocOp<'a> for OpAsDocOp<'a> {
         }
     }
 
-    fn key(&self) -> convert::Key<'a, Self::OpId> {
+    fn elem(&self) -> Option<convert::ElemId<Self::OpId>> {
         match self.op.key {
-            Key::Map(idx) => convert::Key::Prop(Cow::Owned(self.props.get(idx).into())),
-            Key::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
-            Key::Seq(ElemId(o)) => {
-                convert::Key::Elem(convert::ElemId::Op(translate(self.actor_lookup, &o)))
-            }
+            Key::Map(_) => None,
+            Key::Seq(e) if e.is_head() => Some(convert::ElemId::Head),
+            Key::Seq(ElemId(o)) => Some(convert::ElemId::Op(translate(self.actor_lookup, &o))),
         }
     }
+
+    fn prop(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
+        match self.op.key {
+            Key::Map(idx) => Some(Cow::Owned(self.props.get(idx).into())),
+            _ => None,
+        }
+    }
+
+    /*
+        fn key(&self) -> convert::Key<'a, Self::OpId> {
+            match self.op.key {
+                Key::Map(idx) => convert::Key::Prop(Cow::Owned(self.props.get(idx).into())),
+                Key::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
+                Key::Seq(ElemId(o)) => {
+                    convert::Key::Elem(convert::ElemId::Op(translate(self.actor_lookup, &o)))
+                }
+            }
+        }
+    */
 
     fn val(&self) -> Cow<'a, crate::ScalarValue> {
         match &self.op.action {

@@ -1,10 +1,11 @@
+use std::borrow::Cow;
 use std::{convert::TryFrom, ops::Range};
 
 use crate::{
     columnar::{
         column_range::{
             generic::{GenericColumnRange, GroupRange, GroupedColumnRange, SimpleColRange},
-            BooleanRange, DeltaRange, Key, KeyEncoder, KeyIter, KeyRange, ObjIdEncoder, ObjIdIter,
+            BooleanRange, DeltaRange, ElemEncoder, ElemIter, ElemRange, ObjIdEncoder, ObjIdIter,
             ObjIdRange, OpIdListEncoder, OpIdListIter, OpIdListRange, RleRange, ValueEncoder,
             ValueIter, ValueRange,
         },
@@ -45,8 +46,12 @@ pub(crate) struct ChangeOp {
 impl<'a, A: AsChangeOp<'a, ActorId = usize, OpId = OpId>> From<A> for ChangeOp {
     fn from(a: A) -> Self {
         ChangeOp {
-            prop: a.prop().cloned(),
-            elem_id: convert::ElemId(a.elem()),
+            prop: a.prop().map(|s| s.into_owned()),
+            elem_id: match a.elem() {
+                Some(convert::ElemId::Head) => Some(ElemId::head()),
+                Some(convert::ElemId::Op(id)) => Some(ElemId(id)),
+                None => None,
+            },
             obj: match a.obj() {
                 convert::ObjId::Root => ObjId::root(),
                 convert::ObjId::Op(o) => ObjId(o),
@@ -72,12 +77,16 @@ impl<'a> AsChangeOp<'a> for &'a ChangeOp {
         }
     }
 
-    fn prop(&self) -> Option<&smol_str::SmolStr> {
-        return self.prop
+    fn prop(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
+        return self.prop.as_ref().map(|p| Cow::Borrowed(p));
     }
 
     fn elem(&self) -> Option<convert::ElemId<Self::OpId>> {
-        return self.elem_id
+        match &self.elem_id {
+          Some(e) if e.is_head() => Some(convert::ElemId::Head),
+          Some(ElemId(o)) => Some(convert::ElemId::Op(o)),
+          _ => None,
+        }
     }
 
     fn val(&self) -> std::borrow::Cow<'a, ScalarValue> {
@@ -100,7 +109,8 @@ impl<'a> AsChangeOp<'a> for &'a ChangeOp {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ChangeOpsColumns {
     obj: Option<ObjIdRange>,
-    key: KeyRange,
+    elem: ElemRange,
+    prop: RleRange<smol_str::SmolStr>,
     insert: BooleanRange,
     action: RleRange<u64>,
     val: ValueRange,
@@ -112,7 +122,8 @@ impl ChangeOpsColumns {
         ChangeOpsIter {
             failed: false,
             obj: self.obj.as_ref().map(|o| o.iter(data)),
-            key: self.key.iter(data),
+            elem: self.elem.iter(data),
+            prop: self.prop.decoder(data),
             insert: self.insert.decoder(data),
             action: self.action.decoder(data),
             val: self.val.iter(data),
@@ -144,14 +155,16 @@ impl ChangeOpsColumns {
         C: AsChangeOp<'c, OpId = Op> + 'a,
     {
         let obj = ObjIdRange::encode(ops.clone().map(|o| o.obj()), out);
-        let key = KeyRange::encode(ops.clone().map(|o| o.key()), out);
+        let elem = ElemRange::maybe_encode(ops.clone().map(|o| o.elem()), out);
+        let prop = RleRange::encode(ops.clone().map(|o| o.prop()), out);
         let insert = BooleanRange::encode(ops.clone().map(|o| o.insert()), out);
         let action = RleRange::encode(ops.clone().map(|o| Some(o.action())), out);
         let val = ValueRange::encode(ops.clone().map(|o| o.val()), out);
         let pred = OpIdListRange::encode(ops.map(|o| o.pred()), out);
         Self {
             obj,
-            key,
+            elem,
+            prop,
             insert,
             action,
             val,
@@ -166,21 +179,28 @@ impl ChangeOpsColumns {
         C: AsChangeOp<'c, OpId = Op> + 'a,
     {
         let mut obj = ObjIdEncoder::new();
-        let mut key = KeyEncoder::new();
+        let mut elem = ElemEncoder::new();
+        let mut prop = RleEncoder::<_, smol_str::SmolStr>::from(Vec::new());
         let mut insert = BooleanEncoder::new();
         let mut action = RleEncoder::<_, u64>::from(Vec::new());
         let mut val = ValueEncoder::new();
         let mut pred = OpIdListEncoder::new();
         for op in ops {
             obj.append(op.obj());
-            key.append(op.key());
+            elem.append(op.elem());
+            prop.append(op.prop());
             insert.append(op.insert());
             action.append_value(op.action());
             val.append(&op.val());
             pred.append(op.pred());
         }
         let obj = obj.finish(out);
-        let key = key.finish(out);
+        let elem = elem.finish(out);
+
+        let prop_start = out.len();
+        let (prop, _) = prop.finish();
+        out.extend(prop);
+        let prop = RleRange::from(prop_start..out.len());
 
         let insert_start = out.len();
         let (insert, _) = insert.finish();
@@ -197,7 +217,8 @@ impl ChangeOpsColumns {
 
         Self {
             obj,
-            key,
+            elem,
+            prop,
             insert,
             action,
             val,
@@ -223,15 +244,15 @@ impl ChangeOpsColumns {
             ),
             RawColumn::new(
                 ColumnSpec::new(KEY_COL_ID, ColumnType::Actor, false),
-                self.key.actor_range().clone().into(),
+                self.elem.actor_range().clone().into(),
             ),
             RawColumn::new(
                 ColumnSpec::new(KEY_COL_ID, ColumnType::DeltaInteger, false),
-                self.key.counter_range().clone().into(),
+                self.elem.counter_range().clone().into(),
             ),
             RawColumn::new(
                 ColumnSpec::new(KEY_COL_ID, ColumnType::String, false),
-                self.key.string_range().clone().into(),
+                self.prop.clone().into(),
             ),
             RawColumn::new(
                 ColumnSpec::new(INSERT_COL_ID, ColumnType::Boolean, false),
@@ -280,7 +301,8 @@ pub struct ReadChangeOpError(#[from] DecodeColumnError);
 pub(crate) struct ChangeOpsIter<'a> {
     failed: bool,
     obj: Option<ObjIdIter<'a>>,
-    key: KeyIter<'a>,
+    prop: RleDecoder<'a, smol_str::SmolStr>,
+    elem: ElemIter<'a>,
     insert: BooleanDecoder<'a>,
     action: RleDecoder<'a, u64>,
     val: ValueIter<'a>,
@@ -301,14 +323,16 @@ impl<'a> ChangeOpsIter<'a> {
             } else {
                 ObjId::root()
             };
-            let key = self.key.next_in_col("key")?;
+            let prop = self.prop.maybe_next_in_col("key:prop")?;
+            let elem_id = self.elem.maybe_next_in_col("key:elem")?;
             let insert = self.insert.next_in_col("insert")?;
             let action = self.action.next_in_col("action")?;
             let val = self.val.next_in_col("value")?;
             let pred = self.pred.next_in_col("pred")?;
             Ok(Some(ChangeOp {
                 obj,
-                key,
+                prop,
+                elem_id,
                 insert,
                 action,
                 val,
@@ -429,11 +453,11 @@ impl TryFrom<Columns> for ChangeOpsColumns {
                 obj_actor.unwrap_or_else(|| (0..0).into()),
                 obj_ctr.unwrap_or_else(|| (0..0).into()),
             ),
-            key: KeyRange::new(
+            elem: ElemRange::new(
                 key_actor.unwrap_or_else(|| (0..0).into()),
                 key_ctr.unwrap_or_else(|| (0..0).into()),
-                key_str.unwrap_or_else(|| (0..0).into()),
             ),
+            prop: key_str.unwrap_or_else(|| (0..0).into()),
             insert: insert.unwrap_or(0..0).into(),
             action: action.unwrap_or(0..0).into(),
             val: val.unwrap_or_else(|| ValueRange::new((0..0).into(), (0..0).into())),
