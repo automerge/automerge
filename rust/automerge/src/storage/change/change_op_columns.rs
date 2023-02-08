@@ -33,7 +33,8 @@ const PRED_COL_ID: ColumnId = ColumnId::new(7);
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ChangeOp {
-    pub(crate) key: Key,
+    pub(crate) prop: Option<smol_str::SmolStr>,
+    pub(crate) elem_id: Option<ElemId>,
     pub(crate) insert: bool,
     pub(crate) val: ScalarValue,
     pub(crate) pred: Vec<OpId>,
@@ -44,11 +45,8 @@ pub(crate) struct ChangeOp {
 impl<'a, A: AsChangeOp<'a, ActorId = usize, OpId = OpId>> From<A> for ChangeOp {
     fn from(a: A) -> Self {
         ChangeOp {
-            key: match a.key() {
-                convert::Key::Prop(s) => Key::Prop(s.into_owned()),
-                convert::Key::Elem(convert::ElemId::Head) => Key::Elem(ElemId::head()),
-                convert::Key::Elem(convert::ElemId::Op(o)) => Key::Elem(ElemId(o)),
-            },
+            prop: a.prop().cloned(),
+            elem_id: convert::ElemId(a.elem()),
             obj: match a.obj() {
                 convert::ObjId::Root => ObjId::root(),
                 convert::ObjId::Op(o) => ObjId(o),
@@ -74,12 +72,12 @@ impl<'a> AsChangeOp<'a> for &'a ChangeOp {
         }
     }
 
-    fn key(&self) -> convert::Key<'a, Self::OpId> {
-        match &self.key {
-            Key::Prop(s) => convert::Key::Prop(std::borrow::Cow::Borrowed(s)),
-            Key::Elem(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
-            Key::Elem(e) => convert::Key::Elem(convert::ElemId::Op(&e.0)),
-        }
+    fn prop(&self) -> Option<&smol_str::SmolStr> {
+        return self.prop
+    }
+
+    fn elem(&self) -> Option<convert::ElemId<Self::OpId>> {
+        return self.elem_id
     }
 
     fn val(&self) -> std::borrow::Cow<'a, ScalarValue> {

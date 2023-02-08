@@ -721,7 +721,7 @@ impl Automerge {
                     obj,
                     Op {
                         id,
-                        action: OpType::from_index_and_value(c.action, c.val).unwrap(),
+                        action: OpType::from_index_and_value(c.action, c.val, c.insert, None).unwrap(),
                         key,
                         succ: Default::default(),
                         pred,

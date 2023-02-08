@@ -14,7 +14,7 @@ pub(crate) struct Spans<'a> {
     seen_at_this_mark: Option<ElemId>,
     seen_at_last_mark: Option<ElemId>,
     ops: Vec<&'a Op>,
-    marks: HashMap<String, &'a ScalarValue>,
+    marks: HashMap<smol_str::SmolStr, &'a ScalarValue>,
     changed: bool,
     pub(crate) spans: Vec<Span<'a>>,
 }
@@ -22,7 +22,7 @@ pub(crate) struct Spans<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Span<'a> {
     pub pos: usize,
-    pub marks: Vec<(String, Cow<'a, ScalarValue>)>,
+    pub marks: Vec<(smol_str::SmolStr, Cow<'a, ScalarValue>)>,
 }
 
 impl<'a> Spans<'a> {

@@ -204,7 +204,7 @@ pub enum OpType {
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct MarkData {
-    pub name: String,
+    pub name: smol_str::SmolStr,
     pub value: ScalarValue,
     pub expand: bool,
 }
@@ -232,12 +232,11 @@ impl OpType {
             Self::Make(ObjType::Text) => 4,
             Self::Increment(_) => 5,
             Self::Make(ObjType::Table) => 6,
-            Self::MarkBegin(_) => 7,
-            Self::MarkEnd(_) => 8,
+            Self::MarkBegin(_) | Self::MarkEnd(..) => 7,
         }
     }
 
-    pub(crate) fn mark(name: String, expand: bool, value: ScalarValue) -> OpType {
+    pub(crate) fn mark(name: smol_str::SmolStr, expand: bool, value: ScalarValue) -> OpType {
         OpType::MarkBegin(MarkData {
             name,
             value,
@@ -248,6 +247,8 @@ impl OpType {
     pub(crate) fn from_index_and_value(
         index: u64,
         value: ScalarValue,
+        insert_or_expand: bool,
+        prop: Option<smol_str::SmolStr>,
     ) -> Result<OpType, error::InvalidOpType> {
         match index {
             0 => Ok(Self::Make(ObjType::Map)),
@@ -261,17 +262,13 @@ impl OpType {
                 _ => Err(error::InvalidOpType::NonNumericInc),
             },
             6 => Ok(Self::Make(ObjType::Table)),
-            7 => match value {
-                let (name, value, expand) = ScalarValue::Bytes(b) => todo!();
-                Ok(MarkBegin(MarkData {
+            7 => match prop {
+                Some(name) => Ok(Self::MarkBegin(MarkData {
                     name,
                     value,
-                    expand,
-                }))
-            },
-            8 => match value {
-                ScalarValue::Bool(b) => Ok(Self::MarkEnd(b)),
-                _ => Err(error::InvalidOpType::InvalidMark),
+                    expand: insert_or_expand,
+                })),
+                None => Ok(Self::MarkEnd(insert_or_expand)),
             },
             other => Err(error::InvalidOpType::UnknownAction(other)),
         }

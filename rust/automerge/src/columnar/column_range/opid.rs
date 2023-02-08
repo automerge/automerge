@@ -99,10 +99,6 @@ impl<'a> OpIdIter<'a> {
     pub(crate) fn done(&self) -> bool {
         self.counter.done()
     }
-
-    pub(crate) fn actor_range(&self) -> Range<usize> {
-        self.actor.range()
-    }
 }
 
 impl<'a> OpIdIter<'a> {
@@ -188,14 +184,6 @@ impl OpIdEncoder<Vec<u8>> {
             actor: (start..actor_end).into(),
             counter: (actor_end..counter_end).into(),
         }
-    }
-
-    pub(crate) fn actor_range(&self) -> Range<usize> {
-        self.actor.range()
-    }
-
-    pub(crate) fn counter_range(&self) -> Range<usize> {
-        self.counter.range()
     }
 }
 

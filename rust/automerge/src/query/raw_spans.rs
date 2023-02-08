@@ -50,7 +50,7 @@ impl<'a> TreeQuery<'a> for RawSpans {
                         id: element.id,
                         start: self.seen,
                         end: 0,
-                        name: md.name.clone(),
+                        name: md.name.into(),
                         value: md.value.clone(),
                     },
                 );

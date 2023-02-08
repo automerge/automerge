@@ -4,7 +4,6 @@ use tracing::instrument;
 
 use crate::{
     change::Change,
-    columnar::Key as DocOpKey,
     op_tree::OpSetMetadata,
     storage::{change::Verified, Change as StoredChange, DocOp, Document},
     types::{ChangeHash, ElemId, Key, ObjId, ObjType, Op, OpId, OpIds, OpType},
@@ -29,6 +28,10 @@ pub(crate) enum Error {
     MissingOps,
     #[error("succ out of order")]
     SuccOutOfOrder,
+    #[error("no key")]
+    MissingKey,
+    #[error(transparent)]
+    InvalidOpType(#[from] crate::error::InvalidOpType),
 }
 
 pub(crate) struct MismatchedHeads {
@@ -335,23 +338,29 @@ impl LoadingObject {
 }
 
 fn import_op(m: &mut OpSetMetadata, op: DocOp) -> Result<Op, Error> {
-    let key = match op.key {
-        DocOpKey::Prop(s) => Key::Map(m.import_prop(s)),
-        DocOpKey::Elem(ElemId(op)) => Key::Seq(ElemId(check_opid(m, op)?)),
-    };
+    let key = match (op.prop, op.elem_id) {
+        (Some(k), None) => Ok(Key::Map(m.import_prop(k))),
+        (_, Some(elem)) => Ok(Key::Seq(ElemId(check_opid(m, elem.0)?))),
+        (None, None) => Err(Error::MissingKey),
+    }?;
     for opid in &op.succ {
         if m.actors.safe_get(opid.actor()).is_none() {
             tracing::error!(?opid, "missing actor");
             return Err(Error::MissingActor);
         }
     }
+    let action = OpType::from_index_and_value(op.action as u64, op.value, op.insert, op.prop)?;
+    let insert = match action {
+        OpType::MarkBegin(_) | OpType::MarkEnd(_) => true,
+        _ => op.insert,
+    };
     Ok(Op {
         id: check_opid(m, op.id)?,
-        action: parse_optype(op.action, op.value)?,
+        action,
         key,
         succ: m.try_sorted_opids(op.succ).ok_or(Error::SuccOutOfOrder)?,
         pred: OpIds::empty(),
-        insert: op.insert,
+        insert,
     })
 }
 

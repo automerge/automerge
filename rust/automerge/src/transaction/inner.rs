@@ -665,7 +665,7 @@ impl TransactionInner {
                 Some(obs),
                 obj,
                 range.start,
-                OpType::mark(mark.to_owned(), range.expand_left, value.into()),
+                OpType::mark(mark.into(), range.expand_left, value.into()),
             )?;
             self.do_insert(
                 doc,
@@ -680,7 +680,7 @@ impl TransactionInner {
                 None,
                 obj,
                 range.start,
-                OpType::mark(mark.to_owned(), range.expand_left, value.into()),
+                OpType::mark(mark.into(), range.expand_left, value.into()),
             )?;
             self.do_insert::<Obs>(
                 doc,
