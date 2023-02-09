@@ -1,7 +1,7 @@
 use std::{borrow::Cow, num::NonZeroU64};
 
 use crate::{
-    //    columnar::Key as StoredKey,
+    columnar::Key as StoredKey,
     storage::{
         change::{Unverified, Verified},
         parse, Change as StoredChange, ChangeOp, Chunk, Compressed, ReadChangeOpError,
@@ -230,34 +230,17 @@ mod convert_expanded {
             self.pred.iter()
         }
 
-        fn prop(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
+        fn key(&self) -> convert::Key<'a, Self::OpId> {
             match &self.key {
-                legacy::Key::Map(s) => Some(Cow::Borrowed(s)),
-                _ => None,
-            }
-        }
-
-        fn elem(&self) -> Option<convert::ElemId<Self::OpId>> {
-            match &self.key {
-                legacy::Key::Seq(legacy::ElementId::Head) => Some(convert::ElemId::Head),
-                legacy::Key::Seq(legacy::ElementId::Id(o)) => Some(convert::ElemId::Op(o)),
-                _ => None,
-            }
-        }
-
-        /*
-                fn key(&self) -> convert::Key<'a, Self::OpId> {
-                    match &self.key {
-                        legacy::Key::Map(s) => convert::Key::Prop(Cow::Borrowed(s)),
-                        legacy::Key::Seq(legacy::ElementId::Head) => {
-                            convert::Key::Elem(convert::ElemId::Head)
-                        }
-                        legacy::Key::Seq(legacy::ElementId::Id(o)) => {
-                            convert::Key::Elem(convert::ElemId::Op(o))
-                        }
-                    }
+                legacy::Key::Map(s) => convert::Key::Prop(Cow::Borrowed(s)),
+                legacy::Key::Seq(legacy::ElementId::Head) => {
+                    convert::Key::Elem(convert::ElemId::Head)
                 }
-        */
+                legacy::Key::Seq(legacy::ElementId::Id(o)) => {
+                    convert::Key::Elem(convert::ElemId::Op(o))
+                }
+            }
+        }
 
         fn obj(&self) -> convert::ObjId<Self::OpId> {
             match &self.obj {
@@ -270,6 +253,18 @@ mod convert_expanded {
             match self.primitive_value() {
                 Some(v) => Cow::Owned(v),
                 None => Cow::Owned(ScalarValue::Null),
+            }
+        }
+
+        fn expand(&self) -> bool {
+            self.action.expand()
+        }
+
+        fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
+            if let legacy::OpType::MarkBegin(legacy::MarkData { name, .. }) = &self.action {
+                Some(Cow::Borrowed(name))
+            } else {
+                None
             }
         }
     }
@@ -295,20 +290,23 @@ impl From<&Change> for crate::ExpandedChange {
         let operations = c
             .iter_ops()
             .map(|o| crate::legacy::Op {
-                action: crate::types::OpType::from_index_and_value(
-                    o.action, o.val, o.insert, o.prop.clone(),
-                )
-                .unwrap(),
+                action: crate::legacy::OpType::from_parts(crate::legacy::OpTypeParts {
+                    action: o.action,
+                    value: o.val,
+                    expand: o.expand,
+                    mark_name: o.mark_name,
+                }),
                 insert: o.insert,
-                key: match (o.elem_id, o.prop) {
-                    (None, Some(p)) => crate::legacy::Key::Map(p.clone()),
-                    (Some(e), _) if e.is_head() => {
+                key: match o.key {
+                    StoredKey::Elem(e) if e.is_head() => {
                         crate::legacy::Key::Seq(crate::legacy::ElementId::Head)
                     }
-                    (Some(ElemId(o)), _) => crate::legacy::Key::Seq(crate::legacy::ElementId::Id(
-                        crate::legacy::OpId::new(o.counter(), actors.get(&o.actor()).unwrap()),
-                    )),
-                    (None, None) => unreachable!(),
+                    StoredKey::Elem(ElemId(o)) => {
+                        crate::legacy::Key::Seq(crate::legacy::ElementId::Id(
+                            crate::legacy::OpId::new(o.counter(), actors.get(&o.actor()).unwrap()),
+                        ))
+                    }
+                    StoredKey::Prop(p) => crate::legacy::Key::Map(p),
                 },
                 obj: if o.obj.is_root() {
                     crate::legacy::ObjectId::Root

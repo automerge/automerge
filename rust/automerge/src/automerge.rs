@@ -5,7 +5,7 @@ use std::num::NonZeroU64;
 use std::ops::RangeBounds;
 
 use crate::change_graph::ChangeGraph;
-//use crate::columnar::Key as EncodedKey;
+use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
 use crate::keys::Keys;
 use crate::op_observer::{BranchableObserver, OpObserver};
@@ -16,8 +16,8 @@ use crate::transaction::{
     self, CommitOptions, Failure, Observed, Success, Transaction, TransactionArgs, UnObserved,
 };
 use crate::types::{
-    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ListEncoding, ObjId, Op, OpId,
-    OpType, ScalarValue, TextEncoding, Value,
+    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ListEncoding, MarkName, ObjId, Op,
+    OpId, OpType, OpTypeParts, ScalarValue, TextEncoding, Value,
 };
 use crate::{
     query, AutomergeError, Change, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType,
@@ -697,13 +697,12 @@ impl Automerge {
             .enumerate()
             .map(|(i, c)| {
                 let id = OpId::new(change.start_op().get() + i as u64, actor);
-                let key = match (&c.elem_id, &c.prop) {
-                    (None, Some(n)) => Key::Map(self.ops.m.props.cache(n.to_string())),
-                    (Some(e), _) if e.is_head() => Key::Seq(ElemId::head()),
-                    (Some(ElemId(o)), _) => {
+                let key = match &c.key {
+                    EncodedKey::Prop(n) => Key::Map(self.ops.m.props.cache(n.to_string())),
+                    EncodedKey::Elem(e) if e.is_head() => Key::Seq(ElemId::head()),
+                    EncodedKey::Elem(ElemId(o)) => {
                         Key::Seq(ElemId(OpId::new(o.counter(), actors[o.actor()])))
-                    },
-                    (None, None) => unreachable!(),
+                    }
                 };
                 let obj = if c.obj.is_root() {
                     ObjId::root()
@@ -718,12 +717,20 @@ impl Automerge {
                     .iter()
                     .map(|p| OpId::new(p.counter(), actors[p.actor()]));
                 let pred = self.ops.m.sorted_opids(pred);
+                let mark_name = c
+                    .mark_name
+                    .map(|m| MarkName::from_prop_index(self.ops.m.props.cache(m.to_string())));
                 (
                     obj,
                     Op {
                         id,
-                        action: OpType::from_index_and_value(c.action, c.val, c.insert, c.prop)
-                            .unwrap(),
+                        action: OpType::from_parts(OpTypeParts {
+                            action: c.action,
+                            value: c.val,
+                            expand: c.expand,
+                            mark_name,
+                        })
+                        .unwrap(),
                         key,
                         succ: Default::default(),
                         pred,
@@ -1319,7 +1326,7 @@ impl ReadDoc for Automerge {
             query::Spans::new(ListEncoding::Text(self.text_encoding)),
         );
         query.check_marks();
-        Ok(query.spans)
+        Ok(query.into_spans(&self.ops.m))
     }
 
     fn attribute<O: AsRef<ExId>>(
@@ -1364,7 +1371,7 @@ impl ReadDoc for Automerge {
                 id: self.id_to_exid(s.id),
                 start: s.start,
                 end: s.end,
-                span_type: s.name,
+                span_type: self.ops.m.props.get(s.name.props_index()).to_string(),
                 value: s.value,
             })
             .collect();

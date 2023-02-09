@@ -429,12 +429,13 @@ pub(crate) trait AsChangeOp<'a> {
     type PredIter: Iterator<Item = Self::OpId> + ExactSizeIterator;
 
     fn obj(&self) -> convert::ObjId<Self::OpId>;
-    fn prop(&self) -> Option<Cow<'a, smol_str::SmolStr>>;
-    fn elem(&self) -> Option<convert::ElemId<Self::OpId>>;
+    fn key(&self) -> convert::Key<'a, Self::OpId>;
     fn insert(&self) -> bool;
     fn action(&self) -> u64;
     fn val(&self) -> Cow<'a, ScalarValue>;
     fn pred(&self) -> Self::PredIter;
+    fn expand(&self) -> bool;
+    fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>>;
 }
 
 impl ChangeBuilder<Set<NonZeroU64>, Set<ActorId>, Set<u64>, Set<i64>> {

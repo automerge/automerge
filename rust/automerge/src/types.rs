@@ -204,19 +204,22 @@ pub enum OpType {
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct MarkData {
-    pub name: smol_str::SmolStr,
+    pub name: MarkName,
     pub value: ScalarValue,
     pub expand: bool,
 }
 
 impl Display for MarkData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "name={} value={} expand={}",
-            self.name, self.value, self.expand
-        )
+        write!(f, "value={} expand={}", self.value, self.value)
     }
+}
+
+pub(crate) struct OpTypeParts {
+    pub(crate) action: u64,
+    pub(crate) value: ScalarValue,
+    pub(crate) expand: bool,
+    pub(crate) mark_name: Option<MarkName>,
 }
 
 impl OpType {
@@ -232,11 +235,12 @@ impl OpType {
             Self::Make(ObjType::Text) => 4,
             Self::Increment(_) => 5,
             Self::Make(ObjType::Table) => 6,
-            Self::MarkBegin(_) | Self::MarkEnd(..) => 7,
+            Self::MarkBegin(_) => 7,
+            Self::MarkEnd(..) => 8,
         }
     }
 
-    pub(crate) fn mark(name: smol_str::SmolStr, expand: bool, value: ScalarValue) -> OpType {
+    pub(crate) fn mark(name: MarkName, expand: bool, value: ScalarValue) -> OpType {
         OpType::MarkBegin(MarkData {
             name,
             value,
@@ -244,13 +248,15 @@ impl OpType {
         })
     }
 
-    pub(crate) fn from_index_and_value(
-        index: u64,
-        value: ScalarValue,
-        insert_or_expand: bool,
-        prop: Option<smol_str::SmolStr>,
+    pub(crate) fn from_parts(
+        OpTypeParts {
+            action,
+            value,
+            expand,
+            mark_name,
+        }: OpTypeParts,
     ) -> Result<OpType, error::InvalidOpType> {
-        match index {
+        match action {
             0 => Ok(Self::Make(ObjType::Map)),
             1 => Ok(Self::Put(value)),
             2 => Ok(Self::Make(ObjType::List)),
@@ -262,14 +268,15 @@ impl OpType {
                 _ => Err(error::InvalidOpType::NonNumericInc),
             },
             6 => Ok(Self::Make(ObjType::Table)),
-            7 => match prop {
+            7 => match mark_name {
                 Some(name) => Ok(Self::MarkBegin(MarkData {
                     name,
                     value,
-                    expand: insert_or_expand,
+                    expand,
                 })),
-                None => Ok(Self::MarkEnd(insert_or_expand)),
+                None => Err(error::InvalidOpType::MarkBeginWithoutName),
             },
+            8 => Ok(Self::MarkEnd(expand)),
             other => Err(error::InvalidOpType::UnknownAction(other)),
         }
     }
@@ -419,6 +426,20 @@ impl From<Option<ElemId>> for Key {
 pub(crate) enum Key {
     Map(usize),
     Seq(ElemId),
+}
+
+// Index of a mark name string in the OpSetMetadata::props IndexedCache
+#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Copy, Hash)]
+pub struct MarkName(usize);
+
+impl MarkName {
+    pub(crate) fn props_index(&self) -> usize {
+        self.0
+    }
+
+    pub(crate) fn from_prop_index(index: usize) -> Self {
+        Self(index)
+    }
 }
 
 /// A property of an object
@@ -700,9 +721,9 @@ impl Op {
         match &self.action {
             OpType::Make(obj_type) => Value::Object(*obj_type),
             OpType::Put(scalar) => Value::Scalar(Cow::Borrowed(scalar)),
-            OpType::MarkBegin(mark) => Value::Scalar(Cow::Owned(
-                format!("markBegin[{}]={}", mark.name, mark.value).into(),
-            )),
+            OpType::MarkBegin(mark) => {
+                Value::Scalar(Cow::Owned(format!("markBegin={}", mark.value).into()))
+            }
             OpType::MarkEnd(_) => Value::Scalar(Cow::Owned("markEnd".into())),
             _ => panic!("cant convert op into a value - {:?}", self),
         }

@@ -4,7 +4,7 @@ use crate::{
     convert,
     indexed_cache::IndexedCache,
     storage::AsDocOp,
-    types::{ElemId, Key, ObjId, Op, OpId, OpType, ScalarValue},
+    types::{ElemId, Key, MarkData, ObjId, Op, OpId, OpType, ScalarValue},
 };
 
 /// Create an [`AsDocOp`] implementation for a [`crate::types::Op`]
@@ -76,32 +76,15 @@ impl<'a> AsDocOp<'a> for OpAsDocOp<'a> {
         }
     }
 
-    fn elem(&self) -> Option<convert::ElemId<Self::OpId>> {
+    fn key(&self) -> convert::Key<'a, Self::OpId> {
         match self.op.key {
-            Key::Map(_) => None,
-            Key::Seq(e) if e.is_head() => Some(convert::ElemId::Head),
-            Key::Seq(ElemId(o)) => Some(convert::ElemId::Op(translate(self.actor_lookup, &o))),
-        }
-    }
-
-    fn prop(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
-        match self.op.key {
-            Key::Map(idx) => Some(Cow::Owned(self.props.get(idx).into())),
-            _ => None,
-        }
-    }
-
-    /*
-        fn key(&self) -> convert::Key<'a, Self::OpId> {
-            match self.op.key {
-                Key::Map(idx) => convert::Key::Prop(Cow::Owned(self.props.get(idx).into())),
-                Key::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
-                Key::Seq(ElemId(o)) => {
-                    convert::Key::Elem(convert::ElemId::Op(translate(self.actor_lookup, &o)))
-                }
+            Key::Map(idx) => convert::Key::Prop(Cow::Owned(self.props.get(idx).into())),
+            Key::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
+            Key::Seq(ElemId(o)) => {
+                convert::Key::Elem(convert::ElemId::Op(translate(self.actor_lookup, &o)))
             }
         }
-    */
+    }
 
     fn val(&self) -> Cow<'a, crate::ScalarValue> {
         match &self.op.action {
@@ -125,6 +108,24 @@ impl<'a> AsDocOp<'a> for OpAsDocOp<'a> {
 
     fn action(&self) -> u64 {
         self.op.action.action_index()
+    }
+
+    fn expand(&self) -> bool {
+        if let OpType::MarkBegin(MarkData { expand, .. }) | OpType::MarkEnd(expand) =
+            &self.op.action
+        {
+            *expand
+        } else {
+            false
+        }
+    }
+
+    fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
+        if let OpType::MarkBegin(MarkData { name, .. }) = &self.op.action {
+            Some(Cow::Owned(self.props.get(name.props_index()).into()))
+        } else {
+            None
+        }
     }
 }
 

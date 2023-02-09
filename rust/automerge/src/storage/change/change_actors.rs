@@ -1,5 +1,7 @@
-use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, BTreeSet},
+};
 
 use crate::convert;
 
@@ -72,7 +74,7 @@ where
         let (num_ops, mut other_actors) =
             ops.clone()
                 .try_fold((0, BTreeSet::new()), |(count, mut acc), op| {
-                    if let Some(convert::ElemId::Op(o)) = op.elem() {
+                    if let convert::Key::Elem(convert::ElemId::Op(o)) = op.key() {
                         if o.actor() != &actor {
                             acc.insert(o.actor());
                         }
@@ -234,20 +236,8 @@ where
         }
     }
 
-    /*
-        fn key(&self) -> convert::Key<'aschangeop, Self::OpId> {
-            self.op.key().map(|o| self.actors.translate_opid(&o))
-        }
-    */
-
-    fn prop(&self) -> Option<Cow<'aschangeop, smol_str::SmolStr>> {
-        self.op.prop()
-    }
-
-    fn elem(&self) -> Option<convert::ElemId<Self::OpId>> {
-        self.op
-            .elem()
-            .map(|e| e.map(|id| self.actors.translate_opid(&id)))
+    fn key(&self) -> convert::Key<'aschangeop, Self::OpId> {
+        self.op.key().map(|o| self.actors.translate_opid(&o))
     }
 
     fn obj(&self) -> convert::ObjId<Self::OpId> {
@@ -256,6 +246,14 @@ where
 
     fn val(&self) -> std::borrow::Cow<'aschangeop, crate::ScalarValue> {
         self.op.val()
+    }
+
+    fn expand(&self) -> bool {
+        self.op.expand()
+    }
+
+    fn mark_name(&self) -> Option<Cow<'aschangeop, smol_str::SmolStr>> {
+        self.op.mark_name()
     }
 }
 

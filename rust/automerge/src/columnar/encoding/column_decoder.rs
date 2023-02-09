@@ -1,7 +1,7 @@
 use crate::{
     columnar::{
-        column_range::{DepsIter, ObjIdIter, OpIdIter, OpIdListIter, ValueIter},
-        encoding,
+        column_range::{DepsIter, KeyIter, ObjIdIter, OpIdIter, OpIdListIter, ValueIter},
+        encoding, Key,
     },
     types::{ObjId, OpId},
     ScalarValue,
@@ -108,7 +108,6 @@ impl<'a> ColumnDecoder<ScalarValue> for ValueIter<'a> {
     }
 }
 
-/*
 impl<'a> ColumnDecoder<Key> for KeyIter<'a> {
     type Error = encoding::DecodeColumnError;
     type Value = Key;
@@ -120,7 +119,6 @@ impl<'a> ColumnDecoder<Key> for KeyIter<'a> {
         self.next().transpose().map_err(|e| e.in_column(col_name))
     }
 }
-*/
 
 impl<'a> ColumnDecoder<ObjId> for ObjIdIter<'a> {
     type Value = ObjId;

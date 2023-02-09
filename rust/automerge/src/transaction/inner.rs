@@ -659,13 +659,14 @@ impl TransactionInner {
         value: V,
     ) -> Result<(), AutomergeError> {
         let (obj, _obj_type) = doc.exid_to_obj(ex_obj)?;
+        let mark = doc.ops_mut().m.import_markname(mark);
         if let Some(obs) = op_observer {
             self.do_insert(
                 doc,
                 Some(obs),
                 obj,
                 range.start,
-                OpType::mark(mark.into(), range.expand_left, value.into()),
+                OpType::mark(mark, range.expand_left, value.into()),
             )?;
             self.do_insert(
                 doc,
@@ -680,7 +681,7 @@ impl TransactionInner {
                 None,
                 obj,
                 range.start,
-                OpType::mark(mark.into(), range.expand_left, value.into()),
+                OpType::mark(mark, range.expand_left, value.into()),
             )?;
             self.do_insert::<Obs>(
                 doc,

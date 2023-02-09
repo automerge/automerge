@@ -7,7 +7,7 @@
 //! `Range<usize>` - which have useful instance methods such as `encode()` to create a new range and
 //! `decoder()` to return an iterator of the correct type.
 pub(crate) mod column_range;
-//pub(crate) use column_range::Key;
+pub(crate) use column_range::Key;
 pub(crate) mod encoding;
 
 mod splice_error;

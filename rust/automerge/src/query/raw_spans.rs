@@ -1,5 +1,5 @@
 use crate::query::{OpSetMetadata, QueryResult, TreeQuery};
-use crate::types::{ElemId, Op, OpId, OpType, ScalarValue};
+use crate::types::{ElemId, MarkName, Op, OpId, OpType, ScalarValue};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -17,7 +17,7 @@ pub(crate) struct RawSpan {
     pub(crate) id: OpId,
     pub(crate) start: usize,
     pub(crate) end: usize,
-    pub(crate) name: String,
+    pub(crate) name: MarkName,
     pub(crate) value: ScalarValue,
 }
 
@@ -50,7 +50,7 @@ impl<'a> TreeQuery<'a> for RawSpans {
                         id: element.id,
                         start: self.seen,
                         end: 0,
-                        name: md.name.clone().into(),
+                        name: md.name,
                         value: md.value.clone(),
                     },
                 );

@@ -4,9 +4,10 @@ use tracing::instrument;
 
 use crate::{
     change::Change,
+    columnar::Key as DocOpKey,
     op_tree::OpSetMetadata,
     storage::{change::Verified, Change as StoredChange, DocOp, Document},
-    types::{ChangeHash, ElemId, Key, ObjId, ObjType, Op, OpId, OpIds, OpType},
+    types::{ChangeHash, ElemId, Key, ObjId, ObjType, Op, OpId, OpIds, OpType, OpTypeParts},
     ScalarValue,
 };
 
@@ -16,8 +17,6 @@ pub(crate) enum Error {
     OpsOutOfOrder,
     #[error("error reading operation: {0:?}")]
     ReadOp(Box<dyn std::error::Error + Send + Sync + 'static>),
-    #[error("an operation contained an invalid action")]
-    InvalidAction,
     #[error("an operation referenced a missing actor id")]
     MissingActor,
     #[error("invalid changes: {0}")]
@@ -28,10 +27,8 @@ pub(crate) enum Error {
     MissingOps,
     #[error("succ out of order")]
     SuccOutOfOrder,
-    #[error("no key")]
-    MissingKey,
     #[error(transparent)]
-    InvalidOpType(#[from] crate::error::InvalidOpType),
+    InvalidOp(#[from] crate::error::InvalidOpType),
 }
 
 pub(crate) struct MismatchedHeads {
@@ -338,29 +335,30 @@ impl LoadingObject {
 }
 
 fn import_op(m: &mut OpSetMetadata, op: DocOp) -> Result<Op, Error> {
-    let key = match (&op.prop, op.elem_id) {
-        (Some(k), None) => Ok(Key::Map(m.import_prop(k.as_str()))),
-        (_, Some(elem)) => Ok(Key::Seq(ElemId(check_opid(m, elem.0)?))),
-        (None, None) => Err(Error::MissingKey),
-    }?;
+    let key = match op.key {
+        DocOpKey::Prop(s) => Key::Map(m.import_prop(s)),
+        DocOpKey::Elem(ElemId(op)) => Key::Seq(ElemId(check_opid(m, op)?)),
+    };
     for opid in &op.succ {
         if m.actors.safe_get(opid.actor()).is_none() {
             tracing::error!(?opid, "missing actor");
             return Err(Error::MissingActor);
         }
     }
-    let action = OpType::from_index_and_value(op.action as u64, op.value, op.insert, op.prop)?;
-    let insert = match action {
-        OpType::MarkBegin(_) | OpType::MarkEnd(_) => true,
-        _ => op.insert,
-    };
+    let mark_name = op.mark_name.map(|n| m.import_markname(n));
+    let action = OpType::from_parts(OpTypeParts {
+        action: op.action,
+        value: op.value,
+        expand: op.expand,
+        mark_name,
+    })?;
     Ok(Op {
         id: check_opid(m, op.id)?,
         action,
         key,
         succ: m.try_sorted_opids(op.succ).ok_or(Error::SuccOutOfOrder)?,
         pred: OpIds::empty(),
-        insert,
+        insert: op.insert,
     })
 }
 
@@ -373,28 +371,6 @@ fn check_opid(m: &OpSetMetadata, opid: OpId) -> Result<OpId, Error> {
         None => {
             tracing::error!("missing actor");
             Err(Error::MissingActor)
-        }
-    }
-}
-
-fn parse_optype(action_index: usize, value: ScalarValue) -> Result<OpType, Error> {
-    match action_index {
-        0 => Ok(OpType::Make(ObjType::Map)),
-        1 => Ok(OpType::Put(value)),
-        2 => Ok(OpType::Make(ObjType::List)),
-        3 => Ok(OpType::Delete),
-        4 => Ok(OpType::Make(ObjType::Text)),
-        5 => match value {
-            ScalarValue::Int(i) => Ok(OpType::Increment(i)),
-            _ => {
-                tracing::error!(?value, "invalid value for counter op");
-                Err(Error::InvalidAction)
-            }
-        },
-        6 => Ok(OpType::Make(ObjType::Table)),
-        other => {
-            tracing::error!(action = other, "unknown action type");
-            Err(Error::InvalidAction)
         }
     }
 }

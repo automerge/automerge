@@ -1,5 +1,5 @@
 use crate::query::{OpSetMetadata, QueryResult, TreeQuery};
-use crate::types::{ElemId, ListEncoding, Op, OpType, ScalarValue};
+use crate::types::{ElemId, ListEncoding, MarkName, Op, OpType, ScalarValue};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -14,15 +14,34 @@ pub(crate) struct Spans<'a> {
     seen_at_this_mark: Option<ElemId>,
     seen_at_last_mark: Option<ElemId>,
     ops: Vec<&'a Op>,
-    marks: HashMap<smol_str::SmolStr, &'a ScalarValue>,
+    marks: HashMap<MarkName, &'a ScalarValue>,
     changed: bool,
-    pub(crate) spans: Vec<Span<'a>>,
+    spans: Vec<InternalSpan<'a>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Span<'a> {
     pub pos: usize,
     pub marks: Vec<(smol_str::SmolStr, Cow<'a, ScalarValue>)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct InternalSpan<'a> {
+    pos: usize,
+    marks: Vec<(MarkName, Cow<'a, ScalarValue>)>,
+}
+
+impl<'a> InternalSpan<'a> {
+    fn into_span(self, m: &OpSetMetadata) -> Span<'a> {
+        Span {
+            pos: self.pos,
+            marks: self
+                .marks
+                .into_iter()
+                .map(|(name, value)| (m.props.get(name.props_index()).into(), value))
+                .collect(),
+        }
+    }
 }
 
 impl<'a> Spans<'a> {
@@ -42,11 +61,15 @@ impl<'a> Spans<'a> {
         }
     }
 
+    pub(crate) fn into_spans(self, m: &OpSetMetadata) -> Vec<Span<'a>> {
+        self.spans.into_iter().map(|s| s.into_span(m)).collect()
+    }
+
     pub(crate) fn check_marks(&mut self) {
         let mut new_marks = HashMap::new();
         for op in &self.ops {
             if let OpType::MarkBegin(m) = &op.action {
-                new_marks.insert(m.name.clone(), &m.value);
+                new_marks.insert(m.name, &m.value);
             }
         }
         if new_marks != self.marks {
@@ -62,10 +85,10 @@ impl<'a> Spans<'a> {
             let mut marks: Vec<_> = self
                 .marks
                 .iter()
-                .map(|(key, val)| (key.clone(), Cow::Borrowed(*val)))
+                .map(|(key, val)| (*key, Cow::Borrowed(*val)))
                 .collect();
             marks.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-            self.spans.push(Span {
+            self.spans.push(InternalSpan {
                 pos: self.seen,
                 marks,
             });
