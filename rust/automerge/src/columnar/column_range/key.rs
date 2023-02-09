@@ -149,8 +149,9 @@ impl<'a> ElemIter<'a> {
             },
             (Some(None), Some(None)) => Ok(Some(None)),
             (None, None) => Ok(None),
+            (None | Some(None), None | Some(None) ) => Ok(Some(None)),
             (None | Some(None), k) => {
-                tracing::error!(key=?k, "unexpected null actor");
+                tracing::error!(counter=?k, "unexpected null actor");
                 Err(DecodeColumnError::unexpected_null("actor"))
             }
             (_, None | Some(None)) => Err(DecodeColumnError::unexpected_null("counter")),

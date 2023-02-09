@@ -8,7 +8,7 @@ use crate::{
             generic::{GenericColumnRange, GroupRange, GroupedColumnRange, SimpleColRange},
             BooleanRange, DeltaRange, ObjIdEncoder, ObjIdIter, ObjIdRange, OpIdEncoder, OpIdIter,
             OpIdListEncoder, OpIdListIter, OpIdListRange, OpIdRange, RleRange, ValueEncoder,
-            ValueIter, ValueRange,
+            ValueIter, ValueRange, ElemRange, ElemEncoder, ElemIter,
         },
         encoding::{
             BooleanDecoder, BooleanEncoder, ColumnDecoder, DecodeColumnError, RleDecoder,
@@ -48,7 +48,7 @@ pub(crate) struct DocOp {
 pub(crate) struct DocOpColumns {
     obj: Option<ObjIdRange>,
     prop: RleRange<smol_str::SmolStr>,
-    elem: OpIdRange,
+    elem: ElemRange,
     id: OpIdRange,
     insert: BooleanRange,
     action: RleRange<u64>,
@@ -116,7 +116,7 @@ impl DocOpColumns {
         let obj = ObjIdRange::encode(ops.clone().map(|o| o.obj()), out);
         let id = OpIdRange::encode(ops.clone().map(|o| o.id()), out);
         let prop = RleRange::encode(ops.clone().map(|o| o.prop()), out);
-        let elem = OpIdRange::encode_elemids(ops.clone().map(|o| o.elem()), out);
+        let elem = ElemRange::maybe_encode(ops.clone().map(|o| o.elem()), out);
         let insert = BooleanRange::encode(ops.clone().map(|o| o.insert()), out);
         let action = RleRange::encode(ops.clone().map(|o| Some(o.action())), out);
         let val = ValueRange::encode(ops.clone().map(|o| o.val()), out);
@@ -142,7 +142,7 @@ impl DocOpColumns {
     {
         let mut obj = ObjIdEncoder::new();
         let mut prop = RleEncoder::<_, SmolStr>::new(Vec::new());
-        let mut elem = OpIdEncoder::new();
+        let mut elem = ElemEncoder::new();
         let mut id = OpIdEncoder::new();
         let mut insert = BooleanEncoder::new();
         let mut action = RleEncoder::<_, u64>::from(Vec::new());
@@ -151,7 +151,7 @@ impl DocOpColumns {
         for op in ops {
             obj.append(op.obj());
             prop.append(op.prop());
-            elem.append_elemid(op.elem());
+            elem.append(op.elem());
             id.append(Some(op.id()));
             insert.append(op.insert());
             action.append(Some(op.action()));
@@ -288,7 +288,7 @@ pub(crate) struct DocOpColumnIter<'a> {
     action: RleDecoder<'a, u64>,
     objs: Option<ObjIdIter<'a>>,
     prop: RleDecoder<'a, SmolStr>,
-    elem: OpIdIter<'a>,
+    elem: ElemIter<'a>,
     insert: BooleanDecoder<'a>,
     value: ValueIter<'a>,
     succ: OpIdListIter<'a>,
@@ -445,7 +445,7 @@ impl TryFrom<Columns> for DocOpColumns {
                 obj_ctr.unwrap_or_else(|| (0..0).into()),
             ),
             prop: key_str.unwrap_or_else(|| (0..0).into()),
-            elem: OpIdRange::new(
+            elem: ElemRange::new(
                 key_actor.unwrap_or_else(|| (0..0).into()),
                 key_ctr.unwrap_or_else(|| (0..0).into()),
             ),

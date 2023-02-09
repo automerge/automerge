@@ -7,6 +7,8 @@ use crate::transaction::Transactable;
 use crate::*;
 use std::convert::TryInto;
 
+use test_log::test;
+
 #[test]
 fn insert_op() -> Result<(), AutomergeError> {
     let mut doc = Automerge::new();
