@@ -127,7 +127,7 @@ pub(crate) struct ElemIter<'a> {
 }
 
 impl<'a> ElemIter<'a> {
-    fn try_next(&mut self) -> Result<Option<ElemId>, DecodeColumnError> {
+    fn try_next(&mut self) -> Result<Option<Option<ElemId>>, DecodeColumnError> {
         let actor = self
             .actor
             .next()
@@ -139,15 +139,16 @@ impl<'a> ElemIter<'a> {
             .transpose()
             .map_err(|e| DecodeColumnError::decode_raw("counter", e))?;
         match (actor, counter) {
-            (Some(None) | None, Some(Some(0))) => Ok(Some(ElemId(OpId::new(0, 0)))),
+            (Some(None) | None, Some(Some(0))) => Ok(Some(Some(ElemId(OpId::new(0, 0))))),
             (Some(Some(actor)), Some(Some(ctr))) => match ctr.try_into() {
-                Ok(ctr) => Ok(Some(ElemId(OpId::new(ctr, actor as usize)))),
+                Ok(ctr) => Ok(Some(Some(ElemId(OpId::new(ctr, actor as usize))))),
                 Err(_) => Err(DecodeColumnError::invalid_value(
                     "counter",
                     "negative value for counter",
                 )),
             },
-            (None | Some(None), None | Some(None)) => Ok(None),
+            (Some(None), Some(None)) => Ok(Some(None)),
+            (None, None) => Ok(None),
             (None | Some(None), k) => {
                 tracing::error!(key=?k, "unexpected null actor");
                 Err(DecodeColumnError::unexpected_null("actor"))
@@ -158,7 +159,7 @@ impl<'a> ElemIter<'a> {
 }
 
 impl<'a> Iterator for ElemIter<'a> {
-    type Item = Result<ElemId, DecodeColumnError>;
+    type Item = Result<Option<ElemId>, DecodeColumnError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.try_next().transpose()

@@ -5,10 +5,7 @@ use std::{fmt::Debug, ops::Range};
 use proptest::prelude::*;
 use smol_str::SmolStr;
 
-use crate::{
-    columnar::Key,
-    types::{ElemId, OpId, ScalarValue},
-};
+use crate::types::{ElemId, OpId, ScalarValue};
 
 #[derive(Clone, Debug)]
 pub(crate) struct SpliceScenario<T> {
@@ -144,13 +141,6 @@ pub(crate) fn opid() -> impl Strategy<Value = OpId> + Clone {
 
 pub(crate) fn elemid() -> impl Strategy<Value = ElemId> + Clone {
     opid().prop_map(ElemId)
-}
-
-pub(crate) fn key() -> impl Strategy<Value = Key> + Clone {
-    prop_oneof! {
-        elemid().prop_map(Key::Elem),
-        any::<String>().prop_map(|s| Key::Prop(s.into())),
-    }
 }
 
 pub(crate) fn encodable_int() -> impl Strategy<Value = i64> + Clone {

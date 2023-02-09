@@ -338,8 +338,8 @@ impl LoadingObject {
 }
 
 fn import_op(m: &mut OpSetMetadata, op: DocOp) -> Result<Op, Error> {
-    let key = match (op.prop, op.elem_id) {
-        (Some(k), None) => Ok(Key::Map(m.import_prop(k))),
+    let key = match (&op.prop, op.elem_id) {
+        (Some(k), None) => Ok(Key::Map(m.import_prop(k.as_str()))),
         (_, Some(elem)) => Ok(Key::Seq(ElemId(check_opid(m, elem.0)?))),
         (None, None) => Err(Error::MissingKey),
     }?;

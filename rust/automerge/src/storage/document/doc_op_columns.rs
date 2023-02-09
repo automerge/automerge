@@ -116,7 +116,7 @@ impl DocOpColumns {
         let obj = ObjIdRange::encode(ops.clone().map(|o| o.obj()), out);
         let id = OpIdRange::encode(ops.clone().map(|o| o.id()), out);
         let prop = RleRange::encode(ops.clone().map(|o| o.prop()), out);
-        let elem = OpIdRange::encode_optional(ops.clone().map(|o| o.elem()), out);
+        let elem = OpIdRange::encode_elemids(ops.clone().map(|o| o.elem()), out);
         let insert = BooleanRange::encode(ops.clone().map(|o| o.insert()), out);
         let action = RleRange::encode(ops.clone().map(|o| Some(o.action())), out);
         let val = ValueRange::encode(ops.clone().map(|o| o.val()), out);
@@ -151,9 +151,10 @@ impl DocOpColumns {
         for op in ops {
             obj.append(op.obj());
             prop.append(op.prop());
-            elem.append(op.elem());
+            elem.append_elemid(op.elem());
             id.append(Some(op.id()));
             insert.append(op.insert());
+            action.append(Some(op.action()));
             val.append(&op.val());
             succ.append(op.succ());
         }
@@ -232,7 +233,7 @@ impl DocOpColumns {
             ),
             RawColumn::new(
                 ColumnSpec::new(KEY_COL_ID, ColumnType::String, false),
-                self.prop.into(),
+                self.prop.clone().into(),
             ),
             RawColumn::new(
                 ColumnSpec::new(ID_COL_ID, ColumnType::Actor, false),

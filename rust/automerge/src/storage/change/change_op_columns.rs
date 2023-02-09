@@ -469,20 +469,22 @@ impl TryFrom<Columns> for ChangeOpsColumns {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::columnar::encoding::properties::{key, opid, scalar_value};
+    use crate::columnar::encoding::properties::{elemid, opid, scalar_value};
     use proptest::prelude::*;
 
     prop_compose! {
         fn change_op()
-                    (key in key(),
-                     value in scalar_value(),
+                    (value in scalar_value(),
+                     prop in proptest::option::of(any::<String>().prop_map(|s| s.into())),
+                     elem_id in proptest::option::of(elemid()),
                      pred in proptest::collection::vec(opid(), 0..20),
                      action in 0_u64..6,
                      obj in opid(),
                      insert in any::<bool>()) -> ChangeOp {
             ChangeOp {
                 obj: obj.into(),
-                key,
+                prop,
+                elem_id,
                 val: value,
                 pred,
                 action,

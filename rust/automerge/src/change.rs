@@ -296,18 +296,19 @@ impl From<&Change> for crate::ExpandedChange {
             .iter_ops()
             .map(|o| crate::legacy::Op {
                 action: crate::types::OpType::from_index_and_value(
-                    o.action, o.val, o.insert, o.prop,
+                    o.action, o.val, o.insert, o.prop.clone(),
                 )
                 .unwrap(),
                 insert: o.insert,
                 key: match (o.elem_id, o.prop) {
-                    (None, Some(p)) => crate::legacy::Key::Map(p),
+                    (None, Some(p)) => crate::legacy::Key::Map(p.clone()),
                     (Some(e), _) if e.is_head() => {
                         crate::legacy::Key::Seq(crate::legacy::ElementId::Head)
                     }
                     (Some(ElemId(o)), _) => crate::legacy::Key::Seq(crate::legacy::ElementId::Id(
                         crate::legacy::OpId::new(o.counter(), actors.get(&o.actor()).unwrap()),
                     )),
+                    (None, None) => unreachable!(),
                 },
                 obj: if o.obj.is_root() {
                     crate::legacy::ObjectId::Root

@@ -839,7 +839,7 @@ impl Automerge {
             let marks = Array::new();
             for m in s.marks {
                 let mark = Array::new();
-                mark.push(&m.0.into()); // span name
+                mark.push(&m.0.to_string().into()); // span name
                 let (datatype, value) = alloc(&am::Value::Scalar(m.1.clone()), self.text_rep);
                 mark.push(&datatype.into());
                 mark.push(&value);

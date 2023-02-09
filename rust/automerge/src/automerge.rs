@@ -702,7 +702,8 @@ impl Automerge {
                     (Some(e), _) if e.is_head() => Key::Seq(ElemId::head()),
                     (Some(ElemId(o)), _) => {
                         Key::Seq(ElemId(OpId::new(o.counter(), actors[o.actor()])))
-                    }
+                    },
+                    (None, None) => unreachable!(),
                 };
                 let obj = if c.obj.is_root() {
                     ObjId::root()
