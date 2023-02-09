@@ -137,8 +137,6 @@ jobs:
       matrix:
         toolchain:
           - 1.66.0
-          - nightly
-    continue-on-error: ${{ matrix.toolchain == 'nightly' }}
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
