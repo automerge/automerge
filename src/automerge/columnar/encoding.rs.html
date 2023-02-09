@@ -62,6 +62,8 @@
 <a href="#61" id="61">61</a>
 <a href="#62" id="62">62</a>
 <a href="#63" id="63">63</a>
+<a href="#64" id="64">64</a>
+<a href="#65" id="65">65</a>
 </pre><pre class="rust"><code><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>raw;
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>raw::{RawDecoder, RawEncoder};
@@ -110,6 +112,8 @@
     </span>FromInt(<span class="attr">#[from] </span>std::num::TryFromIntError),
     <span class="attr">#[error(<span class="string">&quot;bad leb128&quot;</span>)]
     </span>BadLeb(<span class="attr">#[from] </span>::leb128::read::Error),
+    <span class="attr">#[error(transparent)]
+    </span>BadLeb128(<span class="attr">#[from] </span><span class="kw">crate</span>::storage::parse::leb128::Error),
     <span class="attr">#[error(<span class="string">&quot;attempted to allocate {attempted} which is larger than the maximum of {maximum}&quot;</span>)]
     </span>OverlargeAllocation { attempted: usize, maximum: usize },
     <span class="attr">#[error(<span class="string">&quot;invalid string encoding&quot;</span>)]
@@ -126,4 +130,4 @@
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>col_error;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>col_error::DecodeColumnError;
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.67.0 (fc594f156 2023-01-24)" data-search-js="search-444266647c4dba98.js" data-settings-js="settings-bebeae96e00e4617.js" data-settings-css="settings-af96d9e2fc13e081.css" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.67.1 (d5a82bbd2 2023-02-07)" data-search-js="search-444266647c4dba98.js" data-settings-js="settings-bebeae96e00e4617.js" data-settings-css="settings-af96d9e2fc13e081.css" ></div></body></html>

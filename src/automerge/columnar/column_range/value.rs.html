@@ -544,15 +544,22 @@
 <a href="#543" id="543">543</a>
 <a href="#544" id="544">544</a>
 <a href="#545" id="545">545</a>
+<a href="#546" id="546">546</a>
+<a href="#547" id="547">547</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::{borrow::Cow, ops::Range};
 
 <span class="kw">use crate</span>::{
     columnar::{
         encoding::{
             leb128::{lebsize, ulebsize},
-            raw, DecodeColumnError, RawBytes, RawDecoder, RawEncoder, RleDecoder, RleEncoder, Sink,
+            raw, DecodeColumnError, DecodeError, RawBytes, RawDecoder, RawEncoder, RleDecoder,
+            RleEncoder, Sink,
         },
         SpliceError,
+    },
+    storage::parse::{
+        leb128::{leb128_i64, leb128_u64},
+        Input, ParseResult,
     },
     ScalarValue,
 };
@@ -763,18 +770,8 @@
                     ValueType::Null =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(ScalarValue::Null)),
                     ValueType::True =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(ScalarValue::Boolean(<span class="bool-val">true</span>))),
                     ValueType::False =&gt; <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(ScalarValue::Boolean(<span class="bool-val">false</span>))),
-                    ValueType::Uleb =&gt; <span class="self">self</span>.parse_raw(val_meta, |<span class="kw-2">mut </span>bytes| {
-                        <span class="kw">let </span>val = leb128::read::unsigned(<span class="kw-2">&amp;mut </span>bytes).map_err(|e| {
-                            DecodeColumnError::invalid_value(<span class="string">&quot;value&quot;</span>, e.to_string())
-                        })<span class="question-mark">?</span>;
-                        <span class="prelude-val">Ok</span>(ScalarValue::Uint(val))
-                    }),
-                    ValueType::Leb =&gt; <span class="self">self</span>.parse_raw(val_meta, |<span class="kw-2">mut </span>bytes| {
-                        <span class="kw">let </span>val = leb128::read::signed(<span class="kw-2">&amp;mut </span>bytes).map_err(|e| {
-                            DecodeColumnError::invalid_value(<span class="string">&quot;value&quot;</span>, e.to_string())
-                        })<span class="question-mark">?</span>;
-                        <span class="prelude-val">Ok</span>(ScalarValue::Int(val))
-                    }),
+                    ValueType::Uleb =&gt; <span class="self">self</span>.parse_input(val_meta, leb128_u64),
+                    ValueType::Leb =&gt; <span class="self">self</span>.parse_input(val_meta, leb128_i64),
                     ValueType::String =&gt; <span class="self">self</span>.parse_raw(val_meta, |bytes| {
                         <span class="kw">let </span>val = std::str::from_utf8(bytes)
                             .map_err(|e| DecodeColumnError::invalid_value(<span class="string">&quot;value&quot;</span>, e.to_string()))<span class="question-mark">?
@@ -796,17 +793,11 @@
                         <span class="kw">let </span>val = f64::from_le_bytes(raw);
                         <span class="prelude-val">Ok</span>(ScalarValue::F64(val))
                     }),
-                    ValueType::Counter =&gt; <span class="self">self</span>.parse_raw(val_meta, |<span class="kw-2">mut </span>bytes| {
-                        <span class="kw">let </span>val = leb128::read::signed(<span class="kw-2">&amp;mut </span>bytes).map_err(|e| {
-                            DecodeColumnError::invalid_value(<span class="string">&quot;value&quot;</span>, e.to_string())
-                        })<span class="question-mark">?</span>;
-                        <span class="prelude-val">Ok</span>(ScalarValue::Counter(val.into()))
+                    ValueType::Counter =&gt; <span class="self">self</span>.parse_input(val_meta, |input| {
+                        leb128_i64(input).map(|(i, n)| (i, ScalarValue::Counter(n.into())))
                     }),
-                    ValueType::Timestamp =&gt; <span class="self">self</span>.parse_raw(val_meta, |<span class="kw-2">mut </span>bytes| {
-                        <span class="kw">let </span>val = leb128::read::signed(<span class="kw-2">&amp;mut </span>bytes).map_err(|e| {
-                            DecodeColumnError::invalid_value(<span class="string">&quot;value&quot;</span>, e.to_string())
-                        })<span class="question-mark">?</span>;
-                        <span class="prelude-val">Ok</span>(ScalarValue::Timestamp(val))
+                    ValueType::Timestamp =&gt; <span class="self">self</span>.parse_input(val_meta, |input| {
+                        leb128_i64(input).map(|(i, n)| (i, ScalarValue::Timestamp(n)))
                     }),
                     ValueType::Unknown(code) =&gt; <span class="self">self</span>.parse_raw(val_meta, |bytes| {
                         <span class="prelude-val">Ok</span>(ScalarValue::Unknown {
@@ -830,8 +821,8 @@
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; ValueIter&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">fn </span>parse_raw&lt;R, F: Fn(<span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;R, DecodeColumnError&gt;&gt;(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+    <span class="kw">fn </span>parse_raw&lt;<span class="lifetime">&#39;b</span>, R, F: Fn(<span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;R, DecodeColumnError&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="kw-2">mut </span><span class="self">self</span>,
         meta: ValueMeta,
         f: F,
     ) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="prelude-ty">Result</span>&lt;R, DecodeColumnError&gt;&gt; {
@@ -844,11 +835,24 @@
             }
             <span class="prelude-val">Ok</span>(bytes) =&gt; bytes,
         };
-        <span class="kw">let </span>val = <span class="kw">match </span>f(raw) {
-            <span class="prelude-val">Ok</span>(v) =&gt; v,
-            <span class="prelude-val">Err</span>(e) =&gt; <span class="kw">return </span><span class="prelude-val">Some</span>(<span class="prelude-val">Err</span>(e)),
-        };
-        <span class="prelude-val">Some</span>(<span class="prelude-val">Ok</span>(val))
+        <span class="prelude-val">Some</span>(f(raw))
+    }
+
+    <span class="kw">fn </span>parse_input&lt;<span class="lifetime">&#39;b</span>, R, F: Fn(Input&lt;<span class="lifetime">&#39;b</span>&gt;) -&gt; ParseResult&lt;<span class="lifetime">&#39;b</span>, R, DecodeError&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="kw-2">mut </span><span class="self">self</span>,
+        meta: ValueMeta,
+        f: F,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="prelude-ty">Result</span>&lt;ScalarValue, DecodeColumnError&gt;&gt;
+    <span class="kw">where
+        </span>R: Into&lt;ScalarValue&gt;,
+    {
+        <span class="self">self</span>.parse_raw(meta, |raw| <span class="kw">match </span>f(Input::new(raw)) {
+            <span class="prelude-val">Err</span>(e) =&gt; <span class="prelude-val">Err</span>(DecodeColumnError::invalid_value(<span class="string">&quot;value&quot;</span>, e.to_string())),
+            <span class="prelude-val">Ok</span>((i, <span class="kw">_</span>)) <span class="kw">if </span>!i.is_empty() =&gt; {
+                <span class="prelude-val">Err</span>(DecodeColumnError::invalid_value(<span class="string">&quot;value&quot;</span>, <span class="string">&quot;extra bytes&quot;</span>))
+            }
+            <span class="prelude-val">Ok</span>((<span class="kw">_</span>, v)) =&gt; <span class="prelude-val">Ok</span>(v.into()),
+        })
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>done(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
@@ -1090,4 +1094,4 @@
     }
 }
 </code></pre></div>
-</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.67.0 (fc594f156 2023-01-24)" data-search-js="search-444266647c4dba98.js" data-settings-js="settings-bebeae96e00e4617.js" data-settings-css="settings-af96d9e2fc13e081.css" ></div></body></html>
+</section></div></main><div id="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.67.1 (d5a82bbd2 2023-02-07)" data-search-js="search-444266647c4dba98.js" data-settings-js="settings-bebeae96e00e4617.js" data-settings-css="settings-af96d9e2fc13e081.css" ></div></body></html>
