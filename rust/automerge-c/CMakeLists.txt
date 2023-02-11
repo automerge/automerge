@@ -68,8 +68,6 @@ configure_file(
 
 set(INCLUDE_GUARD_PREFIX "${SYMBOL_PREFIX}")
 
-# \note cbindgen won't regenerate its output header file after it's been removed
-#       but it will after its configuration file has been updated.
 configure_file(
     ${CMAKE_MODULE_PATH}/cbindgen.toml.in
     ${CMAKE_SOURCE_DIR}/cbindgen.toml
@@ -87,6 +85,10 @@ set(CARGO_OUTPUT
 add_custom_command(
     OUTPUT
         ${CARGO_OUTPUT}
+    COMMAND
+        # \note cbindgen won't regenerate its output header file after it's been removed but it will after its
+        #       configuration file has been updated.
+        ${CMAKE_COMMAND} -DCONDITION=NOT_EXISTS -P ${CMAKE_SOURCE_DIR}/cmake/file-touch.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h ${CMAKE_SOURCE_DIR}/cbindgen.toml
     COMMAND
         ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${CARGO_TARGET_DIR} CBINDGEN_TARGET_DIR=${CBINDGEN_TARGET_DIR} ${CARGO_CMD} build ${CARGO_FLAG} ${CARGO_FEATURES}
     COMMAND
