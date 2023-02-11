@@ -11,7 +11,7 @@ macro_rules! to_actor_id {
         let handle = $handle.as_ref();
         match handle {
             Some(b) => b,
-            None => return AMresult::err("Invalid AMactorId pointer").into(),
+            None => return AMresult::error("Invalid `AMactorId*`").into(),
         }
     }};
 }
@@ -57,11 +57,11 @@ impl AsRef<am::ActorId> for AMactorId {
 }
 
 /// \memberof AMactorId
-/// \brief Gets the value of an actor identifier as a sequence of bytes.
+/// \brief Gets the value of an actor identifier as an array of bytes.
 ///
 /// \param[in] actor_id A pointer to an `AMactorId` struct.
-/// \pre \p actor_id `!= NULL`.
-/// \return An `AMbyteSpan` struct.
+/// \return An `AMbyteSpan` struct for an array of bytes.
+/// \pre \p actor_id `!= NULL`
 /// \internal
 ///
 /// # Safety
@@ -82,8 +82,8 @@ pub unsafe extern "C" fn AMactorIdBytes(actor_id: *const AMactorId) -> AMbyteSpa
 /// \return `-1` if \p actor_id1 `<` \p actor_id2, `0` if
 ///         \p actor_id1 `==` \p actor_id2 and `1` if
 ///         \p actor_id1 `>` \p actor_id2.
-/// \pre \p actor_id1 `!= NULL`.
-/// \pre \p actor_id2 `!= NULL`.
+/// \pre \p actor_id1 `!= NULL`
+/// \pre \p actor_id2 `!= NULL`
 /// \internal
 ///
 /// #Safety
@@ -101,65 +101,69 @@ pub unsafe extern "C" fn AMactorIdCmp(
             Ordering::Greater => 1,
         },
         (None, Some(_)) => -1,
-        (Some(_), None) => 1,
         (None, None) => 0,
+        (Some(_), None) => 1,
     }
 }
 
 /// \memberof AMactorId
-/// \brief Allocates a new actor identifier and initializes it with a random
-///        UUID.
+/// \brief Allocates a new actor identifier and initializes it from a random
+///        UUID value.
 ///
-/// \return A pointer to an `AMresult` struct containing a pointer to an
-///         `AMactorId` struct.
-/// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
-///          in order to prevent a memory leak.
+/// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_ACTOR_ID` item.
+/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+///          in order to avoid a memory leak.
 #[no_mangle]
 pub unsafe extern "C" fn AMactorIdInit() -> *mut AMresult {
     to_result(Ok::<am::ActorId, am::AutomergeError>(am::ActorId::random()))
 }
 
 /// \memberof AMactorId
-/// \brief Allocates a new actor identifier and initializes it from a sequence
-///        of bytes.
+/// \brief Allocates a new actor identifier and initializes it from an array of
+///        bytes value.
 ///
-/// \param[in] src A pointer to a contiguous sequence of bytes.
-/// \param[in] count The number of bytes to copy from \p src.
-/// \pre `0 <` \p count `<= sizeof(`\p src`)`.
-/// \return A pointer to an `AMresult` struct containing a pointer to an
-///         `AMactorId` struct.
-/// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
-///          in order to prevent a memory leak.
+/// \param[in] src A pointer to an array of bytes.
+/// \param[in] count The count of bytes to copy from the array pointed to by
+///                  \p src.
+/// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_ACTOR_ID` item.
+/// \pre \p src `!= NULL`
+/// \pre `sizeof(`\p src `) > 0`
+/// \pre \p count `<= sizeof(`\p src `)`
+/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+///          in order to avoid a memory leak.
 /// \internal
 ///
 /// # Safety
-/// src must be a byte array of size `>= count`
+/// src must be a byte array of length `>= count`
 #[no_mangle]
-pub unsafe extern "C" fn AMactorIdInitBytes(src: *const u8, count: usize) -> *mut AMresult {
-    let slice = std::slice::from_raw_parts(src, count);
-    to_result(Ok::<am::ActorId, am::InvalidActorId>(am::ActorId::from(
-        slice,
-    )))
+pub unsafe extern "C" fn AMactorIdFromBytes(src: *const u8, count: usize) -> *mut AMresult {
+    if !src.is_null() {
+        let value = std::slice::from_raw_parts(src, count);
+        to_result(Ok::<am::ActorId, am::InvalidActorId>(am::ActorId::from(
+            value,
+        )))
+    } else {
+        AMresult::error("Invalid uint8_t*").into()
+    }
 }
 
 /// \memberof AMactorId
 /// \brief Allocates a new actor identifier and initializes it from a
-///        hexadecimal string.
+///        hexadecimal UTF-8 string view value.
 ///
-/// \param[in] hex_str A UTF-8 string view as an `AMbyteSpan` struct.
-/// \return A pointer to an `AMresult` struct containing a pointer to an
-///         `AMactorId` struct.
-/// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
-///          in order to prevent a memory leak.
+/// \param[in] value A UTF-8 string view as an `AMbyteSpan` struct.
+/// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_ACTOR_ID` item.
+/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+///          in order to avoid a memory leak.
 /// \internal
 ///
 /// # Safety
 /// hex_str must be a valid pointer to an AMbyteSpan
 #[no_mangle]
-pub unsafe extern "C" fn AMactorIdInitStr(hex_str: AMbyteSpan) -> *mut AMresult {
+pub unsafe extern "C" fn AMactorIdFromStr(value: AMbyteSpan) -> *mut AMresult {
     use am::AutomergeError::InvalidActorId;
 
-    to_result(match (&hex_str).try_into() {
+    to_result(match (&value).try_into() {
         Ok(s) => match am::ActorId::from_str(s) {
             Ok(actor_id) => Ok(actor_id),
             Err(_) => Err(InvalidActorId(String::from(s))),
@@ -169,11 +173,12 @@ pub unsafe extern "C" fn AMactorIdInitStr(hex_str: AMbyteSpan) -> *mut AMresult 
 }
 
 /// \memberof AMactorId
-/// \brief Gets the value of an actor identifier as a hexadecimal string.
+/// \brief Gets the value of an actor identifier as a UTF-8 hexadecimal string
+///        view.
 ///
 /// \param[in] actor_id A pointer to an `AMactorId` struct.
-/// \pre \p actor_id `!= NULL`.
 /// \return A UTF-8 string view as an `AMbyteSpan` struct.
+/// \pre \p actor_id `!= NULL`
 /// \internal
 ///
 /// # Safety

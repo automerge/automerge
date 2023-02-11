@@ -1,10 +1,10 @@
 automerge
 automerge.h
 automerge.o
-*.cmake
+build/
+CMakeCache.txt
 CMakeFiles
+CMakePresets.json
 Makefile
 DartConfiguration.tcl
-config.h
-CMakeCache.txt
-Cargo
+out/

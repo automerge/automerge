@@ -1,3 +1,4 @@
+use crate::change::LoadError as LoadChangeError;
 use crate::storage::load::Error as LoadError;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
@@ -18,6 +19,8 @@ pub enum AutomergeError {
     Fail,
     #[error("invalid actor ID `{0}`")]
     InvalidActorId(String),
+    #[error(transparent)]
+    InvalidChangeHashBytes(#[from] InvalidChangeHashSlice),
     #[error("invalid UTF-8 character at {0}")]
     InvalidCharacter(usize),
     #[error("invalid hash {0}")]
@@ -39,6 +42,8 @@ pub enum AutomergeError {
     },
     #[error(transparent)]
     Load(#[from] LoadError),
+    #[error(transparent)]
+    LoadChangeError(#[from] LoadChangeError),
     #[error("increment operations must be against a counter value")]
     MissingCounter,
     #[error("hash {0} does not correspond to a change in this document")]

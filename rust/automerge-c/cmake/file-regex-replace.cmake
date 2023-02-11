@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
 
 if(NOT DEFINED MATCH_REGEX)
     message(FATAL_ERROR "Variable \"MATCH_REGEX\" is not defined.")
