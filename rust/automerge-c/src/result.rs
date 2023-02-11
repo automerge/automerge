@@ -626,10 +626,8 @@ pub unsafe extern "C" fn AMresultItems<'a>(result: *mut AMresult) -> AMitems<'a>
 pub unsafe extern "C" fn AMresultSize(result: *const AMresult) -> usize {
     use self::AMresult::*;
 
-    if let Some(result) = result.as_ref() {
-        if let Items(items) = result {
-            return items.len();
-        }
+    if let Some(Items(items)) = result.as_ref() {
+        return items.len();
     }
     0
 }
