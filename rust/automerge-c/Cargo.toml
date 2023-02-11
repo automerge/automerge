@@ -19,4 +19,4 @@ libc = "^0.2"
 smol_str = "^0.1.21"
 
 [build-dependencies]
-cbindgen = "^0.20"
+cbindgen = "^0.24"
