@@ -39,7 +39,7 @@ macro_rules! to_range {
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre `0 <=` \p pos `<= AMobjSize(`\p obj_id `)` or \p pos `== SIZE_MAX`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -71,7 +71,7 @@ pub unsafe extern "C" fn AMlistDelete(
 /// \return A pointer to an `AMresult` struct with an `AMitem` struct.
 /// \pre \p doc `!= NULL`
 /// \pre `0 <=` \p pos `<= AMobjSize(`\p obj_id `)` or \p pos `== SIZE_MAX`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -112,7 +112,7 @@ pub unsafe extern "C" fn AMlistGet(
 /// \return A pointer to an `AMresult` struct with an `AMitems` struct.
 /// \pre \p doc `!= NULL`
 /// \pre `0 <=` \p pos `<= AMobjSize(`\p obj_id `)` or \p pos `== SIZE_MAX`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -151,7 +151,7 @@ pub unsafe extern "C" fn AMlistGetAll(
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre `0 <=` \p pos `<= AMobjSize(`\p obj_id `)` or \p pos `== SIZE_MAX`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -187,7 +187,7 @@ pub unsafe extern "C" fn AMlistIncrement(
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre `0 <=` \p pos `<= AMobjSize(`\p obj_id `)` or \p pos `== SIZE_MAX`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -232,7 +232,7 @@ pub unsafe extern "C" fn AMlistPutBool(
 /// \pre `0 <=` \p pos `<= AMobjSize(`\p obj_id `)` or \p pos `== SIZE_MAX`
 /// \pre \p value.src `!= NULL`
 /// \pre `0 <` \p value.count `<= sizeof(`\p value.src `)`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -275,7 +275,7 @@ pub unsafe extern "C" fn AMlistPutBytes(
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre `0 <=` \p pos `<= AMobjSize(`\p obj_id `)` or \p pos `== SIZE_MAX`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -317,7 +317,7 @@ pub unsafe extern "C" fn AMlistPutCounter(
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre `0 <=` \p pos `<= AMobjSize(`\p obj_id `)` or \p pos `== SIZE_MAX`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -358,7 +358,7 @@ pub unsafe extern "C" fn AMlistPutF64(
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre `0 <=` \p pos `<= AMobjSize(`\p obj_id `)` or \p pos `== SIZE_MAX`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -398,7 +398,7 @@ pub unsafe extern "C" fn AMlistPutInt(
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre `0 <=` \p pos `<= AMobjSize(`\p obj_id `)` or \p pos `== SIZE_MAX`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -438,7 +438,7 @@ pub unsafe extern "C" fn AMlistPutNull(
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_OBJ_TYPE` item.
 /// \pre \p doc `!= NULL`
 /// \pre `0 <=` \p pos `<= AMobjSize(`\p obj_id `)` or \p pos `== SIZE_MAX`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -482,7 +482,7 @@ pub unsafe extern "C" fn AMlistPutObject(
 /// \pre `0 <=` \p pos `<= AMobjSize(`\p obj_id `)` or \p pos `== SIZE_MAX`
 /// \pre \p value.src `!= NULL`
 /// \pre `0 <` \p value.count `<= sizeof(`\p value.src `)`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -526,7 +526,7 @@ pub unsafe extern "C" fn AMlistPutStr(
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre `0 <=` \p pos `<= AMobjSize(`\p obj_id `)` or \p pos `== SIZE_MAX`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -578,7 +578,7 @@ pub unsafe extern "C" fn AMlistPutTimestamp(
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre `0 <=` \p pos `<= AMobjSize(`\p obj_id `)` or \p pos `== SIZE_MAX`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -617,7 +617,7 @@ pub unsafe extern "C" fn AMlistPutUint(
 /// \return A pointer to an `AMresult` struct with an `AMitems` struct.
 /// \pre \p doc `!= NULL`
 /// \pre \p begin `<=` \p end `<= SIZE_MAX`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///

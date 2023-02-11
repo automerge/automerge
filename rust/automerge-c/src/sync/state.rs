@@ -63,7 +63,7 @@ impl From<AMsyncState> for *mut AMsyncState {
 /// \pre \p src `!= NULL`
 /// \pre `sizeof(`\p src `) > 0`
 /// \pre \p count `<= sizeof(`\p src `)`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -81,7 +81,7 @@ pub unsafe extern "C" fn AMsyncStateDecode(src: *const u8, count: usize) -> *mut
 /// \param[in] sync_state A pointer to an `AMsyncState` struct.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_BYTE_SPAN` item.
 /// \pre \p sync_state `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -123,7 +123,7 @@ pub unsafe extern "C" fn AMsyncStateEqual(
 ///        default values.
 ///
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_SYNC_STATE` item.
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 #[no_mangle]
 pub extern "C" fn AMsyncStateInit() -> *mut AMresult {
@@ -136,7 +136,7 @@ pub extern "C" fn AMsyncStateInit() -> *mut AMresult {
 /// \param[in] sync_state A pointer to an `AMsyncState` struct.
 /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE_HASH` items.
 /// \pre \p sync_state `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -154,7 +154,7 @@ pub unsafe extern "C" fn AMsyncStateSharedHeads(sync_state: *const AMsyncState) 
 /// \param[in] sync_state A pointer to an `AMsyncState` struct.
 /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE_HASH` items.
 /// \pre \p sync_state `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -175,7 +175,7 @@ pub unsafe extern "C" fn AMsyncStateLastSentHeads(sync_state: *const AMsyncState
 /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_SYNC_HAVE` items.
 /// \pre \p sync_state `!= NULL`
 /// \pre \p has_value `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 //// \internal
 ///
@@ -207,7 +207,7 @@ pub unsafe extern "C" fn AMsyncStateTheirHaves(
 /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE_HASH` items.
 /// \pre \p sync_state `!= NULL`
 /// \pre \p has_value `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -239,7 +239,7 @@ pub unsafe extern "C" fn AMsyncStateTheirHeads(
 /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE_HASH` items.
 /// \pre \p sync_state `!= NULL`
 /// \pre \p has_value `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///

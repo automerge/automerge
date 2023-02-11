@@ -71,7 +71,7 @@ impl AsRef<am::Change> for AMchange {
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_ACTOR_ID` item.
 /// \pre \p change `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -107,7 +107,7 @@ pub unsafe extern "C" fn AMchangeCompress(change: *mut AMchange) {
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE_HASH` items.
 /// \pre \p change `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -150,7 +150,7 @@ pub unsafe extern "C" fn AMchangeExtraBytes(change: *const AMchange) -> AMbyteSp
 /// \pre \p src `!= NULL`
 /// \pre `sizeof(`\p src `) > 0`
 /// \pre \p count `<= sizeof(`\p src `)`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -209,7 +209,7 @@ pub unsafe extern "C" fn AMchangeIsEmpty(change: *const AMchange) -> bool {
 // /// \pre \p byte_spans `!= NULL`
 // /// \pre `sizeof(`\p byte_spans `) > 0`
 // /// \pre \p size `<= sizeof(`\p byte_spans `)`
-// /// \warning The returned `AMresult` struct must be passed to `AMfree()`
+// /// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 // ///          in order to avoid a memory leak.
 // /// \internal
 // ///
@@ -244,7 +244,7 @@ pub unsafe extern "C" fn AMchangeIsEmpty(change: *const AMchange) -> bool {
 /// \pre \p src `!= NULL`
 /// \pre `sizeof(`\p src `) > 0`
 /// \pre \p count `<= sizeof(`\p src `)`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///

@@ -67,7 +67,7 @@ void AMstackFree(AMstack** stack);
  *                   select the top result in \p stack.
  * \return A pointer to an `AMresult` struct or `NULL`.
  * \pre \p stack `!= NULL`
- * \warning The returned `AMresult` struct must be passed to `AMfree()`
+ * \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
  *          in order to avoid a memory leak.
  * \note Calling this function is purely optional because its sole purpose is
  *       to ease memory management in C/C++ and Objective-C by deferring the

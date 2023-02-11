@@ -12,10 +12,15 @@
  * \param[in] ... A \p count list of arguments, each of which is a pointer to
  *                an `AMresult` struct whose items will be transferred out of it
  *                and which is subsequently freed.
- * \return A new `AMresult` struct.
- * \warning The returned `AMresult` struct must be passed to `AMfree()`
+ * \return A pointer to an `AMresult` struct or `NULL`.
+ * \pre `∀𝑥 ∈` \p ... `, AMresultStatus(𝑥) == AM_STATUS_OK`
+ * \post `(∃𝑥 ∈` \p ... `, AMresultStatus(𝑥) != AM_STATUS_OK) -> NULL`
+ * \attention All `AMresult` struct pointer arguments are passed to `AMfree()`
+ *            regardless of success; use `AMresultCat()` instead if you wish 
+ *            to pass them to `AMfree()` yourself.
+ * \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
  *          in order to avoid a memory leak.
-*/
+ */
 AMresult* AMresultFrom(int count, ...);
 
 #endif /* AUTOMERGE_C_UTILS_RESULT_H */

@@ -72,7 +72,7 @@ impl DerefMut for AMdoc {
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre \p items `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -96,7 +96,7 @@ pub unsafe extern "C" fn AMapplyChanges(doc: *mut AMdoc, items: *const AMitems) 
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_DOC` item.
 /// \pre \p doc `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -114,7 +114,7 @@ pub unsafe extern "C" fn AMclone(doc: *const AMdoc) -> *mut AMresult {
 /// \param[in] actor_id A pointer to an `AMactorId` struct or `NULL` for a
 ///                     random one.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_DOC` item.
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -139,7 +139,7 @@ pub unsafe extern "C" fn AMcreate(actor_id: *const AMactorId) -> *mut AMresult {
 ///         item if there were operations to commit or an `AM_VAL_TYPE_VOID` item
 ///         if there were no operations to commit.
 /// \pre \p doc `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -182,7 +182,7 @@ pub unsafe extern "C" fn AMcommit(
 /// \return A pointer to an `AMresult` struct with one `AM_VAL_TYPE_CHANGE_HASH`
 ///         item.
 /// \pre \p doc `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -236,7 +236,7 @@ pub unsafe extern "C" fn AMequal(doc1: *mut AMdoc, doc2: *mut AMdoc) -> bool {
 ///                  current point.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -265,7 +265,7 @@ pub unsafe extern "C" fn AMfork(doc: *mut AMdoc, heads: *const AMitems) -> *mut 
 ///         `AM_VAL_TYPE_SYNC_MESSAGE` or `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre \p sync_state `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -288,7 +288,7 @@ pub unsafe extern "C" fn AMgenerateSyncMessage(
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_ACTOR_ID` item.
 /// \pre \p doc `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -314,7 +314,7 @@ pub unsafe extern "C" fn AMgetActorId(doc: *const AMdoc) -> *mut AMresult {
 /// \pre \p src `!= NULL`
 /// \pre `sizeof(`\p src') >= AM_CHANGE_HASH_SIZE`
 /// \pre \p count `<= sizeof(`\p src `)`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -343,7 +343,7 @@ pub unsafe extern "C" fn AMgetChangeByHash(
 ///                      `AM_VAL_TYPE_CHANGE_HASH` items or `NULL`.
 /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE` items.
 /// \pre \p doc `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -371,7 +371,7 @@ pub unsafe extern "C" fn AMgetChanges(doc: *mut AMdoc, have_deps: *const AMitems
 /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE` items.
 /// \pre \p doc1 `!= NULL`
 /// \pre \p doc2 `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -391,7 +391,7 @@ pub unsafe extern "C" fn AMgetChangesAdded(doc1: *mut AMdoc, doc2: *mut AMdoc) -
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE_HASH` items.
 /// \pre \p doc `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -414,7 +414,7 @@ pub unsafe extern "C" fn AMgetHeads(doc: *mut AMdoc) -> *mut AMresult {
 ///                  items or `NULL`.
 /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE_HASH` items.
 /// \pre \p doc `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -443,7 +443,7 @@ pub unsafe extern "C" fn AMgetMissingDeps(doc: *mut AMdoc, heads: *const AMitems
 /// \return A pointer to an `AMresult` struct containing either an
 ///         `AM_VAL_TYPE_CHANGE` or `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -465,7 +465,7 @@ pub unsafe extern "C" fn AMgetLastLocalChange(doc: *mut AMdoc) -> *mut AMresult 
 ///                  keys.
 /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_STR` items.
 /// \pre \p doc `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -501,7 +501,7 @@ pub unsafe extern "C" fn AMkeys(
 /// \pre \p src `!= NULL`
 /// \pre `sizeof(`\p src `) > 0`
 /// \pre \p count `<= sizeof(`\p src `)`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -525,7 +525,7 @@ pub unsafe extern "C" fn AMload(src: *const u8, count: usize) -> *mut AMresult {
 /// \pre \p src `!= NULL`
 /// \pre `sizeof(`\p src `) > 0`
 /// \pre \p count `<= sizeof(`\p src `)`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -552,7 +552,7 @@ pub unsafe extern "C" fn AMloadIncremental(
 /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE_HASH` items.
 /// \pre \p dest `!= NULL`
 /// \pre \p src `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -637,7 +637,7 @@ pub unsafe extern "C" fn AMobjObjType(doc: *const AMdoc, obj_id: *const AMobjId)
 ///                  its current items.
 /// \return A pointer to an `AMresult` struct with an `AMitems` struct.
 /// \pre \p doc `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -738,7 +738,7 @@ pub unsafe extern "C" fn AMrollback(doc: *mut AMdoc) -> usize {
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_BYTES` item.
 /// \pre \p doc `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -757,7 +757,7 @@ pub unsafe extern "C" fn AMsave(doc: *mut AMdoc) -> *mut AMresult {
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_BYTES` item.
 /// \pre \p doc `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -777,7 +777,7 @@ pub unsafe extern "C" fn AMsaveIncremental(doc: *mut AMdoc) -> *mut AMresult {
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre \p actor_id `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -814,7 +814,7 @@ pub unsafe extern "C" fn AMsetActorId(
 /// \pre \p doc `!= NULL`
 /// \pre `0 <=` \p pos `<= AMobjSize(`\p obj_id `)` or \p pos `== SIZE_MAX`
 /// \pre `0 <=` \p del `<= AMobjSize(`\p obj_id `)` or \p del `== SIZE_MAX`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -856,7 +856,7 @@ pub unsafe extern "C" fn AMsplice(
 /// \pre \p doc `!= NULL`
 /// \pre `0 <=` \p pos `<= AMobjSize(`\p obj_id `)` or \p pos `== SIZE_MAX`
 /// \pre `0 <=` \p del `<= AMobjSize(`\p obj_id `)` or \p del `== SIZE_MAX`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -889,7 +889,7 @@ pub unsafe extern "C" fn AMspliceText(
 ///                  or `NULL` to select the current string.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_STR` item.
 /// \pre \p doc `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///

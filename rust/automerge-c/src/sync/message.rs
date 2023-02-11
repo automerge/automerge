@@ -50,7 +50,7 @@ impl AsRef<am::sync::Message> for AMsyncMessage {
 /// \param[in] sync_message A pointer to an `AMsyncMessage` struct.
 /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE` items.
 /// \pre \p sync_message `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -74,7 +74,7 @@ pub unsafe extern "C" fn AMsyncMessageChanges(sync_message: *const AMsyncMessage
 /// \pre \p src `!= NULL`
 /// \pre `sizeof(`\p src `) > 0`
 /// \pre \p count `<= sizeof(`\p src `)`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -92,7 +92,7 @@ pub unsafe extern "C" fn AMsyncMessageDecode(src: *const u8, count: usize) -> *m
 /// \param[in] sync_message A pointer to an `AMsyncMessage` struct.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_BYTES` item.
 /// \pre \p sync_message `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -110,7 +110,7 @@ pub unsafe extern "C" fn AMsyncMessageEncode(sync_message: *const AMsyncMessage)
 /// \param[in] sync_message A pointer to an `AMsyncMessage` struct.
 /// \return A pointer to an `AMresult` struct with `AM_SYNC_HAVE` items.
 /// \pre \p sync_message `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -130,7 +130,7 @@ pub unsafe extern "C" fn AMsyncMessageHaves(sync_message: *const AMsyncMessage) 
 /// \param[in] sync_message A pointer to an `AMsyncMessage` struct.
 /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE_HASH` items.
 /// \pre \p sync_message `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -151,7 +151,7 @@ pub unsafe extern "C" fn AMsyncMessageHeads(sync_message: *const AMsyncMessage) 
 /// \param[in] sync_message A pointer to an `AMsyncMessage` struct.
 /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE_HASH` items.
 /// \pre \p sync_message `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///

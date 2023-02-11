@@ -1260,7 +1260,7 @@ pub unsafe extern "C" fn AMitemEqual(item1: *const AMitem, item2: *const AMitem)
 ///
 /// \param[in] value A boolean.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_BOOL` item.
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 #[no_mangle]
 pub unsafe extern "C" fn AMitemFromBool(value: bool) -> *mut AMresult {
@@ -1277,7 +1277,7 @@ pub unsafe extern "C" fn AMitemFromBool(value: bool) -> *mut AMresult {
 /// \pre \p src `!= NULL`
 /// \pre `sizeof(`\p src `) > 0`
 /// \pre \p count `<= sizeof(`\p src `)`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -1296,7 +1296,7 @@ pub unsafe extern "C" fn AMitemFromBytes(src: *const u8, count: usize) -> *mut A
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_CHANGE_HASH` item.
 /// \pre \p value.src `!= NULL`
 /// \pre `0 <` \p value.count `<= sizeof(`\p value.src `)`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -1312,7 +1312,7 @@ pub unsafe extern "C" fn AMitemFromChangeHash(value: AMbyteSpan) -> *mut AMresul
 ///
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_COUNTER` item.
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 #[no_mangle]
 pub unsafe extern "C" fn AMitemFromCounter(value: i64) -> *mut AMresult {
@@ -1324,7 +1324,7 @@ pub unsafe extern "C" fn AMitemFromCounter(value: i64) -> *mut AMresult {
 ///
 /// \param[in] value A 64-bit float.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_F64` item.
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 #[no_mangle]
 pub unsafe extern "C" fn AMitemFromF64(value: f64) -> *mut AMresult {
@@ -1336,7 +1336,7 @@ pub unsafe extern "C" fn AMitemFromF64(value: f64) -> *mut AMresult {
 ///
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_INT` item.
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 #[no_mangle]
 pub unsafe extern "C" fn AMitemFromInt(value: i64) -> *mut AMresult {
@@ -1347,7 +1347,7 @@ pub unsafe extern "C" fn AMitemFromInt(value: i64) -> *mut AMresult {
 /// \brief Allocates a new item and initializes it from a null value.
 ///
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_NULL` item.
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 #[no_mangle]
 pub unsafe extern "C" fn AMitemFromNull() -> *mut AMresult {
@@ -1361,7 +1361,7 @@ pub unsafe extern "C" fn AMitemFromNull() -> *mut AMresult {
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_STR` item.
 /// \pre \p value.src `!= NULL`
 /// \pre `0 <` \p value.count `<= sizeof(`\p value.src `)`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -1378,7 +1378,7 @@ pub unsafe extern "C" fn AMitemFromStr(value: AMbyteSpan) -> *mut AMresult {
 ///
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_TIMESTAMP` item.
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 #[no_mangle]
 pub unsafe extern "C" fn AMitemFromTimestamp(value: i64) -> *mut AMresult {
@@ -1390,7 +1390,7 @@ pub unsafe extern "C" fn AMitemFromTimestamp(value: i64) -> *mut AMresult {
 ///
 /// \param[in] value A 64-bit unsigned integer.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_UINT` item.
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 #[no_mangle]
 pub unsafe extern "C" fn AMitemFromUint(value: u64) -> *mut AMresult {
@@ -1509,7 +1509,7 @@ pub unsafe extern "C" fn AMitemRefCount(item: *const AMitem) -> usize {
 /// \return A pointer to an `AMresult` struct.
 /// \pre \p item `!= NULL`
 /// \post `(`\p item `== NULL) -> NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///

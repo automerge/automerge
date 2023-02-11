@@ -18,7 +18,7 @@ use crate::result::{to_result, AMresult};
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre \p key.src `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -50,7 +50,7 @@ pub unsafe extern "C" fn AMmapDelete(
 /// \return A pointer to an `AMresult` struct with an `AMitem` struct.
 /// \pre \p doc `!= NULL`
 /// \pre \p key.src `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -92,7 +92,7 @@ pub unsafe extern "C" fn AMmapGet(
 /// \return A pointer to an `AMresult` struct with an `AMItems` struct.
 /// \pre \p doc `!= NULL`
 /// \pre \p key.src `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -131,7 +131,7 @@ pub unsafe extern "C" fn AMmapGetAll(
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre \p key.src `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -162,7 +162,7 @@ pub unsafe extern "C" fn AMmapIncrement(
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre \p key.src `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -195,7 +195,7 @@ pub unsafe extern "C" fn AMmapPutBool(
 /// \pre \p key.src `!= NULL`
 /// \pre \p value.src `!= NULL`
 /// \pre `0 <` \p value.count `<= sizeof(`\p value.src `)`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -227,7 +227,7 @@ pub unsafe extern "C" fn AMmapPutBytes(
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre \p key.src `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -261,7 +261,7 @@ pub unsafe extern "C" fn AMmapPutCounter(
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre \p key.src `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -291,7 +291,7 @@ pub unsafe extern "C" fn AMmapPutNull(
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_OBJ_TYPE` item.
 /// \pre \p doc `!= NULL`
 /// \pre \p key.src `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -322,7 +322,7 @@ pub unsafe extern "C" fn AMmapPutObject(
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre \p key.src `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -353,7 +353,7 @@ pub unsafe extern "C" fn AMmapPutF64(
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre \p key.src `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -384,7 +384,7 @@ pub unsafe extern "C" fn AMmapPutInt(
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre \p key.src `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -415,7 +415,7 @@ pub unsafe extern "C" fn AMmapPutStr(
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre \p key.src `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -446,7 +446,7 @@ pub unsafe extern "C" fn AMmapPutTimestamp(
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_VOID` item.
 /// \pre \p doc `!= NULL`
 /// \pre \p key.src `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///
@@ -481,7 +481,7 @@ pub unsafe extern "C" fn AMmapPutUint(
 ///                  current items.
 /// \return A pointer to an `AMresult` struct with an `AMitems` struct.
 /// \pre \p doc `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()`
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
 ///          in order to avoid a memory leak.
 /// \internal
 ///

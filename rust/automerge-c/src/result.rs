@@ -492,7 +492,7 @@ pub enum AMstatus {
 /// \brief Gets a result's error message string.
 ///
 /// \param[in] result A pointer to an `AMresult` struct.
-/// \return An `AMbyteSpan` struct for a UTF-8 string.
+/// \return A UTF-8 string view as an `AMbyteSpan` struct.
 /// \pre \p result `!= NULL`
 /// \internal
 ///
@@ -534,7 +534,7 @@ pub unsafe extern "C" fn AMfree(result: *mut AMresult) {
 ///         \p dest and \p src in their original order.
 /// \pre \p dest `!= NULL`
 /// \pre \p src `!= NULL`
-/// \warning The returned `AMresult` struct must be passed to `AMfree()` in
+/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()` in
 ///          order to avoid a memory leak.
 /// \internal
 ///
