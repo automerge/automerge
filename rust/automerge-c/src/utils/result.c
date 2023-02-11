@@ -3,30 +3,31 @@
 #include <automerge-c/utils/result.h>
 
 AMresult* AMresultFrom(int count, ...) {
-	AMresult* result = NULL;
-	bool is_error = false;
+    AMresult* result = NULL;
+    bool is_ok = true;
     va_list args;
     va_start(args, count);
     for (int i = 0; i != count; ++i) {
         AMresult* src = va_arg(args, AMresult*);
-		AMresult* dest = result;
-		if (!is_error && (AMresultStatus(src) == AM_STATUS_OK)) {
-			if (dest) {
-				result = AMresultCat(dest, src);
-				AMfree(dest);
-				AMfree(src);
-			} else {
-				result = src;
-			}
-		} else {
-			is_error = true;
-			AMfree(src);
-		}
+        AMresult* dest = result;
+        is_ok = (AMresultStatus(src) == AM_STATUS_OK);
+        if (is_ok) {
+            if (dest) {
+                result = AMresultCat(dest, src);
+                is_ok = (AMresultStatus(result) == AM_STATUS_OK);
+                AMfree(dest);
+                AMfree(src);
+            } else {
+                result = src;
+            }
+        } else {
+            AMfree(src);
+        }
     }
     va_end(args);
-	if (is_error) {
-		AMfree(result);
-		result = NULL;
-	}
-	return result;
+    if (!is_ok) {
+        AMfree(result);
+        result = NULL;
+    }
+    return result;
 }

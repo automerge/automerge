@@ -530,8 +530,9 @@ pub unsafe extern "C" fn AMfree(result: *mut AMresult) {
 ///
 /// \param[in] dest A pointer to an `AMresult` struct.
 /// \param[in] src A pointer to an `AMresult` struct.
-/// \return A pointer to an `AMresult` struct with copies of the items from both
-///         \p dest and \p src in their original order.
+/// \return A pointer to an `AMresult` struct with the items from \p dest in
+///         their original order followed by the items from \p src in their
+///         original order.
 /// \pre \p dest `!= NULL`
 /// \pre \p src `!= NULL`
 /// \warning The returned `AMresult` struct pointer must be passed to `AMfree()` in
@@ -626,13 +627,11 @@ pub unsafe extern "C" fn AMresultSize(result: *const AMresult) -> usize {
     use self::AMresult::*;
 
     if let Some(result) = result.as_ref() {
-        match result {
-            Error(_) => 0,
-            Items(items) => items.len(),
+        if let Items(items) = result {
+            return items.len();
         }
-    } else {
-        0
     }
+    0
 }
 
 /// \memberof AMresult
