@@ -1403,7 +1403,7 @@ pub unsafe extern "C" fn AMitemFromUint(value: u64) -> *mut AMresult {
 /// \param[in] item A pointer to an `AMitem` struct.
 /// \return An `AMidxType` enum tag.
 /// \pre \p item `!= NULL`
-/// \post `(`\p item` == NULL) -> 0`
+/// \post `(`\p item `== NULL) -> 0`
 /// \internal
 ///
 /// # Safety
@@ -1897,7 +1897,7 @@ pub unsafe extern "C" fn AMitemToUnknown(item: *const AMitem) -> AMunknownValue 
 /// \param[in] item A pointer to an `AMitem` struct.
 /// \return An `AMvalType` enum tag.
 /// \pre \p item `!= NULL`
-/// \post `(`\p item` == NULL) -> 0`
+/// \post `(`\p item `== NULL) -> 0`
 /// \internal
 ///
 /// # Safety

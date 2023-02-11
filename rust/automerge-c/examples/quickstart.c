@@ -87,7 +87,7 @@ int main(int argc, char** argv) {
  * \param[in,out] stack A pointer to a pointer to an `AMstack` struct.
  * \param[in] data A pointer to an owned `AMstackCallbackData` struct or `NULL`.
  * \return `true` if the top `AMresult` in \p stack is valid, `false` otherwise.
- * \pre \p stack` != NULL`.
+ * \pre \p stack `!= NULL`.
  */
 static bool abort_cb(AMstack** stack, void* data) {
     static char buffer[512] = {0};

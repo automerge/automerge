@@ -33,8 +33,8 @@
  * \param[in] data A pointer to an owned `AMpushData` struct.
  * \return `true` if the top `AMresult` struct in \p stack is valid, `false`
  *         otherwise.
- * \pre \p stack` != NULL`.
- * \pre \p data` != NULL`.
+ * \pre \p stack `!= NULL`.
+ * \pre \p data `!= NULL`.
  */
 bool cmocka_cb(AMstack** stack, void* data);
 

@@ -32,7 +32,7 @@ int setup_base(void** state);
  * \brief Tears down the shared state for one or more cmocka test cases.
  *
  * \param[in] state A pointer to a pointer to a `BaseState` struct.
- * \pre \p state` != NULL`.
+ * \pre \p state `!= NULL`.
  */
 int teardown_base(void** state);
 

@@ -34,7 +34,7 @@ typedef struct AMstack {
  * \param[in] data A pointer to arbitrary data or `NULL`.
  * \return `true` if the top `AMresult` struct in \p stack is valid, `false`
  *         otherwise.
- * \pre \p stack` != NULL`.
+ * \pre \p stack `!= NULL`.
  * \note Implementing this function is purely optional because its sole purpose
  *       is to ease memory management in C/C++ and Objective-C by deferring
  *       the `AMfree()` call for multiple `AMresult` structs without having to
