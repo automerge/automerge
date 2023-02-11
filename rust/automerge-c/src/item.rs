@@ -28,7 +28,7 @@ pub struct AMunknownValue {
 
 pub enum Value {
     ActorId(am::ActorId, UnsafeCell<Option<AMactorId>>),
-    Change(am::Change, UnsafeCell<Option<AMchange>>),
+    Change(Box<am::Change>, UnsafeCell<Option<AMchange>>),
     ChangeHash(am::ChangeHash),
     Doc(RefCell<AMdoc>),
     SyncHave(AMsyncHave),
@@ -145,7 +145,7 @@ impl From<am::AutoCommit> for Value {
 
 impl From<am::Change> for Value {
     fn from(change: am::Change) -> Self {
-        Self::Change(change, Default::default())
+        Self::Change(Box::new(change), Default::default())
     }
 }
 
