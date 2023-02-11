@@ -32,10 +32,7 @@ AMresult* AMstackPop(AMstack** stack, const AMresult* result) {
     return popped;
 }
 
-AMresult* AMstackResult(AMstack** stack,
-                        AMresult* result,
-                        AMstackCallback callback,
-                        void* data) {
+AMresult* AMstackResult(AMstack** stack, AMresult* result, AMstackCallback callback, void* data) {
     if (!stack) {
         if (callback) {
             /* Create a local stack so that the callback can still examine the
@@ -71,7 +68,7 @@ AMresult* AMstackResult(AMstack** stack,
             if (err_msg.src && err_msg.count) {
                 /* \note The callback may be null because the result is supposed
                  *       to be examined externally so return it despite an
-                 * error. */
+                 *       error. */
                 char* const cstr = AMstrdup(err_msg, NULL);
                 fprintf(stderr, "WARNING: %s.\n", cstr);
                 free(cstr);
@@ -86,21 +83,13 @@ AMresult* AMstackResult(AMstack** stack,
     return result;
 }
 
-AMitem* AMstackItem(AMstack** stack,
-                    AMresult* result,
-                    AMstackCallback callback,
-                    void* data) {
+AMitem* AMstackItem(AMstack** stack, AMresult* result, AMstackCallback callback, void* data) {
     AMitems items = AMstackItems(stack, result, callback, data);
     return AMitemsNext(&items, 1);
 }
 
-AMitems AMstackItems(AMstack** stack,
-                     AMresult* result,
-                     AMstackCallback callback,
-                     void* data) {
-    return (AMstackResult(stack, result, callback, data))
-               ? AMresultItems(result)
-               : (AMitems){0};
+AMitems AMstackItems(AMstack** stack, AMresult* result, AMstackCallback callback, void* data) {
+    return (AMstackResult(stack, result, callback, data)) ? AMresultItems(result) : (AMitems){0};
 }
 
 size_t AMstackSize(AMstack const* const stack) {

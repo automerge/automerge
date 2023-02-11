@@ -20,8 +20,7 @@
  * \param[in] file A file's full path string.
  * \param[in] line A line number.
  */
-#define assert_true_where(c, file, line) \
-    _assert_true(cast_ptr_to_largest_integral_type(c), #c, file, line)
+#define assert_true_where(c, file, line) _assert_true(cast_ptr_to_largest_integral_type(c), #c, file, line)
 
 /**
  * \brief Assert that the given pointer is non-NULL and report failure in terms
@@ -72,8 +71,7 @@ bool cmocka_cb(AMstack** stack, void* data) {
     assert_non_null_where(*stack, sc_data->file, sc_data->line);
     assert_non_null_where((*stack)->result, sc_data->file, sc_data->line);
     if (AMresultStatus((*stack)->result) != AM_STATUS_OK) {
-        fail_msg_view_where("%s", AMerrorMessage((*stack)->result),
-                            sc_data->file, sc_data->line);
+        fail_msg_view_where("%s", AMerrorMessage((*stack)->result), sc_data->file, sc_data->line);
         return false;
     }
     /* Test that the types of all item values are members of the mask. */
@@ -82,8 +80,7 @@ bool cmocka_cb(AMstack** stack, void* data) {
     while ((item = AMitemsNext(&items, 1)) != NULL) {
         AMvalType const tag = AMitemValType(item);
         if (!(tag & sc_data->bitmask)) {
-            fail_msg_where("Unexpected value type `%s`.", AMvalTypeToString(tag),
-                           sc_data->file, sc_data->line);
+            fail_msg_where("Unexpected value type `%s`.", AMvalTypeToString(tag), sc_data->file, sc_data->line);
             return false;
         }
     }

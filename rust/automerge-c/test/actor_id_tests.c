@@ -50,8 +50,7 @@ static void test_AMactorIdFromBytes(void** state) {
     DocState* doc_state = *state;
     AMstack** stack_ptr = &doc_state->stack;
     /* Non-empty string. */
-    AMresult* result = AMstackResult(stack_ptr, AMactorIdFromBytes(doc_state->src, doc_state->count),
-               NULL, NULL);
+    AMresult* result = AMstackResult(stack_ptr, AMactorIdFromBytes(doc_state->src, doc_state->count), NULL, NULL);
     if (AMresultStatus(result) != AM_STATUS_OK) {
         fail_msg_view("%s", AMerrorMessage(result));
     }
@@ -68,8 +67,7 @@ static void test_AMactorIdFromBytes(void** state) {
         fail_msg_view("%s", AMerrorMessage(result));
     }
     /* NULL array. */
-    result = AMstackResult(stack_ptr, AMactorIdFromBytes(NULL, doc_state->count), NULL,
-               NULL);
+    result = AMstackResult(stack_ptr, AMactorIdFromBytes(NULL, doc_state->count), NULL, NULL);
     if (AMresultStatus(result) == AM_STATUS_OK) {
         fail_msg("AMactorId from NULL.");
     }

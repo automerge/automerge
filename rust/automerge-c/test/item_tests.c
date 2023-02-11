@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-
 /* third-party */
 #include <cmocka.h>
 
@@ -15,28 +14,25 @@
 #include "doc_state.h"
 
 static void test_AMitemResult(void** state) {
-    enum {ITEM_COUNT = 1000};
+    enum { ITEM_COUNT = 1000 };
 
     DocState* doc_state = *state;
     AMstack** stack_ptr = &doc_state->base_state->stack;
     /* Append the strings to a list so that they'll be in numerical order. */
     AMobjId const* const list =
-        AMitemObjId(AMstackItem(stack_ptr,
-                               AMmapPutObject(doc_state->doc, AM_ROOT,
-                                              AMstr("list"), AM_OBJ_TYPE_LIST),
-                               cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));
+        AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc_state->doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST),
+                                cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));
     for (size_t pos = 0; pos != ITEM_COUNT; ++pos) {
         size_t const count = snprintf(NULL, 0, "%zu", pos);
         char* const src = test_calloc(count + 1, sizeof(char));
         assert_int_equal(sprintf(src, "%zu", pos), count);
-        AMstackItem(NULL, AMlistPutStr(doc_state->doc, list, pos, true, AMbytes(src, count)),
-                   cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
+        AMstackItem(NULL, AMlistPutStr(doc_state->doc, list, pos, true, AMbytes(src, count)), cmocka_cb,
+                    AMexpect(AM_VAL_TYPE_VOID));
         test_free(src);
     }
     /* Get an item iterator. */
-    AMitems items = AMstackItems(
-        stack_ptr, AMlistRange(doc_state->doc, list, 0, SIZE_MAX, NULL),
-        cmocka_cb, AMexpect(AM_VAL_TYPE_STR));
+    AMitems items = AMstackItems(stack_ptr, AMlistRange(doc_state->doc, list, 0, SIZE_MAX, NULL), cmocka_cb,
+                                 AMexpect(AM_VAL_TYPE_STR));
     /* Get the item iterator's result so that it can be freed later. */
     AMresult const* const items_result = (*stack_ptr)->result;
     /* Iterate over all of the items and copy their pointers into an array. */
@@ -47,9 +43,7 @@ static void test_AMitemResult(void** state) {
         assert_int_equal(AMitemRefCount(item), 1);
         if (pos & 1) {
             /* Create a redundant result for an odd item. */
-            AMitem* const new_item =
-                AMstackItem(stack_ptr, AMitemResult(item), cmocka_cb,
-                           AMexpect(AM_VAL_TYPE_STR));
+            AMitem* const new_item = AMstackItem(stack_ptr, AMitemResult(item), cmocka_cb, AMexpect(AM_VAL_TYPE_STR));
             /* The item's old and new pointers will never match. */
             assert_ptr_not_equal(new_item, item);
             /* The item's reference count will have been incremented. */
