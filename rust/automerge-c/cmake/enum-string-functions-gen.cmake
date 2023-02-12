@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.23 FATAL_ERROR)
 
 # Seeks the starting line of the source enum's declaration.
 macro(seek_enum_mode)
@@ -35,7 +35,7 @@ macro(write_header_file)
         " * \\brief Gets an `${enum_name}` enum tag from its string representation.\n"
         " *\n"
         " * \\param[out] dest An `${enum_name}` enum tag pointer.\n"
-        " * \\param[in] src A null-terminated byte string.\n" 
+        " * \\param[in] src A null-terminated byte string.\n"
         " * \\return `true` if \\p src matches the string representation of an\n"
         " *         `${enum_name}` enum tag, `false` otherwise.\n"
         " */\n"
@@ -65,7 +65,7 @@ macro(write_source_file)
     foreach(label IN LISTS enum_tags)
         list(APPEND source_body
             "    if (!strcmp(src, \"${label}\")) {\n"
-            "        *dest = ${label}\;\n" 
+            "        *dest = ${label}\;\n"
             "        return true\;\n"
             "    }\n")
     endforeach()

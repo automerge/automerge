@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.23 FATAL_ERROR)
 
 if(NOT DEFINED CONDITION)
     message(FATAL_ERROR "Variable \"CONDITION\" is not defined.")

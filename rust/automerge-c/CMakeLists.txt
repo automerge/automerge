@@ -1,11 +1,11 @@
-cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.23 FATAL_ERROR)
 
 project(automerge-c VERSION 0.1.0
                     LANGUAGES C
                     DESCRIPTION "C bindings for the Automerge Rust library.")
 
 set(LIBRARY_NAME "automerge")
-           
+
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 
 option(BUILD_SHARED_LIBS "Enable the choice of a shared or static library.")
@@ -239,12 +239,12 @@ target_sources(${LIBRARY_NAME}
         ${CMAKE_BINARY_DIR}/src/${UTILS_SUBDIR}/enum_string.c
     PUBLIC
         FILE_SET api TYPE HEADERS
-            BASE_DIRS 
+            BASE_DIRS
                 ${CBINDGEN_INCLUDEDIR}
                 ${CMAKE_SOURCE_DIR}/${CMAKE_INSTALL_INCLUDEDIR}
             FILES
                 ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h
-                ${CBINDGEN_TARGET_DIR}/${UTILS_SUBDIR}/enum_string.h 
+                ${CBINDGEN_TARGET_DIR}/${UTILS_SUBDIR}/enum_string.h
                 ${CMAKE_SOURCE_DIR}/${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${UTILS_SUBDIR}/result.h
                 ${CMAKE_SOURCE_DIR}/${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${UTILS_SUBDIR}/stack_callback_data.h
                 ${CMAKE_SOURCE_DIR}/${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${UTILS_SUBDIR}/stack.h

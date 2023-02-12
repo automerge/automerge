@@ -1,6 +1,7 @@
 #ifndef TESTS_CMOCKA_UTILS_H
 #define TESTS_CMOCKA_UTILS_H
 
+#include <stdlib.h>
 #include <string.h>
 
 /* third-party */
