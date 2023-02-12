@@ -1001,6 +1001,15 @@ impl Automerge {
         }
     }
 
+    pub(crate) fn import_obj(&self, id: JsValue) -> Result<ObjId, error::ImportObj> {
+        if let Some(s) = id.as_string() {
+            // only valid formats is 123@aabbcc
+            self.doc.import_obj(&s).map_err(error::ImportObj::BadImport)
+        } else {
+            Err(error::ImportObj::NotString)
+        }
+    }
+
     fn import_path<'a, I: Iterator<Item = &'a str>>(
         &self,
         mut obj: ObjId,

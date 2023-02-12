@@ -283,6 +283,11 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
     }
 
     #[doc(hidden)]
+    pub fn import_obj(&self, s: &str) -> Result<ExId, AutomergeError> {
+        self.doc.import_obj(s)
+    }
+
+    #[doc(hidden)]
     pub fn dump(&mut self) {
         self.ensure_transaction_closed();
         self.doc.dump()

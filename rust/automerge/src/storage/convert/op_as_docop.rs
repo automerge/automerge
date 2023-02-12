@@ -90,6 +90,7 @@ impl<'a> AsDocOp<'a> for OpAsDocOp<'a> {
         match &self.op.action {
             OpType::Put(v) => Cow::Borrowed(v),
             OpType::Increment(i) => Cow::Owned(ScalarValue::Int(*i)),
+            OpType::MarkBegin(MarkData { value, .. }) => Cow::Borrowed(value),
             _ => Cow::Owned(ScalarValue::Null),
         }
     }

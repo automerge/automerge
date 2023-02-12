@@ -275,8 +275,7 @@ impl OpType {
             Self::Make(ObjType::Text) => 4,
             Self::Increment(_) => 5,
             Self::Make(ObjType::Table) => 6,
-            Self::MarkBegin(_) => 7,
-            Self::MarkEnd(..) => 8,
+            Self::MarkBegin(_) | Self::MarkEnd(_) => 7,
         }
     }
 
@@ -308,6 +307,7 @@ impl Op {
     pub fn primitive_value(&self) -> Option<ScalarValue> {
         match &self.action {
             OpType::Put(v) => Some(v.clone()),
+            OpType::MarkBegin(MarkData { value, .. }) => Some(value.clone()),
             OpType::Increment(i) => Some(ScalarValue::Int(*i)),
             _ => None,
         }

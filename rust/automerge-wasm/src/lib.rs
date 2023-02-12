@@ -824,7 +824,7 @@ impl Automerge {
 
     pub fn unmark(&mut self, obj: JsValue, mark: JsValue) -> Result<(), JsValue> {
         let (obj, _) = self.import(obj)?;
-        let (mark, _) = self.import(mark)?;
+        let mark = self.import_obj(mark)?;
         self.doc.unmark(&obj, &mark).map_err(to_js_err)?;
         Ok(())
     }
@@ -860,7 +860,9 @@ impl Automerge {
         }
         let text_span = &text.get(last_pos..);
         if let Some(t) = text_span {
-            result.push(&t.to_string().into());
+            if !t.is_empty() {
+                result.push(&t.to_string().into());
+            }
         }
         Ok(result.into())
     }

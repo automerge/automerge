@@ -16,8 +16,8 @@ use crate::transaction::{
     self, CommitOptions, Failure, Observed, Success, Transaction, TransactionArgs, UnObserved,
 };
 use crate::types::{
-    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ListEncoding, MarkName, ObjId, Op,
-    OpId, OpType, OpTypeParts, ScalarValue, TextEncoding, Value,
+    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ListEncoding, MarkData, MarkName,
+    ObjId, Op, OpId, OpType, OpTypeParts, ScalarValue, TextEncoding, Value,
 };
 use crate::{
     query, AutomergeError, Change, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType,
@@ -400,11 +400,23 @@ impl Automerge {
     pub(crate) fn exid_to_obj(&self, id: &ExId) -> Result<(ObjId, ObjType), AutomergeError> {
         match id {
             ExId::Root => Ok((ObjId::root(), ObjType::Map)),
+            ExId::Id(..) => {
+                let obj = ObjId(self.exid_to_opid(id)?);
+                if let Some(obj_type) = self.ops.object_type(&obj) {
+                    Ok((obj, obj_type))
+                } else {
+                    Err(AutomergeError::NotAnObject)
+                }
+            }
+        }
+    }
+
+    pub(crate) fn exid_to_opid(&self, id: &ExId) -> Result<OpId, AutomergeError> {
+        match id {
+            ExId::Root => Err(AutomergeError::Fail),
             ExId::Id(ctr, actor, idx) => {
-                // do a direct get here b/c this could be foriegn and not be within the array
-                // bounds
-                let obj = if self.ops.m.actors.cache.get(*idx) == Some(actor) {
-                    ObjId(OpId::new(*ctr, *idx))
+                if self.ops.m.actors.cache.get(*idx) == Some(actor) {
+                    Ok(OpId::new(*ctr, *idx))
                 } else {
                     // FIXME - make a real error
                     let idx = self
@@ -413,12 +425,7 @@ impl Automerge {
                         .actors
                         .lookup(actor)
                         .ok_or(AutomergeError::Fail)?;
-                    ObjId(OpId::new(*ctr, idx))
-                };
-                if let Some(obj_type) = self.ops.object_type(&obj) {
-                    Ok((obj, obj_type))
-                } else {
-                    Err(AutomergeError::NotAnObject)
+                    Ok(OpId::new(*ctr, idx))
                 }
             }
         }
@@ -921,8 +928,21 @@ impl Automerge {
 
     #[doc(hidden)]
     pub fn import(&self, s: &str) -> Result<(ExId, ObjType), AutomergeError> {
-        if s == "_root" {
+        let obj = self.import_obj(s)?;
+        if obj == ExId::Root {
             Ok((ExId::Root, ObjType::Map))
+        } else {
+            let obj_type = self
+                .object_type(&obj)
+                .map_err(|_| AutomergeError::InvalidObjId(s.to_owned()))?;
+            Ok((obj, obj_type))
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn import_obj(&self, s: &str) -> Result<ExId, AutomergeError> {
+        if s == "_root" {
+            Ok(ExId::Root)
         } else {
             let n = s
                 .find('@')
@@ -938,10 +958,7 @@ impl Automerge {
                 .lookup(&actor)
                 .ok_or_else(|| AutomergeError::InvalidObjId(s.to_owned()))?;
             let obj = ExId::Id(counter, self.ops.m.actors.cache[actor].clone(), actor);
-            let obj_type = self
-                .object_type(&obj)
-                .map_err(|_| AutomergeError::InvalidObjId(s.to_owned()))?;
-            Ok((obj, obj_type))
+            Ok(obj)
         }
     }
 
@@ -975,8 +992,10 @@ impl Automerge {
                 OpType::Make(obj) => format!("make({})", obj),
                 OpType::Increment(obj) => format!("inc({})", obj),
                 OpType::Delete => format!("del{}", 0),
-                OpType::MarkBegin(_) => format!("markBegin{}", 0),
-                OpType::MarkEnd(_) => format!("markEnd{}", 0),
+                OpType::MarkBegin(MarkData { name, value, .. }) => {
+                    format!("mark({},{})", self.ops.m.props[name.props_index()], value)
+                }
+                OpType::MarkEnd(_) => "/mark".to_string(),
             };
             let pred: Vec<_> = op.pred.iter().map(|id| self.to_string(*id)).collect();
             let succ: Vec<_> = op.succ.into_iter().map(|id| self.to_string(*id)).collect();

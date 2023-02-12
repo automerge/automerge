@@ -694,14 +694,48 @@ impl TransactionInner {
         Ok(())
     }
 
-    pub(crate) fn unmark<Obs: OpObserver>(
+    pub(crate) fn unmark<O: AsRef<ExId>, M: AsRef<ExId>, Obs: OpObserver>(
         &mut self,
-        _doc: &mut Automerge,
-        mut _op_observer: Option<&mut Obs>,
-        _ex_obj: &ExId,
-        _mark: &ExId,
+        doc: &mut Automerge,
+        _op_observer: Option<&mut Obs>,
+        obj: O,
+        mark: M,
     ) -> Result<(), AutomergeError> {
-        unimplemented!()
+        let (obj, _) = doc.exid_to_obj(obj.as_ref())?;
+        let markid = doc.exid_to_opid(mark.as_ref())?;
+        let ops = doc.ops_mut();
+        let op1 = Op {
+            id: self.next_id(),
+            action: OpType::Delete,
+            key: markid.into(),
+            succ: Default::default(),
+            pred: ops.m.sorted_opids(vec![markid].into_iter()),
+            insert: false,
+        };
+        let q1 = ops.search(&obj, query::SeekOp::new(&op1));
+        ops.add_succ(&obj, &q1.succ, &op1);
+        //for i in q1.succ {
+        //    ops.replace(&obj, i, |old_op| old_op.add_succ(&op1));
+        //}
+        self.operations.push((obj, op1));
+
+        let markid = markid.next();
+        let op2 = Op {
+            id: self.next_id(),
+            action: OpType::Delete,
+            key: markid.into(),
+            succ: Default::default(),
+            pred: ops.m.sorted_opids(vec![markid].into_iter()),
+            insert: false,
+        };
+        let q2 = ops.search(&obj, query::SeekOp::new(&op2));
+
+        ops.add_succ(&obj, &q2.succ, &op2);
+        //for i in q2.succ {
+        //    ops.replace(&obj, i, |old_op| old_op.add_succ(&op2));
+        //}
+        self.operations.push((obj, op2));
+        Ok(())
     }
 
     fn finalize_op<Obs: OpObserver>(

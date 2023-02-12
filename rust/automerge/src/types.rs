@@ -235,8 +235,7 @@ impl OpType {
             Self::Make(ObjType::Text) => 4,
             Self::Increment(_) => 5,
             Self::Make(ObjType::Table) => 6,
-            Self::MarkBegin(_) => 7,
-            Self::MarkEnd(..) => 8,
+            Self::MarkBegin(_) | Self::MarkEnd(_) => 7,
         }
     }
 
@@ -274,9 +273,8 @@ impl OpType {
                     value,
                     expand,
                 })),
-                None => Err(error::InvalidOpType::MarkBeginWithoutName),
+                None => Ok(Self::MarkEnd(expand)),
             },
-            8 => Ok(Self::MarkEnd(expand)),
             other => Err(error::InvalidOpType::UnknownAction(other)),
         }
     }
@@ -509,6 +507,11 @@ impl OpId {
     #[inline]
     pub(crate) fn prev(&self) -> OpId {
         OpId(self.0 - 1, self.1)
+    }
+
+    #[inline]
+    pub(crate) fn next(&self) -> OpId {
+        OpId(self.0 + 1, self.1)
     }
 }
 

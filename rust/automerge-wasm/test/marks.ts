@@ -6,7 +6,7 @@ import { create, load, Automerge, encodeChange, decodeChange } from '..'
 
 describe('Automerge', () => {
   describe('marks', () => {
-    it.skip('should handle marks [..]', () => {
+    it('should handle marks [..]', () => {
       let doc = create(true)
       let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
@@ -20,7 +20,7 @@ describe('Automerge', () => {
       assert.deepStrictEqual(spans, [ 'aaaA', [ [ 'bold', 'boolean', true ] ], 'bbb', [], 'Accc' ]);
     })
 
-    it.skip('should handle marks [..] at the beginning of a string', () => {
+    it('should handle marks [..] at the beginning of a string', () => {
       let doc = create(true)
       let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
@@ -36,7 +36,7 @@ describe('Automerge', () => {
       assert.deepStrictEqual(spans, [ 'A', [ [ 'bold', 'boolean', true ] ], 'aaa', [], 'Bbbbccc' ]);
     })
 
-    it.skip('should handle marks [..] with splice', () => {
+    it('should handle marks [..] with splice', () => {
       let doc = create(true)
       let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
@@ -52,7 +52,7 @@ describe('Automerge', () => {
       assert.deepStrictEqual(spans, [ 'AAA', [ [ 'bold', 'boolean', true ] ], 'a', [], 'BBBbbbccc' ]);
     })
 
-    it.skip('should handle marks across multiple forks', () => {
+    it('should handle marks across multiple forks', () => {
       let doc = create(true)
       let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
@@ -74,7 +74,7 @@ describe('Automerge', () => {
     })
 
 
-    it.only('should handle marks with deleted ends [..]', () => {
+    it('should handle marks with deleted ends [..]', () => {
       let doc = create(true)
       let list = doc.putObject("_root", "list", "")
 
@@ -94,7 +94,7 @@ describe('Automerge', () => {
       assert.deepStrictEqual(spans, [ 'aaA', [ [ 'bold', 'boolean', true ] ], 'b', [], 'Acc' ])
     })
 
-    it.skip('should handle sticky marks (..)', () => {
+    it('should handle sticky marks (..)', () => {
       let doc = create(true)
       let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
@@ -107,7 +107,7 @@ describe('Automerge', () => {
       assert.deepStrictEqual(spans, [ 'aaa', [ [ 'bold', 'boolean', true ] ], 'AbbbA', [], 'ccc' ]);
     })
 
-    it.skip('should handle sticky marks with deleted ends (..)', () => {
+    it('should handle sticky marks with deleted ends (..)', () => {
       let doc = create(true)
       let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
@@ -127,7 +127,9 @@ describe('Automerge', () => {
 
       // make sure save/load can handle marks
 
-      let doc2 = load(doc.save(),true)
+      let saved = doc.save()
+      let doc2 = load(saved,true)
+      //let doc2 = load(doc.save(),true)
       spans = doc2.spans(list);
       assert.deepStrictEqual(spans, [ 'aa', [ [ 'bold', 'boolean', true ] ], 'AbA', [], 'cc' ])
 
@@ -135,7 +137,7 @@ describe('Automerge', () => {
       assert.deepStrictEqual(doc.save(), doc2.save())
     })
 
-    it.skip('should handle overlapping marks', () => {
+    it('should handle overlapping marks', () => {
       let doc : Automerge = create(true, "aabbcc")
       let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
@@ -152,8 +154,8 @@ describe('Automerge', () => {
           'quick ',
           [
             [ 'bold', 'boolean', true ],
+            [ 'itallic', 'boolean', true ],
             [ 'comment', 'str', 'foxes are my favorite animal!' ],
-            [ 'itallic', 'boolean', true ]
           ],
           'fox',
           [ [ 'bold', 'boolean', true ], [ 'itallic', 'boolean', true ] ],
@@ -191,7 +193,9 @@ describe('Automerge', () => {
 
       let all = doc.getChanges([])
       let decoded = all.map((c) => decodeChange(c))
+      let util = require('util');
       let encoded = decoded.map((c) => encodeChange(c))
+      let decoded2 = encoded.map((c) => decodeChange(c))
       let doc2 = create(true);
       doc2.applyChanges(encoded)
 
