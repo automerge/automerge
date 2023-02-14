@@ -69,7 +69,7 @@ impl OpTreeNode {
                         skip = Some(n - child.len() - 1);
                     }
                     Some(n) if n == child.len() => {
-                        skip = None;
+                        skip = Some(0); // important to not be None so we never call query_node again
                         if self.search_element(query, m, ops, child_index) {
                             return true;
                         }
@@ -78,7 +78,7 @@ impl OpTreeNode {
                         if child.search(query, m, ops, Some(n)) {
                             return true;
                         }
-                        skip = Some(0);  // important to not be None so we never call query_node again
+                        skip = Some(0); // important to not be None so we never call query_node again
                         if self.search_element(query, m, ops, child_index) {
                             return true;
                         }
