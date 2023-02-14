@@ -58,6 +58,22 @@ describe("Automerge", () => {
       })
     })
 
+    it("should be able to insert and delete a large number of properties", () => {
+      let doc = Automerge.init<any>()
+
+      doc = Automerge.change(doc, doc => {
+        doc['k1'] = true;
+      });
+
+      for (let idx = 1; idx <= 200; idx++) {
+        doc = Automerge.change(doc, doc => {
+          delete doc['k' + idx];
+          doc['k' + (idx + 1)] = true;
+          assert(Object.keys(doc).length == 1)
+        });
+      }
+    })
+
     it("can detect an automerge doc with isAutomerge()", () => {
       const doc1 = Automerge.from({ sub: { object: true } })
       assert(Automerge.isAutomerge(doc1))

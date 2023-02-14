@@ -1,6 +1,6 @@
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
 use crate::query::{binary_search_by, QueryResult, TreeQuery};
-use crate::types::{Key, ListEncoding, Op, HEAD};
+use crate::types::{Key, Op, HEAD};
 use std::cmp::Ordering;
 use std::fmt::Debug;
 
@@ -14,8 +14,6 @@ pub(crate) struct SeekOp<'a> {
     pub(crate) succ: Vec<usize>,
     /// whether a position has been found
     found: bool,
-    /// The found start position of the key if there is one yet (for map objects).
-    start: Option<usize>,
 }
 
 impl<'a> SeekOp<'a> {
@@ -25,7 +23,6 @@ impl<'a> SeekOp<'a> {
             succ: vec![],
             pos: 0,
             found: false,
-            start: None,
         }
     }
 
@@ -72,37 +69,9 @@ impl<'a> TreeQuery<'a> for SeekOp<'a> {
                 }
             }
             Key::Map(_) => {
-                if let Some(start) = self.start {
-                    if self.pos + child.len() >= start {
-                        // skip empty nodes
-                        if child.index.visible_len(ListEncoding::List) == 0 {
-                            let child_contains_key =
-                                child.elements.iter().any(|e| ops[*e].key == self.op.key);
-                            if !child_contains_key {
-                                // If we are in a node which has no visible ops, but none of the
-                                // elements of the node match the key of the op, then we must have
-                                // finished processing and so we can just return.
-                                // See https://github.com/automerge/automerge-rs/pull/480
-                                QueryResult::Finish
-                            } else {
-                                // Otherwise, we need to proceed to the next node
-                                self.pos += child.len();
-                                QueryResult::Next
-                            }
-                        } else {
-                            QueryResult::Descend
-                        }
-                    } else {
-                        self.pos += child.len();
-                        QueryResult::Next
-                    }
-                } else {
-                    // in the root node find the first op position for the key
-                    let start = binary_search_by(child, ops, |op| m.key_cmp(&op.key, &self.op.key));
-                    self.start = Some(start);
-                    self.pos = start;
-                    QueryResult::Skip(start)
-                }
+                let start = binary_search_by(child, ops, |op| m.key_cmp(&op.key, &self.op.key));
+                self.pos = start;
+                QueryResult::Skip(start)
             }
         }
     }

@@ -27,50 +27,67 @@ impl OpTreeNode {
         }
     }
 
+    fn search_element<'a, 'b: 'a, Q>(
+        &'b self,
+        query: &mut Q,
+        m: &OpSetMetadata,
+        ops: &'a [Op],
+        index: usize,
+    ) -> bool
+    where
+        Q: TreeQuery<'a>,
+    {
+        if let Some(e) = self.elements.get(index) {
+            if query.query_element_with_metadata(&ops[*e], m) == QueryResult::Finish {
+                return true;
+            }
+        }
+        false
+    }
+
     pub(crate) fn search<'a, 'b: 'a, Q>(
         &'b self,
         query: &mut Q,
         m: &OpSetMetadata,
         ops: &'a [Op],
-        skip: Option<usize>,
+        mut skip: Option<usize>,
     ) -> bool
     where
         Q: TreeQuery<'a>,
     {
         if self.is_leaf() {
-            let skip = skip.unwrap_or(0);
-            for e in self.elements.iter().skip(skip) {
+            for e in self.elements.iter().skip(skip.unwrap_or(0)) {
                 if query.query_element_with_metadata(&ops[*e], m) == QueryResult::Finish {
                     return true;
                 }
             }
             false
         } else {
-            let mut skip = skip.unwrap_or(0);
             for (child_index, child) in self.children.iter().enumerate() {
-                match skip.cmp(&child.len()) {
-                    Ordering::Greater => {
-                        // not in this child at all
-                        // take off the number of elements in the child as well as the next element
-                        skip -= child.len() + 1;
+                match skip {
+                    Some(n) if n > child.len() => {
+                        skip = Some(n - child.len() - 1);
                     }
-                    Ordering::Equal => {
-                        // just try the element
-                        skip -= child.len();
-                        if let Some(e) = self.elements.get(child_index) {
-                            if query.query_element_with_metadata(&ops[*e], m) == QueryResult::Finish
-                            {
-                                return true;
-                            }
+                    Some(n) if n == child.len() => {
+                        skip = None;
+                        if self.search_element(query, m, ops, child_index) {
+                            return true;
                         }
                     }
-                    Ordering::Less => {
+                    Some(n) => {
+                        if child.search(query, m, ops, Some(n)) {
+                            return true;
+                        }
+                        skip = Some(0);  // important to not be None so we never call query_node again
+                        if self.search_element(query, m, ops, child_index) {
+                            return true;
+                        }
+                    }
+                    None => {
                         // descend and try find it
                         match query.query_node_with_metadata(child, m, ops) {
                             QueryResult::Descend => {
-                                // search in the child node, passing in the number of items left to
-                                // skip
-                                if child.search(query, m, ops, Some(skip)) {
+                                if child.search(query, m, ops, None) {
                                     return true;
                                 }
                             }
@@ -78,14 +95,9 @@ impl OpTreeNode {
                             QueryResult::Next => (),
                             QueryResult::Skip(_) => panic!("had skip from non-root node"),
                         }
-                        if let Some(e) = self.elements.get(child_index) {
-                            if query.query_element_with_metadata(&ops[*e], m) == QueryResult::Finish
-                            {
-                                return true;
-                            }
+                        if self.search_element(query, m, ops, child_index) {
+                            return true;
                         }
-                        // reset the skip to zero so we continue iterating normally
-                        skip = 0;
                     }
                 }
             }
