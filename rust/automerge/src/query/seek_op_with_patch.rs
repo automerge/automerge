@@ -16,8 +16,6 @@ pub(crate) struct SeekOpWithPatch<'a> {
     last_seen: Option<Key>,
     pub(crate) values: Vec<&'a Op>,
     pub(crate) had_value_before: bool,
-    /// The found start position of the key if there is one yet (for map objects).
-    start: Option<usize>,
 }
 
 impl<'a> SeekOpWithPatch<'a> {
@@ -33,7 +31,6 @@ impl<'a> SeekOpWithPatch<'a> {
             last_seen: None,
             values: vec![],
             had_value_before: false,
-            start: None,
         }
     }
 
@@ -132,38 +129,9 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
 
             // Updating a map: operations appear in sorted order by key
             Key::Map(_) => {
-                if let Some(start) = self.start {
-                    if self.pos + child.len() >= start {
-                        // skip empty nodes
-                        if child.index.visible_len(self.encoding) == 0 {
-                            let child_contains_key =
-                                child.elements.iter().any(|e| ops[*e].key == self.op.key);
-                            if !child_contains_key {
-                                // If we are in a node which has no visible ops, but none of the
-                                // elements of the node match the key of the op, then we must have
-                                // finished processing and so we can just return.
-                                // See https://github.com/automerge/automerge-rs/pull/480
-                                QueryResult::Finish
-                            } else {
-                                self.pos += child.len();
-                                QueryResult::Next
-                            }
-                        } else {
-                            QueryResult::Descend
-                        }
-                    } else {
-                        self.pos += child.len();
-                        QueryResult::Next
-                    }
-                } else {
-                    // in the root node find the first op position for the key
-                    // Search for the place where we need to insert the new operation. First find the
-                    // first op with a key >= the key we're updating
-                    let start = binary_search_by(child, ops, |op| m.key_cmp(&op.key, &self.op.key));
-                    self.start = Some(start);
-                    self.pos = start;
-                    QueryResult::Skip(start)
-                }
+                let start = binary_search_by(child, ops, |op| m.key_cmp(&op.key, &self.op.key));
+                self.pos = start;
+                QueryResult::Skip(start)
             }
         }
     }
