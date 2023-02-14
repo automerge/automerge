@@ -887,6 +887,51 @@ mod tests {
         assert_eq!(doc2.get_heads(), all_heads);
     }
 
+    #[test]
+    fn should_handle_lots_of_branching_and_merging() {
+        let mut doc1 = crate::AutoCommit::new().with_actor(ActorId::try_from("01234567").unwrap());
+        let mut doc2 = crate::AutoCommit::new().with_actor(ActorId::try_from("89abcdef").unwrap());
+        let mut doc3 = crate::AutoCommit::new().with_actor(ActorId::try_from("fedcba98").unwrap());
+        let mut s1 = State::new();
+        let mut s2 = State::new();
+
+        doc1.put(crate::ROOT, "x", 0).unwrap();
+        let change1 = doc1.get_last_local_change().unwrap().clone();
+
+        doc2.apply_changes([change1.clone()]).unwrap();
+        doc3.apply_changes([change1]).unwrap();
+
+        doc3.put(crate::ROOT, "x", 1).unwrap();
+
+        ////        - n1c1 <------ n1c2 <------ n1c3 <-- etc. <-- n1c20 <------ n1c21
+        ////       /          \/           \/                              \/
+        ////      /           /\           /\                              /\
+        //// c0 <---- n2c1 <------ n2c2 <------ n2c3 <-- etc. <-- n2c20 <------ n2c21
+        ////      \                                                          /
+        ////       ---------------------------------------------- n3c1 <-----
+        for i in 1..20 {
+            doc1.put(crate::ROOT, "n1", i).unwrap();
+            doc2.put(crate::ROOT, "n2", i).unwrap();
+            let change1 = doc1.get_last_local_change().unwrap().clone();
+            let change2 = doc2.get_last_local_change().unwrap().clone();
+            doc1.apply_changes([change2.clone()]).unwrap();
+            doc2.apply_changes([change1]).unwrap();
+        }
+
+        sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+        //// Having n3's last change concurrent to the last sync heads forces us into the slower code path
+        let change3 = doc3.get_last_local_change().unwrap().clone();
+        doc2.apply_changes([change3]).unwrap();
+
+        doc1.put(crate::ROOT, "n1", "final").unwrap();
+        doc2.put(crate::ROOT, "n1", "final").unwrap();
+
+        sync(&mut doc1, &mut doc2, &mut s1, &mut s2);
+
+        assert_eq!(doc1.get_heads(), doc2.get_heads());
+    }
+
     fn sync(
         a: &mut crate::AutoCommit,
         b: &mut crate::AutoCommit,

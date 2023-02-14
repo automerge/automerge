@@ -62,15 +62,15 @@ describe("Automerge", () => {
       let doc = Automerge.init<any>()
 
       doc = Automerge.change(doc, doc => {
-        doc['k1'] = true;
-      });
+        doc["k1"] = true
+      })
 
       for (let idx = 1; idx <= 200; idx++) {
         doc = Automerge.change(doc, doc => {
-          delete doc['k' + idx];
-          doc['k' + (idx + 1)] = true;
+          delete doc["k" + idx]
+          doc["k" + (idx + 1)] = true
           assert(Object.keys(doc).length == 1)
-        });
+        })
       }
     })
 

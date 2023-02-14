@@ -1447,7 +1447,7 @@ describe('Automerge', () => {
       sync(n1, n2, s1, s2)
 
       // Having n3's last change concurrent to the last sync heads forces us into the slower code path
-      const change3 = n2.getLastLocalChange()
+      const change3 = n3.getLastLocalChange()
       if (change3 === null) throw new RangeError("no local change")
       n2.applyChanges([change3])
       n1.put("_root", "n1", "final"); n1.commit("", 0)
