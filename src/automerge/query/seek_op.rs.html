@@ -246,40 +246,9 @@
 <a href="#245" id="245">245</a>
 <a href="#246" id="246">246</a>
 <a href="#247" id="247">247</a>
-<a href="#248" id="248">248</a>
-<a href="#249" id="249">249</a>
-<a href="#250" id="250">250</a>
-<a href="#251" id="251">251</a>
-<a href="#252" id="252">252</a>
-<a href="#253" id="253">253</a>
-<a href="#254" id="254">254</a>
-<a href="#255" id="255">255</a>
-<a href="#256" id="256">256</a>
-<a href="#257" id="257">257</a>
-<a href="#258" id="258">258</a>
-<a href="#259" id="259">259</a>
-<a href="#260" id="260">260</a>
-<a href="#261" id="261">261</a>
-<a href="#262" id="262">262</a>
-<a href="#263" id="263">263</a>
-<a href="#264" id="264">264</a>
-<a href="#265" id="265">265</a>
-<a href="#266" id="266">266</a>
-<a href="#267" id="267">267</a>
-<a href="#268" id="268">268</a>
-<a href="#269" id="269">269</a>
-<a href="#270" id="270">270</a>
-<a href="#271" id="271">271</a>
-<a href="#272" id="272">272</a>
-<a href="#273" id="273">273</a>
-<a href="#274" id="274">274</a>
-<a href="#275" id="275">275</a>
-<a href="#276" id="276">276</a>
-<a href="#277" id="277">277</a>
-<a href="#278" id="278">278</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTreeNode};
 <span class="kw">use </span><span class="kw">crate</span>::query::{binary_search_by, QueryResult, TreeQuery};
-<span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, Op, HEAD};
+<span class="kw">use </span><span class="kw">crate</span>::types::{Key, Op, HEAD};
 <span class="kw">use </span>std::cmp::Ordering;
 <span class="kw">use </span>std::fmt::Debug;
 
@@ -293,8 +262,6 @@
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) succ: Vec&lt;usize&gt;,
     <span class="doccomment">/// whether a position has been found
     </span>found: bool,
-    <span class="doccomment">/// The found start position of the key if there is one yet (for map objects).
-    </span>start: <span class="prelude-ty">Option</span>&lt;usize&gt;,
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; SeekOp&lt;<span class="lifetime">&#39;a</span>&gt; {
@@ -304,7 +271,6 @@
             succ: <span class="macro">vec!</span>[],
             pos: <span class="number">0</span>,
             found: <span class="bool-val">false</span>,
-            start: <span class="prelude-val">None</span>,
         }
     }
 
@@ -351,37 +317,9 @@
                 }
             }
             Key::Map(<span class="kw">_</span>) =&gt; {
-                <span class="kw">if let </span><span class="prelude-val">Some</span>(start) = <span class="self">self</span>.start {
-                    <span class="kw">if </span><span class="self">self</span>.pos + child.len() &gt;= start {
-                        <span class="comment">// skip empty nodes
-                        </span><span class="kw">if </span>child.index.visible_len(ListEncoding::List) == <span class="number">0 </span>{
-                            <span class="kw">let </span>child_contains_key =
-                                child.elements.iter().any(|e| ops[<span class="kw-2">*</span>e].key == <span class="self">self</span>.op.key);
-                            <span class="kw">if </span>!child_contains_key {
-                                <span class="comment">// If we are in a node which has no visible ops, but none of the
-                                // elements of the node match the key of the op, then we must have
-                                // finished processing and so we can just return.
-                                // See https://github.com/automerge/automerge-rs/pull/480
-                                </span>QueryResult::Finish
-                            } <span class="kw">else </span>{
-                                <span class="comment">// Otherwise, we need to proceed to the next node
-                                </span><span class="self">self</span>.pos += child.len();
-                                QueryResult::Next
-                            }
-                        } <span class="kw">else </span>{
-                            QueryResult::Descend
-                        }
-                    } <span class="kw">else </span>{
-                        <span class="self">self</span>.pos += child.len();
-                        QueryResult::Next
-                    }
-                } <span class="kw">else </span>{
-                    <span class="comment">// in the root node find the first op position for the key
-                    </span><span class="kw">let </span>start = binary_search_by(child, ops, |op| m.key_cmp(<span class="kw-2">&amp;</span>op.key, <span class="kw-2">&amp;</span><span class="self">self</span>.op.key));
-                    <span class="self">self</span>.start = <span class="prelude-val">Some</span>(start);
-                    <span class="self">self</span>.pos = start;
-                    QueryResult::Skip(start)
-                }
+                <span class="kw">let </span>start = binary_search_by(child, ops, |op| m.key_cmp(<span class="kw-2">&amp;</span>op.key, <span class="kw-2">&amp;</span><span class="self">self</span>.op.key));
+                <span class="self">self</span>.pos = start;
+                QueryResult::Skip(start)
             }
         }
     }

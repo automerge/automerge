@@ -917,6 +917,51 @@
 <a href="#916" id="916">916</a>
 <a href="#917" id="917">917</a>
 <a href="#918" id="918">918</a>
+<a href="#919" id="919">919</a>
+<a href="#920" id="920">920</a>
+<a href="#921" id="921">921</a>
+<a href="#922" id="922">922</a>
+<a href="#923" id="923">923</a>
+<a href="#924" id="924">924</a>
+<a href="#925" id="925">925</a>
+<a href="#926" id="926">926</a>
+<a href="#927" id="927">927</a>
+<a href="#928" id="928">928</a>
+<a href="#929" id="929">929</a>
+<a href="#930" id="930">930</a>
+<a href="#931" id="931">931</a>
+<a href="#932" id="932">932</a>
+<a href="#933" id="933">933</a>
+<a href="#934" id="934">934</a>
+<a href="#935" id="935">935</a>
+<a href="#936" id="936">936</a>
+<a href="#937" id="937">937</a>
+<a href="#938" id="938">938</a>
+<a href="#939" id="939">939</a>
+<a href="#940" id="940">940</a>
+<a href="#941" id="941">941</a>
+<a href="#942" id="942">942</a>
+<a href="#943" id="943">943</a>
+<a href="#944" id="944">944</a>
+<a href="#945" id="945">945</a>
+<a href="#946" id="946">946</a>
+<a href="#947" id="947">947</a>
+<a href="#948" id="948">948</a>
+<a href="#949" id="949">949</a>
+<a href="#950" id="950">950</a>
+<a href="#951" id="951">951</a>
+<a href="#952" id="952">952</a>
+<a href="#953" id="953">953</a>
+<a href="#954" id="954">954</a>
+<a href="#955" id="955">955</a>
+<a href="#956" id="956">956</a>
+<a href="#957" id="957">957</a>
+<a href="#958" id="958">958</a>
+<a href="#959" id="959">959</a>
+<a href="#960" id="960">960</a>
+<a href="#961" id="961">961</a>
+<a href="#962" id="962">962</a>
+<a href="#963" id="963">963</a>
 </pre><pre class="rust"><code><span class="doccomment">//! # Sync Protocol
 //!
 //! The sync protocol is based on this paper:
@@ -1804,6 +1849,51 @@
         sync(<span class="kw-2">&amp;mut </span>doc1, <span class="kw-2">&amp;mut </span>doc2, <span class="kw-2">&amp;mut </span>s1, <span class="kw-2">&amp;mut </span>s2);
         <span class="macro">assert_eq!</span>(doc1.get_heads(), all_heads);
         <span class="macro">assert_eq!</span>(doc2.get_heads(), all_heads);
+    }
+
+    <span class="attr">#[test]
+    </span><span class="kw">fn </span>should_handle_lots_of_branching_and_merging() {
+        <span class="kw">let </span><span class="kw-2">mut </span>doc1 = <span class="kw">crate</span>::AutoCommit::new().with_actor(ActorId::try_from(<span class="string">&quot;01234567&quot;</span>).unwrap());
+        <span class="kw">let </span><span class="kw-2">mut </span>doc2 = <span class="kw">crate</span>::AutoCommit::new().with_actor(ActorId::try_from(<span class="string">&quot;89abcdef&quot;</span>).unwrap());
+        <span class="kw">let </span><span class="kw-2">mut </span>doc3 = <span class="kw">crate</span>::AutoCommit::new().with_actor(ActorId::try_from(<span class="string">&quot;fedcba98&quot;</span>).unwrap());
+        <span class="kw">let </span><span class="kw-2">mut </span>s1 = State::new();
+        <span class="kw">let </span><span class="kw-2">mut </span>s2 = State::new();
+
+        doc1.put(<span class="kw">crate</span>::ROOT, <span class="string">&quot;x&quot;</span>, <span class="number">0</span>).unwrap();
+        <span class="kw">let </span>change1 = doc1.get_last_local_change().unwrap().clone();
+
+        doc2.apply_changes([change1.clone()]).unwrap();
+        doc3.apply_changes([change1]).unwrap();
+
+        doc3.put(<span class="kw">crate</span>::ROOT, <span class="string">&quot;x&quot;</span>, <span class="number">1</span>).unwrap();
+
+        <span class="comment">////        - n1c1 &lt;------ n1c2 &lt;------ n1c3 &lt;-- etc. &lt;-- n1c20 &lt;------ n1c21
+        ////       /          \/           \/                              \/
+        ////      /           /\           /\                              /\
+        //// c0 &lt;---- n2c1 &lt;------ n2c2 &lt;------ n2c3 &lt;-- etc. &lt;-- n2c20 &lt;------ n2c21
+        ////      \                                                          /
+        ////       ---------------------------------------------- n3c1 &lt;-----
+        </span><span class="kw">for </span>i <span class="kw">in </span><span class="number">1</span>..<span class="number">20 </span>{
+            doc1.put(<span class="kw">crate</span>::ROOT, <span class="string">&quot;n1&quot;</span>, i).unwrap();
+            doc2.put(<span class="kw">crate</span>::ROOT, <span class="string">&quot;n2&quot;</span>, i).unwrap();
+            <span class="kw">let </span>change1 = doc1.get_last_local_change().unwrap().clone();
+            <span class="kw">let </span>change2 = doc2.get_last_local_change().unwrap().clone();
+            doc1.apply_changes([change2.clone()]).unwrap();
+            doc2.apply_changes([change1]).unwrap();
+        }
+
+        sync(<span class="kw-2">&amp;mut </span>doc1, <span class="kw-2">&amp;mut </span>doc2, <span class="kw-2">&amp;mut </span>s1, <span class="kw-2">&amp;mut </span>s2);
+
+        <span class="comment">//// Having n3&#39;s last change concurrent to the last sync heads forces us into the slower code path
+        </span><span class="kw">let </span>change3 = doc3.get_last_local_change().unwrap().clone();
+        doc2.apply_changes([change3]).unwrap();
+
+        doc1.put(<span class="kw">crate</span>::ROOT, <span class="string">&quot;n1&quot;</span>, <span class="string">&quot;final&quot;</span>).unwrap();
+        doc2.put(<span class="kw">crate</span>::ROOT, <span class="string">&quot;n1&quot;</span>, <span class="string">&quot;final&quot;</span>).unwrap();
+
+        sync(<span class="kw-2">&amp;mut </span>doc1, <span class="kw-2">&amp;mut </span>doc2, <span class="kw-2">&amp;mut </span>s1, <span class="kw-2">&amp;mut </span>s2);
+
+        <span class="macro">assert_eq!</span>(doc1.get_heads(), doc2.get_heads());
     }
 
     <span class="kw">fn </span>sync(
