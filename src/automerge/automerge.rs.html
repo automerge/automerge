@@ -1449,7 +1449,6 @@
 <a href="#1448" id="1448">1448</a>
 <a href="#1449" id="1449">1449</a>
 <a href="#1450" id="1450">1450</a>
-<a href="#1451" id="1451">1451</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::cmp::Ordering;
 <span class="kw">use </span>std::collections::{BTreeSet, HashMap, HashSet};
 <span class="kw">use </span>std::fmt::Debug;
@@ -2349,7 +2348,6 @@
             .add_change(<span class="kw-2">&amp;</span>change, actor_index)
             .expect(<span class="string">&quot;Change&#39;s deps should already be in the document&quot;</span>);
 
-        <span class="self">self</span>.history_index.insert(change.hash(), history_index);
         <span class="self">self</span>.history.push(change);
 
         history_index
