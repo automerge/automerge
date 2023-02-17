@@ -160,16 +160,16 @@ int main(int argc, char** argv) {
     goto cleanup;
   }
 
-  AMitem* got = AMresultItem(getResult);
-  if (AMitemValType(got) != AM_VAL_TYPE_STR) {
+  AMbyteSpan got;
+  if (AMitemToStr(AMresultItem(getResult), &got)) {
+    char* const c_str = AMstrdup(got, NULL);
+    printf("Got %zu-character string \"%s\"", got.count, c_str);
+    free(c_str);
+  } else {
     printf("expected to read a string!");
     goto cleanup;
   }
 
-  AMbyteSpan const got_str = AMitemToStr(got);
-  char* const got_cstr = AMstrdup(got_str, NULL);
-  printf("Got %zu-character string \"%s\"", got_str.count, got_cstr);
-  free(got_cstr);
 
 cleanup:
   AMfree(getResult);
@@ -186,6 +186,6 @@ items that it contains. However, the memory for an individual `AMitem` can be
 shared with a new `AMresult` by calling `AMitemResult()` on it. In other
 words, a select group of items can be filtered out of a collection and only each
 one's corresponding `AMresult` must be kept alive from that point forward; the
-originating colection's `AMresult` can be safely freed.
+originating collection's `AMresult` can be safely freed.
 
 Beyond that, good luck!

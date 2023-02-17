@@ -8,7 +8,6 @@
 #include <automerge-c/utils/stack_callback_data.h>
 #include <automerge-c/utils/string.h>
 
-
 static bool abort_cb(AMstack**, void*);
 
 /**
@@ -16,7 +15,8 @@ static bool abort_cb(AMstack**, void*);
  */
 int main(int argc, char** argv) {
     AMstack* stack = NULL;
-    AMdoc* const doc1 = AMitemToDoc(AMstackItem(&stack, AMcreate(NULL), abort_cb, AMexpect(AM_VAL_TYPE_DOC)));
+    AMdoc* doc1;
+    AMitemToDoc(AMstackItem(&stack, AMcreate(NULL), abort_cb, AMexpect(AM_VAL_TYPE_DOC)), &doc1);
     AMobjId const* const cards = AMitemObjId(AMstackItem(
         &stack, AMmapPutObject(doc1, AM_ROOT, AMstr("cards"), AM_OBJ_TYPE_LIST), abort_cb, AMexpect(AM_VAL_TYPE_VOID)));
     AMobjId const* const card1 = AMitemObjId(AMstackItem(
@@ -31,11 +31,13 @@ int main(int argc, char** argv) {
     AMstackItem(NULL, AMmapPutBool(doc1, card2, AMstr("done"), false), abort_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMcommit(doc1, AMstr("Add card"), NULL), abort_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
 
-    AMdoc* doc2 = AMitemToDoc(AMstackItem(&stack, AMcreate(NULL), abort_cb, AMexpect(AM_VAL_TYPE_DOC)));
+    AMdoc* doc2;
+    AMitemToDoc(AMstackItem(&stack, AMcreate(NULL), abort_cb, AMexpect(AM_VAL_TYPE_DOC)), &doc2);
     AMstackItem(NULL, AMmerge(doc2, doc1), abort_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
 
-    AMbyteSpan const binary = AMitemToBytes(AMstackItem(&stack, AMsave(doc1), abort_cb, AMexpect(AM_VAL_TYPE_BYTES)));
-    doc2 = AMitemToDoc(AMstackItem(&stack, AMload(binary.src, binary.count), abort_cb, AMexpect(AM_VAL_TYPE_DOC)));
+    AMbyteSpan binary;
+    AMitemToBytes(AMstackItem(&stack, AMsave(doc1), abort_cb, AMexpect(AM_VAL_TYPE_BYTES)), &binary);
+    AMitemToDoc(AMstackItem(&stack, AMload(binary.src, binary.count), abort_cb, AMexpect(AM_VAL_TYPE_DOC)), &doc2);
 
     AMstackItem(NULL, AMmapPutBool(doc1, card1, AMstr("done"), true), abort_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMcommit(doc1, AMstr("Mark card as done"), NULL), abort_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
@@ -48,7 +50,8 @@ int main(int argc, char** argv) {
     AMitems changes = AMstackItems(&stack, AMgetChanges(doc1, NULL), abort_cb, AMexpect(AM_VAL_TYPE_CHANGE));
     AMitem* item = NULL;
     while ((item = AMitemsNext(&changes, 1)) != NULL) {
-        AMchange const* const change = AMitemToChange(item);
+        AMchange const* change;
+        AMitemToChange(item, &change);
         AMitems const heads = AMstackItems(&stack, AMitemFromChangeHash(AMchangeHash(change)), abort_cb,
                                            AMexpect(AM_VAL_TYPE_CHANGE_HASH));
         char* const c_msg = AMstrdup(AMchangeMessage(change), NULL);

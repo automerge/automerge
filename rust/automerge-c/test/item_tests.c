@@ -60,8 +60,10 @@ static void test_AMitemResult(void** state) {
             /* The item's old and new value types should match. */
             assert_int_equal(AMitemValType(item), AMitemValType(new_item));
             /* The item's old and new string values should match. */
-            AMbyteSpan const str = AMitemToStr(item);
-            AMbyteSpan const new_str = AMitemToStr(new_item);
+            AMbyteSpan str;
+            assert_true(AMitemToStr(item, &str));
+            AMbyteSpan new_str;
+            assert_true(AMitemToStr(new_item, &new_str));
             assert_int_equal(str.count, new_str.count);
             assert_memory_equal(str.src, new_str.src, new_str.count);
             /* The item's old and new object IDs are one and the same. */

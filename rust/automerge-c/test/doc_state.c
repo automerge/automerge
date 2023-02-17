@@ -13,8 +13,8 @@
 int setup_doc(void** state) {
     DocState* doc_state = test_calloc(1, sizeof(DocState));
     setup_base((void**)&doc_state->base_state);
-    doc_state->doc =
-        AMitemToDoc(AMstackItem(&doc_state->base_state->stack, AMcreate(NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)));
+    AMitemToDoc(AMstackItem(&doc_state->base_state->stack, AMcreate(NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)),
+                &doc_state->doc);
     *state = doc_state;
     return 0;
 }

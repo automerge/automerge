@@ -57,7 +57,9 @@ static void test_AMactorIdFromBytes(void** state) {
     assert_int_equal(AMresultSize(result), 1);
     AMitem* const item = AMresultItem(result);
     assert_int_equal(AMitemValType(item), AM_VAL_TYPE_ACTOR_ID);
-    AMbyteSpan const bytes = AMactorIdBytes(AMitemToActorId(item));
+    AMactorId const* actor_id;
+    assert_true(AMitemToActorId(item, &actor_id));
+    AMbyteSpan const bytes = AMactorIdBytes(actor_id);
     assert_int_equal(bytes.count, doc_state->count);
     assert_memory_equal(bytes.src, doc_state->src, bytes.count);
     /* Empty array. */
@@ -84,11 +86,14 @@ static void test_AMactorIdFromStr(void** state) {
     AMitem* const item = AMresultItem(result);
     assert_int_equal(AMitemValType(item), AM_VAL_TYPE_ACTOR_ID);
     /* The hexadecimal string should've been decoded as identical bytes. */
-    AMbyteSpan const bytes = AMactorIdBytes(AMitemToActorId(item));
+    AMactorId const* actor_id;
+    assert_true(AMitemToActorId(item, &actor_id));
+    AMbyteSpan const bytes = AMactorIdBytes(actor_id);
     assert_int_equal(bytes.count, doc_state->count);
     assert_memory_equal(bytes.src, doc_state->src, bytes.count);
     /* The bytes should've been encoded as an identical hexadecimal string. */
-    AMbyteSpan const str = AMactorIdStr(AMitemToActorId(item));
+    assert_true(AMitemToActorId(item, &actor_id));
+    AMbyteSpan const str = AMactorIdStr(actor_id);
     assert_int_equal(str.count, doc_state->str.count);
     assert_memory_equal(str.src, doc_state->str.src, str.count);
 }
@@ -107,8 +112,11 @@ static void test_AMactorIdInit(void** state) {
         assert_int_equal(AMresultSize(result), 1);
         AMitem* const item = AMresultItem(result);
         assert_int_equal(AMitemValType(item), AM_VAL_TYPE_ACTOR_ID);
-        AMbyteSpan const bytes = AMactorIdBytes(AMitemToActorId(item));
-        AMbyteSpan const str = AMactorIdStr(AMitemToActorId(item));
+        AMactorId const* actor_id;
+        assert_true(AMitemToActorId(item, &actor_id));
+        AMbyteSpan const bytes = AMactorIdBytes(actor_id);
+        assert_true(AMitemToActorId(item, &actor_id));
+        AMbyteSpan const str = AMactorIdStr(actor_id);
         if (prior_result) {
             size_t const max_byte_count = fmax(bytes.count, prior_bytes.count);
             assert_memory_not_equal(bytes.src, prior_bytes.src, max_byte_count);

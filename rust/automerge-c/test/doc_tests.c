@@ -45,7 +45,8 @@ static int teardown(void** state) {
 static void test_AMkeys_empty(void** state) {
     TestState* test_state = *state;
     AMstack** stack_ptr = &test_state->doc_state->base_state->stack;
-    AMdoc* const doc = AMitemToDoc(AMstackItem(stack_ptr, AMcreate(NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)));
+    AMdoc* doc;
+    assert_true(AMitemToDoc(AMstackItem(stack_ptr, AMcreate(NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)), &doc));
     AMitems forward = AMstackItems(stack_ptr, AMkeys(doc, AM_ROOT, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     assert_int_equal(AMitemsSize(&forward), 0);
     AMitems reverse = AMitemsReversed(&forward);
@@ -59,7 +60,8 @@ static void test_AMkeys_empty(void** state) {
 static void test_AMkeys_list(void** state) {
     TestState* test_state = *state;
     AMstack** stack_ptr = &test_state->doc_state->base_state->stack;
-    AMdoc* const doc = AMitemToDoc(AMstackItem(stack_ptr, AMcreate(NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)));
+    AMdoc* doc;
+    assert_true(AMitemToDoc(AMstackItem(stack_ptr, AMcreate(NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)), &doc));
     AMobjId const* const list =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST), cmocka_cb,
                                 AMexpect(AM_VAL_TYPE_VOID)));
@@ -71,35 +73,36 @@ static void test_AMkeys_list(void** state) {
     AMitems reverse = AMitemsReversed(&forward);
     assert_int_equal(AMitemsSize(&reverse), 3);
     /* Forward iterator forward. */
-    AMbyteSpan str = AMitemToStr(AMitemsNext(&forward, 1));
+    AMbyteSpan str;
+    assert_true(AMitemToStr(AMitemsNext(&forward, 1), &str));
     assert_ptr_equal(strstr(str.src, "2@"), str.src);
-    str = AMitemToStr(AMitemsNext(&forward, 1));
+    assert_true(AMitemToStr(AMitemsNext(&forward, 1), &str));
     assert_ptr_equal(strstr(str.src, "3@"), str.src);
-    str = AMitemToStr(AMitemsNext(&forward, 1));
+    assert_true(AMitemToStr(AMitemsNext(&forward, 1), &str));
     assert_ptr_equal(strstr(str.src, "4@"), str.src);
     assert_null(AMitemsNext(&forward, 1));
     // /* Forward iterator reverse. */
-    str = AMitemToStr(AMitemsPrev(&forward, 1));
+    assert_true(AMitemToStr(AMitemsPrev(&forward, 1), &str));
     assert_ptr_equal(strstr(str.src, "4@"), str.src);
-    str = AMitemToStr(AMitemsPrev(&forward, 1));
+    assert_true(AMitemToStr(AMitemsPrev(&forward, 1), &str));
     assert_ptr_equal(strstr(str.src, "3@"), str.src);
-    str = AMitemToStr(AMitemsPrev(&forward, 1));
+    assert_true(AMitemToStr(AMitemsPrev(&forward, 1), &str));
     assert_ptr_equal(strstr(str.src, "2@"), str.src);
     assert_null(AMitemsPrev(&forward, 1));
     /* Reverse iterator forward. */
-    str = AMitemToStr(AMitemsNext(&reverse, 1));
+    assert_true(AMitemToStr(AMitemsNext(&reverse, 1), &str));
     assert_ptr_equal(strstr(str.src, "4@"), str.src);
-    str = AMitemToStr(AMitemsNext(&reverse, 1));
+    assert_true(AMitemToStr(AMitemsNext(&reverse, 1), &str));
     assert_ptr_equal(strstr(str.src, "3@"), str.src);
-    str = AMitemToStr(AMitemsNext(&reverse, 1));
+    assert_true(AMitemToStr(AMitemsNext(&reverse, 1), &str));
     assert_ptr_equal(strstr(str.src, "2@"), str.src);
     assert_null(AMitemsNext(&reverse, 1));
     /* Reverse iterator reverse. */
-    str = AMitemToStr(AMitemsPrev(&reverse, 1));
+    assert_true(AMitemToStr(AMitemsPrev(&reverse, 1), &str));
     assert_ptr_equal(strstr(str.src, "2@"), str.src);
-    str = AMitemToStr(AMitemsPrev(&reverse, 1));
+    assert_true(AMitemToStr(AMitemsPrev(&reverse, 1), &str));
     assert_ptr_equal(strstr(str.src, "3@"), str.src);
-    str = AMitemToStr(AMitemsPrev(&reverse, 1));
+    assert_true(AMitemToStr(AMitemsPrev(&reverse, 1), &str));
     assert_ptr_equal(strstr(str.src, "4@"), str.src);
     assert_null(AMitemsPrev(&reverse, 1));
 }
@@ -107,7 +110,8 @@ static void test_AMkeys_list(void** state) {
 static void test_AMkeys_map(void** state) {
     TestState* test_state = *state;
     AMstack** stack_ptr = &test_state->doc_state->base_state->stack;
-    AMdoc* const doc = AMitemToDoc(AMstackItem(stack_ptr, AMcreate(NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)));
+    AMdoc* doc;
+    assert_true(AMitemToDoc(AMstackItem(stack_ptr, AMcreate(NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)), &doc));
     AMstackItem(NULL, AMmapPutInt(doc, AM_ROOT, AMstr("one"), 1), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMmapPutInt(doc, AM_ROOT, AMstr("two"), 2), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMmapPutInt(doc, AM_ROOT, AMstr("three"), 3), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
@@ -116,46 +120,47 @@ static void test_AMkeys_map(void** state) {
     AMitems reverse = AMitemsReversed(&forward);
     assert_int_equal(AMitemsSize(&reverse), 3);
     /* Forward iterator forward. */
-    AMbyteSpan str = AMitemToStr(AMitemsNext(&forward, 1));
+    AMbyteSpan str;
+    assert_true(AMitemToStr(AMitemsNext(&forward, 1), &str));
     assert_int_equal(str.count, 3);
     assert_memory_equal(str.src, "one", str.count);
-    str = AMitemToStr(AMitemsNext(&forward, 1));
+    assert_true(AMitemToStr(AMitemsNext(&forward, 1), &str));
     assert_int_equal(str.count, 5);
     assert_memory_equal(str.src, "three", str.count);
-    str = AMitemToStr(AMitemsNext(&forward, 1));
+    assert_true(AMitemToStr(AMitemsNext(&forward, 1), &str));
     assert_int_equal(str.count, 3);
     assert_memory_equal(str.src, "two", str.count);
     assert_null(AMitemsNext(&forward, 1));
     /* Forward iterator reverse. */
-    str = AMitemToStr(AMitemsPrev(&forward, 1));
+    assert_true(AMitemToStr(AMitemsPrev(&forward, 1), &str));
     assert_int_equal(str.count, 3);
     assert_memory_equal(str.src, "two", str.count);
-    str = AMitemToStr(AMitemsPrev(&forward, 1));
+    assert_true(AMitemToStr(AMitemsPrev(&forward, 1), &str));
     assert_int_equal(str.count, 5);
     assert_memory_equal(str.src, "three", str.count);
-    str = AMitemToStr(AMitemsPrev(&forward, 1));
+    assert_true(AMitemToStr(AMitemsPrev(&forward, 1), &str));
     assert_int_equal(str.count, 3);
     assert_memory_equal(str.src, "one", str.count);
     assert_null(AMitemsPrev(&forward, 1));
     /* Reverse iterator forward. */
-    str = AMitemToStr(AMitemsNext(&reverse, 1));
+    assert_true(AMitemToStr(AMitemsNext(&reverse, 1), &str));
     assert_int_equal(str.count, 3);
     assert_memory_equal(str.src, "two", str.count);
-    str = AMitemToStr(AMitemsNext(&reverse, 1));
+    assert_true(AMitemToStr(AMitemsNext(&reverse, 1), &str));
     assert_int_equal(str.count, 5);
     assert_memory_equal(str.src, "three", str.count);
-    str = AMitemToStr(AMitemsNext(&reverse, 1));
+    assert_true(AMitemToStr(AMitemsNext(&reverse, 1), &str));
     assert_int_equal(str.count, 3);
     assert_memory_equal(str.src, "one", str.count);
     assert_null(AMitemsNext(&reverse, 1));
     /* Reverse iterator reverse. */
-    str = AMitemToStr(AMitemsPrev(&reverse, 1));
+    assert_true(AMitemToStr(AMitemsPrev(&reverse, 1), &str));
     assert_int_equal(str.count, 3);
     assert_memory_equal(str.src, "one", str.count);
-    str = AMitemToStr(AMitemsPrev(&reverse, 1));
+    assert_true(AMitemToStr(AMitemsPrev(&reverse, 1), &str));
     assert_int_equal(str.count, 5);
     assert_memory_equal(str.src, "three", str.count);
-    str = AMitemToStr(AMitemsPrev(&reverse, 1));
+    assert_true(AMitemToStr(AMitemsPrev(&reverse, 1), &str));
     assert_int_equal(str.count, 3);
     assert_memory_equal(str.src, "two", str.count);
     assert_null(AMitemsPrev(&reverse, 1));
@@ -164,12 +169,15 @@ static void test_AMkeys_map(void** state) {
 static void test_AMputActor_bytes(void** state) {
     TestState* test_state = *state;
     AMstack** stack_ptr = &test_state->doc_state->base_state->stack;
-    AMactorId const* actor_id = AMitemToActorId(
+    AMactorId const* actor_id;
+    assert_true(AMitemToActorId(
         AMstackItem(stack_ptr, AMactorIdFromBytes(test_state->actor_id_bytes, test_state->actor_id_size), cmocka_cb,
-                    AMexpect(AM_VAL_TYPE_ACTOR_ID)));
+                    AMexpect(AM_VAL_TYPE_ACTOR_ID)),
+        &actor_id));
     AMstackItem(NULL, AMsetActorId(test_state->doc_state->doc, actor_id), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    actor_id = AMitemToActorId(
-        AMstackItem(stack_ptr, AMgetActorId(test_state->doc_state->doc), cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)));
+    assert_true(AMitemToActorId(
+        AMstackItem(stack_ptr, AMgetActorId(test_state->doc_state->doc), cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)),
+        &actor_id));
     AMbyteSpan const bytes = AMactorIdBytes(actor_id);
     assert_int_equal(bytes.count, test_state->actor_id_size);
     assert_memory_equal(bytes.src, test_state->actor_id_bytes, bytes.count);
@@ -178,11 +186,14 @@ static void test_AMputActor_bytes(void** state) {
 static void test_AMputActor_str(void** state) {
     TestState* test_state = *state;
     AMstack** stack_ptr = &test_state->doc_state->base_state->stack;
-    AMactorId const* actor_id = AMitemToActorId(
-        AMstackItem(stack_ptr, AMactorIdFromStr(test_state->actor_id_str), cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)));
+    AMactorId const* actor_id;
+    assert_true(AMitemToActorId(
+        AMstackItem(stack_ptr, AMactorIdFromStr(test_state->actor_id_str), cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)),
+        &actor_id));
     AMstackItem(NULL, AMsetActorId(test_state->doc_state->doc, actor_id), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    actor_id = AMitemToActorId(
-        AMstackItem(stack_ptr, AMgetActorId(test_state->doc_state->doc), cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)));
+    assert_true(AMitemToActorId(
+        AMstackItem(stack_ptr, AMgetActorId(test_state->doc_state->doc), cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)),
+        &actor_id));
     AMbyteSpan const str = AMactorIdStr(actor_id);
     assert_int_equal(str.count, test_state->actor_id_str.count);
     assert_memory_equal(str.src, test_state->actor_id_str.src, str.count);
@@ -191,18 +202,19 @@ static void test_AMputActor_str(void** state) {
 static void test_AMspliceText(void** state) {
     TestState* test_state = *state;
     AMstack** stack_ptr = &test_state->doc_state->base_state->stack;
-    AMdoc* const doc = AMitemToDoc(AMstackItem(stack_ptr, AMcreate(NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)));
+    AMdoc* doc;
+    assert_true(AMitemToDoc(AMstackItem(stack_ptr, AMcreate(NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)), &doc));
     AMobjId const* const text =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc, AM_ROOT, AMstr("text"), AM_OBJ_TYPE_TEXT), cmocka_cb,
                                 AMexpect(AM_VAL_TYPE_VOID)));
     AMstackItem(NULL, AMspliceText(doc, text, 0, 0, AMstr("one + ")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMspliceText(doc, text, 4, 2, AMstr("two = ")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMspliceText(doc, text, 8, 2, AMstr("three")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMbyteSpan const str =
-        AMitemToStr(AMstackItem(stack_ptr, AMtext(doc, text, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_STR)));
-    static char const* const STR_VALUE = "one two three";
-    assert_int_equal(str.count, strlen(STR_VALUE));
-    assert_memory_equal(str.src, STR_VALUE, str.count);
+    AMbyteSpan str;
+    assert_true(
+        AMitemToStr(AMstackItem(stack_ptr, AMtext(doc, text, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_STR)), &str));
+    assert_int_equal(str.count, strlen("one two three"));
+    assert_memory_equal(str.src, "one two three", str.count);
 }
 
 int run_doc_tests(void) {

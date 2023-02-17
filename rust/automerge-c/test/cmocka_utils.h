@@ -15,7 +15,7 @@
  * \brief Forces the test to fail immediately and quit, printing the reason.
  *
  * \param[in] msg A message string into which \p view.src is interpolated.
- * \param[in] view A string view as an `AMbyteSpan` struct.
+ * \param[in] view A UTF-8 string view as an `AMbyteSpan` struct.
  */
 #define fail_msg_view(msg, view)                  \
     do {                                          \

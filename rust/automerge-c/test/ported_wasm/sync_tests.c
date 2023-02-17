@@ -25,20 +25,21 @@ static int setup(void** state) {
     TestState* test_state = test_calloc(1, sizeof(TestState));
     setup_base((void**)&test_state->base_state);
     AMstack** stack_ptr = &test_state->base_state->stack;
-    test_state->n1 =
-        AMitemToDoc(AMstackItem(stack_ptr,
-                                AMcreate(AMitemToActorId(AMstackItem(stack_ptr, AMactorIdFromStr(AMstr("01234567")),
-                                                                     cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)))),
-                                cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)));
-    test_state->n2 =
-        AMitemToDoc(AMstackItem(stack_ptr,
-                                AMcreate(AMitemToActorId(AMstackItem(stack_ptr, AMactorIdFromStr(AMstr("89abcdef")),
-                                                                     cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)))),
-                                cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)));
-    test_state->s1 =
-        AMitemToSyncState(AMstackItem(stack_ptr, AMsyncStateInit(), cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_STATE)));
-    test_state->s2 =
-        AMitemToSyncState(AMstackItem(stack_ptr, AMsyncStateInit(), cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_STATE)));
+    AMactorId const* actor_id;
+    assert_true(AMitemToActorId(
+        AMstackItem(stack_ptr, AMactorIdFromStr(AMstr("01234567")), cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)),
+        &actor_id));
+    assert_true(
+        AMitemToDoc(AMstackItem(stack_ptr, AMcreate(actor_id), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)), &test_state->n1));
+    assert_true(AMitemToActorId(
+        AMstackItem(stack_ptr, AMactorIdFromStr(AMstr("89abcdef")), cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)),
+        &actor_id));
+    assert_true(
+        AMitemToDoc(AMstackItem(stack_ptr, AMcreate(actor_id), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)), &test_state->n2));
+    assert_true(AMitemToSyncState(
+        AMstackItem(stack_ptr, AMsyncStateInit(), cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_STATE)), &test_state->s1));
+    assert_true(AMitemToSyncState(
+        AMstackItem(stack_ptr, AMsyncStateInit(), cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_STATE)), &test_state->s2));
     *state = test_state;
     return 0;
 }
@@ -62,7 +63,7 @@ static void sync(AMdoc* a, AMdoc* b, AMsyncState* a_sync_state, AMsyncState* b_s
         AMitem* item = AMresultItem(a2b_msg_result);
         switch (AMitemValType(item)) {
             case AM_VAL_TYPE_SYNC_MESSAGE: {
-                a2b_msg = AMitemToSyncMessage(item);
+                AMitemToSyncMessage(item, &a2b_msg);
                 AMstackResult(NULL, AMreceiveSyncMessage(b, b_sync_state, a2b_msg), cmocka_cb,
                               AMexpect(AM_VAL_TYPE_VOID));
             } break;
@@ -73,7 +74,7 @@ static void sync(AMdoc* a, AMdoc* b, AMsyncState* a_sync_state, AMsyncState* b_s
         item = AMresultItem(b2a_msg_result);
         switch (AMitemValType(item)) {
             case AM_VAL_TYPE_SYNC_MESSAGE: {
-                b2a_msg = AMitemToSyncMessage(item);
+                AMitemToSyncMessage(item, &b2a_msg);
                 AMstackResult(NULL, AMreceiveSyncMessage(a, a_sync_state, b2a_msg), cmocka_cb,
                               AMexpect(AM_VAL_TYPE_VOID));
             } break;
@@ -103,9 +104,10 @@ static void test_should_send_a_sync_message_implying_no_local_data(void** state)
     /* const m1 = doc.generateSyncMessage(s1)
        if (m1 === null) { throw new RangeError("message should not be null") }
        const message: DecodedSyncMessage = decodeSyncMessage(m1)             */
-    AMsyncMessage const* const m1 =
-        AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1), cmocka_cb,
-                                        AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)));
+    AMsyncMessage const* m1;
+    assert_true(AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1),
+                                                cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)),
+                                    &m1));
     /* assert.deepStrictEqual(message.heads, [])                             */
     AMitems heads = AMstackItems(stack_ptr, AMsyncMessageHeads(m1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     assert_int_equal(AMitemsSize(&heads), 0);
@@ -116,7 +118,8 @@ static void test_should_send_a_sync_message_implying_no_local_data(void** state)
     AMitems haves = AMstackItems(stack_ptr, AMsyncMessageHaves(m1), cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_HAVE));
     assert_int_equal(AMitemsSize(&haves), 1);
     /* assert.deepStrictEqual(message.have[0].lastSync, [])                  */
-    AMsyncHave const* have0 = AMitemToSyncHave(AMitemsNext(&haves, 1));
+    AMsyncHave const* have0;
+    assert_true(AMitemToSyncHave(AMitemsNext(&haves, 1), &have0));
     AMitems last_sync =
         AMstackItems(stack_ptr, AMsyncHaveLastSync(have0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     assert_int_equal(AMitemsSize(&last_sync), 0);
@@ -136,9 +139,10 @@ static void test_should_not_reply_if_we_have_no_data_as_well(void** state) {
     AMstack** stack_ptr = &test_state->base_state->stack;
     /* const m1 = n1.generateSyncMessage(s1)
        if (m1 === null) { throw new RangeError("message should not be null")  */
-    AMsyncMessage const* const m1 =
-        AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1), cmocka_cb,
-                                        AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)));
+    AMsyncMessage const* m1;
+    assert_true(AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1),
+                                                cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)),
+                                    &m1));
     /* n2.receiveSyncMessage(s2, m1)                                         */
     AMstackItem(NULL, AMreceiveSyncMessage(test_state->n2, test_state->s2, m1), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* const m2 = n2.generateSyncMessage(s2)
@@ -180,9 +184,10 @@ static void test_repos_with_equal_heads_do_not_need_a_reply_message(void** state
     /* generate a naive sync message */
     /* const m1 = n1.generateSyncMessage(s1)
        if (m1 === null) { throw new RangeError("message should not be null")  */
-    AMsyncMessage const* m1 =
-        AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1), cmocka_cb,
-                                        AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)));
+    AMsyncMessage const* m1;
+    assert_true(AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1),
+                                                cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)),
+                                    &m1));
     /* assert.deepStrictEqual(s1.lastSentHeads, n1.getHeads())               */
     AMitems const last_sent_heads =
         AMstackItems(stack_ptr, AMsyncStateLastSentHeads(test_state->s1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
@@ -309,14 +314,15 @@ static void test_should_not_generate_messages_once_synced(void** state) {
        const s1 = initSyncState(), s2 = initSyncState()                      */
     TestState* test_state = *state;
     AMstack** stack_ptr = &test_state->base_state->stack;
-    AMstackItem(NULL,
-                AMsetActorId(test_state->n1, AMitemToActorId(AMstackItem(stack_ptr, AMactorIdFromStr(AMstr("abc123")),
-                                                                         cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)))),
-                cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL,
-                AMsetActorId(test_state->n2, AMitemToActorId(AMstackItem(stack_ptr, AMactorIdFromStr(AMstr("def456")),
-                                                                         cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)))),
-                cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
+    AMactorId const* actor_id;
+    assert_true(AMitemToActorId(
+        AMstackItem(stack_ptr, AMactorIdFromStr(AMstr("abc123")), cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)),
+        &actor_id));
+    AMstackItem(NULL, AMsetActorId(test_state->n1, actor_id), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
+    assert_true(AMitemToActorId(
+        AMstackItem(stack_ptr, AMactorIdFromStr(AMstr("def456")), cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)),
+        &actor_id));
+    AMstackItem(NULL, AMsetActorId(test_state->n2, actor_id), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /*                                                                       */
     /* let message, patch
        for (let i = 0; i < 5; i++) {                                         */
@@ -340,9 +346,10 @@ static void test_should_not_generate_messages_once_synced(void** state) {
     /* message = n1.generateSyncMessage(s1)
        if (message === null) { throw new RangeError("message should not be
        null")  */
-    AMsyncMessage const* message =
-        AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1), cmocka_cb,
-                                        AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)));
+    AMsyncMessage const* message;
+    assert_true(AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1),
+                                                cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)),
+                                    &message));
     /*                                                                       */
     /* n2 receives that message and sends changes along with what it has */
     /* n2.receiveSyncMessage(s2, message)                                    */
@@ -351,8 +358,9 @@ static void test_should_not_generate_messages_once_synced(void** state) {
     /* message = n2.generateSyncMessage(s2)
        if (message === null) { throw new RangeError("message should not be
        null")  */
-    message = AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n2, test_state->s2),
-                                              cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)));
+    assert_true(AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n2, test_state->s2),
+                                                cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)),
+                                    &message));
     AMitems message_changes =
         AMstackItems(stack_ptr, AMsyncMessageChanges(message), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE));
     assert_int_equal(AMitemsSize(&message_changes), 5);
@@ -365,8 +373,9 @@ static void test_should_not_generate_messages_once_synced(void** state) {
     /* message = n2.generateSyncMessage(s2)
        if (message === null) { throw new RangeError("message should not be
        null")  */
-    message = AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1),
-                                              cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)));
+    assert_true(AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1),
+                                                cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)),
+                                    &message));
     message_changes = AMstackItems(stack_ptr, AMsyncMessageChanges(message), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE));
     assert_int_equal(AMitemsSize(&message_changes), 5);
     /*                                                                       */
@@ -377,8 +386,9 @@ static void test_should_not_generate_messages_once_synced(void** state) {
     /* message = n2.generateSyncMessage(s2)
        if (message === null) { throw new RangeError("message should not be
        null")  */
-    message = AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n2, test_state->s2),
-                                              cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)));
+    assert_true(AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n2, test_state->s2),
+                                                cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)),
+                                    &message));
     /*                                                                       */
     /* n1 receives the message and has nothing more to say */
     /* n1.receiveSyncMessage(s1, message)                                    */
@@ -404,14 +414,15 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void*
        const s1 = initSyncState(), s2 = initSyncState()                      */
     TestState* test_state = *state;
     AMstack** stack_ptr = &test_state->base_state->stack;
-    AMstackItem(NULL,
-                AMsetActorId(test_state->n1, AMitemToActorId(AMstackItem(stack_ptr, AMactorIdFromStr(AMstr("abc123")),
-                                                                         cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)))),
-                cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMstackItem(NULL,
-                AMsetActorId(test_state->n2, AMitemToActorId(AMstackItem(stack_ptr, AMactorIdFromStr(AMstr("def456")),
-                                                                         cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)))),
-                cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
+    AMactorId const* actor_id;
+    assert_true(AMitemToActorId(
+        AMstackItem(stack_ptr, AMactorIdFromStr(AMstr("abc123")), cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)),
+        &actor_id));
+    AMstackItem(NULL, AMsetActorId(test_state->n1, actor_id), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
+    assert_true(AMitemToActorId(
+        AMstackItem(stack_ptr, AMactorIdFromStr(AMstr("def456")), cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)),
+        &actor_id));
+    AMstackItem(NULL, AMsetActorId(test_state->n2, actor_id), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /*                                                                       */
     /*  for (let i = 0; i < 5; i++) {                                        */
     for (size_t i = 0; i != 5; ++i) {
@@ -431,24 +442,28 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void*
     }
     /* const head1 = n1.getHeads()[0], head2 = n2.getHeads()[0]              */
     AMitems heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
-    AMbyteSpan const head1 = AMitemToChangeHash(AMitemsNext(&heads1, 1));
+    AMbyteSpan head1;
+    assert_true(AMitemToChangeHash(AMitemsNext(&heads1, 1), &head1));
     AMitems heads2 = AMstackItems(stack_ptr, AMgetHeads(test_state->n2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
-    AMbyteSpan const head2 = AMitemToChangeHash(AMitemsNext(&heads2, 1));
+    AMbyteSpan head2;
+    assert_true(AMitemToChangeHash(AMitemsNext(&heads2, 1), &head2));
     /*                                                                       */
     /* both sides report what they have but have no shared peer state */
     /* let msg1to2, msg2to1
        msg1to2 = n1.generateSyncMessage(s1)
        if (msg1to2 === null) { throw new RangeError("message should not be
        null")  */
-    AMsyncMessage const* msg1to2 =
-        AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1), cmocka_cb,
-                                        AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)));
+    AMsyncMessage const* msg1to2;
+    assert_true(AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1),
+                                                cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)),
+                                    &msg1to2));
     /* msg2to1 = n2.generateSyncMessage(s2)
        if (msg2to1 === null) { throw new RangeError("message should not be
        null")  */
-    AMsyncMessage const* msg2to1 =
-        AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n2, test_state->s2), cmocka_cb,
-                                        AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)));
+    AMsyncMessage const* msg2to1;
+    assert_true(AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n2, test_state->s2),
+                                                cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)),
+                                    &msg2to1));
     /* assert.deepStrictEqual(decodeSyncMessage(msg1to2).changes.length, 0)  */
     AMitems msg1to2_changes =
         AMstackItems(stack_ptr, AMsyncMessageChanges(msg1to2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE));
@@ -457,7 +472,8 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void*
      * 0 */
     AMitems msg1to2_haves =
         AMstackItems(stack_ptr, AMsyncMessageHaves(msg1to2), cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_HAVE));
-    AMsyncHave const* msg1to2_have = AMitemToSyncHave(AMitemsNext(&msg1to2_haves, 1));
+    AMsyncHave const* msg1to2_have;
+    assert_true(AMitemToSyncHave(AMitemsNext(&msg1to2_haves, 1), &msg1to2_have));
     AMitems msg1to2_last_sync =
         AMstackItems(stack_ptr, AMsyncHaveLastSync(msg1to2_have), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     assert_int_equal(AMitemsSize(&msg1to2_last_sync), 0);
@@ -469,7 +485,8 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void*
      * 0 */
     AMitems msg2to1_haves =
         AMstackItems(stack_ptr, AMsyncMessageHaves(msg2to1), cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_HAVE));
-    AMsyncHave const* msg2to1_have = AMitemToSyncHave(AMitemsNext(&msg2to1_haves, 1));
+    AMsyncHave const* msg2to1_have;
+    assert_true(AMitemToSyncHave(AMitemsNext(&msg2to1_haves, 1), &msg2to1_have));
     AMitems msg2to1_last_sync =
         AMstackItems(stack_ptr, AMsyncHaveLastSync(msg2to1_have), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     assert_int_equal(AMitemsSize(&msg2to1_last_sync), 0);
@@ -488,16 +505,18 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void*
     /* msg1to2 = n1.generateSyncMessage(s1)
        if (msg1to2 === null) { throw new RangeError("message should not be
        null")  */
-    msg1to2 = AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1),
-                                              cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)));
+    assert_true(AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1),
+                                                cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)),
+                                    &msg1to2));
     /* assert.deepStrictEqual(decodeSyncMessage(msg1to2).changes.length, 5)  */
     msg1to2_changes = AMstackItems(stack_ptr, AMsyncMessageChanges(msg1to2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE));
     assert_int_equal(AMitemsSize(&msg1to2_changes), 5);
     /* msg2to1 = n2.generateSyncMessage(s2)
        if (msg2to1 === null) { throw new RangeError("message should not be
        null")  */
-    msg2to1 = AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n2, test_state->s2),
-                                              cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)));
+    assert_true(AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n2, test_state->s2),
+                                                cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)),
+                                    &msg2to1));
     /* assert.deepStrictEqual(decodeSyncMessage(msg2to1).changes.length, 5)  */
     msg2to1_changes = AMstackItems(stack_ptr, AMsyncMessageChanges(msg2to1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE));
     assert_int_equal(AMitemsSize(&msg2to1_changes), 5);
@@ -512,12 +531,15 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void*
     assert_int_equal(AMitemsSize(&missing_deps), 0);
     /* //assert.notDeepStrictEqual(patch1, null)
        assert.deepStrictEqual(n1.materialize(), { x: 4, y: 4 })              */
-    assert_int_equal(AMitemToUint(AMstackItem(stack_ptr, AMmapGet(test_state->n1, AM_ROOT, AMstr("x"), NULL), cmocka_cb,
-                                              AMexpect(AM_VAL_TYPE_UINT))),
-                     4);
-    assert_int_equal(AMitemToUint(AMstackItem(stack_ptr, AMmapGet(test_state->n1, AM_ROOT, AMstr("y"), NULL), cmocka_cb,
-                                              AMexpect(AM_VAL_TYPE_UINT))),
-                     4);
+    uint64_t uint;
+    assert_true(AMitemToUint(AMstackItem(stack_ptr, AMmapGet(test_state->n1, AM_ROOT, AMstr("x"), NULL), cmocka_cb,
+                                         AMexpect(AM_VAL_TYPE_UINT)),
+                             &uint));
+    assert_int_equal(uint, 4);
+    assert_true(AMitemToUint(AMstackItem(stack_ptr, AMmapGet(test_state->n1, AM_ROOT, AMstr("y"), NULL), cmocka_cb,
+                                         AMexpect(AM_VAL_TYPE_UINT)),
+                             &uint));
+    assert_int_equal(uint, 4);
     /*                                                                       */
     /* n2.receiveSyncMessage(s2, msg1to2)                                    */
     AMstackItem(NULL, AMreceiveSyncMessage(test_state->n2, test_state->s2, msg1to2), cmocka_cb,
@@ -528,28 +550,32 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void*
     assert_int_equal(AMitemsSize(&missing_deps), 0);
     /* //assert.notDeepStrictEqual(patch2, null)
        assert.deepStrictEqual(n2.materialize(), { x: 4, y: 4 })              */
-    assert_int_equal(AMitemToUint(AMstackItem(stack_ptr, AMmapGet(test_state->n2, AM_ROOT, AMstr("x"), NULL), cmocka_cb,
-                                              AMexpect(AM_VAL_TYPE_UINT))),
-                     4);
-    assert_int_equal(AMitemToUint(AMstackItem(stack_ptr, AMmapGet(test_state->n2, AM_ROOT, AMstr("y"), NULL), cmocka_cb,
-                                              AMexpect(AM_VAL_TYPE_UINT))),
-                     4);
+    assert_true(AMitemToUint(AMstackItem(stack_ptr, AMmapGet(test_state->n2, AM_ROOT, AMstr("x"), NULL), cmocka_cb,
+                                         AMexpect(AM_VAL_TYPE_UINT)),
+                             &uint));
+    assert_int_equal(uint, 4);
+    assert_true(AMitemToUint(AMstackItem(stack_ptr, AMmapGet(test_state->n2, AM_ROOT, AMstr("y"), NULL), cmocka_cb,
+                                         AMexpect(AM_VAL_TYPE_UINT)),
+                             &uint));
+    assert_int_equal(uint, 4);
     /*                                                                       */
     /* The response acknowledges the changes received and sends no further
      * changes */
     /* msg1to2 = n1.generateSyncMessage(s1)
        if (msg1to2 === null) { throw new RangeError("message should not be
        null")  */
-    msg1to2 = AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1),
-                                              cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)));
+    assert_true(AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1),
+                                                cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)),
+                                    &msg1to2));
     /* assert.deepStrictEqual(decodeSyncMessage(msg1to2).changes.length, 0)  */
     msg1to2_changes = AMstackItems(stack_ptr, AMsyncMessageChanges(msg1to2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE));
     assert_int_equal(AMitemsSize(&msg1to2_changes), 0);
     /* msg2to1 = n2.generateSyncMessage(s2)
        if (msg2to1 === null) { throw new RangeError("message should not be
        null")  */
-    msg2to1 = AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n2, test_state->s2),
-                                              cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)));
+    assert_true(AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n2, test_state->s2),
+                                                cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)),
+                                    &msg2to1));
     /* assert.deepStrictEqual(decodeSyncMessage(msg2to1).changes.length, 0)  */
     msg2to1_changes = AMstackItems(stack_ptr, AMsyncMessageChanges(msg2to1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE));
     assert_int_equal(AMitemsSize(&msg2to1_changes), 0);
@@ -564,13 +590,19 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void*
     /* assert.deepStrictEqual(s1.sharedHeads, [head1, head2].sort())         */
     AMitems s1_shared_heads =
         AMstackItems(stack_ptr, AMsyncStateSharedHeads(test_state->s1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
-    assert_memory_equal(AMitemToChangeHash(AMitemsNext(&s1_shared_heads, 1)).src, head1.src, head1.count);
-    assert_memory_equal(AMitemToChangeHash(AMitemsNext(&s1_shared_heads, 1)).src, head2.src, head2.count);
+    AMbyteSpan s1_shared_change_hash;
+    assert_true(AMitemToChangeHash(AMitemsNext(&s1_shared_heads, 1), &s1_shared_change_hash));
+    assert_memory_equal(s1_shared_change_hash.src, head1.src, head1.count);
+    assert_true(AMitemToChangeHash(AMitemsNext(&s1_shared_heads, 1), &s1_shared_change_hash));
+    assert_memory_equal(s1_shared_change_hash.src, head2.src, head2.count);
     /* assert.deepStrictEqual(s2.sharedHeads, [head1, head2].sort())         */
     AMitems s2_shared_heads =
         AMstackItems(stack_ptr, AMsyncStateSharedHeads(test_state->s2), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
-    assert_memory_equal(AMitemToChangeHash(AMitemsNext(&s2_shared_heads, 1)).src, head1.src, head1.count);
-    assert_memory_equal(AMitemToChangeHash(AMitemsNext(&s2_shared_heads, 1)).src, head2.src, head2.count);
+    AMbyteSpan s2_shared_change_hash;
+    assert_true(AMitemToChangeHash(AMitemsNext(&s2_shared_heads, 1), &s2_shared_change_hash));
+    assert_memory_equal(s2_shared_change_hash.src, head1.src, head1.count);
+    assert_true(AMitemToChangeHash(AMitemsNext(&s2_shared_heads, 1), &s2_shared_change_hash));
+    assert_memory_equal(s2_shared_change_hash.src, head2.src, head2.count);
     /* //assert.deepStrictEqual(patch1, null)
        //assert.deepStrictEqual(patch2, null)                                */
     /*                                                                       */
@@ -589,18 +621,20 @@ static void test_should_allow_simultaneous_messages_during_synchronization(void*
     /* msg1to2 = n1.generateSyncMessage(s1)
        if (msg1to2 === null) { throw new RangeError("message should not be
        null")  */
-    msg1to2 = AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1),
-                                              cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)));
+    assert_true(AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1),
+                                                cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)),
+                                    &msg1to2));
     /* assert.deepStrictEqual(decodeSyncMessage(msg1to2).have[0].lastSync,
      * [head1, head2].sort( */
     msg1to2_haves = AMstackItems(stack_ptr, AMsyncMessageHaves(msg1to2), cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_HAVE));
-    msg1to2_have = AMitemToSyncHave(AMitemsNext(&msg1to2_haves, 1));
+    assert_true(AMitemToSyncHave(AMitemsNext(&msg1to2_haves, 1), &msg1to2_have));
     msg1to2_last_sync =
         AMstackItems(stack_ptr, AMsyncHaveLastSync(msg1to2_have), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
-    AMbyteSpan msg1to2_last_sync_next = AMitemToChangeHash(AMitemsNext(&msg1to2_last_sync, 1));
+    AMbyteSpan msg1to2_last_sync_next;
+    assert_true(AMitemToChangeHash(AMitemsNext(&msg1to2_last_sync, 1), &msg1to2_last_sync_next));
     assert_int_equal(msg1to2_last_sync_next.count, head1.count);
     assert_memory_equal(msg1to2_last_sync_next.src, head1.src, head1.count);
-    msg1to2_last_sync_next = AMitemToChangeHash(AMitemsNext(&msg1to2_last_sync, 1));
+    assert_true(AMitemToChangeHash(AMitemsNext(&msg1to2_last_sync, 1), &msg1to2_last_sync_next));
     assert_int_equal(msg1to2_last_sync_next.count, head2.count);
     assert_memory_equal(msg1to2_last_sync_next.src, head2.src, head2.count);
 }
@@ -633,9 +667,10 @@ static void test_should_assume_sent_changes_were_received_until_we_hear_otherwis
     /* message = n1.generateSyncMessage(s1)
       if (message === null) { throw new RangeError("message should not be null")
     */
-    AMsyncMessage const* message =
-        AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1), cmocka_cb,
-                                        AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)));
+    AMsyncMessage const* message;
+    assert_true(AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1),
+                                                cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)),
+                                    &message));
     /* assert.deepStrictEqual(decodeSyncMessage(message).changes.length, 1)  */
     AMitems message_changes =
         AMstackItems(stack_ptr, AMsyncMessageChanges(message), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE));
@@ -649,8 +684,9 @@ static void test_should_assume_sent_changes_were_received_until_we_hear_otherwis
     /* message = n1.generateSyncMessage(s1)
        if (message === null) { throw new RangeError("message should not be
        null")  */
-    message = AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1),
-                                              cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)));
+    assert_true(AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1),
+                                                cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)),
+                                    &message));
     /* assert.deepStrictEqual(decodeSyncMessage(message).changes.length, 1)  */
     message_changes = AMstackItems(stack_ptr, AMsyncMessageChanges(message), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE));
     assert_int_equal(AMitemsSize(&message_changes), 1);
@@ -664,8 +700,9 @@ static void test_should_assume_sent_changes_were_received_until_we_hear_otherwis
     /* message = n1.generateSyncMessage(s1)
        if (message === null) { throw new RangeError("message should not be
        null")  */
-    message = AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1),
-                                              cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)));
+    assert_true(AMitemToSyncMessage(AMstackItem(stack_ptr, AMgenerateSyncMessage(test_state->n1, test_state->s1),
+                                                cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_MESSAGE)),
+                                    &message));
     /* assert.deepStrictEqual(decodeSyncMessage(message).changes.length, 1)  */
     message_changes = AMstackItems(stack_ptr, AMsyncMessageChanges(message), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE));
     assert_int_equal(AMitemsSize(&message_changes), 1);
@@ -816,15 +853,20 @@ static void test_should_work_with_prior_sync_state_2(void** state) {
     }
     /*                                                                       */
     /* s1 = decodeSyncState(encodeSyncState(s1))                             */
-    AMbyteSpan encoded = AMitemToBytes(
-        AMstackItem(stack_ptr, AMsyncStateEncode(test_state->s1), cmocka_cb, AMexpect(AM_VAL_TYPE_BYTES)));
-    AMsyncState* s1 = AMitemToSyncState(AMstackItem(stack_ptr, AMsyncStateDecode(encoded.src, encoded.count), cmocka_cb,
-                                                    AMexpect(AM_VAL_TYPE_SYNC_STATE)));
+    AMbyteSpan encoded;
+    assert_true(AMitemToBytes(
+        AMstackItem(stack_ptr, AMsyncStateEncode(test_state->s1), cmocka_cb, AMexpect(AM_VAL_TYPE_BYTES)), &encoded));
+    AMsyncState* s1;
+    assert_true(AMitemToSyncState(AMstackItem(stack_ptr, AMsyncStateDecode(encoded.src, encoded.count), cmocka_cb,
+                                              AMexpect(AM_VAL_TYPE_SYNC_STATE)),
+                                  &s1));
     /* s2 = decodeSyncState(encodeSyncState(s2))                             */
-    encoded = AMitemToBytes(
-        AMstackItem(stack_ptr, AMsyncStateEncode(test_state->s2), cmocka_cb, AMexpect(AM_VAL_TYPE_BYTES)));
-    AMsyncState* s2 = AMitemToSyncState(AMstackItem(stack_ptr, AMsyncStateDecode(encoded.src, encoded.count), cmocka_cb,
-                                                    AMexpect(AM_VAL_TYPE_SYNC_STATE)));
+    assert_true(AMitemToBytes(
+        AMstackItem(stack_ptr, AMsyncStateEncode(test_state->s2), cmocka_cb, AMexpect(AM_VAL_TYPE_BYTES)), &encoded));
+    AMsyncState* s2;
+    assert_true(AMitemToSyncState(AMstackItem(stack_ptr, AMsyncStateDecode(encoded.src, encoded.count), cmocka_cb,
+                                              AMexpect(AM_VAL_TYPE_SYNC_STATE)),
+                                  &s2));
     /*                                                                       */
     /* assert.notDeepStrictEqual(n1.materialize(), n2.materialize())         */
     assert_false(AMequal(test_state->n1, test_state->n2));
@@ -902,11 +944,16 @@ static void test_should_resync_after_one_node_crashed_with_data_loss(void** stat
     /* let r
        let rSyncState
        ;[r, rSyncState] = [n2.clone(), s2.clone()]                           */
-    AMdoc* r = AMitemToDoc(AMstackItem(stack_ptr, AMclone(test_state->n2), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)));
-    AMbyteSpan const encoded_s2 = AMitemToBytes(
-        AMstackItem(stack_ptr, AMsyncStateEncode(test_state->s2), cmocka_cb, AMexpect(AM_VAL_TYPE_BYTES)));
-    AMsyncState* sync_state_r = AMitemToSyncState(AMstackItem(
-        stack_ptr, AMsyncStateDecode(encoded_s2.src, encoded_s2.count), cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_STATE)));
+    AMdoc* r;
+    assert_true(AMitemToDoc(AMstackItem(stack_ptr, AMclone(test_state->n2), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)), &r));
+    AMbyteSpan encoded_s2;
+    assert_true(
+        AMitemToBytes(AMstackItem(stack_ptr, AMsyncStateEncode(test_state->s2), cmocka_cb, AMexpect(AM_VAL_TYPE_BYTES)),
+                      &encoded_s2));
+    AMsyncState* sync_state_r;
+    assert_true(AMitemToSyncState(AMstackItem(stack_ptr, AMsyncStateDecode(encoded_s2.src, encoded_s2.count), cmocka_cb,
+                                              AMexpect(AM_VAL_TYPE_SYNC_STATE)),
+                                  &sync_state_r));
     /*                                                                       */
     /* sync another few commits */
     /* for (let i = 3; i < 6; i++) {                                         */
@@ -941,15 +988,21 @@ static void test_should_resync_after_one_node_crashed_with_data_loss(void** stat
     }
     /*                                                                       */
     /* s1 = decodeSyncState(encodeSyncState(s1))                             */
-    AMbyteSpan const encoded_s1 = AMitemToBytes(
-        AMstackItem(stack_ptr, AMsyncStateEncode(test_state->s1), cmocka_cb, AMexpect(AM_VAL_TYPE_BYTES)));
-    AMsyncState* const s1 = AMitemToSyncState(AMstackItem(
-        stack_ptr, AMsyncStateDecode(encoded_s1.src, encoded_s1.count), cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_STATE)));
+    AMbyteSpan encoded_s1;
+    assert_true(
+        AMitemToBytes(AMstackItem(stack_ptr, AMsyncStateEncode(test_state->s1), cmocka_cb, AMexpect(AM_VAL_TYPE_BYTES)),
+                      &encoded_s1));
+    AMsyncState* s1;
+    assert_true(AMitemToSyncState(AMstackItem(stack_ptr, AMsyncStateDecode(encoded_s1.src, encoded_s1.count), cmocka_cb,
+                                              AMexpect(AM_VAL_TYPE_SYNC_STATE)),
+                                  &s1));
     /* rSyncState = decodeSyncState(encodeSyncState(rSyncState))             */
-    AMbyteSpan const encoded_r =
-        AMitemToBytes(AMstackItem(stack_ptr, AMsyncStateEncode(sync_state_r), cmocka_cb, AMexpect(AM_VAL_TYPE_BYTES)));
-    sync_state_r = AMitemToSyncState(AMstackItem(stack_ptr, AMsyncStateDecode(encoded_r.src, encoded_r.count),
-                                                 cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_STATE)));
+    AMbyteSpan encoded_r;
+    assert_true(AMitemToBytes(
+        AMstackItem(stack_ptr, AMsyncStateEncode(sync_state_r), cmocka_cb, AMexpect(AM_VAL_TYPE_BYTES)), &encoded_r));
+    assert_true(AMitemToSyncState(AMstackItem(stack_ptr, AMsyncStateDecode(encoded_r.src, encoded_r.count), cmocka_cb,
+                                              AMexpect(AM_VAL_TYPE_SYNC_STATE)),
+                                  &sync_state_r));
     /*                                                                       */
     /* assert.notDeepStrictEqual(n1.getHeads(), r.getHeads())                */
     heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
@@ -958,13 +1011,15 @@ static void test_should_resync_after_one_node_crashed_with_data_loss(void** stat
     /* assert.notDeepStrictEqual(n1.materialize(), r.materialize())          */
     assert_false(AMequal(test_state->n1, r));
     /* assert.deepStrictEqual(n1.materialize(), { x: 8 })                    */
-    assert_int_equal(AMitemToUint(AMstackItem(stack_ptr, AMmapGet(test_state->n1, AM_ROOT, AMstr("x"), NULL), cmocka_cb,
-                                              AMexpect(AM_VAL_TYPE_UINT))),
-                     8);
+    uint64_t uint;
+    assert_true(AMitemToUint(AMstackItem(stack_ptr, AMmapGet(test_state->n1, AM_ROOT, AMstr("x"), NULL), cmocka_cb,
+                                         AMexpect(AM_VAL_TYPE_UINT)),
+                             &uint));
+    assert_int_equal(uint, 8);
     /* assert.deepStrictEqual(r.materialize(), { x: 2 })                     */
-    assert_int_equal(AMitemToUint(AMstackItem(stack_ptr, AMmapGet(r, AM_ROOT, AMstr("x"), NULL), cmocka_cb,
-                                              AMexpect(AM_VAL_TYPE_UINT))),
-                     2);
+    assert_true(AMitemToUint(
+        AMstackItem(stack_ptr, AMmapGet(r, AM_ROOT, AMstr("x"), NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_UINT)), &uint));
+    assert_int_equal(uint, 2);
     /* sync(n1, r, s1, rSyncState)                                           */
     sync(test_state->n1, r, test_state->s1, sync_state_r);
     /* assert.deepStrictEqual(n1.getHeads(), r.getHeads())                   */
@@ -1006,18 +1061,21 @@ static void test_should_resync_after_one_node_experiences_data_loss_without_disc
     assert_true(AMequal(test_state->n1, test_state->n2));
     /*                                                                       */
     /* const n2AfterDataLoss = create('89abcdef')                            */
-    AMdoc* n2_after_data_loss =
-        AMitemToDoc(AMstackItem(stack_ptr,
-                                AMcreate(AMitemToActorId(AMstackItem(stack_ptr, AMactorIdFromStr(AMstr("89abcdef")),
-                                                                     cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)))),
-                                cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)));
+    AMactorId const* actor_id;
+    assert_true(AMitemToActorId(
+        AMstackItem(stack_ptr, AMactorIdFromStr(AMstr("89abcdef")), cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)),
+        &actor_id));
+    AMdoc* n2_after_data_loss;
+    assert_true(AMitemToDoc(AMstackItem(stack_ptr, AMcreate(actor_id), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)),
+                            &n2_after_data_loss));
     /*                                                                       */
     /* "n2" now has no data, but n1 still thinks it does. Note we don't do
      * decodeSyncState(encodeSyncState(s1)) in order to simulate data loss
      * without disconnecting */
     /* sync(n1, n2AfterDataLoss, s1, initSyncState())                        */
-    AMsyncState* s2_after_data_loss =
-        AMitemToSyncState(AMstackItem(stack_ptr, AMsyncStateInit(), cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_STATE)));
+    AMsyncState* s2_after_data_loss;
+    assert_true(AMitemToSyncState(
+        AMstackItem(stack_ptr, AMsyncStateInit(), cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_STATE)), &s2_after_data_loss));
     sync(test_state->n1, n2_after_data_loss, test_state->s1, s2_after_data_loss);
     /* assert.deepStrictEqual(n1.getHeads(), n2.getHeads())                  */
     heads1 = AMstackItems(stack_ptr, AMgetHeads(test_state->n1), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
@@ -1035,19 +1093,22 @@ static void test_should_handle_changes_concurrrent_to_the_last_sync_heads(void**
      * create('fedcba98' */
     TestState* test_state = *state;
     AMstack** stack_ptr = &test_state->base_state->stack;
-    AMdoc* n3 =
-        AMitemToDoc(AMstackItem(stack_ptr,
-                                AMcreate(AMitemToActorId(AMstackItem(stack_ptr, AMactorIdFromStr(AMstr("fedcba98")),
-                                                                     cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)))),
-                                cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)));
+    AMactorId const* actor_id;
+    assert_true(AMitemToActorId(
+        AMstackItem(stack_ptr, AMactorIdFromStr(AMstr("fedcba98")), cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)),
+        &actor_id));
+    AMdoc* n3;
+    assert_true(AMitemToDoc(AMstackItem(stack_ptr, AMcreate(actor_id), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)), &n3));
     /* const s12 = initSyncState(), s21 = initSyncState(), s23 =
      * initSyncState(), s32 = initSyncState( */
     AMsyncState* s12 = test_state->s1;
     AMsyncState* s21 = test_state->s2;
-    AMsyncState* s23 =
-        AMitemToSyncState(AMstackItem(stack_ptr, AMsyncStateInit(), cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_STATE)));
-    AMsyncState* s32 =
-        AMitemToSyncState(AMstackItem(stack_ptr, AMsyncStateInit(), cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_STATE)));
+    AMsyncState* s23;
+    assert_true(AMitemToSyncState(
+        AMstackItem(stack_ptr, AMsyncStateInit(), cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_STATE)), &s23));
+    AMsyncState* s32;
+    assert_true(AMitemToSyncState(
+        AMstackItem(stack_ptr, AMsyncStateInit(), cmocka_cb, AMexpect(AM_VAL_TYPE_SYNC_STATE)), &s32));
     /*                                                                       */
     /* Change 1 is known to all three nodes */
     /* //n1 = Automerge.change(n1, {time: 0}, doc => doc.x = 1)              */
@@ -1106,11 +1167,12 @@ static void test_should_handle_histories_with_lots_of_branching_and_merging(void
        create('fedcba98') const s1 = initSyncState(), s2 = initSyncState() */
     TestState* test_state = *state;
     AMstack** stack_ptr = &test_state->base_state->stack;
-    AMdoc* n3 =
-        AMitemToDoc(AMstackItem(stack_ptr,
-                                AMcreate(AMitemToActorId(AMstackItem(stack_ptr, AMactorIdFromStr(AMstr("fedcba98")),
-                                                                     cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)))),
-                                cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)));
+    AMactorId const* actor_id;
+    assert_true(AMitemToActorId(
+        AMstackItem(stack_ptr, AMactorIdFromStr(AMstr("fedcba98")), cmocka_cb, AMexpect(AM_VAL_TYPE_ACTOR_ID)),
+        &actor_id));
+    AMdoc* n3;
+    assert_true(AMitemToDoc(AMstackItem(stack_ptr, AMcreate(actor_id), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)), &n3));
     /* n1.put("_root", "x", 0); n1.commit("", 0)                             */
     AMstackItem(NULL, AMmapPutUint(test_state->n1, AM_ROOT, AMstr("x"), 0), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));

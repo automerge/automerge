@@ -1,8 +1,10 @@
 use automerge as am;
 
+use libc::{c_void, memcpy};
 use std::any::type_name;
 use std::borrow::Cow;
 use std::cell::{RefCell, UnsafeCell};
+use std::mem::size_of;
 use std::rc::Rc;
 
 use crate::actor_id::AMactorId;
@@ -1527,43 +1529,58 @@ pub unsafe extern "C" fn AMitemResult(item: *const AMitem) -> *mut AMresult {
 /// \brief Gets the actor identifier value of an item.
 ///
 /// \param[in] item A pointer to an `AMitem` struct.
-/// \return An `AMactorId` struct pointer.
+/// \param[out] value A pointer to an `AMactorId` struct pointer.
+/// \return `true` if `AMitemValType(`\p item `) == AM_VAL_TYPE_ACTOR_ID` and
+///         \p *value has been reassigned, `false` otherwise.
 /// \pre \p item `!= NULL`
-/// \pre `AMitemValType(`\p item `) == AM_VAL_TYPE_ACTOR_ID`
-/// \post `(`\p item `== NULL) -> NULL`
-/// \post `(AMitemValType(`\p item `) != AM_VAL_TYPE_ACTOR_ID) -> NULL`
 /// \internal
 ///
 /// # Safety
 /// item must be a valid pointer to an AMitem
 #[no_mangle]
-pub unsafe extern "C" fn AMitemToActorId(item: *const AMitem) -> *const AMactorId {
+pub unsafe extern "C" fn AMitemToActorId(
+    item: *const AMitem,
+    value: *mut *const AMactorId,
+) -> bool {
     if let Some(item) = item.as_ref() {
         if let Ok(actor_id) = <&AMactorId>::try_from(item) {
-            return actor_id;
+            if !value.is_null() {
+                memcpy(
+                    value as *mut c_void,
+                    &actor_id as *const &AMactorId as *const c_void,
+                    size_of::<*const AMactorId>(),
+                );
+                return true;
+            }
         }
     }
-    std::ptr::null()
+    false
 }
 
 /// \memberof AMitem
 /// \brief Gets the boolean value of an item.
 ///
 /// \param[in] item A pointer to an `AMitem` struct.
-/// \return A boolean.
+/// \param[out] value A pointer to a boolean.
+/// \return `true` if `AMitemValType(`\p item `) == AM_VAL_TYPE_BOOL` and
+///         \p *value has been reassigned, `false` otherwise.
 /// \pre \p item `!= NULL`
-/// \pre `AMitemValType(`\p item `) == AM_VAL_TYPE_BOOL`
-/// \post `(`\p item `== NULL) -> false`
-/// \post `(AMitemValType(`\p item `) != AM_VAL_TYPE_BOOL) -> false`
 /// \internal
 ///
 /// # Safety
 /// item must be a valid pointer to an AMitem
 #[no_mangle]
-pub unsafe extern "C" fn AMitemToBool(item: *const AMitem) -> bool {
+pub unsafe extern "C" fn AMitemToBool(item: *const AMitem, value: *mut bool) -> bool {
     if let Some(item) = item.as_ref() {
         if let Ok(boolean) = item.try_into() {
-            return boolean;
+            if !value.is_null() {
+                memcpy(
+                    value as *mut c_void,
+                    &boolean as *const bool as *const c_void,
+                    size_of::<bool>(),
+                );
+                return true;
+            }
         }
     }
     false
@@ -1573,322 +1590,415 @@ pub unsafe extern "C" fn AMitemToBool(item: *const AMitem) -> bool {
 /// \brief Gets the array of bytes value of an item.
 ///
 /// \param[in] item A pointer to an `AMitem` struct.
-/// \return An `AMbyteSpan` struct.
+/// \param[out] value A pointer to an `AMbyteSpan` struct.
+/// \return `true` if `AMitemValType(`\p item `) == AM_VAL_TYPE_BYTES` and
+///         \p *value has been reassigned, `false` otherwise.
 /// \pre \p item `!= NULL`
-/// \pre `AMitemValType(`\p item `) == AM_VAL_TYPE_BYTES`
-/// \post `(`\p item `== NULL) -> (AMbyteSpan){0}`
-/// \post `(AMitemValType(`\p item `) != AM_VAL_TYPE_BYTES) -> (AMbyteSpan){0}`
 /// \internal
 ///
 /// # Safety
 /// item must be a valid pointer to an AMitem
 #[no_mangle]
-pub unsafe extern "C" fn AMitemToBytes(item: *const AMitem) -> AMbyteSpan {
+pub unsafe extern "C" fn AMitemToBytes(item: *const AMitem, value: *mut AMbyteSpan) -> bool {
     if let Some(item) = item.as_ref() {
         if let Ok(bytes) = item.as_ref().try_into_bytes() {
-            return bytes;
+            if !value.is_null() {
+                memcpy(
+                    value as *mut c_void,
+                    &bytes as *const AMbyteSpan as *const c_void,
+                    size_of::<AMbyteSpan>(),
+                );
+                return true;
+            }
         }
     }
-    Default::default()
+    false
 }
 
 /// \memberof AMitem
 /// \brief Gets the change value of an item.
 ///
 /// \param[in] item A pointer to an `AMitem` struct.
-/// \return An `AMchange` struct pointer.
+/// \param[out] value A pointer to an `AMchange` struct pointer.
+/// \return `true` if `AMitemValType(`\p item `) == AM_VAL_TYPE_CHANGE` and
+///         \p *value has been reassigned, `false` otherwise.
 /// \pre \p item `!= NULL`
-/// \pre `AMitemValType(`\p item `) == AM_VAL_TYPE_CHANGE`
-/// \post `(`\p item `== NULL) -> NULL`
-/// \post `(AMitemValType(`\p item `) != AM_VAL_TYPE_CHANGE) -> NULL`
 /// \internal
 ///
 /// # Safety
 /// item must be a valid pointer to an AMitem
 #[no_mangle]
-pub unsafe extern "C" fn AMitemToChange(item: *mut AMitem) -> *mut AMchange {
+pub unsafe extern "C" fn AMitemToChange(item: *mut AMitem, value: *mut *mut AMchange) -> bool {
     if let Some(item) = item.as_mut() {
         if let Ok(change) = <&mut AMchange>::try_from(item) {
-            return change;
+            if !value.is_null() {
+                memcpy(
+                    value as *mut c_void,
+                    &change as *const &mut AMchange as *const c_void,
+                    size_of::<*const AMchange>(),
+                );
+                return true;
+            }
         }
     }
-    std::ptr::null_mut()
+    false
 }
 
 /// \memberof AMitem
 /// \brief Gets the change hash value of an item.
 ///
 /// \param[in] item A pointer to an `AMitem` struct.
-/// \return An `AMbyteSpan` struct.
+/// \param[out] value A pointer to an `AMbyteSpan` struct.
+/// \return `true` if `AMitemValType(`\p item `) == AM_VAL_TYPE_CHANGE_HASH` and
+///         \p *value has been reassigned, `false` otherwise.
 /// \pre \p item `!= NULL`
-/// \pre `AMitemValType(`\p item `) == AM_VAL_TYPE_CHANGE_HASH`
-/// \post `(`\p item `== NULL) -> (AMbyteSpan){0}`
-/// \post `(AMitemValType(`\p item `) != AM_VAL_TYPE_CHANGE_HASH) -> (AMbyteSpan){0}`
 /// \internal
 ///
 /// # Safety
 /// item must be a valid pointer to an AMitem
 #[no_mangle]
-pub unsafe extern "C" fn AMitemToChangeHash(item: *const AMitem) -> AMbyteSpan {
+pub unsafe extern "C" fn AMitemToChangeHash(item: *const AMitem, value: *mut AMbyteSpan) -> bool {
     if let Some(item) = item.as_ref() {
         if let Ok(change_hash) = item.as_ref().try_into_change_hash() {
-            return change_hash;
+            if !value.is_null() {
+                memcpy(
+                    value as *mut c_void,
+                    &change_hash as *const AMbyteSpan as *const c_void,
+                    size_of::<AMbyteSpan>(),
+                );
+                return true;
+            }
         }
     }
-    Default::default()
+    false
 }
 
 /// \memberof AMitem
 /// \brief Gets the CRDT counter value of an item.
 ///
 /// \param[in] item A pointer to an `AMitem` struct.
-/// \return A signed 64-bit integer.
+/// \param[out] value A pointer to a signed 64-bit integer.
+/// \return `true` if `AMitemValType(`\p item `) == AM_VAL_TYPE_COUNTER` and
+///         \p *value has been reassigned, `false` otherwise.
 /// \pre \p item `!= NULL`
-/// \pre `AMitemValType(`\p item `) == AM_VAL_TYPE_COUNTER`
-/// \post `(`\p item `== NULL) -> INT64_MAX`
-/// \post `(AMitemValType(`\p item `) != AM_VAL_TYPE_COUNTER) -> INT64_MAX`
 /// \internal
 ///
 /// # Safety
 /// item must be a valid pointer to an AMitem
 #[no_mangle]
-pub unsafe extern "C" fn AMitemToCounter(item: *const AMitem) -> i64 {
+pub unsafe extern "C" fn AMitemToCounter(item: *const AMitem, value: *mut i64) -> bool {
     if let Some(item) = item.as_ref() {
         if let Ok(counter) = item.as_ref().try_into_counter() {
-            return counter;
+            if !value.is_null() {
+                memcpy(
+                    value as *mut c_void,
+                    &counter as *const i64 as *const c_void,
+                    size_of::<i64>(),
+                );
+                return true;
+            }
         }
     }
-    i64::MAX
+    false
 }
 
 /// \memberof AMitem
 /// \brief Gets the document value of an item.
 ///
 /// \param[in] item A pointer to an `AMitem` struct.
-/// \return An `AMdoc` struct pointer.
+/// \param[out] value A pointer to an `AMdoc` struct pointer.
+/// \return `true` if `AMitemValType(`\p item `) == AM_VAL_TYPE_DOC` and
+///         \p *value has been reassigned, `false` otherwise.
 /// \pre \p item `!= NULL`
-/// \pre `AMitemValType(`\p item `) == AM_VAL_TYPE_DOC`
-/// \post `(`\p item `== NULL) -> NULL`
-/// \post `(AMitemValType(`\p item `) != AM_VAL_TYPE_DOC) -> NULL`
 /// \internal
 ///
 /// # Safety
 /// item must be a valid pointer to an AMitem
 #[no_mangle]
-pub unsafe extern "C" fn AMitemToDoc(item: *mut AMitem) -> *mut AMdoc {
+pub unsafe extern "C" fn AMitemToDoc(item: *mut AMitem, value: *mut *const AMdoc) -> bool {
     if let Some(item) = item.as_mut() {
         if let Ok(doc) = <&mut AMdoc>::try_from(item) {
-            return doc;
+            if !value.is_null() {
+                memcpy(
+                    value as *mut c_void,
+                    &doc as *const &mut AMdoc as *const c_void,
+                    size_of::<*const AMdoc>(),
+                );
+                return true;
+            }
         }
     }
-    std::ptr::null_mut()
+    false
 }
 
 /// \memberof AMitem
 /// \brief Gets the float value of an item.
 ///
 /// \param[in] item A pointer to an `AMitem` struct.
-/// \return A 64-bit float.
+/// \param[out] value A pointer to a 64-bit float.
+/// \return `true` if `AMitemValType(`\p item `) == AM_VAL_TYPE_F64` and
+///         \p *value has been reassigned, `false` otherwise.
 /// \pre \p item `!= NULL`
-/// \pre `AMitemValType(`\p item `) == AM_VAL_TYPE_F64`
-/// \post `(`\p item `== NULL) -> DBL_MAX`
-/// \post `(AMitemValType(`\p item `) != AM_VAL_TYPE_F64) -> DBL_MAX`
 /// \internal
 ///
 /// # Safety
 /// item must be a valid pointer to an AMitem
 #[no_mangle]
-pub unsafe extern "C" fn AMitemToF64(item: *const AMitem) -> f64 {
+pub unsafe extern "C" fn AMitemToF64(item: *const AMitem, value: *mut f64) -> bool {
     if let Some(item) = item.as_ref() {
         if let Ok(float) = item.try_into() {
-            return float;
+            if !value.is_null() {
+                memcpy(
+                    value as *mut c_void,
+                    &float as *const f64 as *const c_void,
+                    size_of::<f64>(),
+                );
+                return true;
+            }
         }
     }
-    f64::MAX
+    false
 }
 
 /// \memberof AMitem
 /// \brief Gets the integer value of an item.
 ///
 /// \param[in] item A pointer to an `AMitem` struct.
-/// \return A signed 64-bit integer.
+/// \param[out] value A pointer to a signed 64-bit integer.
+/// \return `true` if `AMitemValType(`\p item `) == AM_VAL_TYPE_INT` and
+///         \p *value has been reassigned, `false` otherwise.
 /// \pre \p item `!= NULL`
-/// \pre `AMitemValType(`\p item `) == AM_VAL_TYPE_INT`
-/// \post `(`\p item `== NULL) -> INT64_MAX`
-/// \post `(AMitemValType(`\p item `) != AM_VAL_TYPE_INT) -> INT64_MAX`
 /// \internal
 ///
 /// # Safety
 /// item must be a valid pointer to an AMitem
 #[no_mangle]
-pub unsafe extern "C" fn AMitemToInt(item: *const AMitem) -> i64 {
+pub unsafe extern "C" fn AMitemToInt(item: *const AMitem, value: *mut i64) -> bool {
     if let Some(item) = item.as_ref() {
         if let Ok(int) = item.as_ref().try_into_int() {
-            return int;
+            if !value.is_null() {
+                memcpy(
+                    value as *mut c_void,
+                    &int as *const i64 as *const c_void,
+                    size_of::<i64>(),
+                );
+                return true;
+            }
         }
     }
-    i64::MAX
+    false
 }
 
 /// \memberof AMitem
 /// \brief Gets the UTF-8 string view value of an item.
 ///
 /// \param[in] item A pointer to an `AMitem` struct.
-/// \return A UTF-8 string view as an `AMbyteSpan` struct.
+/// \param[out] value A pointer to a UTF-8 string view as an `AMbyteSpan` struct.
+/// \return `true` if `AMitemValType(`\p item `) == AM_VAL_TYPE_STR` and
+///         \p *value has been reassigned, `false` otherwise.
 /// \pre \p item `!= NULL`
-/// \pre `AMitemValType(`\p item `) == AM_VAL_TYPE_STR`
-/// \post `(`\p item `== NULL) -> (AMbyteSpan){0}`
-/// \post `(AMitemValType(`\p item `) != AM_VAL_TYPE_STR) -> (AMbyteSpan){0}`
 /// \internal
 ///
 /// # Safety
 /// item must be a valid pointer to an AMitem
 #[no_mangle]
-pub unsafe extern "C" fn AMitemToStr(item: *const AMitem) -> AMbyteSpan {
+pub unsafe extern "C" fn AMitemToStr(item: *const AMitem, value: *mut AMbyteSpan) -> bool {
     if let Some(item) = item.as_ref() {
         if let Ok(str) = item.as_ref().try_into_str() {
-            return str;
+            if !value.is_null() {
+                memcpy(
+                    value as *mut c_void,
+                    &str as *const AMbyteSpan as *const c_void,
+                    size_of::<AMbyteSpan>(),
+                );
+                return true;
+            }
         }
     }
-    Default::default()
+    false
 }
 
 /// \memberof AMitem
 /// \brief Gets the synchronization have value of an item.
 ///
 /// \param[in] item A pointer to an `AMitem` struct.
-/// \return An `AMsyncHave` struct pointer.
+/// \param[out] value A pointer to an `AMsyncHave` struct pointer.
+/// \return `true` if `AMitemValType(`\p item `) == AM_VAL_TYPE_SYNC_HAVE` and
+///         \p *value has been reassigned, `false` otherwise.
 /// \pre \p item `!= NULL`
-/// \pre `AMitemValType(`\p item `) == AM_VAL_TYPE_SYNC_HAVE`
-/// \post `(`\p item `== NULL) -> NULL`
-/// \post `(AMitemValType(`\p item `) != AM_VAL_TYPE_SYNC_HAVE) -> NULL`
 /// \internal
 ///
 /// # Safety
 /// item must be a valid pointer to an AMitem
 #[no_mangle]
-pub unsafe extern "C" fn AMitemToSyncHave(item: *const AMitem) -> *const AMsyncHave {
+pub unsafe extern "C" fn AMitemToSyncHave(
+    item: *const AMitem,
+    value: *mut *const AMsyncHave,
+) -> bool {
     if let Some(item) = item.as_ref() {
         if let Ok(sync_have) = <&AMsyncHave>::try_from(item) {
-            return sync_have;
+            if !value.is_null() {
+                memcpy(
+                    value as *mut c_void,
+                    &sync_have as *const &AMsyncHave as *const c_void,
+                    size_of::<*const AMsyncHave>(),
+                );
+                return true;
+            }
         }
     }
-    std::ptr::null()
+    false
 }
 
 /// \memberof AMitem
 /// \brief Gets the synchronization message value of an item.
 ///
 /// \param[in] item A pointer to an `AMitem` struct.
-/// \return An `AMsyncMessage` struct pointer.
+/// \param[out] value A pointer to an `AMsyncMessage` struct pointer.
+/// \return `true` if `AMitemValType(`\p item `) == AM_VAL_TYPE_SYNC_MESSAGE` and
+///         \p *value has been reassigned, `false` otherwise.
 /// \pre \p item `!= NULL`
-/// \pre `AMitemValType(`\p item `) == AM_VAL_TYPE_SYNC_MESSAGE`
-/// \post `(`\p item `== NULL) -> NULL`
-/// \post `(AMitemValType(`\p item `) != AM_VAL_TYPE_SYNC_MESSAGE) -> NULL`
 /// \internal
 ///
 /// # Safety
 /// item must be a valid pointer to an AMitem
 #[no_mangle]
-pub unsafe extern "C" fn AMitemToSyncMessage(item: *const AMitem) -> *const AMsyncMessage {
+pub unsafe extern "C" fn AMitemToSyncMessage(
+    item: *const AMitem,
+    value: *mut *const AMsyncMessage,
+) -> bool {
     if let Some(item) = item.as_ref() {
         if let Ok(sync_message) = <&AMsyncMessage>::try_from(item) {
-            return sync_message;
+            if !value.is_null() {
+                memcpy(
+                    value as *mut c_void,
+                    &sync_message as *const &AMsyncMessage as *const c_void,
+                    size_of::<*const AMsyncMessage>(),
+                );
+                return true;
+            }
         }
     }
-    std::ptr::null()
+    false
 }
 
 /// \memberof AMitem
 /// \brief Gets the synchronization state value of an item.
 ///
 /// \param[in] item A pointer to an `AMitem` struct.
-/// \return An `AMsyncState` struct pointer.
+/// \param[out] value A pointer to an `AMsyncState` struct pointer.
+/// \return `true` if `AMitemValType(`\p item `) == AM_VAL_TYPE_SYNC_STATE` and
+///         \p *value has been reassigned, `false` otherwise.
 /// \pre \p item `!= NULL`
-/// \pre `AMitemValType(`\p item `) == AM_VAL_TYPE_SYNC_STATE`
-/// \post `(`\p item `== NULL) -> NULL`
-/// \post `(AMitemValType(`\p item `) != AM_VAL_TYPE_SYNC_STATE) -> NULL`
 /// \internal
 ///
 /// # Safety
 /// item must be a valid pointer to an AMitem
 #[no_mangle]
-pub unsafe extern "C" fn AMitemToSyncState(item: *mut AMitem) -> *mut AMsyncState {
+pub unsafe extern "C" fn AMitemToSyncState(
+    item: *mut AMitem,
+    value: *mut *mut AMsyncState,
+) -> bool {
     if let Some(item) = item.as_mut() {
         if let Ok(sync_state) = <&mut AMsyncState>::try_from(item) {
-            return sync_state;
+            if !value.is_null() {
+                memcpy(
+                    value as *mut c_void,
+                    &sync_state as *const &mut AMsyncState as *const c_void,
+                    size_of::<*const AMsyncState>(),
+                );
+                return true;
+            }
         }
     }
-    std::ptr::null_mut()
+    false
 }
 
 /// \memberof AMitem
 /// \brief Gets the *nix timestamp (milliseconds) value of an item.
 ///
 /// \param[in] item A pointer to an `AMitem` struct.
-/// \return A signed 64-bit integer.
+/// \param[out] value A pointer to a signed 64-bit integer.
+/// \return `true` if `AMitemValType(`\p item `) == AM_VAL_TYPE_TIMESTAMP` and
+///         \p *value has been reassigned, `false` otherwise.
 /// \pre \p item `!= NULL`
-/// \pre `AMitemValType(`\p item `) == AM_VAL_TYPE_TIMESTAMP`
-/// \post `(`\p item `== NULL) -> 0`
-/// \post `(AMitemValType(`\p item `) != AM_VAL_TYPE_TIMESTAMP) -> 0`
 /// \internal
 ///
 /// # Safety
 /// item must be a valid pointer to an AMitem
 #[no_mangle]
-pub unsafe extern "C" fn AMitemToTimestamp(item: *const AMitem) -> i64 {
+pub unsafe extern "C" fn AMitemToTimestamp(item: *const AMitem, value: *mut i64) -> bool {
     if let Some(item) = item.as_ref() {
         if let Ok(timestamp) = item.as_ref().try_into_timestamp() {
-            return timestamp;
+            if !value.is_null() {
+                memcpy(
+                    value as *mut c_void,
+                    &timestamp as *const i64 as *const c_void,
+                    size_of::<i64>(),
+                );
+                return true;
+            }
         }
     }
-    0
+    false
 }
 
 /// \memberof AMitem
 /// \brief Gets the unsigned integer value of an item.
 ///
 /// \param[in] item A pointer to an `AMitem` struct.
-/// \return An unsigned 64-bit integer.
+/// \param[out] value A pointer to a unsigned 64-bit integer.
+/// \return `true` if `AMitemValType(`\p item `) == AM_VAL_TYPE_UINT` and
+///         \p *value has been reassigned, `false` otherwise.
 /// \pre \p item `!= NULL`
-/// \pre `AMitemValType(`\p item `) == AM_VAL_TYPE_UINT`
-/// \post `(`\p item `== NULL) -> UINT64_MAX`
-/// \post `(AMitemValType(`\p item `) != AM_VAL_TYPE_UINT) -> UINT64_MAX`
 /// \internal
 ///
 /// # Safety
 /// item must be a valid pointer to an AMitem
 #[no_mangle]
-pub unsafe extern "C" fn AMitemToUint(item: *const AMitem) -> u64 {
+pub unsafe extern "C" fn AMitemToUint(item: *const AMitem, value: *mut u64) -> bool {
     if let Some(item) = item.as_ref() {
         if let Ok(uint) = item.try_into() {
-            return uint;
+            if !value.is_null() {
+                memcpy(
+                    value as *mut c_void,
+                    &uint as *const u64 as *const c_void,
+                    size_of::<u64>(),
+                );
+                return true;
+            }
         }
     }
-    u64::MAX
+    false
 }
 
 /// \memberof AMitem
 /// \brief Gets the unknown type of value of an item.
 ///
 /// \param[in] item A pointer to an `AMitem` struct.
-/// \return An `AMunknownValue` struct.
+/// \param[out] value A pointer to an `AMunknownValue` struct.
+/// \return `true` if `AMitemValType(`\p item `) == AM_VAL_TYPE_UNKNOWN` and
+///         \p *value has been reassigned, `false` otherwise.
 /// \pre \p item `!= NULL`
-/// \pre `AMitemValType(`\p item `) == AM_VAL_TYPE_UNKNOWN`
-/// \post `(`\p item `== NULL) -> (AMunknownValue){0}`
-/// \post `(AMitemValType(`\p item `) != AM_VAL_TYPE_UNKNOWN) -> (AMunknownValue){0}`
 /// \internal
 ///
 /// # Safety
 /// item must be a valid pointer to an AMitem
 #[no_mangle]
-pub unsafe extern "C" fn AMitemToUnknown(item: *const AMitem) -> AMunknownValue {
+pub unsafe extern "C" fn AMitemToUnknown(item: *const AMitem, value: *mut AMunknownValue) -> bool {
     if let Some(item) = item.as_ref() {
         if let Ok(unknown) = item.try_into() {
-            return unknown;
+            if !value.is_null() {
+                memcpy(
+                    value as *mut c_void,
+                    &unknown as *const AMunknownValue as *const c_void,
+                    size_of::<AMunknownValue>(),
+                );
+                return true;
+            }
         }
     }
-    Default::default()
+    false
 }
 
 /// \memberof AMitem
