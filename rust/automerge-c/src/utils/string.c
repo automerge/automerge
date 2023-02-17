@@ -4,13 +4,7 @@
 #include <automerge-c/utils/string.h>
 
 int AMstrcmp(AMbyteSpan const lhs, AMbyteSpan const rhs) {
-    if (lhs.count < rhs.count) {
-        return -1;
-    } else if (lhs.count == rhs.count) {
-        return memcmp(lhs.src, rhs.src, lhs.count);
-    } else {
-        return 1;
-    }
+    return memcmp(lhs.src, rhs.src, (lhs.count < rhs.count) ? lhs.count : rhs.count);
 }
 
 char* AMstrdup(AMbyteSpan const str, char const* nul) {
