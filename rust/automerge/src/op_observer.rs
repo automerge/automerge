@@ -1,4 +1,5 @@
 use crate::exid::ExId;
+use crate::marks::Mark;
 use crate::Prop;
 use crate::ReadDoc;
 use crate::Value;
@@ -111,6 +112,8 @@ pub trait OpObserver {
     /// - `num`: the number of sequential elements deleted
     fn delete_seq<R: ReadDoc>(&mut self, doc: &R, objid: ExId, index: usize, num: usize);
 
+    fn mark<R: ReadDoc, M: Iterator<Item = Mark>>(&mut self, doc: &R, objid: ExId, mark: M);
+
     /// Whether to call sequence methods or `splice_text` when encountering changes in text
     ///
     /// Returns `false` by default
@@ -179,6 +182,8 @@ impl OpObserver for () {
         _tagged_value: (i64, ExId),
     ) {
     }
+
+    fn mark<R: ReadDoc, M: Iterator<Item = Mark>>(&mut self, _doc: &R, _objid: ExId, _mark: M) {}
 
     fn delete_map<R: ReadDoc>(&mut self, _doc: &R, _objid: ExId, _key: &str) {}
 
@@ -281,6 +286,8 @@ impl OpObserver for VecOpObserver {
             });
         }
     }
+
+    fn mark<R: ReadDoc, M: Iterator<Item = Mark>>(&mut self, _doc: &R, _objid: ExId, _mark: M) {}
 
     fn delete_map<R: ReadDoc>(&mut self, doc: &R, obj: ExId, key: &str) {
         if let Ok(p) = doc.parents(&obj) {

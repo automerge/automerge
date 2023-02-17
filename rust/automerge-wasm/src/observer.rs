@@ -6,7 +6,7 @@ use crate::{
     interop::{self, alloc, js_set},
     TextRepresentation,
 };
-use automerge::{ObjId, OpObserver, Prop, ReadDoc, ScalarValue, Value};
+use automerge::{marks::Mark, ObjId, OpObserver, Prop, ReadDoc, ScalarValue, Value};
 use js_sys::{Array, Object};
 use wasm_bindgen::prelude::*;
 
@@ -96,6 +96,11 @@ pub(crate) enum Patch {
         path: Vec<(ObjId, Prop)>,
         index: usize,
         length: usize,
+    },
+    Mark {
+        obj: ObjId,
+        path: Vec<(ObjId, Prop)>,
+        marks: Vec<Mark>,
     },
 }
 
@@ -345,6 +350,17 @@ impl OpObserver for Observer {
         }
     }
 
+    fn mark<R: ReadDoc, M: Iterator<Item = Mark>>(&mut self, doc: &R, obj: ObjId, mark: M) {
+        if self.enabled {
+            if let Some(path) = self.get_path(doc, &obj) {
+                let marks : Vec<_> = mark.collect();
+                if !marks.is_empty() {
+                  self.patches.push(Patch::Mark { path, obj, marks });
+                }
+            }
+        }
+    }
+
     fn text_as_seq(&self) -> bool {
         self.text_rep == TextRepresentation::Array
     }
@@ -380,6 +396,14 @@ fn export_path(path: &[(ObjId, Prop)], end: &Prop) -> Array {
     result
 }
 
+fn export_just_path(path: &[(ObjId, Prop)]) -> Array {
+    let result = Array::new();
+    for p in path {
+        result.push(&prop_to_js(&p.1));
+    }
+    result
+}
+
 impl Patch {
     pub(crate) fn path(&self) -> &[(ObjId, Prop)] {
         match &self {
@@ -390,6 +414,7 @@ impl Patch {
             Self::SpliceText { path, .. } => path.as_slice(),
             Self::DeleteMap { path, .. } => path.as_slice(),
             Self::DeleteSeq { path, .. } => path.as_slice(),
+            Self::Mark { path, .. } => path.as_slice(),
         }
     }
 
@@ -402,6 +427,7 @@ impl Patch {
             Self::SpliceText { obj, .. } => obj,
             Self::DeleteMap { obj, .. } => obj,
             Self::DeleteSeq { obj, .. } => obj,
+            Self::Mark { obj, .. } => obj,
         }
     }
 }
@@ -511,6 +537,24 @@ impl TryFrom<Patch> for JsValue {
                 if length > 1 {
                     js_set(&result, "length", length)?;
                 }
+                Ok(result.into())
+            }
+            Patch::Mark { path, marks, .. } => {
+                js_set(&result, "action", "mark")?;
+                js_set(&result, "path", export_just_path(path.as_slice()))?;
+                let marks_array = Array::new();
+                for m in marks.iter() {
+                    let mark = Object::new();
+                    js_set(&mark, "name", &m.name)?;
+                    js_set(
+                        &mark,
+                        "value",
+                        &alloc(&m.value.clone().into(), TextRepresentation::String).1,
+                    )?;
+                    js_set(&mark, "range", format!("{}..{}", m.start, m.end))?;
+                    marks_array.push(&mark);
+                }
+                js_set(&result, "marks", marks_array)?;
                 Ok(result.into())
             }
         }

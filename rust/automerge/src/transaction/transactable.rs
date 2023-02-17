@@ -1,5 +1,5 @@
 use crate::exid::ExId;
-use crate::marks::MarkRange;
+use crate::marks::Mark;
 use crate::{AutomergeError, ChangeHash, ObjType, Prop, ReadDoc, ScalarValue};
 
 /// A way of mutating a document within a single change.
@@ -89,13 +89,7 @@ pub trait Transactable: ReadDoc {
         text: &str,
     ) -> Result<(), AutomergeError>;
 
-    fn mark<O: AsRef<ExId>, V: Into<ScalarValue>>(
-        &mut self,
-        obj: O,
-        range: &MarkRange,
-        mark: &str,
-        value: V,
-    ) -> Result<(), AutomergeError>;
+    fn mark<O: AsRef<ExId>>(&mut self, obj: O, mark: Mark) -> Result<(), AutomergeError>;
 
     fn unmark<O: AsRef<ExId>, M: AsRef<ExId>>(
         &mut self,

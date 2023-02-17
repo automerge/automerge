@@ -1,7 +1,7 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
-use crate::marks::MarkRange;
+use crate::marks::Mark;
 use crate::op_observer::BranchableObserver;
 use crate::{
     query, Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, ReadDoc, ScalarValue, Value,
@@ -358,14 +358,8 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         self.do_tx(|tx, doc, obs| tx.splice_text(doc, obs, obj.as_ref(), pos, del, text))
     }
 
-    fn mark<O: AsRef<ExId>, V: Into<ScalarValue>>(
-        &mut self,
-        obj: O,
-        range: &MarkRange,
-        mark: &str,
-        value: V,
-    ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.mark(doc, obs, obj.as_ref(), range, mark, value))
+    fn mark<O: AsRef<ExId>>(&mut self, obj: O, mark: Mark) -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, obs| tx.mark(doc, obs, obj.as_ref(), mark))
     }
 
     fn unmark<O: AsRef<ExId>, M: AsRef<ExId>>(

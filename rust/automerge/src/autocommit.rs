@@ -1,7 +1,7 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
-use crate::marks::MarkRange;
+use crate::marks::Mark;
 use crate::op_observer::{BranchableObserver, OpObserver};
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
@@ -654,23 +654,10 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
         )
     }
 
-    fn mark<O: AsRef<ExId>, V: Into<ScalarValue>>(
-        &mut self,
-        obj: O,
-        range: &MarkRange,
-        mark: &str,
-        value: V,
-    ) -> Result<(), AutomergeError> {
+    fn mark<O: AsRef<ExId>>(&mut self, obj: O, mark: Mark) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let (current, tx) = self.transaction.as_mut().unwrap();
-        tx.mark(
-            &mut self.doc,
-            current.observer(),
-            obj.as_ref(),
-            range,
-            mark,
-            value,
-        )
+        tx.mark(&mut self.doc, current.observer(), obj.as_ref(), mark)
     }
 
     fn unmark<O: AsRef<ExId>, M: AsRef<ExId>>(

@@ -84,6 +84,18 @@ impl<'a, O1: OpObserver, O2: OpObserver> OpObserver for ComposeObservers<'a, O1,
         self.obs2.increment(doc, objid, prop, tagged_value);
     }
 
+    fn mark<R: crate::ReadDoc, M: Iterator<Item = crate::marks::Mark>>(
+        &mut self,
+        doc: &R,
+        objid: crate::ObjId,
+        mark: M,
+    ) {
+        let marks: Vec<_> = mark.collect();
+        self.obs1
+            .mark(doc, objid.clone(), marks.clone().into_iter());
+        self.obs2.mark(doc, objid, marks.into_iter());
+    }
+
     fn delete_map<R: crate::ReadDoc>(&mut self, doc: &R, objid: crate::ObjId, key: &str) {
         self.obs1.delete_map(doc, objid.clone(), key);
         self.obs2.delete_map(doc, objid, key);

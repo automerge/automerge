@@ -4,6 +4,8 @@ import assert from 'assert'
 //@ts-ignore
 import { create, load, Automerge, encodeChange, decodeChange } from '..'
 
+let util = require('util')
+
 describe('Automerge', () => {
   describe('marks', () => {
     it('should handle marks [..]', () => {
@@ -201,6 +203,95 @@ describe('Automerge', () => {
 
       assert.deepStrictEqual(doc.spans(list) , doc2.spans(list))
       assert.deepStrictEqual(doc.save(), doc2.save())
+    })
+
+    it('generates patches for marks made locally', () => {
+      let doc : Automerge = create(true, "aabbcc")
+      doc.enablePatches(true)
+      let list = doc.putObject("_root", "list", "")
+      doc.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
+      let h1 = doc.getHeads()
+      doc.mark(list, "[0..37]", "bold" , true)
+      doc.mark(list, "[4..19]", "itallic" , true)
+      doc.mark(list, "[10..13]", "comment" , "foxes are my favorite animal!")
+      doc.commit("marks");
+      let h2 = doc.getHeads()
+      let x = doc.attribute2(list, [], [h2]);
+      let patches = doc.popPatches();
+      let util = require('util')
+      assert.deepEqual(patches, [
+        { action: 'put', path: [ 'list' ], value: '' },
+        {
+          action: 'splice',
+          path: [ 'list', 0 ],
+          value: 'the quick fox jumps over the lazy dog'
+        },
+        {
+          action: 'mark',
+          path: [ 'list' ],
+          marks: [ { name: 'bold', value: true, range: '0..37' } ]
+        },
+        {
+          action: 'mark',
+          path: [ 'list' ],
+          marks: [ { name: 'itallic', value: true, range: '4..19' } ]
+        },
+        {
+          action: 'mark',
+          path: [ 'list' ],
+          marks: [
+            {
+              name: 'comment',
+              value: 'foxes are my favorite animal!',
+              range: '10..13'
+            }
+          ]
+        }
+      ]);
+    })
+    it('marks should create patches that respect marks that supersede it', () => {
+
+      let doc1 : Automerge = create(true, "aabbcc")
+      let list = doc1.putObject("_root", "list", "")
+      doc1.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
+
+      let doc2 = load(doc1.save(),true);
+
+      let doc3 = load(doc1.save(),true);
+      doc3.enablePatches(true)
+
+      doc1.put("/","foo", "bar"); // make a change to our op counter is higher than doc2
+      doc1.mark(list, "[0..5]", "x", "a")
+      doc1.mark(list, "[8..11]", "x", "b")
+
+      doc2.mark(list, "[4..13]", "x", "c");
+
+      doc3.merge(doc1)
+      doc3.merge(doc2)
+
+      let patches = doc3.popPatches();
+
+      assert.deepEqual(patches, [
+          { action: 'put', path: [ 'foo' ], value: 'bar' },
+          {
+            action: 'mark',
+            path: [ 'list' ],
+            marks: [ { name: 'x', value: 'a', range: '0..5' } ]
+          },
+          {
+            action: 'mark',
+            path: [ 'list' ],
+            marks: [ { name: 'x', value: 'b', range: '8..11' } ]
+          },
+          {
+            action: 'mark',
+            path: [ 'list' ],
+            marks: [
+              { name: 'x', value: 'c', range: '5..8' },
+              { name: 'x', value: 'c', range: '11..13' },
+            ]
+          },
+        ]);
     })
   })
 })

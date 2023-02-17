@@ -819,6 +819,7 @@ impl Automerge {
                     }
                 }
             }
+            Patch::Mark { .. } => Ok(result.into()),
         }
     }
 
@@ -878,6 +879,7 @@ impl Automerge {
             //Patch::SpliceText { .. } => Err(to_js_err("cannot Splice into map")),
             Patch::SpliceText { .. } => Err(error::ApplyPatch::SpliceTextInMap),
             Patch::PutSeq { .. } => Err(error::ApplyPatch::PutIdxInMap),
+            Patch::Mark { .. } => Err(error::ApplyPatch::MarkInMap),
         }
     }
 
@@ -1415,6 +1417,8 @@ pub(crate) mod error {
         SpliceTextInMap,
         #[error("cannot put a seq index in a map")]
         PutIdxInMap,
+        #[error("cannot mark a span in a map")]
+        MarkInMap,
         #[error(transparent)]
         GetProp(#[from] GetProp),
         #[error(transparent)]

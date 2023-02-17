@@ -1,7 +1,7 @@
 use std::num::NonZeroU64;
 
 use crate::exid::ExId;
-use crate::marks::MarkRange;
+use crate::marks::Mark;
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
 use crate::types::{Key, ListEncoding, ObjId, OpId, OpIds, TextEncoding};
@@ -649,47 +649,40 @@ impl TransactionInner {
         Ok(())
     }
 
-    pub(crate) fn mark<Obs: OpObserver, V: Into<ScalarValue>>(
+    pub(crate) fn mark<Obs: OpObserver>(
         &mut self,
         doc: &mut Automerge,
         op_observer: Option<&mut Obs>,
         ex_obj: &ExId,
-        range: &MarkRange,
-        mark: &str,
-        value: V,
+        mark: Mark,
     ) -> Result<(), AutomergeError> {
         let (obj, _obj_type) = doc.exid_to_obj(ex_obj)?;
-        let mark = doc.ops_mut().m.import_markname(mark);
+        let mark_name = doc.ops_mut().m.import_markname(mark.name.as_ref());
         if let Some(obs) = op_observer {
             self.do_insert(
                 doc,
                 Some(obs),
                 obj,
-                range.start,
-                OpType::mark(mark, range.expand_left, value.into()),
+                mark.start,
+                OpType::mark(mark_name, mark.expand_left, mark.value.clone()),
             )?;
             self.do_insert(
                 doc,
                 Some(obs),
                 obj,
-                range.end,
-                OpType::MarkEnd(range.expand_right),
+                mark.end,
+                OpType::MarkEnd(mark.expand_right),
             )?;
+            obs.mark(doc, ex_obj.clone(), Some(mark).into_iter())
         } else {
             self.do_insert::<Obs>(
                 doc,
                 None,
                 obj,
-                range.start,
-                OpType::mark(mark, range.expand_left, value.into()),
+                mark.start,
+                OpType::mark(mark_name, mark.expand_left, mark.value),
             )?;
-            self.do_insert::<Obs>(
-                doc,
-                None,
-                obj,
-                range.end,
-                OpType::MarkEnd(range.expand_right),
-            )?;
+            self.do_insert::<Obs>(doc, None, obj, mark.end, OpType::MarkEnd(mark.expand_right))?;
         }
         Ok(())
     }

@@ -799,7 +799,7 @@ impl Automerge {
         let (obj, _) = self.import(obj)?;
         let re = Regex::new(r"([\[\(])(\d+)\.\.(\d+)([\)\]])").unwrap();
         let range = range.as_string().ok_or("range must be a string")?;
-        let cap = re.captures_iter(&range).next().ok_or("range must be in the form of (start..end] or [start..end) etc... () for sticky, [] for normal")?;
+        let cap = re.captures_iter(&range).next().ok_or(format!("(range={}) range must be in the form of (start..end] or [start..end) etc... () for sticky, [] for normal",range))?;
         let start: usize = cap[2].parse().map_err(|_| to_js_err("invalid start"))?;
         let end: usize = cap[3].parse().map_err(|_| to_js_err("invalid end"))?;
         let start_sticky = &cap[1] == "(";
@@ -814,9 +814,7 @@ impl Automerge {
         self.doc
             .mark(
                 &obj,
-                &am::marks::MarkRange::new(start, end, start_sticky, end_sticky),
-                &name,
-                value,
+                am::marks::Mark::new(name, value, start, end, start_sticky, end_sticky),
             )
             .map_err(to_js_err)?;
         Ok(())
@@ -885,7 +883,6 @@ impl Automerge {
         baseline: JsValue,
         change_sets: JsValue,
     ) -> Result<Array, JsValue> {
-        am::log!("doc.blame() is depricated - please use doc.attribute()");
         self.attribute(obj, baseline, change_sets)
     }
 

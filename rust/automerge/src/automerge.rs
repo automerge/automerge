@@ -1074,7 +1074,14 @@ impl Automerge {
         };
 
         if op.insert {
-            if obj_type == Some(ObjType::Text) {
+            if op.is_mark() {
+                if let OpType::MarkEnd(_) = op.action {
+                    let q = self
+                        .ops
+                        .search(obj, query::SeekMark::new(op.id.prev(), pos, encoding));
+                    observer.mark(self, ex_obj, q.marks.into_iter());
+                }
+            } else if obj_type == Some(ObjType::Text) {
                 observer.splice_text(self, ex_obj, seen, op.to_str());
             } else {
                 let value = (op.value(), self.ops.id_to_exid(op.id));
@@ -1361,6 +1368,7 @@ impl ReadDoc for Automerge {
             .ops
             .search(&obj, query::Attribute::new(baseline, change_sets));
         query.finish();
+        log!("ATTRIBUTE query={:?}", query);
         Ok(query.change_sets)
     }
 

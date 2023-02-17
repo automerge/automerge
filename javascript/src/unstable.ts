@@ -233,6 +233,29 @@ export function splice<T>(
   }
 }
 
+export function mark<T>(
+  doc: Doc<T>,
+  prop: stable.Prop,
+  markName: string,
+  range: string,
+  value: string | boolean | number | Uint8Array | null
+) {
+  if (!_is_proxy(doc)) {
+    throw new RangeError("object cannot be modified outside of a change block")
+  }
+  const state = _state(doc, false)
+  const objectId = _obj(doc)
+  if (!objectId) {
+    throw new RangeError("invalid object for mark")
+  }
+  const obj = `${objectId}/${prop}`
+  try {
+    return state.handle.mark(obj, range, markName, value)
+  } catch (e) {
+    throw new RangeError(`Cannot mark: ${e}`)
+  }
+}
+
 /**
  * Get the conflicts associated with a property
  *
