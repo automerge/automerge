@@ -1,8 +1,9 @@
 use automerge as am;
+use std::cmp::Ordering;
 use std::convert::TryFrom;
 use std::os::raw::c_char;
 
-use libc::strlen;
+use libc::{c_int, strlen};
 use smol_str::SmolStr;
 
 macro_rules! to_str {
@@ -25,10 +26,9 @@ pub struct AMbyteSpan {
     /// A pointer to the first byte of an array of bytes.
     /// \warning \p src is only valid until the array of bytes to which it
     ///          points is freed.
-    /// \attention <b>NEVER CALL `free()` ON \p src if the `AMbyteSpan` came
-    ///            from within an `AMitem` struct</b>; \p src will be freed
-    ///            when `AMfree()` is called on the `AMresult` from which the
-    ///            `AMitem` struct was retrieved.
+    /// \note If the `AMbyteSpan` came from within an `AMitem` struct then
+    ///       \p src will be freed when the pointer to the `AMresult` struct
+    ///       containing the `AMitem` struct is passed to `AMfree()`.
     pub src: *const u8,
     /// The count of bytes in the array.
     pub count: usize,
@@ -155,31 +155,66 @@ impl TryFrom<&AMbyteSpan> for &str {
     }
 }
 
+/// \memberof AMbyteSpan
 /// \brief Creates a view onto an array of bytes.
 ///
-/// \param[in] src A pointer to an array of bytes.
+/// \param[in] src A pointer to an array of bytes or `NULL`.
 /// \param[in] count The count of bytes to view from the array pointed to by
 ///                  \p src.
 /// \return An `AMbyteSpan` struct.
 /// \pre \p count `<= sizeof(`\p src `)`
+/// \post `(`\p src `== NULL) -> (AMbyteSpan){NULL, 0}` 
 /// \internal
 ///
 /// #Safety
-/// src must be a byte array of length `>= count`
+/// src must be a byte array of length `>= count` or `std::ptr::null()`
 #[no_mangle]
 pub unsafe extern "C" fn AMbytes(src: *const u8, count: usize) -> AMbyteSpan {
-    AMbyteSpan { src, count }
+    AMbyteSpan { src, count: if src.is_null() { 0 } else { count } }
 }
 
-/// \brief Creates a string view from a C string.
+/// \memberof AMbyteSpan
+/// \brief Creates a view onto a C string.
 ///
-/// \param[in] c_str A UTF-8 C string.
-/// \return An `AMbyteSpan` struct for a UTF-8 string.
+/// \param[in] c_str A null-terminated byte string or `NULL`.
+/// \return An `AMbyteSpan` struct.
+/// \pre Each byte in \p c_str encodes one UTF-8 character.
 /// \internal
 ///
 /// #Safety
-/// c_str must be a null-terminated array of `c_char`
+/// c_str must be a null-terminated array of `std::os::raw::c_char` or `std::ptr::null()`.
 #[no_mangle]
 pub unsafe extern "C" fn AMstr(c_str: *const c_char) -> AMbyteSpan {
     c_str.into()
+}
+
+/// \memberof AMbyteSpan
+/// \brief Compares two UTF-8 string views lexicographically.
+///        
+/// \param[in] lhs A UTF-8 string view as an `AMbyteSpan` struct.
+/// \param[in] rhs A UTF-8 string view as an `AMbyteSpan` struct.
+/// \return Negative value if \p lhs appears before \p rhs in lexicographical order.
+///         Zero if \p lhs and \p rhs compare equal.
+///         Positive value if \p lhs appears after \p rhs in lexicographical order.
+/// \pre \p lhs.src `!= NULL`
+/// \pre \p lhs.count `<= sizeof(`\p lhs.src `)`
+/// \pre \p rhs.src `!= NULL`
+/// \pre \p rhs.count `<= sizeof(`\p rhs.src `)`
+/// \internal
+///
+/// #Safety
+/// lhs.src must be a byte array of length >= lhs.count
+/// rhs.src must be a a byte array of length >= rhs.count
+#[no_mangle]
+pub unsafe extern "C" fn AMstrcmp(lhs: AMbyteSpan, rhs: AMbyteSpan) -> c_int {
+    match (<&str>::try_from(&lhs), <&str>::try_from(&rhs)) {
+        (Ok(lhs), Ok(rhs)) => match lhs.cmp(rhs) {
+            Ordering::Less => -1,
+            Ordering::Equal => 0,
+            Ordering::Greater => 1,
+        },
+        (Err(_), Ok(_)) => -1,
+        (Err(_), Err(_)) => 0,
+        (Ok(_), Err(_)) => 1,
+    }
 }

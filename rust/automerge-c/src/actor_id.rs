@@ -1,4 +1,5 @@
 use automerge as am;
+use libc::c_int;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::str::FromStr;
@@ -93,7 +94,7 @@ pub unsafe extern "C" fn AMactorIdBytes(actor_id: *const AMactorId) -> AMbyteSpa
 pub unsafe extern "C" fn AMactorIdCmp(
     actor_id1: *const AMactorId,
     actor_id2: *const AMactorId,
-) -> isize {
+) -> c_int {
     match (actor_id1.as_ref(), actor_id2.as_ref()) {
         (Some(actor_id1), Some(actor_id2)) => match actor_id1.as_ref().cmp(actor_id2.as_ref()) {
             Ordering::Less => -1,

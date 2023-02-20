@@ -1,18 +1,21 @@
 #ifndef AUTOMERGE_C_UTILS_STACK_H
 #define AUTOMERGE_C_UTILS_STACK_H
+/** \file
+ *  \brief Utility data structures and functions for hiding `AMresult` structs,
+ *         managing their lifetimes, and automatically applying custom
+ *         validation logic to the `AMitem` structs that they contain.
+ *
+ *  \note The `AMstack` struct and its related functions drastically reduce the
+ *        need for boilerplate code and/or `goto` statement usage within a C
+ *        application but a higher-level programming language offers even better
+ *        ways to do the same things.
+ */
 
 #include <automerge-c/automerge.h>
 
 /**
  * \struct AMstack
- * \installed_headerfile
  * \brief A node in a singly-linked list of result pointers.
- *
- * \note Using this data structure is purely optional because its sole purpose
- *       is to ease memory management in C/C++ and Objective-C by deferring
- *       the `AMfree()` call for multiple `AMresult` structs without having to
- *       assign each one to a unique variable and then later call `AMfree()`
- *       for each of those variables individually.
  */
 typedef struct AMstack {
     /**
@@ -35,11 +38,6 @@ typedef struct AMstack {
  * \return `true` if the top `AMresult` struct in \p stack is valid, `false`
  *         otherwise.
  * \pre \p stack `!= NULL`.
- * \note Implementing this function is purely optional because its sole purpose
- *       is to ease memory management in C/C++ and Objective-C by deferring
- *       the `AMfree()` call for multiple `AMresult` structs without having to
- *       assign each one to a unique variable and then later call `AMfree()`
- *       for each of those variables individually.
  */
 typedef bool (*AMstackCallback)(AMstack** stack, void* data);
 
@@ -50,11 +48,6 @@ typedef bool (*AMstackCallback)(AMstack** stack, void* data);
  * \param[in,out] stack A pointer to a pointer to an `AMstack` struct.
  * \pre \p stack `!= NULL`
  * \post `*stack == NULL`
- * \note Calling this function is purely optional because its sole purpose is
- *       to ease memory management in C/C++ and Objective-C by deferring the
- *       `AMfree()` call for multiple `AMresult` structs without having to
- *       assign each one to a unique variable and then later call `AMfree()`
- *       for each of those variables individually.
  */
 void AMstackFree(AMstack** stack);
 
@@ -69,11 +62,6 @@ void AMstackFree(AMstack** stack);
  * \pre \p stack `!= NULL`
  * \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
  *          in order to avoid a memory leak.
- * \note Calling this function is purely optional because its sole purpose is
- *       to ease memory management in C/C++ and Objective-C by deferring the
- *       `AMfree()` call for multiple `AMresult` structs without having to
- *       assign each one to a unique variable and then later call `AMfree()`
- *       for each of those variables individually.
  */
 AMresult* AMstackPop(AMstack** stack, AMresult const* result);
 
@@ -92,11 +80,6 @@ AMresult* AMstackPop(AMstack** stack, AMresult const* result);
  * \return \p result or `NULL`.
  * \warning If \p stack `== NULL` then \p result is deallocated in order to
  *          avoid a memory leak.
- * \note Calling this function is purely optional because its sole purpose is
- *       to ease memory management in C/C++ and Objective-C by deferring the
- *       `AMfree()` call for multiple `AMresult` structs without having to
- *       assign each one to a unique variable and then later call `AMfree()`
- *       for each of those variables individually.
  */
 AMresult* AMstackResult(AMstack** stack,
                         AMresult* result,
@@ -119,11 +102,6 @@ AMresult* AMstackResult(AMstack** stack,
  * \return A pointer to an `AMitem` struct or `NULL`.
  * \warning If \p stack `== NULL` then \p result is deallocated in order to
  *          avoid a memory leak.
- * \note Calling this function is purely optional because its sole purpose is
- *       to ease memory management in C/C++ and Objective-C by deferring the
- *       `AMfree()` call for multiple `AMresult` structs without having to
- *       assign each one to a unique variable and then later call `AMfree()`
- *       for each of those variables individually.
  */
 AMitem* AMstackItem(AMstack** stack,
                     AMresult* result,
@@ -146,11 +124,6 @@ AMitem* AMstackItem(AMstack** stack,
  * \return An `AMitems` struct.
  * \warning If \p stack `== NULL` then \p result is deallocated immediately
  *          in order to avoid a memory leak.
- * \note Calling this function is purely optional because its sole purpose is
- *       to ease memory management in C/C++ and Objective-C by deferring the
- *       `AMfree()` call for multiple `AMresult` structs without having to
- *       assign each one to a unique variable and then later call `AMfree()`
- *       for each of those variables individually.
  */
 AMitems AMstackItems(AMstack** stack,
                      AMresult* result,
@@ -163,11 +136,6 @@ AMitems AMstackItems(AMstack** stack,
  *
  * \param[in,out] stack A pointer to an `AMstack` struct.
  * \return A 64-bit unsigned integer.
- * \note Calling this function is purely optional because its sole purpose is
- *       to ease memory management in C/C++ and Objective-C by deferring the
- *       `AMfree()` call for multiple `AMresult` structs without having to
- *       assign each one to a unique variable and then later call `AMfree()`
- *       for each of those variables individually.
  */
 size_t AMstackSize(AMstack const* const stack);
 

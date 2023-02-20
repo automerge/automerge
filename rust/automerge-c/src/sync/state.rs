@@ -76,7 +76,7 @@ pub unsafe extern "C" fn AMsyncStateDecode(src: *const u8, count: usize) -> *mut
 }
 
 /// \memberof AMsyncState
-/// \brief Encodes a synchronizaton state as an array of bytes.
+/// \brief Encodes a synchronization state as an array of bytes.
 ///
 /// \param[in] sync_state A pointer to an `AMsyncState` struct.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_BYTE_SPAN` item.

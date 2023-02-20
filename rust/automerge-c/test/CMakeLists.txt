@@ -4,7 +4,9 @@ add_executable(
     ${LIBRARY_NAME}_test
         actor_id_tests.c
         base_state.c
+        byte_span_tests.c
         cmocka_utils.c
+        enum_string_tests.c
         doc_state.c
         doc_tests.c
         item_tests.c

@@ -57,7 +57,7 @@ set(CARGO_FEATURES "")
 
 set(CARGO_BINARY_DIR "${CARGO_TARGET_DIR}/${CARGO_BUILD_TYPE}")
 
-set(BINDINGS_NAME "_${LIBRARY_NAME}")
+set(BINDINGS_NAME "${LIBRARY_NAME}_core")
 
 configure_file(
     ${CMAKE_MODULE_PATH}/Cargo.toml.in
@@ -262,6 +262,12 @@ install(
     EXPORT ${PROJECT_NAME}-config
     FILE_SET api
     FILE_SET config
+)
+
+# \note Install the Cargo-built core bindings to enable direct linkage.
+install(
+    FILES $<TARGET_PROPERTY:${BINDINGS_NAME},IMPORTED_LOCATION>
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
 install(EXPORT ${PROJECT_NAME}-config
