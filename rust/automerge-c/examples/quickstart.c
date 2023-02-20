@@ -17,15 +17,18 @@ int main(int argc, char** argv) {
     AMstack* stack = NULL;
     AMdoc* doc1;
     AMitemToDoc(AMstackItem(&stack, AMcreate(NULL), abort_cb, AMexpect(AM_VAL_TYPE_DOC)), &doc1);
-    AMobjId const* const cards = AMitemObjId(AMstackItem(
-        &stack, AMmapPutObject(doc1, AM_ROOT, AMstr("cards"), AM_OBJ_TYPE_LIST), abort_cb, AMexpect(AM_VAL_TYPE_VOID)));
-    AMobjId const* const card1 = AMitemObjId(AMstackItem(
-        &stack, AMlistPutObject(doc1, cards, SIZE_MAX, true, AM_OBJ_TYPE_MAP), abort_cb, AMexpect(AM_VAL_TYPE_VOID)));
+    AMobjId const* const cards =
+        AMitemObjId(AMstackItem(&stack, AMmapPutObject(doc1, AM_ROOT, AMstr("cards"), AM_OBJ_TYPE_LIST), abort_cb,
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
+    AMobjId const* const card1 =
+        AMitemObjId(AMstackItem(&stack, AMlistPutObject(doc1, cards, SIZE_MAX, true, AM_OBJ_TYPE_MAP), abort_cb,
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     AMstackItem(NULL, AMmapPutStr(doc1, card1, AMstr("title"), AMstr("Rewrite everything in Clojure")), abort_cb,
                 AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMmapPutBool(doc1, card1, AMstr("done"), false), abort_cb, AMexpect(AM_VAL_TYPE_VOID));
-    AMobjId const* const card2 = AMitemObjId(AMstackItem(
-        &stack, AMlistPutObject(doc1, cards, SIZE_MAX, true, AM_OBJ_TYPE_MAP), abort_cb, AMexpect(AM_VAL_TYPE_VOID)));
+    AMobjId const* const card2 =
+        AMitemObjId(AMstackItem(&stack, AMlistPutObject(doc1, cards, SIZE_MAX, true, AM_OBJ_TYPE_MAP), abort_cb,
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     AMstackItem(NULL, AMmapPutStr(doc1, card2, AMstr("title"), AMstr("Rewrite everything in Haskell")), abort_cb,
                 AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMmapPutBool(doc1, card2, AMstr("done"), false), abort_cb, AMexpect(AM_VAL_TYPE_VOID));

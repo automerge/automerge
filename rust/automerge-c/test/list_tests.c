@@ -22,7 +22,7 @@ static void test_AMlistIncrement(void** state) {
     AMstack** stack_ptr = &doc_state->base_state->stack;
     AMobjId const* const list =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc_state->doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST),
-                                cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));
+                                cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     AMstackItem(NULL, AMlistPutCounter(doc_state->doc, list, 0, true, 0), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     int64_t counter;
     assert_true(AMitemToCounter(
@@ -46,7 +46,7 @@ static void test_AMlistIncrement(void** state) {
         AMstack** stack_ptr = &doc_state->base_state->stack;                                                     \
         AMobjId const* const list = AMitemObjId(                                                                 \
             AMstackItem(stack_ptr, AMmapPutObject(doc_state->doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST),     \
-                        cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));                                                 \
+                        cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));                                             \
         AMstackItem(NULL, AMlistPut##suffix(doc_state->doc, list, 0, !strcmp(#mode, "insert"), scalar_value),    \
                     cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));                                                      \
         type value;                                                                                              \
@@ -67,7 +67,7 @@ static void test_AMlistIncrement(void** state) {
         AMstack** stack_ptr = &doc_state->base_state->stack;                                                           \
         AMobjId const* const list = AMitemObjId(                                                                       \
             AMstackItem(stack_ptr, AMmapPutObject(doc_state->doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST),           \
-                        cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));                                                       \
+                        cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));                                                   \
         AMstackItem(                                                                                                   \
             NULL, AMlistPutBytes(doc_state->doc, list, 0, !strcmp(#mode, "insert"), AMbytes(bytes_value, BYTES_SIZE)), \
             cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));                                                                    \
@@ -88,7 +88,7 @@ static void test_AMlistIncrement(void** state) {
         AMstack** stack_ptr = &doc_state->base_state->stack;                                                 \
         AMobjId const* const list = AMitemObjId(                                                             \
             AMstackItem(stack_ptr, AMmapPutObject(doc_state->doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST), \
-                        cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));                                             \
+                        cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));                                         \
         AMstackItem(NULL, AMlistPutNull(doc_state->doc, list, 0, !strcmp(#mode, "insert")), cmocka_cb,       \
                     AMexpect(AM_VAL_TYPE_VOID));                                                             \
         AMresult* result = AMstackResult(stack_ptr, AMlistGet(doc_state->doc, list, 0, NULL), NULL, NULL);   \
@@ -108,11 +108,11 @@ static void test_AMlistIncrement(void** state) {
         AMstack** stack_ptr = &doc_state->base_state->stack;                                                     \
         AMobjId const* const list = AMitemObjId(                                                                 \
             AMstackItem(stack_ptr, AMmapPutObject(doc_state->doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST),     \
-                        cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));                                                 \
+                        cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));                                             \
         AMobjType const obj_type = suffix_to_obj_type(#label);                                                   \
         AMobjId const* const obj_id = AMitemObjId(                                                               \
             AMstackItem(stack_ptr, AMlistPutObject(doc_state->doc, list, 0, !strcmp(#mode, "insert"), obj_type), \
-                        cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));                                                 \
+                        cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));                                             \
         assert_non_null(obj_id);                                                                                 \
         assert_int_equal(AMobjObjType(doc_state->doc, obj_id), obj_type);                                        \
         assert_int_equal(AMobjSize(doc_state->doc, obj_id, NULL), 0);                                            \
@@ -127,7 +127,7 @@ static void test_AMlistIncrement(void** state) {
         AMstack** stack_ptr = &doc_state->base_state->stack;                                                        \
         AMobjId const* const list = AMitemObjId(                                                                    \
             AMstackItem(stack_ptr, AMmapPutObject(doc_state->doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST),        \
-                        cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));                                                    \
+                        cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));                                                \
         AMstackItem(NULL, AMlistPutStr(doc_state->doc, list, 0, !strcmp(#mode, "insert"), AMstr(str_value)),        \
                     cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));                                                         \
         AMbyteSpan str;                                                                                             \
@@ -201,7 +201,7 @@ static void test_get_range_values(void** state) {
     assert_true(AMitemToDoc(AMstackItem(stack_ptr, AMcreate(NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)), &doc1));
     AMobjId const* const list =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc1, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST), cmocka_cb,
-                                AMexpect(AM_VAL_TYPE_VOID)));
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
 
     /* Insert elements. */
     AMstackItem(NULL, AMlistPutStr(doc1, list, 0, true, AMstr("First")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
@@ -456,7 +456,7 @@ static void test_insert_at_index(void** state) {
     assert_true(AMitemToDoc(AMstackItem(stack_ptr, AMcreate(NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)), &doc));
     AMobjId const* const list =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST), cmocka_cb,
-                                AMexpect(AM_VAL_TYPE_VOID)));
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     /* Insert both at the same index. */
     AMstackItem(NULL, AMlistPutUint(doc, list, 0, true, 0), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMlistPutUint(doc, list, 0, true, 1), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));

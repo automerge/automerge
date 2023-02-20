@@ -21,7 +21,7 @@ static void test_AMitemResult(void** state) {
     /* Append the strings to a list so that they'll be in numerical order. */
     AMobjId const* const list =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc_state->doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST),
-                                cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));
+                                cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     for (size_t pos = 0; pos != ITEM_COUNT; ++pos) {
         size_t const count = snprintf(NULL, 0, "%zu", pos);
         char* const src = test_calloc(count + 1, sizeof(char));

@@ -264,11 +264,11 @@ impl From<Result<am::Change, am::LoadChangeError>> for AMresult {
     }
 }
 
-impl From<Result<am::ObjId, am::AutomergeError>> for AMresult {
-    fn from(maybe: Result<am::ObjId, am::AutomergeError>) -> Self {
-        match maybe {
-            Ok(obj_id) => Self::item(obj_id.into()),
-            Err(e) => Self::error(&e.to_string()),
+impl From<(Result<am::ObjId, am::AutomergeError>, am::ObjType)> for AMresult {
+    fn from(tuple: (Result<am::ObjId, am::AutomergeError>, am::ObjType)) -> Self {
+        match tuple {
+            (Ok(obj_id), obj_type) => Self::item((obj_id, obj_type).into()),
+            (Err(e), _) => Self::error(&e.to_string()),
         }
     }
 }

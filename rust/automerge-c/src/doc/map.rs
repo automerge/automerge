@@ -308,7 +308,8 @@ pub unsafe extern "C" fn AMmapPutObject(
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let key = to_str!(key);
-    to_result(doc.put_object(to_obj_id!(obj_id), key, to_obj_type!(obj_type)))
+    let obj_type = to_obj_type!(obj_type);
+    to_result((doc.put_object(to_obj_id!(obj_id), key, obj_type), obj_type))
 }
 
 /// \memberof AMdoc

@@ -559,12 +559,12 @@ impl From<am::ChangeHash> for Item {
     }
 }
 
-impl From<am::ObjId> for Item {
-    fn from(obj_id: am::ObjId) -> Self {
+impl From<(am::ObjId, am::ObjType)> for Item {
+    fn from((obj_id, obj_type): (am::ObjId, am::ObjType)) -> Self {
         Self {
             index: None,
             obj_id: Some(AMobjId::new(obj_id)),
-            value: None,
+            value: Some(am::Value::Object(obj_type).into()),
         }
     }
 }
@@ -959,9 +959,9 @@ impl From<am::ChangeHash> for AMitem {
     }
 }
 
-impl From<am::ObjId> for AMitem {
-    fn from(obj_id: am::ObjId) -> Self {
-        Self(Rc::new(Item::from(obj_id)))
+impl From<(am::ObjId, am::ObjType)> for AMitem {
+    fn from((obj_id, obj_type): (am::ObjId, am::ObjType)) -> Self {
+        Self(Rc::new(Item::from((obj_id, obj_type))))
     }
 }
 

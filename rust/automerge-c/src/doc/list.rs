@@ -458,9 +458,9 @@ pub unsafe extern "C" fn AMlistPutObject(
     let (pos, insert) = adjust!(pos, insert, doc.length(obj_id));
     let obj_type = to_obj_type!(obj_type);
     to_result(if insert {
-        doc.insert_object(obj_id, pos, obj_type)
+        (doc.insert_object(obj_id, pos, obj_type), obj_type)
     } else {
-        doc.put_object(obj_id, pos, obj_type)
+        (doc.put_object(obj_id, pos, obj_type), obj_type)
     })
 }
 

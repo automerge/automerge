@@ -64,7 +64,7 @@ static void test_AMkeys_list(void** state) {
     assert_true(AMitemToDoc(AMstackItem(stack_ptr, AMcreate(NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)), &doc));
     AMobjId const* const list =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST), cmocka_cb,
-                                AMexpect(AM_VAL_TYPE_VOID)));
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     AMstackItem(NULL, AMlistPutInt(doc, list, 0, true, 0), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMlistPutInt(doc, list, 1, true, 0), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMlistPutInt(doc, list, 2, true, 0), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
@@ -206,7 +206,7 @@ static void test_AMspliceText(void** state) {
     assert_true(AMitemToDoc(AMstackItem(stack_ptr, AMcreate(NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)), &doc));
     AMobjId const* const text =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc, AM_ROOT, AMstr("text"), AM_OBJ_TYPE_TEXT), cmocka_cb,
-                                AMexpect(AM_VAL_TYPE_VOID)));
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     AMstackItem(NULL, AMspliceText(doc, text, 0, 0, AMstr("one + ")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMspliceText(doc, text, 4, 2, AMstr("two = ")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     AMstackItem(NULL, AMspliceText(doc, text, 8, 2, AMstr("three")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));

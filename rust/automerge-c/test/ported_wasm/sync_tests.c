@@ -163,7 +163,7 @@ static void test_repos_with_equal_heads_do_not_need_a_reply_message(void** state
     /* const list = n1.putObject("_root", "n", [])                           */
     AMobjId const* const list =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(test_state->n1, AM_ROOT, AMstr("n"), AM_OBJ_TYPE_LIST),
-                                cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));
+                                cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     /* n1.commit("", 0)                                                      */
     AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     /* for (let i = 0; i < 10; i++) {                                        */
@@ -215,7 +215,7 @@ static void test_n1_should_offer_all_changes_to_n2_when_starting_from_nothing(vo
     /* const list = n1.putObject("_root", "n", [])                           */
     AMobjId const* const list =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(test_state->n1, AM_ROOT, AMstr("n"), AM_OBJ_TYPE_LIST),
-                                cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));
+                                cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     /* n1.commit("", 0)                                                      */
     AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     /* for (let i = 0; i < 10; i++) {                                        */
@@ -246,7 +246,7 @@ static void test_should_sync_peers_where_one_has_commits_the_other_does_not(void
     /* const list = n1.putObject("_root", "n", [])                           */
     AMobjId const* const list =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(test_state->n1, AM_ROOT, AMstr("n"), AM_OBJ_TYPE_LIST),
-                                cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));
+                                cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     /* n1.commit("", 0)                                                      */
     AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     /* for (let i = 0; i < 10; i++) {                                        */
@@ -652,7 +652,7 @@ static void test_should_assume_sent_changes_were_received_until_we_hear_otherwis
     /* const items = n1.putObject("_root", "items", [])                      */
     AMobjId const* const items =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(test_state->n1, AM_ROOT, AMstr("items"), AM_OBJ_TYPE_LIST),
-                                cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));
+                                cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     /* n1.commit("", 0)                                                      */
     AMstackItem(NULL, AMcommit(test_state->n1, AMstr(""), &TIME_0), cmocka_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
     /*                                                                       */

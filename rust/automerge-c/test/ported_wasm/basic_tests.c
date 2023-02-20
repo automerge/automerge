@@ -99,7 +99,7 @@ static void test_should_be_able_to_set_and_get_a_simple_value(void** state) {
     AMstackItem(NULL, AMmapPutTimestamp(doc, AM_ROOT, AMstr("time2"), 1001), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* doc.putObject(root, "list", []);                                      */
     AMstackItem(NULL, AMmapPutObject(doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST), cmocka_cb,
-                AMexpect(AM_VAL_TYPE_VOID));
+                AMexpect(AM_VAL_TYPE_OBJ_TYPE));
     /* doc.put(root, "null", null)                                           */
     AMstackItem(NULL, AMmapPutNull(doc, AM_ROOT, AMstr("null")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /*                                                                       */
@@ -250,7 +250,7 @@ static void test_should_be_able_to_make_subobjects(void** state) {
     /* const submap = doc.putObject(root, "submap", {})                      */
     AMobjId const* const submap =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc, AM_ROOT, AMstr("submap"), AM_OBJ_TYPE_MAP), cmocka_cb,
-                                AMexpect(AM_VAL_TYPE_VOID)));
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     /* doc.put(submap, "number", 6, "uint")                                  */
     AMstackItem(NULL, AMmapPutUint(doc, submap, AMstr("number"), 6), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* assert.strictEqual(doc.pendingOps(), 2)                               */
@@ -285,7 +285,7 @@ static void test_should_be_able_to_make_lists(void** state) {
     /* const sublist = doc.putObject(root, "numbers", [])                    */
     AMobjId const* const sublist =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc, AM_ROOT, AMstr("numbers"), AM_OBJ_TYPE_LIST), cmocka_cb,
-                                AMexpect(AM_VAL_TYPE_VOID)));
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     /* doc.insert(sublist, 0, "a");                                          */
     AMstackItem(NULL, AMlistPutStr(doc, sublist, 0, true, AMstr("a")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* doc.insert(sublist, 1, "b");                                          */
@@ -345,7 +345,7 @@ static void test_lists_have_insert_set_splice_and_push_ops(void** state) {
     /* const sublist = doc.putObject(root, "letters", [])                    */
     AMobjId const* const sublist =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc, AM_ROOT, AMstr("letters"), AM_OBJ_TYPE_LIST), cmocka_cb,
-                                AMexpect(AM_VAL_TYPE_VOID)));
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     /* doc.insert(sublist, 0, "a");                                          */
     AMstackItem(NULL, AMlistPutStr(doc, sublist, 0, true, AMstr("a")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* doc.insert(sublist, 0, "b");                                          */
@@ -679,7 +679,7 @@ static void test_should_be_able_to_splice_text(void** state) {
     /* const text = doc.putObject(root, "text", "");                         */
     AMobjId const* const text =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc, AM_ROOT, AMstr("text"), AM_OBJ_TYPE_TEXT), cmocka_cb,
-                                AMexpect(AM_VAL_TYPE_VOID)));
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     /* doc.splice(text, 0, 0, "hello ")                                      */
     AMstackItem(NULL, AMspliceText(doc, text, 0, 0, AMstr("hello ")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* doc.splice(text, 6, 0, "world")                                       */
@@ -821,7 +821,7 @@ static void test_should_be_able_to_splice_text_2(void** state) {
     /* const text = doc.putObject("_root", "text", "");                      */
     AMobjId const* const text =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc, AM_ROOT, AMstr("text"), AM_OBJ_TYPE_TEXT), cmocka_cb,
-                                AMexpect(AM_VAL_TYPE_VOID)));
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     /* doc.splice(text, 0, 0, "hello world");                                */
     AMstackItem(NULL, AMspliceText(doc, text, 0, 0, AMstr("hello world")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* const hash1 = doc.commit();                                           */
@@ -988,7 +988,7 @@ static void test_local_inc_increments_all_visible_counters_in_a_sequence(void** 
     /* const seq = doc1.putObject("_root", "seq", [])                        */
     AMobjId const* const seq =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc1, AM_ROOT, AMstr("seq"), AM_OBJ_TYPE_LIST), cmocka_cb,
-                                AMexpect(AM_VAL_TYPE_VOID)));
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     /* doc1.insert(seq, 0, "hello")                                          */
     AMstackItem(NULL, AMlistPutStr(doc1, seq, 0, true, AMstr("hello")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* const doc2 = load(doc1.save(), "bbbb");                               */
@@ -1154,24 +1154,25 @@ static void test_recursive_sets_are_possible(void** state) {
     /* const l1 = doc.putObject("_root", "list", [{ foo: "bar" }, [1, 2, 3]] */
     AMobjId const* const l1 =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST), cmocka_cb,
-                                AMexpect(AM_VAL_TYPE_VOID)));
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     {
         AMobjId const* const map = AMitemObjId(AMstackItem(
-            stack_ptr, AMlistPutObject(doc, l1, 0, true, AM_OBJ_TYPE_MAP), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));
+            stack_ptr, AMlistPutObject(doc, l1, 0, true, AM_OBJ_TYPE_MAP), cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
         AMstackItem(NULL, AMmapPutStr(doc, map, AMstr("foo"), AMstr("bar")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         AMobjId const* const list =
             AMitemObjId(AMstackItem(stack_ptr, AMlistPutObject(doc, l1, SIZE_MAX, true, AM_OBJ_TYPE_LIST), cmocka_cb,
-                                    AMexpect(AM_VAL_TYPE_VOID)));
+                                    AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
         for (int value = 1; value != 4; ++value) {
             AMstackItem(NULL, AMlistPutInt(doc, list, SIZE_MAX, true, value), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         }
     }
     /* const l2 = doc.insertObject(l1, 0, { zip: ["a", "b"] })               */
     AMobjId const* const l2 = AMitemObjId(AMstackItem(stack_ptr, AMlistPutObject(doc, l1, 0, true, AM_OBJ_TYPE_MAP),
-                                                      cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));
+                                                      cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     {
-        AMobjId const* const list = AMitemObjId(AMstackItem(
-            stack_ptr, AMmapPutObject(doc, l2, AMstr("zip"), AM_OBJ_TYPE_LIST), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));
+        AMobjId const* const list =
+            AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc, l2, AMstr("zip"), AM_OBJ_TYPE_LIST), cmocka_cb,
+                                    AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
         AMstackItem(NULL, AMlistPutStr(doc, list, SIZE_MAX, true, AMstr("a")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
         AMstackItem(NULL, AMlistPutStr(doc, list, SIZE_MAX, true, AMstr("b")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     }
@@ -1179,7 +1180,7 @@ static void test_recursive_sets_are_possible(void** state) {
      * object */
     AMobjId const* const l3 =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc, AM_ROOT, AMstr("info1"), AM_OBJ_TYPE_TEXT), cmocka_cb,
-                                AMexpect(AM_VAL_TYPE_VOID)));
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     AMstackItem(NULL, AMspliceText(doc, l3, 0, 0, AMstr("hello world")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* doc.put("_root", "info2", "hello world")  // 'str'                    */
     AMstackItem(NULL, AMmapPutStr(doc, AM_ROOT, AMstr("info2"), AMstr("hello world")), cmocka_cb,
@@ -1187,7 +1188,7 @@ static void test_recursive_sets_are_possible(void** state) {
     /* const l4 = doc.putObject("_root", "info3", "hello world")             */
     AMobjId const* const l4 =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc, AM_ROOT, AMstr("info3"), AM_OBJ_TYPE_TEXT), cmocka_cb,
-                                AMexpect(AM_VAL_TYPE_VOID)));
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     AMstackItem(NULL, AMspliceText(doc, l4, 0, 0, AMstr("hello world")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* assert.deepEqual(doc.materialize(), {
          "list": [{ zip: ["a", "b"] }, { foo: "bar" }, [1, 2, 3]],
@@ -1378,7 +1379,7 @@ static void test_only_returns_an_object_id_when_objects_are_created(void** state
     /* const r2 = doc.putObject("_root", "list", [])                         */
     AMobjId const* const r2 =
         AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc, AM_ROOT, AMstr("list"), AM_OBJ_TYPE_LIST), cmocka_cb,
-                                AMexpect(AM_VAL_TYPE_VOID)));
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     /* const r3 = doc.put("_root", "counter", 10, "counter")
        assert.deepEqual(r3, null);                                           */
     AMstackItem(NULL, AMmapPutCounter(doc, AM_ROOT, AMstr("counter"), 10), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
@@ -1393,7 +1394,7 @@ static void test_only_returns_an_object_id_when_objects_are_created(void** state
     AMstackItem(NULL, AMlistPutInt(doc, r2, 0, true, 10), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* const r7 = doc.insertObject(r2, 0, {});                               */
     AMobjId const* const r7 = AMitemObjId(AMstackItem(stack_ptr, AMlistPutObject(doc, r2, 0, true, AM_OBJ_TYPE_LIST),
-                                                      cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));
+                                                      cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     /* const r8 = doc.splice(r2, 1, 0, ["a", "b", "c"]);                     */
     AMresult* data = AMstackResult(
         stack_ptr, AMresultFrom(3, AMitemFromStr(AMstr("a")), AMitemFromStr(AMstr("b")), AMitemFromStr(AMstr("c"))),
@@ -1423,14 +1424,17 @@ static void test_objects_without_properties_are_preserved(void** state) {
     AMdoc* doc1;
     assert_true(AMitemToDoc(AMstackItem(stack_ptr, AMcreate(actor_id), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)), &doc1));
     /* const a = doc1.putObject("_root", "a", {});                           */
-    AMobjId const* const a = AMitemObjId(AMstackItem(
-        stack_ptr, AMmapPutObject(doc1, AM_ROOT, AMstr("a"), AM_OBJ_TYPE_MAP), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));
+    AMobjId const* const a =
+        AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc1, AM_ROOT, AMstr("a"), AM_OBJ_TYPE_MAP), cmocka_cb,
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     /* const b = doc1.putObject("_root", "b", {});                           */
-    AMobjId const* const b = AMitemObjId(AMstackItem(
-        stack_ptr, AMmapPutObject(doc1, AM_ROOT, AMstr("b"), AM_OBJ_TYPE_MAP), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));
+    AMobjId const* const b =
+        AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc1, AM_ROOT, AMstr("b"), AM_OBJ_TYPE_MAP), cmocka_cb,
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     /* const c = doc1.putObject("_root", "c", {});                           */
-    AMobjId const* const c = AMitemObjId(AMstackItem(
-        stack_ptr, AMmapPutObject(doc1, AM_ROOT, AMstr("c"), AM_OBJ_TYPE_MAP), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));
+    AMobjId const* const c =
+        AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc1, AM_ROOT, AMstr("c"), AM_OBJ_TYPE_MAP), cmocka_cb,
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     /* const d = doc1.put(c, "d", "dd");                                     */
     AMstackItem(NULL, AMmapPutStr(doc1, c, AMstr("d"), AMstr("dd")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /* const saved = doc1.save();                                            */
@@ -1539,8 +1543,9 @@ static void test_should_handle_merging_text_conflicts_then_saving_and_loading(vo
     AMdoc* A;
     assert_true(AMitemToDoc(AMstackItem(stack_ptr, AMcreate(actor_id), cmocka_cb, AMexpect(AM_VAL_TYPE_DOC)), &A));
     /* const At = A.putObject('_root', 'text', "")                           */
-    AMobjId const* const At = AMitemObjId(AMstackItem(
-        stack_ptr, AMmapPutObject(A, AM_ROOT, AMstr("text"), AM_OBJ_TYPE_TEXT), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));
+    AMobjId const* const At =
+        AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(A, AM_ROOT, AMstr("text"), AM_OBJ_TYPE_TEXT), cmocka_cb,
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
     /* A.splice(At, 0, 0, 'hello')                                           */
     AMstackItem(NULL, AMspliceText(A, At, 0, 0, AMstr("hello")), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     /*                                                                       */

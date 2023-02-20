@@ -96,7 +96,7 @@ static void test_AMmapPutNull(void** state) {
         AMobjType const obj_type = suffix_to_obj_type(#label);                                                   \
         AMobjId const* const obj_id =                                                                            \
             AMitemObjId(AMstackItem(stack_ptr, AMmapPutObject(doc_state->doc, AM_ROOT, AMstr(#label), obj_type), \
-                                    cmocka_cb, AMexpect(AM_VAL_TYPE_VOID)));                                     \
+                                    cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE)));                                 \
         assert_non_null(obj_id);                                                                                 \
         assert_int_equal(AMobjObjType(doc_state->doc, obj_id), obj_type);                                        \
         assert_int_equal(AMobjSize(doc_state->doc, obj_id, NULL), 0);                                            \
