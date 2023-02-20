@@ -1,3 +1,5 @@
+# This CMake script is used to force Cargo to regenerate the header file for the
+# core bindings after the out-of-source build directory has been cleaned.
 cmake_minimum_required(VERSION 3.23 FATAL_ERROR)
 
 if(NOT DEFINED CONDITION)

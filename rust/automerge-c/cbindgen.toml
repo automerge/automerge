@@ -23,7 +23,7 @@ documentation = true
 documentation_style = "doxy"
 header = """
 /** \\file
- *  \\ brief All constants, functions and types in the Automerge Rust library's C API.
+ *  \\brief All constants, functions and types in the core Automerge C API.
  */
  """
 include_guard = "AUTOMERGE_C_H"

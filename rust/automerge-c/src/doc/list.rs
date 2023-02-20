@@ -543,22 +543,12 @@ pub unsafe extern "C" fn AMlistPutTimestamp(
 ) -> *mut AMresult {
     let doc = to_doc_mut!(doc);
     let obj_id = to_obj_id!(obj_id);
-    let _is_max = pos == usize::MAX;
-    // let (pos, insert) = adjust!(pos, insert, doc.length(obj_id));
-    let len = doc.length(obj_id);
-    let (adjusted_pos, adjusted_insert) = {
-        let insert = insert || len == 0;
-        let end = if insert { len } else { len - 1 };
-        if pos > end && pos != usize::MAX {
-            return AMresult::error(&format!("Invalid pos {}", pos)).into();
-        }
-        (std::cmp::min(pos, end), insert)
-    };
+    let (pos, insert) = adjust!(pos, insert, doc.length(obj_id));
     let value = am::ScalarValue::Timestamp(value);
-    to_result(if adjusted_insert {
-        doc.insert(obj_id, adjusted_pos, value)
+    to_result(if insert {
+        doc.insert(obj_id, pos, value)
     } else {
-        doc.put(obj_id, adjusted_pos, value)
+        doc.put(obj_id, pos, value)
     })
 }
 

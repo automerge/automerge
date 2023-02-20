@@ -7,7 +7,7 @@ license = "MIT"
 rust-version = "1.57.0"
 
 [lib]
-name = "_automerge"
+name = "automerge_core"
 crate-type = ["staticlib"]
 bench = false
 doc = false

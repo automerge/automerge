@@ -14,6 +14,16 @@ cmake -S automerge-c -B automerge-c/build
 cmake --build automerge-c/build
 cmake --install automerge-c/build --prefix "/usr/local"
 ```
+Installation is important because the name, location and structure of CMake's
+out-of-source build subdirectory is subject to change based on the platform and
+the release version; generated headers like `automerge-c/config.h` and
+`automerge-c/utils/enum_string.h` are only sure to be found within their
+installed locations.
+
+It's not obvious because they are versioned but the `Cargo.toml` and
+`cbindgen.toml` configuration files are also generated in order to ensure that
+the project name, project version and library name that they contain match those
+specified within the top-level `CMakeLists.txt` file.
 
 If you'd like to cross compile the library for different platforms you can do so
 using [cross](https://github.com/cross-rs/cross). For example:

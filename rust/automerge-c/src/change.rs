@@ -199,41 +199,6 @@ pub unsafe extern "C" fn AMchangeIsEmpty(change: *const AMchange) -> bool {
     }
 }
 
-// /// \memberof AMchange
-// /// \brief Loads an array of byte spans into a sequence of change items.
-// ///
-// /// \param[in] byte_spans A pointer to an array of `AMbyteSpan` structs.
-// /// \param[in] size The number of `AMbyteSpan` structs to copy from
-// ///                 \p byte_spans.
-// /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE` items.
-// /// \pre \p byte_spans `!= NULL`
-// /// \pre `sizeof(`\p byte_spans `) > 0`
-// /// \pre \p size `<= sizeof(`\p byte_spans `)`
-// /// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
-// ///          in order to avoid a memory leak.
-// /// \internal
-// ///
-// /// # Safety
-// /// byte_spans must be a `AMbyteSpan` array of length `>= size`
-// #[no_mangle]
-// pub unsafe extern "C" fn AMchangeItemsFromByteSpans(byte_spans: *const AMbyteSpan, size: usize) -> *mut AMresult {
-//     let mut changes = Vec::<am::Change>::new();
-//     changes.reserve_exact(size);
-//     for n in 0..size {
-//         let byte_span = &*byte_spans.add(n);
-//         let slice = std::slice::from_raw_parts(byte_span.src, byte_span.count);
-//         match slice.try_into() {
-//             Ok(change) => {
-//                 changes.push(change);
-//             }
-//             Err(e) => {
-//                 return to_result(Err(e.into()));
-//             }
-//         }
-//     }
-//     to_result(Ok(changes))
-// }
-
 /// \memberof AMchange
 /// \brief Loads a document into a sequence of changes.
 ///
