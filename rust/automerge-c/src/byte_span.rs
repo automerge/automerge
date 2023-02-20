@@ -163,14 +163,17 @@ impl TryFrom<&AMbyteSpan> for &str {
 ///                  \p src.
 /// \return An `AMbyteSpan` struct.
 /// \pre \p count `<= sizeof(`\p src `)`
-/// \post `(`\p src `== NULL) -> (AMbyteSpan){NULL, 0}` 
+/// \post `(`\p src `== NULL) -> (AMbyteSpan){NULL, 0}`
 /// \internal
 ///
 /// #Safety
 /// src must be a byte array of length `>= count` or `std::ptr::null()`
 #[no_mangle]
 pub unsafe extern "C" fn AMbytes(src: *const u8, count: usize) -> AMbyteSpan {
-    AMbyteSpan { src, count: if src.is_null() { 0 } else { count } }
+    AMbyteSpan {
+        src,
+        count: if src.is_null() { 0 } else { count },
+    }
 }
 
 /// \memberof AMbyteSpan
