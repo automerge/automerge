@@ -105,7 +105,7 @@ static bool abort_cb(AMstack** stack, void* data) {
             sprintf(buffer, "Unknown `AMstatus` tag %d", status);
     }
     if (buffer[0]) {
-        char* const c_msg = AMstrdup(AMerrorMessage((*stack)->result), NULL);
+        char* const c_msg = AMstrdup(AMresultError((*stack)->result), NULL);
         fprintf(stderr, "%s; %s.\n", buffer, c_msg);
         free(c_msg);
         AMstackFree(stack);

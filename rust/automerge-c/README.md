@@ -88,7 +88,7 @@ int main(int argc, char** argv) {
   AMresult *docResult = AMcreate(NULL);
 
   if (AMresultStatus(docResult) != AM_STATUS_OK) {
-    char* const err_msg = AMstrdup(AMerrorMessage(docResult), NULL);
+    char* const err_msg = AMstrdup(AMresultError(docResult), NULL);
     printf("failed to create doc: %s", err_msg);
     free(err_msg);
     goto cleanup;
@@ -160,7 +160,7 @@ int main(int argc, char** argv) {
 
   AMresult *putResult = AMmapPutStr(doc, AM_ROOT, AMstr("key"), AMstr("value"));
   if (AMresultStatus(putResult) != AM_STATUS_OK) {
-    char* const err_msg = AMstrdup(AMerrorMessage(putResult), NULL);
+    char* const err_msg = AMstrdup(AMresultError(putResult), NULL);
     printf("failed to put: %s", err_msg);
     free(err_msg);
     goto cleanup;
@@ -168,7 +168,7 @@ int main(int argc, char** argv) {
 
   AMresult *getResult = AMmapGet(doc, AM_ROOT, AMstr("key"), NULL);
   if (AMresultStatus(getResult) != AM_STATUS_OK) {
-    char* const err_msg = AMstrdup(AMerrorMessage(putResult), NULL);
+    char* const err_msg = AMstrdup(AMresultError(putResult), NULL);
     printf("failed to get: %s", err_msg);
     free(err_msg);
     goto cleanup;

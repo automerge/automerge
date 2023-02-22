@@ -64,7 +64,7 @@ AMresult* AMstackResult(AMstack** stack, AMresult* result, AMstackCallback callb
     } else {
         /* Report an obvious error. */
         if (result) {
-            AMbyteSpan const err_msg = AMerrorMessage(result);
+            AMbyteSpan const err_msg = AMresultError(result);
             if (err_msg.src && err_msg.count) {
                 /* \note The callback may be null because the result is supposed
                  *       to be examined externally so return it despite an

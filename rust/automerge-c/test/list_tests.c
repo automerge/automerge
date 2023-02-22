@@ -93,7 +93,7 @@ static void test_AMlistIncrement(void** state) {
                     AMexpect(AM_VAL_TYPE_VOID));                                                             \
         AMresult* result = AMstackResult(stack_ptr, AMlistGet(doc_state->doc, list, 0, NULL), NULL, NULL);   \
         if (AMresultStatus(result) != AM_STATUS_OK) {                                                        \
-            fail_msg_view("%s", AMerrorMessage(result));                                                     \
+            fail_msg_view("%s", AMresultError(result));                                                      \
         }                                                                                                    \
         assert_int_equal(AMresultSize(result), 1);                                                           \
         assert_int_equal(AMitemValType(AMresultItem(result)), AM_VAL_TYPE_NULL);                             \

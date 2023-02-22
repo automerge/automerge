@@ -489,26 +489,6 @@ pub enum AMstatus {
 }
 
 /// \memberof AMresult
-/// \brief Gets a result's error message string.
-///
-/// \param[in] result A pointer to an `AMresult` struct.
-/// \return A UTF-8 string view as an `AMbyteSpan` struct.
-/// \pre \p result `!= NULL`
-/// \internal
-///
-/// # Safety
-/// result must be a valid pointer to an AMresult
-#[no_mangle]
-pub unsafe extern "C" fn AMerrorMessage(result: *const AMresult) -> AMbyteSpan {
-    use AMresult::*;
-
-    if let Some(Error(message)) = result.as_ref() {
-        return message.as_bytes().into();
-    }
-    Default::default()
-}
-
-/// \memberof AMresult
 /// \brief Concatenates the items from two results.
 ///
 /// \param[in] dest A pointer to an `AMresult` struct.
@@ -549,6 +529,26 @@ pub unsafe extern "C" fn AMresultCat(dest: *const AMresult, src: *const AMresult
             AMresult::error("Invalid `AMresult*`").into()
         }
     }
+}
+
+/// \memberof AMresult
+/// \brief Gets a result's error message string.
+///
+/// \param[in] result A pointer to an `AMresult` struct.
+/// \return A UTF-8 string view as an `AMbyteSpan` struct.
+/// \pre \p result `!= NULL`
+/// \internal
+///
+/// # Safety
+/// result must be a valid pointer to an AMresult
+#[no_mangle]
+pub unsafe extern "C" fn AMresultError(result: *const AMresult) -> AMbyteSpan {
+    use AMresult::*;
+
+    if let Some(Error(message)) = result.as_ref() {
+        return message.as_bytes().into();
+    }
+    Default::default()
 }
 
 /// \memberof AMresult

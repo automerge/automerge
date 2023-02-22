@@ -52,7 +52,7 @@ static void test_AMactorIdFromBytes(void** state) {
     /* Non-empty string. */
     AMresult* result = AMstackResult(stack_ptr, AMactorIdFromBytes(doc_state->src, doc_state->count), NULL, NULL);
     if (AMresultStatus(result) != AM_STATUS_OK) {
-        fail_msg_view("%s", AMerrorMessage(result));
+        fail_msg_view("%s", AMresultError(result));
     }
     assert_int_equal(AMresultSize(result), 1);
     AMitem* const item = AMresultItem(result);
@@ -66,7 +66,7 @@ static void test_AMactorIdFromBytes(void** state) {
     /** \todo Find out if this is intentionally allowed. */
     result = AMstackResult(stack_ptr, AMactorIdFromBytes(doc_state->src, 0), NULL, NULL);
     if (AMresultStatus(result) != AM_STATUS_OK) {
-        fail_msg_view("%s", AMerrorMessage(result));
+        fail_msg_view("%s", AMresultError(result));
     }
     /* NULL array. */
     result = AMstackResult(stack_ptr, AMactorIdFromBytes(NULL, doc_state->count), NULL, NULL);
@@ -80,7 +80,7 @@ static void test_AMactorIdFromStr(void** state) {
     AMstack** stack_ptr = &doc_state->stack;
     AMresult* result = AMstackResult(stack_ptr, AMactorIdFromStr(doc_state->str), NULL, NULL);
     if (AMresultStatus(result) != AM_STATUS_OK) {
-        fail_msg_view("%s", AMerrorMessage(result));
+        fail_msg_view("%s", AMresultError(result));
     }
     assert_int_equal(AMresultSize(result), 1);
     AMitem* const item = AMresultItem(result);
@@ -107,7 +107,7 @@ static void test_AMactorIdInit(void** state) {
     for (size_t i = 0; i != 11; ++i) {
         AMresult* result = AMstackResult(stack_ptr, AMactorIdInit(), NULL, NULL);
         if (AMresultStatus(result) != AM_STATUS_OK) {
-            fail_msg_view("%s", AMerrorMessage(result));
+            fail_msg_view("%s", AMresultError(result));
         }
         assert_int_equal(AMresultSize(result), 1);
         AMitem* const item = AMresultItem(result);
