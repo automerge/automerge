@@ -94,7 +94,8 @@ int main(int argc, char** argv) {
     goto cleanup;
   }
 
-  AMdoc *doc = AMitemToDoc(AMresultItem(docResult));
+  AMdoc *doc;
+  AMitemToDoc(AMresultItem(docResult), &doc);
 
   // useful code goes here!
 
@@ -156,7 +157,8 @@ you can do this:
 
 int main(int argc, char** argv) {
   // ...previous example...
-  AMdoc *doc = AMitemToDoc(AMresultItem(docResult));
+  AMdoc *doc; 
+  AMitemToDoc(AMresultItem(docResult), &doc);
 
   AMresult *putResult = AMmapPutStr(doc, AM_ROOT, AMstr("key"), AMstr("value"));
   if (AMresultStatus(putResult) != AM_STATUS_OK) {
