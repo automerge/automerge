@@ -75,7 +75,7 @@ static void test_AMitemResult(void** state) {
         }
     }
     /* Free the item iterator's result. */
-    AMfree(AMstackPop(stack_ptr, items_result));
+    AMresultFree(AMstackPop(stack_ptr, items_result));
     /* An odd item's reference count should be 1 again. */
     for (size_t pos = 1; pos < ITEM_COUNT; pos += 2) {
         assert_int_equal(AMitemRefCount(item_ptrs[pos]), 1);

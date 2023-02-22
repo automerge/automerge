@@ -509,23 +509,6 @@ pub unsafe extern "C" fn AMerrorMessage(result: *const AMresult) -> AMbyteSpan {
 }
 
 /// \memberof AMresult
-/// \brief Deallocates the storage for a result.
-///
-/// \param[in] result A pointer to an `AMresult` struct.
-/// \pre \p result `!= NULL`
-/// \internal
-///
-/// # Safety
-/// result must be a valid pointer to an AMresult
-#[no_mangle]
-pub unsafe extern "C" fn AMfree(result: *mut AMresult) {
-    if !result.is_null() {
-        let result: AMresult = *Box::from_raw(result);
-        drop(result)
-    }
-}
-
-/// \memberof AMresult
 /// \brief Concatenates the items from two results.
 ///
 /// \param[in] dest A pointer to an `AMresult` struct.
@@ -535,8 +518,8 @@ pub unsafe extern "C" fn AMfree(result: *mut AMresult) {
 ///         original order.
 /// \pre \p dest `!= NULL`
 /// \pre \p src `!= NULL`
-/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()` in
-///          order to avoid a memory leak.
+/// \warning The returned `AMresult` struct pointer must be passed to
+///          `AMresultFree()` in order to avoid a memory leak.
 /// \internal
 ///
 /// # Safety
@@ -565,6 +548,23 @@ pub unsafe extern "C" fn AMresultCat(dest: *const AMresult, src: *const AMresult
         (None, None) | (None, Some(_)) | (Some(_), None) => {
             AMresult::error("Invalid `AMresult*`").into()
         }
+    }
+}
+
+/// \memberof AMresult
+/// \brief Deallocates the storage for a result.
+///
+/// \param[in] result A pointer to an `AMresult` struct.
+/// \pre \p result `!= NULL`
+/// \internal
+///
+/// # Safety
+/// result must be a valid pointer to an AMresult
+#[no_mangle]
+pub unsafe extern "C" fn AMresultFree(result: *mut AMresult) {
+    if !result.is_null() {
+        let result: AMresult = *Box::from_raw(result);
+        drop(result)
     }
 }
 

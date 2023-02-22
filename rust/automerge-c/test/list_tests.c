@@ -29,13 +29,13 @@ static void test_AMlistIncrement(void** state) {
         AMstackItem(stack_ptr, AMlistGet(doc_state->doc, list, 0, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_COUNTER)),
         &counter));
     assert_int_equal(counter, 0);
-    AMfree(AMstackPop(stack_ptr, NULL));
+    AMresultFree(AMstackPop(stack_ptr, NULL));
     AMstackItem(NULL, AMlistIncrement(doc_state->doc, list, 0, 3), cmocka_cb, AMexpect(AM_VAL_TYPE_VOID));
     assert_true(AMitemToCounter(
         AMstackItem(stack_ptr, AMlistGet(doc_state->doc, list, 0, NULL), cmocka_cb, AMexpect(AM_VAL_TYPE_COUNTER)),
         &counter));
     assert_int_equal(counter, 3);
-    AMfree(AMstackPop(stack_ptr, NULL));
+    AMresultFree(AMstackPop(stack_ptr, NULL));
 }
 
 #define test_AMlistPut(suffix, mode) test_AMlistPut##suffix##_##mode
@@ -54,7 +54,7 @@ static void test_AMlistIncrement(void** state) {
                                                  AMexpect(suffix_to_val_type(#suffix))),                         \
                                      &value));                                                                   \
         assert_true(value == scalar_value);                                                                      \
-        AMfree(AMstackPop(stack_ptr, NULL));                                                                     \
+        AMresultFree(AMstackPop(stack_ptr, NULL));                                                               \
     }
 
 #define test_AMlistPutBytes(mode) test_AMlistPutBytes##_##mode
@@ -77,7 +77,7 @@ static void test_AMlistIncrement(void** state) {
             &bytes));                                                                                                  \
         assert_int_equal(bytes.count, BYTES_SIZE);                                                                     \
         assert_memory_equal(bytes.src, bytes_value, BYTES_SIZE);                                                       \
-        AMfree(AMstackPop(stack_ptr, NULL));                                                                           \
+        AMresultFree(AMstackPop(stack_ptr, NULL));                                                                     \
     }
 
 #define test_AMlistPutNull(mode) test_AMlistPutNull_##mode
@@ -97,7 +97,7 @@ static void test_AMlistIncrement(void** state) {
         }                                                                                                    \
         assert_int_equal(AMresultSize(result), 1);                                                           \
         assert_int_equal(AMitemValType(AMresultItem(result)), AM_VAL_TYPE_NULL);                             \
-        AMfree(AMstackPop(stack_ptr, NULL));                                                                 \
+        AMresultFree(AMstackPop(stack_ptr, NULL));                                                           \
     }
 
 #define test_AMlistPutObject(label, mode) test_AMlistPutObject_##label##_##mode
@@ -116,7 +116,7 @@ static void test_AMlistIncrement(void** state) {
         assert_non_null(obj_id);                                                                                 \
         assert_int_equal(AMobjObjType(doc_state->doc, obj_id), obj_type);                                        \
         assert_int_equal(AMobjSize(doc_state->doc, obj_id, NULL), 0);                                            \
-        AMfree(AMstackPop(stack_ptr, NULL));                                                                     \
+        AMresultFree(AMstackPop(stack_ptr, NULL));                                                               \
     }
 
 #define test_AMlistPutStr(mode) test_AMlistPutStr##_##mode
@@ -136,7 +136,7 @@ static void test_AMlistIncrement(void** state) {
             &str));                                                                                                 \
         assert_int_equal(str.count, strlen(str_value));                                                             \
         assert_memory_equal(str.src, str_value, str.count);                                                         \
-        AMfree(AMstackPop(stack_ptr, NULL));                                                                        \
+        AMresultFree(AMstackPop(stack_ptr, NULL));                                                                  \
     }
 
 static_void_test_AMlistPut(Bool, insert, bool, true);
@@ -263,7 +263,7 @@ static void test_get_range_values(void** state) {
         assert_true(AMobjIdEqual(AMitemObjId(item1), AMitemObjId(item2)));
         assert_true(AMitemEqual(item_back1, item_back2));
         assert_true(AMobjIdEqual(AMitemObjId(item_back1), AMitemObjId(item_back2)));
-        AMfree(AMstackPop(stack_ptr, NULL));
+        AMresultFree(AMstackPop(stack_ptr, NULL));
     }
 
     /* Forward vs. reverse: partial current list range. */
@@ -301,7 +301,7 @@ static void test_get_range_values(void** state) {
         assert_true(AMobjIdEqual(AMitemObjId(item1), AMitemObjId(item2)));
         assert_true(AMitemEqual(item_back1, item_back2));
         assert_true(AMobjIdEqual(AMitemObjId(item_back1), AMitemObjId(item_back2)));
-        AMfree(AMstackPop(stack_ptr, NULL));
+        AMresultFree(AMstackPop(stack_ptr, NULL));
     }
 
     /* Forward vs. reverse: complete historical map range. */
@@ -339,7 +339,7 @@ static void test_get_range_values(void** state) {
         assert_true(AMobjIdEqual(AMitemObjId(item1), AMitemObjId(item2)));
         assert_true(AMitemEqual(item_back1, item_back2));
         assert_true(AMobjIdEqual(AMitemObjId(item_back1), AMitemObjId(item_back2)));
-        AMfree(AMstackPop(stack_ptr, NULL));
+        AMresultFree(AMstackPop(stack_ptr, NULL));
     }
 
     /* Forward vs. reverse: partial historical map range. */
@@ -377,7 +377,7 @@ static void test_get_range_values(void** state) {
         assert_true(AMobjIdEqual(AMitemObjId(item1), AMitemObjId(item2)));
         assert_true(AMitemEqual(item_back1, item_back2));
         assert_true(AMobjIdEqual(AMitemObjId(item_back1), AMitemObjId(item_back2)));
-        AMfree(AMstackPop(stack_ptr, NULL));
+        AMresultFree(AMstackPop(stack_ptr, NULL));
     }
 
     /* List range vs. object range: complete current. */

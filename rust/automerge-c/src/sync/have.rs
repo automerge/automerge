@@ -27,8 +27,8 @@ impl AsRef<am::sync::Have> for AMsyncHave {
 /// \param[in] sync_have A pointer to an `AMsyncHave` struct.
 /// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE_HASH` items.
 /// \pre \p sync_have `!= NULL`
-/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
-///          in order to avoid a memory leak.
+/// \warning The returned `AMresult` struct pointer must be passed to
+///          `AMresultFree()` in order to avoid a memory leak.
 /// \internal
 ///
 /// # Safety

@@ -112,8 +112,8 @@ pub unsafe extern "C" fn AMactorIdCmp(
 ///        UUID value.
 ///
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_ACTOR_ID` item.
-/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
-///          in order to avoid a memory leak.
+/// \warning The returned `AMresult` struct pointer must be passed to
+///          `AMresultFree()` in order to avoid a memory leak.
 #[no_mangle]
 pub unsafe extern "C" fn AMactorIdInit() -> *mut AMresult {
     to_result(Ok::<am::ActorId, am::AutomergeError>(am::ActorId::random()))
@@ -130,8 +130,8 @@ pub unsafe extern "C" fn AMactorIdInit() -> *mut AMresult {
 /// \pre \p src `!= NULL`
 /// \pre `sizeof(`\p src `) > 0`
 /// \pre \p count `<= sizeof(`\p src `)`
-/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
-///          in order to avoid a memory leak.
+/// \warning The returned `AMresult` struct pointer must be passed to
+///          `AMresultFree()` in order to avoid a memory leak.
 /// \internal
 ///
 /// # Safety
@@ -154,8 +154,8 @@ pub unsafe extern "C" fn AMactorIdFromBytes(src: *const u8, count: usize) -> *mu
 ///
 /// \param[in] value A UTF-8 string view as an `AMbyteSpan` struct.
 /// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_ACTOR_ID` item.
-/// \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
-///          in order to avoid a memory leak.
+/// \warning The returned `AMresult` struct pointer must be passed to
+///          `AMresultFree()` in order to avoid a memory leak.
 /// \internal
 ///
 /// # Safety

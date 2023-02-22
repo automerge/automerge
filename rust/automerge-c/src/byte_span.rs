@@ -28,7 +28,7 @@ pub struct AMbyteSpan {
     ///          points is freed.
     /// \note If the `AMbyteSpan` came from within an `AMitem` struct then
     ///       \p src will be freed when the pointer to the `AMresult` struct
-    ///       containing the `AMitem` struct is passed to `AMfree()`.
+    ///       containing the `AMitem` struct is passed to `AMresultFree()`.
     pub src: *const u8,
     /// The count of bytes in the array.
     pub count: usize,

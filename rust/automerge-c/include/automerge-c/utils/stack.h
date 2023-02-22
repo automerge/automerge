@@ -60,8 +60,8 @@ void AMstackFree(AMstack** stack);
  *                   select the top result in \p stack.
  * \return A pointer to an `AMresult` struct or `NULL`.
  * \pre \p stack `!= NULL`
- * \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
- *          in order to avoid a memory leak.
+ * \warning The returned `AMresult` struct pointer must be passed to
+ *          `AMresultFree()` in order to avoid a memory leak.
  */
 AMresult* AMstackPop(AMstack** stack, AMresult const* result);
 
@@ -81,10 +81,7 @@ AMresult* AMstackPop(AMstack** stack, AMresult const* result);
  * \warning If \p stack `== NULL` then \p result is deallocated in order to
  *          avoid a memory leak.
  */
-AMresult* AMstackResult(AMstack** stack,
-                        AMresult* result,
-                        AMstackCallback callback,
-                        void* data);
+AMresult* AMstackResult(AMstack** stack, AMresult* result, AMstackCallback callback, void* data);
 
 /**
  * \memberof AMstack
@@ -103,10 +100,7 @@ AMresult* AMstackResult(AMstack** stack,
  * \warning If \p stack `== NULL` then \p result is deallocated in order to
  *          avoid a memory leak.
  */
-AMitem* AMstackItem(AMstack** stack,
-                    AMresult* result,
-                    AMstackCallback callback,
-                    void* data);
+AMitem* AMstackItem(AMstack** stack, AMresult* result, AMstackCallback callback, void* data);
 
 /**
  * \memberof AMstack
@@ -125,10 +119,7 @@ AMitem* AMstackItem(AMstack** stack,
  * \warning If \p stack `== NULL` then \p result is deallocated immediately
  *          in order to avoid a memory leak.
  */
-AMitems AMstackItems(AMstack** stack,
-                     AMresult* result,
-                     AMstackCallback callback,
-                     void* data);
+AMitems AMstackItems(AMstack** stack, AMresult* result, AMstackCallback callback, void* data);
 
 /**
  * \memberof AMstack

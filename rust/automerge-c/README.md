@@ -32,7 +32,10 @@ using [cross](https://github.com/cross-rs/cross). For example:
 
 This will output a shared library in the directory `rust/target/aarch64-unknown-linux-gnu/release/`.
 
-You can replace `aarch64-unknown-linux-gnu` with any [cross supported targets](https://github.com/cross-rs/cross#supported-targets). The targets below are known to work, though other targets are expected to work too:
+You can replace `aarch64-unknown-linux-gnu` with any
+[cross supported targets](https://github.com/cross-rs/cross#supported-targets).
+The targets below are known to work, though other targets are expected to work
+too:
 
 - `x86_64-apple-darwin`
 - `aarch64-apple-darwin`
@@ -73,8 +76,8 @@ An item contains up to three components: an index within its parent object
 value.
 The result of a successful function call that doesn't produce any values will
 contain a single item that is void (`AM_VAL_TYPE_VOID`).
-A returned result **must** have `AMfree()` called on it once the item(s) or error
-message it contains is no longer needed in order to avoid a memory leak.
+A returned result **must** be passed to `AMresultFree()` once the item(s) or
+error message it contains is no longer needed in order to avoid a memory leak.
 ```
 #include <stdio.h>
 #include <stdlib.h>
@@ -96,18 +99,18 @@ int main(int argc, char** argv) {
   // useful code goes here!
 
 cleanup:
-  AMfree(docResult);
+  AMresultFree(docResult);
 }
 ```
 
-If you are writing code in C/C++ or Objective-C directly, the `AMstackItem()`,
-`AMstackItems()` and `AMstackResult()` functions enable the lifetimes of anonymous
-results to be centrally managed and allow the same validation logic to be reused
-without relying upon the `goto` statement (see examples/quickstart.c).
+If you are writing an application in C, the `AMstackItem()`, `AMstackItems()`
+and `AMstackResult()` functions enable the lifetimes of anonymous results to be
+centrally managed and allow the same validation logic to be reused without
+relying upon the `goto` statement (see examples/quickstart.c).
 
 If you are wrapping automerge-c in another language, particularly one that has a
-garbage collector, you can call the `AMfree()` function within a finalizer to
-ensure that memory is reclaimed when it is no longer needed.
+garbage collector, you can call the `AMresultFree()` function within a finalizer
+to ensure that memory is reclaimed when it is no longer needed.
 
 Automerge documents consist of a mutable root which is always a map from string
 keys to values. A value can be one of the following types:
@@ -121,7 +124,8 @@ keys to values. A value can be one of the following types:
 - A mutable UTF-8 string.
 
 If you read from a location in the document with no value, a value with type
-`AM_VAL_TYPE_VOID` will be returned, but you cannot write such a value explicitly.
+`AM_VAL_TYPE_VOID` will be returned, but you cannot write such a value
+explicitly.
 
 Under the hood, automerge references a mutable object by its object identifier
 where `AM_ROOT` signifies a document's root map object.
@@ -182,18 +186,18 @@ int main(int argc, char** argv) {
 
 
 cleanup:
-  AMfree(getResult);
-  AMfree(putResult);
-  AMfree(docResult);
+  AMresultFree(getResult);
+  AMresultFree(putResult);
+  AMresultFree(docResult);
 }
 ```
 
 Functions that do not return an `AMresult` (for example `AMitemKey()`) do
 not allocate memory but rather reference memory that was previously
 allocated. It's therefore important to keep the original `AMresult` alive (in
-this case the one returned by `AMmapRange()`) until after you are finished with the
-items that it contains. However, the memory for an individual `AMitem` can be
-shared with a new `AMresult` by calling `AMitemResult()` on it. In other
+this case the one returned by `AMmapRange()`) until after you are finished with
+the items that it contains. However, the memory for an individual `AMitem` can
+be shared with a new `AMresult` by calling `AMitemResult()` on it. In other
 words, a select group of items can be filtered out of a collection and only each
 one's corresponding `AMresult` must be kept alive from that point forward; the
 originating collection's `AMresult` can be safely freed.

@@ -15,18 +15,18 @@ AMresult* AMresultFrom(int count, ...) {
             if (dest) {
                 result = AMresultCat(dest, src);
                 is_ok = (AMresultStatus(result) == AM_STATUS_OK);
-                AMfree(dest);
-                AMfree(src);
+                AMresultFree(dest);
+                AMresultFree(src);
             } else {
                 result = src;
             }
         } else {
-            AMfree(src);
+            AMresultFree(src);
         }
     }
     va_end(args);
     if (!is_ok) {
-        AMfree(result);
+        AMresultFree(result);
         result = NULL;
     }
     return result;

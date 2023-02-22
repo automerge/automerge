@@ -28,14 +28,14 @@ static void test_AMmapIncrement(void** state) {
                                             cmocka_cb, AMexpect(AM_VAL_TYPE_COUNTER)),
                                 &counter));
     assert_int_equal(counter, 0);
-    AMfree(AMstackPop(stack_ptr, NULL));
+    AMresultFree(AMstackPop(stack_ptr, NULL));
     AMstackItem(NULL, AMmapIncrement(doc_state->doc, AM_ROOT, AMstr("Counter"), 3), cmocka_cb,
                 AMexpect(AM_VAL_TYPE_VOID));
     assert_true(AMitemToCounter(AMstackItem(stack_ptr, AMmapGet(doc_state->doc, AM_ROOT, AMstr("Counter"), NULL),
                                             cmocka_cb, AMexpect(AM_VAL_TYPE_COUNTER)),
                                 &counter));
     assert_int_equal(counter, 3);
-    AMfree(AMstackPop(stack_ptr, NULL));
+    AMresultFree(AMstackPop(stack_ptr, NULL));
 }
 
 #define test_AMmapPut(suffix) test_AMmapPut##suffix
@@ -51,7 +51,7 @@ static void test_AMmapIncrement(void** state) {
                                                  cmocka_cb, AMexpect(suffix_to_val_type(#suffix))),                  \
                                      &value));                                                                       \
         assert_true(value == scalar_value);                                                                          \
-        AMfree(AMstackPop(stack_ptr, NULL));                                                                         \
+        AMresultFree(AMstackPop(stack_ptr, NULL));                                                                   \
     }
 
 static void test_AMmapPutBytes(void** state) {
@@ -69,7 +69,7 @@ static void test_AMmapPutBytes(void** state) {
         &bytes));
     assert_int_equal(bytes.count, BYTES_SIZE);
     assert_memory_equal(bytes.src, BYTES_VALUE, BYTES_SIZE);
-    AMfree(AMstackPop(stack_ptr, NULL));
+    AMresultFree(AMstackPop(stack_ptr, NULL));
 }
 
 static void test_AMmapPutNull(void** state) {
@@ -100,7 +100,7 @@ static void test_AMmapPutNull(void** state) {
         assert_non_null(obj_id);                                                                                 \
         assert_int_equal(AMobjObjType(doc_state->doc, obj_id), obj_type);                                        \
         assert_int_equal(AMobjSize(doc_state->doc, obj_id, NULL), 0);                                            \
-        AMfree(AMstackPop(stack_ptr, NULL));                                                                     \
+        AMresultFree(AMstackPop(stack_ptr, NULL));                                                               \
     }
 
 static void test_AMmapPutStr(void** state) {
@@ -114,7 +114,7 @@ static void test_AMmapPutStr(void** state) {
                             &str));
     assert_int_equal(str.count, strlen("Hello, world!"));
     assert_memory_equal(str.src, "Hello, world!", str.count);
-    AMfree(AMstackPop(stack_ptr, NULL));
+    AMresultFree(AMstackPop(stack_ptr, NULL));
 }
 
 static_void_test_AMmapPut(Bool, bool, true);
@@ -1387,7 +1387,7 @@ static void test_get_range_values(void** state) {
         assert_true(AMobjIdEqual(AMitemObjId(item1), AMitemObjId(item2)));
         assert_true(AMitemEqual(item1, item2));
         assert_true(AMobjIdEqual(AMitemObjId(item_back1), AMitemObjId(item_back2)));
-        AMfree(AMstackPop(stack_ptr, NULL));
+        AMresultFree(AMstackPop(stack_ptr, NULL));
     }
 
     /* Forward vs. reverse: partial current map range. */
@@ -1428,7 +1428,7 @@ static void test_get_range_values(void** state) {
         assert_true(AMobjIdEqual(AMitemObjId(item1), AMitemObjId(item2)));
         assert_true(AMitemEqual(item_back1, item_back2));
         assert_true(AMobjIdEqual(AMitemObjId(item_back1), AMitemObjId(item_back2)));
-        AMfree(AMstackPop(stack_ptr, NULL));
+        AMresultFree(AMstackPop(stack_ptr, NULL));
     }
 
     /* Forward vs. reverse: complete historical map range. */
@@ -1469,7 +1469,7 @@ static void test_get_range_values(void** state) {
         assert_true(AMobjIdEqual(AMitemObjId(item1), AMitemObjId(item2)));
         assert_true(AMitemEqual(item_back1, item_back2));
         assert_true(AMobjIdEqual(AMitemObjId(item_back1), AMitemObjId(item_back2)));
-        AMfree(AMstackPop(stack_ptr, NULL));
+        AMresultFree(AMstackPop(stack_ptr, NULL));
     }
 
     /* Forward vs. reverse: partial historical map range. */
@@ -1510,7 +1510,7 @@ static void test_get_range_values(void** state) {
         assert_true(AMobjIdEqual(AMitemObjId(item1), AMitemObjId(item2)));
         assert_true(AMitemEqual(item_back1, item_back2));
         assert_true(AMobjIdEqual(AMitemObjId(item_back1), AMitemObjId(item_back2)));
-        AMfree(AMstackPop(stack_ptr, NULL));
+        AMresultFree(AMstackPop(stack_ptr, NULL));
     }
 
     /* Map range vs. object range: complete current. */

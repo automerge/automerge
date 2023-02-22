@@ -18,11 +18,11 @@
  *  \return A pointer to an `AMresult` struct or `NULL`.
  *  \pre `∀𝑥 ∈` \p ... `, AMresultStatus(𝑥) == AM_STATUS_OK`
  *  \post `(∃𝑥 ∈` \p ... `, AMresultStatus(𝑥) != AM_STATUS_OK) -> NULL`
- *  \attention All `AMresult` struct pointer arguments are passed to `AMfree()`
- *             regardless of success; use `AMresultCat()` instead if you wish
- *             to pass them to `AMfree()` yourself.
- *  \warning The returned `AMresult` struct pointer must be passed to `AMfree()`
- *           in order to avoid a memory leak.
+ *  \attention All `AMresult` struct pointer arguments are passed to
+ *             `AMresultFree()` regardless of success; use `AMresultCat()`
+ *             instead if you wish to pass them to `AMresultFree()` yourself.
+ *  \warning The returned `AMresult` struct pointer must be passed to
+ *           `AMresultFree()` in order to avoid a memory leak.
  */
 AMresult* AMresultFrom(int count, ...);
 

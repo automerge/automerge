@@ -7,7 +7,7 @@
 void AMstackFree(AMstack** stack) {
     if (stack) {
         while (*stack) {
-            AMfree(AMstackPop(stack, NULL));
+            AMresultFree(AMstackPop(stack, NULL));
         }
     }
 }
@@ -47,7 +47,7 @@ AMresult* AMstackResult(AMstack** stack, AMresult* result, AMstackCallback callb
         }
         /* \note Nothing can be returned without a stack regardless of
          *       whether or not the callback validated the result. */
-        AMfree(result);
+        AMresultFree(result);
         return NULL;
     }
     /* Always push the result onto the stack, even if it's null, so that the
