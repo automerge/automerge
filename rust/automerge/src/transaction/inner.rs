@@ -657,7 +657,7 @@ impl TransactionInner {
         mark: Mark,
     ) -> Result<(), AutomergeError> {
         let (obj, _obj_type) = doc.exid_to_obj(ex_obj)?;
-        let mark_name = doc.ops_mut().m.import_markname(mark.name.as_ref());
+        let mark_name = mark.name.clone();
         if let Some(obs) = op_observer {
             self.do_insert(
                 doc,

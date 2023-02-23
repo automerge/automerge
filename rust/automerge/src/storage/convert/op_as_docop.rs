@@ -123,7 +123,7 @@ impl<'a> AsDocOp<'a> for OpAsDocOp<'a> {
 
     fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
         if let OpType::MarkBegin(MarkData { name, .. }) = &self.op.action {
-            Some(Cow::Owned(self.props.get(name.props_index()).into()))
+            Some(Cow::Owned(name.clone()))
         } else {
             None
         }

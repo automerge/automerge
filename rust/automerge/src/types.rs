@@ -14,6 +14,7 @@ mod opids;
 pub(crate) use opids::OpIds;
 
 pub(crate) use crate::clock::Clock;
+pub(crate) use crate::marks::{MarkData, MarkStateMachine};
 pub(crate) use crate::value::{Counter, ScalarValue, Value};
 
 pub(crate) const HEAD: ElemId = ElemId(OpId(0, 0));
@@ -202,24 +203,11 @@ pub enum OpType {
     MarkEnd(bool),
 }
 
-#[derive(PartialEq, Debug, Clone)]
-pub struct MarkData {
-    pub name: MarkName,
-    pub value: ScalarValue,
-    pub expand: bool,
-}
-
-impl Display for MarkData {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "value={} expand={}", self.value, self.value)
-    }
-}
-
 pub(crate) struct OpTypeParts {
     pub(crate) action: u64,
     pub(crate) value: ScalarValue,
     pub(crate) expand: bool,
-    pub(crate) mark_name: Option<MarkName>,
+    pub(crate) mark_name: Option<smol_str::SmolStr>,
 }
 
 impl OpType {
@@ -239,7 +227,7 @@ impl OpType {
         }
     }
 
-    pub(crate) fn mark(name: MarkName, expand: bool, value: ScalarValue) -> OpType {
+    pub(crate) fn mark(name: smol_str::SmolStr, expand: bool, value: ScalarValue) -> OpType {
         OpType::MarkBegin(MarkData {
             name,
             value,
@@ -424,20 +412,6 @@ impl From<Option<ElemId>> for Key {
 pub(crate) enum Key {
     Map(usize),
     Seq(ElemId),
-}
-
-// Index of a mark name string in the OpSetMetadata::props IndexedCache
-#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Copy, Hash)]
-pub struct MarkName(usize);
-
-impl MarkName {
-    pub(crate) fn props_index(&self) -> usize {
-        self.0
-    }
-
-    pub(crate) fn from_prop_index(index: usize) -> Self {
-        Self(index)
-    }
 }
 
 /// A property of an object
@@ -648,6 +622,16 @@ impl Op {
 
     pub(crate) fn visible(&self) -> bool {
         if self.is_inc() || self.is_mark() {
+            false
+        } else if self.is_counter() {
+            self.succ.len() <= self.incs()
+        } else {
+            self.succ.is_empty()
+        }
+    }
+
+    pub(crate) fn visible_or_mark(&self) -> bool {
+        if self.is_inc() {
             false
         } else if self.is_counter() {
             self.succ.len() <= self.incs()

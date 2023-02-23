@@ -4,9 +4,7 @@ use crate::indexed_cache::IndexedCache;
 use crate::op_tree::{self, OpTree};
 use crate::parents::Parents;
 use crate::query::{self, OpIdVisSearch, TreeQuery};
-use crate::types::{
-    self, ActorId, Key, ListEncoding, MarkName, ObjId, Op, OpId, OpIds, OpType, Prop,
-};
+use crate::types::{self, ActorId, Key, ListEncoding, ObjId, Op, OpId, OpIds, OpType, Prop};
 use crate::ObjType;
 use fxhash::FxBuildHasher;
 use std::borrow::Borrow;
@@ -397,10 +395,6 @@ impl OpSetMetadata {
 
     pub(crate) fn import_prop<S: Borrow<str>>(&mut self, key: S) -> usize {
         self.props.cache(key.borrow().to_string())
-    }
-
-    pub(crate) fn import_markname<S: Borrow<str>>(&mut self, name: S) -> MarkName {
-        MarkName::from_prop_index(self.props.cache(name.borrow().to_string()))
     }
 }
 

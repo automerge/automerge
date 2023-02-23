@@ -94,13 +94,19 @@ export type Op = {
   pred: string[],
 }
 
-export type Patch =  PutPatch | DelPatch | SpliceTextPatch | IncPatch | InsertPatch;
+export type Patch =  PutPatch | DelPatch | SpliceTextPatch | IncPatch | InsertPatch | MarkPatch;
 
 export type PutPatch = {
   action: 'put'
   path: Prop[],
   value: Value
   conflict: boolean
+}
+
+export type MarkPatch = {
+  action: 'mark'
+  path: Prop[],
+  marks: Mark[]
 }
 
 export type IncPatch = {
@@ -126,6 +132,13 @@ export type InsertPatch = {
   path: Prop[],
   values: Value[],
 }
+
+export type Mark = {
+  name: string,
+  value: Value,
+  range: string,
+}
+
 
 export function encodeChange(change: ChangeToEncode): Change;
 export function create(text_v2: boolean, actor?: Actor): Automerge;

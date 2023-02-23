@@ -3,7 +3,7 @@ use std::{borrow::Cow, collections::HashSet, iter::Peekable};
 use itertools::Itertools;
 
 use crate::{
-    types::{ElemId, Key, ListEncoding, ObjId, Op, OpId},
+    types::{ElemId, Key, ListEncoding, MarkData, MarkStateMachine, ObjId, Op, OpId},
     ObjType, OpObserver, OpType, ScalarValue, Value,
 };
 
@@ -32,13 +32,21 @@ pub(super) fn observe_current_state<O: OpObserver>(doc: &crate::Automerge, obser
         if !visible_objs.contains(obj) {
             continue;
         }
+
+        // group by key
+        // op.insert id=(1@aaa) HEAD value=1
+        // op.put id=2@aaa (1@aaa) value=3
+        // op.insert id=(1@bbb) 1@aaa value=2
+
         let ops_by_key = ops.group_by(|o| o.key);
         let actions = ops_by_key
             .into_iter()
             .flat_map(|(key, key_ops)| key_actions(key, key_ops));
+        let mut mark_state_machine = MarkStateMachine::new();
         if typ == ObjType::Text && !observer.text_as_seq() {
             track_new_objs_and_notify(
                 &mut visible_objs,
+                &mut mark_state_machine,
                 doc,
                 obj,
                 typ,
@@ -48,6 +56,7 @@ pub(super) fn observe_current_state<O: OpObserver>(doc: &crate::Automerge, obser
         } else if typ == ObjType::List {
             track_new_objs_and_notify(
                 &mut visible_objs,
+                &mut mark_state_machine,
                 doc,
                 obj,
                 typ,
@@ -55,13 +64,33 @@ pub(super) fn observe_current_state<O: OpObserver>(doc: &crate::Automerge, obser
                 list_actions(actions),
             )
         } else {
-            track_new_objs_and_notify(&mut visible_objs, doc, obj, typ, observer, actions)
+            track_new_objs_and_notify(
+                &mut visible_objs,
+                &mut mark_state_machine,
+                doc,
+                obj,
+                typ,
+                observer,
+                actions,
+            )
+        }
+        if !mark_state_machine.spans.is_empty() {
+            let encoding = match typ {
+                ObjType::Text => ListEncoding::Text(doc.text_encoding()),
+                _ => ListEncoding::List,
+            };
+            let marks = mark_state_machine
+                .spans
+                .into_iter()
+                .map(|span| span.into_mark(obj, doc, encoding));
+            observer.mark(doc, doc.id_to_exid(obj.0), marks);
         }
     }
 }
 
 fn track_new_objs_and_notify<N: Action, I: Iterator<Item = N>, O: OpObserver>(
     visible_objs: &mut HashSet<ObjId>,
+    mark_state_machine: &mut MarkStateMachine,
     doc: &crate::Automerge,
     obj: &ObjId,
     typ: ObjType,
@@ -73,7 +102,7 @@ fn track_new_objs_and_notify<N: Action, I: Iterator<Item = N>, O: OpObserver>(
         if let Some(obj) = action.made_object() {
             visible_objs.insert(obj);
         }
-        action.notify_observer(doc, &exid, obj, typ, observer);
+        action.notify_observer(doc, mark_state_machine, &exid, obj, typ, observer);
     }
 }
 
@@ -82,6 +111,7 @@ trait Action {
     fn notify_observer<O: OpObserver>(
         self,
         doc: &crate::Automerge,
+        mark_state_machine: &mut MarkStateMachine,
         exid: &crate::ObjId,
         obj: &ObjId,
         typ: ObjType,
@@ -92,7 +122,7 @@ trait Action {
     fn made_object(&self) -> Option<ObjId>;
 }
 
-fn key_actions<'a, I: Iterator<Item = &'a Op>>(
+fn key_actions<'a, 'b, I: Iterator<Item = &'a Op>>(
     key: Key,
     key_ops: I,
 ) -> impl Iterator<Item = SimpleAction<'a>> {
@@ -104,12 +134,14 @@ fn key_actions<'a, I: Iterator<Item = &'a Op>>(
             conflicted: bool,
         },
         Insert(Value<'a>, OpId),
+        MarkBegin(OpId, &'a MarkData),
+        MarkEnd(OpId),
     }
-    let current_ops = key_ops
-        .filter(|o| o.visible())
-        .filter_map(|o| match o.action {
+    key_ops
+        .filter(|o| o.visible_or_mark())
+        .filter_map(|o| match &o.action {
             OpType::Make(obj_type) => {
-                let value = Value::Object(obj_type);
+                let value = Value::Object(*obj_type);
                 if o.insert {
                     Some(CurrentOp::Insert(value, o.id))
                 } else {
@@ -120,7 +152,7 @@ fn key_actions<'a, I: Iterator<Item = &'a Op>>(
                     })
                 }
             }
-            OpType::Put(ref value) => {
+            OpType::Put(value) => {
                 let value = Value::Scalar(Cow::Borrowed(value));
                 if o.insert {
                     Some(CurrentOp::Insert(value, o.id))
@@ -132,9 +164,10 @@ fn key_actions<'a, I: Iterator<Item = &'a Op>>(
                     })
                 }
             }
+            OpType::MarkBegin(m) => Some(CurrentOp::MarkBegin(o.id, m)),
+            OpType::MarkEnd(_) => Some(CurrentOp::MarkEnd(o.id)),
             _ => None,
-        });
-    current_ops
+        })
         .coalesce(|previous, current| match (previous, current) {
             (CurrentOp::Put { .. }, CurrentOp::Put { value, id, .. }) => Ok(CurrentOp::Put {
                 value,
@@ -157,6 +190,8 @@ fn key_actions<'a, I: Iterator<Item = &'a Op>>(
                 elem_id: ElemId(id),
                 tagged_value: (val, id),
             },
+            CurrentOp::MarkBegin(id, data) => SimpleAction::MarkBegin { id, data },
+            CurrentOp::MarkEnd(id) => SimpleAction::MarkEnd { id },
         })
 }
 
@@ -171,12 +206,20 @@ enum SimpleAction<'a> {
         elem_id: ElemId,
         tagged_value: (Value<'a>, OpId),
     },
+    MarkBegin {
+        id: OpId,
+        data: &'a MarkData,
+    },
+    MarkEnd {
+        id: OpId,
+    },
 }
 
 impl<'a> Action for SimpleAction<'a> {
     fn notify_observer<O: OpObserver>(
         self,
         doc: &crate::Automerge,
+        mark_state_machine: &mut MarkStateMachine,
         exid: &crate::ObjId,
         obj: &ObjId,
         typ: ObjType,
@@ -208,6 +251,12 @@ impl<'a> Action for SimpleAction<'a> {
                 let tagged_value = (value, doc.id_to_exid(opid));
                 observer.insert(doc, doc.id_to_exid(obj.0), index, tagged_value);
             }
+            Self::MarkBegin { id, data } => {
+                mark_state_machine.mark_begin(id, data, doc);
+            }
+            Self::MarkEnd { id } => {
+                mark_state_machine.mark_end(id, doc);
+            }
         }
     }
 
@@ -236,13 +285,16 @@ impl<'a> Action for TextAction<'a> {
     fn notify_observer<O: OpObserver>(
         self,
         doc: &crate::Automerge,
+        mark_state_machine: &mut MarkStateMachine,
         exid: &crate::ObjId,
         obj: &ObjId,
         typ: ObjType,
         observer: &mut O,
     ) {
         match self {
-            Self::Action(action) => action.notify_observer(doc, exid, obj, typ, observer),
+            Self::Action(action) => {
+                action.notify_observer(doc, mark_state_machine, exid, obj, typ, observer)
+            }
             Self::Splice { start, chars } => {
                 let index = doc
                     .ops()
@@ -340,7 +392,9 @@ impl<'a, I: Iterator<Item = SimpleAction<'a>>> Iterator for TextActions<'a, I> {
 mod tests {
     use std::borrow::Cow;
 
-    use crate::{transaction::Transactable, ObjType, OpObserver, Prop, ReadDoc, Value};
+    use crate::{
+        marks::Mark, transaction::Transactable, ObjType, OpObserver, Prop, ReadDoc, Value,
+    };
 
     // Observer ops often carry a "tagged value", which is a value and the OpID of the op which
     // created that value. For a lot of values (i.e. any scalar value) we don't care about the
@@ -565,6 +619,14 @@ mod tests {
 
         fn text_as_seq(&self) -> bool {
             self.text_as_seq
+        }
+
+        fn mark<R: ReadDoc, M: Iterator<Item = Mark>>(
+            &mut self,
+            _doc: &R,
+            _objid: crate::ObjId,
+            _mark: M,
+        ) {
         }
     }
 

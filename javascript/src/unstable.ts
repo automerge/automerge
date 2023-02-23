@@ -197,7 +197,11 @@ export function load<T>(
 ): Doc<T> {
   const opts = importOpts(_opts)
   opts.enableTextV2 = true
-  return stable.load(data, opts)
+  if (opts.patchCallback) {
+    return stable.loadIncremental(stable.init(opts), data)
+  } else {
+    return stable.load(data, opts)
+  }
 }
 
 function importOpts<T>(

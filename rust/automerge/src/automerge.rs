@@ -16,8 +16,8 @@ use crate::transaction::{
     self, CommitOptions, Failure, Observed, Success, Transaction, TransactionArgs, UnObserved,
 };
 use crate::types::{
-    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ListEncoding, MarkData, MarkName,
-    ObjId, Op, OpId, OpType, OpTypeParts, ScalarValue, TextEncoding, Value,
+    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ListEncoding, MarkData, ObjId, Op,
+    OpId, OpType, OpTypeParts, ScalarValue, TextEncoding, Value,
 };
 use crate::{
     query, AutomergeError, Change, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType,
@@ -724,9 +724,6 @@ impl Automerge {
                     .iter()
                     .map(|p| OpId::new(p.counter(), actors[p.actor()]));
                 let pred = self.ops.m.sorted_opids(pred);
-                let mark_name = c
-                    .mark_name
-                    .map(|m| MarkName::from_prop_index(self.ops.m.props.cache(m.to_string())));
                 (
                     obj,
                     Op {
@@ -735,7 +732,7 @@ impl Automerge {
                             action: c.action,
                             value: c.val,
                             expand: c.expand,
-                            mark_name,
+                            mark_name: c.mark_name,
                         })
                         .unwrap(),
                         key,
@@ -993,7 +990,7 @@ impl Automerge {
                 OpType::Increment(obj) => format!("inc({})", obj),
                 OpType::Delete => format!("del{}", 0),
                 OpType::MarkBegin(MarkData { name, value, .. }) => {
-                    format!("mark({},{})", self.ops.m.props[name.props_index()], value)
+                    format!("mark({},{})", name, value)
                 }
                 OpType::MarkEnd(_) => "/mark".to_string(),
             };
@@ -1352,7 +1349,7 @@ impl ReadDoc for Automerge {
             query::Spans::new(ListEncoding::Text(self.text_encoding)),
         );
         query.check_marks();
-        Ok(query.into_spans(&self.ops.m))
+        Ok(query.spans)
     }
 
     fn attribute<O: AsRef<ExId>>(
@@ -1398,7 +1395,7 @@ impl ReadDoc for Automerge {
                 id: self.id_to_exid(s.id),
                 start: s.start,
                 end: s.end,
-                span_type: self.ops.m.props.get(s.name.props_index()).to_string(),
+                span_type: s.name.to_string(),
                 value: s.value,
             })
             .collect();

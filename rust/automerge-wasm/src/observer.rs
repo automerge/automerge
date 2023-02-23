@@ -352,10 +352,23 @@ impl OpObserver for Observer {
 
     fn mark<R: ReadDoc, M: Iterator<Item = Mark>>(&mut self, doc: &R, obj: ObjId, mark: M) {
         if self.enabled {
+            if let Some(Patch::Mark {
+                obj: tail_obj,
+                marks,
+                ..
+            }) = self.patches.last_mut()
+            {
+                if tail_obj == &obj {
+                    for m in mark {
+                        marks.push(m)
+                    }
+                    return;
+                }
+            }
             if let Some(path) = self.get_path(doc, &obj) {
-                let marks : Vec<_> = mark.collect();
+                let marks: Vec<_> = mark.collect();
                 if !marks.is_empty() {
-                  self.patches.push(Patch::Mark { path, obj, marks });
+                    self.patches.push(Patch::Mark { path, obj, marks });
                 }
             }
         }
@@ -545,7 +558,7 @@ impl TryFrom<Patch> for JsValue {
                 let marks_array = Array::new();
                 for m in marks.iter() {
                     let mark = Object::new();
-                    js_set(&mark, "name", &m.name)?;
+                    js_set(&mark, "name", m.name.as_str())?;
                     js_set(
                         &mark,
                         "value",

@@ -138,8 +138,7 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
 
     fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
         if let OpType::MarkBegin(MarkData { name, .. }) = &self.op.action {
-            let name = self.metadata.props.get(name.props_index());
-            Some(Cow::Owned(name.into()))
+            Some(Cow::Owned(name.clone()))
         } else {
             None
         }

@@ -345,12 +345,11 @@ fn import_op(m: &mut OpSetMetadata, op: DocOp) -> Result<Op, Error> {
             return Err(Error::MissingActor);
         }
     }
-    let mark_name = op.mark_name.map(|n| m.import_markname(n));
     let action = OpType::from_parts(OpTypeParts {
         action: op.action,
         value: op.value,
         expand: op.expand,
-        mark_name,
+        mark_name: op.mark_name,
     })?;
     Ok(Op {
         id: check_opid(m, op.id)?,

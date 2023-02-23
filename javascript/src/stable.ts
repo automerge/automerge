@@ -518,7 +518,7 @@ export function loadIncremental<T>(
 }
 
 /**
- * Create binary save data to be appended to a save file or fed into {@link loadIncremental} 
+ * Create binary save data to be appended to a save file or fed into {@link loadIncremental}
  *
  * @typeParam T - The type of the value which is contained in the document.
  *                Note that no validation is done to make sure this type is in
@@ -528,9 +528,7 @@ export function loadIncremental<T>(
  * automerge save file, or passed to a document replicating its state.
  *
  */
-export function saveIncremental<T>(
-  doc: Doc<T>,
-): Uint8Array {
+export function saveIncremental<T>(doc: Doc<T>): Uint8Array {
   const state = _state(doc)
   if (state.heads) {
     throw new RangeError(
