@@ -233,8 +233,11 @@ static void test_get_range_values(void** state) {
     assert_int_equal(size, 8);
     AMitems range_back = AMitemsReversed(&range);
     assert_int_equal(AMitemsSize(&range_back), size);
-    assert_int_equal(AMitemPos(AMitemsNext(&range, 1)), 0);
-    assert_int_equal(AMitemPos(AMitemsNext(&range_back, 1)), 7);
+    size_t pos;
+    assert_true(AMitemPos(AMitemsNext(&range, 1), &pos));
+    assert_int_equal(pos, 0);
+    assert_true(AMitemPos(AMitemsNext(&range_back, 1), &pos));
+    assert_int_equal(pos, 7);
 
     AMitem *item1, *item_back1;
     size_t count, middle = size / 2;
@@ -242,19 +245,19 @@ static void test_get_range_values(void** state) {
     range_back = AMitemsRewound(&range_back);
     for (item1 = NULL, item_back1 = NULL, count = 0; item1 && item_back1;
          item1 = AMitemsNext(&range, 1), item_back1 = AMitemsNext(&range_back, 1), ++count) {
-        assert_int_equal(AMitemIdxType(item_back1), AMitemIdxType(item1));
-        assert_int_equal(AMitemIdxType(item1), AM_IDX_TYPE_POS);
-        bool const indices_match = (AMitemPos(item_back1) == AMitemPos(item1));
+        size_t pos1, pos_back1;
+        assert_true(AMitemPos(item1, &pos1));
+        assert_true(AMitemPos(item_back1, &pos_back1));
         if ((count == middle) && (middle & 1)) {
             /* The iterators are crossing in the middle. */
-            assert_true(indices_match);
+            assert_int_equal(pos1, pos_back1);
             assert_true(AMitemEqual(item1, item_back1));
             assert_true(AMobjIdEqual(AMitemObjId(item1), AMitemObjId(item_back1)));
         } else {
-            assert_false(indices_match);
+            assert_int_not_equal(pos1, pos_back1);
         }
-        AMitem* item2 = AMstackItem(stack_ptr, AMlistGet(doc1, list, AMitemPos(item1), NULL), NULL, NULL);
-        AMitem* item_back2 = AMstackItem(stack_ptr, AMlistGet(doc1, list, AMitemPos(item_back1), NULL), NULL, NULL);
+        AMitem* item2 = AMstackItem(stack_ptr, AMlistGet(doc1, list, pos1, NULL), NULL, NULL);
+        AMitem* item_back2 = AMstackItem(stack_ptr, AMlistGet(doc1, list, pos_back1, NULL), NULL, NULL);
         /** \note An item returned from an `AM...Get()` call doesn't include the
                   index used to retrieve it. */
         assert_false(AMitemIdxType(item2));
@@ -272,27 +275,29 @@ static void test_get_range_values(void** state) {
     assert_int_equal(size, 5);
     range_back = AMitemsReversed(&range);
     assert_int_equal(AMitemsSize(&range_back), size);
-    assert_int_equal(AMitemPos(AMitemsNext(&range, 1)), 1);
-    assert_int_equal(AMitemPos(AMitemsNext(&range_back, 1)), 5);
+    assert_true(AMitemPos(AMitemsNext(&range, 1), &pos));
+    assert_int_equal(pos, 1);
+    assert_true(AMitemPos(AMitemsNext(&range_back, 1), &pos));
+    assert_int_equal(pos, 5);
 
     middle = size / 2;
     range = AMitemsRewound(&range);
     range_back = AMitemsRewound(&range_back);
     for (item1 = NULL, item_back1 = NULL, count = 0; item1 && item_back1;
          item1 = AMitemsNext(&range, 1), item_back1 = AMitemsNext(&range_back, 1), ++count) {
-        assert_int_equal(AMitemIdxType(item_back1), AMitemIdxType(item1));
-        assert_int_equal(AMitemIdxType(item1), AM_IDX_TYPE_POS);
-        bool const indices_match = (AMitemPos(item_back1) == AMitemPos(item1));
+        size_t pos1, pos_back1;
+        assert_true(AMitemPos(item1, &pos1));
+        assert_true(AMitemPos(item_back1, &pos_back1));
         if ((count == middle) && (middle & 1)) {
             /* The iterators are crossing in the middle. */
-            assert_true(indices_match);
+            assert_int_equal(pos1, pos_back1);
             assert_true(AMitemEqual(item1, item_back1));
             assert_true(AMobjIdEqual(AMitemObjId(item1), AMitemObjId(item_back1)));
         } else {
-            assert_false(indices_match);
+            assert_int_not_equal(pos1, pos_back1);
         }
-        AMitem* item2 = AMstackItem(stack_ptr, AMlistGet(doc1, list, AMitemPos(item1), NULL), NULL, NULL);
-        AMitem* item_back2 = AMstackItem(stack_ptr, AMlistGet(doc1, list, AMitemPos(item_back1), NULL), NULL, NULL);
+        AMitem* item2 = AMstackItem(stack_ptr, AMlistGet(doc1, list, pos1, NULL), NULL, NULL);
+        AMitem* item_back2 = AMstackItem(stack_ptr, AMlistGet(doc1, list, pos_back1, NULL), NULL, NULL);
         /** \note An item returned from an `AMlistGet()` call doesn't include
                   the index used to retrieve it. */
         assert_int_equal(AMitemIdxType(item2), 0);
@@ -310,27 +315,29 @@ static void test_get_range_values(void** state) {
     assert_int_equal(size, 8);
     range_back = AMitemsReversed(&range);
     assert_int_equal(AMitemsSize(&range_back), size);
-    assert_int_equal(AMitemPos(AMitemsNext(&range, 1)), 0);
-    assert_int_equal(AMitemPos(AMitemsNext(&range_back, 1)), 7);
+    assert_true(AMitemPos(AMitemsNext(&range, 1), &pos));
+    assert_int_equal(pos, 0);
+    assert_true(AMitemPos(AMitemsNext(&range_back, 1), &pos));
+    assert_int_equal(pos, 7);
 
     middle = size / 2;
     range = AMitemsRewound(&range);
     range_back = AMitemsRewound(&range_back);
     for (item1 = NULL, item_back1 = NULL, count = 0; item1 && item_back1;
          item1 = AMitemsNext(&range, 1), item_back1 = AMitemsNext(&range_back, 1), ++count) {
-        assert_int_equal(AMitemIdxType(item_back1), AMitemIdxType(item1));
-        assert_int_equal(AMitemIdxType(item1), AM_IDX_TYPE_POS);
-        bool const indices_match = (AMitemPos(item_back1) == AMitemPos(item1));
+        size_t pos1, pos_back1;
+        assert_true(AMitemPos(item1, &pos1));
+        assert_true(AMitemPos(item_back1, &pos_back1));
         if ((count == middle) && (middle & 1)) {
             /* The iterators are crossing in the middle. */
-            assert_true(indices_match);
+            assert_int_equal(pos1, pos_back1);
             assert_true(AMitemEqual(item1, item_back1));
             assert_true(AMobjIdEqual(AMitemObjId(item1), AMitemObjId(item_back1)));
         } else {
-            assert_false(indices_match);
+            assert_int_not_equal(pos1, pos_back1);
         }
-        AMitem* item2 = AMstackItem(stack_ptr, AMlistGet(doc1, list, AMitemPos(item1), &v1), NULL, NULL);
-        AMitem* item_back2 = AMstackItem(stack_ptr, AMlistGet(doc1, list, AMitemPos(item_back1), &v1), NULL, NULL);
+        AMitem* item2 = AMstackItem(stack_ptr, AMlistGet(doc1, list, pos1, &v1), NULL, NULL);
+        AMitem* item_back2 = AMstackItem(stack_ptr, AMlistGet(doc1, list, pos_back1, &v1), NULL, NULL);
         /** \note An item returned from an `AM...Get()` call doesn't include the
                   index used to retrieve it. */
         assert_false(AMitemIdxType(item2));
@@ -348,27 +355,29 @@ static void test_get_range_values(void** state) {
     assert_int_equal(size, 5);
     range_back = AMitemsReversed(&range);
     assert_int_equal(AMitemsSize(&range_back), size);
-    assert_int_equal(AMitemPos(AMitemsNext(&range, 1)), 2);
-    assert_int_equal(AMitemPos(AMitemsNext(&range_back, 1)), 6);
+    assert_true(AMitemPos(AMitemsNext(&range, 1), &pos));
+    assert_int_equal(pos, 2);
+    assert_true(AMitemPos(AMitemsNext(&range_back, 1), &pos));
+    assert_int_equal(pos, 6);
 
     middle = size / 2;
     range = AMitemsRewound(&range);
     range_back = AMitemsRewound(&range_back);
     for (item1 = NULL, item_back1 = NULL, count = 0; item1 && item_back1;
          item1 = AMitemsNext(&range, 1), item_back1 = AMitemsNext(&range_back, 1), ++count) {
-        assert_int_equal(AMitemIdxType(item_back1), AMitemIdxType(item1));
-        assert_int_equal(AMitemIdxType(item1), AM_IDX_TYPE_POS);
-        bool const indices_match = (AMitemPos(item_back1) == AMitemPos(item1));
+        size_t pos1, pos_back1;
+        assert_true(AMitemPos(item1, &pos1));
+        assert_true(AMitemPos(item_back1, &pos_back1));
         if ((count == middle) && (middle & 1)) {
             /* The iterators are crossing in the middle. */
-            assert_true(indices_match);
+            assert_int_equal(pos1, pos_back1);
             assert_true(AMitemEqual(item1, item_back1));
             assert_true(AMobjIdEqual(AMitemObjId(item1), AMitemObjId(item_back1)));
         } else {
-            assert_false(indices_match);
+            assert_int_not_equal(pos1, pos_back1);
         }
-        AMitem* item2 = AMstackItem(stack_ptr, AMlistGet(doc1, list, AMitemPos(item1), &v1), NULL, NULL);
-        AMitem* item_back2 = AMstackItem(stack_ptr, AMlistGet(doc1, list, AMitemPos(item_back1), &v1), NULL, NULL);
+        AMitem* item2 = AMstackItem(stack_ptr, AMlistGet(doc1, list, pos1, &v1), NULL, NULL);
+        AMitem* item_back2 = AMstackItem(stack_ptr, AMlistGet(doc1, list, pos_back1, &v1), NULL, NULL);
         /** \note An item returned from an `AM...Get()` call doesn't include the
                   index used to retrieve it. */
         assert_false(AMitemIdxType(item2));

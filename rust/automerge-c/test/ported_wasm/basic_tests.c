@@ -354,7 +354,8 @@ static void test_lists_have_insert_set_splice_and_push_ops(void** state) {
     AMitem* doc_item = AMstackItem(stack_ptr, AMmapRange(doc, AM_ROOT, AMstr(NULL), AMstr(NULL), NULL), cmocka_cb,
                                    AMexpect(AM_VAL_TYPE_OBJ_TYPE));
     assert_int_equal(AMitemIdxType(doc_item), AM_IDX_TYPE_KEY);
-    AMbyteSpan key = AMitemKey(doc_item);
+    AMbyteSpan key;
+    assert_true(AMitemKey(doc_item, &key));
     assert_int_equal(key.count, strlen("letters"));
     assert_memory_equal(key.src, "letters", key.count);
     {
@@ -378,7 +379,7 @@ static void test_lists_have_insert_set_splice_and_push_ops(void** state) {
     doc_item = AMstackItem(stack_ptr, AMmapRange(doc, AM_ROOT, AMstr(NULL), AMstr(NULL), NULL), cmocka_cb,
                            AMexpect(AM_VAL_TYPE_OBJ_TYPE));
     assert_int_equal(AMitemIdxType(doc_item), AM_IDX_TYPE_KEY);
-    key = AMitemKey(doc_item);
+    assert_true(AMitemKey(doc_item, &key));
     assert_int_equal(key.count, strlen("letters"));
     assert_memory_equal(key.src, "letters", key.count);
     {
@@ -404,7 +405,7 @@ static void test_lists_have_insert_set_splice_and_push_ops(void** state) {
     doc_item = AMstackItem(stack_ptr, AMmapRange(doc, AM_ROOT, AMstr(NULL), AMstr(NULL), NULL), cmocka_cb,
                            AMexpect(AM_VAL_TYPE_OBJ_TYPE));
     assert_int_equal(AMitemIdxType(doc_item), AM_IDX_TYPE_KEY);
-    key = AMitemKey(doc_item);
+    assert_true(AMitemKey(doc_item, &key));
     assert_int_equal(key.count, strlen("letters"));
     assert_memory_equal(key.src, "letters", key.count);
     {
@@ -436,7 +437,7 @@ static void test_lists_have_insert_set_splice_and_push_ops(void** state) {
     doc_item = AMstackItem(stack_ptr, AMmapRange(doc, AM_ROOT, AMstr(NULL), AMstr(NULL), NULL), cmocka_cb,
                            AMexpect(AM_VAL_TYPE_OBJ_TYPE));
     assert_int_equal(AMitemIdxType(doc_item), AM_IDX_TYPE_KEY);
-    key = AMitemKey(doc_item);
+    assert_true(AMitemKey(doc_item, &key));
     assert_int_equal(key.count, strlen("letters"));
     assert_memory_equal(key.src, "letters", key.count);
     {
@@ -470,7 +471,7 @@ static void test_lists_have_insert_set_splice_and_push_ops(void** state) {
     doc_item = AMstackItem(stack_ptr, AMmapRange(doc, AM_ROOT, AMstr(NULL), AMstr(NULL), NULL), cmocka_cb,
                            AMexpect(AM_VAL_TYPE_OBJ_TYPE));
     assert_int_equal(AMitemIdxType(doc_item), AM_IDX_TYPE_KEY);
-    key = AMitemKey(doc_item);
+    assert_true(AMitemKey(doc_item, &key));
     assert_int_equal(key.count, strlen("letters"));
     assert_memory_equal(key.src, "letters", key.count);
     {
@@ -528,7 +529,7 @@ static void test_lists_have_insert_set_splice_and_push_ops(void** state) {
     doc_item = AMstackItem(stack_ptr, AMmapRange(doc, AM_ROOT, AMstr(NULL), AMstr(NULL), &heads), cmocka_cb,
                            AMexpect(AM_VAL_TYPE_OBJ_TYPE));
     assert_int_equal(AMitemIdxType(doc_item), AM_IDX_TYPE_KEY);
-    key = AMitemKey(doc_item);
+    assert_true(AMitemKey(doc_item, &key));
     assert_int_equal(key.count, strlen("letters"));
     assert_memory_equal(key.src, "letters", key.count);
     {
@@ -1200,7 +1201,8 @@ static void test_recursive_sets_are_possible(void** state) {
                                      AMexpect(AM_VAL_TYPE_OBJ_TYPE | AM_VAL_TYPE_STR));
     AMitem* doc_item = AMitemsNext(&doc_items, 1);
     assert_int_equal(AMitemIdxType(doc_item), AM_IDX_TYPE_KEY);
-    AMbyteSpan key = AMitemKey(doc_item);
+    AMbyteSpan key;
+    assert_true(AMitemKey(doc_item, &key));
     assert_int_equal(key.count, strlen("info1"));
     assert_memory_equal(key.src, "info1", key.count);
     AMbyteSpan str;
@@ -1210,7 +1212,7 @@ static void test_recursive_sets_are_possible(void** state) {
     assert_memory_equal(str.src, "hello world", str.count);
     doc_item = AMitemsNext(&doc_items, 1);
     assert_int_equal(AMitemIdxType(doc_item), AM_IDX_TYPE_KEY);
-    key = AMitemKey(doc_item);
+    assert_true(AMitemKey(doc_item, &key));
     assert_int_equal(key.count, strlen("info2"));
     assert_memory_equal(key.src, "info2", key.count);
     assert_true(AMitemToStr(doc_item, &str));
@@ -1218,7 +1220,7 @@ static void test_recursive_sets_are_possible(void** state) {
     assert_memory_equal(str.src, "hello world", str.count);
     doc_item = AMitemsNext(&doc_items, 1);
     assert_int_equal(AMitemIdxType(doc_item), AM_IDX_TYPE_KEY);
-    key = AMitemKey(doc_item);
+    assert_true(AMitemKey(doc_item, &key));
     assert_int_equal(key.count, strlen("info3"));
     assert_memory_equal(key.src, "info3", key.count);
     assert_true(AMitemToStr(
@@ -1227,7 +1229,7 @@ static void test_recursive_sets_are_possible(void** state) {
     assert_memory_equal(str.src, "hello world", str.count);
     doc_item = AMitemsNext(&doc_items, 1);
     assert_int_equal(AMitemIdxType(doc_item), AM_IDX_TYPE_KEY);
-    key = AMitemKey(doc_item);
+    assert_true(AMitemKey(doc_item, &key));
     assert_int_equal(key.count, strlen("list"));
     assert_memory_equal(key.src, "list", key.count);
     {
@@ -1240,7 +1242,8 @@ static void test_recursive_sets_are_possible(void** state) {
                              cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE));
             AMitem const* map_item = AMitemsNext(&map_items, 1);
             assert_int_equal(AMitemIdxType(map_item), AM_IDX_TYPE_KEY);
-            AMbyteSpan const key = AMitemKey(map_item);
+            AMbyteSpan key;
+            assert_true(AMitemKey(map_item, &key));
             assert_int_equal(key.count, strlen("zip"));
             assert_memory_equal(key.src, "zip", key.count);
             {
@@ -1262,7 +1265,8 @@ static void test_recursive_sets_are_possible(void** state) {
                              cmocka_cb, AMexpect(AM_VAL_TYPE_OBJ_TYPE | AM_VAL_TYPE_STR));
             AMitem* map_item = AMitemsNext(&map_items, 1);
             assert_int_equal(AMitemIdxType(map_item), AM_IDX_TYPE_KEY);
-            AMbyteSpan const key = AMitemKey(map_item);
+            AMbyteSpan key;
+            assert_true(AMitemKey(map_item, &key));
             assert_int_equal(key.count, strlen("foo"));
             assert_memory_equal(key.src, "foo", key.count);
             AMbyteSpan str;
@@ -1288,7 +1292,7 @@ static void test_recursive_sets_are_possible(void** state) {
                                      AMexpect(AM_VAL_TYPE_OBJ_TYPE));
     AMitem const* map_item = AMitemsNext(&map_items, 1);
     assert_int_equal(AMitemIdxType(map_item), AM_IDX_TYPE_KEY);
-    key = AMitemKey(map_item);
+    assert_true(AMitemKey(map_item, &key));
     assert_int_equal(key.count, strlen("zip"));
     assert_memory_equal(key.src, "zip", key.count);
     {
@@ -1313,7 +1317,8 @@ static void test_recursive_sets_are_possible(void** state) {
                          AMexpect(AM_VAL_TYPE_OBJ_TYPE));
         AMitem const* map_item = AMitemsNext(&map_items, 1);
         assert_int_equal(AMitemIdxType(map_item), AM_IDX_TYPE_KEY);
-        AMbyteSpan const key = AMitemKey(map_item);
+        AMbyteSpan key;
+        assert_true(AMitemKey(map_item, &key));
         assert_int_equal(key.count, strlen("zip"));
         assert_memory_equal(key.src, "zip", key.count);
         {
@@ -1335,7 +1340,8 @@ static void test_recursive_sets_are_possible(void** state) {
                          AMexpect(AM_VAL_TYPE_STR));
         AMitem* map_item = AMitemsNext(&map_items, 1);
         assert_int_equal(AMitemIdxType(map_item), AM_IDX_TYPE_KEY);
-        AMbyteSpan const key = AMitemKey(map_item);
+        AMbyteSpan key;
+        assert_true(AMitemKey(map_item, &key));
         assert_int_equal(key.count, strlen("foo"));
         assert_memory_equal(key.src, "foo", key.count);
         AMbyteSpan str;

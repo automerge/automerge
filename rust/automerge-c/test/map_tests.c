@@ -243,7 +243,8 @@ static void test_range_iter_map(void** state) {
     AMitem* next = AMitemsNext(&range, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    AMbyteSpan key = AMitemKey(next);
+    AMbyteSpan key;
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "b", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_UINT);
@@ -258,7 +259,7 @@ static void test_range_iter_map(void** state) {
     next = AMitemsNext(&range, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "c", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_UINT);
@@ -278,7 +279,7 @@ static void test_range_iter_map(void** state) {
     next = AMitemsNext(&range, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "b", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_UINT);
@@ -292,7 +293,7 @@ static void test_range_iter_map(void** state) {
     next = AMitemsNext(&range, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "c", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_UINT);
@@ -306,7 +307,7 @@ static void test_range_iter_map(void** state) {
     next = AMitemsNext(&range, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "d", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_UINT);
@@ -326,7 +327,7 @@ static void test_range_iter_map(void** state) {
     next = AMitemsNext(&range, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "a", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_UINT);
@@ -340,7 +341,7 @@ static void test_range_iter_map(void** state) {
     next = AMitemsNext(&range, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "b", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_UINT);
@@ -354,7 +355,7 @@ static void test_range_iter_map(void** state) {
     next = AMitemsNext(&range, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "c", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_UINT);
@@ -374,7 +375,7 @@ static void test_range_iter_map(void** state) {
     next = AMitemsNext(&range, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "a", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_UINT);
@@ -388,7 +389,7 @@ static void test_range_iter_map(void** state) {
     next = AMitemsNext(&range, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "b", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_UINT);
@@ -402,7 +403,7 @@ static void test_range_iter_map(void** state) {
     next = AMitemsNext(&range, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "c", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_UINT);
@@ -416,7 +417,7 @@ static void test_range_iter_map(void** state) {
     next = AMitemsNext(&range, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "d", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_UINT);
@@ -450,7 +451,8 @@ static void test_map_range_back_and_forth_single(void** state) {
     AMitem* next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    AMbyteSpan key = AMitemKey(next);
+    AMbyteSpan key;
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "1", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -468,7 +470,7 @@ static void test_map_range_back_and_forth_single(void** state) {
     AMitem* next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "3", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -484,7 +486,7 @@ static void test_map_range_back_and_forth_single(void** state) {
     next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "2", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -503,7 +505,7 @@ static void test_map_range_back_and_forth_single(void** state) {
     next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "1", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -518,7 +520,7 @@ static void test_map_range_back_and_forth_single(void** state) {
     next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "3", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -533,7 +535,7 @@ static void test_map_range_back_and_forth_single(void** state) {
     next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "2", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -551,7 +553,7 @@ static void test_map_range_back_and_forth_single(void** state) {
     next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "1", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -566,7 +568,7 @@ static void test_map_range_back_and_forth_single(void** state) {
     next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "2", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -581,7 +583,7 @@ static void test_map_range_back_and_forth_single(void** state) {
     next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "3", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -601,7 +603,7 @@ static void test_map_range_back_and_forth_single(void** state) {
     next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "3", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -616,7 +618,7 @@ static void test_map_range_back_and_forth_single(void** state) {
     next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "2", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -631,7 +633,7 @@ static void test_map_range_back_and_forth_single(void** state) {
     next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "1", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -680,7 +682,8 @@ static void test_map_range_back_and_forth_double(void** state) {
     AMitem* next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    AMbyteSpan key = AMitemKey(next);
+    AMbyteSpan key;
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "1", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -698,7 +701,7 @@ static void test_map_range_back_and_forth_double(void** state) {
     AMitem* next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "3", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -714,7 +717,7 @@ static void test_map_range_back_and_forth_double(void** state) {
     next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "2", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -733,7 +736,7 @@ static void test_map_range_back_and_forth_double(void** state) {
     next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "1", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -748,7 +751,7 @@ static void test_map_range_back_and_forth_double(void** state) {
     next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "3", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -763,7 +766,7 @@ static void test_map_range_back_and_forth_double(void** state) {
     next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "2", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -781,7 +784,7 @@ static void test_map_range_back_and_forth_double(void** state) {
     next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "1", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -796,7 +799,7 @@ static void test_map_range_back_and_forth_double(void** state) {
     next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "2", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -811,7 +814,7 @@ static void test_map_range_back_and_forth_double(void** state) {
     next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "3", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -831,7 +834,7 @@ static void test_map_range_back_and_forth_double(void** state) {
     next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "3", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -846,7 +849,7 @@ static void test_map_range_back_and_forth_double(void** state) {
     next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "2", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -861,7 +864,7 @@ static void test_map_range_back_and_forth_double(void** state) {
     next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "1", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -898,7 +901,8 @@ static void test_map_range_at_back_and_forth_single(void** state) {
     AMitem* next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    AMbyteSpan key = AMitemKey(next);
+    AMbyteSpan key;
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "1", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -916,7 +920,7 @@ static void test_map_range_at_back_and_forth_single(void** state) {
     AMitem* next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "3", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -932,7 +936,7 @@ static void test_map_range_at_back_and_forth_single(void** state) {
     next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "2", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -951,7 +955,7 @@ static void test_map_range_at_back_and_forth_single(void** state) {
     next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "1", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -966,7 +970,7 @@ static void test_map_range_at_back_and_forth_single(void** state) {
     next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "3", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -981,7 +985,7 @@ static void test_map_range_at_back_and_forth_single(void** state) {
     next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "2", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -999,7 +1003,7 @@ static void test_map_range_at_back_and_forth_single(void** state) {
     next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "1", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -1014,7 +1018,7 @@ static void test_map_range_at_back_and_forth_single(void** state) {
     next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "2", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -1029,7 +1033,7 @@ static void test_map_range_at_back_and_forth_single(void** state) {
     next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "3", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -1049,7 +1053,7 @@ static void test_map_range_at_back_and_forth_single(void** state) {
     next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "3", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -1064,7 +1068,7 @@ static void test_map_range_at_back_and_forth_single(void** state) {
     next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "2", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -1079,7 +1083,7 @@ static void test_map_range_at_back_and_forth_single(void** state) {
     next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "1", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -1129,7 +1133,8 @@ static void test_map_range_at_back_and_forth_double(void** state) {
     AMitem* next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    AMbyteSpan key = AMitemKey(next);
+    AMbyteSpan key;
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "1", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -1147,7 +1152,7 @@ static void test_map_range_at_back_and_forth_double(void** state) {
     AMitem* next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "3", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -1163,7 +1168,7 @@ static void test_map_range_at_back_and_forth_double(void** state) {
     next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "2", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -1182,7 +1187,7 @@ static void test_map_range_at_back_and_forth_double(void** state) {
     next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "1", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -1197,7 +1202,7 @@ static void test_map_range_at_back_and_forth_double(void** state) {
     next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "3", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -1212,7 +1217,7 @@ static void test_map_range_at_back_and_forth_double(void** state) {
     next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "2", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -1230,7 +1235,7 @@ static void test_map_range_at_back_and_forth_double(void** state) {
     next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "1", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -1245,7 +1250,7 @@ static void test_map_range_at_back_and_forth_double(void** state) {
     next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "2", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -1260,7 +1265,7 @@ static void test_map_range_at_back_and_forth_double(void** state) {
     next = AMitemsNext(&range_all, 1);
     assert_non_null(next);
     assert_int_equal(AMitemIdxType(next), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next);
+    assert_true(AMitemKey(next, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "3", key.count);
     assert_int_equal(AMitemValType(next), AM_VAL_TYPE_STR);
@@ -1280,7 +1285,7 @@ static void test_map_range_at_back_and_forth_double(void** state) {
     next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "3", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -1295,7 +1300,7 @@ static void test_map_range_at_back_and_forth_double(void** state) {
     next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "2", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -1310,7 +1315,7 @@ static void test_map_range_at_back_and_forth_double(void** state) {
     next_back = AMitemsNext(&range_back_all, 1);
     assert_non_null(next_back);
     assert_int_equal(AMitemIdxType(next_back), AM_IDX_TYPE_KEY);
-    key = AMitemKey(next_back);
+    assert_true(AMitemKey(next_back, &key));
     assert_int_equal(key.count, 1);
     assert_memory_equal(key.src, "1", key.count);
     assert_int_equal(AMitemValType(next_back), AM_VAL_TYPE_STR);
@@ -1355,9 +1360,10 @@ static void test_get_range_values(void** state) {
     assert_int_equal(size, 4);
     AMitems range_back = AMitemsReversed(&range);
     assert_int_equal(AMitemsSize(&range_back), size);
-    AMbyteSpan key = AMitemKey(AMitemsNext(&range, 1));
+    AMbyteSpan key;
+    assert_true(AMitemKey(AMitemsNext(&range, 1), &key));
     assert_memory_equal(key.src, "aa", key.count);
-    key = AMitemKey(AMitemsNext(&range_back, 1));
+    assert_true(AMitemKey(AMitemsNext(&range_back, 1), &key));
     assert_memory_equal(key.src, "dd", key.count);
 
     AMitem *item1, *item_back1;
@@ -1366,19 +1372,19 @@ static void test_get_range_values(void** state) {
     range_back = AMitemsRewound(&range_back);
     for (item1 = NULL, item_back1 = NULL, count = 0; item1 && item_back1;
          item1 = AMitemsNext(&range, 1), item_back1 = AMitemsNext(&range_back, 1), ++count) {
-        assert_int_equal(AMitemIdxType(item1), AM_IDX_TYPE_KEY);
-        assert_int_equal(AMitemIdxType(item_back1), AMitemIdxType(item1));
-        bool const indices_match = !AMstrcmp(AMitemKey(item_back1), AMitemKey(item1));
+        AMbyteSpan key1, key_back1;
+        assert_true(AMitemKey(item1, &key1));
+        assert_true(AMitemKey(item_back1, &key_back1));
         if ((count == middle) && (middle & 1)) {
             /* The iterators are crossing in the middle. */
-            assert_true(indices_match);
+            assert_int_equal(AMstrcmp(key1, key_back1), 0);
             assert_true(AMitemEqual(item1, item_back1));
             assert_true(AMobjIdEqual(AMitemObjId(item1), AMitemObjId(item_back1)));
         } else {
-            assert_false(indices_match);
+            assert_int_not_equal(AMstrcmp(key1, key_back1), 0);
         }
-        AMitem* item2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, AMitemKey(item1), NULL), NULL, NULL);
-        AMitem* item_back2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, AMitemKey(item_back1), NULL), NULL, NULL);
+        AMitem* item2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, key1, NULL), NULL, NULL);
+        AMitem* item_back2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, key_back1, NULL), NULL, NULL);
         /** \note An item returned from an `AM...Get()` call doesn't include the
                   index used to retrieve it. */
         assert_false(AMitemIdxType(item2));
@@ -1397,9 +1403,9 @@ static void test_get_range_values(void** state) {
     assert_int_equal(size, 3);
     range_back = AMitemsReversed(&range);
     assert_int_equal(AMitemsSize(&range_back), size);
-    key = AMitemKey(AMitemsNext(&range, 1));
+    assert_true(AMitemKey(AMitemsNext(&range, 1), &key));
     assert_memory_equal(key.src, "aa", key.count);
-    key = AMitemKey(AMitemsNext(&range_back, 1));
+    assert_true(AMitemKey(AMitemsNext(&range_back, 1), &key));
     assert_memory_equal(key.src, "cc", key.count);
 
     middle = size / 2;
@@ -1407,19 +1413,19 @@ static void test_get_range_values(void** state) {
     range_back = AMitemsRewound(&range_back);
     for (item1 = NULL, item_back1 = NULL, count = 0; item1 && item_back1;
          item1 = AMitemsNext(&range, 1), item_back1 = AMitemsNext(&range_back, 1), ++count) {
-        assert_int_equal(AMitemIdxType(item1), AM_IDX_TYPE_KEY);
-        assert_int_equal(AMitemIdxType(item_back1), AMitemIdxType(item1));
-        bool const indices_match = !AMstrcmp(AMitemKey(item_back1), AMitemKey(item1));
+        AMbyteSpan key1, key_back1;
+        assert_true(AMitemKey(item1, &key1));
+        assert_true(AMitemKey(item_back1, &key_back1));
         if ((count == middle) && (middle & 1)) {
             /* The iterators are crossing in the middle. */
-            assert_true(indices_match);
+            assert_int_equal(AMstrcmp(key1, key_back1), 0);
             assert_true(AMitemEqual(item1, item_back1));
             assert_true(AMobjIdEqual(AMitemObjId(item1), AMitemObjId(item_back1)));
         } else {
-            assert_false(indices_match);
+            assert_int_not_equal(AMstrcmp(key1, key_back1), 0);
         }
-        AMitem* item2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, AMitemKey(item1), NULL), NULL, NULL);
-        AMitem* item_back2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, AMitemKey(item_back1), NULL), NULL, NULL);
+        AMitem* item2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, key1, NULL), NULL, NULL);
+        AMitem* item_back2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, key_back1, NULL), NULL, NULL);
         /** \note An item returned from an `AM...Get()` call doesn't include the
                   index used to retrieve it. */
         assert_false(AMitemIdxType(item2));
@@ -1438,9 +1444,9 @@ static void test_get_range_values(void** state) {
     assert_int_equal(size, 4);
     range_back = AMitemsReversed(&range);
     assert_int_equal(AMitemsSize(&range_back), size);
-    key = AMitemKey(AMitemsNext(&range, 1));
+    assert_true(AMitemKey(AMitemsNext(&range, 1), &key));
     assert_memory_equal(key.src, "aa", key.count);
-    key = AMitemKey(AMitemsNext(&range_back, 1));
+    assert_true(AMitemKey(AMitemsNext(&range_back, 1), &key));
     assert_memory_equal(key.src, "dd", key.count);
 
     middle = size / 2;
@@ -1448,19 +1454,19 @@ static void test_get_range_values(void** state) {
     range_back = AMitemsRewound(&range_back);
     for (item1 = NULL, item_back1 = NULL, count = 0; item1 && item_back1;
          item1 = AMitemsNext(&range, 1), item_back1 = AMitemsNext(&range_back, 1), ++count) {
-        assert_int_equal(AMitemIdxType(item1), AM_IDX_TYPE_KEY);
-        assert_int_equal(AMitemIdxType(item_back1), AMitemIdxType(item1));
-        bool const indices_match = !AMstrcmp(AMitemKey(item_back1), AMitemKey(item1));
+        AMbyteSpan key1, key_back1;
+        assert_true(AMitemKey(item1, &key1));
+        assert_true(AMitemKey(item_back1, &key_back1));
         if ((count == middle) && (middle & 1)) {
             /* The iterators are crossing in the middle. */
-            assert_true(indices_match);
+            assert_int_equal(AMstrcmp(key1, key_back1), 0);
             assert_true(AMitemEqual(item1, item_back1));
             assert_true(AMobjIdEqual(AMitemObjId(item1), AMitemObjId(item_back1)));
         } else {
-            assert_false(indices_match);
+            assert_int_not_equal(AMstrcmp(key1, key_back1), 0);
         }
-        AMitem* item2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, AMitemKey(item1), &v1), NULL, NULL);
-        AMitem* item_back2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, AMitemKey(item_back1), &v1), NULL, NULL);
+        AMitem* item2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, key1, &v1), NULL, NULL);
+        AMitem* item_back2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, key_back1, &v1), NULL, NULL);
         /** \note An item returned from an `AM...Get()` call doesn't include the
                   index used to retrieve it. */
         assert_false(AMitemIdxType(item2));
@@ -1479,9 +1485,9 @@ static void test_get_range_values(void** state) {
     assert_int_equal(size, 3);
     range_back = AMitemsReversed(&range);
     assert_int_equal(AMitemsSize(&range_back), size);
-    key = AMitemKey(AMitemsNext(&range, 1));
+    assert_true(AMitemKey(AMitemsNext(&range, 1), &key));
     assert_memory_equal(key.src, "bb", key.count);
-    key = AMitemKey(AMitemsNext(&range_back, 1));
+    assert_true(AMitemKey(AMitemsNext(&range_back, 1), &key));
     assert_memory_equal(key.src, "dd", key.count);
 
     middle = size / 2;
@@ -1489,19 +1495,19 @@ static void test_get_range_values(void** state) {
     range_back = AMitemsRewound(&range_back);
     for (item1 = NULL, item_back1 = NULL, count = 0; item1 && item_back1;
          item1 = AMitemsNext(&range, 1), item_back1 = AMitemsNext(&range_back, 1), ++count) {
-        assert_int_equal(AMitemIdxType(item1), AM_IDX_TYPE_KEY);
-        assert_int_equal(AMitemIdxType(item_back1), AMitemIdxType(item1));
-        bool const indices_match = !AMstrcmp(AMitemKey(item_back1), AMitemKey(item1));
+        AMbyteSpan key1, key_back1;
+        assert_true(AMitemKey(item1, &key1));
+        assert_true(AMitemKey(item_back1, &key_back1));
         if ((count == middle) && (middle & 1)) {
             /* The iterators are crossing in the middle. */
-            assert_true(indices_match);
+            assert_int_equal(AMstrcmp(key1, key_back1), 0);
             assert_true(AMitemEqual(item1, item_back1));
             assert_true(AMobjIdEqual(AMitemObjId(item1), AMitemObjId(item_back1)));
         } else {
-            assert_false(indices_match);
+            assert_int_not_equal(AMstrcmp(key1, key_back1), 0);
         }
-        AMitem* item2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, AMitemKey(item1), &v1), NULL, NULL);
-        AMitem* item_back2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, AMitemKey(item_back1), &v1), NULL, NULL);
+        AMitem* item2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, key1, &v1), NULL, NULL);
+        AMitem* item_back2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, key_back1, &v1), NULL, NULL);
         /** \note An item returned from an `AM...Get()` call doesn't include the
                   index used to retrieve it. */
         assert_false(AMitemIdxType(item2));

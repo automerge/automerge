@@ -1440,49 +1440,65 @@ pub unsafe extern "C" fn AMitemObjId(item: *const AMitem) -> *const AMobjId {
 }
 
 /// \memberof AMitem
-/// \brief Gets the key index of an item.
+/// \brief Gets the UTF-8 string view key index of an item.
 ///
 /// \param[in] item A pointer to an `AMitem` struct.
-/// \return A UTF-8 string view as an `AMbyteSpan` struct.
+/// \param[out] value A pointer to a UTF-8 string view as an `AMbyteSpan` struct.
+/// \return `true` if `AMitemIdxType(`\p item `) == AM_IDX_TYPE_KEY` and
+///         \p *value has been reassigned, `false` otherwise.
 /// \pre \p item `!= NULL`
-/// \post `(`\p item `== NULL) -> (AMbyteSpan){0}`
 /// \internal
 ///
 /// # Safety
 /// item must be a valid pointer to an AMitem
 #[no_mangle]
-pub unsafe extern "C" fn AMitemKey(item: *const AMitem) -> AMbyteSpan {
+pub unsafe extern "C" fn AMitemKey(item: *const AMitem, value: *mut AMbyteSpan) -> bool {
     if let Some(item) = item.as_ref() {
         if let Some(index) = &item.as_ref().index {
             if let Ok(key) = index.try_into() {
-                return key;
+                if !value.is_null() {
+                    memcpy(
+                        value as *mut c_void,
+                        &key as *const AMbyteSpan as *const c_void,
+                        size_of::<AMbyteSpan>(),
+                    );
+                    return true;
+                }
             }
         }
     }
-    Default::default()
+    false
 }
 
 /// \memberof AMitem
-/// \brief Gets the position index of an item.
+/// \brief Gets the positional index of an item.
 ///
 /// \param[in] item A pointer to an `AMitem` struct.
-/// \return A 64-bit unsigned integer.
+/// \param[out] value A pointer to a `size_t`.
+/// \return `true` if `AMitemIdxType(`\p item `) == AM_IDX_TYPE_POS` and
+///         \p *value has been reassigned, `false` otherwise.
 /// \pre \p item `!= NULL`
-/// \post `(`\p item `== NULL) -> SIZE_MAX`
 /// \internal
 ///
 /// # Safety
 /// item must be a valid pointer to an AMitem
 #[no_mangle]
-pub unsafe extern "C" fn AMitemPos(item: *const AMitem) -> usize {
+pub unsafe extern "C" fn AMitemPos(item: *const AMitem, value: *mut usize) -> bool {
     if let Some(item) = item.as_ref() {
         if let Some(index) = &item.as_ref().index {
             if let Ok(pos) = index.try_into() {
-                return pos;
+                if !value.is_null() {
+                    memcpy(
+                        value as *mut c_void,
+                        &pos as *const usize as *const c_void,
+                        size_of::<usize>(),
+                    );
+                    return true;
+                }
             }
         }
     }
-    usize::MAX
+    false
 }
 
 /// \memberof AMitem

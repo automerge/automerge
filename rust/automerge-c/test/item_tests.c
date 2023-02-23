@@ -52,7 +52,10 @@ static void test_AMitemResult(void** state) {
             /* The item's old and new indices should match. */
             assert_int_equal(AMitemIdxType(item), AMitemIdxType(new_item));
             assert_int_equal(AMitemIdxType(item), AM_IDX_TYPE_POS);
-            assert_int_equal(AMitemPos(item), AMitemPos(new_item));
+            size_t pos, new_pos;
+            assert_true(AMitemPos(item, &pos));
+            assert_true(AMitemPos(new_item, &new_pos));
+            assert_int_equal(pos, new_pos);
             /* The item's old and new object IDs should match. */
             AMobjId const* const obj_id = AMitemObjId(item);
             AMobjId const* const new_obj_id = AMitemObjId(new_item);

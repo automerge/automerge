@@ -16,6 +16,7 @@ if(DOXYGEN_FOUND)
     doxygen_add_docs(
         ${LIBRARY_NAME}_docs
         "${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h"
+        "${CBINDGEN_TARGET_DIR}/config.h"
         "${CBINDGEN_TARGET_DIR}/${UTILS_SUBDIR}/enum_string.h"
         "${CMAKE_SOURCE_DIR}/${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${UTILS_SUBDIR}/result.h"
         "${CMAKE_SOURCE_DIR}/${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${UTILS_SUBDIR}/stack_callback_data.h"
