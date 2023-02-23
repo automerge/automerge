@@ -209,7 +209,7 @@ pub unsafe extern "C" fn AMstr(c_str: *const c_char) -> AMbyteSpan {
 /// lhs.src must be a byte array of length >= lhs.count
 /// rhs.src must be a a byte array of length >= rhs.count
 #[no_mangle]
-pub unsafe extern "C" fn AMstrcmp(lhs: AMbyteSpan, rhs: AMbyteSpan) -> c_int {
+pub unsafe extern "C" fn AMstrCmp(lhs: AMbyteSpan, rhs: AMbyteSpan) -> c_int {
     match (<&str>::try_from(&lhs), <&str>::try_from(&rhs)) {
         (Ok(lhs), Ok(rhs)) => match lhs.cmp(rhs) {
             Ordering::Less => -1,

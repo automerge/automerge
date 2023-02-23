@@ -45,37 +45,37 @@ static void test_AMstr(void** state) {
     assert_ptr_equal(str.src, NULL);
 }
 
-static void test_AMstrcmp(void** state) {
+static void test_AMstrCmp(void** state) {
     /* Length ordering */
-    assert_int_equal(AMstrcmp(AMstr("abcdef"), AMstr("abcdefghijkl")), -1);
-    assert_int_equal(AMstrcmp(AMstr("abcdefghijkl"), AMstr("abcdefghijkl")), 0);
-    assert_int_equal(AMstrcmp(AMstr("abcdefghijkl"), AMstr("abcdef")), 1);
+    assert_int_equal(AMstrCmp(AMstr("abcdef"), AMstr("abcdefghijkl")), -1);
+    assert_int_equal(AMstrCmp(AMstr("abcdefghijkl"), AMstr("abcdefghijkl")), 0);
+    assert_int_equal(AMstrCmp(AMstr("abcdefghijkl"), AMstr("abcdef")), 1);
     /* Lexicographical ordering */
-    assert_int_equal(AMstrcmp(AMstr("abcdef"), AMstr("ghijkl")), -1);
-    assert_int_equal(AMstrcmp(AMstr("ghijkl"), AMstr("abcdef")), 1);
+    assert_int_equal(AMstrCmp(AMstr("abcdef"), AMstr("ghijkl")), -1);
+    assert_int_equal(AMstrCmp(AMstr("ghijkl"), AMstr("abcdef")), 1);
     /* Case ordering */
-    assert_int_equal(AMstrcmp(AMstr("ABCDEFGHIJKL"), AMstr("abcdefghijkl")), -1);
-    assert_int_equal(AMstrcmp(AMstr("ABCDEFGHIJKL"), AMstr("ABCDEFGHIJKL")), 0);
-    assert_int_equal(AMstrcmp(AMstr("abcdefghijkl"), AMstr("ABCDEFGHIJKL")), 1);
-    assert_int_equal(AMstrcmp(AMstr("ABCDEFGHIJKL"), AMstr("abcdef")), -1);
-    assert_int_equal(AMstrcmp(AMstr("abcdef"), AMstr("ABCDEFGHIJKL")), 1);
-    assert_int_equal(AMstrcmp(AMstr("GHIJKL"), AMstr("abcdef")), -1);
-    assert_int_equal(AMstrcmp(AMstr("abcdef"), AMstr("GHIJKL")), 1);
+    assert_int_equal(AMstrCmp(AMstr("ABCDEFGHIJKL"), AMstr("abcdefghijkl")), -1);
+    assert_int_equal(AMstrCmp(AMstr("ABCDEFGHIJKL"), AMstr("ABCDEFGHIJKL")), 0);
+    assert_int_equal(AMstrCmp(AMstr("abcdefghijkl"), AMstr("ABCDEFGHIJKL")), 1);
+    assert_int_equal(AMstrCmp(AMstr("ABCDEFGHIJKL"), AMstr("abcdef")), -1);
+    assert_int_equal(AMstrCmp(AMstr("abcdef"), AMstr("ABCDEFGHIJKL")), 1);
+    assert_int_equal(AMstrCmp(AMstr("GHIJKL"), AMstr("abcdef")), -1);
+    assert_int_equal(AMstrCmp(AMstr("abcdef"), AMstr("GHIJKL")), 1);
     /* NUL character inclusion */
     static char const SRC[] = {'a', 'b', 'c', 'd', 'e', 'f', '\0', 'g', 'h', 'i', 'j', 'k', 'l'};
     static AMbyteSpan const NUL_STR = {.src = SRC, .count = 13};
 
-    assert_int_equal(AMstrcmp(AMstr("abcdef"), NUL_STR), -1);
-    assert_int_equal(AMstrcmp(NUL_STR, NUL_STR), 0);
-    assert_int_equal(AMstrcmp(NUL_STR, AMstr("abcdef")), 1);
+    assert_int_equal(AMstrCmp(AMstr("abcdef"), NUL_STR), -1);
+    assert_int_equal(AMstrCmp(NUL_STR, NUL_STR), 0);
+    assert_int_equal(AMstrCmp(NUL_STR, AMstr("abcdef")), 1);
     /* Empty string */
-    assert_int_equal(AMstrcmp(AMstr(""), AMstr("abcdefghijkl")), -1);
-    assert_int_equal(AMstrcmp(AMstr(""), AMstr("")), 0);
-    assert_int_equal(AMstrcmp(AMstr("abcdefghijkl"), AMstr("")), 1);
+    assert_int_equal(AMstrCmp(AMstr(""), AMstr("abcdefghijkl")), -1);
+    assert_int_equal(AMstrCmp(AMstr(""), AMstr("")), 0);
+    assert_int_equal(AMstrCmp(AMstr("abcdefghijkl"), AMstr("")), 1);
     /* Invalid string */
-    assert_int_equal(AMstrcmp(AMstr(NULL), AMstr("abcdefghijkl")), -1);
-    assert_int_equal(AMstrcmp(AMstr(NULL), AMstr(NULL)), 0);
-    assert_int_equal(AMstrcmp(AMstr("abcdefghijkl"), AMstr(NULL)), 1);
+    assert_int_equal(AMstrCmp(AMstr(NULL), AMstr("abcdefghijkl")), -1);
+    assert_int_equal(AMstrCmp(AMstr(NULL), AMstr(NULL)), 0);
+    assert_int_equal(AMstrCmp(AMstr("abcdefghijkl"), AMstr(NULL)), 1);
 }
 
 static void test_AMstrdup(void** state) {
@@ -110,7 +110,7 @@ int run_byte_span_tests(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_AMbytes),
         cmocka_unit_test(test_AMstr),
-        cmocka_unit_test(test_AMstrcmp),
+        cmocka_unit_test(test_AMstrCmp),
         cmocka_unit_test(test_AMstrdup),
     };
 

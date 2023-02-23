@@ -1377,11 +1377,11 @@ static void test_get_range_values(void** state) {
         assert_true(AMitemKey(item_back1, &key_back1));
         if ((count == middle) && (middle & 1)) {
             /* The iterators are crossing in the middle. */
-            assert_int_equal(AMstrcmp(key1, key_back1), 0);
+            assert_int_equal(AMstrCmp(key1, key_back1), 0);
             assert_true(AMitemEqual(item1, item_back1));
             assert_true(AMobjIdEqual(AMitemObjId(item1), AMitemObjId(item_back1)));
         } else {
-            assert_int_not_equal(AMstrcmp(key1, key_back1), 0);
+            assert_int_not_equal(AMstrCmp(key1, key_back1), 0);
         }
         AMitem* item2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, key1, NULL), NULL, NULL);
         AMitem* item_back2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, key_back1, NULL), NULL, NULL);
@@ -1418,11 +1418,11 @@ static void test_get_range_values(void** state) {
         assert_true(AMitemKey(item_back1, &key_back1));
         if ((count == middle) && (middle & 1)) {
             /* The iterators are crossing in the middle. */
-            assert_int_equal(AMstrcmp(key1, key_back1), 0);
+            assert_int_equal(AMstrCmp(key1, key_back1), 0);
             assert_true(AMitemEqual(item1, item_back1));
             assert_true(AMobjIdEqual(AMitemObjId(item1), AMitemObjId(item_back1)));
         } else {
-            assert_int_not_equal(AMstrcmp(key1, key_back1), 0);
+            assert_int_not_equal(AMstrCmp(key1, key_back1), 0);
         }
         AMitem* item2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, key1, NULL), NULL, NULL);
         AMitem* item_back2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, key_back1, NULL), NULL, NULL);
@@ -1459,11 +1459,11 @@ static void test_get_range_values(void** state) {
         assert_true(AMitemKey(item_back1, &key_back1));
         if ((count == middle) && (middle & 1)) {
             /* The iterators are crossing in the middle. */
-            assert_int_equal(AMstrcmp(key1, key_back1), 0);
+            assert_int_equal(AMstrCmp(key1, key_back1), 0);
             assert_true(AMitemEqual(item1, item_back1));
             assert_true(AMobjIdEqual(AMitemObjId(item1), AMitemObjId(item_back1)));
         } else {
-            assert_int_not_equal(AMstrcmp(key1, key_back1), 0);
+            assert_int_not_equal(AMstrCmp(key1, key_back1), 0);
         }
         AMitem* item2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, key1, &v1), NULL, NULL);
         AMitem* item_back2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, key_back1, &v1), NULL, NULL);
@@ -1500,11 +1500,11 @@ static void test_get_range_values(void** state) {
         assert_true(AMitemKey(item_back1, &key_back1));
         if ((count == middle) && (middle & 1)) {
             /* The iterators are crossing in the middle. */
-            assert_int_equal(AMstrcmp(key1, key_back1), 0);
+            assert_int_equal(AMstrCmp(key1, key_back1), 0);
             assert_true(AMitemEqual(item1, item_back1));
             assert_true(AMobjIdEqual(AMitemObjId(item1), AMitemObjId(item_back1)));
         } else {
-            assert_int_not_equal(AMstrcmp(key1, key_back1), 0);
+            assert_int_not_equal(AMstrCmp(key1, key_back1), 0);
         }
         AMitem* item2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, key1, &v1), NULL, NULL);
         AMitem* item_back2 = AMstackItem(stack_ptr, AMmapGet(doc1, AM_ROOT, key_back1, &v1), NULL, NULL);
