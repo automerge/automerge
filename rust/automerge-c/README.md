@@ -124,19 +124,19 @@ keys to values. A value can be one of the following types:
 - A mutable list of values.
 - A mutable UTF-8 string.
 
-If you read from a location in the document with no value, a value with type
+If you read from a location in the document with no value, an item with type
 `AM_VAL_TYPE_VOID` will be returned, but you cannot write such a value
 explicitly.
 
 Under the hood, automerge references a mutable object by its object identifier
 where `AM_ROOT` signifies a document's root map object.
 
-There is a function to put each type of value into either a map or a list, and a
-function to read the current value from a list. As (in general) collaborators
+There are functions to put each type of value into either a map or a list, and
+functions to read the current or a historical value from a map or a list. As (in general) collaborators
 may edit the document at any time, you cannot guarantee that the type of the
 value at a given part of the document will stay the same. As a result, reading
 from the document will return an `AMitem` struct that you can inspect to
-determine its type.
+determine the type of value that it contains.
 
 Strings in automerge-c are represented using an `AMbyteSpan` which contains a
 pointer and a length. Strings must be valid UTF-8 and may contain NUL (`0`)

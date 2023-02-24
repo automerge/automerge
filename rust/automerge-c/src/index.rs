@@ -11,9 +11,9 @@ use crate::byte_span::AMbyteSpan;
 /// \brief An item index.
 #[derive(PartialEq)]
 pub enum AMindex {
-    /// A string key variant.
+    /// A UTF-8 string key variant.
     Key(SmolStr),
-    /// A position variant.
+    /// A 64-bit unsigned integer position variant.
     Pos(usize),
 }
 
@@ -60,9 +60,9 @@ impl TryFrom<&AMindex> for usize {
 pub enum AMidxType {
     /// The default tag, not a type signifier.
     Default = 0,
-    /// A string key.
+    /// A UTF-8 string view key.
     Key,
-    /// A position.
+    /// A 64-bit unsigned integer position.
     Pos,
 }
 

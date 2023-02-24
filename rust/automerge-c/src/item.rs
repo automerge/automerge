@@ -1,10 +1,8 @@
 use automerge as am;
 
-use libc::{c_void, memcpy};
 use std::any::type_name;
 use std::borrow::Cow;
 use std::cell::{RefCell, UnsafeCell};
-use std::mem::size_of;
 use std::rc::Rc;
 
 use crate::actor_id::AMactorId;
@@ -1457,11 +1455,7 @@ pub unsafe extern "C" fn AMitemKey(item: *const AMitem, value: *mut AMbyteSpan) 
         if let Some(index) = &item.as_ref().index {
             if let Ok(key) = index.try_into() {
                 if !value.is_null() {
-                    memcpy(
-                        value as *mut c_void,
-                        &key as *const AMbyteSpan as *const c_void,
-                        size_of::<AMbyteSpan>(),
-                    );
+                    *value = key;
                     return true;
                 }
             }
@@ -1471,7 +1465,7 @@ pub unsafe extern "C" fn AMitemKey(item: *const AMitem, value: *mut AMbyteSpan) 
 }
 
 /// \memberof AMitem
-/// \brief Gets the positional index of an item.
+/// \brief Gets the unsigned integer position index of an item.
 ///
 /// \param[in] item A pointer to an `AMitem` struct.
 /// \param[out] value A pointer to a `size_t`.
@@ -1488,11 +1482,7 @@ pub unsafe extern "C" fn AMitemPos(item: *const AMitem, value: *mut usize) -> bo
         if let Some(index) = &item.as_ref().index {
             if let Ok(pos) = index.try_into() {
                 if !value.is_null() {
-                    memcpy(
-                        value as *mut c_void,
-                        &pos as *const usize as *const c_void,
-                        size_of::<usize>(),
-                    );
+                    *value = pos;
                     return true;
                 }
             }
@@ -1561,11 +1551,7 @@ pub unsafe extern "C" fn AMitemToActorId(
     if let Some(item) = item.as_ref() {
         if let Ok(actor_id) = <&AMactorId>::try_from(item) {
             if !value.is_null() {
-                memcpy(
-                    value as *mut c_void,
-                    &actor_id as *const &AMactorId as *const c_void,
-                    size_of::<*const AMactorId>(),
-                );
+                *value = actor_id;
                 return true;
             }
         }
@@ -1590,11 +1576,7 @@ pub unsafe extern "C" fn AMitemToBool(item: *const AMitem, value: *mut bool) -> 
     if let Some(item) = item.as_ref() {
         if let Ok(boolean) = item.try_into() {
             if !value.is_null() {
-                memcpy(
-                    value as *mut c_void,
-                    &boolean as *const bool as *const c_void,
-                    size_of::<bool>(),
-                );
+                *value = boolean;
                 return true;
             }
         }
@@ -1619,11 +1601,7 @@ pub unsafe extern "C" fn AMitemToBytes(item: *const AMitem, value: *mut AMbyteSp
     if let Some(item) = item.as_ref() {
         if let Ok(bytes) = item.as_ref().try_into_bytes() {
             if !value.is_null() {
-                memcpy(
-                    value as *mut c_void,
-                    &bytes as *const AMbyteSpan as *const c_void,
-                    size_of::<AMbyteSpan>(),
-                );
+                *value = bytes;
                 return true;
             }
         }
@@ -1648,11 +1626,7 @@ pub unsafe extern "C" fn AMitemToChange(item: *mut AMitem, value: *mut *mut AMch
     if let Some(item) = item.as_mut() {
         if let Ok(change) = <&mut AMchange>::try_from(item) {
             if !value.is_null() {
-                memcpy(
-                    value as *mut c_void,
-                    &change as *const &mut AMchange as *const c_void,
-                    size_of::<*const AMchange>(),
-                );
+                *value = change;
                 return true;
             }
         }
@@ -1677,11 +1651,7 @@ pub unsafe extern "C" fn AMitemToChangeHash(item: *const AMitem, value: *mut AMb
     if let Some(item) = item.as_ref() {
         if let Ok(change_hash) = item.as_ref().try_into_change_hash() {
             if !value.is_null() {
-                memcpy(
-                    value as *mut c_void,
-                    &change_hash as *const AMbyteSpan as *const c_void,
-                    size_of::<AMbyteSpan>(),
-                );
+                *value = change_hash;
                 return true;
             }
         }
@@ -1706,11 +1676,7 @@ pub unsafe extern "C" fn AMitemToCounter(item: *const AMitem, value: *mut i64) -
     if let Some(item) = item.as_ref() {
         if let Ok(counter) = item.as_ref().try_into_counter() {
             if !value.is_null() {
-                memcpy(
-                    value as *mut c_void,
-                    &counter as *const i64 as *const c_void,
-                    size_of::<i64>(),
-                );
+                *value = counter;
                 return true;
             }
         }
@@ -1735,11 +1701,7 @@ pub unsafe extern "C" fn AMitemToDoc(item: *mut AMitem, value: *mut *const AMdoc
     if let Some(item) = item.as_mut() {
         if let Ok(doc) = <&mut AMdoc>::try_from(item) {
             if !value.is_null() {
-                memcpy(
-                    value as *mut c_void,
-                    &doc as *const &mut AMdoc as *const c_void,
-                    size_of::<*const AMdoc>(),
-                );
+                *value = doc;
                 return true;
             }
         }
@@ -1764,11 +1726,7 @@ pub unsafe extern "C" fn AMitemToF64(item: *const AMitem, value: *mut f64) -> bo
     if let Some(item) = item.as_ref() {
         if let Ok(float) = item.try_into() {
             if !value.is_null() {
-                memcpy(
-                    value as *mut c_void,
-                    &float as *const f64 as *const c_void,
-                    size_of::<f64>(),
-                );
+                *value = float;
                 return true;
             }
         }
@@ -1793,11 +1751,7 @@ pub unsafe extern "C" fn AMitemToInt(item: *const AMitem, value: *mut i64) -> bo
     if let Some(item) = item.as_ref() {
         if let Ok(int) = item.as_ref().try_into_int() {
             if !value.is_null() {
-                memcpy(
-                    value as *mut c_void,
-                    &int as *const i64 as *const c_void,
-                    size_of::<i64>(),
-                );
+                *value = int;
                 return true;
             }
         }
@@ -1822,11 +1776,7 @@ pub unsafe extern "C" fn AMitemToStr(item: *const AMitem, value: *mut AMbyteSpan
     if let Some(item) = item.as_ref() {
         if let Ok(str) = item.as_ref().try_into_str() {
             if !value.is_null() {
-                memcpy(
-                    value as *mut c_void,
-                    &str as *const AMbyteSpan as *const c_void,
-                    size_of::<AMbyteSpan>(),
-                );
+                *value = str;
                 return true;
             }
         }
@@ -1854,11 +1804,7 @@ pub unsafe extern "C" fn AMitemToSyncHave(
     if let Some(item) = item.as_ref() {
         if let Ok(sync_have) = <&AMsyncHave>::try_from(item) {
             if !value.is_null() {
-                memcpy(
-                    value as *mut c_void,
-                    &sync_have as *const &AMsyncHave as *const c_void,
-                    size_of::<*const AMsyncHave>(),
-                );
+                *value = sync_have;
                 return true;
             }
         }
@@ -1886,11 +1832,7 @@ pub unsafe extern "C" fn AMitemToSyncMessage(
     if let Some(item) = item.as_ref() {
         if let Ok(sync_message) = <&AMsyncMessage>::try_from(item) {
             if !value.is_null() {
-                memcpy(
-                    value as *mut c_void,
-                    &sync_message as *const &AMsyncMessage as *const c_void,
-                    size_of::<*const AMsyncMessage>(),
-                );
+                *value = sync_message;
                 return true;
             }
         }
@@ -1918,11 +1860,7 @@ pub unsafe extern "C" fn AMitemToSyncState(
     if let Some(item) = item.as_mut() {
         if let Ok(sync_state) = <&mut AMsyncState>::try_from(item) {
             if !value.is_null() {
-                memcpy(
-                    value as *mut c_void,
-                    &sync_state as *const &mut AMsyncState as *const c_void,
-                    size_of::<*const AMsyncState>(),
-                );
+                *value = sync_state;
                 return true;
             }
         }
@@ -1947,11 +1885,7 @@ pub unsafe extern "C" fn AMitemToTimestamp(item: *const AMitem, value: *mut i64)
     if let Some(item) = item.as_ref() {
         if let Ok(timestamp) = item.as_ref().try_into_timestamp() {
             if !value.is_null() {
-                memcpy(
-                    value as *mut c_void,
-                    &timestamp as *const i64 as *const c_void,
-                    size_of::<i64>(),
-                );
+                *value = timestamp;
                 return true;
             }
         }
@@ -1976,11 +1910,7 @@ pub unsafe extern "C" fn AMitemToUint(item: *const AMitem, value: *mut u64) -> b
     if let Some(item) = item.as_ref() {
         if let Ok(uint) = item.try_into() {
             if !value.is_null() {
-                memcpy(
-                    value as *mut c_void,
-                    &uint as *const u64 as *const c_void,
-                    size_of::<u64>(),
-                );
+                *value = uint;
                 return true;
             }
         }
@@ -2005,11 +1935,7 @@ pub unsafe extern "C" fn AMitemToUnknown(item: *const AMitem, value: *mut AMunkn
     if let Some(item) = item.as_ref() {
         if let Ok(unknown) = item.try_into() {
             if !value.is_null() {
-                memcpy(
-                    value as *mut c_void,
-                    &unknown as *const AMunknownValue as *const c_void,
-                    size_of::<AMunknownValue>(),
-                );
+                *value = unknown;
                 return true;
             }
         }
