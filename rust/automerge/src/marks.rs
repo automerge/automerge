@@ -40,11 +40,11 @@ impl<'a> Mark<'a> {
     }
 
     pub fn into_owned(self) -> Mark<'static> {
-      Mark {
-        data: Cow::Owned(self.data.into_owned()),
-        start: self.start,
-        end: self.end,
-      }
+        Mark {
+            data: Cow::Owned(self.data.into_owned()),
+            start: self.start,
+            end: self.end,
+        }
     }
 
     pub fn name(&self) -> &str {

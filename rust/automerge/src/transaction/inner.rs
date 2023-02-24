@@ -658,16 +658,13 @@ impl TransactionInner {
         (expand_left, expand_right): (bool, bool),
     ) -> Result<(), AutomergeError> {
         let (obj, _obj_type) = doc.exid_to_obj(ex_obj)?;
-        let mark_name = mark.name().into();
-        let mark_value = mark.value().clone();
-        // FIXME
         if let Some(obs) = op_observer {
             self.do_insert(
                 doc,
                 Some(obs),
                 obj,
                 mark.start,
-                OpType::mark(mark_name, expand_left, mark_value),
+                OpType::MarkBegin(expand_left, mark.data.clone().into_owned()),
             )?;
             self.do_insert(doc, Some(obs), obj, mark.end, OpType::MarkEnd(expand_right))?;
             obs.mark(doc, ex_obj.clone(), Some(mark).into_iter())
@@ -677,7 +674,7 @@ impl TransactionInner {
                 None,
                 obj,
                 mark.start,
-                OpType::mark(mark_name, expand_left, mark_value),
+                OpType::MarkBegin(expand_left, mark.data.into_owned()),
             )?;
             self.do_insert::<Obs>(doc, None, obj, mark.end, OpType::MarkEnd(expand_right))?;
         }
@@ -749,7 +746,6 @@ impl TransactionInner {
                             op_observer.insert(doc, ex_obj, index, value, false)
                         }
                         (Some(ObjType::Text), Prop::Seq(index)) => {
-                            // FIXME
                             if op_observer.text_as_seq() {
                                 let value = (op.value(), doc.ops().id_to_exid(op.id));
                                 op_observer.insert(doc, ex_obj, index, value, false)

@@ -227,10 +227,6 @@ impl OpType {
         }
     }
 
-    pub(crate) fn mark(name: smol_str::SmolStr, expand: bool, value: ScalarValue) -> OpType {
-        OpType::MarkBegin(expand, MarkData { name, value })
-    }
-
     pub(crate) fn from_parts(
         OpTypeParts {
             action,

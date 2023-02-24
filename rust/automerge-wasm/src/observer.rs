@@ -352,7 +352,12 @@ impl OpObserver for Observer {
         }
     }
 
-    fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(&mut self, doc: &'a R, obj: ObjId, mark: M) {
+    fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(
+        &mut self,
+        doc: &'a R,
+        obj: ObjId,
+        mark: M,
+    ) {
         if self.enabled {
             if let Some(Patch::Mark {
                 obj: tail_obj,
