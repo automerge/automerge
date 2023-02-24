@@ -136,13 +136,8 @@ fn observe_list<'a, I: Iterator<Item = &'a Op>, O: OpObserver>(
         })
         .for_each(|(index, (val_enum, (value, opid)))| {
             let tagged_value = (value, doc.id_to_exid(opid));
-            if val_enum == 0 {
-                observer.insert(doc, exid.clone(), index, tagged_value);
-            } else {
-                observer.insert(doc, exid.clone(), index, tagged_value.clone());
-                observer.put(doc, exid.clone(), Prop::Seq(index), tagged_value, true);
-                // cant insert with conflict flag - fixme
-            }
+            let conflict = val_enum > 0;
+            observer.insert(doc, exid.clone(), index, tagged_value, conflict);
         });
     observer.mark(doc, exid, finished.into_iter());
 }
@@ -358,6 +353,7 @@ mod tests {
             objid: crate::ObjId,
             index: usize,
             tagged_value: (crate::Value<'_>, crate::ObjId),
+            _conflict: bool,
         ) {
             self.ops.push(ObserverCall::Insert {
                 obj: objid,

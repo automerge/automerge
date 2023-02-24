@@ -1084,7 +1084,7 @@ impl Automerge {
                 observer.splice_text(self, ex_obj, seen, op.to_str());
             } else {
                 let value = (op.value(), self.ops.id_to_exid(op.id));
-                observer.insert(self, ex_obj, seen, value);
+                observer.insert(self, ex_obj, seen, value, false);
             }
         } else if op.is_delete() {
             if let Some(winner) = &values.last() {
@@ -1116,7 +1116,7 @@ impl Automerge {
                 .unwrap_or(false);
             let value = (op.value(), self.ops.id_to_exid(op.id));
             if op.is_list_op() && !had_value_before {
-                observer.insert(self, ex_obj, seen, value);
+                observer.insert(self, ex_obj, seen, value, false);
             } else if just_conflict {
                 observer.flag_conflict(self, ex_obj, key);
             } else {

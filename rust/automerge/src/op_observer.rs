@@ -22,6 +22,7 @@ pub trait OpObserver {
         objid: ExId,
         index: usize,
         tagged_value: (Value<'_>, ExId),
+        conflict: bool,
     );
 
     /// Some text has been spliced into a text object
@@ -149,6 +150,7 @@ impl OpObserver for () {
         _objid: ExId,
         _index: usize,
         _tagged_value: (Value<'_>, ExId),
+        _conflict: bool,
     ) {
     }
 
@@ -216,6 +218,7 @@ impl OpObserver for VecOpObserver {
         obj: ExId,
         index: usize,
         (value, id): (Value<'_>, ExId),
+        conflict: bool,
     ) {
         if let Ok(p) = doc.parents(&obj) {
             self.patches.push(Patch::Insert {
@@ -223,6 +226,7 @@ impl OpObserver for VecOpObserver {
                 path: p.path(),
                 index,
                 value: (value.into_owned(), id),
+                conflict,
             });
         }
     }
@@ -361,6 +365,8 @@ pub enum Patch {
         index: usize,
         /// The value that was inserted, and the id of the operation that inserted it there.
         value: (Value<'static>, ExId),
+        /// the inserted value has a conflict - only possible to be true on document load
+        conflict: bool,
     },
     /// Splicing a text object
     Splice {

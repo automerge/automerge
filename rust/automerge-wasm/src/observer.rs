@@ -111,6 +111,7 @@ impl OpObserver for Observer {
         obj: ObjId,
         index: usize,
         tagged_value: (Value<'_>, ObjId),
+        _conflict: bool,
     ) {
         if self.enabled {
             let value = (tagged_value.0.to_owned(), tagged_value.1);
@@ -153,6 +154,7 @@ impl OpObserver for Observer {
                             Value::Scalar(Cow::Owned(ScalarValue::Str(c.to_string().into()))),
                             ObjId::Root, // We hope this is okay
                         ),
+                        false,
                     );
                 }
                 return;

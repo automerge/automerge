@@ -639,7 +639,7 @@ impl TransactionInner {
                         for (offset, v) in values.iter().enumerate() {
                             let op = &self.operations[start + offset].1;
                             let value = (v.clone().into(), doc.ops().id_to_exid(op.id));
-                            obs.insert(doc, ex_obj.clone(), index + offset, value)
+                            obs.insert(doc, ex_obj.clone(), index + offset, value, false)
                         }
                     }
                 }
@@ -749,13 +749,13 @@ impl TransactionInner {
                     match (obj_type, prop) {
                         (Some(ObjType::List), Prop::Seq(index)) => {
                             let value = (op.value(), doc.ops().id_to_exid(op.id));
-                            op_observer.insert(doc, ex_obj, index, value)
+                            op_observer.insert(doc, ex_obj, index, value, false)
                         }
                         (Some(ObjType::Text), Prop::Seq(index)) => {
                             // FIXME
                             if op_observer.text_as_seq() {
                                 let value = (op.value(), doc.ops().id_to_exid(op.id));
-                                op_observer.insert(doc, ex_obj, index, value)
+                                op_observer.insert(doc, ex_obj, index, value, false)
                             } else {
                                 op_observer.splice_text(doc, ex_obj, index, op.to_str())
                             }

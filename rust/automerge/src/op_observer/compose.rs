@@ -19,10 +19,11 @@ impl<'a, O1: OpObserver, O2: OpObserver> OpObserver for ComposeObservers<'a, O1,
         objid: crate::ObjId,
         index: usize,
         tagged_value: (crate::Value<'_>, crate::ObjId),
+        conflict: bool,
     ) {
         self.obs1
-            .insert(doc, objid.clone(), index, tagged_value.clone());
-        self.obs2.insert(doc, objid, index, tagged_value);
+            .insert(doc, objid.clone(), index, tagged_value.clone(), conflict);
+        self.obs2.insert(doc, objid, index, tagged_value, conflict);
     }
 
     fn splice_text<R: crate::ReadDoc>(
