@@ -139,6 +139,13 @@ export type Mark = {
   range: string,
 }
 
+export type RawMark = {
+  id: ObjID,
+  type: string,
+  value: Value,
+  start: number,
+  end: number,
+}
 
 export function encodeChange(change: ChangeToEncode): Change;
 export function create(text_v2: boolean, actor?: Actor): Automerge;
@@ -181,8 +188,8 @@ export class Automerge {
   // marks
   mark(obj: ObjID, name: string, range: string, value: Value, datatype?: Datatype): void;
   unmark(obj: ObjID, mark: ObjID): void;
-  spans(obj: ObjID): any;
-  raw_spans(obj: ObjID): any;
+  marks(obj: ObjID): Mark[];
+  rawMarks(obj: ObjID): RawMark[];
   blame(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet[];
   attribute(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet[];
   attribute2(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet[];

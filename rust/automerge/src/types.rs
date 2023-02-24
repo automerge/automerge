@@ -14,7 +14,7 @@ mod opids;
 pub(crate) use opids::OpIds;
 
 pub(crate) use crate::clock::Clock;
-pub(crate) use crate::marks::{MarkData, MarkStateMachine};
+pub(crate) use crate::marks::MarkData;
 pub(crate) use crate::value::{Counter, ScalarValue, Value};
 
 pub(crate) const HEAD: ElemId = ElemId(OpId(0, 0));
@@ -445,6 +445,13 @@ impl Display for Prop {
 }
 
 impl Key {
+    pub(crate) fn prop_index(&self) -> Option<usize> {
+        match self {
+            Key::Map(n) => Some(*n),
+            Key::Seq(_) => None,
+        }
+    }
+
     pub(crate) fn elemid(&self) -> Option<ElemId> {
         match self {
             Key::Map(_) => None,

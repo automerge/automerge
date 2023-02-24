@@ -1,7 +1,7 @@
 use crate::{
     error::AutomergeError, exid::ExId, keys::Keys, keys_at::KeysAt, list_range::ListRange,
-    list_range_at::ListRangeAt, map_range::MapRange, map_range_at::MapRangeAt, parents::Parents,
-    query, values::Values, Change, ChangeHash, ObjType, Prop, Value,
+    list_range_at::ListRangeAt, map_range::MapRange, map_range_at::MapRangeAt, marks::Mark,
+    parents::Parents, query, values::Values, Change, ChangeHash, ObjType, Prop, Value,
 };
 
 use std::ops::RangeBounds;
@@ -128,6 +128,9 @@ pub trait ReadDoc {
 
     /// Get the type of this object, if it is an object.
     fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError>;
+
+    /// Get all marks on a current sequence
+    fn get_marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark>, AutomergeError>;
 
     /// Get the string represented by the given text object.
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError>;

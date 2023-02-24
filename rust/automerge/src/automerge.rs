@@ -4,10 +4,13 @@ use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::ops::RangeBounds;
 
+use itertools::Itertools;
+
 use crate::change_graph::ChangeGraph;
 use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
 use crate::keys::Keys;
+use crate::marks::{Mark, MarkStateMachine};
 use crate::op_observer::{BranchableObserver, OpObserver};
 use crate::op_set::OpSet;
 use crate::parents::Parents;
@@ -1340,6 +1343,32 @@ impl ReadDoc for Automerge {
             }
         }
         Ok(buffer)
+    }
+
+    fn get_marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark>, AutomergeError> {
+        let (obj, obj_type) = self.exid_to_obj(obj.as_ref())?;
+        let encoding = ListEncoding::new(obj_type, self.text_encoding);
+        let ops_by_key = self.ops().iter_ops(&obj).group_by(|o| o.elemid_or_key());
+        let mut pos = 0;
+        let mut marks = MarkStateMachine::default();
+
+        Ok(ops_by_key
+            .into_iter()
+            .filter_map(|(_key, key_ops)| {
+                key_ops
+                    .filter(|o| o.visible_or_mark())
+                    .last()
+                    .and_then(|o| match &o.action {
+                        OpType::Make(_) | OpType::Put(_) => {
+                            pos += o.width(encoding);
+                            None
+                        }
+                        OpType::MarkBegin(data) => marks.mark_begin(o.id, pos, data, self),
+                        OpType::MarkEnd(_) => marks.mark_end(o.id, pos, self),
+                        OpType::Increment(_) | OpType::Delete => None,
+                    })
+            })
+            .collect())
     }
 
     fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::Span<'_>>, AutomergeError> {

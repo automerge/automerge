@@ -827,6 +827,22 @@ impl Automerge {
         Ok(())
     }
 
+    pub fn marks(&mut self, obj: JsValue) -> Result<JsValue, JsValue> {
+        let (obj, _) = self.import(obj)?;
+        let marks = self.doc.get_marks(obj).map_err(to_js_err)?;
+        let result = Array::new();
+        for m in marks {
+            let mark = Object::new();
+            let (_datatype, value) = alloc(&m.value.into(), self.text_rep);
+            js_set(&mark, "name", m.name.as_str())?;
+            js_set(&mark, "value", value)?;
+            //js_set(&mark, "datatype",datatype)?;
+            js_set(&mark, "range", format!("{}..{}", m.start, m.end))?;
+            result.push(&mark.into());
+        }
+        Ok(result.into())
+    }
+
     pub fn spans(&mut self, obj: JsValue) -> Result<JsValue, JsValue> {
         let (obj, _) = self.import(obj)?;
         let text = self.doc.text(&obj)?;
@@ -865,7 +881,8 @@ impl Automerge {
         Ok(result.into())
     }
 
-    pub fn raw_spans(&mut self, obj: JsValue) -> Result<Array, JsValue> {
+    #[wasm_bindgen(js_name = rawMarks)]
+    pub fn raw_marks(&mut self, obj: JsValue) -> Result<Array, JsValue> {
         let (obj, _) = self.import(obj)?;
         let spans = self.doc.raw_spans(obj).map_err(to_js_err)?;
         let result = Array::new();

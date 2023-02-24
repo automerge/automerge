@@ -78,6 +78,10 @@ impl OpSetInternal {
         }
     }
 
+    pub(crate) fn iter_ops(&self, obj: &ObjId) -> impl Iterator<Item = &Op> {
+        self.trees.get(obj).map(|o| o.iter()).into_iter().flatten()
+    }
+
     pub(crate) fn parents(&self, obj: ObjId) -> Parents<'_> {
         Parents { obj, ops: self }
     }

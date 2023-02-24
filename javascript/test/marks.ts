@@ -4,7 +4,7 @@ import * as WASM from "@automerge/automerge-wasm"
 
 describe("Automerge", () => {
   describe("marks", () => {
-    it.only("should allow marks that can be seen in patches", () => {
+    it("should allow marks that can be seen in patches", () => {
       let callbacks = []
       let doc1 = Automerge.init({
         patchCallback: (patches, before, after) => callbacks.push(patches),

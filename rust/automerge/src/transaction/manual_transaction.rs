@@ -192,6 +192,10 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
         self.doc.text_at(obj, heads)
     }
 
+    fn get_marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark>, AutomergeError> {
+        self.doc.get_marks(obj)
+    }
+
     fn get<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
