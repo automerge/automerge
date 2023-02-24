@@ -654,25 +654,22 @@ impl TransactionInner {
         doc: &mut Automerge,
         op_observer: Option<&mut Obs>,
         ex_obj: &ExId,
-        mark: Mark,
+        mark: Mark<'_>,
+        (expand_left, expand_right): (bool, bool),
     ) -> Result<(), AutomergeError> {
         let (obj, _obj_type) = doc.exid_to_obj(ex_obj)?;
-        let mark_name = mark.name.clone();
+        let mark_name = mark.name().into();
+        let mark_value = mark.value().clone();
+        // FIXME
         if let Some(obs) = op_observer {
             self.do_insert(
                 doc,
                 Some(obs),
                 obj,
                 mark.start,
-                OpType::mark(mark_name, mark.expand_left, mark.value.clone()),
+                OpType::mark(mark_name, expand_left, mark_value),
             )?;
-            self.do_insert(
-                doc,
-                Some(obs),
-                obj,
-                mark.end,
-                OpType::MarkEnd(mark.expand_right),
-            )?;
+            self.do_insert(doc, Some(obs), obj, mark.end, OpType::MarkEnd(expand_right))?;
             obs.mark(doc, ex_obj.clone(), Some(mark).into_iter())
         } else {
             self.do_insert::<Obs>(
@@ -680,9 +677,9 @@ impl TransactionInner {
                 None,
                 obj,
                 mark.start,
-                OpType::mark(mark_name, mark.expand_left, mark.value),
+                OpType::mark(mark_name, expand_left, mark_value),
             )?;
-            self.do_insert::<Obs>(doc, None, obj, mark.end, OpType::MarkEnd(mark.expand_right))?;
+            self.do_insert::<Obs>(doc, None, obj, mark.end, OpType::MarkEnd(expand_right))?;
         }
         Ok(())
     }

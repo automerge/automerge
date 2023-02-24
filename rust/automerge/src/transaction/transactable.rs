@@ -89,7 +89,12 @@ pub trait Transactable: ReadDoc {
         text: &str,
     ) -> Result<(), AutomergeError>;
 
-    fn mark<O: AsRef<ExId>>(&mut self, obj: O, mark: Mark) -> Result<(), AutomergeError>;
+    fn mark<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        mark: Mark<'_>,
+        expand: (bool, bool),
+    ) -> Result<(), AutomergeError>;
 
     fn unmark<O: AsRef<ExId>, M: AsRef<ExId>>(
         &mut self,

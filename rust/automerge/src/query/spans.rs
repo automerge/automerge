@@ -45,7 +45,7 @@ impl<'a> Spans<'a> {
     pub(crate) fn check_marks(&mut self) {
         let mut new_marks = HashMap::new();
         for op in &self.ops {
-            if let OpType::MarkBegin(m) = &op.action {
+            if let OpType::MarkBegin(_, m) = &op.action {
                 new_marks.insert(m.name.clone(), &m.value);
             }
         }
@@ -84,7 +84,7 @@ impl<'a> TreeQuery<'a> for Spans<'a> {
         // find location to insert
         // mark or set
         if element.succ.is_empty() {
-            if let OpType::MarkBegin(_) = &element.action {
+            if let OpType::MarkBegin(_, _) = &element.action {
                 let pos = self
                     .ops
                     .binary_search_by(|probe| m.lamport_cmp(probe.id, element.id))

@@ -448,7 +448,7 @@ impl<Obs: Observation> ReadDoc for AutoCommitWithObs<Obs> {
         self.doc.object_type(obj)
     }
 
-    fn get_marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark>, AutomergeError> {
+    fn get_marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
         self.doc.get_marks(obj)
     }
 
@@ -658,10 +658,21 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
         )
     }
 
-    fn mark<O: AsRef<ExId>>(&mut self, obj: O, mark: Mark) -> Result<(), AutomergeError> {
+    fn mark<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        mark: Mark<'_>,
+        expand: (bool, bool),
+    ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let (current, tx) = self.transaction.as_mut().unwrap();
-        tx.mark(&mut self.doc, current.observer(), obj.as_ref(), mark)
+        tx.mark(
+            &mut self.doc,
+            current.observer(),
+            obj.as_ref(),
+            mark,
+            expand,
+        )
     }
 
     fn unmark<O: AsRef<ExId>, M: AsRef<ExId>>(

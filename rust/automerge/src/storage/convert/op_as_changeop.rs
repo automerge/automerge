@@ -98,7 +98,7 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
             }
             OpType::Increment(i) => Cow::Owned(ScalarValue::Int(*i)),
             OpType::Put(s) => Cow::Borrowed(s),
-            OpType::MarkBegin(MarkData { value, .. }) => Cow::Borrowed(value),
+            OpType::MarkBegin(_, MarkData { value, .. }) => Cow::Borrowed(value),
         }
     }
 
@@ -132,12 +132,12 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
     fn expand(&self) -> bool {
         matches!(
             self.op.action,
-            OpType::MarkBegin(MarkData { expand: true, .. }) | OpType::MarkEnd(true)
+            OpType::MarkBegin(true, _) | OpType::MarkEnd(true)
         )
     }
 
     fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
-        if let OpType::MarkBegin(MarkData { name, .. }) = &self.op.action {
+        if let OpType::MarkBegin(_, MarkData { name, .. }) = &self.op.action {
             Some(Cow::Owned(name.clone()))
         } else {
             None

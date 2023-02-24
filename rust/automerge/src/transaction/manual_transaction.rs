@@ -192,7 +192,7 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
         self.doc.text_at(obj, heads)
     }
 
-    fn get_marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark>, AutomergeError> {
+    fn get_marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
         self.doc.get_marks(obj)
     }
 
@@ -362,8 +362,13 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         self.do_tx(|tx, doc, obs| tx.splice_text(doc, obs, obj.as_ref(), pos, del, text))
     }
 
-    fn mark<O: AsRef<ExId>>(&mut self, obj: O, mark: Mark) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.mark(doc, obs, obj.as_ref(), mark))
+    fn mark<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        mark: Mark<'_>,
+        expand: (bool, bool),
+    ) -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, obs| tx.mark(doc, obs, obj.as_ref(), mark, expand))
     }
 
     fn unmark<O: AsRef<ExId>, M: AsRef<ExId>>(

@@ -341,6 +341,12 @@ impl<'a> From<ScalarValue> for Value<'a> {
     }
 }
 
+impl<'a> From<&'a ScalarValue> for Value<'a> {
+    fn from(v: &'a ScalarValue) -> Self {
+        Value::Scalar(Cow::Borrowed(v))
+    }
+}
+
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone, Copy)]
 pub(crate) enum DataType {
     #[serde(rename = "counter")]

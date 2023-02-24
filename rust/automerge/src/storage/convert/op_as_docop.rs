@@ -90,7 +90,7 @@ impl<'a> AsDocOp<'a> for OpAsDocOp<'a> {
         match &self.op.action {
             OpType::Put(v) => Cow::Borrowed(v),
             OpType::Increment(i) => Cow::Owned(ScalarValue::Int(*i)),
-            OpType::MarkBegin(MarkData { value, .. }) => Cow::Borrowed(value),
+            OpType::MarkBegin(_, MarkData { value, .. }) => Cow::Borrowed(value),
             _ => Cow::Owned(ScalarValue::Null),
         }
     }
@@ -112,17 +112,16 @@ impl<'a> AsDocOp<'a> for OpAsDocOp<'a> {
     }
 
     fn expand(&self) -> bool {
-        if let OpType::MarkBegin(MarkData { expand, .. }) | OpType::MarkEnd(expand) =
-            &self.op.action
-        {
+        if let OpType::MarkBegin(expand, _) | OpType::MarkEnd(expand) = &self.op.action {
             *expand
         } else {
             false
         }
     }
 
+    // FIXME
     fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
-        if let OpType::MarkBegin(MarkData { name, .. }) = &self.op.action {
+        if let OpType::MarkBegin(_, MarkData { name, .. }) = &self.op.action {
             Some(Cow::Owned(name.clone()))
         } else {
             None

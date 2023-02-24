@@ -9,11 +9,11 @@ use crate::{
 };
 
 #[derive(Debug, Default)]
-struct TextState {
+struct TextState<'a> {
     text: String,
     len: usize,
-    marks: MarkStateMachine,
-    finished: Vec<Mark>,
+    marks: MarkStateMachine<'a>,
+    finished: Vec<Mark<'a>>,
 }
 
 struct Put<'a> {
@@ -72,7 +72,7 @@ fn observe_text<'a, I: Iterator<Item = &'a Op>, O: OpObserver>(
                         state.text.push_str(o.to_str());
                         state.len += o.width(encoding);
                     }
-                    OpType::MarkBegin(data) => {
+                    OpType::MarkBegin(_, data) => {
                         if let Some(mark) = state.marks.mark_begin(o.id, state.len, data, doc) {
                             state.finished.push(mark);
                         }
@@ -110,7 +110,7 @@ fn observe_list<'a, I: Iterator<Item = &'a Op>, O: OpObserver>(
                 .filter_map(|o| match &o.action {
                     OpType::Make(obj_type) => Some((Value::Object(*obj_type), o.id)),
                     OpType::Put(value) => Some((Value::Scalar(Cow::Borrowed(value)), o.id)),
-                    OpType::MarkBegin(data) => {
+                    OpType::MarkBegin(_, data) => {
                         if let Some(mark) = marks.mark_begin(o.id, len, data, doc) {
                             // side effect
                             finished.push(mark)
@@ -431,7 +431,7 @@ mod tests {
             self.text_as_seq
         }
 
-        fn mark<R: ReadDoc, M: Iterator<Item = Mark>>(
+        fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(
             &mut self,
             _doc: &R,
             _objid: crate::ObjId,

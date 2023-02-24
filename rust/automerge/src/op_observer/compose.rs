@@ -85,9 +85,9 @@ impl<'a, O1: OpObserver, O2: OpObserver> OpObserver for ComposeObservers<'a, O1,
         self.obs2.increment(doc, objid, prop, tagged_value);
     }
 
-    fn mark<R: crate::ReadDoc, M: Iterator<Item = crate::marks::Mark>>(
+    fn mark<'b, R: crate::ReadDoc, M: Iterator<Item = crate::marks::Mark<'b>>>(
         &mut self,
-        doc: &R,
+        doc: &'b R,
         objid: crate::ObjId,
         mark: M,
     ) {

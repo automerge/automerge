@@ -199,7 +199,7 @@ pub enum OpType {
     Delete,
     Increment(i64),
     Put(ScalarValue),
-    MarkBegin(MarkData),
+    MarkBegin(bool, MarkData),
     MarkEnd(bool),
 }
 
@@ -223,16 +223,12 @@ impl OpType {
             Self::Make(ObjType::Text) => 4,
             Self::Increment(_) => 5,
             Self::Make(ObjType::Table) => 6,
-            Self::MarkBegin(_) | Self::MarkEnd(_) => 7,
+            Self::MarkBegin(_, _) | Self::MarkEnd(_) => 7,
         }
     }
 
     pub(crate) fn mark(name: smol_str::SmolStr, expand: bool, value: ScalarValue) -> OpType {
-        OpType::MarkBegin(MarkData {
-            name,
-            value,
-            expand,
-        })
+        OpType::MarkBegin(expand, MarkData { name, value })
     }
 
     pub(crate) fn from_parts(
@@ -256,11 +252,7 @@ impl OpType {
             },
             6 => Ok(Self::Make(ObjType::Table)),
             7 => match mark_name {
-                Some(name) => Ok(Self::MarkBegin(MarkData {
-                    name,
-                    value,
-                    expand,
-                })),
+                Some(name) => Ok(Self::MarkBegin(expand, MarkData { name, value })),
                 None => Ok(Self::MarkEnd(expand)),
             },
             other => Err(error::InvalidOpType::UnknownAction(other)),
@@ -668,14 +660,14 @@ impl Op {
     }
 
     pub(crate) fn is_mark(&self) -> bool {
-        matches!(&self.action, OpType::MarkBegin(_) | OpType::MarkEnd(_))
+        matches!(&self.action, OpType::MarkBegin(_, _) | OpType::MarkEnd(_))
     }
 
     pub(crate) fn valid_mark_anchor(&self) -> bool {
         self.succ.is_empty()
             && matches!(
                 &self.action,
-                OpType::MarkBegin(MarkData { expand: true, .. }) | OpType::MarkEnd(false)
+                OpType::MarkBegin(true, _) | OpType::MarkEnd(false)
             )
     }
 
@@ -715,7 +707,7 @@ impl Op {
         match &self.action {
             OpType::Make(obj_type) => Value::Object(*obj_type),
             OpType::Put(scalar) => Value::Scalar(Cow::Borrowed(scalar)),
-            OpType::MarkBegin(mark) => {
+            OpType::MarkBegin(_, mark) => {
                 Value::Scalar(Cow::Owned(format!("markBegin={}", mark.value).into()))
             }
             OpType::MarkEnd(_) => Value::Scalar(Cow::Owned("markEnd".into())),
@@ -739,7 +731,7 @@ impl Op {
             OpType::Make(obj) => format!("make{}", obj),
             OpType::Increment(val) => format!("inc:{}", val),
             OpType::Delete => "del".to_string(),
-            OpType::MarkBegin(_) => "markBegin".to_string(),
+            OpType::MarkBegin(_, _) => "markBegin".to_string(),
             OpType::MarkEnd(_) => "markEnd".to_string(),
         }
     }

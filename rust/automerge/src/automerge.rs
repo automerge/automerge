@@ -991,7 +991,7 @@ impl Automerge {
                 OpType::Make(obj) => format!("make({})", obj),
                 OpType::Increment(obj) => format!("inc({})", obj),
                 OpType::Delete => format!("del{}", 0),
-                OpType::MarkBegin(MarkData { name, value, .. }) => {
+                OpType::MarkBegin(_, MarkData { name, value }) => {
                     format!("mark({},{})", name, value)
                 }
                 OpType::MarkEnd(_) => "/mark".to_string(),
@@ -1344,7 +1344,7 @@ impl ReadDoc for Automerge {
         Ok(buffer)
     }
 
-    fn get_marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark>, AutomergeError> {
+    fn get_marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
         let (obj, obj_type) = self.exid_to_obj(obj.as_ref())?;
         let encoding = ListEncoding::new(obj_type, self.text_encoding);
         let ops_by_key = self.ops().iter_ops(&obj).group_by(|o| o.elemid_or_key());
@@ -1362,7 +1362,7 @@ impl ReadDoc for Automerge {
                             pos += o.width(encoding);
                             None
                         }
-                        OpType::MarkBegin(data) => marks.mark_begin(o.id, pos, data, self),
+                        OpType::MarkBegin(_, data) => marks.mark_begin(o.id, pos, data, self),
                         OpType::MarkEnd(_) => marks.mark_end(o.id, pos, self),
                         OpType::Increment(_) | OpType::Delete => None,
                     })

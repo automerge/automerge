@@ -5,85 +5,81 @@ use std::fmt::Display;
 use crate::types::OpId;
 use crate::value::ScalarValue;
 use crate::Automerge;
+use std::borrow::Cow;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Mark {
+pub struct Mark<'a> {
     pub start: usize,
     pub end: usize,
-    pub expand_left: bool,
-    pub expand_right: bool,
-    pub name: smol_str::SmolStr,
-    pub value: ScalarValue,
+    pub(crate) data: Cow<'a, MarkData>,
 }
 
-impl Default for Mark {
-    fn default() -> Self {
-        Mark {
-            name: "".into(),
-            value: ScalarValue::Null,
-            start: 0,
-            end: 0,
-            expand_left: false,
-            expand_right: false,
-        }
-    }
-}
-
-impl Mark {
+impl<'a> Mark<'a> {
     pub fn new<V: Into<ScalarValue>>(
         name: String,
         value: V,
         start: usize,
         end: usize,
-        expand_left: bool,
-        expand_right: bool,
-    ) -> Self {
+    ) -> Mark<'static> {
         Mark {
-            name: name.into(),
-            value: value.into(),
+            data: Cow::Owned(MarkData {
+                name: name.into(),
+                value: value.into(),
+            }),
             start,
             end,
-            expand_left,
-            expand_right,
         }
     }
 
-    pub(crate) fn from_data(start: usize, end: usize, data: &MarkData) -> Self {
+    pub(crate) fn from_data(start: usize, end: usize, data: &MarkData) -> Mark<'_> {
         Mark {
-            name: data.name.clone(),
-            value: data.value.clone(),
+            data: Cow::Borrowed(data),
             start,
             end,
-            expand_left: false,
-            expand_right: false,
         }
+    }
+
+    pub fn into_owned(self) -> Mark<'static> {
+      Mark {
+        data: Cow::Owned(self.data.into_owned()),
+        start: self.start,
+        end: self.end,
+      }
+    }
+
+    pub fn name(&self) -> &str {
+        self.data.name.as_str()
+    }
+
+    pub fn value(&self) -> &ScalarValue {
+        &self.data.value
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub(crate) struct MarkStateMachine {
-    state: Vec<(OpId, Mark)>,
+pub(crate) struct MarkStateMachine<'a> {
+    state: Vec<(OpId, Mark<'a>)>,
 }
 
-impl MarkStateMachine {
+impl<'a> MarkStateMachine<'a> {
     pub(crate) fn mark_begin(
         &mut self,
         id: OpId,
         pos: usize,
-        data: &MarkData,
+        data: &'a MarkData,
         doc: &Automerge,
-    ) -> Option<Mark> {
+    ) -> Option<Mark<'a>> {
         let mut result = None;
         let index = self.find(id, doc).err()?;
 
         let mut mark = Mark::from_data(pos, pos, data);
 
         if let Some(above) = Self::mark_above(&self.state, index, &mark) {
-            if above.value == mark.value {
+            if above.value() == mark.value() {
                 mark.start = above.start;
             }
         } else if let Some(below) = Self::mark_below(&mut self.state, index, &mark) {
-            if below.value == mark.value {
+            if below.value() == mark.value() {
                 mark.start = below.start;
             } else {
                 let mut m = below.clone();
@@ -97,7 +93,7 @@ impl MarkStateMachine {
         result
     }
 
-    pub(crate) fn mark_end(&mut self, id: OpId, pos: usize, doc: &Automerge) -> Option<Mark> {
+    pub(crate) fn mark_end(&mut self, id: OpId, pos: usize, doc: &Automerge) -> Option<Mark<'a>> {
         let mut result = None;
         let index = self.find(id.prev(), doc).ok()?;
 
@@ -106,7 +102,7 @@ impl MarkStateMachine {
 
         if Self::mark_above(&self.state, index, &mark).is_none() {
             match Self::mark_below(&mut self.state, index, &mark) {
-                Some(below) if below.value == mark.value => {}
+                Some(below) if below.value() == mark.value() => {}
                 Some(below) => {
                     below.start = pos;
                     result = Some(mark.clone());
@@ -126,19 +122,28 @@ impl MarkStateMachine {
             .binary_search_by(|probe| metadata.lamport_cmp(probe.0, target))
     }
 
-    fn mark_above<'a>(state: &'a [(OpId, Mark)], index: usize, mark: &Mark) -> Option<&'a Mark> {
-        Some(&state[index..].iter().find(|(_, m)| m.name == mark.name)?.1)
+    fn mark_above<'b>(
+        state: &'b [(OpId, Mark<'a>)],
+        index: usize,
+        mark: &Mark<'a>,
+    ) -> Option<&'b Mark<'a>> {
+        Some(
+            &state[index..]
+                .iter()
+                .find(|(_, m)| m.name() == mark.name())?
+                .1,
+        )
     }
 
-    fn mark_below<'a>(
-        state: &'a mut [(OpId, Mark)],
+    fn mark_below<'b>(
+        state: &'b mut [(OpId, Mark<'a>)],
         index: usize,
-        mark: &Mark,
-    ) -> Option<&'a mut Mark> {
+        mark: &Mark<'a>,
+    ) -> Option<&'b mut Mark<'a>> {
         Some(
             &mut state[0..index]
                 .iter_mut()
-                .filter(|(_, m)| m.name == mark.name)
+                .filter(|(_, m)| m.data.name == mark.data.name)
                 .last()?
                 .1,
         )
@@ -149,11 +154,10 @@ impl MarkStateMachine {
 pub struct MarkData {
     pub name: SmolStr,
     pub value: ScalarValue,
-    pub expand: bool,
 }
 
 impl Display for MarkData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "value={} expand={}", self.value, self.value)
+        write!(f, "name={} value={}", self.name, self.value)
     }
 }

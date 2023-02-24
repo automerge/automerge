@@ -814,7 +814,8 @@ impl Automerge {
         self.doc
             .mark(
                 &obj,
-                am::marks::Mark::new(name, value, start, end, start_sticky, end_sticky),
+                am::marks::Mark::new(name, value, start, end),
+                (start_sticky, end_sticky),
             )
             .map_err(to_js_err)?;
         Ok(())
@@ -833,8 +834,8 @@ impl Automerge {
         let result = Array::new();
         for m in marks {
             let mark = Object::new();
-            let (_datatype, value) = alloc(&m.value.into(), self.text_rep);
-            js_set(&mark, "name", m.name.as_str())?;
+            let (_datatype, value) = alloc(&m.value().clone().into(), self.text_rep);
+            js_set(&mark, "name", m.name())?;
             js_set(&mark, "value", value)?;
             //js_set(&mark, "datatype",datatype)?;
             js_set(&mark, "range", format!("{}..{}", m.start, m.end))?;

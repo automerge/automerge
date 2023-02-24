@@ -130,7 +130,7 @@ pub trait ReadDoc {
     fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError>;
 
     /// Get all marks on a current sequence
-    fn get_marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark>, AutomergeError>;
+    fn get_marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError>;
 
     /// Get the string represented by the given text object.
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError>;

@@ -39,7 +39,7 @@ impl<'a> TreeQuery<'a> for RawSpans {
         // find location to insert
         // mark or set
         if element.succ.is_empty() {
-            if let OpType::MarkBegin(md) = &element.action {
+            if let OpType::MarkBegin(_, md) = &element.action {
                 let pos = self
                     .spans
                     .binary_search_by(|probe| m.lamport_cmp(probe.id, element.id))
