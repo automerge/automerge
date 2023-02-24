@@ -340,8 +340,7 @@ describe("Automerge", () => {
         const s2 = Automerge.change(
           s1,
           {
-            patchCallback: (patches, before, after) =>
-              callbacks.push({ patches, before, after }),
+            patchCallback: (patches, info) => callbacks.push({ patches, info }),
           },
           doc => {
             doc.birds = ["Goldfinch"]
@@ -363,8 +362,8 @@ describe("Automerge", () => {
           path: ["birds", 0, 0],
           value: "Goldfinch",
         })
-        assert.strictEqual(callbacks[0].before, s1)
-        assert.strictEqual(callbacks[0].after, s2)
+        assert.strictEqual(callbacks[0].info.before, s1)
+        assert.strictEqual(callbacks[0].info.after, s2)
       })
 
       it("should call a patchCallback set up on document initialisation", () => {
@@ -374,8 +373,7 @@ describe("Automerge", () => {
           after: Automerge.Doc<any>
         }> = []
         s1 = Automerge.init({
-          patchCallback: (patches, before, after) =>
-            callbacks.push({ patches, before, after }),
+          patchCallback: (patches, info) => callbacks.push({ patches, info }),
         })
         const s2 = Automerge.change(s1, doc => (doc.bird = "Goldfinch"))
         assert.strictEqual(callbacks.length, 1)
@@ -389,8 +387,8 @@ describe("Automerge", () => {
           path: ["bird", 0],
           value: "Goldfinch",
         })
-        assert.strictEqual(callbacks[0].before, s1)
-        assert.strictEqual(callbacks[0].after, s2)
+        assert.strictEqual(callbacks[0].info.before, s1)
+        assert.strictEqual(callbacks[0].info.after, s2)
       })
     })
 
@@ -1812,8 +1810,8 @@ describe("Automerge", () => {
         before,
         Automerge.getAllChanges(s1),
         {
-          patchCallback(patch, before, after) {
-            callbacks.push({ patch, before, after })
+          patchCallback(patch, info) {
+            callbacks.push({ patch, info })
           },
         }
       )
@@ -1833,8 +1831,8 @@ describe("Automerge", () => {
         path: ["birds", 0, 0],
         value: "Goldfinch",
       })
-      assert.strictEqual(callbacks[0].before, before)
-      assert.strictEqual(callbacks[0].after, after)
+      assert.strictEqual(callbacks[0].info.before, before)
+      assert.strictEqual(callbacks[0].info.after, after)
     })
 
     it("should merge multiple applied changes into one patch", () => {

@@ -66,8 +66,7 @@ pub struct SpanInfo {
     pub id: ExId,
     pub start: usize,
     pub end: usize,
-    #[serde(rename = "type")]
-    pub span_type: String,
+    pub key: String,
     pub value: ScalarValue,
 }
 

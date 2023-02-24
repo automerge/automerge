@@ -134,14 +134,15 @@ export type InsertPatch = {
 }
 
 export type Mark = {
-  name: string,
+  key: string,
   value: Value,
-  range: string,
+  start: number,
+  end: number,
 }
 
 export type RawMark = {
   id: ObjID,
-  type: string,
+  key: string,
   value: Value,
   start: number,
   end: number,
@@ -186,7 +187,7 @@ export class Automerge {
   delete(obj: ObjID, prop: Prop): void;
 
   // marks
-  mark(obj: ObjID, name: string, range: string, value: Value, datatype?: Datatype): void;
+  mark(obj: ObjID, key: string, range: string, value: Value, datatype?: Datatype): void;
   unmark(obj: ObjID, mark: ObjID): void;
   marks(obj: ObjID): Mark[];
   rawMarks(obj: ObjID): RawMark[];
@@ -246,7 +247,14 @@ export class Automerge {
   dump(): void;
 
   // experimental api can go here
-  applyPatches<Doc>(obj: Doc, meta?: unknown, callback?: (patch: Array<Patch>, before: Doc, after: Doc) => void): Doc;
+  applyPatches<Doc>(obj: Doc, meta?: unknown, callback?: (patch: Array<Patch>, info: PatchInfo<Doc>) => void): Doc;
+}
+
+export interface PatchInfo<T> {
+  before: T,
+  after: T,
+  from: Heads,
+  to: Heads,
 }
 
 export interface JsSyncState {

@@ -208,7 +208,7 @@ pub(crate) struct OpTypeParts {
     pub(crate) action: u64,
     pub(crate) value: ScalarValue,
     pub(crate) expand: bool,
-    pub(crate) mark_name: Option<smol_str::SmolStr>,
+    pub(crate) mark_key: Option<smol_str::SmolStr>,
 }
 
 // Like `types::OpType` except using a String for mark names
@@ -239,7 +239,7 @@ impl OpType {
             action,
             value,
             expand,
-            mark_name,
+            mark_key,
         }: OpTypeParts,
     ) -> Self {
         match action {
@@ -254,7 +254,7 @@ impl OpType {
                 _ => panic!("non numeric value for integer action"),
             },
             6 => Self::Make(ObjType::Table),
-            7 => match mark_name {
+            7 => match mark_key {
                 Some(name) => Self::MarkBegin(MarkData {
                     name,
                     value,

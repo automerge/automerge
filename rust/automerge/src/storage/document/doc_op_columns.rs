@@ -42,7 +42,7 @@ pub(crate) struct DocOp {
     pub(crate) value: ScalarValue,
     pub(crate) succ: Vec<OpId>,
     pub(crate) expand: bool,
-    pub(crate) mark_name: Option<smol_str::SmolStr>,
+    pub(crate) mark_key: Option<smol_str::SmolStr>,
 }
 
 #[derive(Debug, Clone)]
@@ -57,7 +57,7 @@ pub(crate) struct DocOpColumns {
     #[allow(dead_code)]
     other: Columns,
     expand: MaybeBooleanRange,
-    mark_name: RleRange<smol_str::SmolStr>,
+    mark_key: RleRange<smol_str::SmolStr>,
 }
 
 struct DocId {
@@ -97,7 +97,7 @@ pub(crate) trait AsDocOp<'a> {
     fn val(&self) -> Cow<'a, ScalarValue>;
     fn succ(&self) -> Self::SuccIter;
     fn expand(&self) -> bool;
-    fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>>;
+    fn mark_key(&self) -> Option<Cow<'a, smol_str::SmolStr>>;
 }
 
 impl DocOpColumns {
@@ -128,7 +128,7 @@ impl DocOpColumns {
         let val = ValueRange::encode(ops.clone().map(|o| o.val()), out);
         let succ = OpIdListRange::encode(ops.clone().map(|o| o.succ()), out);
         let expand = MaybeBooleanRange::encode(ops.clone().map(|o| o.expand()), out);
-        let mark_name = RleRange::encode(ops.map(|o| o.mark_name()), out);
+        let mark_key = RleRange::encode(ops.map(|o| o.mark_key()), out);
         Self {
             obj,
             key,
@@ -138,7 +138,7 @@ impl DocOpColumns {
             val,
             succ,
             expand,
-            mark_name,
+            mark_key,
             other: Columns::empty(),
         }
     }
@@ -157,7 +157,7 @@ impl DocOpColumns {
         let mut val = ValueEncoder::new();
         let mut succ = OpIdListEncoder::new();
         let mut expand = MaybeBooleanEncoder::new();
-        let mut mark_name = RleEncoder::<_, smol_str::SmolStr>::new(Vec::new());
+        let mut mark_key = RleEncoder::<_, smol_str::SmolStr>::new(Vec::new());
         for op in ops {
             obj.append(op.obj());
             key.append(op.key());
@@ -167,7 +167,7 @@ impl DocOpColumns {
             val.append(&op.val());
             succ.append(op.succ());
             expand.append(op.expand());
-            mark_name.append(op.mark_name());
+            mark_key.append(op.mark_key());
         }
         let obj = obj.finish(out);
         let key = key.finish(out);
@@ -191,10 +191,10 @@ impl DocOpColumns {
         out.extend(expand_out);
         let expand = MaybeBooleanRange::from(expand_start..out.len());
 
-        let mark_name_start = out.len();
-        let (mark_name_out, _) = mark_name.finish();
-        out.extend(mark_name_out);
-        let mark_name = RleRange::from(mark_name_start..out.len());
+        let mark_key_start = out.len();
+        let (mark_key_out, _) = mark_key.finish();
+        out.extend(mark_key_out);
+        let mark_key = RleRange::from(mark_key_start..out.len());
 
         DocOpColumns {
             obj,
@@ -205,7 +205,7 @@ impl DocOpColumns {
             val,
             succ,
             expand,
-            mark_name,
+            mark_key,
             other: Columns::empty(),
         }
     }
@@ -220,7 +220,7 @@ impl DocOpColumns {
             value: self.val.iter(data),
             succ: self.succ.iter(data),
             expand: self.expand.decoder(data),
-            mark_name: self.mark_name.decoder(data),
+            mark_key: self.mark_key.decoder(data),
         }
     }
 
@@ -301,10 +301,10 @@ impl DocOpColumns {
                 self.expand.clone().into(),
             ));
         }
-        if !self.mark_name.is_empty() {
+        if !self.mark_key.is_empty() {
             cols.push(RawColumn::new(
                 ColumnSpec::new(MARK_NAME_COL_ID, ColumnType::String, false),
-                self.mark_name.clone().into(),
+                self.mark_key.clone().into(),
             ));
         }
         cols.into_iter().collect()
@@ -321,7 +321,7 @@ pub(crate) struct DocOpColumnIter<'a> {
     value: ValueIter<'a>,
     succ: OpIdListIter<'a>,
     expand: MaybeBooleanDecoder<'a>,
-    mark_name: RleDecoder<'a, smol_str::SmolStr>,
+    mark_key: RleDecoder<'a, smol_str::SmolStr>,
 }
 
 impl<'a> DocOpColumnIter<'a> {
@@ -367,7 +367,7 @@ impl<'a> DocOpColumnIter<'a> {
             let succ = self.succ.next_in_col("succ")?;
             let insert = self.insert.next_in_col("insert")?;
             let expand = self.expand.maybe_next_in_col("expand")?.unwrap_or(false);
-            let mark_name = self.mark_name.maybe_next_in_col("mark_name")?;
+            let mark_key = self.mark_key.maybe_next_in_col("mark_key")?;
             Ok(Some(DocOp {
                 id,
                 value,
@@ -377,7 +377,7 @@ impl<'a> DocOpColumnIter<'a> {
                 succ,
                 insert,
                 expand,
-                mark_name,
+                mark_key,
             }))
         }
     }
@@ -413,7 +413,7 @@ impl TryFrom<Columns> for DocOpColumns {
         let mut succ_actor: Option<RleRange<u64>> = None;
         let mut succ_ctr: Option<DeltaRange> = None;
         let mut expand: Option<MaybeBooleanRange> = None;
-        let mut mark_name: Option<RleRange<smol_str::SmolStr>> = None;
+        let mut mark_key: Option<RleRange<smol_str::SmolStr>> = None;
         let mut other = Columns::empty();
 
         for (index, col) in columns.into_iter().enumerate() {
@@ -468,7 +468,7 @@ impl TryFrom<Columns> for DocOpColumns {
                     _ => return Err(Error::MismatchingColumn { index }),
                 },
                 (EXPAND_COL_ID, ColumnType::Boolean) => expand = Some(col.range().into()),
-                (MARK_NAME_COL_ID, ColumnType::String) => mark_name = Some(col.range().into()),
+                (MARK_NAME_COL_ID, ColumnType::String) => mark_key = Some(col.range().into()),
                 (other_col, other_type) => {
                     tracing::warn!(id=?other_col, typ=?other_type, "unknown column type");
                     other.append(col)
@@ -498,7 +498,7 @@ impl TryFrom<Columns> for DocOpColumns {
                 succ_ctr.unwrap_or_else(|| (0..0).into()),
             ),
             expand: expand.unwrap_or_else(|| (0..0).into()),
-            mark_name: mark_name.unwrap_or_else(|| (0..0).into()),
+            mark_key: mark_key.unwrap_or_else(|| (0..0).into()),
             other,
         })
     }

@@ -46,7 +46,7 @@ impl<'a> Spans<'a> {
         let mut new_marks = HashMap::new();
         for op in &self.ops {
             if let OpType::MarkBegin(_, m) = &op.action {
-                new_marks.insert(m.name.clone(), &m.value);
+                new_marks.insert(m.key.clone(), &m.value);
             }
         }
         if new_marks != self.marks {

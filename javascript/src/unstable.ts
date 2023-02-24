@@ -240,7 +240,7 @@ export function splice<T>(
 export function mark<T>(
   doc: Doc<T>,
   prop: stable.Prop,
-  markName: string,
+  key: string,
   range: string,
   value: string | boolean | number | Uint8Array | null
 ) {
@@ -254,7 +254,7 @@ export function mark<T>(
   }
   const obj = `${objectId}/${prop}`
   try {
-    return state.handle.mark(obj, range, markName, value)
+    return state.handle.mark(obj, range, key, value)
   } catch (e) {
     throw new RangeError(`Cannot mark: ${e}`)
   }

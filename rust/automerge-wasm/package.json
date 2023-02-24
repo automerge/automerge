@@ -37,7 +37,7 @@
     "target": "rimraf ./$TARGET && yarn compile && yarn bindgen && yarn opt",
     "compile": "cargo build --target wasm32-unknown-unknown --profile $PROFILE",
     "bindgen": "wasm-bindgen --no-typescript --weak-refs --target $TARGET --out-dir $TARGET ../target/wasm32-unknown-unknown/$TARGET_DIR/automerge_wasm.wasm",
-    "opt": "wasm-opt -O4 $TARGET/automerge_wasm_bg.wasm -o $TARGET/automerge_wasm_bg.wasm",
+    "opt": "echo wasm-opt -O4 $TARGET/automerge_wasm_bg.wasm -o $TARGET/automerge_wasm_bg.wasm",
     "test": "ts-mocha -p tsconfig.json --type-check --bail --full-trace test/*.ts"
   },
   "devDependencies": {

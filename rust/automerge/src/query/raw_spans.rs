@@ -17,7 +17,7 @@ pub(crate) struct RawSpan {
     pub(crate) id: OpId,
     pub(crate) start: usize,
     pub(crate) end: usize,
-    pub(crate) name: smol_str::SmolStr,
+    pub(crate) key: smol_str::SmolStr,
     pub(crate) value: ScalarValue,
 }
 
@@ -50,7 +50,7 @@ impl<'a> TreeQuery<'a> for RawSpans {
                         id: element.id,
                         start: self.seen,
                         end: 0,
-                        name: md.name.clone(),
+                        key: md.key.clone(),
                         value: md.value.clone(),
                     },
                 );

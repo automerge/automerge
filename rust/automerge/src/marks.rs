@@ -16,14 +16,14 @@ pub struct Mark<'a> {
 
 impl<'a> Mark<'a> {
     pub fn new<V: Into<ScalarValue>>(
-        name: String,
+        key: String,
         value: V,
         start: usize,
         end: usize,
     ) -> Mark<'static> {
         Mark {
             data: Cow::Owned(MarkData {
-                name: name.into(),
+                key: key.into(),
                 value: value.into(),
             }),
             start,
@@ -47,8 +47,8 @@ impl<'a> Mark<'a> {
         }
     }
 
-    pub fn name(&self) -> &str {
-        self.data.name.as_str()
+    pub fn key(&self) -> &str {
+        self.data.key.as_str()
     }
 
     pub fn value(&self) -> &ScalarValue {
@@ -130,7 +130,7 @@ impl<'a> MarkStateMachine<'a> {
         Some(
             &state[index..]
                 .iter()
-                .find(|(_, m)| m.name() == mark.name())?
+                .find(|(_, m)| m.key() == mark.key())?
                 .1,
         )
     }
@@ -143,7 +143,7 @@ impl<'a> MarkStateMachine<'a> {
         Some(
             &mut state[0..index]
                 .iter_mut()
-                .filter(|(_, m)| m.data.name == mark.data.name)
+                .filter(|(_, m)| m.data.key == mark.data.key)
                 .last()?
                 .1,
         )
@@ -152,12 +152,12 @@ impl<'a> MarkStateMachine<'a> {
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct MarkData {
-    pub name: SmolStr,
+    pub key: SmolStr,
     pub value: ScalarValue,
 }
 
 impl Display for MarkData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "name={} value={}", self.name, self.value)
+        write!(f, "key={} value={}", self.key, self.value)
     }
 }

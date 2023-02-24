@@ -207,7 +207,7 @@ pub(crate) struct OpTypeParts {
     pub(crate) action: u64,
     pub(crate) value: ScalarValue,
     pub(crate) expand: bool,
-    pub(crate) mark_name: Option<smol_str::SmolStr>,
+    pub(crate) mark_key: Option<smol_str::SmolStr>,
 }
 
 impl OpType {
@@ -232,7 +232,7 @@ impl OpType {
             action,
             value,
             expand,
-            mark_name,
+            mark_key,
         }: OpTypeParts,
     ) -> Result<OpType, error::InvalidOpType> {
         match action {
@@ -247,8 +247,8 @@ impl OpType {
                 _ => Err(error::InvalidOpType::NonNumericInc),
             },
             6 => Ok(Self::Make(ObjType::Table)),
-            7 => match mark_name {
-                Some(name) => Ok(Self::MarkBegin(expand, MarkData { name, value })),
+            7 => match mark_key {
+                Some(key) => Ok(Self::MarkBegin(expand, MarkData { key, value })),
                 None => Ok(Self::MarkEnd(expand)),
             },
             other => Err(error::InvalidOpType::UnknownAction(other)),

@@ -349,7 +349,7 @@ fn import_op(m: &mut OpSetMetadata, op: DocOp) -> Result<Op, Error> {
         action: op.action,
         value: op.value,
         expand: op.expand,
-        mark_name: op.mark_name,
+        mark_key: op.mark_key,
     })?;
     Ok(Op {
         id: check_opid(m, op.id)?,

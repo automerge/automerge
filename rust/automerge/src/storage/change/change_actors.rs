@@ -252,8 +252,8 @@ where
         self.op.expand()
     }
 
-    fn mark_name(&self) -> Option<Cow<'aschangeop, smol_str::SmolStr>> {
-        self.op.mark_name()
+    fn mark_key(&self) -> Option<Cow<'aschangeop, smol_str::SmolStr>> {
+        self.op.mark_key()
     }
 }
 

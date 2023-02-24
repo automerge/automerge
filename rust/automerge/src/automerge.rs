@@ -26,7 +26,6 @@ use crate::{
     query, AutomergeError, Change, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType,
     Prop, ReadDoc, Values,
 };
-use serde::Serialize;
 
 mod current_state;
 
@@ -735,7 +734,7 @@ impl Automerge {
                             action: c.action,
                             value: c.val,
                             expand: c.expand,
-                            mark_name: c.mark_name,
+                            mark_key: c.mark_key,
                         })
                         .unwrap(),
                         key,
@@ -991,8 +990,8 @@ impl Automerge {
                 OpType::Make(obj) => format!("make({})", obj),
                 OpType::Increment(obj) => format!("inc({})", obj),
                 OpType::Delete => format!("del{}", 0),
-                OpType::MarkBegin(_, MarkData { name, value }) => {
-                    format!("mark({},{})", name, value)
+                OpType::MarkBegin(_, MarkData { key, value }) => {
+                    format!("mark({},{})", key, value)
                 }
                 OpType::MarkEnd(_) => "/mark".to_string(),
             };
@@ -1423,7 +1422,7 @@ impl ReadDoc for Automerge {
                 id: self.id_to_exid(s.id),
                 start: s.start,
                 end: s.end,
-                span_type: s.name.to_string(),
+                key: s.key.to_string(),
                 value: s.value,
             })
             .collect();
@@ -1559,15 +1558,4 @@ impl Default for Automerge {
     fn default() -> Self {
         Self::new()
     }
-}
-
-#[derive(Serialize, Debug, Clone, PartialEq)]
-pub(crate) struct SpanInfo {
-    pub(crate) id: ExId,
-    pub(crate) time: i64,
-    pub(crate) start: usize,
-    pub(crate) end: usize,
-    #[serde(rename = "type")]
-    pub(crate) span_type: String,
-    pub(crate) value: ScalarValue,
 }

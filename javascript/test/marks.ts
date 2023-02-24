@@ -19,7 +19,7 @@ describe("Automerge", () => {
         {
           action: "mark",
           path: ["x"],
-          marks: [{ name: "font-weight", range: "5..10", value: "bold" }],
+          marks: [{ key: "font-weight", start: 5, end: 10, value: "bold" }],
         },
       ])
 
@@ -33,7 +33,7 @@ describe("Automerge", () => {
       assert.deepStrictEqual(callbacks[0][2], {
         action: "mark",
         path: ["x"],
-        marks: [{ name: "font-weight", range: "5..10", value: "bold" }],
+        marks: [{ key: "font-weight", start: 5, end: 10, value: "bold" }],
       })
     })
   })

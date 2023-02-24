@@ -28,6 +28,12 @@ impl From<AR> for JsValue {
     }
 }
 
+impl From<AR> for Array {
+    fn from(ar: AR) -> Self {
+        ar.0
+    }
+}
+
 impl From<JS> for JsValue {
     fn from(js: JS) -> Self {
         js.0
@@ -334,11 +340,20 @@ impl TryFrom<JS> for am::sync::Message {
     }
 }
 
+impl From<Vec<ChangeHash>> for AR {
+    fn from(values: Vec<ChangeHash>) -> Self {
+        AR(values
+            .iter()
+            .map(|h| JsValue::from_str(&h.to_string()))
+            .collect())
+    }
+}
+
 impl From<&[ChangeHash]> for AR {
     fn from(value: &[ChangeHash]) -> Self {
         AR(value
             .iter()
-            .map(|h| JsValue::from_str(&hex::encode(h.0)))
+            .map(|h| JsValue::from_str(&h.to_string()))
             .collect())
     }
 }

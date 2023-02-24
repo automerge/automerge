@@ -13,7 +13,7 @@ pub(crate) struct SeekMark<'a> {
     end: usize,
     encoding: ListEncoding,
     found: bool,
-    mark_name: smol_str::SmolStr,
+    mark_key: smol_str::SmolStr,
     next_mark: Option<Mark<'a>>,
     pos: usize,
     seen: usize,
@@ -30,7 +30,7 @@ impl<'a> SeekMark<'a> {
             end,
             found: false,
             next_mark: None,
-            mark_name: "".into(),
+            mark_key: "".into(),
             pos: 0,
             seen: 0,
             last_seen: None,
@@ -58,20 +58,20 @@ impl<'a> TreeQuery<'a> for SeekMark<'a> {
                     return QueryResult::Finish;
                 }
                 self.found = true;
-                self.mark_name = data.name.clone();
+                self.mark_key = data.key.clone();
                 // retain the name and the value
                 self.next_mark = Some(Mark::from_data(self.seen, self.seen, data));
                 // change id to the end id
                 self.id = self.id.next();
                 // remove all marks that dont match
-                self.super_marks.retain(|_, v| v == &data.name);
+                self.super_marks.retain(|_, v| v == &data.key);
             }
             OpType::MarkBegin(_, mark) => {
                 if m.lamport_cmp(op.id, self.id) == Ordering::Greater {
                     if let Some(next_mark) = &mut self.next_mark {
                         // gather marks of the same type that supersede us
-                        if mark.name == self.mark_name {
-                            self.super_marks.insert(op.id.next(), mark.name.clone());
+                        if mark.key == self.mark_key {
+                            self.super_marks.insert(op.id.next(), mark.key.clone());
                             if self.super_marks.len() == 1 {
                                 // complete a mark
                                 next_mark.end = self.seen;
@@ -80,7 +80,7 @@ impl<'a> TreeQuery<'a> for SeekMark<'a> {
                         }
                     } else {
                         // gather all marks until we know what our mark's name is
-                        self.super_marks.insert(op.id.next(), mark.name.clone());
+                        self.super_marks.insert(op.id.next(), mark.key.clone());
                     }
                 }
             }

@@ -2,6 +2,8 @@
 
 use std::borrow::Cow;
 
+use automerge::ChangeHash;
+
 use crate::{
     interop::{self, alloc, js_set},
     TextRepresentation,
@@ -15,17 +17,22 @@ use crate::sequence_tree::SequenceTree;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Observer {
     enabled: bool,
+    last_heads: Option<Vec<ChangeHash>>,
     patches: Vec<Patch>,
     text_rep: TextRepresentation,
 }
 
 impl Observer {
-    pub(crate) fn take_patches(&mut self) -> Vec<Patch> {
-        std::mem::take(&mut self.patches)
+    pub(crate) fn take_patches(&mut self, heads: Vec<ChangeHash>) -> (Vec<Patch>, Vec<ChangeHash>) {
+        let old_heads = self.last_heads.replace(heads).unwrap_or_default();
+        let patches = std::mem::take(&mut self.patches);
+        (patches, old_heads)
     }
-    pub(crate) fn enable(&mut self, enable: bool) -> bool {
+
+    pub(crate) fn enable(&mut self, enable: bool, heads: Vec<ChangeHash>) -> bool {
         if self.enabled && !enable {
-            self.patches.truncate(0)
+            self.patches.truncate(0);
+            self.last_heads = Some(heads);
         }
         let old_enabled = self.enabled;
         self.enabled = enable;
@@ -394,6 +401,7 @@ impl automerge::op_observer::BranchableObserver for Observer {
     fn branch(&self) -> Self {
         Observer {
             patches: vec![],
+            last_heads: None,
             enabled: self.enabled,
             text_rep: self.text_rep,
         }
@@ -565,13 +573,14 @@ impl TryFrom<Patch> for JsValue {
                 let marks_array = Array::new();
                 for m in marks.iter() {
                     let mark = Object::new();
-                    js_set(&mark, "name", m.name())?;
+                    js_set(&mark, "key", m.key())?;
                     js_set(
                         &mark,
                         "value",
                         &alloc(&m.value().into(), TextRepresentation::String).1,
                     )?;
-                    js_set(&mark, "range", format!("{}..{}", m.start, m.end))?;
+                    js_set(&mark, "start", m.start as i32)?;
+                    js_set(&mark, "end", m.end as i32)?;
                     marks_array.push(&mark);
                 }
                 js_set(&result, "marks", marks_array)?;

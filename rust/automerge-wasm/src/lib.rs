@@ -546,7 +546,8 @@ impl Automerge {
         let enable = enable
             .as_bool()
             .ok_or_else(|| to_js_err("must pass a bool to enablePatches"))?;
-        let old_enabled = self.doc.observer().enable(enable);
+        let heads = self.doc.get_heads();
+        let old_enabled = self.doc.observer().enable(enable, heads);
         self.doc.observer().set_text_rep(self.text_rep);
         Ok(old_enabled.into())
     }
@@ -572,11 +573,12 @@ impl Automerge {
         object: JsValue,
         meta: JsValue,
         callback: JsValue,
-    ) -> Result<JsValue, error::ApplyPatch> {
+    ) -> Result<JsValue, JsValue> {
         let mut object = object
             .dyn_into::<Object>()
             .map_err(|_| error::ApplyPatch::NotObjectd)?;
-        let patches = self.doc.observer().take_patches();
+        let end_heads = self.doc.get_heads();
+        let (patches, begin_heads) = self.doc.observer().take_patches(end_heads.clone());
         let callback = callback.dyn_into::<Function>().ok();
 
         // even if there are no patches we may need to update the meta object
@@ -595,18 +597,22 @@ impl Automerge {
             object = self.apply_patch(object, p, 0, &meta, &mut exposed)?;
         }
 
+        self.finalize_exposed(&object, exposed, &meta)?;
+
         if let Some(c) = &callback {
             if !patches.is_empty() {
                 let patches: Array = patches
                     .into_iter()
                     .map(JsValue::try_from)
                     .collect::<Result<_, _>>()?;
-                c.call3(&JsValue::undefined(), &patches.into(), &before, &object)
-                    .map_err(error::ApplyPatch::PatchCallback)?;
+                let info = Object::new();
+                js_set(&info, "before", &before)?;
+                js_set(&info, "after", &object)?;
+                js_set(&info, "from", AR::from(begin_heads))?;
+                js_set(&info, "to", AR::from(end_heads))?;
+                c.call2(&JsValue::undefined(), &patches.into(), &info)?;
             }
         }
-
-        self.finalize_exposed(&object, exposed, &meta)?;
 
         Ok(object.into())
     }
@@ -617,7 +623,8 @@ impl Automerge {
         // committed.
         // If we pop the patches then we won't be able to revert them.
 
-        let patches = self.doc.observer().take_patches();
+        let heads = self.doc.get_heads();
+        let (patches, _heads) = self.doc.observer().take_patches(heads);
         let result = Array::new();
         for p in patches {
             result.push(&p.try_into()?);
@@ -703,17 +710,12 @@ impl Automerge {
     #[wasm_bindgen(js_name = getHeads)]
     pub fn get_heads(&mut self) -> Array {
         let heads = self.doc.get_heads();
-        let heads: Array = heads
-            .iter()
-            .map(|h| JsValue::from_str(&hex::encode(h.0)))
-            .collect();
-        heads
+        AR::from(heads).into()
     }
 
     #[wasm_bindgen(js_name = getActorId)]
     pub fn get_actor_id(&self) -> String {
-        let actor = self.doc.get_actor();
-        actor.to_string()
+        self.doc.get_actor().to_string()
     }
 
     #[wasm_bindgen(js_name = getLastLocalChange)]
@@ -776,7 +778,8 @@ impl Automerge {
     ) -> Result<JsValue, error::Materialize> {
         let (obj, obj_type) = self.import(obj).unwrap_or((ROOT, am::ObjType::Map));
         let heads = get_heads(heads)?;
-        let _patches = self.doc.observer().take_patches(); // throw away patches
+        let current_heads = self.doc.get_heads();
+        let _patches = self.doc.observer().take_patches(current_heads); // throw away patches
         Ok(self.export_object(&obj, obj_type.into(), heads.as_ref(), &meta)?)
     }
 
@@ -835,10 +838,10 @@ impl Automerge {
         for m in marks {
             let mark = Object::new();
             let (_datatype, value) = alloc(&m.value().clone().into(), self.text_rep);
-            js_set(&mark, "name", m.name())?;
+            js_set(&mark, "key", m.key())?;
             js_set(&mark, "value", value)?;
-            //js_set(&mark, "datatype",datatype)?;
-            js_set(&mark, "range", format!("{}..{}", m.start, m.end))?;
+            js_set(&mark, "start", m.start as i32)?;
+            js_set(&mark, "end", m.end as i32)?;
             result.push(&mark.into());
         }
         Ok(result.into())
