@@ -913,7 +913,6 @@ impl Automerge {
             .add_change(&change, actor_index)
             .expect("Change's deps should already be in the document");
 
-        self.history_index.insert(change.hash(), history_index);
         self.history.push(change);
 
         history_index

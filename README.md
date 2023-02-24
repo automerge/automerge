@@ -113,6 +113,9 @@ brew install cmake node cmocka
 # install yarn
 npm install --global yarn
 
+# install javascript dependencies
+yarn --cwd ./javascript
+
 # install rust dependencies
 cargo install wasm-bindgen-cli wasm-opt cargo-deny
 
