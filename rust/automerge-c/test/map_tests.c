@@ -135,8 +135,9 @@ static_void_test_AMmapPut(Timestamp, int64_t, INT64_MAX);
 
 static_void_test_AMmapPut(Uint, int64_t, UINT64_MAX);
 
-/** \brief A JavaScript application can introduce NUL (`\0`) characters into
- * a map object's key which will truncate it in a C application.
+/**
+ * \brief A JavaScript application can introduce NUL (`\0`) characters into
+ *        a map object's key which will truncate it in a C application.
  */
 static void test_get_NUL_key(void** state) {
     /*
@@ -174,8 +175,9 @@ static void test_get_NUL_key(void** state) {
     assert_memory_equal(str.src, "oops", str.count);
 }
 
-/** \brief A JavaScript application can introduce NUL (`\0`) characters into a
- *         map object's string value which will truncate it in a C application.
+/**
+ * \brief A JavaScript application can introduce NUL (`\0`) characters into a
+ *        map object's string value which will truncate it in a C application.
  */
 static void test_get_NUL_string_value(void** state) {
     /*

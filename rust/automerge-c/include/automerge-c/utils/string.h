@@ -1,8 +1,9 @@
 #ifndef AUTOMERGE_C_UTILS_STRING_H
 #define AUTOMERGE_C_UTILS_STRING_H
-/** \file
- *  \brief Utility functions for use with `AMbyteSpan` structs that provide
- *         UTF-8 string views.
+/**
+ * \file
+ * \brief Utility functions for use with `AMbyteSpan` structs that provide
+ *        UTF-8 string views.
  */
 
 #include <automerge-c/automerge.h>

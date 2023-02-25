@@ -419,8 +419,9 @@ static void test_get_range_values(void** state) {
     }
 }
 
-/** \brief A JavaScript application can introduce NUL (`\0`) characters into a
- *         list object's string value which will truncate it in a C application.
+/**
+ * \brief A JavaScript application can introduce NUL (`\0`) characters into a
+ *        list object's string value which will truncate it in a C application.
  */
 static void test_get_NUL_string_value(void** state) {
     /*

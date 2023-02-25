@@ -1,14 +1,15 @@
 #ifndef AUTOMERGE_C_UTILS_STACK_H
 #define AUTOMERGE_C_UTILS_STACK_H
-/** \file
- *  \brief Utility data structures and functions for hiding `AMresult` structs,
- *         managing their lifetimes, and automatically applying custom
- *         validation logic to the `AMitem` structs that they contain.
+/**
+ * \file
+ * \brief Utility data structures and functions for hiding `AMresult` structs,
+ *        managing their lifetimes, and automatically applying custom
+ *        validation logic to the `AMitem` structs that they contain.
  *
- *  \note The `AMstack` struct and its related functions drastically reduce the
- *        need for boilerplate code and/or `goto` statement usage within a C
- *        application but a higher-level programming language offers even better
- *        ways to do the same things.
+ * \note The `AMstack` struct and its related functions drastically reduce the
+ *       need for boilerplate code and/or `goto` statement usage within a C
+ *       application but a higher-level programming language offers even better
+ *       ways to do the same things.
  */
 
 #include <automerge-c/automerge.h>
@@ -18,13 +19,9 @@
  * \brief A node in a singly-linked list of result pointers.
  */
 typedef struct AMstack {
-    /**
-     * A result to be deallocated.
-     */
+    /** A result to be deallocated. */
     AMresult* result;
-    /**
-     * The previous node in the singly-linked list or `NULL`.
-     */
+    /** The previous node in the singly-linked list or `NULL`. */ 
     struct AMstack* prev;
 } AMstack;
 
