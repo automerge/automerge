@@ -1,53 +1,51 @@
-cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
-
-find_package(cmocka REQUIRED)
+find_package(cmocka CONFIG REQUIRED)
 
 add_executable(
-    test_${LIBRARY_NAME}
+    ${LIBRARY_NAME}_test
         actor_id_tests.c
+        base_state.c
+        byte_span_tests.c
+        cmocka_utils.c
+        enum_string_tests.c
+        doc_state.c
         doc_tests.c
-        group_state.c
+        item_tests.c
         list_tests.c
         macro_utils.c
         main.c
         map_tests.c
-        stack_utils.c
         str_utils.c
         ported_wasm/basic_tests.c
         ported_wasm/suite.c
         ported_wasm/sync_tests.c
 )
 
-set_target_properties(test_${LIBRARY_NAME} PROPERTIES LINKER_LANGUAGE C)
+set_target_properties(${LIBRARY_NAME}_test PROPERTIES LINKER_LANGUAGE C)
 
-# \note An imported library's INTERFACE_INCLUDE_DIRECTORIES property can't
-#       contain a non-existent path so its build-time include directory
-#       must be specified for all of its dependent targets instead.
-target_include_directories(
-    test_${LIBRARY_NAME}
-    PRIVATE "$<BUILD_INTERFACE:${CBINDGEN_INCLUDEDIR}>"
-)
+if(WIN32)
+    set(CMOCKA "cmocka::cmocka")
+else()
+    set(CMOCKA "cmocka")
+endif()
 
-target_link_libraries(test_${LIBRARY_NAME} PRIVATE cmocka ${LIBRARY_NAME})
+target_link_libraries(${LIBRARY_NAME}_test PRIVATE ${CMOCKA} ${LIBRARY_NAME})
 
-add_dependencies(test_${LIBRARY_NAME} ${LIBRARY_NAME}_artifacts)
+add_dependencies(${LIBRARY_NAME}_test ${BINDINGS_NAME}_artifacts)
 
 if(BUILD_SHARED_LIBS AND WIN32)
     add_custom_command(
-        TARGET test_${LIBRARY_NAME}
+        TARGET ${LIBRARY_NAME}_test
         POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${CARGO_CURRENT_BINARY_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_${CMAKE_BUILD_TYPE}_POSTFIX}${CMAKE_SHARED_LIBRARY_SUFFIX}
-                ${CMAKE_CURRENT_BINARY_DIR}
-        COMMENT "Copying the DLL built by Cargo into the test directory..."
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${LIBRARY_NAME}> $<TARGET_FILE_DIR:${LIBRARY_NAME}_test>
+        COMMENT "Copying the DLL into the tests directory..."
         VERBATIM
     )
 endif()
 
-add_test(NAME test_${LIBRARY_NAME} COMMAND test_${LIBRARY_NAME})
+add_test(NAME ${LIBRARY_NAME}_test COMMAND ${LIBRARY_NAME}_test)
 
 add_custom_command(
-    TARGET test_${LIBRARY_NAME}
+    TARGET ${LIBRARY_NAME}_test
     POST_BUILD
     COMMAND
         ${CMAKE_CTEST_COMMAND} --config $<CONFIG> --output-on-failure

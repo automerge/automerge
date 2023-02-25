@@ -1,97 +1,279 @@
-cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.23 FATAL_ERROR)
 
-set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+project(automerge-c VERSION 0.1.0
+                    LANGUAGES C
+                    DESCRIPTION "C bindings for the Automerge Rust library.")
 
-# Parse the library name, project name and project version out of Cargo's TOML file.
-set(CARGO_LIB_SECTION OFF)
+set(LIBRARY_NAME "automerge")
 
-set(LIBRARY_NAME "")
-
-set(CARGO_PKG_SECTION OFF)
-
-set(CARGO_PKG_NAME "")
-
-set(CARGO_PKG_VERSION "")
-
-file(READ Cargo.toml TOML_STRING)
-
-string(REPLACE ";" "\\\\;" TOML_STRING "${TOML_STRING}")
-
-string(REPLACE "\n" ";" TOML_LINES "${TOML_STRING}")
-
-foreach(TOML_LINE IN ITEMS ${TOML_LINES})
-    string(REGEX MATCH "^\\[(lib|package)\\]$" _ ${TOML_LINE})
-
-    if(CMAKE_MATCH_1 STREQUAL "lib")
-        set(CARGO_LIB_SECTION ON)
-
-        set(CARGO_PKG_SECTION OFF)
-    elseif(CMAKE_MATCH_1 STREQUAL "package")
-        set(CARGO_LIB_SECTION OFF)
-
-        set(CARGO_PKG_SECTION ON)
-    endif()
-
-    string(REGEX MATCH "^name += +\"([^\"]+)\"$" _ ${TOML_LINE})
-
-    if(CMAKE_MATCH_1 AND (CARGO_LIB_SECTION AND NOT CARGO_PKG_SECTION))
-        set(LIBRARY_NAME "${CMAKE_MATCH_1}")
-    elseif(CMAKE_MATCH_1 AND (NOT CARGO_LIB_SECTION AND CARGO_PKG_SECTION))
-        set(CARGO_PKG_NAME "${CMAKE_MATCH_1}")
-    endif()
-
-    string(REGEX MATCH "^version += +\"([^\"]+)\"$" _ ${TOML_LINE})
-
-    if(CMAKE_MATCH_1 AND CARGO_PKG_SECTION)
-        set(CARGO_PKG_VERSION "${CMAKE_MATCH_1}")
-    endif()
-
-    if(LIBRARY_NAME AND (CARGO_PKG_NAME AND CARGO_PKG_VERSION))
-        break()
-    endif()
-endforeach()
-
-project(${CARGO_PKG_NAME} VERSION 0.0.1 LANGUAGES C DESCRIPTION "C bindings for the Automerge Rust backend.")
-
-include(CTest)
+set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 
 option(BUILD_SHARED_LIBS "Enable the choice of a shared or static library.")
+
+include(CTest)
 
 include(CMakePackageConfigHelpers)
 
 include(GNUInstallDirs)
 
+set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+
 string(MAKE_C_IDENTIFIER ${PROJECT_NAME} SYMBOL_PREFIX)
 
 string(TOUPPER ${SYMBOL_PREFIX} SYMBOL_PREFIX)
 
-set(CARGO_TARGET_DIR "${CMAKE_CURRENT_BINARY_DIR}/Cargo/target")
+set(CARGO_TARGET_DIR "${CMAKE_BINARY_DIR}/Cargo/target")
 
-set(CBINDGEN_INCLUDEDIR "${CARGO_TARGET_DIR}/${CMAKE_INSTALL_INCLUDEDIR}")
+set(CBINDGEN_INCLUDEDIR "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_INCLUDEDIR}")
 
 set(CBINDGEN_TARGET_DIR "${CBINDGEN_INCLUDEDIR}/${PROJECT_NAME}")
 
-add_subdirectory(src)
+find_program (
+    CARGO_CMD
+    "cargo"
+    PATHS "$ENV{CARGO_HOME}/bin"
+    DOC "The Cargo command"
+)
 
-# Generate and install the configuration header.
+if(NOT CARGO_CMD)
+    message(FATAL_ERROR "Cargo (Rust package manager) not found! "
+                        "Please install it and/or set the CARGO_HOME "
+                        "environment variable to its path.")
+endif()
+
+string(TOLOWER "${CMAKE_BUILD_TYPE}" BUILD_TYPE_LOWER)
+
+if(BUILD_TYPE_LOWER STREQUAL debug)
+    set(CARGO_BUILD_TYPE "debug")
+
+    set(CARGO_FLAG "")
+else()
+    set(CARGO_BUILD_TYPE "release")
+
+    set(CARGO_FLAG "--release")
+endif()
+
+set(CARGO_FEATURES "")
+
+set(CARGO_BINARY_DIR "${CARGO_TARGET_DIR}/${CARGO_BUILD_TYPE}")
+
+set(BINDINGS_NAME "${LIBRARY_NAME}_core")
+
+configure_file(
+    ${CMAKE_MODULE_PATH}/Cargo.toml.in
+    ${CMAKE_SOURCE_DIR}/Cargo.toml
+    @ONLY
+    NEWLINE_STYLE LF
+)
+
+set(INCLUDE_GUARD_PREFIX "${SYMBOL_PREFIX}")
+
+configure_file(
+    ${CMAKE_MODULE_PATH}/cbindgen.toml.in
+    ${CMAKE_SOURCE_DIR}/cbindgen.toml
+    @ONLY
+    NEWLINE_STYLE LF
+)
+
+set(CARGO_OUTPUT
+    ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h
+    ${CARGO_BINARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${BINDINGS_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}
+)
+
+# \note cbindgen's naming behavior isn't fully configurable and it ignores
+#       `const fn` calls (https://github.com/eqrion/cbindgen/issues/252).
+add_custom_command(
+    OUTPUT
+        ${CARGO_OUTPUT}
+    COMMAND
+        # \note cbindgen won't regenerate its output header file after it's been removed but it will after its
+        #       configuration file has been updated.
+        ${CMAKE_COMMAND} -DCONDITION=NOT_EXISTS -P ${CMAKE_SOURCE_DIR}/cmake/file-touch.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h ${CMAKE_SOURCE_DIR}/cbindgen.toml
+    COMMAND
+        ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${CARGO_TARGET_DIR} CBINDGEN_TARGET_DIR=${CBINDGEN_TARGET_DIR} ${CARGO_CMD} build ${CARGO_FLAG} ${CARGO_FEATURES}
+    COMMAND
+        # Compensate for cbindgen's translation of consecutive uppercase letters to "ScreamingSnakeCase".
+        ${CMAKE_COMMAND} -DMATCH_REGEX=A_M\([^_]+\)_ -DREPLACE_EXPR=AM_\\1_ -P ${CMAKE_SOURCE_DIR}/cmake/file-regex-replace.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h
+    COMMAND
+        # Compensate for cbindgen ignoring `std:mem::size_of<usize>()` calls.
+        ${CMAKE_COMMAND} -DMATCH_REGEX=USIZE_ -DREPLACE_EXPR=\+${CMAKE_SIZEOF_VOID_P} -P ${CMAKE_SOURCE_DIR}/cmake/file-regex-replace.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h
+    MAIN_DEPENDENCY
+        src/lib.rs
+    DEPENDS
+        src/actor_id.rs
+        src/byte_span.rs
+        src/change.rs
+        src/doc.rs
+        src/doc/list.rs
+        src/doc/map.rs
+        src/doc/utils.rs
+        src/index.rs
+        src/item.rs
+        src/items.rs
+        src/obj.rs
+        src/result.rs
+        src/sync.rs
+        src/sync/have.rs
+        src/sync/message.rs
+        src/sync/state.rs
+        ${CMAKE_SOURCE_DIR}/build.rs
+        ${CMAKE_MODULE_PATH}/Cargo.toml.in
+        ${CMAKE_MODULE_PATH}/cbindgen.toml.in
+    WORKING_DIRECTORY
+        ${CMAKE_SOURCE_DIR}
+    COMMENT
+        "Producing the bindings' artifacts with Cargo..."
+    VERBATIM
+)
+
+add_custom_target(${BINDINGS_NAME}_artifacts ALL
+    DEPENDS ${CARGO_OUTPUT}
+)
+
+add_library(${BINDINGS_NAME} STATIC IMPORTED GLOBAL)
+
+target_include_directories(${BINDINGS_NAME} INTERFACE "${CBINDGEN_INCLUDEDIR}")
+
+set_target_properties(
+    ${BINDINGS_NAME}
+    PROPERTIES
+        # \note Cargo writes a debug build into a nested directory instead of
+        #       decorating its name.
+        DEBUG_POSTFIX ""
+        DEFINE_SYMBOL ""
+        IMPORTED_IMPLIB ""
+        IMPORTED_LOCATION "${CARGO_BINARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${BINDINGS_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}"
+        IMPORTED_NO_SONAME "TRUE"
+        IMPORTED_SONAME ""
+        LINKER_LANGUAGE C
+        PUBLIC_HEADER "${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h"
+        SOVERSION "${PROJECT_VERSION_MAJOR}"
+        VERSION "${PROJECT_VERSION}"
+        # \note Cargo exports all of the symbols automatically.
+        WINDOWS_EXPORT_ALL_SYMBOLS "TRUE"
+)
+
+target_compile_definitions(${BINDINGS_NAME} INTERFACE $<TARGET_PROPERTY:${BINDINGS_NAME},DEFINE_SYMBOL>)
+
+set(UTILS_SUBDIR "utils")
+
+add_custom_command(
+    OUTPUT
+        ${CBINDGEN_TARGET_DIR}/${UTILS_SUBDIR}/enum_string.h
+        ${CMAKE_BINARY_DIR}/src/${UTILS_SUBDIR}/enum_string.c
+    COMMAND
+        ${CMAKE_COMMAND} -DPROJECT_NAME=${PROJECT_NAME} -DLIBRARY_NAME=${LIBRARY_NAME} -DSUBDIR=${UTILS_SUBDIR} -P ${CMAKE_SOURCE_DIR}/cmake/enum-string-functions-gen.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h ${CBINDGEN_TARGET_DIR}/${UTILS_SUBDIR}/enum_string.h ${CMAKE_BINARY_DIR}/src/${UTILS_SUBDIR}/enum_string.c
+    MAIN_DEPENDENCY
+        ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h
+    DEPENDS
+        ${CMAKE_SOURCE_DIR}/cmake/enum-string-functions-gen.cmake
+    WORKING_DIRECTORY
+        ${CMAKE_SOURCE_DIR}
+    COMMENT
+        "Generating the enum string functions with CMake..."
+    VERBATIM
+)
+
+add_custom_target(${LIBRARY_NAME}_utilities
+    DEPENDS ${CBINDGEN_TARGET_DIR}/${UTILS_SUBDIR}/enum_string.h
+            ${CMAKE_BINARY_DIR}/src/${UTILS_SUBDIR}/enum_string.c
+)
+
+add_library(${LIBRARY_NAME})
+
+target_compile_features(${LIBRARY_NAME} PRIVATE c_std_99)
+
+set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
+
+set(THREADS_PREFER_PTHREAD_FLAG TRUE)
+
+find_package(Threads REQUIRED)
+
+set(LIBRARY_DEPENDENCIES Threads::Threads ${CMAKE_DL_LIBS})
+
+if(WIN32)
+    list(APPEND LIBRARY_DEPENDENCIES Bcrypt userenv ws2_32)
+else()
+    list(APPEND LIBRARY_DEPENDENCIES m)
+endif()
+
+target_link_libraries(${LIBRARY_NAME}
+    PUBLIC ${BINDINGS_NAME}
+           ${LIBRARY_DEPENDENCIES}
+)
+
+# \note An imported library's INTERFACE_INCLUDE_DIRECTORIES property can't
+#       contain a non-existent path so its build-time include directory
+#       must be specified for all of its dependent targets instead.
+target_include_directories(${LIBRARY_NAME}
+    PUBLIC "$<BUILD_INTERFACE:${CBINDGEN_INCLUDEDIR};${CMAKE_SOURCE_DIR}/${CMAKE_INSTALL_INCLUDEDIR}>"
+           "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
+
+add_dependencies(${LIBRARY_NAME} ${BINDINGS_NAME}_artifacts)
+
+# Generate the configuration header.
 math(EXPR INTEGER_PROJECT_VERSION_MAJOR "${PROJECT_VERSION_MAJOR} * 100000")
 
 math(EXPR INTEGER_PROJECT_VERSION_MINOR "${PROJECT_VERSION_MINOR} * 100")
 
 math(EXPR INTEGER_PROJECT_VERSION_PATCH "${PROJECT_VERSION_PATCH}")
 
-math(EXPR INTEGER_PROJECT_VERSION "${INTEGER_PROJECT_VERSION_MAJOR} + ${INTEGER_PROJECT_VERSION_MINOR} + ${INTEGER_PROJECT_VERSION_PATCH}")
+math(EXPR INTEGER_PROJECT_VERSION "${INTEGER_PROJECT_VERSION_MAJOR} + \
+                                   ${INTEGER_PROJECT_VERSION_MINOR} + \
+                                   ${INTEGER_PROJECT_VERSION_PATCH}")
 
 configure_file(
     ${CMAKE_MODULE_PATH}/config.h.in
-    config.h
+    ${CBINDGEN_TARGET_DIR}/config.h
     @ONLY
     NEWLINE_STYLE LF
 )
 
+target_sources(${LIBRARY_NAME}
+    PRIVATE
+        src/${UTILS_SUBDIR}/result.c
+        src/${UTILS_SUBDIR}/stack_callback_data.c
+        src/${UTILS_SUBDIR}/stack.c
+        src/${UTILS_SUBDIR}/string.c
+        ${CMAKE_BINARY_DIR}/src/${UTILS_SUBDIR}/enum_string.c
+    PUBLIC
+        FILE_SET api TYPE HEADERS
+            BASE_DIRS
+                ${CBINDGEN_INCLUDEDIR}
+                ${CMAKE_SOURCE_DIR}/${CMAKE_INSTALL_INCLUDEDIR}
+            FILES
+                ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h
+                ${CBINDGEN_TARGET_DIR}/${UTILS_SUBDIR}/enum_string.h
+                ${CMAKE_SOURCE_DIR}/${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${UTILS_SUBDIR}/result.h
+                ${CMAKE_SOURCE_DIR}/${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${UTILS_SUBDIR}/stack_callback_data.h
+                ${CMAKE_SOURCE_DIR}/${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${UTILS_SUBDIR}/stack.h
+                ${CMAKE_SOURCE_DIR}/${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${UTILS_SUBDIR}/string.h
+    INTERFACE
+        FILE_SET config TYPE HEADERS
+            BASE_DIRS
+                ${CBINDGEN_INCLUDEDIR}
+            FILES
+                ${CBINDGEN_TARGET_DIR}/config.h
+)
+
 install(
-    FILES ${CMAKE_BINARY_DIR}/config.h
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}
+    TARGETS ${LIBRARY_NAME}
+    EXPORT ${PROJECT_NAME}-config
+    FILE_SET api
+    FILE_SET config
+)
+
+# \note Install the Cargo-built core bindings to enable direct linkage.
+install(
+    FILES $<TARGET_PROPERTY:${BINDINGS_NAME},IMPORTED_LOCATION>
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
+install(EXPORT ${PROJECT_NAME}-config
+        FILE ${PROJECT_NAME}-config.cmake
+        NAMESPACE "${PROJECT_NAME}::"
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${LIB}
 )
 
 if(BUILD_TESTING)
@@ -100,42 +282,6 @@ if(BUILD_TESTING)
     enable_testing()
 endif()
 
+add_subdirectory(docs)
+
 add_subdirectory(examples EXCLUDE_FROM_ALL)
-
-# Generate and install .cmake files
-set(PROJECT_CONFIG_NAME "${PROJECT_NAME}-config")
-
-set(PROJECT_CONFIG_VERSION_NAME "${PROJECT_CONFIG_NAME}-version")
-
-write_basic_package_version_file(
-    ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_CONFIG_VERSION_NAME}.cmake
-    VERSION ${PROJECT_VERSION}
-    COMPATIBILITY ExactVersion
-)
-
-# The namespace label starts with the title-cased library name.
-string(SUBSTRING ${LIBRARY_NAME} 0 1 NS_FIRST)
-
-string(SUBSTRING ${LIBRARY_NAME} 1 -1 NS_REST)
-
-string(TOUPPER ${NS_FIRST} NS_FIRST)
-
-string(TOLOWER ${NS_REST} NS_REST)
-
-string(CONCAT NAMESPACE ${NS_FIRST} ${NS_REST} "::")
-
-# \note CMake doesn't automate the exporting of an imported library's targets
-#       so the package configuration script must do it.
-configure_package_config_file(
-    ${CMAKE_MODULE_PATH}/${PROJECT_CONFIG_NAME}.cmake.in
-    ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_CONFIG_NAME}.cmake
-    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
-)
-
-install(
-    FILES
-        ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_CONFIG_NAME}.cmake
-        ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_CONFIG_VERSION_NAME}.cmake
-    DESTINATION
-        ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
-)

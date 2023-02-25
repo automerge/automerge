@@ -2,7 +2,6 @@ use automerge as am;
 use std::cell::RefCell;
 
 use crate::byte_span::AMbyteSpan;
-use crate::change_hashes::AMchangeHashes;
 use crate::result::{to_result, AMresult};
 
 macro_rules! to_change {
@@ -10,7 +9,7 @@ macro_rules! to_change {
         let handle = $handle.as_ref();
         match handle {
             Some(b) => b,
-            None => return AMresult::err("Invalid AMchange pointer").into(),
+            None => return AMresult::error("Invalid `AMchange*`").into(),
         }
     }};
 }
@@ -21,14 +20,14 @@ macro_rules! to_change {
 #[derive(Eq, PartialEq)]
 pub struct AMchange {
     body: *mut am::Change,
-    changehash: RefCell<Option<am::ChangeHash>>,
+    change_hash: RefCell<Option<am::ChangeHash>>,
 }
 
 impl AMchange {
     pub fn new(change: &mut am::Change) -> Self {
         Self {
             body: change,
-            changehash: Default::default(),
+            change_hash: Default::default(),
         }
     }
 
@@ -40,12 +39,12 @@ impl AMchange {
     }
 
     pub fn hash(&self) -> AMbyteSpan {
-        let mut changehash = self.changehash.borrow_mut();
-        if let Some(changehash) = changehash.as_ref() {
-            changehash.into()
+        let mut change_hash = self.change_hash.borrow_mut();
+        if let Some(change_hash) = change_hash.as_ref() {
+            change_hash.into()
         } else {
             let hash = unsafe { (*self.body).hash() };
-            let ptr = changehash.insert(hash);
+            let ptr = change_hash.insert(hash);
             AMbyteSpan {
                 src: ptr.0.as_ptr(),
                 count: hash.as_ref().len(),
@@ -70,11 +69,10 @@ impl AsRef<am::Change> for AMchange {
 /// \brief Gets the first referenced actor identifier in a change.
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
-/// \pre \p change `!= NULL`.
-/// \return A pointer to an `AMresult` struct containing a pointer to an
-///         `AMactorId` struct.
-/// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
-///          in order to prevent a memory leak.
+/// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_ACTOR_ID` item.
+/// \pre \p change `!= NULL`
+/// \warning The returned `AMresult` struct pointer must be passed to
+///          `AMresultFree()` in order to avoid a memory leak.
 /// \internal
 ///
 /// # Safety
@@ -90,8 +88,8 @@ pub unsafe extern "C" fn AMchangeActorId(change: *const AMchange) -> *mut AMresu
 /// \memberof AMchange
 /// \brief Compresses the raw bytes of a change.
 ///
-/// \param[in,out] change A pointer to an `AMchange` struct.
-/// \pre \p change `!= NULL`.
+/// \param[in] change A pointer to an `AMchange` struct.
+/// \pre \p change `!= NULL`
 /// \internal
 ///
 /// # Safety
@@ -107,18 +105,20 @@ pub unsafe extern "C" fn AMchangeCompress(change: *mut AMchange) {
 /// \brief Gets the dependencies of a change.
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
-/// \return A pointer to an `AMchangeHashes` struct or `NULL`.
-/// \pre \p change `!= NULL`.
+/// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE_HASH` items.
+/// \pre \p change `!= NULL`
+/// \warning The returned `AMresult` struct pointer must be passed to
+///          `AMresultFree()` in order to avoid a memory leak.
 /// \internal
 ///
 /// # Safety
 /// change must be a valid pointer to an AMchange
 #[no_mangle]
-pub unsafe extern "C" fn AMchangeDeps(change: *const AMchange) -> AMchangeHashes {
-    match change.as_ref() {
-        Some(change) => AMchangeHashes::new(change.as_ref().deps()),
+pub unsafe extern "C" fn AMchangeDeps(change: *const AMchange) -> *mut AMresult {
+    to_result(match change.as_ref() {
+        Some(change) => change.as_ref().deps(),
         None => Default::default(),
-    }
+    })
 }
 
 /// \memberof AMchange
@@ -126,7 +126,7 @@ pub unsafe extern "C" fn AMchangeDeps(change: *const AMchange) -> AMchangeHashes
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return An `AMbyteSpan` struct.
-/// \pre \p change `!= NULL`.
+/// \pre \p change `!= NULL`
 /// \internal
 ///
 /// # Safety
@@ -141,32 +141,33 @@ pub unsafe extern "C" fn AMchangeExtraBytes(change: *const AMchange) -> AMbyteSp
 }
 
 /// \memberof AMchange
-/// \brief Loads a sequence of bytes into a change.
+/// \brief Allocates a new change and initializes it from an array of bytes value.
 ///
 /// \param[in] src A pointer to an array of bytes.
-/// \param[in] count The number of bytes in \p src to load.
-/// \return A pointer to an `AMresult` struct containing an `AMchange` struct.
-/// \pre \p src `!= NULL`.
-/// \pre `0 <` \p count `<= sizeof(`\p src`)`.
-/// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
-///          in order to prevent a memory leak.
+/// \param[in] count The count of bytes to load from the array pointed to by
+///                  \p src.
+/// \return A pointer to an `AMresult` struct with an `AM_VAL_TYPE_CHANGE` item.
+/// \pre \p src `!= NULL`
+/// \pre `sizeof(`\p src `) > 0`
+/// \pre \p count `<= sizeof(`\p src `)`
+/// \warning The returned `AMresult` struct pointer must be passed to
+///          `AMresultFree()` in order to avoid a memory leak.
 /// \internal
 ///
 /// # Safety
-/// src must be a byte array of size `>= count`
+/// src must be a byte array of length `>= count`
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeFromBytes(src: *const u8, count: usize) -> *mut AMresult {
-    let mut data = Vec::new();
-    data.extend_from_slice(std::slice::from_raw_parts(src, count));
-    to_result(am::Change::from_bytes(data))
+    let data = std::slice::from_raw_parts(src, count);
+    to_result(am::Change::from_bytes(data.to_vec()))
 }
 
 /// \memberof AMchange
 /// \brief Gets the hash of a change.
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
-/// \return A change hash as an `AMbyteSpan` struct.
-/// \pre \p change `!= NULL`.
+/// \return An `AMbyteSpan` struct for a change hash.
+/// \pre \p change `!= NULL`
 /// \internal
 ///
 /// # Safety
@@ -183,8 +184,8 @@ pub unsafe extern "C" fn AMchangeHash(change: *const AMchange) -> AMbyteSpan {
 /// \brief Tests the emptiness of a change.
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
-/// \return A boolean.
-/// \pre \p change `!= NULL`.
+/// \return `true` if \p change is empty, `false` otherwise.
+/// \pre \p change `!= NULL`
 /// \internal
 ///
 /// # Safety
@@ -199,11 +200,36 @@ pub unsafe extern "C" fn AMchangeIsEmpty(change: *const AMchange) -> bool {
 }
 
 /// \memberof AMchange
+/// \brief Loads a document into a sequence of changes.
+///
+/// \param[in] src A pointer to an array of bytes.
+/// \param[in] count The count of bytes to load from the array pointed to by
+///                  \p src.
+/// \return A pointer to an `AMresult` struct with `AM_VAL_TYPE_CHANGE` items.
+/// \pre \p src `!= NULL`
+/// \pre `sizeof(`\p src `) > 0`
+/// \pre \p count `<= sizeof(`\p src `)`
+/// \warning The returned `AMresult` struct pointer must be passed to
+///          `AMresultFree()` in order to avoid a memory leak.
+/// \internal
+///
+/// # Safety
+/// src must be a byte array of length `>= count`
+#[no_mangle]
+pub unsafe extern "C" fn AMchangeLoadDocument(src: *const u8, count: usize) -> *mut AMresult {
+    let data = std::slice::from_raw_parts(src, count);
+    to_result::<Result<Vec<am::Change>, _>>(
+        am::Automerge::load(data)
+            .and_then(|d| d.get_changes(&[]).map(|c| c.into_iter().cloned().collect())),
+    )
+}
+
+/// \memberof AMchange
 /// \brief Gets the maximum operation index of a change.
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A 64-bit unsigned integer.
-/// \pre \p change `!= NULL`.
+/// \pre \p change `!= NULL`
 /// \internal
 ///
 /// # Safety
@@ -221,8 +247,8 @@ pub unsafe extern "C" fn AMchangeMaxOp(change: *const AMchange) -> u64 {
 /// \brief Gets the message of a change.
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
-/// \return A UTF-8 string view as an `AMbyteSpan` struct.
-/// \pre \p change `!= NULL`.
+/// \return An `AMbyteSpan` struct for a UTF-8 string.
+/// \pre \p change `!= NULL`
 /// \internal
 ///
 /// # Safety
@@ -240,7 +266,7 @@ pub unsafe extern "C" fn AMchangeMessage(change: *const AMchange) -> AMbyteSpan 
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A 64-bit unsigned integer.
-/// \pre \p change `!= NULL`.
+/// \pre \p change `!= NULL`
 /// \internal
 ///
 /// # Safety
@@ -259,7 +285,7 @@ pub unsafe extern "C" fn AMchangeSeq(change: *const AMchange) -> u64 {
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A 64-bit unsigned integer.
-/// \pre \p change `!= NULL`.
+/// \pre \p change `!= NULL`
 /// \internal
 ///
 /// # Safety
@@ -267,10 +293,9 @@ pub unsafe extern "C" fn AMchangeSeq(change: *const AMchange) -> u64 {
 #[no_mangle]
 pub unsafe extern "C" fn AMchangeSize(change: *const AMchange) -> usize {
     if let Some(change) = change.as_ref() {
-        change.as_ref().len()
-    } else {
-        0
+        return change.as_ref().len();
     }
+    0
 }
 
 /// \memberof AMchange
@@ -278,7 +303,7 @@ pub unsafe extern "C" fn AMchangeSize(change: *const AMchange) -> usize {
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A 64-bit unsigned integer.
-/// \pre \p change `!= NULL`.
+/// \pre \p change `!= NULL`
 /// \internal
 ///
 /// # Safety
@@ -297,7 +322,7 @@ pub unsafe extern "C" fn AMchangeStartOp(change: *const AMchange) -> u64 {
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
 /// \return A 64-bit signed integer.
-/// \pre \p change `!= NULL`.
+/// \pre \p change `!= NULL`
 /// \internal
 ///
 /// # Safety
@@ -315,8 +340,8 @@ pub unsafe extern "C" fn AMchangeTime(change: *const AMchange) -> i64 {
 /// \brief Gets the raw bytes of a change.
 ///
 /// \param[in] change A pointer to an `AMchange` struct.
-/// \return An `AMbyteSpan` struct.
-/// \pre \p change `!= NULL`.
+/// \return An `AMbyteSpan` struct for an array of bytes.
+/// \pre \p change `!= NULL`
 /// \internal
 ///
 /// # Safety
@@ -328,29 +353,4 @@ pub unsafe extern "C" fn AMchangeRawBytes(change: *const AMchange) -> AMbyteSpan
     } else {
         Default::default()
     }
-}
-
-/// \memberof AMchange
-/// \brief Loads a document into a sequence of changes.
-///
-/// \param[in] src A pointer to an array of bytes.
-/// \param[in] count The number of bytes in \p src to load.
-/// \return A pointer to an `AMresult` struct containing a sequence of
-///         `AMchange` structs.
-/// \pre \p src `!= NULL`.
-/// \pre `0 <` \p count `<= sizeof(`\p src`)`.
-/// \warning The returned `AMresult` struct must be deallocated with `AMfree()`
-///          in order to prevent a memory leak.
-/// \internal
-///
-/// # Safety
-/// src must be a byte array of size `>= count`
-#[no_mangle]
-pub unsafe extern "C" fn AMchangeLoadDocument(src: *const u8, count: usize) -> *mut AMresult {
-    let mut data = Vec::new();
-    data.extend_from_slice(std::slice::from_raw_parts(src, count));
-    to_result::<Result<Vec<am::Change>, _>>(
-        am::Automerge::load(&data)
-            .and_then(|d| d.get_changes(&[]).map(|c| c.into_iter().cloned().collect())),
-    )
 }
