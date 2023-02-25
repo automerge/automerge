@@ -505,7 +505,7 @@ impl Automerge {
                 let change = Change::new_from_unverified(stored_change.into_owned(), None)
                     .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?;
                 let mut am = Self::new();
-                am.apply_change(change, &mut observer);
+                am.apply_change::<Obs>(change, &mut None);
                 am
             }
             storage::Chunk::CompressedChange(stored_change, compressed) => {
@@ -516,7 +516,7 @@ impl Automerge {
                 )
                 .map_err(|e| load::Error::InvalidChangeColumns(Box::new(e)))?;
                 let mut am = Self::new();
-                am.apply_change(change, &mut observer);
+                am.apply_change::<Obs>(change, &mut None);
                 am
             }
         };
@@ -524,7 +524,7 @@ impl Automerge {
         match load::load_changes(remaining.reset()) {
             load::LoadedChanges::Complete(c) => {
                 for change in c {
-                    am.apply_change(change, &mut observer);
+                    am.apply_change::<Obs>(change, &mut None);
                 }
             }
             load::LoadedChanges::Partial { error, .. } => {

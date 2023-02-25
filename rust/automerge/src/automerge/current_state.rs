@@ -338,9 +338,9 @@ impl<'a, I: Iterator<Item = SimpleAction<'a>>> Iterator for TextActions<'a, I> {
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
+    use std::{borrow::Cow, fs};
 
-    use crate::{transaction::Transactable, ObjType, OpObserver, Prop, ReadDoc, Value};
+    use crate::{transaction::Transactable, Automerge, ObjType, OpObserver, Prop, ReadDoc, Value};
 
     // Observer ops often carry a "tagged value", which is a value and the OpID of the op which
     // created that value. For a lot of values (i.e. any scalar value) we don't care about the
@@ -885,6 +885,31 @@ mod tests {
                     value: ObservedValue::Untagged("four".into()),
                 },
             ])
+        );
+    }
+
+    #[test]
+    fn test_load_changes() {
+        fn fixture(name: &str) -> Vec<u8> {
+            fs::read("./tests/fixtures/".to_owned() + name).unwrap()
+        }
+
+        let mut obs = ObserverStub::new();
+        let _doc = Automerge::load_with(
+            &fixture("counter_value_is_ok.automerge"),
+            crate::OnPartialLoad::Error,
+            crate::storage::VerificationMode::Check,
+            Some(&mut obs),
+        );
+
+        assert_eq!(
+            Calls(obs.ops),
+            Calls(vec![ObserverCall::Put {
+                obj: crate::ROOT,
+                prop: "a".into(),
+                value: ObservedValue::Untagged(crate::ScalarValue::Counter(2000.into()).into()),
+                conflict: false,
+            },])
         );
     }
 }
