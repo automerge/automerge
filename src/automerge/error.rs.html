@@ -99,7 +99,13 @@
 <a href="#98" id="98">98</a>
 <a href="#99" id="99">99</a>
 <a href="#100" id="100">100</a>
-</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::storage::load::Error <span class="kw">as </span>LoadError;
+<a href="#101" id="101">101</a>
+<a href="#102" id="102">102</a>
+<a href="#103" id="103">103</a>
+<a href="#104" id="104">104</a>
+<a href="#105" id="105">105</a>
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::change::LoadError <span class="kw">as </span>LoadChangeError;
+<span class="kw">use </span><span class="kw">crate</span>::storage::load::Error <span class="kw">as </span>LoadError;
 <span class="kw">use </span><span class="kw">crate</span>::types::{ActorId, ScalarValue};
 <span class="kw">use </span><span class="kw">crate</span>::value::DataType;
 <span class="kw">use crate</span>::{ChangeHash, ObjType};
@@ -119,6 +125,8 @@
     </span>Fail,
     <span class="attr">#[error(<span class="string">&quot;invalid actor ID `{0}`&quot;</span>)]
     </span>InvalidActorId(String),
+    <span class="attr">#[error(transparent)]
+    </span>InvalidChangeHashBytes(<span class="attr">#[from] </span>InvalidChangeHashSlice),
     <span class="attr">#[error(<span class="string">&quot;invalid UTF-8 character at {0}&quot;</span>)]
     </span>InvalidCharacter(usize),
     <span class="attr">#[error(<span class="string">&quot;invalid hash {0}&quot;</span>)]
@@ -140,6 +148,8 @@
     },
     <span class="attr">#[error(transparent)]
     </span>Load(<span class="attr">#[from] </span>LoadError),
+    <span class="attr">#[error(transparent)]
+    </span>LoadChangeError(<span class="attr">#[from] </span>LoadChangeError),
     <span class="attr">#[error(<span class="string">&quot;increment operations must be against a counter value&quot;</span>)]
     </span>MissingCounter,
     <span class="attr">#[error(<span class="string">&quot;hash {0} does not correspond to a change in this document&quot;</span>)]
