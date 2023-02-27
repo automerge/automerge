@@ -48,6 +48,8 @@ pub enum AutomergeError {
     MissingCounter,
     #[error("hash {0} does not correspond to a change in this document")]
     MissingHash(ChangeHash),
+    #[error("change's deps should already be in the document")]
+    MissingDeps,
     #[error("compressed chunk was not a change")]
     NonChangeCompressed,
     #[error("id was not an object id")]
