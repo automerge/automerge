@@ -254,6 +254,20 @@ impl OpType {
             other => Err(error::InvalidOpType::UnknownAction(other)),
         }
     }
+
+    pub(crate) fn to_str(&self) -> &str {
+        if let OpType::Put(ScalarValue::Str(s)) = &self {
+            s
+        } else if self.is_mark() {
+            ""
+        } else {
+            "\u{fffc}"
+        }
+    }
+
+    pub(crate) fn is_mark(&self) -> bool {
+        matches!(&self, OpType::MarkBegin(_, _) | OpType::MarkEnd(_))
+    }
 }
 
 impl From<ObjType> for OpType {
@@ -606,13 +620,7 @@ impl Op {
     }
 
     pub(crate) fn to_str(&self) -> &str {
-        if let OpType::Put(ScalarValue::Str(s)) = &self.action {
-            s
-        } else if self.is_mark() {
-            ""
-        } else {
-            "\u{fffc}"
-        }
+        self.action.to_str()
     }
 
     pub(crate) fn visible(&self) -> bool {
@@ -656,7 +664,7 @@ impl Op {
     }
 
     pub(crate) fn is_mark(&self) -> bool {
-        matches!(&self.action, OpType::MarkBegin(_, _) | OpType::MarkEnd(_))
+        self.action.is_mark()
     }
 
     pub(crate) fn valid_mark_anchor(&self) -> bool {

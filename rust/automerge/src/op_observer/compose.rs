@@ -103,7 +103,7 @@ impl<'a, O1: OpObserver, O2: OpObserver> OpObserver for ComposeObservers<'a, O1,
         objid: crate::ObjId,
         key: &str,
         start: usize,
-        end: usize
+        end: usize,
     ) {
         self.obs1.unmark(doc, objid.clone(), key, start, end);
         self.obs2.unmark(doc, objid, key, start, end);

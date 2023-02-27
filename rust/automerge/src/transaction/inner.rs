@@ -1,7 +1,7 @@
 use std::num::NonZeroU64;
 
 use crate::exid::ExId;
-use crate::marks::{ Mark };
+use crate::marks::Mark;
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
 use crate::types::{Key, ListEncoding, ObjId, OpId, OpIds, TextEncoding};
@@ -631,6 +631,7 @@ impl TransactionInner {
             // handle the observer
             if let Some(obs) = op_observer.as_mut() {
                 match splice_type {
+                    //SpliceType::Text(text, _) => { //if !obs.text_as_seq() => {
                     SpliceType::Text(text, _) if !obs.text_as_seq() => {
                         obs.splice_text(doc, ex_obj, index, text)
                     }
@@ -639,6 +640,7 @@ impl TransactionInner {
                         for (offset, v) in values.iter().enumerate() {
                             let op = &self.operations[start + offset].1;
                             let value = (v.clone().into(), doc.ops().id_to_exid(op.id));
+                            log!("external insert index={} value={:?}", index, value);
                             obs.insert(doc, ex_obj.clone(), index + offset, value, false)
                         }
                     }
@@ -663,9 +665,9 @@ impl TransactionInner {
             self.do_insert(doc, Some(obs), obj, mark.start, action)?;
             self.do_insert(doc, Some(obs), obj, mark.end, OpType::MarkEnd(expand_right))?;
             if mark.value().is_null() {
-              obs.unmark(doc, ex_obj.clone(), mark.key(), mark.start, mark.end);
+                obs.unmark(doc, ex_obj.clone(), mark.key(), mark.start, mark.end);
             } else {
-              obs.mark(doc, ex_obj.clone(), Some(mark).into_iter())
+                obs.mark(doc, ex_obj.clone(), Some(mark).into_iter())
             }
         } else {
             let action = OpType::MarkBegin(expand_left, mark.data.into_owned());
@@ -711,6 +713,7 @@ impl TransactionInner {
                         (Some(ObjType::Text), Prop::Seq(index)) => {
                             if op_observer.text_as_seq() {
                                 let value = (op.value(), doc.ops().id_to_exid(op.id));
+                                log!("external insert2 index={} value={:?}", index, value);
                                 op_observer.insert(doc, ex_obj, index, value, false)
                             } else {
                                 op_observer.splice_text(doc, ex_obj, index, op.to_str())

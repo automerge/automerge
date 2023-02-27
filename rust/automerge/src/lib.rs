@@ -265,6 +265,7 @@ mod op_tree;
 mod parents;
 mod query;
 mod read;
+mod sequence_tree;
 mod storage;
 pub mod sync;
 pub mod transaction;
@@ -289,9 +290,9 @@ pub use list_range::ListRange;
 pub use list_range_at::ListRangeAt;
 pub use map_range::MapRange;
 pub use map_range_at::MapRangeAt;
-pub use op_observer::OpObserver;
-pub use op_observer::Patch;
-pub use op_observer::VecOpObserver;
+pub use op_observer::{
+    OpObserver, Patch, PatchAction, ToggleObserver, VecOpObserver, VecOpObserver16,
+};
 pub use parents::{Parent, Parents};
 pub use read::ReadDoc;
 pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, TextEncoding};

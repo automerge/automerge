@@ -1,11 +1,11 @@
+use automerge::op_observer::HasPatches;
 use automerge::transaction::CommitOptions;
 use automerge::transaction::Transactable;
 use automerge::Automerge;
 use automerge::AutomergeError;
-use automerge::Patch;
-use automerge::ReadDoc;
 use automerge::VecOpObserver;
 use automerge::ROOT;
+use automerge::{PatchAction, PatchCtx};
 
 fn main() {
     let mut doc = Automerge::new();
@@ -42,64 +42,52 @@ fn main() {
     get_changes(&doc, patches);
 }
 
-fn get_changes(doc: &Automerge, patches: Vec<Patch>) {
-    for patch in patches {
-        match patch {
-            Patch::Put {
-                obj, prop, value, ..
-            } => {
+fn get_changes(_doc: &Automerge, patches: Vec<PatchCtx<char>>) {
+    for PatchCtx { obj, path, action } in patches {
+        match action {
+            PatchAction::PutMap { key, value, .. } => {
                 println!(
                     "put {:?} at {:?} in obj {:?}, object path {:?}",
-                    value,
-                    prop,
-                    obj,
-                    doc.path_to_object(&obj)
+                    value, key, obj, path,
                 )
             }
-            Patch::Insert {
-                obj, index, value, ..
-            } => {
+            PatchAction::PutSeq { index, value, .. } => {
+                println!(
+                    "put {:?} at {:?} in obj {:?}, object path {:?}",
+                    value, index, obj, path,
+                )
+            }
+            PatchAction::Insert { index, values, .. } => {
                 println!(
                     "insert {:?} at {:?} in obj {:?}, object path {:?}",
-                    value,
-                    index,
-                    obj,
-                    doc.path_to_object(&obj)
+                    values, index, obj, path,
                 )
             }
-            Patch::Splice {
-                obj, index, value, ..
-            } => {
+            PatchAction::SpliceText { index, value, .. } => {
                 println!(
                     "splice '{:?}' at {:?} in obj {:?}, object path {:?}",
-                    value,
-                    index,
-                    obj,
-                    doc.path_to_object(&obj)
+                    value, index, obj, path,
                 )
             }
-            Patch::Increment {
-                obj, prop, value, ..
-            } => {
+            PatchAction::Increment { prop, value, .. } => {
                 println!(
                     "increment {:?} in obj {:?} by {:?}, object path {:?}",
-                    prop,
-                    obj,
-                    value,
-                    doc.path_to_object(&obj)
+                    prop, obj, value, path,
                 )
             }
-            Patch::Delete { obj, prop, .. } => println!(
+            PatchAction::DeleteMap { key, .. } => {
+                println!("delete {:?} in obj {:?}, object path {:?}", key, obj, path,)
+            }
+            PatchAction::DeleteSeq { index, .. } => println!(
                 "delete {:?} in obj {:?}, object path {:?}",
-                prop,
-                obj,
-                doc.path_to_object(&obj)
+                index, obj, path,
             ),
-            Patch::Expose { obj, prop, .. } => println!(
-                "expose {:?} in obj {:?}, object path {:?}",
-                prop,
-                obj,
-                doc.path_to_object(&obj)
+            PatchAction::Mark { marks } => {
+                println!("mark {:?} in obj {:?}, object path {:?}", marks, obj, path,)
+            }
+            PatchAction::Unmark { key, start, end } => println!(
+                "unmark {:?} from {} to {} in obj {:?}, object path {:?}",
+                key, start, end, obj, path,
             ),
         }
     }

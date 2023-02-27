@@ -4,8 +4,7 @@ use crate::exid::ExId;
 use crate::marks::Mark;
 use crate::op_observer::BranchableObserver;
 use crate::{
-    Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, ReadDoc, ScalarValue, Value,
-    Values,
+    Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, ReadDoc, ScalarValue, Value, Values,
 };
 use crate::{AutomergeError, Keys};
 use crate::{ListRange, ListRangeAt, MapRange, MapRangeAt};

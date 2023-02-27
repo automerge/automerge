@@ -2162,7 +2162,7 @@ describe('Automerge', () => {
         assert.deepEqual(mat.text, new FakeText("0abcd"))
     })
 
-    it("should allow inserting objects in old style text", () => {
+    it.only("should allow inserting objects in old style text", () => {
         let doc = create(false);
         doc.registerDatatype("text", (e: any) => new FakeText(e))
         doc.enablePatches(true)

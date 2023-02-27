@@ -5,7 +5,13 @@ use crate::ReadDoc;
 use crate::Value;
 
 mod compose;
+mod patch;
+mod toggle_observer;
+mod vec_observer;
 pub use compose::compose;
+pub use patch::{Patch, PatchAction};
+pub use toggle_observer::ToggleObserver;
+pub use vec_observer::{HasPatches, TextRepresentation, VecOpObserver, VecOpObserver16};
 
 /// An observer of operations applied to the document.
 pub trait OpObserver {
@@ -120,14 +126,7 @@ pub trait OpObserver {
         mark: M,
     );
 
-    fn unmark<R: ReadDoc>(
-        &mut self,
-        doc: &R,
-        objid: ExId,
-        key: &str,
-        start: usize,
-        end: usize,
-    );
+    fn unmark<R: ReadDoc>(&mut self, doc: &R, objid: ExId, key: &str, start: usize, end: usize);
 
     /// Whether to call sequence methods or `splice_text` when encountering changes in text
     ///
@@ -207,9 +206,9 @@ impl OpObserver for () {
     ) {
     }
 
-    fn unmark<'a, R: ReadDoc>(
+    fn unmark<R: ReadDoc>(
         &mut self,
-        _doc: &'a R,
+        _doc: &R,
         _objid: ExId,
         _key: &str,
         _start: usize,
@@ -225,227 +224,4 @@ impl OpObserver for () {
 impl BranchableObserver for () {
     fn merge(&mut self, _other: &Self) {}
     fn branch(&self) -> Self {}
-}
-
-/// Capture operations into a [`Vec`] and store them as patches.
-#[derive(Default, Debug, Clone)]
-pub struct VecOpObserver {
-    patches: Vec<Patch>,
-}
-
-impl VecOpObserver {
-    /// Take the current list of patches, leaving the internal list empty and ready for new
-    /// patches.
-    pub fn take_patches(&mut self) -> Vec<Patch> {
-        std::mem::take(&mut self.patches)
-    }
-}
-
-impl OpObserver for VecOpObserver {
-    fn insert<R: ReadDoc>(
-        &mut self,
-        doc: &R,
-        obj: ExId,
-        index: usize,
-        (value, id): (Value<'_>, ExId),
-        conflict: bool,
-    ) {
-        if let Ok(p) = doc.parents(&obj) {
-            self.patches.push(Patch::Insert {
-                obj,
-                path: p.path(),
-                index,
-                value: (value.into_owned(), id),
-                conflict,
-            });
-        }
-    }
-
-    fn splice_text<R: ReadDoc>(&mut self, doc: &R, obj: ExId, index: usize, value: &str) {
-        if let Ok(p) = doc.parents(&obj) {
-            self.patches.push(Patch::Splice {
-                obj,
-                path: p.path(),
-                index,
-                value: value.to_string(),
-            })
-        }
-    }
-
-    fn put<R: ReadDoc>(
-        &mut self,
-        doc: &R,
-        obj: ExId,
-        prop: Prop,
-        (value, id): (Value<'_>, ExId),
-        conflict: bool,
-    ) {
-        if let Ok(p) = doc.parents(&obj) {
-            self.patches.push(Patch::Put {
-                obj,
-                path: p.path(),
-                prop,
-                value: (value.into_owned(), id),
-                conflict,
-            });
-        }
-    }
-
-    fn expose<R: ReadDoc>(
-        &mut self,
-        doc: &R,
-        obj: ExId,
-        prop: Prop,
-        (value, id): (Value<'_>, ExId),
-        conflict: bool,
-    ) {
-        if let Ok(p) = doc.parents(&obj) {
-            self.patches.push(Patch::Expose {
-                obj,
-                path: p.path(),
-                prop,
-                value: (value.into_owned(), id),
-                conflict,
-            });
-        }
-    }
-
-    fn increment<R: ReadDoc>(&mut self, doc: &R, obj: ExId, prop: Prop, tagged_value: (i64, ExId)) {
-        if let Ok(p) = doc.parents(&obj) {
-            self.patches.push(Patch::Increment {
-                obj,
-                path: p.path(),
-                prop,
-                value: tagged_value,
-            });
-        }
-    }
-
-    fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(
-        &mut self,
-        _doc: &'a R,
-        _objid: ExId,
-        _mark: M,
-    ) {
-    }
-
-    fn unmark<R: ReadDoc>(
-        &mut self,
-        _doc: &R,
-        _objid: ExId,
-        _key: &str,
-        _start: usize,
-        _end: usize,
-    ) {
-    }
-
-    fn delete_map<R: ReadDoc>(&mut self, doc: &R, obj: ExId, key: &str) {
-        if let Ok(p) = doc.parents(&obj) {
-            self.patches.push(Patch::Delete {
-                obj,
-                path: p.path(),
-                prop: Prop::Map(key.to_owned()),
-                num: 1,
-            })
-        }
-    }
-
-    fn delete_seq<R: ReadDoc>(&mut self, doc: &R, obj: ExId, index: usize, num: usize) {
-        if let Ok(p) = doc.parents(&obj) {
-            self.patches.push(Patch::Delete {
-                obj,
-                path: p.path(),
-                prop: Prop::Seq(index),
-                num,
-            })
-        }
-    }
-}
-
-impl BranchableObserver for VecOpObserver {
-    fn merge(&mut self, other: &Self) {
-        self.patches.extend_from_slice(other.patches.as_slice())
-    }
-
-    fn branch(&self) -> Self {
-        Self::default()
-    }
-}
-
-/// A notification to the application that something has changed in a document.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Patch {
-    /// Associating a new value with a prop in a map, or an existing list element
-    Put {
-        /// path to the object
-        path: Vec<(ExId, Prop)>,
-        /// The object that was put into.
-        obj: ExId,
-        /// The prop that the new value was put at.
-        prop: Prop,
-        /// The value that was put, and the id of the operation that put it there.
-        value: (Value<'static>, ExId),
-        /// Whether this put conflicts with another.
-        conflict: bool,
-    },
-    /// Exposing (via delete) an old but conflicted value with a prop in a map, or a list element
-    Expose {
-        /// path to the object
-        path: Vec<(ExId, Prop)>,
-        /// The object that was put into.
-        obj: ExId,
-        /// The prop that the new value was put at.
-        prop: Prop,
-        /// The value that was put, and the id of the operation that put it there.
-        value: (Value<'static>, ExId),
-        /// Whether this put conflicts with another.
-        conflict: bool,
-    },
-    /// Inserting a new element into a list
-    Insert {
-        /// path to the object
-        path: Vec<(ExId, Prop)>,
-        /// The object that was inserted into.
-        obj: ExId,
-        /// The index that the new value was inserted at.
-        index: usize,
-        /// The value that was inserted, and the id of the operation that inserted it there.
-        value: (Value<'static>, ExId),
-        /// the inserted value has a conflict - only possible to be true on document load
-        conflict: bool,
-    },
-    /// Splicing a text object
-    Splice {
-        /// path to the object
-        path: Vec<(ExId, Prop)>,
-        /// The object that was inserted into.
-        obj: ExId,
-        /// The index that the new value was inserted at.
-        index: usize,
-        /// The value that was spliced
-        value: String,
-    },
-    /// Incrementing a counter.
-    Increment {
-        /// path to the object
-        path: Vec<(ExId, Prop)>,
-        /// The object that was incremented in.
-        obj: ExId,
-        /// The prop that was incremented.
-        prop: Prop,
-        /// The amount that the counter was incremented by, and the id of the operation that
-        /// did the increment.
-        value: (i64, ExId),
-    },
-    /// Deleting an element from a list/text
-    Delete {
-        /// path to the object
-        path: Vec<(ExId, Prop)>,
-        /// The object that was deleted from.
-        obj: ExId,
-        /// The prop that was deleted.
-        prop: Prop,
-        /// number of items deleted (for seq)
-        num: usize,
-    },
 }

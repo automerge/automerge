@@ -6,12 +6,12 @@ use crate::op_observer::{BranchableObserver, OpObserver};
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::{
-    transaction::{Observation, Observed, TransactionInner, UnObserved},
-    ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop, TextEncoding, Value, Values,
-};
-use crate::{
     sync, Keys, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType, Parents, ReadDoc,
     ScalarValue,
+};
+use crate::{
+    transaction::{Observation, Observed, TransactionInner, UnObserved},
+    ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop, TextEncoding, Value, Values,
 };
 
 /// An automerge document that automatically manages transactions.

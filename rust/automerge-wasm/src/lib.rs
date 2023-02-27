@@ -29,7 +29,8 @@ use am::transaction::CommitOptions;
 use am::transaction::{Observed, Transactable, UnObserved};
 use am::ScalarValue;
 use automerge as am;
-use automerge::{sync::SyncDoc, Change, ObjId, Prop, ReadDoc, TextEncoding, Value, ROOT};
+use automerge::{sync::SyncDoc, Change, Prop, ReadDoc, TextEncoding, Value, ROOT};
+use automerge::{ToggleObserver, VecOpObserver16};
 use js_sys::{Array, Function, Object, Uint8Array};
 use regex::Regex;
 use serde::ser::Serialize;
@@ -41,12 +42,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 mod interop;
-mod observer;
-mod sequence_tree;
 mod sync;
 mod value;
-
-use observer::Observer;
 
 use interop::{alloc, get_heads, import_obj, js_set, to_js_err, to_prop, AR, JS};
 use sync::SyncState;
@@ -61,7 +58,7 @@ macro_rules! log {
     };
 }
 
-type AutoCommit = am::AutoCommitWithObs<Observed<Observer>>;
+type AutoCommit = am::AutoCommitWithObs<Observed<ToggleObserver<VecOpObserver16>>>;
 
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
@@ -83,6 +80,15 @@ impl std::default::Default for TextRepresentation {
     }
 }
 
+impl From<TextRepresentation> for am::op_observer::TextRepresentation {
+    fn from(tr: TextRepresentation) -> Self {
+        match tr {
+            TextRepresentation::Array => am::op_observer::TextRepresentation::Array,
+            TextRepresentation::String => am::op_observer::TextRepresentation::String,
+        }
+    }
+}
+
 #[wasm_bindgen]
 #[derive(Debug)]
 pub struct Automerge {
@@ -98,7 +104,10 @@ impl Automerge {
         actor: Option<String>,
         text_rep: TextRepresentation,
     ) -> Result<Automerge, error::BadActorId> {
-        let mut doc = AutoCommit::default().with_encoding(TextEncoding::Utf16);
+        let mut doc = AutoCommit::default()
+            .with_observer(ToggleObserver::default().with_text_rep(text_rep.into()))
+            .with_encoding(TextEncoding::Utf16);
+        doc.observer().set_text_rep(text_rep.into());
         if let Some(a) = actor {
             let a = automerge::ActorId::from(hex::decode(a)?.to_vec());
             doc.set_actor(a);
@@ -548,7 +557,7 @@ impl Automerge {
             .ok_or_else(|| to_js_err("must pass a bool to enablePatches"))?;
         let heads = self.doc.get_heads();
         let old_enabled = self.doc.observer().enable(enable, heads);
-        self.doc.observer().set_text_rep(self.text_rep);
+        self.doc.observer().set_text_rep(self.text_rep.into());
         Ok(old_enabled.into())
     }
 
@@ -603,6 +612,7 @@ impl Automerge {
             if !patches.is_empty() {
                 let patches: Array = patches
                     .into_iter()
+                    .map(interop::JsPatch)
                     .map(JsValue::try_from)
                     .collect::<Result<_, _>>()?;
                 let info = Object::new();
@@ -627,7 +637,7 @@ impl Automerge {
         let (patches, _heads) = self.doc.observer().take_patches(heads);
         let result = Array::new();
         for p in patches {
-            result.push(&p.try_into()?);
+            result.push(&interop::JsPatch(p).try_into()?);
         }
         Ok(result)
     }
@@ -880,7 +890,7 @@ pub fn load(
         TextRepresentation::Array
     };
     let mut doc = am::AutoCommitWithObs::<UnObserved>::load(&data)?
-        .with_observer(Observer::default().with_text_rep(text_rep))
+        .with_observer(ToggleObserver::default().with_text_rep(text_rep.into()))
         .with_encoding(TextEncoding::Utf16);
     if let Some(s) = actor {
         let actor =
