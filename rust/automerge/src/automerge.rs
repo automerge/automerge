@@ -1369,66 +1369,6 @@ impl ReadDoc for Automerge {
             .collect())
     }
 
-    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::Span<'_>>, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?.0;
-        let mut query = self.ops.search(
-            &obj,
-            query::Spans::new(ListEncoding::Text(self.text_encoding)),
-        );
-        query.check_marks();
-        Ok(query.spans)
-    }
-
-    fn attribute<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        baseline: &[ChangeHash],
-        change_sets: &[Vec<ChangeHash>],
-    ) -> Result<Vec<query::ChangeSet>, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?.0;
-        let baseline = self.clock_at(baseline);
-        let change_sets: Vec<Clock> = change_sets.iter().map(|p| self.clock_at(p)).collect();
-        let mut query = self
-            .ops
-            .search(&obj, query::Attribute::new(baseline, change_sets));
-        query.finish();
-        log!("ATTRIBUTE query={:?}", query);
-        Ok(query.change_sets)
-    }
-
-    fn attribute2<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        baseline: &[ChangeHash],
-        change_sets: &[Vec<ChangeHash>],
-    ) -> Result<Vec<query::ChangeSet2>, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?.0;
-        let baseline = self.clock_at(baseline);
-        let change_sets: Vec<Clock> = change_sets.iter().map(|p| self.clock_at(p)).collect();
-        let mut query = self
-            .ops
-            .search(&obj, query::Attribute2::new(baseline, change_sets));
-        query.finish();
-        Ok(query.change_sets)
-    }
-
-    fn raw_spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::SpanInfo>, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?.0;
-        let query = self.ops.search(&obj, query::RawSpans::new());
-        let result = query
-            .spans
-            .into_iter()
-            .map(|s| query::SpanInfo {
-                id: self.id_to_exid(s.id),
-                start: s.start,
-                end: s.end,
-                key: s.key.to_string(),
-                value: s.value,
-            })
-            .collect();
-        Ok(result)
-    }
-
     fn get<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,

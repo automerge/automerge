@@ -4,7 +4,7 @@ use crate::exid::ExId;
 use crate::marks::Mark;
 use crate::op_observer::BranchableObserver;
 use crate::{
-    query, Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, ReadDoc, ScalarValue, Value,
+    Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, ReadDoc, ScalarValue, Value,
     Values,
 };
 use crate::{AutomergeError, Keys};
@@ -245,32 +245,6 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&crate::Change> {
         self.doc.get_change_by_hash(hash)
     }
-
-    fn raw_spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::SpanInfo>, AutomergeError> {
-        self.doc.raw_spans(obj)
-    }
-
-    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::Span<'_>>, AutomergeError> {
-        self.doc.spans(obj)
-    }
-
-    fn attribute<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        baseline: &[ChangeHash],
-        change_sets: &[Vec<ChangeHash>],
-    ) -> Result<Vec<query::ChangeSet>, AutomergeError> {
-        self.doc.attribute(obj, baseline, change_sets)
-    }
-
-    fn attribute2<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        baseline: &[ChangeHash],
-        change_sets: &[Vec<ChangeHash>],
-    ) -> Result<Vec<query::ChangeSet2>, AutomergeError> {
-        self.doc.attribute2(obj, baseline, change_sets)
-    }
 }
 
 impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
@@ -371,12 +345,14 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         self.do_tx(|tx, doc, obs| tx.mark(doc, obs, obj.as_ref(), mark, expand))
     }
 
-    fn unmark<O: AsRef<ExId>, M: AsRef<ExId>>(
+    fn unmark<O: AsRef<ExId>>(
         &mut self,
         obj: O,
-        mark: M,
+        key: &str,
+        start: usize,
+        end: usize,
     ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.unmark(doc, obs, obj.as_ref(), mark.as_ref()))
+        self.do_tx(|tx, doc, obs| tx.unmark(doc, obs, obj.as_ref(), key, start, end))
     }
 
     fn base_heads(&self) -> Vec<ChangeHash> {

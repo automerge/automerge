@@ -1,7 +1,7 @@
 use std::num::NonZeroU64;
 
 use crate::exid::ExId;
-use crate::marks::Mark;
+use crate::marks::{ Mark };
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
 use crate::types::{Key, ListEncoding, ObjId, OpId, OpIds, TextEncoding};
@@ -659,70 +659,33 @@ impl TransactionInner {
     ) -> Result<(), AutomergeError> {
         let (obj, _obj_type) = doc.exid_to_obj(ex_obj)?;
         if let Some(obs) = op_observer {
-            self.do_insert(
-                doc,
-                Some(obs),
-                obj,
-                mark.start,
-                OpType::MarkBegin(expand_left, mark.data.clone().into_owned()),
-            )?;
+            let action = OpType::MarkBegin(expand_left, mark.data.clone().into_owned());
+            self.do_insert(doc, Some(obs), obj, mark.start, action)?;
             self.do_insert(doc, Some(obs), obj, mark.end, OpType::MarkEnd(expand_right))?;
-            obs.mark(doc, ex_obj.clone(), Some(mark).into_iter())
+            if mark.value().is_null() {
+              obs.unmark(doc, ex_obj.clone(), mark.key(), mark.start, mark.end);
+            } else {
+              obs.mark(doc, ex_obj.clone(), Some(mark).into_iter())
+            }
         } else {
-            self.do_insert::<Obs>(
-                doc,
-                None,
-                obj,
-                mark.start,
-                OpType::MarkBegin(expand_left, mark.data.into_owned()),
-            )?;
+            let action = OpType::MarkBegin(expand_left, mark.data.into_owned());
+            self.do_insert::<Obs>(doc, None, obj, mark.start, action)?;
             self.do_insert::<Obs>(doc, None, obj, mark.end, OpType::MarkEnd(expand_right))?;
         }
         Ok(())
     }
 
-    pub(crate) fn unmark<O: AsRef<ExId>, M: AsRef<ExId>, Obs: OpObserver>(
+    pub(crate) fn unmark<Obs: OpObserver>(
         &mut self,
         doc: &mut Automerge,
-        _op_observer: Option<&mut Obs>,
-        obj: O,
-        mark: M,
+        op_observer: Option<&mut Obs>,
+        ex_obj: &ExId,
+        key: &str,
+        start: usize,
+        end: usize,
     ) -> Result<(), AutomergeError> {
-        let (obj, _) = doc.exid_to_obj(obj.as_ref())?;
-        let markid = doc.exid_to_opid(mark.as_ref())?;
-        let ops = doc.ops_mut();
-        let op1 = Op {
-            id: self.next_id(),
-            action: OpType::Delete,
-            key: markid.into(),
-            succ: Default::default(),
-            pred: ops.m.sorted_opids(vec![markid].into_iter()),
-            insert: false,
-        };
-        let q1 = ops.search(&obj, query::SeekOp::new(&op1));
-        ops.add_succ(&obj, &q1.succ, &op1);
-        //for i in q1.succ {
-        //    ops.replace(&obj, i, |old_op| old_op.add_succ(&op1));
-        //}
-        self.operations.push((obj, op1));
-
-        let markid = markid.next();
-        let op2 = Op {
-            id: self.next_id(),
-            action: OpType::Delete,
-            key: markid.into(),
-            succ: Default::default(),
-            pred: ops.m.sorted_opids(vec![markid].into_iter()),
-            insert: false,
-        };
-        let q2 = ops.search(&obj, query::SeekOp::new(&op2));
-
-        ops.add_succ(&obj, &q2.succ, &op2);
-        //for i in q2.succ {
-        //    ops.replace(&obj, i, |old_op| old_op.add_succ(&op2));
-        //}
-        self.operations.push((obj, op2));
-        Ok(())
+        let mark = Mark::new(key.to_string(), ScalarValue::Null, start, end);
+        self.mark(doc, op_observer, ex_obj, mark, (false, false))
     }
 
     fn finalize_op<Obs: OpObserver>(

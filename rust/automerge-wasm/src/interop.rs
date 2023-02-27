@@ -834,7 +834,7 @@ impl Automerge {
                     }
                 }
             }
-            Patch::Mark { .. } => Ok(result.into()),
+            Patch::Mark { .. } | Patch::Unmark { .. } => Ok(result.into()),
         }
     }
 
@@ -894,7 +894,7 @@ impl Automerge {
             //Patch::SpliceText { .. } => Err(to_js_err("cannot Splice into map")),
             Patch::SpliceText { .. } => Err(error::ApplyPatch::SpliceTextInMap),
             Patch::PutSeq { .. } => Err(error::ApplyPatch::PutIdxInMap),
-            Patch::Mark { .. } => Err(error::ApplyPatch::MarkInMap),
+            Patch::Mark { .. } | Patch::Unmark { .. } => Err(error::ApplyPatch::MarkInMap),
         }
     }
 
@@ -1013,15 +1013,6 @@ impl Automerge {
             };
             self.import_path(id, obj_type, components)
                 .map_err(|e| error::ImportObj::InvalidPath(s.to_string(), e))
-        } else {
-            Err(error::ImportObj::NotString)
-        }
-    }
-
-    pub(crate) fn import_obj(&self, id: JsValue) -> Result<ObjId, error::ImportObj> {
-        if let Some(s) = id.as_string() {
-            // only valid formats is 123@aabbcc
-            self.doc.import_obj(&s).map_err(error::ImportObj::BadImport)
         } else {
             Err(error::ImportObj::NotString)
         }

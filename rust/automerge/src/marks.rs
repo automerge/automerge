@@ -84,7 +84,9 @@ impl<'a> MarkStateMachine<'a> {
             } else {
                 let mut m = below.clone();
                 m.end = pos;
-                result = Some(m);
+                if !m.value().is_null() {
+                  result = Some(m);
+                }
             }
         }
 
@@ -105,10 +107,14 @@ impl<'a> MarkStateMachine<'a> {
                 Some(below) if below.value() == mark.value() => {}
                 Some(below) => {
                     below.start = pos;
-                    result = Some(mark.clone());
+                    if !mark.value().is_null() {
+                      result = Some(mark.clone());
+                    }
                 }
                 None => {
-                    result = Some(mark.clone());
+                    if !mark.value().is_null() {
+                      result = Some(mark.clone());
+                    }
                 }
             }
         }

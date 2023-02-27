@@ -97,6 +97,18 @@ impl<'a, O1: OpObserver, O2: OpObserver> OpObserver for ComposeObservers<'a, O1,
         self.obs2.mark(doc, objid, marks.into_iter());
     }
 
+    fn unmark<R: crate::ReadDoc>(
+        &mut self,
+        doc: &R,
+        objid: crate::ObjId,
+        key: &str,
+        start: usize,
+        end: usize
+    ) {
+        self.obs1.unmark(doc, objid.clone(), key, start, end);
+        self.obs2.unmark(doc, objid, key, start, end);
+    }
+
     fn delete_map<R: crate::ReadDoc>(&mut self, doc: &R, objid: crate::ObjId, key: &str) {
         self.obs1.delete_map(doc, objid.clone(), key);
         self.obs2.delete_map(doc, objid, key);

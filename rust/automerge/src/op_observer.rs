@@ -120,6 +120,15 @@ pub trait OpObserver {
         mark: M,
     );
 
+    fn unmark<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        objid: ExId,
+        key: &str,
+        start: usize,
+        end: usize,
+    );
+
     /// Whether to call sequence methods or `splice_text` when encountering changes in text
     ///
     /// Returns `false` by default
@@ -195,6 +204,16 @@ impl OpObserver for () {
         _doc: &'a R,
         _objid: ExId,
         _mark: M,
+    ) {
+    }
+
+    fn unmark<'a, R: ReadDoc>(
+        &mut self,
+        _doc: &'a R,
+        _objid: ExId,
+        _key: &str,
+        _start: usize,
+        _end: usize,
     ) {
     }
 
@@ -307,6 +326,16 @@ impl OpObserver for VecOpObserver {
         _doc: &'a R,
         _objid: ExId,
         _mark: M,
+    ) {
+    }
+
+    fn unmark<R: ReadDoc>(
+        &mut self,
+        _doc: &R,
+        _objid: ExId,
+        _key: &str,
+        _start: usize,
+        _end: usize,
     ) {
     }
 

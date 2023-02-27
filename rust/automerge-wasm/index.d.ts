@@ -188,12 +188,8 @@ export class Automerge {
 
   // marks
   mark(obj: ObjID, key: string, range: string, value: Value, datatype?: Datatype): void;
-  unmark(obj: ObjID, mark: ObjID): void;
+  unmark(obj: ObjID, key: string, start: number, end: numbr): void;
   marks(obj: ObjID): Mark[];
-  rawMarks(obj: ObjID): RawMark[];
-  blame(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet[];
-  attribute(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet[];
-  attribute2(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet[];
 
   // returns a single value - if there is a conflict return the winner
   get(obj: ObjID, prop: Prop, heads?: Heads): Value | undefined;

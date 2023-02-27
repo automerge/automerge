@@ -96,10 +96,12 @@ pub trait Transactable: ReadDoc {
         expand: (bool, bool),
     ) -> Result<(), AutomergeError>;
 
-    fn unmark<O: AsRef<ExId>, M: AsRef<ExId>>(
+    fn unmark<O: AsRef<ExId>>(
         &mut self,
         obj: O,
-        mark: M,
+        key: &str,
+        start: usize,
+        end: usize,
     ) -> Result<(), AutomergeError>;
 
     /// The heads this transaction will be based on

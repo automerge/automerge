@@ -109,6 +109,13 @@ pub(crate) enum Patch {
         path: Vec<(ObjId, Prop)>,
         marks: Vec<Mark<'static>>,
     },
+    Unmark {
+        obj: ObjId,
+        path: Vec<(ObjId, Prop)>,
+        key: String,
+        start: usize,
+        end: usize,
+    },
 }
 
 impl OpObserver for Observer {
@@ -388,6 +395,27 @@ impl OpObserver for Observer {
         }
     }
 
+    fn unmark<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        obj: ObjId,
+        key: &str,
+        start: usize,
+        end: usize,
+    ) {
+        if self.enabled {
+            if let Some(path) = self.get_path(doc, &obj) {
+                self.patches.push(Patch::Unmark {
+                    path,
+                    obj,
+                    key: key.to_string(),
+                    start,
+                    end,
+                });
+            }
+        }
+    }
+
     fn text_as_seq(&self) -> bool {
         self.text_rep == TextRepresentation::Array
     }
@@ -443,6 +471,7 @@ impl Patch {
             Self::DeleteMap { path, .. } => path.as_slice(),
             Self::DeleteSeq { path, .. } => path.as_slice(),
             Self::Mark { path, .. } => path.as_slice(),
+            Self::Unmark { path, .. } => path.as_slice(),
         }
     }
 
@@ -456,6 +485,7 @@ impl Patch {
             Self::DeleteMap { obj, .. } => obj,
             Self::DeleteSeq { obj, .. } => obj,
             Self::Mark { obj, .. } => obj,
+            Self::Unmark { obj, .. } => obj,
         }
     }
 }
@@ -584,6 +614,20 @@ impl TryFrom<Patch> for JsValue {
                     marks_array.push(&mark);
                 }
                 js_set(&result, "marks", marks_array)?;
+                Ok(result.into())
+            }
+            Patch::Unmark {
+                path,
+                key,
+                start,
+                end,
+                ..
+            } => {
+                js_set(&result, "action", "unmark")?;
+                js_set(&result, "path", export_just_path(path.as_slice()))?;
+                js_set(&result, "key", key)?;
+                js_set(&result, "start", start as i32)?;
+                js_set(&result, "end", end as i32)?;
                 Ok(result.into())
             }
         }

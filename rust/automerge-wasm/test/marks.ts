@@ -3,6 +3,8 @@ import { describe, it } from 'mocha';
 import assert from 'assert'
 //@ts-ignore
 import { create, load, Automerge, encodeChange, decodeChange } from '..'
+import { v4 as uuid } from "uuid"
+
 
 let util = require('util')
 
@@ -20,6 +22,51 @@ describe('Automerge', () => {
       doc.insert(list, 3, "A")
       marks = doc.marks(list);
       assert.deepStrictEqual(marks, [{ key: 'bold', value: true, start: 4, end: 7 }])
+    })
+
+    it('should handle mark and unmark', () => {
+      let doc = create(true)
+      let list = doc.putObject("_root", "list", "")
+      doc.splice(list, 0, 0, "aaabbbccc")
+      doc.mark(list, "[2..8]", "bold" , true)
+      let marks = doc.marks(list);
+      assert.deepStrictEqual(marks, [{ key: 'bold', value: true, start: 2, end: 8 }])
+      doc.unmark(list, 'bold', 4, 6)
+      doc.insert(list, 7, "A")
+      doc.insert(list, 3, "A")
+      marks = doc.marks(list);
+      assert.deepStrictEqual(marks, [
+        { key: 'bold', value: true, start: 2, end: 5 },
+        { key: 'bold', value: true, start: 7, end: 10 },
+      ])
+    })
+
+    it('should handle mark and unmark of overlapping marks', () => {
+      let doc = create(true)
+      let list = doc.putObject("_root", "list", "")
+      doc.splice(list, 0, 0, "aaabbbccc")
+      doc.mark(list, "[2..6]", "bold" , true)
+      doc.mark(list, "[5..8]", "bold" , true)
+      doc.mark(list, "[3..6]", "underline" , true)
+      let marks = doc.marks(list);
+      assert.deepStrictEqual(marks, [
+        { key: 'underline', value: true, start: 3, end: 6 },
+        { key: 'bold', value: true, start: 2, end: 8 },
+      ])
+      doc.unmark(list, 'bold', 4, 6)
+      doc.insert(list, 7, "A")
+      doc.insert(list, 3, "A")
+      marks = doc.marks(list);
+      assert.deepStrictEqual(marks, [
+        { key: 'bold', value: true, start: 2, end: 5 },
+        { key: 'underline', value: true, start: 4, end: 7 },
+        { key: 'bold', value: true, start: 7, end: 10 },
+      ])
+      doc.unmark(list, 'bold', 0, 11)
+      marks = doc.marks(list);
+      assert.deepStrictEqual(marks, [
+        { key: 'underline', value: true, start: 4, end: 7 }
+      ])
     })
 
     it('should handle marks [..] at the beginning of a string', () => {
@@ -143,39 +190,17 @@ describe('Automerge', () => {
       doc.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
       doc.mark(list, "[0..37]", "bold" , true)
       doc.mark(list, "[4..19]", "itallic" , true)
-      doc.mark(list, "[10..13]", "comment" , "foxes are my favorite animal!")
+      let id = uuid(); // we want each comment to be unique so give it a unique id
+      doc.mark(list, "[10..13]", `comment:${id}` , "foxes are my favorite animal!")
       doc.commit("marks");
       let marks = doc.marks(list);
       assert.deepStrictEqual(marks, [
-        { key: 'comment', start: 10, end: 13,  value: 'foxes are my favorite animal!' },
+        { key: `comment:${id}`, start: 10, end: 13,  value: 'foxes are my favorite animal!' },
         { key: 'itallic', start: 4, end: 19, value: true },
         { key: 'bold', start: 0, end: 37, value: true }
       ])
       let text = doc.text(list);
       assert.deepStrictEqual(text, "the quick fox jumps over the lazy dog");
-      let rawMarks = doc.rawMarks(list);
-      assert.deepStrictEqual(rawMarks,
-        [
-          { id: "39@aabbcc", start: 0, end: 37, key: 'bold', value: true },
-          { id: "41@aabbcc", start: 4, end: 19, key: 'itallic', value: true },
-          { id: "43@aabbcc", start: 10, end: 13, key: 'comment', value: 'foxes are my favorite animal!' }
-        ]);
-
-      doc.unmark(list, "41@aabbcc")
-      rawMarks = doc.rawMarks(list);
-      assert.deepStrictEqual(rawMarks,
-        [
-          { id: "39@aabbcc", start: 0, end: 37, key: 'bold', value: true },
-          { id: "43@aabbcc", start: 10, end: 13, key: 'comment', value: 'foxes are my favorite animal!' }
-        ]);
-      // mark sure encode decode can handle marks
-
-      doc.unmark(list, "39@aabbcc")
-      rawMarks = doc.rawMarks(list);
-      assert.deepStrictEqual(rawMarks,
-        [
-          { id: "43@aabbcc", start: 10, end: 13, key: 'comment', value: 'foxes are my favorite animal!' }
-        ]);
 
       let all = doc.getChanges([])
       let decoded = all.map((c) => decodeChange(c))
@@ -197,10 +222,10 @@ describe('Automerge', () => {
       let h1 = doc.getHeads()
       doc.mark(list, "[0..37]", "bold" , true)
       doc.mark(list, "[4..19]", "itallic" , true)
-      doc.mark(list, "[10..13]", "comment" , "foxes are my favorite animal!")
+      let id = uuid(); // we want each comment to be unique so give it a unique id
+      doc.mark(list, "[10..13]", `comment:${id}` , "foxes are my favorite animal!")
       doc.commit("marks");
       let h2 = doc.getHeads()
-      let x = doc.attribute2(list, [], [h2]);
       let patches = doc.popPatches();
       let util = require('util')
       assert.deepEqual(patches, [
@@ -214,7 +239,7 @@ describe('Automerge', () => {
           marks: [
             { key: 'bold', value: true, start: 0, end: 37  },
             { key: 'itallic', value: true, start: 4, end: 19 },
-            { key: 'comment', value: 'foxes are my favorite animal!', start: 10, end: 13 }
+            { key: `comment:${id}`, value: 'foxes are my favorite animal!', start: 10, end: 13 }
           ]
         }
       ]);
