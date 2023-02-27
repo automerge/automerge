@@ -104,6 +104,8 @@
 <a href="#103" id="103">103</a>
 <a href="#104" id="104">104</a>
 <a href="#105" id="105">105</a>
+<a href="#106" id="106">106</a>
+<a href="#107" id="107">107</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::change::LoadError <span class="kw">as </span>LoadChangeError;
 <span class="kw">use </span><span class="kw">crate</span>::storage::load::Error <span class="kw">as </span>LoadError;
 <span class="kw">use </span><span class="kw">crate</span>::types::{ActorId, ScalarValue};
@@ -154,6 +156,8 @@
     </span>MissingCounter,
     <span class="attr">#[error(<span class="string">&quot;hash {0} does not correspond to a change in this document&quot;</span>)]
     </span>MissingHash(ChangeHash),
+    <span class="attr">#[error(<span class="string">&quot;change&#39;s deps should already be in the document&quot;</span>)]
+    </span>MissingDeps,
     <span class="attr">#[error(<span class="string">&quot;compressed chunk was not a change&quot;</span>)]
     </span>NonChangeCompressed,
     <span class="attr">#[error(<span class="string">&quot;id was not an object id&quot;</span>)]
