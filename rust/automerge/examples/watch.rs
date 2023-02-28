@@ -5,7 +5,7 @@ use automerge::Automerge;
 use automerge::AutomergeError;
 use automerge::VecOpObserver;
 use automerge::ROOT;
-use automerge::{PatchAction, PatchCtx};
+use automerge::{Patch, PatchAction};
 
 fn main() {
     let mut doc = Automerge::new();
@@ -42,8 +42,8 @@ fn main() {
     get_changes(&doc, patches);
 }
 
-fn get_changes(_doc: &Automerge, patches: Vec<PatchCtx<char>>) {
-    for PatchCtx { obj, path, action } in patches {
+fn get_changes(_doc: &Automerge, patches: Vec<Patch<char>>) {
+    for Patch { obj, path, action } in patches {
         match action {
             PatchAction::PutMap { key, value, .. } => {
                 println!(

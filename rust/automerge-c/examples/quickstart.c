@@ -3,152 +3,127 @@
 #include <string.h>
 
 #include <automerge-c/automerge.h>
+#include <automerge-c/utils/enum_string.h>
+#include <automerge-c/utils/stack.h>
+#include <automerge-c/utils/stack_callback_data.h>
+#include <automerge-c/utils/string.h>
 
-static void abort_cb(AMresultStack**, uint8_t);
+static bool abort_cb(AMstack**, void*);
 
 /**
  * \brief Based on https://automerge.github.io/docs/quickstart
  */
 int main(int argc, char** argv) {
-    AMresultStack* stack = NULL;
-    AMdoc* const doc1 = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, abort_cb).doc;
-    AMobjId const* const cards = AMpush(&stack,
-                                        AMmapPutObject(doc1, AM_ROOT, AMstr("cards"), AM_OBJ_TYPE_LIST),
-                                        AM_VALUE_OBJ_ID,
-                                        abort_cb).obj_id;
-    AMobjId const* const card1 = AMpush(&stack,
-                                        AMlistPutObject(doc1, cards, SIZE_MAX, true, AM_OBJ_TYPE_MAP),
-                                        AM_VALUE_OBJ_ID,
-                                        abort_cb).obj_id;
-    AMfree(AMmapPutStr(doc1, card1, AMstr("title"), AMstr("Rewrite everything in Clojure")));
-    AMfree(AMmapPutBool(doc1, card1, AMstr("done"), false));
-    AMobjId const* const card2 = AMpush(&stack,
-                                        AMlistPutObject(doc1, cards, SIZE_MAX, true, AM_OBJ_TYPE_MAP),
-                                        AM_VALUE_OBJ_ID,
-                                        abort_cb).obj_id;
-    AMfree(AMmapPutStr(doc1, card2, AMstr("title"), AMstr("Rewrite everything in Haskell")));
-    AMfree(AMmapPutBool(doc1, card2, AMstr("done"), false));
-    AMfree(AMcommit(doc1, AMstr("Add card"), NULL));
+    AMstack* stack = NULL;
+    AMdoc* doc1;
+    AMitemToDoc(AMstackItem(&stack, AMcreate(NULL), abort_cb, AMexpect(AM_VAL_TYPE_DOC)), &doc1);
+    AMobjId const* const cards =
+        AMitemObjId(AMstackItem(&stack, AMmapPutObject(doc1, AM_ROOT, AMstr("cards"), AM_OBJ_TYPE_LIST), abort_cb,
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
+    AMobjId const* const card1 =
+        AMitemObjId(AMstackItem(&stack, AMlistPutObject(doc1, cards, SIZE_MAX, true, AM_OBJ_TYPE_MAP), abort_cb,
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
+    AMstackItem(NULL, AMmapPutStr(doc1, card1, AMstr("title"), AMstr("Rewrite everything in Clojure")), abort_cb,
+                AMexpect(AM_VAL_TYPE_VOID));
+    AMstackItem(NULL, AMmapPutBool(doc1, card1, AMstr("done"), false), abort_cb, AMexpect(AM_VAL_TYPE_VOID));
+    AMobjId const* const card2 =
+        AMitemObjId(AMstackItem(&stack, AMlistPutObject(doc1, cards, SIZE_MAX, true, AM_OBJ_TYPE_MAP), abort_cb,
+                                AMexpect(AM_VAL_TYPE_OBJ_TYPE)));
+    AMstackItem(NULL, AMmapPutStr(doc1, card2, AMstr("title"), AMstr("Rewrite everything in Haskell")), abort_cb,
+                AMexpect(AM_VAL_TYPE_VOID));
+    AMstackItem(NULL, AMmapPutBool(doc1, card2, AMstr("done"), false), abort_cb, AMexpect(AM_VAL_TYPE_VOID));
+    AMstackItem(NULL, AMcommit(doc1, AMstr("Add card"), NULL), abort_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
 
-    AMdoc* doc2 = AMpush(&stack, AMcreate(NULL), AM_VALUE_DOC, abort_cb).doc;
-    AMfree(AMmerge(doc2, doc1));
+    AMdoc* doc2;
+    AMitemToDoc(AMstackItem(&stack, AMcreate(NULL), abort_cb, AMexpect(AM_VAL_TYPE_DOC)), &doc2);
+    AMstackItem(NULL, AMmerge(doc2, doc1), abort_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
 
-    AMbyteSpan const binary = AMpush(&stack, AMsave(doc1), AM_VALUE_BYTES, abort_cb).bytes;
-    doc2 = AMpush(&stack, AMload(binary.src, binary.count), AM_VALUE_DOC, abort_cb).doc;
+    AMbyteSpan binary;
+    AMitemToBytes(AMstackItem(&stack, AMsave(doc1), abort_cb, AMexpect(AM_VAL_TYPE_BYTES)), &binary);
+    AMitemToDoc(AMstackItem(&stack, AMload(binary.src, binary.count), abort_cb, AMexpect(AM_VAL_TYPE_DOC)), &doc2);
 
-    AMfree(AMmapPutBool(doc1, card1, AMstr("done"), true));
-    AMfree(AMcommit(doc1, AMstr("Mark card as done"), NULL));
+    AMstackItem(NULL, AMmapPutBool(doc1, card1, AMstr("done"), true), abort_cb, AMexpect(AM_VAL_TYPE_VOID));
+    AMstackItem(NULL, AMcommit(doc1, AMstr("Mark card as done"), NULL), abort_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
 
-    AMfree(AMlistDelete(doc2, cards, 0));
-    AMfree(AMcommit(doc2, AMstr("Delete card"), NULL));
+    AMstackItem(NULL, AMlistDelete(doc2, cards, 0), abort_cb, AMexpect(AM_VAL_TYPE_VOID));
+    AMstackItem(NULL, AMcommit(doc2, AMstr("Delete card"), NULL), abort_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
 
-    AMfree(AMmerge(doc1, doc2));
+    AMstackItem(NULL, AMmerge(doc1, doc2), abort_cb, AMexpect(AM_VAL_TYPE_CHANGE_HASH));
 
-    AMchanges changes = AMpush(&stack, AMgetChanges(doc1, NULL), AM_VALUE_CHANGES, abort_cb).changes;
-    AMchange const* change = NULL;
-    while ((change = AMchangesNext(&changes, 1)) != NULL) {
-        AMbyteSpan const change_hash = AMchangeHash(change);
-        AMchangeHashes const heads = AMpush(&stack,
-                                            AMchangeHashesInit(&change_hash, 1),
-                                            AM_VALUE_CHANGE_HASHES,
-                                            abort_cb).change_hashes;
-        AMbyteSpan const msg = AMchangeMessage(change);
-        char* const c_msg = calloc(1, msg.count + 1);
-        strncpy(c_msg, msg.src, msg.count);
-        printf("%s %ld\n", c_msg, AMobjSize(doc1, cards, &heads));
+    AMitems changes = AMstackItems(&stack, AMgetChanges(doc1, NULL), abort_cb, AMexpect(AM_VAL_TYPE_CHANGE));
+    AMitem* item = NULL;
+    while ((item = AMitemsNext(&changes, 1)) != NULL) {
+        AMchange const* change;
+        AMitemToChange(item, &change);
+        AMitems const heads = AMstackItems(&stack, AMitemFromChangeHash(AMchangeHash(change)), abort_cb,
+                                           AMexpect(AM_VAL_TYPE_CHANGE_HASH));
+        char* const c_msg = AMstrdup(AMchangeMessage(change), NULL);
+        printf("%s %zu\n", c_msg, AMobjSize(doc1, cards, &heads));
         free(c_msg);
     }
-    AMfreeStack(&stack);
+    AMstackFree(&stack);
 }
 
-static char const* discriminant_suffix(AMvalueVariant const);
-
 /**
- * \brief Prints an error message to `stderr`, deallocates all results in the
- *        given stack and exits.
+ * \brief Examines the result at the top of the given stack and, if it's
+ *        invalid, prints an error message to `stderr`, deallocates all results
+ *        in the stack and exits.
  *
- * \param[in,out] stack A pointer to a pointer to an `AMresultStack` struct.
- * \param[in] discriminant An `AMvalueVariant` enum tag.
- * \pre \p stack` != NULL`.
- * \post `*stack == NULL`.
+ * \param[in,out] stack A pointer to a pointer to an `AMstack` struct.
+ * \param[in] data A pointer to an owned `AMstackCallbackData` struct or `NULL`.
+ * \return `true` if the top `AMresult` in \p stack is valid, `false` otherwise.
+ * \pre \p stack `!= NULL`.
  */
-static void abort_cb(AMresultStack** stack, uint8_t discriminant) {
+static bool abort_cb(AMstack** stack, void* data) {
     static char buffer[512] = {0};
 
     char const* suffix = NULL;
     if (!stack) {
         suffix = "Stack*";
-    }
-    else if (!*stack) {
+    } else if (!*stack) {
         suffix = "Stack";
-    }
-    else if (!(*stack)->result) {
+    } else if (!(*stack)->result) {
         suffix = "";
     }
     if (suffix) {
-        fprintf(stderr, "Null `AMresult%s*`.", suffix);
-        AMfreeStack(stack);
+        fprintf(stderr, "Null `AMresult%s*`.\n", suffix);
+        AMstackFree(stack);
         exit(EXIT_FAILURE);
-        return;
+        return false;
     }
     AMstatus const status = AMresultStatus((*stack)->result);
     switch (status) {
-        case AM_STATUS_ERROR:          strcpy(buffer, "Error");          break;
-        case AM_STATUS_INVALID_RESULT: strcpy(buffer, "Invalid result"); break;
-        case AM_STATUS_OK:                                               break;
-        default: sprintf(buffer, "Unknown `AMstatus` tag %d", status);
+        case AM_STATUS_ERROR:
+            strcpy(buffer, "Error");
+            break;
+        case AM_STATUS_INVALID_RESULT:
+            strcpy(buffer, "Invalid result");
+            break;
+        case AM_STATUS_OK:
+            break;
+        default:
+            sprintf(buffer, "Unknown `AMstatus` tag %d", status);
     }
     if (buffer[0]) {
-        AMbyteSpan const msg = AMerrorMessage((*stack)->result);
-        char* const c_msg = calloc(1, msg.count + 1);
-        strncpy(c_msg, msg.src, msg.count);
-        fprintf(stderr, "%s; %s.", buffer, c_msg);
+        char* const c_msg = AMstrdup(AMresultError((*stack)->result), NULL);
+        fprintf(stderr, "%s; %s.\n", buffer, c_msg);
         free(c_msg);
-        AMfreeStack(stack);
+        AMstackFree(stack);
         exit(EXIT_FAILURE);
-        return;
+        return false;
     }
-    AMvalue const value = AMresultValue((*stack)->result);
-    fprintf(stderr, "Unexpected tag `AM_VALUE_%s` (%d); expected `AM_VALUE_%s`.",
-        discriminant_suffix(value.tag),
-        value.tag,
-        discriminant_suffix(discriminant));
-    AMfreeStack(stack);
-    exit(EXIT_FAILURE);
-}
-
-/**
- * \brief Gets the suffix for a discriminant's corresponding string
- *        representation.
- *
- * \param[in] discriminant An `AMvalueVariant` enum tag.
- * \return A UTF-8 string.
- */
-static char const* discriminant_suffix(AMvalueVariant const discriminant) {
-    char const* suffix = NULL;
-    switch (discriminant) {
-        case AM_VALUE_ACTOR_ID:      suffix = "ACTOR_ID";      break;
-        case AM_VALUE_BOOLEAN:       suffix = "BOOLEAN";       break;
-        case AM_VALUE_BYTES:         suffix = "BYTES";         break;
-        case AM_VALUE_CHANGE_HASHES: suffix = "CHANGE_HASHES"; break;
-        case AM_VALUE_CHANGES:       suffix = "CHANGES";       break;
-        case AM_VALUE_COUNTER:       suffix = "COUNTER";       break;
-        case AM_VALUE_DOC:           suffix = "DOC";           break;
-        case AM_VALUE_F64:           suffix = "F64";           break;
-        case AM_VALUE_INT:           suffix = "INT";           break;
-        case AM_VALUE_LIST_ITEMS:    suffix = "LIST_ITEMS";    break;
-        case AM_VALUE_MAP_ITEMS:     suffix = "MAP_ITEMS";     break;
-        case AM_VALUE_NULL:          suffix = "NULL";          break;
-        case AM_VALUE_OBJ_ID:        suffix = "OBJ_ID";        break;
-        case AM_VALUE_OBJ_ITEMS:     suffix = "OBJ_ITEMS";     break;
-        case AM_VALUE_STR:           suffix = "STR";           break;
-        case AM_VALUE_STRS:          suffix = "STRINGS";       break;
-        case AM_VALUE_SYNC_MESSAGE:  suffix = "SYNC_MESSAGE";  break;
-        case AM_VALUE_SYNC_STATE:    suffix = "SYNC_STATE";    break;
-        case AM_VALUE_TIMESTAMP:     suffix = "TIMESTAMP";     break;
-        case AM_VALUE_UINT:          suffix = "UINT";          break;
-        case AM_VALUE_VOID:          suffix = "VOID";          break;
-        default:                     suffix = "...";
+    if (data) {
+        AMstackCallbackData* sc_data = (AMstackCallbackData*)data;
+        AMvalType const tag = AMitemValType(AMresultItem((*stack)->result));
+        if (tag != sc_data->bitmask) {
+            fprintf(stderr, "Unexpected tag `%s` (%d) instead of `%s` at %s:%d.\n", AMvalTypeToString(tag), tag,
+                    AMvalTypeToString(sc_data->bitmask), sc_data->file, sc_data->line);
+            free(sc_data);
+            AMstackFree(stack);
+            exit(EXIT_FAILURE);
+            return false;
+        }
     }
-    return suffix;
+    free(data);
+    return true;
 }

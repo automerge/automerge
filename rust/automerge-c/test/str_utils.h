@@ -1,14 +1,17 @@
-#ifndef STR_UTILS_H
-#define STR_UTILS_H
+#ifndef TESTS_STR_UTILS_H
+#define TESTS_STR_UTILS_H
 
 /**
- * \brief Converts a hexadecimal string into a sequence of bytes.
+ * \brief Converts a hexadecimal string into an array of bytes.
  *
- * \param[in] hex_str A string.
- * \param[in] src A pointer to a contiguous sequence of bytes.
- * \param[in] count The number of bytes to copy to \p src.
- * \pre \p count `<=` length of \p src.
+ * \param[in] hex_str A hexadecimal string.
+ * \param[in] src A pointer to an array of bytes.
+ * \param[in] count The count of bytes to copy into the array pointed to by
+ *                  \p src.
+ * \pre \p src `!= NULL`
+ * \pre `sizeof(`\p src `) > 0`
+ * \pre \p count `<= sizeof(`\p src `)`
  */
 void hex_to_bytes(char const* hex_str, uint8_t* src, size_t const count);
 
-#endif  /* STR_UTILS_H */
+#endif /* TESTS_STR_UTILS_H */

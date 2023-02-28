@@ -1428,6 +1428,19 @@ fn overlong_leb() {
 }
 
 #[test]
+fn load() {
+    fn check_fixture(name: &str) {
+        let doc = Automerge::load(&fixture(name)).unwrap();
+        let map_id = doc.get(ROOT, "a").unwrap().unwrap().1;
+        assert_eq!(doc.get(map_id, "a").unwrap().unwrap().0, "b".into());
+    }
+
+    check_fixture("two_change_chunks.automerge");
+    check_fixture("two_change_chunks_compressed.automerge");
+    check_fixture("two_change_chunks_out_of_order.automerge");
+}
+
+#[test]
 fn negative_64() {
     let mut doc = Automerge::new();
     assert!(doc.transact(|d| { d.put(ROOT, "a", -64_i64) }).is_ok())
