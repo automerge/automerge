@@ -451,6 +451,14 @@ impl<Obs: Observation> ReadDoc for AutoCommitWithObs<Obs> {
         self.doc.get_marks(obj)
     }
 
+    fn get_marks_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<Mark<'_>>, AutomergeError> {
+        self.doc.get_marks_at(obj, heads)
+    }
+
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
         self.doc.text(obj)
     }

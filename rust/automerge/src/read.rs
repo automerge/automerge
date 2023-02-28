@@ -132,6 +132,13 @@ pub trait ReadDoc {
     /// Get all marks on a current sequence
     fn get_marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError>;
 
+    /// Get all marks on a sequence at a given heads
+    fn get_marks_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<Mark<'_>>, AutomergeError>;
+
     /// Get the string represented by the given text object.
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError>;
 

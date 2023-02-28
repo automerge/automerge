@@ -538,5 +538,35 @@ describe('Automerge', () => {
         ]}
       ]);
     })
+    it('can get marks at a given heads', () => {
+      let doc1 : Automerge = create(true, "aabbcc")
+      doc1.enablePatches(true)
+
+      let list = doc1.putObject("_root", "list", "")
+      doc1.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
+
+      let heads1 = doc1.getHeads();
+      let marks1 = doc1.marks(list);
+
+      doc1.mark(list, "[3..25]", "xxx", "aaa")
+
+      let heads2 = doc1.getHeads();
+      let marks2 = doc1.marks(list);
+
+      doc1.mark(list, "[4..11]", "yyy", "bbb")
+
+      let heads3 = doc1.getHeads();
+      let marks3 = doc1.marks(list);
+
+      doc1.unmark(list, "xxx", 9, 20)
+
+      let heads4 = doc1.getHeads();
+      let marks4 = doc1.marks(list);
+
+      assert.deepEqual(marks1, doc1.marks(list,heads1))
+      assert.deepEqual(marks2, doc1.marks(list,heads2))
+      assert.deepEqual(marks3, doc1.marks(list,heads3))
+      assert.deepEqual(marks4, doc1.marks(list,heads4))
+    })
   })
 })

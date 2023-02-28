@@ -185,11 +185,6 @@ impl<T: TextIndex> OpObserver for VecOpObserverInner<T> {
     fn splice_text<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, index: usize, value: &str) {
         if self.text_rep == TextRepresentation::Array {
             for (offset, c) in value.chars().map(ScalarValue::from).enumerate() {
-                log!(
-                    "-- internal insert index={} value={:?}",
-                    index + offset,
-                    value
-                );
                 let value = (c.into(), ObjId::Root);
                 self.insert(doc, obj.clone(), index + offset, value, false);
             }

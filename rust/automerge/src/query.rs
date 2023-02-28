@@ -289,7 +289,7 @@ pub(crate) struct VisWindow {
 }
 
 impl VisWindow {
-    fn visible_at(&mut self, op: &Op, pos: usize, clock: &Clock) -> bool {
+    pub(crate) fn visible_at(&mut self, op: &Op, pos: usize, clock: &Clock) -> bool {
         if !clock.covers(&op.id) {
             return false;
         }

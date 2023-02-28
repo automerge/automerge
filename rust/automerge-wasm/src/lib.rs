@@ -849,9 +849,14 @@ impl Automerge {
         Ok(())
     }
 
-    pub fn marks(&mut self, obj: JsValue) -> Result<JsValue, JsValue> {
+    pub fn marks(&mut self, obj: JsValue, heads: Option<Array>) -> Result<JsValue, JsValue> {
         let (obj, _) = self.import(obj)?;
-        let marks = self.doc.get_marks(obj).map_err(to_js_err)?;
+        let heads = get_heads(heads)?;
+        let marks = if let Some(heads) = heads {
+            self.doc.get_marks_at(obj, &heads).map_err(to_js_err)?
+        } else {
+            self.doc.get_marks(obj).map_err(to_js_err)?
+        };
         let result = Array::new();
         for m in marks {
             let mark = Object::new();
