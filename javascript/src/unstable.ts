@@ -260,6 +260,43 @@ export function mark<T>(
   }
 }
 
+export function unmark<T>(
+  doc: Doc<T>,
+  prop: stable.Prop,
+  key: string,
+  start: number,
+  end: number
+) {
+  if (!_is_proxy(doc)) {
+    throw new RangeError("object cannot be modified outside of a change block")
+  }
+  const state = _state(doc, false)
+  const objectId = _obj(doc)
+  if (!objectId) {
+    throw new RangeError("invalid object for unmark")
+  }
+  const obj = `${objectId}/${prop}`
+  try {
+    return state.handle.unmark(obj, key, start, end)
+  } catch (e) {
+    throw new RangeError(`Cannot unmark: ${e}`)
+  }
+}
+
+export function marks<T>(doc: Doc<T>, prop: stable.Prop) {
+  const state = _state(doc, false)
+  const objectId = _obj(doc)
+  if (!objectId) {
+    throw new RangeError("invalid object for unmark")
+  }
+  const obj = `${objectId}/${prop}`
+  try {
+    return state.handle.marks(obj)
+  } catch (e) {
+    throw new RangeError(`Cannot call marks(): ${e}`)
+  }
+}
+
 /**
  * Get the conflicts associated with a property
  *

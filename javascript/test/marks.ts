@@ -15,11 +15,26 @@ describe("Automerge", () => {
       doc1 = Automerge.change(doc1, d => {
         Automerge.mark(d, "x", "font-weight", "[5..10]", "bold")
       })
+
+      doc1 = Automerge.change(doc1, d => {
+        Automerge.unmark(d, "x", "font-weight", 7, 9)
+      })
+
       assert.deepStrictEqual(callbacks[1], [
         {
           action: "mark",
           path: ["x"],
           marks: [{ key: "font-weight", start: 5, end: 10, value: "bold" }],
+        },
+      ])
+
+      assert.deepStrictEqual(callbacks[2], [
+        {
+          action: "unmark",
+          path: ["x"],
+          key: "font-weight",
+          start: 7,
+          end: 9,
         },
       ])
 
@@ -33,8 +48,16 @@ describe("Automerge", () => {
       assert.deepStrictEqual(callbacks[0][2], {
         action: "mark",
         path: ["x"],
-        marks: [{ key: "font-weight", start: 5, end: 10, value: "bold" }],
+        marks: [
+          { key: "font-weight", start: 5, end: 7, value: "bold" },
+          { key: "font-weight", start: 9, end: 10, value: "bold" },
+        ],
       })
+
+      assert.deepStrictEqual(Automerge.marks(doc2, "x"), [
+        { key: "font-weight", value: "bold", start: 5, end: 7 },
+        { key: "font-weight", value: "bold", start: 9, end: 10 },
+      ])
     })
   })
 })
