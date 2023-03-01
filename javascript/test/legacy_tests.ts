@@ -1568,7 +1568,7 @@ describe("Automerge", () => {
       assert.deepStrictEqual(doc, { list: expected })
     })
 
-    it.skip("should call patchCallback if supplied to load", () => {
+    it("should call patchCallback if supplied to load", () => {
       const s1 = Automerge.change(
         Automerge.init<any>(),
         doc => (doc.birds = ["Goldfinch"])
@@ -1577,40 +1577,19 @@ describe("Automerge", () => {
       const callbacks: Array<any> = [],
         actor = Automerge.getActorId(s1)
       const reloaded = Automerge.load<any>(Automerge.save(s2), {
-        patchCallback(patch, before, after) {
-          callbacks.push({ patch, before, after })
+        patchCallback(patches, opts) {
+          callbacks.push({ patches, opts })
         },
       })
       assert.strictEqual(callbacks.length, 1)
-      assert.deepStrictEqual(callbacks[0].patch, {
-        maxOp: 3,
-        deps: [decodeChange(Automerge.getAllChanges(s2)[1]).hash],
-        clock: { [actor]: 2 },
-        pendingChanges: 0,
-        diffs: {
-          objectId: "_root",
-          type: "map",
-          props: {
-            birds: {
-              [`1@${actor}`]: {
-                objectId: `1@${actor}`,
-                type: "list",
-                edits: [
-                  {
-                    action: "multi-insert",
-                    index: 0,
-                    elemId: `2@${actor}`,
-                    values: ["Goldfinch", "Chaffinch"],
-                  },
-                ],
-              },
-            },
-          },
-        },
-      })
-      assert.deepStrictEqual(callbacks[0].before, {})
-      assert.strictEqual(callbacks[0].after, reloaded)
-      assert.strictEqual(callbacks[0].local, false)
+      assert.deepStrictEqual(callbacks[0].patches, [
+        { action: "put", path: ["birds"], value: [] },
+        { action: "insert", path: ["birds", 0], values: ["", ""] },
+        { action: "splice", path: ["birds", 0, 0], value: "Goldfinch" },
+        { action: "splice", path: ["birds", 1, 0], value: "Chaffinch" },
+      ])
+      assert.deepStrictEqual(callbacks[0].opts.before, {})
+      assert.strictEqual(callbacks[0].opts.after, reloaded)
     })
   })
 
