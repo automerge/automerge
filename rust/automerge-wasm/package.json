@@ -55,6 +55,7 @@
   },
   "exports": {
     "browser": "./bundler/automerge_wasm.js",
+    "default": "./nodejs/automerge_wasm.js",
     "require": "./nodejs/automerge_wasm.js"
   }
 }
