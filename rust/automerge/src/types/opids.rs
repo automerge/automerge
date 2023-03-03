@@ -129,7 +129,7 @@ mod tests {
 
     fn gen_opid(actors: Vec<ActorId>) -> impl Strategy<Value = OpId> {
         (0..actors.len()).prop_flat_map(|actor_idx| {
-            (Just(actor_idx), 0..u64::MAX)
+            (Just(actor_idx), 0..(u32::MAX as u64))
                 .prop_map(|(actor_idx, counter)| OpId::new(counter, actor_idx))
         })
     }
