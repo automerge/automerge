@@ -14,6 +14,7 @@ use crate::{
         },
     },
     convert,
+    error::InvalidOpType,
     storage::{
         change::AsChangeOp,
         columns::{
@@ -22,6 +23,7 @@ use crate::{
         RawColumns,
     },
     types::{ElemId, ObjId, OpId, ScalarValue},
+    OpType,
 };
 
 const OBJ_COL_ID: ColumnId = ColumnId::new(0);
@@ -276,7 +278,12 @@ impl ChangeOpsColumns {
 
 #[derive(thiserror::Error, Debug)]
 #[error(transparent)]
-pub struct ReadChangeOpError(#[from] DecodeColumnError);
+pub enum ReadChangeOpError {
+    #[error(transparent)]
+    DecodeError(#[from] DecodeColumnError),
+    #[error(transparent)]
+    InvalidOpType(#[from] InvalidOpType),
+}
 
 #[derive(Clone)]
 pub(crate) struct ChangeOpsIter<'a> {
@@ -308,6 +315,11 @@ impl<'a> ChangeOpsIter<'a> {
             let action = self.action.next_in_col("action")?;
             let val = self.val.next_in_col("value")?;
             let pred = self.pred.next_in_col("pred")?;
+
+            // This check is necessary to ensure that OpType::from_action_and_value
+            // cannot panic later in the process.
+            OpType::validate_action_and_value(action, &val)?;
+
             Ok(Some(ChangeOp {
                 obj,
                 key,
@@ -458,10 +470,14 @@ mod tests {
                      action in 0_u64..6,
                      obj in opid(),
                      insert in any::<bool>()) -> ChangeOp {
+
+                    let val = if action == 5 && !(value.is_int() || value.is_uint()) {
+                        ScalarValue::Uint(0)
+                    } else { value };
             ChangeOp {
                 obj: obj.into(),
                 key,
-                val: value,
+                val,
                 pred,
                 action,
                 insert,
