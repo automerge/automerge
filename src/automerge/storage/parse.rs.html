@@ -593,6 +593,7 @@
 <a href="#592" id="592">592</a>
 <a href="#593" id="593">593</a>
 <a href="#594" id="594">594</a>
+<a href="#595" id="595">595</a>
 </pre><pre class="rust"><code><span class="doccomment">//! A small parser combinator library inspired by [`nom`](https://docs.rs/crate/nom/5.0.0).
 //!
 //! The primary reason for using this rather than `nom` is that this is only a few hundred lines of
@@ -903,6 +904,7 @@
     }
 
     <span class="doccomment">/// The bytes behind this input - including bytes which have been consumed
+    </span><span class="attr">#[allow(clippy::misnamed_getters)]
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>bytes(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[u8] {
         <span class="self">self</span>.original
     }
