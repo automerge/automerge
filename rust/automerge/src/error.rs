@@ -99,7 +99,7 @@ pub struct InvalidElementId(pub String);
 pub struct InvalidOpId(pub String);
 
 #[derive(Error, Debug)]
-pub(crate) enum InvalidOpType {
+pub enum InvalidOpType {
     #[error("unrecognized action index {0}")]
     UnknownAction(u64),
     #[error("non numeric argument for inc op")]

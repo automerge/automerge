@@ -1,5 +1,5 @@
 #[derive(Clone, Debug)]
-pub(crate) struct DecodeColumnError {
+pub struct DecodeColumnError {
     path: Path,
     error: DecodeColErrorKind,
 }

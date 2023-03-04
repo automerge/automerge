@@ -278,7 +278,7 @@ impl From<&Change> for crate::ExpandedChange {
         let operations = c
             .iter_ops()
             .map(|o| crate::legacy::Op {
-                action: crate::types::OpType::from_index_and_value(o.action, o.val).unwrap(),
+                action: crate::types::OpType::from_action_and_value(o.action, o.val),
                 insert: o.insert,
                 key: match o.key {
                     StoredKey::Elem(e) if e.is_head() => {

@@ -216,23 +216,35 @@ impl OpType {
         }
     }
 
-    pub(crate) fn from_index_and_value(
-        index: u64,
-        value: ScalarValue,
-    ) -> Result<OpType, error::InvalidOpType> {
-        match index {
-            0 => Ok(Self::Make(ObjType::Map)),
-            1 => Ok(Self::Put(value)),
-            2 => Ok(Self::Make(ObjType::List)),
-            3 => Ok(Self::Delete),
-            4 => Ok(Self::Make(ObjType::Text)),
+    pub(crate) fn validate_action_and_value(
+        action: u64,
+        value: &ScalarValue,
+    ) -> Result<(), error::InvalidOpType> {
+        match action {
+            0..=4 => Ok(()),
             5 => match value {
-                ScalarValue::Int(i) => Ok(Self::Increment(i)),
-                ScalarValue::Uint(i) => Ok(Self::Increment(i as i64)),
+                ScalarValue::Int(_) | ScalarValue::Uint(_) => Ok(()),
                 _ => Err(error::InvalidOpType::NonNumericInc),
             },
-            6 => Ok(Self::Make(ObjType::Table)),
-            other => Err(error::InvalidOpType::UnknownAction(other)),
+            6 => Ok(()),
+            _ => Err(error::InvalidOpType::UnknownAction(action)),
+        }
+    }
+
+    pub(crate) fn from_action_and_value(action: u64, value: ScalarValue) -> OpType {
+        match action {
+            0 => Self::Make(ObjType::Map),
+            1 => Self::Put(value),
+            2 => Self::Make(ObjType::List),
+            3 => Self::Delete,
+            4 => Self::Make(ObjType::Text),
+            5 => match value {
+                ScalarValue::Int(i) => Self::Increment(i),
+                ScalarValue::Uint(i) => Self::Increment(i as i64),
+                _ => unreachable!("validate_action_and_value returned NonNumericInc"),
+            },
+            6 => Self::Make(ObjType::Table),
+            _ => unreachable!("validate_action_and_value returned UnknownAction"),
         }
     }
 }
