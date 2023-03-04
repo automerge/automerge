@@ -207,7 +207,7 @@
 </span><span class="kw">pub struct </span>InvalidOpId(<span class="kw">pub </span>String);
 
 <span class="attr">#[derive(Error, Debug)]
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>InvalidOpType {
+</span><span class="kw">pub enum </span>InvalidOpType {
     <span class="attr">#[error(<span class="string">&quot;unrecognized action index {0}&quot;</span>)]
     </span>UnknownAction(u64),
     <span class="attr">#[error(<span class="string">&quot;non numeric argument for inc op&quot;</span>)]

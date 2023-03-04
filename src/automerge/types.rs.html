@@ -831,6 +831,18 @@
 <a href="#830" id="830">830</a>
 <a href="#831" id="831">831</a>
 <a href="#832" id="832">832</a>
+<a href="#833" id="833">833</a>
+<a href="#834" id="834">834</a>
+<a href="#835" id="835">835</a>
+<a href="#836" id="836">836</a>
+<a href="#837" id="837">837</a>
+<a href="#838" id="838">838</a>
+<a href="#839" id="839">839</a>
+<a href="#840" id="840">840</a>
+<a href="#841" id="841">841</a>
+<a href="#842" id="842">842</a>
+<a href="#843" id="843">843</a>
+<a href="#844" id="844">844</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error;
 <span class="kw">use </span><span class="kw">crate</span>::legacy <span class="kw">as </span>amp;
 <span class="kw">use </span>serde::{Deserialize, Serialize};
@@ -1049,23 +1061,35 @@
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>from_index_and_value(
-        index: u64,
-        value: ScalarValue,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;OpType, error::InvalidOpType&gt; {
-        <span class="kw">match </span>index {
-            <span class="number">0 </span>=&gt; <span class="prelude-val">Ok</span>(<span class="self">Self</span>::Make(ObjType::Map)),
-            <span class="number">1 </span>=&gt; <span class="prelude-val">Ok</span>(<span class="self">Self</span>::Put(value)),
-            <span class="number">2 </span>=&gt; <span class="prelude-val">Ok</span>(<span class="self">Self</span>::Make(ObjType::List)),
-            <span class="number">3 </span>=&gt; <span class="prelude-val">Ok</span>(<span class="self">Self</span>::Delete),
-            <span class="number">4 </span>=&gt; <span class="prelude-val">Ok</span>(<span class="self">Self</span>::Make(ObjType::Text)),
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>validate_action_and_value(
+        action: u64,
+        value: <span class="kw-2">&amp;</span>ScalarValue,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), error::InvalidOpType&gt; {
+        <span class="kw">match </span>action {
+            <span class="number">0</span>..=<span class="number">4 </span>=&gt; <span class="prelude-val">Ok</span>(()),
             <span class="number">5 </span>=&gt; <span class="kw">match </span>value {
-                ScalarValue::Int(i) =&gt; <span class="prelude-val">Ok</span>(<span class="self">Self</span>::Increment(i)),
-                ScalarValue::Uint(i) =&gt; <span class="prelude-val">Ok</span>(<span class="self">Self</span>::Increment(i <span class="kw">as </span>i64)),
+                ScalarValue::Int(<span class="kw">_</span>) | ScalarValue::Uint(<span class="kw">_</span>) =&gt; <span class="prelude-val">Ok</span>(()),
                 <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(error::InvalidOpType::NonNumericInc),
             },
-            <span class="number">6 </span>=&gt; <span class="prelude-val">Ok</span>(<span class="self">Self</span>::Make(ObjType::Table)),
-            other =&gt; <span class="prelude-val">Err</span>(error::InvalidOpType::UnknownAction(other)),
+            <span class="number">6 </span>=&gt; <span class="prelude-val">Ok</span>(()),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(error::InvalidOpType::UnknownAction(action)),
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>from_action_and_value(action: u64, value: ScalarValue) -&gt; OpType {
+        <span class="kw">match </span>action {
+            <span class="number">0 </span>=&gt; <span class="self">Self</span>::Make(ObjType::Map),
+            <span class="number">1 </span>=&gt; <span class="self">Self</span>::Put(value),
+            <span class="number">2 </span>=&gt; <span class="self">Self</span>::Make(ObjType::List),
+            <span class="number">3 </span>=&gt; <span class="self">Self</span>::Delete,
+            <span class="number">4 </span>=&gt; <span class="self">Self</span>::Make(ObjType::Text),
+            <span class="number">5 </span>=&gt; <span class="kw">match </span>value {
+                ScalarValue::Int(i) =&gt; <span class="self">Self</span>::Increment(i),
+                ScalarValue::Uint(i) =&gt; <span class="self">Self</span>::Increment(i <span class="kw">as </span>i64),
+                <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">&quot;validate_action_and_value returned NonNumericInc&quot;</span>),
+            },
+            <span class="number">6 </span>=&gt; <span class="self">Self</span>::Make(ObjType::Table),
+            <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">&quot;validate_action_and_value returned UnknownAction&quot;</span>),
         }
     }
 }

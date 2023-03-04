@@ -681,7 +681,7 @@
         <span class="kw">let </span>operations = c
             .iter_ops()
             .map(|o| <span class="kw">crate</span>::legacy::Op {
-                action: <span class="kw">crate</span>::types::OpType::from_index_and_value(o.action, o.val).unwrap(),
+                action: <span class="kw">crate</span>::types::OpType::from_action_and_value(o.action, o.val),
                 insert: o.insert,
                 key: <span class="kw">match </span>o.key {
                     StoredKey::Elem(e) <span class="kw">if </span>e.is_head() =&gt; {
