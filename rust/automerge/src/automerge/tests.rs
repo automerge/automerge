@@ -2,6 +2,7 @@ use itertools::Itertools;
 use pretty_assertions::assert_eq;
 
 use super::*;
+use crate::clock::ClockData;
 use crate::op_tree::B;
 use crate::transaction::Transactable;
 use crate::*;
@@ -1551,4 +1552,62 @@ fn get_changes_heads_empty() {
     doc.commit();
     let heads = doc.get_heads();
     assert_eq!(doc.get_changes(&heads).unwrap(), Vec::<&Change>::new());
+}
+
+#[test]
+fn clock_for() {
+    let mut doc1 = AutoCommit::new();
+    let actor1 = doc1.get_actor().clone();
+
+    let heads = doc1.get_heads();
+    let clock = ExClock::default();
+    assert_eq!(doc1.clock_for_heads(&heads), clock);
+
+    doc1.put(ROOT, "foo", "bar").unwrap();
+    let heads = doc1.get_heads();
+    let mut clock = ExClock::default();
+    clock.insert(actor1.clone(), ClockData { max_op: 1, seq: 1 });
+    assert_eq!(doc1.clock_for_heads(&heads), clock);
+
+    doc1.put(ROOT, "foo", "baz").unwrap();
+    doc1.put(ROOT, "zoo", "baz").unwrap();
+    let heads = doc1.get_heads();
+    let mut clock = ExClock::default();
+    clock.insert(actor1.clone(), ClockData { max_op: 3, seq: 2 });
+    assert_eq!(doc1.clock_for_heads(&heads), clock);
+
+    let mut doc2 = doc1.fork();
+    let actor2 = doc2.get_actor().clone();
+
+    let heads = doc2.get_heads();
+    let mut clock = ExClock::default();
+    clock.insert(actor1.clone(), ClockData { max_op: 3, seq: 2 });
+    assert_eq!(doc2.clock_for_heads(&heads), clock);
+
+    doc2.put(ROOT, "foo", "bar").unwrap();
+    let heads = doc2.get_heads();
+    let mut clock = ExClock::default();
+    clock.insert(actor1.clone(), ClockData { max_op: 3, seq: 2 });
+    clock.insert(actor2.clone(), ClockData { max_op: 4, seq: 1 });
+    assert_eq!(doc2.clock_for_heads(&heads), clock);
+
+    let mut doc3 = doc1.fork();
+    doc3.put(ROOT, "foo", "zoo").unwrap();
+
+    doc1.merge(&mut doc2).unwrap();
+
+    let heads = doc1.get_heads();
+    let mut clock = ExClock::default();
+    clock.insert(actor1, ClockData { max_op: 3, seq: 2 });
+    clock.insert(actor2, ClockData { max_op: 4, seq: 1 });
+    assert_eq!(doc1.clock_for_heads(&heads), clock);
+
+    let calculated_heads = doc1.heads_for_clock(&clock).unwrap();
+    assert_eq!(heads, calculated_heads);
+
+    doc1.merge(&mut doc3).unwrap();
+    let heads = doc1.get_heads();
+    let clock = doc1.clock_for_heads(&heads);
+    let calculated_heads = doc1.heads_for_clock(&clock).unwrap();
+    assert_eq!(heads, calculated_heads);
 }

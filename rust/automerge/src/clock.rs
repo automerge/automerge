@@ -1,13 +1,110 @@
-use crate::types::OpId;
+use crate::{indexed_cache::IndexedCache, types::OpId, ActorId};
 use fxhash::FxBuildHasher;
 use std::{cmp::Ordering, collections::HashMap};
 
-#[derive(Default, Debug, Clone, Copy, PartialEq)]
-pub(crate) struct ClockData {
+/// Vector clock mapping actor ids to the max op counter and sequence number of the changes created by that actor.
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub struct ExClock(HashMap<ActorId, ClockData>);
+
+impl ExClock {
+    pub(crate) fn from_internal_clock(clock: Clock, actors: &IndexedCache<ActorId>) -> Self {
+        let map = clock
+            .0
+            .into_iter()
+            .map(|(actor_index, data)| {
+                let actor_id = actors[actor_index].clone();
+                (actor_id, data)
+            })
+            .collect();
+        ExClock(map)
+    }
+
+    pub fn get(&self, actor: &ActorId) -> Option<&ClockData> {
+        self.0.get(actor)
+    }
+
+    pub fn insert(&mut self, actor: ActorId, data: ClockData) -> Option<ClockData> {
+        self.0.insert(actor, data)
+    }
+
+    pub fn remove(&mut self, actor: &ActorId) -> Option<ClockData> {
+        self.0.remove(actor)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&ActorId, &ClockData)> {
+        self.0.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&ActorId, &mut ClockData)> {
+        self.0.iter_mut()
+    }
+
+    fn is_greater(&self, other: &Self) -> bool {
+        let mut has_greater = false;
+
+        let mut others_found = 0;
+
+        for (actor, data) in &self.0 {
+            if let Some(other_data) = other.0.get(actor) {
+                if data < other_data {
+                    // may be concurrent or less
+                    return false;
+                } else if data > other_data {
+                    has_greater = true;
+                }
+                others_found += 1;
+            } else {
+                // other doesn't have this so effectively has a greater element
+                has_greater = true;
+            }
+        }
+
+        if has_greater {
+            // if they are equal then we have seen every key in the other clock and have at least
+            // one greater element so our clock is greater
+            //
+            // If they aren't the same then we haven't seen every key but have a greater element
+            // anyway so are concurrent
+            others_found == other.0.len()
+        } else {
+            // our clock doesn't have anything greater than the other clock so can't be greater but
+            // could still be concurrent
+            false
+        }
+    }
+}
+
+impl PartialOrd for ExClock {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        if self.0 == other.0 {
+            Some(Ordering::Equal)
+        } else if self.is_greater(other) {
+            Some(Ordering::Greater)
+        } else if other.is_greater(self) {
+            Some(Ordering::Less)
+        } else {
+            // concurrent
+            None
+        }
+    }
+}
+
+impl IntoIterator for ExClock {
+    type Item = (ActorId, ClockData);
+
+    type IntoIter = std::collections::hash_map::IntoIter<ActorId, ClockData>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClockData {
     /// Maximum operation counter of the actor at the point in time.
-    pub(crate) max_op: u64,
+    pub max_op: u64,
     /// Sequence number of the change from this actor.
-    pub(crate) seq: u64,
+    pub seq: u64,
 }
 
 // a clock for the same actor is ahead of another if it has a higher max_op
@@ -56,6 +153,12 @@ impl Clock {
                 }
             })
             .or_insert(data);
+    }
+
+    pub(crate) fn merge(&mut self, other: Clock) {
+        for (index, data) in other.0 {
+            self.include(index, data)
+        }
     }
 
     pub(crate) fn covers(&self, id: &OpId) -> bool {

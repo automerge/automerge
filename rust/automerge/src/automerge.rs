@@ -5,6 +5,7 @@ use std::num::NonZeroU64;
 use std::ops::RangeBounds;
 
 use crate::change_graph::ChangeGraph;
+use crate::clock::ExClock;
 use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
 use crate::keys::Keys;
@@ -866,6 +867,65 @@ impl Automerge {
             .iter()
             .rev()
             .find(|c| c.actor_id() == self.get_actor());
+    }
+
+    /// Get the vector clock for the given heads.
+    pub fn clock_for_heads(&self, heads: &[ChangeHash]) -> ExClock {
+        let clock = self.change_graph.clock_for_heads(heads);
+        ExClock::from_internal_clock(clock, &self.ops.m.actors)
+    }
+
+    /// Get the heads hashes for the given vector clock.
+    pub fn heads_for_clock(&self, clock: &ExClock) -> Result<Vec<ChangeHash>, AutomergeError> {
+        // get the hash for the last change of each actor in the clock
+        let mut heads_and_clocks = Vec::new();
+        for (actor_id, data) in clock.iter() {
+            let actor_index = self.ops.m.actors.lookup(actor_id).unwrap();
+            if let Some(state) = self.states.get(&actor_index) {
+                if let Some(change_index) = state.get(data.seq as usize - 1) {
+                    let change = &self.history[*change_index];
+                    let hash = change.hash();
+                    let clock = self.clock_at(&[hash]);
+                    heads_and_clocks.push((hash, clock));
+                } else {
+                    return Err(AutomergeError::FutureClock);
+                }
+            } else {
+                return Err(AutomergeError::FutureClock);
+            }
+        }
+
+        // minimize heads list to only those that are needed
+        // first sorting them to get the biggest clocks first
+        heads_and_clocks.sort_by(|left, right| match left.1.partial_cmp(&right.1) {
+            Some(ordering) => ordering.reverse(),
+            None => Ordering::Equal,
+        });
+
+        // then iterating through to filter out unneeded hashes
+        let mut final_heads = Vec::new();
+        let mut rolling_clock = Clock::default();
+        for (head, clock) in heads_and_clocks {
+            match rolling_clock.partial_cmp(&clock) {
+                Some(ordering) => match ordering {
+                    Ordering::Less => {
+                        final_heads.push(head);
+                        rolling_clock.merge(clock);
+                    }
+                    Ordering::Equal => {
+                        // ignore, already covered by the hashes
+                    }
+                    Ordering::Greater => {
+                        // ignore, this hash is already covered
+                    }
+                },
+                None => final_heads.push(head),
+            }
+        }
+
+        // and finally sorting them to make them compatible with the expected format
+        final_heads.sort_unstable();
+        Ok(final_heads)
     }
 
     fn clock_at(&self, heads: &[ChangeHash]) -> Clock {

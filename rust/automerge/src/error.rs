@@ -54,6 +54,8 @@ pub enum AutomergeError {
     NonChangeCompressed,
     #[error("id was not an object id")]
     NotAnObject,
+    #[error("this clock refers to the future")]
+    FutureClock,
 }
 
 impl PartialEq for AutomergeError {

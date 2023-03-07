@@ -245,7 +245,7 @@ mod automerge;
 mod autoserde;
 mod change;
 mod change_graph;
-mod clock;
+pub mod clock;
 mod columnar;
 mod convert;
 mod error;

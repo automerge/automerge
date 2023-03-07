@@ -1,5 +1,6 @@
 use std::ops::RangeBounds;
 
+use crate::clock::ExClock;
 use crate::exid::ExId;
 use crate::op_observer::{BranchableObserver, OpObserver};
 use crate::sync::SyncDoc;
@@ -253,6 +254,16 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
     pub fn get_last_local_change(&mut self) -> Option<&Change> {
         self.ensure_transaction_closed();
         self.doc.get_last_local_change()
+    }
+
+    /// Get the vector clock for the given heads.
+    pub fn clock_for_heads(&self, heads: &[ChangeHash]) -> ExClock {
+        self.doc.clock_for_heads(heads)
+    }
+
+    /// Get the heads hashes for the given vector clock.
+    pub fn heads_for_clock(&self, clock: &ExClock) -> Result<Vec<ChangeHash>, AutomergeError> {
+        self.doc.heads_for_clock(clock)
     }
 
     pub fn get_changes(
