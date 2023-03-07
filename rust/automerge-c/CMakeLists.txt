@@ -43,19 +43,37 @@ endif()
 
 string(TOLOWER "${CMAKE_BUILD_TYPE}" BUILD_TYPE_LOWER)
 
+# In order to build with -Z build-std, we need to pass target explicitly.
+# https://doc.rust-lang.org/cargo/reference/unstable.html#build-std
+execute_process (
+    COMMAND rustc -vV
+    OUTPUT_VARIABLE RUSTC_VERSION
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+string(REGEX REPLACE ".*host: ([^ \n]*).*" "\\1"
+    CARGO_TARGET
+    ${RUSTC_VERSION}
+)
+
 if(BUILD_TYPE_LOWER STREQUAL debug)
     set(CARGO_BUILD_TYPE "debug")
 
-    set(CARGO_FLAG "")
+    set(CARGO_FLAG --target=${CARGO_TARGET})
 else()
     set(CARGO_BUILD_TYPE "release")
 
-    set(CARGO_FLAG "--release")
+    if (NOT RUSTC_VERSION MATCHES "nightly")
+        set(RUSTUP_TOOLCHAIN nightly)
+    endif()
+
+    set(RUSTFLAGS -C\ panic=abort)
+
+    set(CARGO_FLAG -Z build-std=std,panic_abort --release --target=${CARGO_TARGET})
 endif()
 
 set(CARGO_FEATURES "")
 
-set(CARGO_BINARY_DIR "${CARGO_TARGET_DIR}/${CARGO_BUILD_TYPE}")
+set(CARGO_BINARY_DIR "${CARGO_TARGET_DIR}/${CARGO_TARGET}/${CARGO_BUILD_TYPE}")
 
 set(BINDINGS_NAME "${LIBRARY_NAME}_core")
 
@@ -90,7 +108,7 @@ add_custom_command(
         #       configuration file has been updated.
         ${CMAKE_COMMAND} -DCONDITION=NOT_EXISTS -P ${CMAKE_SOURCE_DIR}/cmake/file-touch.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h ${CMAKE_SOURCE_DIR}/cbindgen.toml
     COMMAND
-        ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${CARGO_TARGET_DIR} CBINDGEN_TARGET_DIR=${CBINDGEN_TARGET_DIR} ${CARGO_CMD} build ${CARGO_FLAG} ${CARGO_FEATURES}
+        ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${CARGO_TARGET_DIR} CBINDGEN_TARGET_DIR=${CBINDGEN_TARGET_DIR} RUSTUP_TOOLCHAIN=${RUSTUP_TOOLCHAIN} RUSTFLAGS=${RUSTFLAGS} ${CARGO_CMD} build ${CARGO_FLAG} ${CARGO_FEATURES}
     COMMAND
         # Compensate for cbindgen's translation of consecutive uppercase letters to "ScreamingSnakeCase".
         ${CMAKE_COMMAND} -DMATCH_REGEX=A_M\([^_]+\)_ -DREPLACE_EXPR=AM_\\1_ -P ${CMAKE_SOURCE_DIR}/cmake/file-regex-replace.cmake -- ${CBINDGEN_TARGET_DIR}/${LIBRARY_NAME}.h

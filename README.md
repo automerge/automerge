@@ -57,7 +57,6 @@ to figure out how to use it. If you are looking to build rust applications which
 use automerge you may want to look into
 [autosurgeon](https://github.com/alexjg/autosurgeon)
 
-
 ## Repository Organisation
 
 - `./rust` - the rust rust implementation and also the Rust components of
@@ -118,6 +117,10 @@ yarn --cwd ./javascript
 
 # install rust dependencies
 cargo install wasm-bindgen-cli wasm-opt cargo-deny
+
+# get nightly rust to produce optimized automerge-c builds
+rustup toolchain install nightly
+rustup component add rust-src --toolchain nightly
 
 # add wasm target in addition to current architecture
 rustup target add wasm32-unknown-unknown

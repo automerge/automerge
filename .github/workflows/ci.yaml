@@ -2,10 +2,10 @@ name: CI
 on:
   push:
     branches:
-    - main
+      - main
   pull_request:
     branches:
-    - main
+      - main
 jobs:
   fmt:
     runs-on: ubuntu-latest
@@ -118,7 +118,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.67.0
+          toolchain: nightly-2023-01-26
           default: true
       - uses: Swatinem/rust-cache@v1
       - name: Install CMocka
@@ -127,6 +127,8 @@ jobs:
         uses: jwlawson/actions-setup-cmake@v1.12
         with:
           cmake-version: latest
+      - name: Install rust-src
+        run: rustup component add rust-src
       - name: Build and test C bindings
         run: ./scripts/ci/cmake-build Release Static
         shell: bash
