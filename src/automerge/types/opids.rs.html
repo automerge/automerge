@@ -328,7 +328,7 @@
 
     <span class="kw">fn </span>gen_opid(actors: Vec&lt;ActorId&gt;) -&gt; <span class="kw">impl </span>Strategy&lt;Value = OpId&gt; {
         (<span class="number">0</span>..actors.len()).prop_flat_map(|actor_idx| {
-            (Just(actor_idx), <span class="number">0</span>..u64::MAX)
+            (Just(actor_idx), <span class="number">0</span>..(u32::MAX <span class="kw">as </span>u64))
                 .prop_map(|(actor_idx, counter)| OpId::new(counter, actor_idx))
         })
     }

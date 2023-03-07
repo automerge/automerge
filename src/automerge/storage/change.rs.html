@@ -507,6 +507,9 @@
 <a href="#506" id="506">506</a>
 <a href="#507" id="507">507</a>
 <a href="#508" id="508">508</a>
+<a href="#509" id="509">509</a>
+<a href="#510" id="510">510</a>
+<a href="#511" id="511">511</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::{borrow::Cow, io::Write, marker::PhantomData, num::NonZeroU64, ops::Range};
 
 <span class="kw">use crate</span>::{convert, ActorId, ChangeHash, ScalarValue};
@@ -685,6 +688,9 @@
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Change&lt;<span class="lifetime">&#39;a</span>, Verified&gt;, ReadChangeOpError&gt; {
         <span class="kw">for </span>op <span class="kw">in </span><span class="self">self</span>.iter_ops() {
             f(op<span class="question-mark">?</span>);
+        }
+        <span class="kw">if </span>u32::try_from(u64::from(<span class="self">self</span>.start_op)).is_err() {
+            <span class="kw">return </span><span class="prelude-val">Err</span>(ReadChangeOpError::CounterTooLarge);
         }
         <span class="prelude-val">Ok</span>(Change {
             bytes: <span class="self">self</span>.bytes,

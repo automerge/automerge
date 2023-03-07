@@ -1284,17 +1284,17 @@
 
 <span class="kw">impl </span>OpId {
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(counter: u64, actor: usize) -&gt; <span class="self">Self </span>{
-        <span class="self">Self</span>(counter <span class="kw">as </span>u32, actor <span class="kw">as </span>u32)
+        <span class="self">Self</span>(counter.try_into().unwrap(), actor.try_into().unwrap())
     }
 
     <span class="attr">#[inline]
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>counter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
-        <span class="self">self</span>.<span class="number">0 </span><span class="kw">as </span>u64
+        <span class="self">self</span>.<span class="number">0</span>.into()
     }
 
     <span class="attr">#[inline]
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>actor(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-        <span class="self">self</span>.<span class="number">1 </span><span class="kw">as </span>usize
+        <span class="self">self</span>.<span class="number">1</span>.try_into().unwrap()
     }
 
     <span class="attr">#[inline]

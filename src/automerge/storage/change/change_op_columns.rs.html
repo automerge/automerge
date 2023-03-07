@@ -496,6 +496,8 @@
 <a href="#495" id="495">495</a>
 <a href="#496" id="496">496</a>
 <a href="#497" id="497">497</a>
+<a href="#498" id="498">498</a>
+<a href="#499" id="499">499</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::{convert::TryFrom, ops::Range};
 
 <span class="kw">use crate</span>::{
@@ -781,6 +783,8 @@
     </span>DecodeError(<span class="attr">#[from] </span>DecodeColumnError),
     <span class="attr">#[error(transparent)]
     </span>InvalidOpType(<span class="attr">#[from] </span>InvalidOpType),
+    <span class="attr">#[error(<span class="string">&quot;counter too large&quot;</span>)]
+    </span>CounterTooLarge,
 }
 
 <span class="attr">#[derive(Clone)]
