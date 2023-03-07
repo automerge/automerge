@@ -283,6 +283,8 @@ pub enum ReadChangeOpError {
     DecodeError(#[from] DecodeColumnError),
     #[error(transparent)]
     InvalidOpType(#[from] InvalidOpType),
+    #[error("counter too large")]
+    CounterTooLarge,
 }
 
 #[derive(Clone)]

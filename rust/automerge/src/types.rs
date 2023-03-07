@@ -439,17 +439,17 @@ pub(crate) struct OpId(u32, u32);
 
 impl OpId {
     pub(crate) fn new(counter: u64, actor: usize) -> Self {
-        Self(counter as u32, actor as u32)
+        Self(counter.try_into().unwrap(), actor.try_into().unwrap())
     }
 
     #[inline]
     pub(crate) fn counter(&self) -> u64 {
-        self.0 as u64
+        self.0.into()
     }
 
     #[inline]
     pub(crate) fn actor(&self) -> usize {
-        self.1 as usize
+        self.1.try_into().unwrap()
     }
 
     #[inline]
