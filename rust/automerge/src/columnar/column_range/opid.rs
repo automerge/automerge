@@ -104,11 +104,11 @@ impl<'a> OpIdIter<'a> {
             .transpose()
             .map_err(|e| DecodeColumnError::decode_raw("counter", e))?;
         match (actor, counter) {
-            (Some(Some(a)), Some(Some(c))) => match c.try_into() {
-                Ok(c) => Ok(Some(OpId::new(c, a as usize))),
+            (Some(Some(a)), Some(Some(c))) => match u32::try_from(c) {
+                Ok(c) => Ok(Some(OpId::new(c as u64, a as usize))),
                 Err(_) => Err(DecodeColumnError::invalid_value(
                     "counter",
-                    "negative value encountered",
+                    "negative or large value encountered",
                 )),
             },
             (Some(None), _) => Err(DecodeColumnError::unexpected_null("actor")),

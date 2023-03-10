@@ -10,13 +10,8 @@ members = [
 resolver = "2"
 
 [profile.release]
-debug = true
 lto = true
-opt-level = 3
+codegen-units = 1
 
 [profile.bench]
 debug = true
-
-[profile.release.package.automerge-wasm]
-debug = false
-opt-level = 3

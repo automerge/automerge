@@ -20,7 +20,7 @@ use crate::transaction::{
 };
 use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ListEncoding, MarkData, ObjId, Op,
-    OpId, OpType, OpTypeParts, ScalarValue, TextEncoding, Value,
+    OpId, OpType, ScalarValue, TextEncoding, Value,
 };
 use crate::{
     query, AutomergeError, Change, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType,
@@ -732,13 +732,9 @@ impl Automerge {
                     obj,
                     Op {
                         id,
-                        action: OpType::from_parts(OpTypeParts {
-                            action: c.action,
-                            value: c.val,
-                            expand: c.expand,
-                            mark_key: c.mark_key,
-                        })
-                        .unwrap(),
+                        action: OpType::from_action_and_value(
+                            c.action, c.val, c.mark_key, c.expand,
+                        ),
                         key,
                         succ: Default::default(),
                         pred,

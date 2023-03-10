@@ -177,6 +177,9 @@ impl<'a> Change<'a, Unverified> {
         for op in self.iter_ops() {
             f(op?);
         }
+        if u32::try_from(u64::from(self.start_op)).is_err() {
+            return Err(ReadChangeOpError::CounterTooLarge);
+        }
         Ok(Change {
             bytes: self.bytes,
             header: self.header,

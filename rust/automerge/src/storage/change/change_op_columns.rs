@@ -14,6 +14,7 @@ use crate::{
         },
     },
     convert,
+    error::InvalidOpType,
     storage::{
         change::AsChangeOp,
         columns::{
@@ -22,6 +23,7 @@ use crate::{
         RawColumns,
     },
     types::{ElemId, ObjId, OpId, ScalarValue},
+    OpType,
 };
 
 const OBJ_COL_ID: ColumnId = ColumnId::new(0);
@@ -329,7 +331,14 @@ impl ChangeOpsColumns {
 
 #[derive(thiserror::Error, Debug)]
 #[error(transparent)]
-pub struct ReadChangeOpError(#[from] DecodeColumnError);
+pub enum ReadChangeOpError {
+    #[error(transparent)]
+    DecodeError(#[from] DecodeColumnError),
+    #[error(transparent)]
+    InvalidOpType(#[from] InvalidOpType),
+    #[error("counter too large")]
+    CounterTooLarge,
+}
 
 #[derive(Clone)]
 pub(crate) struct ChangeOpsIter<'a> {
@@ -365,6 +374,11 @@ impl<'a> ChangeOpsIter<'a> {
             let pred = self.pred.next_in_col("pred")?;
             let expand = self.expand.maybe_next_in_col("expand")?.unwrap_or(false);
             let mark_key = self.mark_key.maybe_next_in_col("mark_key")?;
+
+            // This check is necessary to ensure that OpType::from_action_and_value
+            // cannot panic later in the process.
+            OpType::validate_action_and_value(action, &val)?;
+
             Ok(Some(ChangeOp {
                 obj,
                 key,
@@ -522,13 +536,17 @@ mod tests {
                      pred in proptest::collection::vec(opid(), 0..20),
                      action in 0_u64..6,
                      obj in opid(),
-                     insert in any::<bool>(),
                      mark_key in proptest::option::of(any::<String>().prop_map(|s| s.into())),
-                     expand in any::<bool>()) -> ChangeOp {
+                     expand in any::<bool>(),
+                     insert in any::<bool>()) -> ChangeOp {
+
+                    let val = if action == 5 && !(value.is_int() || value.is_uint()) {
+                        ScalarValue::Uint(0)
+                    } else { value };
             ChangeOp {
                 obj: obj.into(),
                 key,
-                val: value,
+                val,
                 pred,
                 action,
                 insert,

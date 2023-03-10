@@ -7,7 +7,7 @@ use crate::{
     columnar::Key as DocOpKey,
     op_tree::OpSetMetadata,
     storage::{change::Verified, Change as StoredChange, DocOp, Document},
-    types::{ChangeHash, ElemId, Key, ObjId, ObjType, Op, OpId, OpIds, OpType, OpTypeParts},
+    types::{ChangeHash, ElemId, Key, ObjId, ObjType, Op, OpId, OpIds, OpType},
     ScalarValue,
 };
 
@@ -345,12 +345,7 @@ fn import_op(m: &mut OpSetMetadata, op: DocOp) -> Result<Op, Error> {
             return Err(Error::MissingActor);
         }
     }
-    let action = OpType::from_parts(OpTypeParts {
-        action: op.action,
-        value: op.value,
-        expand: op.expand,
-        mark_key: op.mark_key,
-    })?;
+    let action = OpType::from_action_and_value(op.action, op.value, op.mark_key, op.expand);
     Ok(Op {
         id: check_opid(m, op.id)?,
         action,

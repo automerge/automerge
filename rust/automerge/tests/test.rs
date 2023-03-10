@@ -1447,6 +1447,22 @@ fn negative_64() {
 }
 
 #[test]
+fn obj_id_64bits() {
+    // this change has an opId of 2**42, which when cast to a 32-bit int gives 0.
+    // The file should either fail to load (a limit of ~4 billion ops per doc seems reasonable), or be handled correctly.
+    if let Ok(doc) = Automerge::load(&fixture("64bit_obj_id_change.automerge")) {
+        let map_id = doc.get(ROOT, "a").unwrap().unwrap().1;
+        assert!(map_id != ROOT)
+    }
+
+    // this fixture is the same as the above, but as a document chunk.
+    if let Ok(doc) = Automerge::load(&fixture("64bit_obj_id_doc.automerge")) {
+        let map_id = doc.get(ROOT, "a").unwrap().unwrap().1;
+        assert!(map_id != ROOT)
+    }
+}
+
+#[test]
 fn bad_change_on_optree_node_boundary() {
     let mut doc = Automerge::new();
     doc.transact::<_, _, AutomergeError>(|d| {

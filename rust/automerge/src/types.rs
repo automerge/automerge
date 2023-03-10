@@ -203,13 +203,6 @@ pub enum OpType {
     MarkEnd(bool),
 }
 
-pub(crate) struct OpTypeParts {
-    pub(crate) action: u64,
-    pub(crate) value: ScalarValue,
-    pub(crate) expand: bool,
-    pub(crate) mark_key: Option<smol_str::SmolStr>,
-}
-
 impl OpType {
     /// The index into the action array as specified in [1]
     ///
@@ -227,31 +220,45 @@ impl OpType {
         }
     }
 
-    pub(crate) fn from_parts(
-        OpTypeParts {
-            action,
-            value,
-            expand,
-            mark_key,
-        }: OpTypeParts,
-    ) -> Result<OpType, error::InvalidOpType> {
+    pub(crate) fn validate_action_and_value(
+        action: u64,
+        value: &ScalarValue,
+    ) -> Result<(), error::InvalidOpType> {
         match action {
-            0 => Ok(Self::Make(ObjType::Map)),
-            1 => Ok(Self::Put(value)),
-            2 => Ok(Self::Make(ObjType::List)),
-            3 => Ok(Self::Delete),
-            4 => Ok(Self::Make(ObjType::Text)),
+            0..=4 => Ok(()),
             5 => match value {
-                ScalarValue::Int(i) => Ok(Self::Increment(i)),
-                ScalarValue::Uint(i) => Ok(Self::Increment(i as i64)),
+                ScalarValue::Int(_) | ScalarValue::Uint(_) => Ok(()),
                 _ => Err(error::InvalidOpType::NonNumericInc),
             },
-            6 => Ok(Self::Make(ObjType::Table)),
-            7 => match mark_key {
-                Some(key) => Ok(Self::MarkBegin(expand, MarkData { key, value })),
-                None => Ok(Self::MarkEnd(expand)),
+            6 => Ok(()),
+            7 => Ok(()),
+            _ => Err(error::InvalidOpType::UnknownAction(action)),
+        }
+    }
+
+    pub(crate) fn from_action_and_value(
+        action: u64,
+        value: ScalarValue,
+        mark_key: Option<smol_str::SmolStr>,
+        expand: bool,
+    ) -> OpType {
+        match action {
+            0 => Self::Make(ObjType::Map),
+            1 => Self::Put(value),
+            2 => Self::Make(ObjType::List),
+            3 => Self::Delete,
+            4 => Self::Make(ObjType::Text),
+            5 => match value {
+                ScalarValue::Int(i) => Self::Increment(i),
+                ScalarValue::Uint(i) => Self::Increment(i as i64),
+                _ => unreachable!("validate_action_and_value returned NonNumericInc"),
             },
-            other => Err(error::InvalidOpType::UnknownAction(other)),
+            6 => Self::Make(ObjType::Table),
+            7 => match mark_key {
+                Some(key) => Self::MarkBegin(expand, MarkData { key, value }),
+                None => Self::MarkEnd(expand),
+            },
+            _ => unreachable!("validate_action_and_value returned UnknownAction"),
         }
     }
 
@@ -467,17 +474,17 @@ pub(crate) struct OpId(u32, u32);
 
 impl OpId {
     pub(crate) fn new(counter: u64, actor: usize) -> Self {
-        Self(counter as u32, actor as u32)
+        Self(counter.try_into().unwrap(), actor.try_into().unwrap())
     }
 
     #[inline]
     pub(crate) fn counter(&self) -> u64 {
-        self.0 as u64
+        self.0.into()
     }
 
     #[inline]
     pub(crate) fn actor(&self) -> usize {
-        self.1 as usize
+        self.1.try_into().unwrap()
     }
 
     #[inline]

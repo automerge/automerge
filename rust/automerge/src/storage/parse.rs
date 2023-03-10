@@ -308,7 +308,7 @@ impl<'a> Input<'a> {
     }
 
     /// The bytes behind this input - including bytes which have been consumed
-    // #[allow(clippy::misnamed_getters)]
+    #[allow(clippy::misnamed_getters)]
     pub(crate) fn bytes(&self) -> &'a [u8] {
         self.original
     }
