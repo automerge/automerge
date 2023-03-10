@@ -239,6 +239,10 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&crate::Change> {
         self.doc.get_change_by_hash(hash)
     }
+
+    fn hash_for_opid(&self, opid: &ExId) -> Option<ChangeHash> {
+        self.doc.hash_for_opid(opid)
+    }
 }
 
 impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {

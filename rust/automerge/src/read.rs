@@ -196,4 +196,7 @@ pub trait ReadDoc {
 
     /// Get a change by its hash.
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&Change>;
+
+    /// Get the hash of the change that contains the given opid.
+    fn hash_for_opid(&self, opid: &ExId) -> Option<ChangeHash>;
 }
