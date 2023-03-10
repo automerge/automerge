@@ -10,7 +10,7 @@ use crate::op_observer::{HasPatches, TextRepresentation};
 
 #[derive(Debug, Clone)]
 pub struct ToggleObserver<T> {
-    enabled: bool,
+    pub enabled: bool,
     last_heads: Option<Vec<ChangeHash>>,
     observer: T,
 }
@@ -173,6 +173,14 @@ impl<T: BranchableObserver> BranchableObserver for ToggleObserver<T> {
             observer: self.observer.branch(),
             last_heads: None,
             enabled: self.enabled,
+        }
+    }
+
+    fn explicit_branch(&self) -> Self {
+        ToggleObserver {
+            observer: self.observer.explicit_branch(),
+            last_heads: None,
+            enabled: true,
         }
     }
 }
