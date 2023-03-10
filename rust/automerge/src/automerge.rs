@@ -1438,7 +1438,7 @@ impl ReadDoc for Automerge {
             ExId::Root => None,
             ExId::Id(op_index, _actor_id, actor_index) => {
                 let actor_indices = self.states.get(actor_index)?;
-                let change_index = actor_indices
+                let change_index_index = actor_indices
                     .binary_search_by(|change_index| {
                         let change = self
                             .history
@@ -1455,7 +1455,8 @@ impl ReadDoc for Automerge {
                         }
                     })
                     .ok()?;
-                Some(self.history.get(change_index).unwrap().hash())
+                let change_index = actor_indices.get(change_index_index).unwrap();
+                Some(self.history.get(*change_index).unwrap().hash())
             }
         }
     }
