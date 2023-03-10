@@ -54,6 +54,8 @@ pub enum AutomergeError {
     NonChangeCompressed,
     #[error("id was not an object id")]
     NotAnObject,
+    #[error("an observer is required")]
+    NoObserver,
 }
 
 impl PartialEq for AutomergeError {

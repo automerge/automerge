@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cmp::Eq;
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
@@ -269,6 +270,17 @@ impl OpType {
             ""
         } else {
             "\u{fffc}"
+        }
+    }
+
+    pub(crate) fn to_i64(&self) -> i64 {
+        match self {
+            OpType::Put(ScalarValue::Counter(c)) => c.current,
+            OpType::Put(ScalarValue::Int(i)) => *i,
+            OpType::Put(ScalarValue::Uint(i)) => *i as i64,
+            OpType::Put(ScalarValue::F64(i)) => *i as i64,
+            OpType::Increment(n) => *n,
+            _ => 0,
         }
     }
 
@@ -587,19 +599,54 @@ pub(crate) struct Op {
     pub(crate) insert: bool,
 }
 
+pub(crate) enum SuccIter<'a> {
+    Counter(HashSet<&'a OpId>, std::slice::Iter<'a, OpId>),
+    NonCounter(std::slice::Iter<'a, OpId>),
+}
+
+impl<'a> Iterator for SuccIter<'a> {
+    type Item = &'a OpId;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Counter(set, iter) => {
+                for i in iter {
+                    if !set.contains(i) {
+                        return Some(i);
+                    }
+                }
+                None
+            }
+            Self::NonCounter(iter) => iter.next(),
+        }
+    }
+}
+
 impl Op {
     pub(crate) fn add_succ<F: Fn(&OpId, &OpId) -> std::cmp::Ordering>(&mut self, op: &Op, cmp: F) {
         self.succ.add(op.id, cmp);
-        if let OpType::Put(ScalarValue::Counter(Counter {
-            current,
-            increments,
-            ..
-        })) = &mut self.action
-        {
-            if let OpType::Increment(n) = &op.action {
-                *current += *n;
-                *increments += 1;
-            }
+        if let OpType::Increment(n) = &op.action {
+            self.increment(*n, op.id);
+        }
+    }
+
+    pub(crate) fn succ_iter(&self) -> SuccIter<'_> {
+        if let OpType::Put(ScalarValue::Counter(c)) = &self.action {
+            let set = c
+                .increments
+                .iter()
+                .map(|(id, _)| id)
+                .collect::<HashSet<_>>();
+            SuccIter::Counter(set, self.succ.iter())
+        } else {
+            SuccIter::NonCounter(self.succ.iter())
+        }
+    }
+
+    pub(crate) fn increment(&mut self, n: i64, id: OpId) {
+        if let OpType::Put(ScalarValue::Counter(c)) = &mut self.action {
+            c.current += n;
+            c.increments.push((id, n));
         }
     }
 
@@ -613,7 +660,7 @@ impl Op {
         {
             if let OpType::Increment(n) = &op.action {
                 *current -= *n;
-                *increments -= 1;
+                increments.retain(|(id, _)| id != &op.id);
             }
         }
     }
@@ -652,7 +699,7 @@ impl Op {
 
     pub(crate) fn incs(&self) -> usize {
         if let OpType::Put(ScalarValue::Counter(Counter { increments, .. })) = &self.action {
-            *increments
+            increments.len()
         } else {
             0
         }

@@ -1263,6 +1263,7 @@ fn set_hidden_value<V: Into<JsValue>>(
 }
 
 pub(crate) struct JsPatch(pub(crate) Patch<u16>);
+pub(crate) struct JsPatches(pub(crate) Vec<Patch<u16>>);
 
 fn export_path(path: &[(ObjId, Prop)], end: &Prop) -> Array {
     let result = Array::new();
@@ -1401,6 +1402,18 @@ impl TryFrom<JsPatch> for JsValue {
                 Ok(result.into())
             }
         }
+    }
+}
+
+impl TryFrom<JsPatches> for Array {
+    type Error = error::Export;
+
+    fn try_from(patches: JsPatches) -> Result<Self, Self::Error> {
+        let result = Array::new();
+        for p in patches.0 {
+            result.push(&JsPatch(p).try_into()?);
+        }
+        Ok(result)
     }
 }
 

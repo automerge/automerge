@@ -642,6 +642,14 @@ impl Automerge {
         Ok(result)
     }
 
+    pub fn diff(&mut self, before: Array, after: Array) -> Result<Array, error::Diff> {
+        let before = get_heads(Some(before))?.unwrap();
+        let after = get_heads(Some(after))?.unwrap();
+
+        let patches = self.doc.diff(&before, &after)?.take_patches(vec![]).0;
+        Ok(interop::JsPatches(patches).try_into()?)
+    }
+
     pub fn length(&self, obj: JsValue, heads: Option<Array>) -> Result<f64, error::Get> {
         let (obj, _) = self.import(obj)?;
         if let Some(heads) = get_heads(heads)? {
@@ -1174,6 +1182,22 @@ pub mod error {
 
     impl From<PopPatches> for JsValue {
         fn from(e: PopPatches) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum Diff {
+        #[error(transparent)]
+        Export(#[from] interop::error::Export),
+        #[error("bad heads: {0}")]
+        Heads(#[from] interop::error::BadChangeHashes),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+    }
+
+    impl From<Diff> for JsValue {
+        fn from(e: Diff) -> Self {
             JsValue::from(e.to_string())
         }
     }

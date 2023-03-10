@@ -149,6 +149,14 @@ pub trait BranchableObserver {
     /// thrown away on `rollback()`
     fn branch(&self) -> Self;
 
+    /// Branch used by diff to communicate that patches are explicitly being asked for
+    fn explicit_branch(&self) -> Self
+    where
+        Self: Sized,
+    {
+        self.branch()
+    }
+
     /// Merge observed information from a transaction.
     ///
     /// Called by AutoCommit on `commit()`

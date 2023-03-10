@@ -197,6 +197,8 @@ export class Automerge {
   unmark(obj: ObjID, range: MarkRange, name: string): void;
   marks(obj: ObjID, heads?: Heads): Mark[];
 
+  diff(before: Heads, after: Heads): Patch[];
+
   // returns a single value - if there is a conflict return the winner
   get(obj: ObjID, prop: Prop, heads?: Heads): Value | undefined;
   getWithType(obj: ObjID, prop: Prop, heads?: Heads): FullValue | null;
