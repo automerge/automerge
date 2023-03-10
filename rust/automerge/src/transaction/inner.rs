@@ -1,7 +1,7 @@
 use std::num::NonZeroU64;
 
 use crate::exid::ExId;
-use crate::marks::Mark;
+use crate::marks::{ExpandMark, Mark};
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
 use crate::types::{Key, ListEncoding, ObjId, OpId, OpIds, TextEncoding};
@@ -631,7 +631,6 @@ impl TransactionInner {
             // handle the observer
             if let Some(obs) = op_observer.as_mut() {
                 match splice_type {
-                    //SpliceType::Text(text, _) => { //if !obs.text_as_seq() => {
                     SpliceType::Text(text, _) if !obs.text_as_seq() => {
                         obs.splice_text(doc, ex_obj, index, text)
                     }
@@ -656,22 +655,28 @@ impl TransactionInner {
         op_observer: Option<&mut Obs>,
         ex_obj: &ExId,
         mark: Mark<'_>,
-        (expand_left, expand_right): (bool, bool),
+        expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
         let (obj, _obj_type) = doc.exid_to_obj(ex_obj)?;
         if let Some(obs) = op_observer {
-            let action = OpType::MarkBegin(expand_left, mark.data.clone().into_owned());
+            let action = OpType::MarkBegin(expand.left(), mark.data.clone().into_owned());
             self.do_insert(doc, Some(obs), obj, mark.start, action)?;
-            self.do_insert(doc, Some(obs), obj, mark.end, OpType::MarkEnd(expand_right))?;
+            self.do_insert(
+                doc,
+                Some(obs),
+                obj,
+                mark.end,
+                OpType::MarkEnd(expand.right()),
+            )?;
             if mark.value().is_null() {
-                obs.unmark(doc, ex_obj.clone(), mark.key(), mark.start, mark.end);
+                obs.unmark(doc, ex_obj.clone(), mark.name(), mark.start, mark.end);
             } else {
                 obs.mark(doc, ex_obj.clone(), Some(mark).into_iter())
             }
         } else {
-            let action = OpType::MarkBegin(expand_left, mark.data.into_owned());
+            let action = OpType::MarkBegin(expand.left(), mark.data.into_owned());
             self.do_insert::<Obs>(doc, None, obj, mark.start, action)?;
-            self.do_insert::<Obs>(doc, None, obj, mark.end, OpType::MarkEnd(expand_right))?;
+            self.do_insert::<Obs>(doc, None, obj, mark.end, OpType::MarkEnd(expand.right()))?;
         }
         Ok(())
     }
@@ -681,12 +686,12 @@ impl TransactionInner {
         doc: &mut Automerge,
         op_observer: Option<&mut Obs>,
         ex_obj: &ExId,
-        key: &str,
+        name: &str,
         start: usize,
         end: usize,
     ) -> Result<(), AutomergeError> {
-        let mark = Mark::new(key.to_string(), ScalarValue::Null, start, end);
-        self.mark(doc, op_observer, ex_obj, mark, (false, false))
+        let mark = Mark::new(name.to_string(), ScalarValue::Null, start, end);
+        self.mark(doc, op_observer, ex_obj, mark, ExpandMark::None)
     }
 
     fn finalize_op<Obs: OpObserver>(

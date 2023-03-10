@@ -1,7 +1,7 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
-use crate::marks::Mark;
+use crate::marks::{ExpandMark, Mark};
 use crate::op_observer::{BranchableObserver, OpObserver};
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
@@ -447,16 +447,16 @@ impl<Obs: Observation> ReadDoc for AutoCommitWithObs<Obs> {
         self.doc.object_type(obj)
     }
 
-    fn get_marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
-        self.doc.get_marks(obj)
+    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
+        self.doc.marks(obj)
     }
 
-    fn get_marks_at<O: AsRef<ExId>>(
+    fn marks_at<O: AsRef<ExId>>(
         &self,
         obj: O,
         heads: &[ChangeHash],
     ) -> Result<Vec<Mark<'_>>, AutomergeError> {
-        self.doc.get_marks_at(obj, heads)
+        self.doc.marks_at(obj, heads)
     }
 
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
@@ -643,7 +643,7 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
         &mut self,
         obj: O,
         mark: Mark<'_>,
-        expand: (bool, bool),
+        expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let (current, tx) = self.transaction.as_mut().unwrap();

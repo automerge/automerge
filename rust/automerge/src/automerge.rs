@@ -733,7 +733,10 @@ impl Automerge {
                     Op {
                         id,
                         action: OpType::from_action_and_value(
-                            c.action, c.val, c.mark_key, c.expand,
+                            c.action,
+                            c.val,
+                            c.mark_name,
+                            c.expand,
                         ),
                         key,
                         succ: Default::default(),
@@ -988,8 +991,8 @@ impl Automerge {
                 OpType::Make(obj) => format!("make({})", obj),
                 OpType::Increment(obj) => format!("inc({})", obj),
                 OpType::Delete => format!("del{}", 0),
-                OpType::MarkBegin(_, MarkData { key, value }) => {
-                    format!("mark({},{})", key, value)
+                OpType::MarkBegin(_, MarkData { name, value }) => {
+                    format!("mark({},{})", name, value)
                 }
                 OpType::MarkEnd(_) => "/mark".to_string(),
             };
@@ -1341,7 +1344,7 @@ impl ReadDoc for Automerge {
         Ok(buffer)
     }
 
-    fn get_marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
+    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
         let (obj, obj_type) = self.exid_to_obj(obj.as_ref())?;
         let encoding = ListEncoding::new(obj_type, self.text_encoding);
         let ops_by_key = self.ops().iter_ops(&obj).group_by(|o| o.elemid_or_key());
@@ -1367,7 +1370,7 @@ impl ReadDoc for Automerge {
             .collect())
     }
 
-    fn get_marks_at<O: AsRef<ExId>>(
+    fn marks_at<O: AsRef<ExId>>(
         &self,
         obj: O,
         heads: &[ChangeHash],

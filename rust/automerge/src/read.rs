@@ -130,10 +130,10 @@ pub trait ReadDoc {
     fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError>;
 
     /// Get all marks on a current sequence
-    fn get_marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError>;
+    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError>;
 
     /// Get all marks on a sequence at a given heads
-    fn get_marks_at<O: AsRef<ExId>>(
+    fn marks_at<O: AsRef<ExId>>(
         &self,
         obj: O,
         heads: &[ChangeHash],

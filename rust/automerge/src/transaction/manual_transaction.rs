@@ -1,7 +1,7 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
-use crate::marks::Mark;
+use crate::marks::{ExpandMark, Mark};
 use crate::op_observer::BranchableObserver;
 use crate::{
     Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, ReadDoc, ScalarValue, Value, Values,
@@ -191,16 +191,16 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
         self.doc.text_at(obj, heads)
     }
 
-    fn get_marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
-        self.doc.get_marks(obj)
+    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
+        self.doc.marks(obj)
     }
 
-    fn get_marks_at<O: AsRef<ExId>>(
+    fn marks_at<O: AsRef<ExId>>(
         &self,
         obj: O,
         heads: &[ChangeHash],
     ) -> Result<Vec<Mark<'_>>, AutomergeError> {
-        self.doc.get_marks_at(obj, heads)
+        self.doc.marks_at(obj, heads)
     }
 
     fn get<O: AsRef<ExId>, P: Into<Prop>>(
@@ -347,7 +347,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         &mut self,
         obj: O,
         mark: Mark<'_>,
-        expand: (bool, bool),
+        expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
         self.do_tx(|tx, doc, obs| tx.mark(doc, obs, obj.as_ref(), mark, expand))
     }
@@ -355,11 +355,11 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
     fn unmark<O: AsRef<ExId>>(
         &mut self,
         obj: O,
-        key: &str,
+        name: &str,
         start: usize,
         end: usize,
     ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.unmark(doc, obs, obj.as_ref(), key, start, end))
+        self.do_tx(|tx, doc, obs| tx.unmark(doc, obs, obj.as_ref(), name, start, end))
     }
 
     fn base_heads(&self) -> Vec<ChangeHash> {

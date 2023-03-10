@@ -239,7 +239,7 @@ impl OpType {
     pub(crate) fn from_action_and_value(
         action: u64,
         value: ScalarValue,
-        mark_key: Option<smol_str::SmolStr>,
+        mark_name: Option<smol_str::SmolStr>,
         expand: bool,
     ) -> OpType {
         match action {
@@ -254,8 +254,8 @@ impl OpType {
                 _ => unreachable!("validate_action_and_value returned NonNumericInc"),
             },
             6 => Self::Make(ObjType::Table),
-            7 => match mark_key {
-                Some(key) => Self::MarkBegin(expand, MarkData { key, value }),
+            7 => match mark_name {
+                Some(name) => Self::MarkBegin(expand, MarkData { name, value }),
                 None => Self::MarkEnd(expand),
             },
             _ => unreachable!("validate_action_and_value returned UnknownAction"),

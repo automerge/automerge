@@ -94,7 +94,7 @@ export type Op = {
   pred: string[],
 }
 
-export type Patch =  PutPatch | DelPatch | SpliceTextPatch | IncPatch | InsertPatch | MarkPatch;
+export type Patch =  PutPatch | DelPatch | SpliceTextPatch | IncPatch | InsertPatch | MarkPatch | UnmarkPatch;
 
 export type PutPatch = {
   action: 'put'
@@ -107,6 +107,14 @@ export type MarkPatch = {
   action: 'mark'
   path: Prop[],
   marks: Mark[]
+}
+
+export type UnmarkPatch = {
+  action: 'unmark'
+  path: Prop[],
+  name: string,
+  start: number,
+  end: number
 }
 
 export type IncPatch = {
@@ -134,15 +142,7 @@ export type InsertPatch = {
 }
 
 export type Mark = {
-  key: string,
-  value: Value,
-  start: number,
-  end: number,
-}
-
-export type RawMark = {
-  id: ObjID,
-  key: string,
+  name: string,
   value: Value,
   start: number,
   end: number,
@@ -187,8 +187,8 @@ export class Automerge {
   delete(obj: ObjID, prop: Prop): void;
 
   // marks
-  mark(obj: ObjID, key: string, range: string, value: Value, datatype?: Datatype): void;
-  unmark(obj: ObjID, key: string, start: number, end: number): void;
+  mark(obj: ObjID, name: string, range: string, value: Value, datatype?: Datatype): void;
+  unmark(obj: ObjID, name: string, start: number, end: number): void;
   marks(obj: ObjID, heads?: Heads): Mark[];
 
   // returns a single value - if there is a conflict return the winner
@@ -270,17 +270,3 @@ export class SyncState {
   readonly sharedHeads: Heads;
 }
 
-export type ChangeSetDeletion = {
-  pos: number;
-  val: string;
-}
-
-export type ChangeSetAddition = {
-  start: number;
-  end: number;
-};
-
-export type ChangeSet = {
-  add: ChangeSetAddition[];
-  del: ChangeSetDeletion[];
-};

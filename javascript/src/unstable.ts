@@ -44,11 +44,12 @@ export {
   Float64,
   type Patch,
   type PatchCallback,
+  type Mark,
   type AutomergeValue,
   type ScalarValue,
 } from "./unstable_types"
 
-import type { PatchCallback } from "./stable"
+import type { ScalarValue, Mark, PatchCallback } from "./stable"
 
 import { type UnstableConflicts as Conflicts } from "./conflicts"
 import { unstableConflictAt } from "./conflicts"
@@ -240,9 +241,9 @@ export function splice<T>(
 export function mark<T>(
   doc: Doc<T>,
   prop: stable.Prop,
-  key: string,
+  name: string,
   range: string,
-  value: string | boolean | number | Uint8Array | null
+  value: ScalarValue
 ) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
@@ -254,7 +255,7 @@ export function mark<T>(
   }
   const obj = `${objectId}/${prop}`
   try {
-    return state.handle.mark(obj, range, key, value)
+    return state.handle.mark(obj, range, name, value)
   } catch (e) {
     throw new RangeError(`Cannot mark: ${e}`)
   }
@@ -263,7 +264,7 @@ export function mark<T>(
 export function unmark<T>(
   doc: Doc<T>,
   prop: stable.Prop,
-  key: string,
+  name: string,
   start: number,
   end: number
 ) {
@@ -277,13 +278,13 @@ export function unmark<T>(
   }
   const obj = `${objectId}/${prop}`
   try {
-    return state.handle.unmark(obj, key, start, end)
+    return state.handle.unmark(obj, name, start, end)
   } catch (e) {
     throw new RangeError(`Cannot unmark: ${e}`)
   }
 }
 
-export function marks<T>(doc: Doc<T>, prop: stable.Prop) {
+export function marks<T>(doc: Doc<T>, prop: stable.Prop): Mark[] {
   const state = _state(doc, false)
   const objectId = _obj(doc)
   if (!objectId) {

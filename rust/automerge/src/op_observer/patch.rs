@@ -50,7 +50,7 @@ pub enum PatchAction<T: PartialEq + Clone + Debug> {
         marks: Vec<Mark<'static>>,
     },
     Unmark {
-        key: String,
+        name: String,
         start: usize,
         end: usize,
     },

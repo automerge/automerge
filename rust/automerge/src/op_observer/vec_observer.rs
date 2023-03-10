@@ -363,10 +363,10 @@ impl<T: TextIndex> OpObserver for VecOpObserverInner<T> {
         }
     }
 
-    fn unmark<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, key: &str, start: usize, end: usize) {
+    fn unmark<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, name: &str, start: usize, end: usize) {
         if let Some(path) = self.get_path(doc, &obj) {
             let action = PatchAction::Unmark {
-                key: key.to_string(),
+                name: name.to_string(),
                 start,
                 end,
             };
@@ -457,8 +457,8 @@ impl OpObserver for VecOpObserver {
         self.0.mark(doc, obj, mark)
     }
 
-    fn unmark<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, key: &str, start: usize, end: usize) {
-        self.0.unmark(doc, obj, key, start, end)
+    fn unmark<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, name: &str, start: usize, end: usize) {
+        self.0.unmark(doc, obj, name, start, end)
     }
 
     fn text_as_seq(&self) -> bool {
@@ -531,8 +531,8 @@ impl OpObserver for VecOpObserver16 {
         self.0.mark(doc, obj, mark)
     }
 
-    fn unmark<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, key: &str, start: usize, end: usize) {
-        self.0.unmark(doc, obj, key, start, end)
+    fn unmark<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, name: &str, start: usize, end: usize) {
+        self.0.unmark(doc, obj, name, start, end)
     }
 
     fn text_as_seq(&self) -> bool {

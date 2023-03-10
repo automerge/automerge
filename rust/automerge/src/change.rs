@@ -260,7 +260,7 @@ mod convert_expanded {
             self.action.expand()
         }
 
-        fn mark_key(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
+        fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
             if let legacy::OpType::MarkBegin(legacy::MarkData { name, .. }) = &self.action {
                 Some(Cow::Borrowed(name))
             } else {
@@ -294,7 +294,7 @@ impl From<&Change> for crate::ExpandedChange {
                     action: o.action,
                     value: o.val,
                     expand: o.expand,
-                    mark_key: o.mark_key,
+                    mark_name: o.mark_name,
                 }),
                 insert: o.insert,
                 key: match o.key {

@@ -5,7 +5,7 @@ export { Int, Uint, Float64 } from "./numbers"
 
 import { Counter } from "./counter"
 import type { Patch, PatchInfo } from "@automerge/automerge-wasm"
-export type { Patch } from "@automerge/automerge-wasm"
+export type { Patch, Mark } from "@automerge/automerge-wasm"
 
 export type AutomergeValue =
   | ScalarValue

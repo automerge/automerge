@@ -8,6 +8,7 @@ export {
   Float64,
   type Patch,
   type PatchCallback,
+  type Mark,
 } from "./types"
 
 import { RawString } from "./raw_string"

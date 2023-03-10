@@ -101,12 +101,12 @@ impl<'a, O1: OpObserver, O2: OpObserver> OpObserver for ComposeObservers<'a, O1,
         &mut self,
         doc: &R,
         objid: crate::ObjId,
-        key: &str,
+        name: &str,
         start: usize,
         end: usize,
     ) {
-        self.obs1.unmark(doc, objid.clone(), key, start, end);
-        self.obs2.unmark(doc, objid, key, start, end);
+        self.obs1.unmark(doc, objid.clone(), name, start, end);
+        self.obs2.unmark(doc, objid, name, start, end);
     }
 
     fn delete_map<R: crate::ReadDoc>(&mut self, doc: &R, objid: crate::ObjId, key: &str) {

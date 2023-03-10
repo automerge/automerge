@@ -152,9 +152,9 @@ impl<T: OpObserver + HasPatches> OpObserver for ToggleObserver<T> {
         }
     }
 
-    fn unmark<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, key: &str, start: usize, end: usize) {
+    fn unmark<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, name: &str, start: usize, end: usize) {
         if self.enabled {
-            self.observer.unmark(doc, obj, key, start, end)
+            self.observer.unmark(doc, obj, name, start, end)
         }
     }
 

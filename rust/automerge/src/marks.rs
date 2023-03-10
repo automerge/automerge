@@ -16,14 +16,14 @@ pub struct Mark<'a> {
 
 impl<'a> Mark<'a> {
     pub fn new<V: Into<ScalarValue>>(
-        key: String,
+        name: String,
         value: V,
         start: usize,
         end: usize,
     ) -> Mark<'static> {
         Mark {
             data: Cow::Owned(MarkData {
-                key: key.into(),
+                name: name.into(),
                 value: value.into(),
             }),
             start,
@@ -47,8 +47,8 @@ impl<'a> Mark<'a> {
         }
     }
 
-    pub fn key(&self) -> &str {
-        self.data.key.as_str()
+    pub fn name(&self) -> &str {
+        self.data.name.as_str()
     }
 
     pub fn value(&self) -> &ScalarValue {
@@ -136,7 +136,7 @@ impl<'a> MarkStateMachine<'a> {
         Some(
             &state[index..]
                 .iter()
-                .find(|(_, m)| m.key() == mark.key())?
+                .find(|(_, m)| m.name() == mark.name())?
                 .1,
         )
     }
@@ -149,7 +149,7 @@ impl<'a> MarkStateMachine<'a> {
         Some(
             &mut state[0..index]
                 .iter_mut()
-                .filter(|(_, m)| m.data.key == mark.data.key)
+                .filter(|(_, m)| m.data.name == mark.data.name)
                 .last()?
                 .1,
         )
@@ -158,12 +158,37 @@ impl<'a> MarkStateMachine<'a> {
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct MarkData {
-    pub key: SmolStr,
+    pub name: SmolStr,
     pub value: ScalarValue,
 }
 
 impl Display for MarkData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "key={} value={}", self.key, self.value)
+        write!(f, "name={} value={}", self.name, self.value)
+    }
+}
+
+#[derive(PartialEq, Debug, Clone, Copy)]
+pub enum ExpandMark {
+    Left,
+    Right,
+    Both,
+    None,
+}
+
+impl ExpandMark {
+    pub fn from(left: bool, right: bool) -> Self {
+        match (left, right) {
+            (true, true) => Self::Both,
+            (false, true) => Self::Right,
+            (true, false) => Self::Left,
+            (false, false) => Self::None,
+        }
+    }
+    pub fn left(&self) -> bool {
+        matches!(self, Self::Left | Self::Both)
+    }
+    pub fn right(&self) -> bool {
+        matches!(self, Self::Right | Self::Both)
     }
 }

@@ -815,8 +815,8 @@ impl Automerge {
         let cap = re.captures_iter(&range).next().ok_or(format!("(range={}) range must be in the form of (start..end] or [start..end) etc... () for sticky, [] for normal",range))?;
         let start: usize = cap[2].parse().map_err(|_| to_js_err("invalid start"))?;
         let end: usize = cap[3].parse().map_err(|_| to_js_err("invalid end"))?;
-        let start_sticky = &cap[1] == "(";
-        let end_sticky = &cap[4] == ")";
+        let left_sticky = &cap[1] == "(";
+        let right_sticky = &cap[4] == ")";
         let name = name
             .as_string()
             .ok_or("invalid mark name")
@@ -828,7 +828,7 @@ impl Automerge {
             .mark(
                 &obj,
                 am::marks::Mark::new(name, value, start, end),
-                (start_sticky, end_sticky),
+                am::marks::ExpandMark::from(left_sticky, right_sticky),
             )
             .map_err(to_js_err)?;
         Ok(())
@@ -853,15 +853,15 @@ impl Automerge {
         let (obj, _) = self.import(obj)?;
         let heads = get_heads(heads)?;
         let marks = if let Some(heads) = heads {
-            self.doc.get_marks_at(obj, &heads).map_err(to_js_err)?
+            self.doc.marks_at(obj, &heads).map_err(to_js_err)?
         } else {
-            self.doc.get_marks(obj).map_err(to_js_err)?
+            self.doc.marks(obj).map_err(to_js_err)?
         };
         let result = Array::new();
         for m in marks {
             let mark = Object::new();
             let (_datatype, value) = alloc(&m.value().clone().into(), self.text_rep);
-            js_set(&mark, "key", m.key())?;
+            js_set(&mark, "name", m.name())?;
             js_set(&mark, "value", value)?;
             js_set(&mark, "start", m.start as i32)?;
             js_set(&mark, "end", m.end as i32)?;

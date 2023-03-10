@@ -126,7 +126,7 @@ pub trait OpObserver {
         mark: M,
     );
 
-    fn unmark<R: ReadDoc>(&mut self, doc: &R, objid: ExId, key: &str, start: usize, end: usize);
+    fn unmark<R: ReadDoc>(&mut self, doc: &R, objid: ExId, name: &str, start: usize, end: usize);
 
     /// Whether to call sequence methods or `splice_text` when encountering changes in text
     ///
@@ -210,7 +210,7 @@ impl OpObserver for () {
         &mut self,
         _doc: &R,
         _objid: ExId,
-        _key: &str,
+        _name: &str,
         _start: usize,
         _end: usize,
     ) {

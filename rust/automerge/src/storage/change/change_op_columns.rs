@@ -44,7 +44,7 @@ pub(crate) struct ChangeOp {
     pub(crate) action: u64,
     pub(crate) obj: ObjId,
     pub(crate) expand: bool,
-    pub(crate) mark_key: Option<smol_str::SmolStr>,
+    pub(crate) mark_name: Option<smol_str::SmolStr>,
 }
 
 impl<'a, A: AsChangeOp<'a, ActorId = usize, OpId = OpId>> From<A> for ChangeOp {
@@ -64,7 +64,7 @@ impl<'a, A: AsChangeOp<'a, ActorId = usize, OpId = OpId>> From<A> for ChangeOp {
             insert: a.insert(),
             action: a.action(),
             expand: a.expand(),
-            mark_key: a.mark_key().map(|n| n.into_owned()),
+            mark_name: a.mark_name().map(|n| n.into_owned()),
         }
     }
 }
@@ -110,8 +110,8 @@ impl<'a> AsChangeOp<'a> for &'a ChangeOp {
         self.expand
     }
 
-    fn mark_key(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
-        self.mark_key.as_ref().map(Cow::Borrowed)
+    fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
+        self.mark_name.as_ref().map(Cow::Borrowed)
     }
 }
 
@@ -124,7 +124,7 @@ pub(crate) struct ChangeOpsColumns {
     val: ValueRange,
     pred: OpIdListRange,
     expand: MaybeBooleanRange,
-    mark_key: RleRange<smol_str::SmolStr>,
+    mark_name: RleRange<smol_str::SmolStr>,
 }
 
 impl ChangeOpsColumns {
@@ -138,7 +138,7 @@ impl ChangeOpsColumns {
             val: self.val.iter(data),
             pred: self.pred.iter(data),
             expand: self.expand.decoder(data),
-            mark_key: self.mark_key.decoder(data),
+            mark_name: self.mark_name.decoder(data),
         }
     }
 
@@ -173,8 +173,8 @@ impl ChangeOpsColumns {
         let val = ValueRange::encode(ops.clone().map(|o| o.val()), out);
         let pred = OpIdListRange::encode(ops.clone().map(|o| o.pred()), out);
         let expand = MaybeBooleanRange::encode(ops.clone().map(|o| o.expand()), out);
-        let mark_key =
-            RleRange::encode::<Cow<'_, smol_str::SmolStr>, _>(ops.map(|o| o.mark_key()), out);
+        let mark_name =
+            RleRange::encode::<Cow<'_, smol_str::SmolStr>, _>(ops.map(|o| o.mark_name()), out);
         Self {
             obj,
             key,
@@ -183,7 +183,7 @@ impl ChangeOpsColumns {
             val,
             pred,
             expand,
-            mark_key,
+            mark_name,
         }
     }
 
@@ -200,7 +200,7 @@ impl ChangeOpsColumns {
         let mut val = ValueEncoder::new();
         let mut pred = OpIdListEncoder::new();
         let mut expand = MaybeBooleanEncoder::new();
-        let mut mark_key = RleEncoder::<_, smol_str::SmolStr>::new(Vec::new());
+        let mut mark_name = RleEncoder::<_, smol_str::SmolStr>::new(Vec::new());
         for op in ops {
             tracing::trace!(expand=?op.expand(), "expand");
             obj.append(op.obj());
@@ -210,7 +210,7 @@ impl ChangeOpsColumns {
             val.append(&op.val());
             pred.append(op.pred());
             expand.append(op.expand());
-            mark_key.append(op.mark_key());
+            mark_name.append(op.mark_name());
         }
         let obj = obj.finish(out);
         let key = key.finish(out);
@@ -233,10 +233,10 @@ impl ChangeOpsColumns {
         out.extend(expand);
         let expand = MaybeBooleanRange::from(expand_start..out.len());
 
-        let mark_key_start = out.len();
-        let (mark_key, _) = mark_key.finish();
-        out.extend(mark_key);
-        let mark_key = RleRange::from(mark_key_start..out.len());
+        let mark_name_start = out.len();
+        let (mark_name, _) = mark_name.finish();
+        out.extend(mark_name);
+        let mark_name = RleRange::from(mark_name_start..out.len());
 
         Self {
             obj,
@@ -246,7 +246,7 @@ impl ChangeOpsColumns {
             val,
             pred,
             expand,
-            mark_key,
+            mark_name,
         }
     }
 
@@ -319,10 +319,10 @@ impl ChangeOpsColumns {
                 self.expand.clone().into(),
             ));
         }
-        if !self.mark_key.is_empty() {
+        if !self.mark_name.is_empty() {
             cols.push(RawColumn::new(
                 ColumnSpec::new(MARK_NAME_COL_ID, ColumnType::String, false),
-                self.mark_key.clone().into(),
+                self.mark_name.clone().into(),
             ));
         }
         cols.into_iter().collect()
@@ -350,7 +350,7 @@ pub(crate) struct ChangeOpsIter<'a> {
     val: ValueIter<'a>,
     pred: OpIdListIter<'a>,
     expand: MaybeBooleanDecoder<'a>,
-    mark_key: RleDecoder<'a, smol_str::SmolStr>,
+    mark_name: RleDecoder<'a, smol_str::SmolStr>,
 }
 
 impl<'a> ChangeOpsIter<'a> {
@@ -373,7 +373,7 @@ impl<'a> ChangeOpsIter<'a> {
             let val = self.val.next_in_col("value")?;
             let pred = self.pred.next_in_col("pred")?;
             let expand = self.expand.maybe_next_in_col("expand")?.unwrap_or(false);
-            let mark_key = self.mark_key.maybe_next_in_col("mark_key")?;
+            let mark_name = self.mark_name.maybe_next_in_col("mark_name")?;
 
             // This check is necessary to ensure that OpType::from_action_and_value
             // cannot panic later in the process.
@@ -387,7 +387,7 @@ impl<'a> ChangeOpsIter<'a> {
                 val,
                 pred,
                 expand,
-                mark_key,
+                mark_name,
             }))
         }
     }
@@ -435,7 +435,7 @@ impl TryFrom<Columns> for ChangeOpsColumns {
         let mut pred_actor: Option<RleRange<u64>> = None;
         let mut pred_ctr: Option<DeltaRange> = None;
         let mut expand: Option<MaybeBooleanRange> = None;
-        let mut mark_key: Option<RleRange<smol_str::SmolStr>> = None;
+        let mut mark_name: Option<RleRange<smol_str::SmolStr>> = None;
         let mut other = Columns::empty();
 
         for (index, col) in columns.into_iter().enumerate() {
@@ -491,7 +491,7 @@ impl TryFrom<Columns> for ChangeOpsColumns {
                     _ => return Err(ParseChangeColumnsError::MismatchingColumn { index }),
                 },
                 (EXPAND_COL_ID, ColumnType::Boolean) => expand = Some(col.range().into()),
-                (MARK_NAME_COL_ID, ColumnType::String) => mark_key = Some(col.range().into()),
+                (MARK_NAME_COL_ID, ColumnType::String) => mark_name = Some(col.range().into()),
                 (other_type, other_col) => {
                     tracing::warn!(typ=?other_type, id=?other_col, "unknown column");
                     other.append(col);
@@ -518,7 +518,7 @@ impl TryFrom<Columns> for ChangeOpsColumns {
             val: val.unwrap_or_else(|| ValueRange::new((0..0).into(), (0..0).into())),
             pred,
             expand: expand.unwrap_or_else(|| (0..0).into()),
-            mark_key: mark_key.unwrap_or_else(|| (0..0).into()),
+            mark_name: mark_name.unwrap_or_else(|| (0..0).into()),
         })
     }
 }
@@ -536,7 +536,7 @@ mod tests {
                      pred in proptest::collection::vec(opid(), 0..20),
                      action in 0_u64..6,
                      obj in opid(),
-                     mark_key in proptest::option::of(any::<String>().prop_map(|s| s.into())),
+                     mark_name in proptest::option::of(any::<String>().prop_map(|s| s.into())),
                      expand in any::<bool>(),
                      insert in any::<bool>()) -> ChangeOp {
 
@@ -551,7 +551,7 @@ mod tests {
                 action,
                 insert,
                 expand,
-                mark_key,
+                mark_name,
             }
         }
     }

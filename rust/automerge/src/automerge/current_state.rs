@@ -445,7 +445,7 @@ mod tests {
             &mut self,
             _doc: &R,
             _objid: crate::ObjId,
-            _key: &str,
+            _name: &str,
             _start: usize,
             _end: usize,
         ) {

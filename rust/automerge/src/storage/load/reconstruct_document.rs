@@ -345,7 +345,7 @@ fn import_op(m: &mut OpSetMetadata, op: DocOp) -> Result<Op, Error> {
             return Err(Error::MissingActor);
         }
     }
-    let action = OpType::from_action_and_value(op.action, op.value, op.mark_key, op.expand);
+    let action = OpType::from_action_and_value(op.action, op.value, op.mark_name, op.expand);
     Ok(Op {
         id: check_opid(m, op.id)?,
         action,

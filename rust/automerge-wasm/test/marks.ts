@@ -17,11 +17,11 @@ describe('Automerge', () => {
       doc.mark(list, "[3..6]", "bold" , true)
       let text = doc.text(list)
       let marks = doc.marks(list);
-      assert.deepStrictEqual(marks, [{ key: 'bold', value: true, start: 3, end: 6 }])
+      assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 3, end: 6 }])
       doc.insert(list, 6, "A")
       doc.insert(list, 3, "A")
       marks = doc.marks(list);
-      assert.deepStrictEqual(marks, [{ key: 'bold', value: true, start: 4, end: 7 }])
+      assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 4, end: 7 }])
     })
 
     it('should handle mark and unmark', () => {
@@ -30,14 +30,14 @@ describe('Automerge', () => {
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "[2..8]", "bold" , true)
       let marks = doc.marks(list);
-      assert.deepStrictEqual(marks, [{ key: 'bold', value: true, start: 2, end: 8 }])
+      assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 2, end: 8 }])
       doc.unmark(list, 'bold', 4, 6)
       doc.insert(list, 7, "A")
       doc.insert(list, 3, "A")
       marks = doc.marks(list);
       assert.deepStrictEqual(marks, [
-        { key: 'bold', value: true, start: 2, end: 5 },
-        { key: 'bold', value: true, start: 7, end: 10 },
+        { name: 'bold', value: true, start: 2, end: 5 },
+        { name: 'bold', value: true, start: 7, end: 10 },
       ])
     })
 
@@ -50,22 +50,22 @@ describe('Automerge', () => {
       doc.mark(list, "[3..6]", "underline" , true)
       let marks = doc.marks(list);
       assert.deepStrictEqual(marks, [
-        { key: 'underline', value: true, start: 3, end: 6 },
-        { key: 'bold', value: true, start: 2, end: 8 },
+        { name: 'underline', value: true, start: 3, end: 6 },
+        { name: 'bold', value: true, start: 2, end: 8 },
       ])
       doc.unmark(list, 'bold', 4, 6)
       doc.insert(list, 7, "A")
       doc.insert(list, 3, "A")
       marks = doc.marks(list);
       assert.deepStrictEqual(marks, [
-        { key: 'bold', value: true, start: 2, end: 5 },
-        { key: 'underline', value: true, start: 4, end: 7 },
-        { key: 'bold', value: true, start: 7, end: 10 },
+        { name: 'bold', value: true, start: 2, end: 5 },
+        { name: 'underline', value: true, start: 4, end: 7 },
+        { name: 'bold', value: true, start: 7, end: 10 },
       ])
       doc.unmark(list, 'bold', 0, 11)
       marks = doc.marks(list);
       assert.deepStrictEqual(marks, [
-        { key: 'underline', value: true, start: 4, end: 7 }
+        { name: 'underline', value: true, start: 4, end: 7 }
       ])
     })
 
@@ -75,14 +75,14 @@ describe('Automerge', () => {
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "[0..3]", "bold", true)
       let marks = doc.marks(list);
-      assert.deepStrictEqual(marks, [{ key: 'bold', value: true, start: 0, end: 3 }])
+      assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 0, end: 3 }])
 
       let doc2 = doc.fork()
       doc2.insert(list, 0, "A")
       doc2.insert(list, 4, "B")
       doc.merge(doc2)
       marks = doc.marks(list);
-      assert.deepStrictEqual(marks, [{ key: 'bold', value: true, start: 1, end: 4 }])
+      assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 1, end: 4 }])
     })
 
     it('should handle marks [..] with splice', () => {
@@ -91,14 +91,14 @@ describe('Automerge', () => {
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "[0..3]", "bold", true)
       let marks = doc.marks(list);
-      assert.deepStrictEqual(marks, [{ key: 'bold', value: true, start: 0, end: 3 }])
+      assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 0, end: 3 }])
 
       let doc2 = doc.fork()
       doc2.splice(list, 0, 2, "AAA")
       doc2.splice(list, 4, 0, "BBB")
       doc.merge(doc2)
       marks = doc.marks(list);
-      assert.deepStrictEqual(marks, [{ key: 'bold', value: true, start: 3, end: 4 }])
+      assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 3, end: 4 }])
     })
 
     it('should handle marks across multiple forks', () => {
@@ -107,7 +107,7 @@ describe('Automerge', () => {
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "[0..3]", "bold", true)
       let marks = doc.marks(list);
-      assert.deepStrictEqual(marks, [{ key: 'bold', value: true, start: 0, end: 3 }])
+      assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 0, end: 3 }])
 
       let doc2 = doc.fork()
       doc2.splice(list, 1, 1, "Z") // replace 'aaa' with 'aZa' inside mark.
@@ -119,7 +119,7 @@ describe('Automerge', () => {
       doc.merge(doc3)
 
       marks = doc.marks(list);
-      assert.deepStrictEqual(marks, [{ key: 'bold', value: true, start: 3, end: 6 }])
+      assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 3, end: 6 }])
     })
 
     it('should handle marks with deleted ends [..]', () => {
@@ -129,17 +129,17 @@ describe('Automerge', () => {
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "[3..6]", "bold" , true)
       let marks = doc.marks(list);
-      assert.deepStrictEqual(marks, [{ key: 'bold', value: true, start: 3, end: 6 }])
+      assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 3, end: 6 }])
       doc.delete(list,5);
       doc.delete(list,5);
       doc.delete(list,2);
       doc.delete(list,2);
       marks = doc.marks(list);
-      assert.deepStrictEqual(marks, [{ key: 'bold', value: true, start: 2, end: 3 }])
+      assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 2, end: 3 }])
       doc.insert(list, 3, "A")
       doc.insert(list, 2, "A")
       marks = doc.marks(list);
-      assert.deepStrictEqual(marks, [{ key: 'bold', value: true, start: 3, end: 4 }])
+      assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 3, end: 4 }])
     })
 
     it('should handle sticky marks (..)', () => {
@@ -148,11 +148,11 @@ describe('Automerge', () => {
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "(3..6)", "bold" , true)
       let marks = doc.marks(list);
-      assert.deepStrictEqual(marks, [{ key: 'bold', value: true, start: 3, end: 6 }])
+      assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 3, end: 6 }])
       doc.insert(list, 6, "A")
       doc.insert(list, 3, "A")
       marks = doc.marks(list);
-      assert.deepStrictEqual(marks, [{ key: 'bold', value: true, start: 3, end: 8 }])
+      assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 3, end: 8 }])
     })
 
     it('should handle sticky marks with deleted ends (..)', () => {
@@ -161,24 +161,24 @@ describe('Automerge', () => {
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "(3..6)", "bold" , true)
       let marks = doc.marks(list);
-      assert.deepStrictEqual(marks, [{ key: 'bold', value: true, start: 3, end: 6 }])
+      assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 3, end: 6 }])
       doc.delete(list,5);
       doc.delete(list,5);
       doc.delete(list,2);
       doc.delete(list,2);
       marks = doc.marks(list);
-      assert.deepStrictEqual(marks, [{ key: 'bold', value: true, start: 2, end: 3 }])
+      assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 2, end: 3 }])
       doc.insert(list, 3, "A")
       doc.insert(list, 2, "A")
       marks = doc.marks(list);
-      assert.deepStrictEqual(marks, [{ key: 'bold', value: true, start: 2, end: 5 }])
+      assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 2, end: 5 }])
 
       // make sure save/load can handle marks
 
       let saved = doc.save()
       let doc2 = load(saved,true)
       marks = doc2.marks(list);
-      assert.deepStrictEqual(marks, [{ key: 'bold', value: true, start: 2, end: 5 }])
+      assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 2, end: 5 }])
 
       assert.deepStrictEqual(doc.getHeads(), doc2.getHeads())
       assert.deepStrictEqual(doc.save(), doc2.save())
@@ -195,9 +195,9 @@ describe('Automerge', () => {
       doc.commit("marks");
       let marks = doc.marks(list);
       assert.deepStrictEqual(marks, [
-        { key: `comment:${id}`, start: 10, end: 13,  value: 'foxes are my favorite animal!' },
-        { key: 'itallic', start: 4, end: 19, value: true },
-        { key: 'bold', start: 0, end: 37, value: true }
+        { name: `comment:${id}`, start: 10, end: 13,  value: 'foxes are my favorite animal!' },
+        { name: 'itallic', start: 4, end: 19, value: true },
+        { name: 'bold', start: 0, end: 37, value: true }
       ])
       let text = doc.text(list);
       assert.deepStrictEqual(text, "the quick fox jumps over the lazy dog");
@@ -237,9 +237,9 @@ describe('Automerge', () => {
         {
           action: 'mark', path: [ 'list' ],
           marks: [
-            { key: 'bold', value: true, start: 0, end: 37  },
-            { key: 'itallic', value: true, start: 4, end: 19 },
-            { key: `comment:${id}`, value: 'foxes are my favorite animal!', start: 10, end: 13 }
+            { name: 'bold', value: true, start: 0, end: 37  },
+            { name: 'itallic', value: true, start: 4, end: 19 },
+            { name: `comment:${id}`, value: 'foxes are my favorite animal!', start: 10, end: 13 }
           ]
         }
       ]);
@@ -273,10 +273,10 @@ describe('Automerge', () => {
             action: 'mark',
             path: [ 'list' ],
             marks: [
-              { key: 'x', value: 'a', start: 0, end: 5 },
-              { key: 'x', value: 'b', start: 8, end: 11 },
-              { key: 'x', value: 'c', start: 5, end: 8 },
-              { key: 'x', value: 'c', start: 11, end: 13 },
+              { name: 'x', value: 'a', start: 0, end: 5 },
+              { name: 'x', value: 'b', start: 8, end: 11 },
+              { name: 'x', value: 'c', start: 5, end: 8 },
+              { name: 'x', value: 'c', start: 11, end: 13 },
             ]
           },
         ]);
@@ -294,7 +294,7 @@ describe('Automerge', () => {
       let patches1 = doc1.popPatches().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches1, [{
-        action: 'mark', path: [ 'list' ], marks: [ { key: 'xxx', value: 'aaa', start: 5, end: 10 }],
+        action: 'mark', path: [ 'list' ], marks: [ { name: 'xxx', value: 'aaa', start: 5, end: 10 }],
       }]);
 
       let doc2 : Automerge = create(true);
@@ -304,7 +304,7 @@ describe('Automerge', () => {
       let patches2 = doc2.popPatches().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches2, [{
-        action: 'mark', path: ['list'], marks: [ { key: 'xxx', value: 'aaa', start: 5, end: 10}],
+        action: 'mark', path: ['list'], marks: [ { name: 'xxx', value: 'aaa', start: 5, end: 10}],
       }]);
     })
 
@@ -322,9 +322,9 @@ describe('Automerge', () => {
 
       assert.deepEqual(patches1, [
         { action: 'mark', path: [ 'list' ], marks: [
-          { key: 'xxx', value: 'aaa', start: 5, end: 15 },
-          { key: 'xxx', value: 'aaa', start: 10, end: 20 },
-          { key: 'xxx', value: 'aaa', start: 15, end: 25 },
+          { name: 'xxx', value: 'aaa', start: 5, end: 15 },
+          { name: 'xxx', value: 'aaa', start: 10, end: 20 },
+          { name: 'xxx', value: 'aaa', start: 15, end: 25 },
         ] },
       ]);
 
@@ -335,7 +335,7 @@ describe('Automerge', () => {
       let patches2 = doc2.popPatches().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches2, [
-        { action: 'mark', path: ['list'], marks: [ { key: 'xxx', value: 'aaa', start: 5, end: 25}] },
+        { action: 'mark', path: ['list'], marks: [ { name: 'xxx', value: 'aaa', start: 5, end: 25}] },
       ]);
     })
 
@@ -353,9 +353,9 @@ describe('Automerge', () => {
 
       assert.deepEqual(patches1, [
         { action: 'mark', path: [ 'list' ], marks: [
-          { key: 'xxx', value: 'aaa', start: 5, end: 15 },
-          { key: 'xxx', value: 'bbb', start: 10, end: 20 },
-          { key: 'xxx', value: 'aaa', start: 15, end: 25 },
+          { name: 'xxx', value: 'aaa', start: 5, end: 15 },
+          { name: 'xxx', value: 'bbb', start: 10, end: 20 },
+          { name: 'xxx', value: 'aaa', start: 15, end: 25 },
         ]}
       ]);
 
@@ -367,9 +367,9 @@ describe('Automerge', () => {
 
       assert.deepEqual(patches2, [
         { action: 'mark', path: ['list'], marks: [
-          { key: 'xxx', value: 'aaa', start: 5, end: 10 },
-          { key: 'xxx', value: 'bbb', start: 10, end: 15 },
-          { key: 'xxx', value: 'aaa', start: 15, end: 25 },
+          { name: 'xxx', value: 'aaa', start: 5, end: 10 },
+          { name: 'xxx', value: 'bbb', start: 10, end: 15 },
+          { name: 'xxx', value: 'aaa', start: 15, end: 25 },
         ]},
       ]);
     })
@@ -388,9 +388,9 @@ describe('Automerge', () => {
 
       assert.deepEqual(patches1, [
         { action: 'mark', path: [ 'list' ], marks: [
-          { key: 'xxx', value: 'aaa', start: 5, end:15 },
-          { key: 'yyy', value: 'aaa', start: 10, end: 20 },
-          { key: 'zzz', value: 'aaa', start: 15, end: 25 },
+          { name: 'xxx', value: 'aaa', start: 5, end:15 },
+          { name: 'yyy', value: 'aaa', start: 10, end: 20 },
+          { name: 'zzz', value: 'aaa', start: 15, end: 25 },
           ]}
       ]);
 
@@ -402,9 +402,9 @@ describe('Automerge', () => {
 
       assert.deepEqual(patches2, [
         { action: 'mark', path: [ 'list' ], marks: [
-          { key: 'xxx', value: 'aaa', start: 5, end: 15 },
-          { key: 'yyy', value: 'aaa', start: 10, end: 20 },
-          { key: 'zzz', value: 'aaa', start: 15, end: 25 },
+          { name: 'xxx', value: 'aaa', start: 5, end: 15 },
+          { name: 'yyy', value: 'aaa', start: 10, end: 20 },
+          { name: 'zzz', value: 'aaa', start: 15, end: 25 },
         ]}
       ]);
     })
@@ -431,10 +431,10 @@ describe('Automerge', () => {
 
       assert.deepEqual(patches1, [
         { action: 'mark', path: [ 'list' ], marks: [
-            { key: 'xxx', value: 'aaa', start: 10, end: 20 },
-            { key: 'xxx', value: 'aaa', start: 15, end: 25 },
-            { key: 'xxx', value: 'bbb', start: 5, end: 10 },
-            { key: 'xxx', value: 'bbb', start: 25, end: 30 },
+            { name: 'xxx', value: 'aaa', start: 10, end: 20 },
+            { name: 'xxx', value: 'aaa', start: 15, end: 25 },
+            { name: 'xxx', value: 'bbb', start: 5, end: 10 },
+            { name: 'xxx', value: 'bbb', start: 25, end: 30 },
           ]
         },
       ]);
@@ -448,9 +448,9 @@ describe('Automerge', () => {
       let marks = doc3.marks(list)
 
       assert.deepEqual(marks, [
-          { key: 'xxx', value: 'bbb', start: 5, end: 10 },
-          { key: 'xxx', value: 'aaa', start: 10, end: 25 },
-          { key: 'xxx', value: 'bbb', start: 25, end: 30  },
+          { name: 'xxx', value: 'bbb', start: 5, end: 10 },
+          { name: 'xxx', value: 'aaa', start: 10, end: 25 },
+          { name: 'xxx', value: 'bbb', start: 25, end: 30  },
       ]);
 
       assert.deepEqual(patches2, [{ action: 'mark', path: [ 'list' ], marks }]);
@@ -478,8 +478,8 @@ describe('Automerge', () => {
 
       assert.deepEqual(patches1, [
         { action: 'mark', path: [ 'list' ], marks: [
-            { key: 'xxx', value: 'aaa', start: 10, end: 20 },
-            { key: 'xxx', value: 'aaa', start: 15, end: 25 },
+            { name: 'xxx', value: 'aaa', start: 10, end: 20 },
+            { name: 'xxx', value: 'aaa', start: 15, end: 25 },
           ]
         },
       ]);
@@ -492,7 +492,7 @@ describe('Automerge', () => {
 
       assert.deepEqual(patches2, [
         { action: 'mark', path: [ 'list' ], marks: [
-          { key: 'xxx', value: 'aaa', start: 10, end: 25 },
+          { name: 'xxx', value: 'aaa', start: 10, end: 25 },
         ]}
       ]);
     })
@@ -519,9 +519,9 @@ describe('Automerge', () => {
 
       assert.deepEqual(patches1, [
         { action: 'mark', path: [ 'list' ], marks: [
-            { key: 'xxx', value: 'aaa', start: 5, end: 11 },
-            { key: 'xxx', value: 'aaa', start: 19, end: 25 },
-            { key: 'xxx', value: 'aaa', start: 11, end: 19 },
+            { name: 'xxx', value: 'aaa', start: 5, end: 11 },
+            { name: 'xxx', value: 'aaa', start: 19, end: 25 },
+            { name: 'xxx', value: 'aaa', start: 11, end: 19 },
           ]
         },
       ]);
@@ -534,7 +534,7 @@ describe('Automerge', () => {
 
       assert.deepEqual(patches2, [
         { action: 'mark', path: [ 'list' ], marks: [
-          { key: 'xxx', value: 'aaa', start: 5, end: 25 },
+          { name: 'xxx', value: 'aaa', start: 5, end: 25 },
         ]}
       ]);
     })

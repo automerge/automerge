@@ -1339,7 +1339,7 @@ impl TryFrom<JsPatch> for JsValue {
                 let marks_array = Array::new();
                 for m in marks.iter() {
                     let mark = Object::new();
-                    js_set(&mark, "key", m.key())?;
+                    js_set(&mark, "name", m.name())?;
                     js_set(
                         &mark,
                         "value",
@@ -1353,11 +1353,11 @@ impl TryFrom<JsPatch> for JsValue {
                 Ok(result.into())
             }
             PatchAction::Unmark {
-                key, start, end, ..
+                name, start, end, ..
             } => {
                 js_set(&result, "action", "unmark")?;
                 js_set(&result, "path", export_just_path(path.as_slice()))?;
-                js_set(&result, "key", key)?;
+                js_set(&result, "name", name)?;
                 js_set(&result, "start", start as i32)?;
                 js_set(&result, "end", end as i32)?;
                 Ok(result.into())

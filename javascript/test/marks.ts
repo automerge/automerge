@@ -7,7 +7,7 @@ describe("Automerge", () => {
     it("should allow marks that can be seen in patches", () => {
       let callbacks = []
       let doc1 = Automerge.init({
-        patchCallback: (patches, before, after) => callbacks.push(patches),
+        patchCallback: (patches, info) => callbacks.push(patches),
       })
       doc1 = Automerge.change(doc1, d => {
         d.x = "the quick fox jumps over the lazy dog"
@@ -24,7 +24,7 @@ describe("Automerge", () => {
         {
           action: "mark",
           path: ["x"],
-          marks: [{ key: "font-weight", start: 5, end: 10, value: "bold" }],
+          marks: [{ name: "font-weight", start: 5, end: 10, value: "bold" }],
         },
       ])
 
@@ -32,7 +32,7 @@ describe("Automerge", () => {
         {
           action: "unmark",
           path: ["x"],
-          key: "font-weight",
+          name: "font-weight",
           start: 7,
           end: 9,
         },
@@ -41,7 +41,7 @@ describe("Automerge", () => {
       callbacks = []
 
       let doc2 = Automerge.init({
-        patchCallback: (patches, before, after) => callbacks.push(patches),
+        patchCallback: (patches, info) => callbacks.push(patches),
       })
       doc2 = Automerge.loadIncremental(doc2, Automerge.save(doc1))
 
@@ -49,14 +49,14 @@ describe("Automerge", () => {
         action: "mark",
         path: ["x"],
         marks: [
-          { key: "font-weight", start: 5, end: 7, value: "bold" },
-          { key: "font-weight", start: 9, end: 10, value: "bold" },
+          { name: "font-weight", start: 5, end: 7, value: "bold" },
+          { name: "font-weight", start: 9, end: 10, value: "bold" },
         ],
       })
 
       assert.deepStrictEqual(Automerge.marks(doc2, "x"), [
-        { key: "font-weight", value: "bold", start: 5, end: 7 },
-        { key: "font-weight", value: "bold", start: 9, end: 10 },
+        { name: "font-weight", value: "bold", start: 5, end: 7 },
+        { name: "font-weight", value: "bold", start: 9, end: 10 },
       ])
     })
   })
