@@ -360,6 +360,12 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
         TransactionInner::empty(&mut self.doc, args, options.message, options.time)
     }
 
+    /// Get the hash of the change that contains the given opid.
+    pub fn hash_for_opid(&mut self, opid: &ExId) -> Option<ChangeHash> {
+        self.ensure_transaction_closed();
+        self.doc.hash_for_opid(opid)
+    }
+
     /// An implementation of [`crate::sync::SyncDoc`] for this autocommit
     ///
     /// This ensures that any outstanding transactions for this document are committed before

@@ -1552,3 +1552,21 @@ fn get_changes_heads_empty() {
     let heads = doc.get_heads();
     assert_eq!(doc.get_changes(&heads).unwrap(), Vec::<&Change>::new());
 }
+
+#[test]
+fn hash_for_opid() {
+    let mut doc = AutoCommit::new();
+
+    doc.put(ROOT, "key1", 1).unwrap();
+    let hash1 = doc.commit();
+    // we can get the hash for the change that made this id
+    let (_, id1) = doc.get(ROOT, "key1").unwrap().unwrap();
+    assert_eq!(doc.hash_for_opid(&id1), hash1);
+
+    // this should still work with historical opids too
+    doc.put(ROOT, "key1", 2).unwrap();
+    let hash2 = doc.commit();
+    let (_, id2) = doc.get(ROOT, "key1").unwrap().unwrap();
+    assert_eq!(doc.hash_for_opid(&id1), hash1);
+    assert_eq!(doc.hash_for_opid(&id2), hash2);
+}
