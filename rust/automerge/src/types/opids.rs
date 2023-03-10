@@ -73,6 +73,13 @@ impl OpIds {
         }
     }
 
+    pub(crate) fn remove(&mut self, id: &OpId) -> Option<OpId> {
+        self.0
+            .iter()
+            .position(|i| i == id)
+            .map(|index| self.0.remove(index))
+    }
+
     pub(crate) fn retain<F: Fn(&OpId) -> bool>(&mut self, f: F) {
         self.0.retain(f)
     }

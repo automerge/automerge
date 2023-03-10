@@ -590,16 +590,15 @@ pub(crate) struct Op {
 impl Op {
     pub(crate) fn add_succ<F: Fn(&OpId, &OpId) -> std::cmp::Ordering>(&mut self, op: &Op, cmp: F) {
         self.succ.add(op.id, cmp);
-        if let OpType::Put(ScalarValue::Counter(Counter {
-            current,
-            increments,
-            ..
-        })) = &mut self.action
-        {
-            if let OpType::Increment(n) = &op.action {
-                *current += *n;
-                *increments += 1;
-            }
+        if let OpType::Increment(n) = &op.action {
+            self.increment(*n);
+        }
+    }
+
+    pub(crate) fn increment(&mut self, n: i64) {
+        if let OpType::Put(ScalarValue::Counter(c)) = &mut self.action {
+            c.current += n;
+            c.increments += 1;
         }
     }
 

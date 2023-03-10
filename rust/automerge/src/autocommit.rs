@@ -311,6 +311,22 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
         self.doc.get_heads()
     }
 
+    pub fn diff(
+        &mut self,
+        start: &[ChangeHash],
+        end: &[ChangeHash],
+    ) -> Result<Obs::Obs, AutomergeError> {
+        self.ensure_transaction_closed();
+
+        if let Some(observer) = self.observation.observer() {
+            let mut branch = observer.branch();
+            self.doc.diff_with_observer(start, end, &mut branch)?;
+            Ok(branch)
+        } else {
+            Err(AutomergeError::NoObserver)
+        }
+    }
+
     /// Commit any uncommitted changes
     ///
     /// Returns `None` if there were no operations to commit

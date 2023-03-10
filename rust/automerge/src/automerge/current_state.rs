@@ -197,6 +197,234 @@ fn observe_map<'a, I: Iterator<Item = &'a Op>, O: OpObserver>(
         });
 }
 
+/*
+pub(crate) fn observe_diff<O: OpObserver>(
+    doc: &Automerge,
+    begin: &Clock,
+    end: &Clock,
+    observer: &mut O,
+) {
+    for (obj, typ, ops) in doc.ops().iter_objs() {
+    let ops_by_key = ops.group_by(|o| o.key);
+    let diffs = ops_by_key
+        .into_iter()
+        .filter_map(|(_key, key_ops)| {
+            key_ops.fold(None, |state, op| {
+                match (created(&op.id, begin, end), deleted(op, begin, end)) {
+                    (Era::Before, Era::During) => Some(Diff::del(op)),
+                    (Era::Before, Era::After) => Some(Diff::visible(op)),
+                    (Era::During, Era::After) => state.merge(Some(Diff::add(op))),
+                    _ => state,
+                }
+            })
+        })
+        .filter(|action| action.valid_at(begin, end));
+        if typ == ObjType::Text && !observer.text_as_seq() {
+            observe_text_diff(doc, observer, obj, diffs)
+        } else if typ.is_sequence() {
+            observe_list_diff(doc, observer, obj, diffs);
+        } else {
+            observe_map_diff(doc, observer, obj, diffs);
+        }
+    }
+}
+
+fn observe_text_diff<'a, I: Iterator<Item = Diff<'a>>, O: OpObserver>(
+    doc: &Automerge,
+    observer: &mut O,
+    obj: &ObjId,
+    diffs: I,
+) {
+    let exid = doc.id_to_exid(obj.0);
+    let encoding = ListEncoding::Text(doc.text_encoding());
+    diffs
+        .fold(0, |index, action| match action {
+            Diff::Visible(op) => index + op.width(encoding),
+            Diff::Add(op, conflict) => {
+                observer.splice_text(doc, exid.clone(), index, op.to_str());
+                index + op.width(encoding)
+            }
+            Diff::Delete(_) => { observer.delete_seq(doc, exid.clone(), index, 1); index },
+        });
+}
+
+fn observe_list_diff<'a, I: Iterator<Item = Diff<'a>>, O: OpObserver>(
+    doc: &Automerge,
+    observer: &mut O,
+    obj: &ObjId,
+    diffs: I,
+) {
+    let exid = doc.id_to_exid(obj.0);
+    diffs
+        .fold(0, |index, action| match action {
+            Diff::Visible(_) => index + 1,
+            Diff::Add(op, conflict) => {
+                observer.insert(doc, exid.clone(), index, doc.tagged_value(&op), conflict);
+                index + 1
+            }
+            Diff::Delete(_) => { observer.delete_seq(doc, exid.clone(), index, 1); index },
+        });
+}
+
+fn observe_map_diff<'a, I: Iterator<Item = Diff<'a>>, O: OpObserver>(
+    doc: &Automerge,
+    observer: &mut O,
+    obj: &ObjId,
+    diffs: I,
+) {
+    let exid = doc.id_to_exid(obj.0);
+    diffs
+        .filter_map(|action| Some((get_prop(doc, action.op())?, action)))
+        .for_each(|(prop, action)| match action {
+            Diff::Add(op, conflict) => {
+                observer.put(doc, exid.clone(), prop.into(), doc.tagged_value(&op), conflict)
+            }
+            Diff::Delete(_) => observer.delete_map(doc, exid.clone(), prop),
+            _ => {}
+        });
+}
+
+#[derive(PartialEq, PartialOrd, Ord, Eq)]
+enum Era {
+    Before = 1,
+    During,
+    After,
+}
+
+fn created(id: &OpId, start: &Clock, end: &Clock) -> Era {
+    if start.covers(&id) {
+        Era::Before
+    } else if end.covers(&id) {
+        Era::During
+    } else {
+        Era::After
+    }
+}
+
+fn deleted(op: &Op, start: &Clock, end: &Clock) -> Era {
+    if op.is_counter() {
+        Era::After
+    } else {
+        op.succ.iter().fold(Era::After, |state, id| {
+            std::cmp::min(state, created(id, start, end))
+        })
+    }
+}
+
+fn get_prop<'a>(doc: &'a Automerge, op: &Op) -> Option<&'a str> {
+    Some(
+        doc.ops()
+            .m
+            .props
+            .safe_get(op.key.prop_index()?)?
+            //.map(|s| Prop::Map(s.to_string()))?,
+    )
+}
+
+enum Diff<'a> {
+    Add(Cow<'a, Op>, bool),
+    Delete(Cow<'a, Op>),
+    Visible(Cow<'a, Op>),
+}
+
+impl<'a> Diff<'a> {
+    fn valid_at(&self, begin: &Clock, end: &Clock) -> bool {
+        // counters have special rules for visability
+        // we cannot know if a succ is an increment or a delete until we've looked at all of them
+        match self {
+            Diff::Add(
+                Cow::Owned(Op {
+                    action: OpType::Put(ScalarValue::Counter(c)),
+                    succ,
+                    ..
+                }),
+                _,
+            ) => {
+                c.increments
+                    == succ
+                        .iter()
+                        .filter(|i| created(i, begin, end) == Era::During)
+                        .count()
+            }
+            _ => true,
+        }
+    }
+
+    fn op(&self) -> &Op {
+        match self {
+            Diff::Add(a, _) => a,
+            Diff::Delete(a) => a,
+            Diff::Visible(a) => a,
+        }
+    }
+
+    fn add(op: &'a Op) -> Self {
+        if let OpType::Put(ScalarValue::Counter(c)) = &op.action {
+            let mut op = op.clone();
+            op.action = OpType::Put(ScalarValue::Counter(c.start.into()));
+            Diff::Add(Cow::Owned(op), false)
+        } else {
+            Diff::Add(Cow::Borrowed(op), false)
+        }
+    }
+
+    fn del(op: &'a Op) -> Self {
+        Diff::Delete(Cow::Borrowed(op))
+    }
+
+    fn visible(op: &'a Op) -> Self {
+        Diff::Visible(Cow::Borrowed(op))
+    }
+}
+
+trait Mergable {
+    fn merge(self, other: Self) -> Self;
+}
+
+impl<'a> Mergable for Diff<'a> {
+    fn merge(self, other: Self) -> Self {
+        match (self, other) {
+            (Diff::Add(a, c1), Diff::Add(b, c2)) => Diff::Add(a.merge(b), c1 || c2),
+            (Diff::Visible(_), Diff::Add(b, _)) => Diff::Add(b, true),
+            (Diff::Visible(a), Diff::Delete(_)) => Diff::Visible(a),
+            (Diff::Visible(_), Diff::Visible(b)) => Diff::Visible(b),
+            (Diff::Delete(_), Diff::Visible(a)) => Diff::Visible(a),
+            (Diff::Add(a, c), Diff::Delete(_)) => Diff::Add(a, c),
+            (_self, other) => other,
+        }
+    }
+}
+
+impl<M: Mergable> Mergable for Option<M> {
+    fn merge(self, other: Self) -> Self {
+        match (self, other) {
+            (Some(a), Some(b)) => Some(a.merge(b)),
+            (None, Some(b)) => Some(b),
+            (Some(a), None) => Some(a),
+            (None, None) => None,
+        }
+    }
+}
+
+impl<'a> Mergable for Cow<'a, Op> {
+    fn merge(mut self, other: Self) -> Self {
+        match (&self.action, &other.action) {
+            (OpType::Put(ScalarValue::Counter(c)), OpType::Increment(n)) => {
+                let mut counter = c.clone();
+                counter.increment(*n);
+                self.to_mut().action = OpType::Put(ScalarValue::Counter(counter));
+                self
+            }
+            (OpType::Increment(n), OpType::Increment(m)) => {
+                self.to_mut().action = OpType::Increment(m + n);
+                self
+            }
+            _ => other,
+        }
+    }
+}
+*/
+
 #[cfg(test)]
 mod tests {
     use std::{borrow::Cow, fs};

@@ -28,6 +28,7 @@ use crate::{
 };
 
 mod current_state;
+mod diff;
 
 #[cfg(test)]
 mod tests;
@@ -435,6 +436,10 @@ impl Automerge {
 
     pub(crate) fn id_to_exid(&self, id: OpId) -> ExId {
         self.ops.id_to_exid(id)
+    }
+
+    pub(crate) fn tagged_value<'a>(&self, op: &'a Op) -> (Value<'a>, ExId) {
+        (op.value(), self.id_to_exid(op.id))
     }
 
     /// Load a document.
@@ -1132,6 +1137,19 @@ impl Automerge {
         }
 
         op
+    }
+
+    pub fn diff_with_observer<Obs: OpObserver>(
+        &self,
+        start: &[ChangeHash],
+        end: &[ChangeHash],
+        observer: &mut Obs,
+    ) -> Result<(), AutomergeError> {
+        let start = self.clock_at(start);
+        let end = self.clock_at(end);
+
+        diff::observe_diff(self, &start, &end, observer);
+        Ok(())
     }
 
     /// Get the heads of this document.

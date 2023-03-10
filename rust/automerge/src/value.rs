@@ -245,13 +245,13 @@ impl<'a> Value<'a> {
 impl<'a> fmt::Display for Value<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Value::Object(o) => write!(f, "Object: {}", o),
-            Value::Scalar(s) => write!(f, "Scalar: {}", s),
+            Value::Object(o) => write!(f, "{}", o),
+            Value::Scalar(s) => write!(f, "{}", s),
         }
     }
 }
 
-impl<'a> From<&str> for Value<'a> {
+impl From<&str> for Value<'static> {
     fn from(s: &str) -> Self {
         Value::Scalar(Cow::Owned(ScalarValue::Str(s.into())))
     }
@@ -373,11 +373,9 @@ pub struct Counter {
 }
 
 impl Counter {
-    pub(crate) fn increment<I: Iterator<Item = i64>>(&mut self, increments: I) {
-        for inc in increments {
-            self.current += inc;
-            self.increments += 1;
-        }
+    pub(crate) fn increment(&mut self, inc: i64) {
+        self.current += inc;
+        self.increments += 1;
     }
 }
 
