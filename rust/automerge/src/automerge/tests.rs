@@ -156,9 +156,9 @@ fn test_save_text() -> Result<(), AutomergeError> {
     let heads3 = doc.get_heads();
 
     assert!(&doc.text(&text)? == "hello big bad world");
-    assert!(&doc.text_at(&text, &heads1)?.is_empty());
-    assert!(&doc.text_at(&text, &heads2)? == "hello world");
-    assert!(&doc.text_at(&text, &heads3)? == "hello big bad world");
+    assert!(&doc.at(&heads1).text(&text)?.is_empty());
+    assert!(&doc.at(&heads2).text(&text)? == "hello world");
+    assert!(&doc.at(&heads3).text(&text)? == "hello big bad world");
 
     Ok(())
 }
@@ -192,46 +192,48 @@ fn test_props_vals_at() -> Result<(), AutomergeError> {
     tx.commit();
     doc.get_heads();
     let heads5 = doc.get_heads();
-    assert!(doc.keys_at(ROOT, &heads1).collect_vec() == vec!["prop1".to_owned()]);
-    assert_eq!(doc.length_at(ROOT, &heads1), 1);
-    assert!(doc.get_at(ROOT, "prop1", &heads1)?.unwrap().0 == Value::str("val1"));
-    assert!(doc.get_at(ROOT, "prop2", &heads1)?.is_none());
-    assert!(doc.get_at(ROOT, "prop3", &heads1)?.is_none());
+    let at_h1 = doc.at(&heads1);
+    assert!(at_h1.keys(ROOT).collect_vec() == vec!["prop1".to_owned()]);
+    assert_eq!(at_h1.length(ROOT), 1);
+    assert!(at_h1.get(ROOT, "prop1")?.unwrap().0 == Value::str("val1"));
+    assert!(at_h1.get(ROOT, "prop2")?.is_none());
+    assert!(at_h1.get(ROOT, "prop3")?.is_none());
 
-    assert!(doc.keys_at(ROOT, &heads2).collect_vec() == vec!["prop1".to_owned()]);
-    assert_eq!(doc.length_at(ROOT, &heads2), 1);
-    assert!(doc.get_at(ROOT, "prop1", &heads2)?.unwrap().0 == Value::str("val2"));
-    assert!(doc.get_at(ROOT, "prop2", &heads2)?.is_none());
-    assert!(doc.get_at(ROOT, "prop3", &heads2)?.is_none());
+    let at_h2 = doc.at(&heads2);
+    assert!(at_h2.keys(ROOT).collect_vec() == vec!["prop1".to_owned()]);
+    assert_eq!(at_h2.length(ROOT), 1);
+    assert!(at_h2.get(ROOT, "prop1")?.unwrap().0 == Value::str("val2"));
+    assert!(at_h2.get(ROOT, "prop2")?.is_none());
+    assert!(at_h2.get(ROOT, "prop3")?.is_none());
 
-    assert!(
-        doc.keys_at(ROOT, &heads3).collect_vec() == vec!["prop1".to_owned(), "prop2".to_owned()]
-    );
-    assert_eq!(doc.length_at(ROOT, &heads3), 2);
-    assert!(doc.get_at(ROOT, "prop1", &heads3)?.unwrap().0 == Value::str("val2"));
-    assert!(doc.get_at(ROOT, "prop2", &heads3)?.unwrap().0 == Value::str("val3"));
-    assert!(doc.get_at(ROOT, "prop3", &heads3)?.is_none());
+    let at_h3 = doc.at(&heads3);
+    assert!(at_h3.keys(ROOT).collect_vec() == vec!["prop1".to_owned(), "prop2".to_owned()]);
+    assert_eq!(at_h3.length(ROOT), 2);
+    assert!(at_h3.get(ROOT, "prop1")?.unwrap().0 == Value::str("val2"));
+    assert!(at_h3.get(ROOT, "prop2")?.unwrap().0 == Value::str("val3"));
+    assert!(at_h3.get(ROOT, "prop3")?.is_none());
 
-    assert!(doc.keys_at(ROOT, &heads4).collect_vec() == vec!["prop2".to_owned()]);
-    assert_eq!(doc.length_at(ROOT, &heads4), 1);
-    assert!(doc.get_at(ROOT, "prop1", &heads4)?.is_none());
-    assert!(doc.get_at(ROOT, "prop2", &heads4)?.unwrap().0 == Value::str("val3"));
-    assert!(doc.get_at(ROOT, "prop3", &heads4)?.is_none());
+    let at_h4 = doc.at(&heads4);
+    assert!(at_h4.keys(ROOT).collect_vec() == vec!["prop2".to_owned()]);
+    assert_eq!(at_h4.length(ROOT), 1);
+    assert!(at_h4.get(ROOT, "prop1")?.is_none());
+    assert!(at_h4.get(ROOT, "prop2")?.unwrap().0 == Value::str("val3"));
+    assert!(at_h4.get(ROOT, "prop3")?.is_none());
 
-    assert!(
-        doc.keys_at(ROOT, &heads5).collect_vec() == vec!["prop2".to_owned(), "prop3".to_owned()]
-    );
-    assert_eq!(doc.length_at(ROOT, &heads5), 2);
+    let at_h5 = doc.at(&heads5);
+    assert!(at_h5.keys(ROOT).collect_vec() == vec!["prop2".to_owned(), "prop3".to_owned()]);
+    assert_eq!(at_h5.length(ROOT), 2);
     assert_eq!(doc.length(ROOT), 2);
-    assert!(doc.get_at(ROOT, "prop1", &heads5)?.is_none());
-    assert!(doc.get_at(ROOT, "prop2", &heads5)?.unwrap().0 == Value::str("val3"));
-    assert!(doc.get_at(ROOT, "prop3", &heads5)?.unwrap().0 == Value::str("val4"));
+    assert!(at_h5.get(ROOT, "prop1")?.is_none());
+    assert!(at_h5.get(ROOT, "prop2")?.unwrap().0 == Value::str("val3"));
+    assert!(at_h5.get(ROOT, "prop3")?.unwrap().0 == Value::str("val4"));
 
-    assert_eq!(doc.keys_at(ROOT, &[]).count(), 0);
-    assert_eq!(doc.length_at(ROOT, &[]), 0);
-    assert!(doc.get_at(ROOT, "prop1", &[])?.is_none());
-    assert!(doc.get_at(ROOT, "prop2", &[])?.is_none());
-    assert!(doc.get_at(ROOT, "prop3", &[])?.is_none());
+    let at_h0 = doc.at(&[]);
+    assert_eq!(at_h0.keys(ROOT).count(), 0);
+    assert_eq!(at_h0.length(ROOT), 0);
+    assert!(at_h0.get(ROOT, "prop1")?.is_none());
+    assert!(at_h0.get(ROOT, "prop2")?.is_none());
+    assert!(at_h0.get(ROOT, "prop3")?.is_none());
     Ok(())
 }
 
@@ -272,28 +274,28 @@ fn test_len_at() -> Result<(), AutomergeError> {
     tx.commit();
     let heads6 = doc.get_heads();
 
-    assert!(doc.length_at(&list, &heads1) == 0);
-    assert!(doc.get_at(&list, 0, &heads1)?.is_none());
+    assert!(doc.at(&heads1).length(&list) == 0);
+    assert!(doc.at(&heads1).get(&list, 0)?.is_none());
 
-    assert!(doc.length_at(&list, &heads2) == 1);
-    assert!(doc.get_at(&list, 0, &heads2)?.unwrap().0 == Value::int(10));
+    assert!(doc.at(&heads2).length(&list) == 1);
+    assert!(doc.at(&heads2).get(&list, 0)?.unwrap().0 == Value::int(10));
 
-    assert!(doc.length_at(&list, &heads3) == 2);
-    assert!(doc.get_at(&list, 0, &heads3)?.unwrap().0 == Value::int(30));
-    assert!(doc.get_at(&list, 1, &heads3)?.unwrap().0 == Value::int(20));
+    assert!(doc.at(&heads3).length(&list) == 2);
+    assert!(doc.at(&heads3).get(&list, 0)?.unwrap().0 == Value::int(30));
+    assert!(doc.at(&heads3).get(&list, 1)?.unwrap().0 == Value::int(20));
 
-    assert!(doc.length_at(&list, &heads4) == 3);
-    assert!(doc.get_at(&list, 0, &heads4)?.unwrap().0 == Value::int(30));
-    assert!(doc.get_at(&list, 1, &heads4)?.unwrap().0 == Value::int(50));
-    assert!(doc.get_at(&list, 2, &heads4)?.unwrap().0 == Value::int(40));
+    assert!(doc.at(&heads4).length(&list) == 3);
+    assert!(doc.at(&heads4).get(&list, 0)?.unwrap().0 == Value::int(30));
+    assert!(doc.at(&heads4).get(&list, 1)?.unwrap().0 == Value::int(50));
+    assert!(doc.at(&heads4).get(&list, 2)?.unwrap().0 == Value::int(40));
 
-    assert!(doc.length_at(&list, &heads5) == 2);
-    assert!(doc.get_at(&list, 0, &heads5)?.unwrap().0 == Value::int(30));
-    assert!(doc.get_at(&list, 1, &heads5)?.unwrap().0 == Value::int(50));
+    assert!(doc.at(&heads5).length(&list) == 2);
+    assert!(doc.at(&heads5).get(&list, 0)?.unwrap().0 == Value::int(30));
+    assert!(doc.at(&heads5).get(&list, 1)?.unwrap().0 == Value::int(50));
 
-    assert!(doc.length_at(&list, &heads6) == 1);
+    assert!(doc.at(&heads6).length(&list) == 1);
     assert!(doc.length(&list) == 1);
-    assert!(doc.get_at(&list, 0, &heads6)?.unwrap().0 == Value::int(50));
+    assert!(doc.at(&heads6).get(&list, 0)?.unwrap().0 == Value::int(50));
 
     Ok(())
 }
@@ -648,7 +650,7 @@ fn map_range_at_back_and_forth_single() {
 
     let heads = doc.get_heads();
 
-    let mut range_all = doc.map_range_at(ROOT, .., &heads);
+    let mut range_all = doc.at(&heads).map_range(ROOT, ..);
     assert_eq!(
         range_all.next(),
         Some(("1", "a".into(), ExId::Id(1, actor.clone(), 0)))
@@ -664,7 +666,7 @@ fn map_range_at_back_and_forth_single() {
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
 
-    let mut range_all = doc.map_range_at(ROOT, .., &heads);
+    let mut range_all = doc.at(&heads).map_range(ROOT, ..);
     assert_eq!(
         range_all.next(),
         Some(("1", "a".into(), ExId::Id(1, actor.clone(), 0)))
@@ -680,7 +682,7 @@ fn map_range_at_back_and_forth_single() {
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
 
-    let mut range_all = doc.map_range_at(ROOT, .., &heads);
+    let mut range_all = doc.at(&heads).map_range(ROOT, ..);
     assert_eq!(
         range_all.next(),
         Some(("1", "a".into(), ExId::Id(1, actor.clone(), 0)))
@@ -696,7 +698,7 @@ fn map_range_at_back_and_forth_single() {
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
 
-    let mut range_all = doc.map_range_at(ROOT, .., &heads);
+    let mut range_all = doc.at(&heads).map_range(ROOT, ..);
     assert_eq!(
         range_all.next_back(),
         Some(("3", "c".into(), ExId::Id(3, actor.clone(), 0)))
@@ -733,7 +735,7 @@ fn map_range_at_back_and_forth_double() {
     doc1.merge(&mut doc2).unwrap();
     let heads = doc1.get_heads();
 
-    let mut range_all = doc1.map_range_at(ROOT, .., &heads);
+    let mut range_all = doc1.at(&heads).map_range(ROOT, ..);
     assert_eq!(
         range_all.next(),
         Some(("1", "aa".into(), ExId::Id(1, actor2.clone(), 1)))
@@ -749,7 +751,7 @@ fn map_range_at_back_and_forth_double() {
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
 
-    let mut range_all = doc1.map_range_at(ROOT, .., &heads);
+    let mut range_all = doc1.at(&heads).map_range(ROOT, ..);
     assert_eq!(
         range_all.next(),
         Some(("1", "aa".into(), ExId::Id(1, actor2.clone(), 1)))
@@ -765,7 +767,7 @@ fn map_range_at_back_and_forth_double() {
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
 
-    let mut range_all = doc1.map_range_at(ROOT, .., &heads);
+    let mut range_all = doc1.at(&heads).map_range(ROOT, ..);
     assert_eq!(
         range_all.next(),
         Some(("1", "aa".into(), ExId::Id(1, actor2.clone(), 1)))
@@ -781,7 +783,7 @@ fn map_range_at_back_and_forth_double() {
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
 
-    let mut range_all = doc1.map_range_at(ROOT, .., &heads);
+    let mut range_all = doc1.at(&heads).map_range(ROOT, ..);
     assert_eq!(
         range_all.next_back(),
         Some(("3", "cc".into(), ExId::Id(3, actor2.clone(), 1)))
@@ -857,18 +859,18 @@ fn get_list_values() -> Result<(), AutomergeError> {
         assert_eq!(Some((val1, id)), val2);
     }
 
-    assert_eq!(doc1.list_range_at(&list, .., &v1).count(), 8);
-    for (i, val1, id) in doc1.list_range_at(&list, .., &v1) {
-        let val2 = doc1.get_at(&list, i, &v1)?;
+    assert_eq!(doc1.at(&v1).list_range(&list, ..).count(), 8);
+    for (i, val1, id) in doc1.at(&v1).list_range(&list, ..) {
+        let val2 = doc1.at(&v1).get(&list, i)?;
         assert_eq!(Some((val1, id)), val2);
     }
 
-    assert_eq!(doc1.list_range_at(&list, 3..6, &v1).count(), 3);
-    assert_eq!(doc1.list_range_at(&list, 3..6, &v1).next().unwrap().0, 3);
-    assert_eq!(doc1.list_range_at(&list, 3..6, &v1).last().unwrap().0, 5);
+    assert_eq!(doc1.at(&v1).list_range(&list, 3..6).count(), 3);
+    assert_eq!(doc1.at(&v1).list_range(&list, 3..6).next().unwrap().0, 3);
+    assert_eq!(doc1.at(&v1).list_range(&list, 3..6).last().unwrap().0, 5);
 
-    for (i, val1, id) in doc1.list_range_at(&list, 3..6, &v1) {
-        let val2 = doc1.get_at(&list, i, &v1)?;
+    for (i, val1, id) in doc1.list_range(&list, 3..6) {
+        let val2 = doc1.at(&v1).get(&list, i)?;
         assert_eq!(Some((val1, id)), val2);
     }
 
@@ -881,10 +883,11 @@ fn get_list_values() -> Result<(), AutomergeError> {
     assert_eq!(range, values);
 
     let range: Vec<_> = doc1
-        .list_range_at(&list, .., &v1)
+        .at(&v1)
+        .list_range(&list, ..)
         .map(|(_, val, id)| (val, id))
         .collect();
-    let values: Vec<_> = doc1.values_at(&list, &v1).collect();
+    let values: Vec<_> = doc1.at(&v1).values(&list).collect();
     assert_eq!(range, values);
 
     Ok(())
@@ -929,17 +932,17 @@ fn get_range_values() -> Result<(), AutomergeError> {
         assert_eq!(Some((val1, id)), val2);
     }
 
-    assert_eq!(doc1.map_range_at(ROOT, range.clone(), &v1).count(), 2);
+    assert_eq!(doc1.at(&v1).map_range(ROOT, range.clone()).count(), 2);
 
-    for (key, val1, id) in doc1.map_range_at(ROOT, range.clone(), &v1) {
-        let val2 = doc1.get_at(ROOT, key, &v1)?;
+    for (key, val1, id) in doc1.at(&v1).map_range(ROOT, range.clone()) {
+        let val2 = doc1.get(ROOT, key)?;
         assert_eq!(Some((val1, id)), val2);
     }
 
-    assert_eq!(doc1.map_range_at(ROOT, range.clone(), &v1).rev().count(), 2);
+    assert_eq!(doc1.at(&v1).map_range(ROOT, range.clone()).rev().count(), 2);
 
-    for (key, val1, id) in doc1.map_range_at(ROOT, range, &v1).rev() {
-        let val2 = doc1.get_at(ROOT, key, &v1)?;
+    for (key, val1, id) in doc1.at(&v1).map_range(ROOT, range).rev() {
+        let val2 = doc1.get(ROOT, key)?;
         assert_eq!(Some((val1, id)), val2);
     }
 
@@ -951,10 +954,11 @@ fn get_range_values() -> Result<(), AutomergeError> {
     assert_eq!(range, values);
 
     let range: Vec<_> = doc1
-        .map_range_at(ROOT, .., &v1)
+        .at(&v1)
+        .map_range(ROOT, ..)
         .map(|(_, val, id)| (val, id))
         .collect();
-    let values: Vec<_> = doc1.values_at(ROOT, &v1).collect();
+    let values: Vec<_> = doc1.at(&v1).values(ROOT).collect();
     assert_eq!(range, values);
 
     Ok(())

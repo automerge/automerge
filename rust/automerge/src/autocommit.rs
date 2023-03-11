@@ -1,14 +1,12 @@
 use std::ops::RangeBounds;
 
+use crate::automerge;
 use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark};
 use crate::op_observer::{BranchableObserver, OpObserver};
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
-use crate::{
-    sync, Keys, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType, Parents, ReadDoc,
-    ScalarValue,
-};
+use crate::{sync, Keys, ListRange, MapRange, ObjType, Parents, ReadDoc, ScalarValue};
 use crate::{
     transaction::{Observation, Observed, TransactionInner, UnObserved},
     ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop, TextEncoding, Value, Values,
@@ -256,6 +254,10 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
         self.doc.get_last_local_change()
     }
 
+    pub fn at<'a,'b>(&'a self, heads: &'b [ChangeHash]) -> automerge::At<'a, 'b> {
+        self.doc.at(heads)
+    }
+
     pub fn get_changes(
         &mut self,
         have_deps: &[ChangeHash],
@@ -401,12 +403,8 @@ impl<Obs: Observation> ReadDoc for AutoCommitWithObs<Obs> {
         self.doc.path_to_object(obj)
     }
 
-    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_, '_> {
+    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
         self.doc.keys(obj)
-    }
-
-    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt<'_, '_> {
-        self.doc.keys_at(obj, heads)
     }
 
     fn map_range<O: AsRef<ExId>, R: RangeBounds<String>>(
@@ -417,15 +415,6 @@ impl<Obs: Observation> ReadDoc for AutoCommitWithObs<Obs> {
         self.doc.map_range(obj, range)
     }
 
-    fn map_range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
-        &self,
-        obj: O,
-        range: R,
-        heads: &[ChangeHash],
-    ) -> MapRangeAt<'_, R> {
-        self.doc.map_range_at(obj, range, heads)
-    }
-
     fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
         &self,
         obj: O,
@@ -434,29 +423,12 @@ impl<Obs: Observation> ReadDoc for AutoCommitWithObs<Obs> {
         self.doc.list_range(obj, range)
     }
 
-    fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
-        &self,
-        obj: O,
-        range: R,
-        heads: &[ChangeHash],
-    ) -> ListRangeAt<'_, R> {
-        self.doc.list_range_at(obj, range, heads)
-    }
-
     fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
         self.doc.values(obj)
     }
 
-    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
-        self.doc.values_at(obj, heads)
-    }
-
     fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
         self.doc.length(obj)
-    }
-
-    fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
-        self.doc.length_at(obj, heads)
     }
 
     fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
@@ -467,24 +439,8 @@ impl<Obs: Observation> ReadDoc for AutoCommitWithObs<Obs> {
         self.doc.marks(obj)
     }
 
-    fn marks_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeHash],
-    ) -> Result<Vec<Mark<'_>>, AutomergeError> {
-        self.doc.marks_at(obj, heads)
-    }
-
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
         self.doc.text(obj)
-    }
-
-    fn text_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeHash],
-    ) -> Result<String, AutomergeError> {
-        self.doc.text_at(obj, heads)
     }
 
     fn get<O: AsRef<ExId>, P: Into<Prop>>(
@@ -495,30 +451,12 @@ impl<Obs: Observation> ReadDoc for AutoCommitWithObs<Obs> {
         self.doc.get(obj, prop)
     }
 
-    fn get_at<O: AsRef<ExId>, P: Into<Prop>>(
-        &self,
-        obj: O,
-        prop: P,
-        heads: &[ChangeHash],
-    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        self.doc.get_at(obj, prop, heads)
-    }
-
     fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         self.doc.get_all(obj, prop)
-    }
-
-    fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
-        &self,
-        obj: O,
-        prop: P,
-        heads: &[ChangeHash],
-    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        self.doc.get_all_at(obj, prop, heads)
     }
 
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {

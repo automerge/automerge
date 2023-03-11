@@ -5,11 +5,8 @@ use itertools::Itertools;
 
 use crate::{
     marks::MarkStateMachine,
-    types::{ListEncoding, Clock, ObjId, Op, OpId, ScalarValue},
-    Automerge,
-    ObjType,
-    OpObserver,
-    OpType,
+    types::{Clock, ListEncoding, ObjId, Op, OpId, ScalarValue},
+    Automerge, ObjType, OpObserver, OpType,
 };
 
 struct OpState<'a> {
@@ -114,14 +111,14 @@ impl<'a> OpState<'a> {
                 let new = !op.predates(&self.era);
                 let preexisting = op.preexisting();
                 let deleted = op.was_changed_during(&self.era); // this ignores increments
-                //log!("resolve op={:?}", op);
-                //log!("resolve era={:?}", self.era);
-                //log!(
-                //    "resolve new={} deleted={} preexisting={}",
-                //    new,
-                //    deleted,
-                //    preexisting
-                //);
+                                                                //log!("resolve op={:?}", op);
+                                                                //log!("resolve era={:?}", self.era);
+                                                                //log!(
+                                                                //    "resolve new={} deleted={} preexisting={}",
+                                                                //    new,
+                                                                //    deleted,
+                                                                //    preexisting
+                                                                //);
                 state.merge(Patch::from_flags(op.clone(), new, deleted, preexisting))
             })
         } else {
@@ -378,7 +375,9 @@ pub(crate) fn observe_diff<O: OpObserver>(
     let mut op_state = OpState::new(begin, end);
     for (obj, typ, ops) in doc.ops().iter_objs() {
         let ops_by_key = ops.group_by(|o| o.elemid_or_key());
-        let diffs = ops_by_key.into_iter().filter_map(|(_key, key_ops)| op_state.process(key_ops));
+        let diffs = ops_by_key
+            .into_iter()
+            .filter_map(|(_key, key_ops)| op_state.process(key_ops));
 
         if typ == ObjType::Text && !observer.text_as_seq() {
             observe_text_diff(doc, observer, obj, diffs)
@@ -1329,5 +1328,4 @@ mod tests {
     // test unicode width issues
     // explicitly test
     // test for path change / at() api?
-
 }

@@ -1,7 +1,6 @@
 use crate::{
-    error::AutomergeError, exid::ExId, keys::Keys, keys_at::KeysAt, list_range::ListRange,
-    list_range_at::ListRangeAt, map_range::MapRange, map_range_at::MapRangeAt, marks::Mark,
-    parents::Parents, values::Values, Change, ChangeHash, ObjType, Prop, Value,
+    error::AutomergeError, exid::ExId, keys::Keys, list_range::ListRange, map_range::MapRange,
+    marks::Mark, parents::Parents, values::Values, Change, ChangeHash, ObjType, Prop, Value,
 };
 
 use std::ops::RangeBounds;
@@ -42,12 +41,7 @@ pub trait ReadDoc {
     ///
     /// For a map this returns the keys of the map.
     /// For a list this returns the element ids (opids) encoded as strings.
-    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_, '_>;
-
-    /// Get the keys of the object `obj` as at `heads`
-    ///
-    /// See [`Self::keys`]
-    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt<'_, '_>;
+    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_>;
 
     /// Iterate over the keys and values of the map `obj` in the given range.
     ///
@@ -61,22 +55,6 @@ pub trait ReadDoc {
         range: R,
     ) -> MapRange<'_, R>;
 
-    /// Iterate over the keys and values of the map `obj` in the given range as
-    /// at `heads`
-    ///
-    /// If the object correspoding to `obj` is a list then this will return an empty iterator
-    ///
-    /// The returned iterator yields `(key, value, exid)` tuples, where the
-    /// third element is the ID of the operation which created the value.
-    ///
-    /// See [`Self::map_range`]
-    fn map_range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
-        &self,
-        obj: O,
-        range: R,
-        heads: &[ChangeHash],
-    ) -> MapRangeAt<'_, R>;
-
     /// Iterate over the indexes and values of the list or text `obj` in the given range.
     ///
     /// The reuturned iterator yields `(index, value, exid)` tuples, where the third
@@ -87,44 +65,18 @@ pub trait ReadDoc {
         range: R,
     ) -> ListRange<'_, R>;
 
-    /// Iterate over the indexes and values of the list or text `obj` in the given range as at `heads`
-    ///
-    /// The returned iterator yields `(index, value, exid)` tuples, where the third
-    /// element is the ID of the operation which created the value.
-    ///
-    /// See [`Self::list_range`]
-    fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
-        &self,
-        obj: O,
-        range: R,
-        heads: &[ChangeHash],
-    ) -> ListRangeAt<'_, R>;
-
     /// Iterate over the values in a map, list, or text object
     ///
     /// The returned iterator yields `(value, exid)` tuples, where the second element
     /// is the ID of the operation which created the value.
-    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_>;
-
-    /// Iterate over the values in a map, list, or text object as at `heads`
-    ///
-    /// The returned iterator yields `(value, exid)` tuples, where the second element
-    /// is the ID of the operation which created the value.
-    ///
-    /// See [`Self::values`]
-    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_>;
+    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
+        todo!()
+    }
 
     /// Get the length of the given object.
     ///
     /// If the given object is not in this document this method will return `0`
     fn length<O: AsRef<ExId>>(&self, obj: O) -> usize;
-
-    /// Get the length of the given object as at `heads`
-    ///
-    /// If the given object is not in this document this method will return `0`
-    ///
-    /// See [`Self::length`]
-    fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize;
 
     /// Get the type of this object, if it is an object.
     fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError>;
@@ -132,23 +84,8 @@ pub trait ReadDoc {
     /// Get all marks on a current sequence
     fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError>;
 
-    /// Get all marks on a sequence at a given heads
-    fn marks_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeHash],
-    ) -> Result<Vec<Mark<'_>>, AutomergeError>;
-
     /// Get the string represented by the given text object.
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError>;
-
-    /// Get the string represented by the given text object as at `heads`, see
-    /// [`Self::text`]
-    fn text_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeHash],
-    ) -> Result<String, AutomergeError>;
 
     /// Get a value out of the document.
     ///
@@ -171,14 +108,6 @@ pub trait ReadDoc {
         prop: P,
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError>;
 
-    /// Get the value of the given key as at `heads`, see `[Self::get]`
-    fn get_at<O: AsRef<ExId>, P: Into<Prop>>(
-        &self,
-        obj: O,
-        prop: P,
-        heads: &[ChangeHash],
-    ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError>;
-
     /// Get all conflicting values out of the document at this prop that conflict.
     ///
     /// If there are multiple conflicting values for a given key this method
@@ -188,16 +117,6 @@ pub trait ReadDoc {
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError>;
-
-    /// Get all possibly conflicting values for a key as at `heads`
-    ///
-    /// See `[Self::get_all]`
-    fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
-        &self,
-        obj: O,
-        prop: P,
-        heads: &[ChangeHash],
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError>;
 
     /// Get the hashes of the changes in this document that aren't transitive dependencies of the

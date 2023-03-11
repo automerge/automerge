@@ -252,12 +252,9 @@ mod error;
 mod exid;
 mod indexed_cache;
 mod keys;
-mod keys_at;
 mod legacy;
 mod list_range;
-mod list_range_at;
 mod map_range;
-mod map_range_at;
 pub mod marks;
 pub mod op_observer;
 mod op_set;
@@ -284,12 +281,9 @@ pub use error::InvalidActorId;
 pub use error::InvalidChangeHashSlice;
 pub use exid::{ExId as ObjId, ObjIdFromBytesError};
 pub use keys::Keys;
-pub use keys_at::KeysAt;
 pub use legacy::Change as ExpandedChange;
 pub use list_range::ListRange;
-pub use list_range_at::ListRangeAt;
 pub use map_range::MapRange;
-pub use map_range_at::MapRangeAt;
 pub use op_observer::{
     OpObserver, Patch, PatchAction, ToggleObserver, VecOpObserver, VecOpObserver16,
 };
