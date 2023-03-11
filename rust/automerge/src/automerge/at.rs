@@ -118,12 +118,12 @@ impl Automerge {
         MapRange::new(self)
     }
 
-    fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
-        &self,
+    fn list_range_at<'a, 'b, O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &'a self,
         obj: O,
         range: R,
-        heads: &[ChangeHash],
-    ) -> ListRange<'_, R> {
+        heads: &'b [ChangeHash],
+    ) -> ListRange<'a, R> {
         if let Ok((obj, _)) = self.exid_to_obj(obj.as_ref()) {
             let clock = self.clock_at(heads);
             if let Some(iter_range) = self.ops.list_range_at(obj, range, clock) {
