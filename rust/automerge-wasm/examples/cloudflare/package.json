@@ -1,0 +1,18 @@
+{
+  "name": "cloudflare",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "wrangler dev --local"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "wrangler": "^2.12.2"
+  },
+  "dependencies": {
+    "@automerge/automerge-wasm": "^0.1.26"
+  }
+}
