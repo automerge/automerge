@@ -1,7 +1,9 @@
+use crate::ScalarValue;
 use crate::{
     error::AutomergeError, exid::ExId, keys::Keys, list_range::ListRange, map_range::MapRange,
     marks::Mark, parents::Parents, values::Values, Change, ChangeHash, ObjType, Prop, Value,
 };
+use std::borrow::Cow;
 
 use std::ops::RangeBounds;
 
@@ -69,7 +71,15 @@ pub trait ReadDoc {
     ///
     /// The returned iterator yields `(value, exid)` tuples, where the second element
     /// is the ID of the operation which created the value.
-    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
+    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_>;
+
+    fn values2<O: AsRef<ExId>>(&self, _obj: O) -> Cow<'_, ScalarValue> {
+        todo!()
+    }
+    fn values3<O: AsRef<ExId>>(&self, _obj: O) -> Value<'_> {
+        todo!()
+    }
+    fn values4<O: AsRef<ExId>>(&self, _obj: O) -> Values<'_> {
         todo!()
     }
 

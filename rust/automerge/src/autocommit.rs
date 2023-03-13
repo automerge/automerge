@@ -254,7 +254,7 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
         self.doc.get_last_local_change()
     }
 
-    pub fn at<'a,'b>(&'a self, heads: &'b [ChangeHash]) -> automerge::At<'a, 'b> {
+    pub fn at(&self, heads: &[ChangeHash]) -> automerge::At<'_> {
         self.doc.at(heads)
     }
 

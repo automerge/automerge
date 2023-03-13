@@ -8,17 +8,18 @@ use crate::{
     Prop, ReadDoc, Value, Values,
 };
 use itertools::Itertools;
+use std::borrow::Cow;
 use std::ops::RangeBounds;
 
 #[derive(Debug)]
-pub struct At<'a, 'b> {
+pub struct At<'a> {
     pub(crate) doc: &'a Automerge,
-    pub(crate) heads: &'b [ChangeHash],
+    pub(crate) heads: Vec<ChangeHash>,
 }
 
-impl<'a,'b> ReadDoc for At<'a,'b> {
+impl<'a> ReadDoc for At<'a> {
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'a> {
-        self.doc.keys_at(obj, self.heads)
+        self.doc.keys_at(obj, self.heads.as_slice())
     }
 
     fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'a>, AutomergeError> {
@@ -36,7 +37,7 @@ impl<'a,'b> ReadDoc for At<'a,'b> {
         obj: O,
         range: R,
     ) -> MapRange<'a, R> {
-        self.doc.map_range_at(obj, range, self.heads)
+        self.doc.map_range_at(obj, range, self.heads.as_slice())
     }
 
     fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
@@ -44,15 +45,28 @@ impl<'a,'b> ReadDoc for At<'a,'b> {
         obj: O,
         range: R,
     ) -> ListRange<'a, R> {
-        self.doc.list_range_at(obj, range, self.heads)
+        self.doc.list_range_at(obj, range, self.heads.as_slice())
+    }
+
+    // works
+    fn values2<O: AsRef<ExId>>(&self, _obj: O) -> Cow<'a, ScalarValue> {
+        todo!()
+    }
+    // works
+    fn values3<O: AsRef<ExId>>(&self, _obj: O) -> Value<'a> {
+        todo!()
+    }
+    // breaks
+    fn values4<O: AsRef<ExId>>(&self, _obj: O) -> Values<'a> {
+        todo!()
     }
 
     fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
-        self.doc.values_at(obj, self.heads)
+        self.doc.values_at(obj, self.heads.as_slice())
     }
 
     fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
-        self.doc.length_at(obj, self.heads)
+        self.doc.length_at(obj, self.heads.as_slice())
     }
 
     fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
@@ -60,11 +74,11 @@ impl<'a,'b> ReadDoc for At<'a,'b> {
     }
 
     fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'a>>, AutomergeError> {
-        self.doc.marks_at(obj, self.heads)
+        self.doc.marks_at(obj, self.heads.as_slice())
     }
 
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
-        self.doc.text_at(obj, self.heads)
+        self.doc.text_at(obj, self.heads.as_slice())
     }
 
     fn get<O: AsRef<ExId>, P: Into<Prop>>(
@@ -72,7 +86,7 @@ impl<'a,'b> ReadDoc for At<'a,'b> {
         obj: O,
         prop: P,
     ) -> Result<Option<(Value<'a>, ExId)>, AutomergeError> {
-        self.doc.get_at(obj, prop, self.heads)
+        self.doc.get_at(obj, prop, self.heads.as_slice())
     }
 
     fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
@@ -80,14 +94,14 @@ impl<'a,'b> ReadDoc for At<'a,'b> {
         obj: O,
         prop: P,
     ) -> Result<Vec<(Value<'a>, ExId)>, AutomergeError> {
-        self.doc.get_all_at(obj, prop, self.heads)
+        self.doc.get_all_at(obj, prop, self.heads.as_slice())
     }
 
-    fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
+    fn get_missing_deps(&self, _heads: &[ChangeHash]) -> Vec<ChangeHash> {
         todo!()
     }
 
-    fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&Change> {
+    fn get_change_by_hash(&self, _hash: &ChangeHash) -> Option<&Change> {
         todo!()
     }
 }

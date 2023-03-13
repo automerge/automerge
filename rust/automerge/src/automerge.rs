@@ -211,8 +211,11 @@ impl Automerge {
         }
     }
 
-    pub fn at<'a, 'b>(&'a self, heads: &'b [ChangeHash]) -> at::At<'a, 'b> {
-        at::At { heads, doc: self }
+    pub fn at(&self, heads: &[ChangeHash]) -> at::At<'_> {
+        at::At {
+            heads: heads.to_vec(),
+            doc: self,
+        }
     }
 
     /// Start a transaction.
