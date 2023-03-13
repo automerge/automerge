@@ -4,8 +4,8 @@ export { Counter } from "./counter"
 export { Int, Uint, Float64 } from "./numbers"
 
 import { Counter } from "./counter"
-import type { Patch, PatchInfo } from "@automerge/automerge-wasm"
-export type { Patch, Mark } from "@automerge/automerge-wasm"
+import type { Patch, PatchInfo, MarkRange } from "@automerge/automerge-wasm"
+export type { Patch, Mark, MarkRange } from "@automerge/automerge-wasm"
 
 export type AutomergeValue =
   | ScalarValue
@@ -22,6 +22,8 @@ export type ScalarValue =
   | Date
   | Counter
   | Uint8Array
+
+export type MarkValue = string | number | null | boolean | Date | Uint8Array
 
 /**
  * An automerge document.

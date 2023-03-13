@@ -170,25 +170,31 @@ impl Display for MarkData {
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum ExpandMark {
-    Left,
-    Right,
+    Before,
+    After,
     Both,
     None,
 }
 
+impl Default for ExpandMark {
+    fn default() -> Self {
+        Self::After
+    }
+}
+
 impl ExpandMark {
-    pub fn from(left: bool, right: bool) -> Self {
-        match (left, right) {
+    pub fn from(before: bool, after: bool) -> Self {
+        match (before, after) {
             (true, true) => Self::Both,
-            (false, true) => Self::Right,
-            (true, false) => Self::Left,
+            (false, true) => Self::After,
+            (true, false) => Self::Before,
             (false, false) => Self::None,
         }
     }
-    pub fn left(&self) -> bool {
-        matches!(self, Self::Left | Self::Both)
+    pub fn before(&self) -> bool {
+        matches!(self, Self::Before | Self::Both)
     }
-    pub fn right(&self) -> bool {
-        matches!(self, Self::Right | Self::Both)
+    pub fn after(&self) -> bool {
+        matches!(self, Self::After | Self::Both)
     }
 }

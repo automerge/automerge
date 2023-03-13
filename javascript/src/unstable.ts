@@ -45,11 +45,15 @@ export {
   type Patch,
   type PatchCallback,
   type Mark,
+  type MarkRange,
+  type MarkValue,
   type AutomergeValue,
   type ScalarValue,
 } from "./unstable_types"
 
-import type { ScalarValue, Mark, PatchCallback } from "./stable"
+import type { Mark, MarkRange, MarkValue } from "./unstable_types"
+
+import type { ScalarValue, PatchCallback } from "./stable"
 
 import { type UnstableConflicts as Conflicts } from "./conflicts"
 import { unstableConflictAt } from "./conflicts"
@@ -241,9 +245,9 @@ export function splice<T>(
 export function mark<T>(
   doc: Doc<T>,
   prop: stable.Prop,
+  range: MarkRange,
   name: string,
-  range: string,
-  value: ScalarValue
+  value: MarkValue
 ) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")

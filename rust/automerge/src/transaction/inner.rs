@@ -659,14 +659,14 @@ impl TransactionInner {
     ) -> Result<(), AutomergeError> {
         let (obj, _obj_type) = doc.exid_to_obj(ex_obj)?;
         if let Some(obs) = op_observer {
-            let action = OpType::MarkBegin(expand.left(), mark.data.clone().into_owned());
+            let action = OpType::MarkBegin(expand.before(), mark.data.clone().into_owned());
             self.do_insert(doc, Some(obs), obj, mark.start, action)?;
             self.do_insert(
                 doc,
                 Some(obs),
                 obj,
                 mark.end,
-                OpType::MarkEnd(expand.right()),
+                OpType::MarkEnd(expand.after()),
             )?;
             if mark.value().is_null() {
                 obs.unmark(doc, ex_obj.clone(), mark.name(), mark.start, mark.end);
@@ -674,9 +674,9 @@ impl TransactionInner {
                 obs.mark(doc, ex_obj.clone(), Some(mark).into_iter())
             }
         } else {
-            let action = OpType::MarkBegin(expand.left(), mark.data.into_owned());
+            let action = OpType::MarkBegin(expand.before(), mark.data.into_owned());
             self.do_insert::<Obs>(doc, None, obj, mark.start, action)?;
-            self.do_insert::<Obs>(doc, None, obj, mark.end, OpType::MarkEnd(expand.right()))?;
+            self.do_insert::<Obs>(doc, None, obj, mark.end, OpType::MarkEnd(expand.after()))?;
         }
         Ok(())
     }

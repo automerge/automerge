@@ -14,7 +14,7 @@ describe('Automerge', () => {
       let doc = create(true)
       let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
-      doc.mark(list, "[3..6]", "bold" , true)
+      doc.mark(list, { start: 3, end: 6, expand: "none" } , "bold" , true)
       let text = doc.text(list)
       let marks = doc.marks(list);
       assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 3, end: 6 }])
@@ -28,7 +28,7 @@ describe('Automerge', () => {
       let doc = create(true)
       let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
-      doc.mark(list, "[2..8]", "bold" , true)
+      doc.mark(list, { start: 2, end: 8 }, "bold" , true)
       let marks = doc.marks(list);
       assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 2, end: 8 }])
       doc.unmark(list, 'bold', 4, 6)
@@ -45,9 +45,9 @@ describe('Automerge', () => {
       let doc = create(true)
       let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
-      doc.mark(list, "[2..6]", "bold" , true)
-      doc.mark(list, "[5..8]", "bold" , true)
-      doc.mark(list, "[3..6]", "underline" , true)
+      doc.mark(list, { start: 2, end: 6 }, "bold" , true)
+      doc.mark(list, { start: 5, end: 8 }, "bold" , true)
+      doc.mark(list, { start: 3, end: 6 }, "underline" , true)
       let marks = doc.marks(list);
       assert.deepStrictEqual(marks, [
         { name: 'underline', value: true, start: 3, end: 6 },
@@ -73,7 +73,7 @@ describe('Automerge', () => {
       let doc = create(true)
       let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
-      doc.mark(list, "[0..3]", "bold", true)
+      doc.mark(list, { start: 0, end: 3, expand: "none" }, "bold", true)
       let marks = doc.marks(list);
       assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 0, end: 3 }])
 
@@ -89,7 +89,7 @@ describe('Automerge', () => {
       let doc = create(true)
       let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
-      doc.mark(list, "[0..3]", "bold", true)
+      doc.mark(list, { start: 0, end: 3, expand: "none" }, "bold", true)
       let marks = doc.marks(list);
       assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 0, end: 3 }])
 
@@ -105,7 +105,7 @@ describe('Automerge', () => {
       let doc = create(true)
       let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
-      doc.mark(list, "[0..3]", "bold", true)
+      doc.mark(list, { start: 0, end: 3 }, "bold", true)
       let marks = doc.marks(list);
       assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 0, end: 3 }])
 
@@ -127,7 +127,7 @@ describe('Automerge', () => {
       let list = doc.putObject("_root", "list", "")
 
       doc.splice(list, 0, 0, "aaabbbccc")
-      doc.mark(list, "[3..6]", "bold" , true)
+      doc.mark(list, { start: 3, end: 6, expand: "none" }, "bold" , true)
       let marks = doc.marks(list);
       assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 3, end: 6 }])
       doc.delete(list,5);
@@ -142,11 +142,11 @@ describe('Automerge', () => {
       assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 3, end: 4 }])
     })
 
-    it('should handle sticky marks (..)', () => {
+    it('should handle expand marks (..)', () => {
       let doc = create(true)
       let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
-      doc.mark(list, "(3..6)", "bold" , true)
+      doc.mark(list, { start: 3, end: 6, expand: "both" }, "bold" , true)
       let marks = doc.marks(list);
       assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 3, end: 6 }])
       doc.insert(list, 6, "A")
@@ -155,11 +155,11 @@ describe('Automerge', () => {
       assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 3, end: 8 }])
     })
 
-    it('should handle sticky marks with deleted ends (..)', () => {
+    it('should handle expand marks with deleted ends (..)', () => {
       let doc = create(true)
       let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
-      doc.mark(list, "(3..6)", "bold" , true)
+      doc.mark(list, { start: 3, end: 6, expand: "both" }, "bold" , true)
       let marks = doc.marks(list);
       assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 3, end: 6 }])
       doc.delete(list,5);
@@ -188,10 +188,10 @@ describe('Automerge', () => {
       let doc : Automerge = create(true, "aabbcc")
       let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
-      doc.mark(list, "[0..37]", "bold" , true)
-      doc.mark(list, "[4..19]", "itallic" , true)
+      doc.mark(list, { start: 0, end: 37 }, "bold" , true)
+      doc.mark(list, { start: 4, end: 19 }, "itallic" , true)
       let id = uuid(); // we want each comment to be unique so give it a unique id
-      doc.mark(list, "[10..13]", `comment:${id}` , "foxes are my favorite animal!")
+      doc.mark(list, { start: 10, end: 13 }, `comment:${id}` , "foxes are my favorite animal!")
       doc.commit("marks");
       let marks = doc.marks(list);
       assert.deepStrictEqual(marks, [
@@ -220,10 +220,10 @@ describe('Automerge', () => {
       let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
       let h1 = doc.getHeads()
-      doc.mark(list, "[0..37]", "bold" , true)
-      doc.mark(list, "[4..19]", "itallic" , true)
+      doc.mark(list, { start: 0, end: 37 }, "bold" , true)
+      doc.mark(list, { start: 4, end: 19 }, "itallic" , true)
       let id = uuid(); // we want each comment to be unique so give it a unique id
-      doc.mark(list, "[10..13]", `comment:${id}` , "foxes are my favorite animal!")
+      doc.mark(list, { start: 10, end: 13 }, `comment:${id}` , "foxes are my favorite animal!")
       doc.commit("marks");
       let h2 = doc.getHeads()
       let patches = doc.popPatches();
@@ -257,10 +257,10 @@ describe('Automerge', () => {
       doc3.enablePatches(true)
 
       doc1.put("/","foo", "bar"); // make a change to our op counter is higher than doc2
-      doc1.mark(list, "[0..5]", "x", "a")
-      doc1.mark(list, "[8..11]", "x", "b")
+      doc1.mark(list, { start: 0, end: 5 }, "x", "a")
+      doc1.mark(list, { start: 8, end: 11 }, "x", "b")
 
-      doc2.mark(list, "[4..13]", "x", "c");
+      doc2.mark(list, { start: 4, end: 13 }, "x", "c");
 
       doc3.merge(doc1)
       doc3.merge(doc2)
@@ -289,7 +289,7 @@ describe('Automerge', () => {
 
       let list = doc1.putObject("_root", "list", "")
       doc1.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
-      doc1.mark(list, "[5..10]", "xxx", "aaa")
+      doc1.mark(list, { start: 5, end: 10 }, "xxx", "aaa")
 
       let patches1 = doc1.popPatches().filter((p:any) => p.action == "mark")
 
@@ -314,9 +314,9 @@ describe('Automerge', () => {
 
       let list = doc1.putObject("_root", "list", "")
       doc1.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
-      doc1.mark(list, "[5..15]", "xxx", "aaa")
-      doc1.mark(list, "[10..20]", "xxx", "aaa")
-      doc1.mark(list, "[15..25]", "xxx", "aaa")
+      doc1.mark(list, { start: 5, end: 15 }, "xxx", "aaa")
+      doc1.mark(list, { start: 10, end: 20 }, "xxx", "aaa")
+      doc1.mark(list, { start: 15, end: 25 }, "xxx", "aaa")
 
       let patches1 = doc1.popPatches().filter((p:any) => p.action == "mark")
 
@@ -345,9 +345,9 @@ describe('Automerge', () => {
 
       let list = doc1.putObject("_root", "list", "")
       doc1.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
-      doc1.mark(list, "[5..15]", "xxx", "aaa")
-      doc1.mark(list, "[10..20]", "xxx", "bbb")
-      doc1.mark(list, "[15..25]", "xxx", "aaa")
+      doc1.mark(list, { start: 5, end: 15 }, "xxx", "aaa")
+      doc1.mark(list, { start: 10, end: 20 }, "xxx", "bbb")
+      doc1.mark(list, { start: 15, end: 25 }, "xxx", "aaa")
 
       let patches1 = doc1.popPatches().filter((p:any) => p.action == "mark")
 
@@ -380,9 +380,9 @@ describe('Automerge', () => {
 
       let list = doc1.putObject("_root", "list", "")
       doc1.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
-      doc1.mark(list, "[5..15]", "xxx", "aaa")
-      doc1.mark(list, "[10..20]", "yyy", "aaa")
-      doc1.mark(list, "[15..25]", "zzz", "aaa")
+      doc1.mark(list, { start: 5, end: 15 }, "xxx", "aaa")
+      doc1.mark(list, { start: 10, end: 20 }, "yyy", "aaa")
+      doc1.mark(list, { start: 15, end: 25 }, "zzz", "aaa")
 
       let patches1 = doc1.popPatches().filter((p:any) => p.action == "mark")
 
@@ -420,10 +420,10 @@ describe('Automerge', () => {
 
       doc1.put("/", "key1", "value"); // incrementing op counter so we win vs doc2
       doc1.put("/", "key2", "value"); // incrementing op counter so we win vs doc2
-      doc1.mark(list, "[10..20]", "xxx", "aaa")
-      doc1.mark(list, "[15..25]", "xxx", "aaa")
+      doc1.mark(list, { start: 10, end: 20 }, "xxx", "aaa")
+      doc1.mark(list, { start: 15, end: 25 }, "xxx", "aaa")
 
-      doc2.mark(list, "[5..30]" , "xxx", "bbb")
+      doc2.mark(list, { start: 5, end: 30 }, "xxx", "bbb")
 
       doc1.merge(doc2)
 
@@ -467,10 +467,10 @@ describe('Automerge', () => {
 
       doc1.put("/", "key1", "value"); // incrementing op counter so we win vs doc2
       doc1.put("/", "key2", "value"); // incrementing op counter so we win vs doc2
-      doc1.mark(list, "[10..20]", "xxx", "aaa")
-      doc1.mark(list, "[15..25]", "xxx", "aaa")
+      doc1.mark(list, { start: 10, end: 20 }, "xxx", "aaa")
+      doc1.mark(list, { start: 15, end: 25 }, "xxx", "aaa")
 
-      doc2.mark(list, "[11..24]" , "xxx", "bbb")
+      doc2.mark(list, { start: 11, end: 24 }, "xxx", "bbb")
 
       doc1.merge(doc2)
 
@@ -508,10 +508,10 @@ describe('Automerge', () => {
 
       doc1.put("/", "key1", "value"); // incrementing op counter so we win vs doc2
       doc1.put("/", "key2", "value"); // incrementing op counter so we win vs doc2
-      doc1.mark(list, "[5..11]", "xxx", "aaa")
-      doc1.mark(list, "[19..25]", "xxx", "aaa")
+      doc1.mark(list, { start: 5, end: 11 }, "xxx", "aaa")
+      doc1.mark(list, { start: 19, end: 25 }, "xxx", "aaa")
 
-      doc2.mark(list, "[10..20]" , "xxx", "aaa")
+      doc2.mark(list, { start: 10, end: 20 }, "xxx", "aaa")
 
       doc1.merge(doc2)
 
@@ -548,12 +548,12 @@ describe('Automerge', () => {
       let heads1 = doc1.getHeads();
       let marks1 = doc1.marks(list);
 
-      doc1.mark(list, "[3..25]", "xxx", "aaa")
+      doc1.mark(list, { start: 3, end: 25 }, "xxx", "aaa")
 
       let heads2 = doc1.getHeads();
       let marks2 = doc1.marks(list);
 
-      doc1.mark(list, "[4..11]", "yyy", "bbb")
+      doc1.mark(list, { start: 4, end: 11 }, "yyy", "bbb")
 
       let heads3 = doc1.getHeads();
       let marks3 = doc1.marks(list);

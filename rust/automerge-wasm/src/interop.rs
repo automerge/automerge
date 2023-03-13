@@ -9,10 +9,11 @@ use js_sys::{Array, Function, JsString, Object, Reflect, Symbol, Uint8Array};
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashSet};
 use std::fmt::Display;
+use std::ops::Deref;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use am::{ObjId, Patch, PatchAction, Value};
+use am::{marks::ExpandMark, ObjId, Patch, PatchAction, Value};
 
 const RAW_DATA_SYMBOL: &str = "_am_raw_value_";
 const DATATYPE_SYMBOL: &str = "_am_datatype_";
@@ -21,6 +22,14 @@ const META_SYMBOL: &str = "_am_meta";
 
 pub(crate) struct JS(pub(crate) JsValue);
 pub(crate) struct AR(pub(crate) Array);
+
+impl Deref for JS {
+    type Target = JsValue;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 impl From<AR> for JsValue {
     fn from(ar: AR) -> Self {
@@ -105,6 +114,35 @@ impl From<Option<Vec<ChangeHash>>> for JS {
             JS(v.into())
         } else {
             JS(JsValue::null())
+        }
+    }
+}
+
+impl TryFrom<JS> for usize {
+    type Error = error::BadNumber;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        value.as_f64().map(|n| n as usize).ok_or(error::BadNumber)
+    }
+}
+
+impl TryFrom<JS> for ExpandMark {
+    type Error = error::BadExpand;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        if value.is_undefined() {
+            Ok(ExpandMark::default())
+        } else {
+            value
+                .as_string()
+                .and_then(|s| match s.as_str() {
+                    "before" => Some(ExpandMark::Before),
+                    "after" => Some(ExpandMark::After),
+                    "both" => Some(ExpandMark::Both),
+                    "none" => Some(ExpandMark::None),
+                    _ => None,
+                })
+                .ok_or(error::BadExpand)
         }
     }
 }
@@ -1630,6 +1668,14 @@ pub(crate) mod error {
         #[error("path did not refer to an object")]
         NotAnObject,
     }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("expand must be 'left', 'right', 'both', or 'none' - is 'right' by default")]
+    pub struct BadExpand;
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("argument must be a number")]
+    pub struct BadNumber;
 
     #[derive(Debug, thiserror::Error)]
     #[error("given property was not a string or integer")]

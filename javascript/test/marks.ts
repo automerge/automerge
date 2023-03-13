@@ -5,6 +5,7 @@ import * as WASM from "@automerge/automerge-wasm"
 describe("Automerge", () => {
   describe("marks", () => {
     it("should allow marks that can be seen in patches", () => {
+      let value = "bold"
       let callbacks = []
       let doc1 = Automerge.init({
         patchCallback: (patches, info) => callbacks.push(patches),
@@ -13,7 +14,13 @@ describe("Automerge", () => {
         d.x = "the quick fox jumps over the lazy dog"
       })
       doc1 = Automerge.change(doc1, d => {
-        Automerge.mark(d, "x", "font-weight", "[5..10]", "bold")
+        Automerge.mark(
+          d,
+          "x",
+          { start: 5, end: 10, expand: "none" },
+          "font-weight",
+          value
+        )
       })
 
       doc1 = Automerge.change(doc1, d => {
@@ -24,7 +31,7 @@ describe("Automerge", () => {
         {
           action: "mark",
           path: ["x"],
-          marks: [{ name: "font-weight", start: 5, end: 10, value: "bold" }],
+          marks: [{ name: "font-weight", start: 5, end: 10, value }],
         },
       ])
 
@@ -49,14 +56,14 @@ describe("Automerge", () => {
         action: "mark",
         path: ["x"],
         marks: [
-          { name: "font-weight", start: 5, end: 7, value: "bold" },
-          { name: "font-weight", start: 9, end: 10, value: "bold" },
+          { name: "font-weight", start: 5, end: 7, value },
+          { name: "font-weight", start: 9, end: 10, value },
         ],
       })
 
       assert.deepStrictEqual(Automerge.marks(doc2, "x"), [
-        { name: "font-weight", value: "bold", start: 5, end: 7 },
-        { name: "font-weight", value: "bold", start: 9, end: 10 },
+        { name: "font-weight", value, start: 5, end: 7 },
+        { name: "font-weight", value, start: 9, end: 10 },
       ])
     })
   })

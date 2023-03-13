@@ -109,6 +109,12 @@ export type MarkPatch = {
   marks: Mark[]
 }
 
+export type MarkRange = {
+  expand?: 'before' | 'after' | 'both' | 'none'
+  start: number,
+  end: number,
+}
+
 export type UnmarkPatch = {
   action: 'unmark'
   path: Prop[],
@@ -187,7 +193,7 @@ export class Automerge {
   delete(obj: ObjID, prop: Prop): void;
 
   // marks
-  mark(obj: ObjID, name: string, range: string, value: Value, datatype?: Datatype): void;
+  mark(obj: ObjID, range: MarkRange, name: string, value: Value, datatype?: Datatype): void;
   unmark(obj: ObjID, name: string, start: number, end: number): void;
   marks(obj: ObjID, heads?: Heads): Mark[];
 

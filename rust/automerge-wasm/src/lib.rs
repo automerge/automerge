@@ -25,6 +25,7 @@
     while_true
 )]
 #![allow(clippy::unused_unit)]
+use am::marks::Mark;
 use am::transaction::CommitOptions;
 use am::transaction::{Observed, Transactable, UnObserved};
 use am::ScalarValue;
@@ -32,7 +33,6 @@ use automerge as am;
 use automerge::{sync::SyncDoc, Change, Prop, ReadDoc, TextEncoding, Value, ROOT};
 use automerge::{ToggleObserver, VecOpObserver16};
 use js_sys::{Array, Function, Object, Uint8Array};
-use regex::Regex;
 use serde::ser::Serialize;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -45,7 +45,7 @@ mod interop;
 mod sync;
 mod value;
 
-use interop::{alloc, get_heads, import_obj, js_set, to_js_err, to_prop, AR, JS};
+use interop::{alloc, get_heads, import_obj, js_get, js_set, to_js_err, to_prop, AR, JS};
 use sync::SyncState;
 use value::Datatype;
 
@@ -808,29 +808,31 @@ impl Automerge {
         name: JsValue,
         value: JsValue,
         datatype: JsValue,
-    ) -> Result<(), JsValue> {
+    ) -> Result<(), error::Mark> {
         let (obj, _) = self.import(obj)?;
-        let re = Regex::new(r"([\[\(])(\d+)\.\.(\d+)([\)\]])").unwrap();
-        let range = range.as_string().ok_or("range must be a string")?;
-        let cap = re.captures_iter(&range).next().ok_or(format!("(range={}) range must be in the form of (start..end] or [start..end) etc... () for sticky, [] for normal",range))?;
-        let start: usize = cap[2].parse().map_err(|_| to_js_err("invalid start"))?;
-        let end: usize = cap[3].parse().map_err(|_| to_js_err("invalid end"))?;
-        let left_sticky = &cap[1] == "(";
-        let right_sticky = &cap[4] == ")";
-        let name = name
-            .as_string()
-            .ok_or("invalid mark name")
-            .map_err(to_js_err)?;
+
+        let range = range
+            .dyn_into::<Object>()
+            .map_err(|_| error::Mark::InvalidRange)?;
+
+        let start = js_get(&range, "start").map_err(|_| error::Mark::InvalidStart)?;
+        let start = start.try_into().map_err(|_| error::Mark::InvalidStart)?;
+
+        let end = js_get(&range, "end").map_err(|_| error::Mark::InvalidEnd)?;
+        let end = end.try_into().map_err(|_| error::Mark::InvalidEnd)?;
+
+        let expand = js_get(&range, "expand").ok();
+        let expand = expand.map(|s| s.try_into()).transpose()?;
+        let expand = expand.unwrap_or_default();
+
+        let name = name.as_string().ok_or(error::Mark::InvalidName)?;
+
         let value = self
             .import_scalar(&value, &datatype.as_string())
-            .ok_or_else(|| to_js_err("invalid value"))?;
+            .ok_or_else(|| error::Mark::InvalidValue)?;
+
         self.doc
-            .mark(
-                &obj,
-                am::marks::Mark::new(name, value, start, end),
-                am::marks::ExpandMark::from(left_sticky, right_sticky),
-            )
-            .map_err(to_js_err)?;
+            .mark(&obj, Mark::new(name, value, start, end), expand)?;
         Ok(())
     }
 
@@ -1232,6 +1234,32 @@ pub mod error {
 
     impl From<DecodeChange> for JsValue {
         fn from(e: DecodeChange) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum Mark {
+        #[error("invalid object id: {0}")]
+        ImportObj(#[from] interop::error::ImportObj),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+        #[error(transparent)]
+        Expand(#[from] interop::error::BadExpand),
+        #[error("Invalid mark name")]
+        InvalidName,
+        #[error("Invalid mark value")]
+        InvalidValue,
+        #[error("start must be a number")]
+        InvalidStart,
+        #[error("end must be a number")]
+        InvalidEnd,
+        #[error("range must be an object")]
+        InvalidRange,
+    }
+
+    impl From<Mark> for JsValue {
+        fn from(e: Mark) -> Self {
             JsValue::from(e.to_string())
         }
     }
