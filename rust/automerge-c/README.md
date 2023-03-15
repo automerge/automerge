@@ -10,7 +10,7 @@ you can build the automerge-c library and install its constituent files within
 a root directory of your choosing (e.g. "/usr/local") like so:
 ```shell
 cmake -E make_directory automerge-c/build
-cmake -S automerge-c -B automerge-c/build 
+cmake -S automerge-c -B automerge-c/build
 cmake --build automerge-c/build
 cmake --install automerge-c/build --prefix "/usr/local"
 ```
@@ -52,13 +52,13 @@ processor.
 You can build and view the C API's HTML reference documentation like so:
 ```shell
 cmake -E make_directory automerge-c/build
-cmake -S automerge-c -B automerge-c/build 
+cmake -S automerge-c -B automerge-c/build
 cmake --build automerge-c/build --target automerge_docs
 firefox automerge-c/build/src/html/index.html
 ```
 
 To get started quickly, look at the
-[examples](https://github.com/automerge/automerge-rs/tree/main/rust/automerge-c/examples).
+[examples](https://github.com/automerge/automerge/tree/main/rust/automerge-c/examples).
 
 Almost all operations in automerge-c act on an Automerge document
 (`AMdoc` struct) which is structurally similar to a JSON document.
@@ -157,7 +157,7 @@ you can do this:
 
 int main(int argc, char** argv) {
   // ...previous example...
-  AMdoc *doc; 
+  AMdoc *doc;
   AMitemToDoc(AMresultItem(docResult), &doc);
 
   AMresult *putResult = AMmapPutStr(doc, AM_ROOT, AMstr("key"), AMstr("value"));
