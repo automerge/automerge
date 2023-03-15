@@ -498,19 +498,88 @@
 <a href="#497" id="497">497</a>
 <a href="#498" id="498">498</a>
 <a href="#499" id="499">499</a>
-</pre><pre class="rust"><code><span class="kw">use </span>std::{convert::TryFrom, ops::Range};
+<a href="#500" id="500">500</a>
+<a href="#501" id="501">501</a>
+<a href="#502" id="502">502</a>
+<a href="#503" id="503">503</a>
+<a href="#504" id="504">504</a>
+<a href="#505" id="505">505</a>
+<a href="#506" id="506">506</a>
+<a href="#507" id="507">507</a>
+<a href="#508" id="508">508</a>
+<a href="#509" id="509">509</a>
+<a href="#510" id="510">510</a>
+<a href="#511" id="511">511</a>
+<a href="#512" id="512">512</a>
+<a href="#513" id="513">513</a>
+<a href="#514" id="514">514</a>
+<a href="#515" id="515">515</a>
+<a href="#516" id="516">516</a>
+<a href="#517" id="517">517</a>
+<a href="#518" id="518">518</a>
+<a href="#519" id="519">519</a>
+<a href="#520" id="520">520</a>
+<a href="#521" id="521">521</a>
+<a href="#522" id="522">522</a>
+<a href="#523" id="523">523</a>
+<a href="#524" id="524">524</a>
+<a href="#525" id="525">525</a>
+<a href="#526" id="526">526</a>
+<a href="#527" id="527">527</a>
+<a href="#528" id="528">528</a>
+<a href="#529" id="529">529</a>
+<a href="#530" id="530">530</a>
+<a href="#531" id="531">531</a>
+<a href="#532" id="532">532</a>
+<a href="#533" id="533">533</a>
+<a href="#534" id="534">534</a>
+<a href="#535" id="535">535</a>
+<a href="#536" id="536">536</a>
+<a href="#537" id="537">537</a>
+<a href="#538" id="538">538</a>
+<a href="#539" id="539">539</a>
+<a href="#540" id="540">540</a>
+<a href="#541" id="541">541</a>
+<a href="#542" id="542">542</a>
+<a href="#543" id="543">543</a>
+<a href="#544" id="544">544</a>
+<a href="#545" id="545">545</a>
+<a href="#546" id="546">546</a>
+<a href="#547" id="547">547</a>
+<a href="#548" id="548">548</a>
+<a href="#549" id="549">549</a>
+<a href="#550" id="550">550</a>
+<a href="#551" id="551">551</a>
+<a href="#552" id="552">552</a>
+<a href="#553" id="553">553</a>
+<a href="#554" id="554">554</a>
+<a href="#555" id="555">555</a>
+<a href="#556" id="556">556</a>
+<a href="#557" id="557">557</a>
+<a href="#558" id="558">558</a>
+<a href="#559" id="559">559</a>
+<a href="#560" id="560">560</a>
+<a href="#561" id="561">561</a>
+<a href="#562" id="562">562</a>
+<a href="#563" id="563">563</a>
+<a href="#564" id="564">564</a>
+<a href="#565" id="565">565</a>
+<a href="#566" id="566">566</a>
+<a href="#567" id="567">567</a>
+<a href="#568" id="568">568</a>
+</pre><pre class="rust"><code><span class="kw">use </span>std::{borrow::Cow, convert::TryFrom, ops::Range};
 
 <span class="kw">use crate</span>::{
     columnar::{
         column_range::{
             generic::{GenericColumnRange, GroupRange, GroupedColumnRange, SimpleColRange},
-            BooleanRange, DeltaRange, Key, KeyEncoder, KeyIter, KeyRange, ObjIdEncoder, ObjIdIter,
-            ObjIdRange, OpIdListEncoder, OpIdListIter, OpIdListRange, RleRange, ValueEncoder,
-            ValueIter, ValueRange,
+            BooleanRange, DeltaRange, Key, KeyEncoder, KeyIter, KeyRange, MaybeBooleanRange,
+            ObjIdEncoder, ObjIdIter, ObjIdRange, OpIdListEncoder, OpIdListIter, OpIdListRange,
+            RleRange, ValueEncoder, ValueIter, ValueRange,
         },
         encoding::{
-            BooleanDecoder, BooleanEncoder, ColumnDecoder, DecodeColumnError, RleDecoder,
-            RleEncoder,
+            BooleanDecoder, BooleanEncoder, ColumnDecoder, DecodeColumnError, MaybeBooleanDecoder,
+            MaybeBooleanEncoder, RleDecoder, RleEncoder,
         },
     },
     convert,
@@ -532,6 +601,8 @@
 <span class="kw">const </span>ACTION_COL_ID: ColumnId = ColumnId::new(<span class="number">4</span>);
 <span class="kw">const </span>VAL_COL_ID: ColumnId = ColumnId::new(<span class="number">5</span>);
 <span class="kw">const </span>PRED_COL_ID: ColumnId = ColumnId::new(<span class="number">7</span>);
+<span class="kw">const </span>EXPAND_COL_ID: ColumnId = ColumnId::new(<span class="number">8</span>);
+<span class="kw">const </span>MARK_NAME_COL_ID: ColumnId = ColumnId::new(<span class="number">9</span>);
 
 <span class="attr">#[derive(Clone, Debug, PartialEq)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ChangeOp {
@@ -541,6 +612,8 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) pred: Vec&lt;OpId&gt;,
     <span class="kw">pub</span>(<span class="kw">crate</span>) action: u64,
     <span class="kw">pub</span>(<span class="kw">crate</span>) obj: ObjId,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) expand: bool,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) mark_name: <span class="prelude-ty">Option</span>&lt;smol_str::SmolStr&gt;,
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, A: AsChangeOp&lt;<span class="lifetime">&#39;a</span>, ActorId = usize, OpId = OpId&gt;&gt; From&lt;A&gt; <span class="kw">for </span>ChangeOp {
@@ -559,6 +632,8 @@
             pred: a.pred().collect(),
             insert: a.insert(),
             action: a.action(),
+            expand: a.expand(),
+            mark_name: a.mark_name().map(|n| n.into_owned()),
         }
     }
 }
@@ -599,6 +674,14 @@
     <span class="kw">fn </span>action(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
         <span class="self">self</span>.action
     }
+
+    <span class="kw">fn </span>expand(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="self">self</span>.expand
+    }
+
+    <span class="kw">fn </span>mark_name(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Cow&lt;<span class="lifetime">&#39;a</span>, smol_str::SmolStr&gt;&gt; {
+        <span class="self">self</span>.mark_name.as_ref().map(Cow::Borrowed)
+    }
 }
 
 <span class="attr">#[derive(Clone, Debug, PartialEq)]
@@ -609,6 +692,8 @@
     action: RleRange&lt;u64&gt;,
     val: ValueRange,
     pred: OpIdListRange,
+    expand: MaybeBooleanRange,
+    mark_name: RleRange&lt;smol_str::SmolStr&gt;,
 }
 
 <span class="kw">impl </span>ChangeOpsColumns {
@@ -621,6 +706,8 @@
             action: <span class="self">self</span>.action.decoder(data),
             val: <span class="self">self</span>.val.iter(data),
             pred: <span class="self">self</span>.pred.iter(data),
+            expand: <span class="self">self</span>.expand.decoder(data),
+            mark_name: <span class="self">self</span>.mark_name.decoder(data),
         }
     }
 
@@ -647,12 +734,16 @@
         Op: convert::OpId&lt;usize&gt; + <span class="lifetime">&#39;a</span>,
         C: AsChangeOp&lt;<span class="lifetime">&#39;c</span>, OpId = Op&gt; + <span class="lifetime">&#39;a</span>,
     {
+        <span class="macro">tracing::trace!</span>(expands = <span class="question-mark">?</span>ops.clone().map(|op| op.expand()).collect::&lt;Vec&lt;<span class="kw">_</span>&gt;&gt;(), <span class="string">&quot;encoding change ops&quot;</span>);
         <span class="kw">let </span>obj = ObjIdRange::encode(ops.clone().map(|o| o.obj()), out);
         <span class="kw">let </span>key = KeyRange::encode(ops.clone().map(|o| o.key()), out);
         <span class="kw">let </span>insert = BooleanRange::encode(ops.clone().map(|o| o.insert()), out);
         <span class="kw">let </span>action = RleRange::encode(ops.clone().map(|o| <span class="prelude-val">Some</span>(o.action())), out);
         <span class="kw">let </span>val = ValueRange::encode(ops.clone().map(|o| o.val()), out);
-        <span class="kw">let </span>pred = OpIdListRange::encode(ops.map(|o| o.pred()), out);
+        <span class="kw">let </span>pred = OpIdListRange::encode(ops.clone().map(|o| o.pred()), out);
+        <span class="kw">let </span>expand = MaybeBooleanRange::encode(ops.clone().map(|o| o.expand()), out);
+        <span class="kw">let </span>mark_name =
+            RleRange::encode::&lt;Cow&lt;<span class="lifetime">&#39;_</span>, smol_str::SmolStr&gt;, <span class="kw">_</span>&gt;(ops.map(|o| o.mark_name()), out);
         <span class="self">Self </span>{
             obj,
             key,
@@ -660,6 +751,8 @@
             action,
             val,
             pred,
+            expand,
+            mark_name,
         }
     }
 
@@ -675,13 +768,18 @@
         <span class="kw">let </span><span class="kw-2">mut </span>action = RleEncoder::&lt;<span class="kw">_</span>, u64&gt;::from(Vec::new());
         <span class="kw">let </span><span class="kw-2">mut </span>val = ValueEncoder::new();
         <span class="kw">let </span><span class="kw-2">mut </span>pred = OpIdListEncoder::new();
+        <span class="kw">let </span><span class="kw-2">mut </span>expand = MaybeBooleanEncoder::new();
+        <span class="kw">let </span><span class="kw-2">mut </span>mark_name = RleEncoder::&lt;<span class="kw">_</span>, smol_str::SmolStr&gt;::new(Vec::new());
         <span class="kw">for </span>op <span class="kw">in </span>ops {
+            <span class="macro">tracing::trace!</span>(expand=<span class="question-mark">?</span>op.expand(), <span class="string">&quot;expand&quot;</span>);
             obj.append(op.obj());
             key.append(op.key());
             insert.append(op.insert());
             action.append_value(op.action());
             val.append(<span class="kw-2">&amp;</span>op.val());
             pred.append(op.pred());
+            expand.append(op.expand());
+            mark_name.append(op.mark_name());
         }
         <span class="kw">let </span>obj = obj.finish(out);
         <span class="kw">let </span>key = key.finish(out);
@@ -699,6 +797,16 @@
         <span class="kw">let </span>val = val.finish(out);
         <span class="kw">let </span>pred = pred.finish(out);
 
+        <span class="kw">let </span>expand_start = out.len();
+        <span class="kw">let </span>(expand, <span class="kw">_</span>) = expand.finish();
+        out.extend(expand);
+        <span class="kw">let </span>expand = MaybeBooleanRange::from(expand_start..out.len());
+
+        <span class="kw">let </span>mark_name_start = out.len();
+        <span class="kw">let </span>(mark_name, <span class="kw">_</span>) = mark_name.finish();
+        out.extend(mark_name);
+        <span class="kw">let </span>mark_name = RleRange::from(mark_name_start..out.len());
+
         <span class="self">Self </span>{
             obj,
             key,
@@ -706,6 +814,8 @@
             action,
             val,
             pred,
+            expand,
+            mark_name,
         }
     }
 
@@ -772,6 +882,18 @@
                 ),
             ]);
         }
+        <span class="kw">if </span>!<span class="self">self</span>.expand.is_empty() {
+            cols.push(RawColumn::new(
+                ColumnSpec::new(EXPAND_COL_ID, ColumnType::Boolean, <span class="bool-val">false</span>),
+                <span class="self">self</span>.expand.clone().into(),
+            ));
+        }
+        <span class="kw">if </span>!<span class="self">self</span>.mark_name.is_empty() {
+            cols.push(RawColumn::new(
+                ColumnSpec::new(MARK_NAME_COL_ID, ColumnType::String, <span class="bool-val">false</span>),
+                <span class="self">self</span>.mark_name.clone().into(),
+            ));
+        }
         cols.into_iter().collect()
     }
 }
@@ -796,6 +918,8 @@
     action: RleDecoder&lt;<span class="lifetime">&#39;a</span>, u64&gt;,
     val: ValueIter&lt;<span class="lifetime">&#39;a</span>&gt;,
     pred: OpIdListIter&lt;<span class="lifetime">&#39;a</span>&gt;,
+    expand: MaybeBooleanDecoder&lt;<span class="lifetime">&#39;a</span>&gt;,
+    mark_name: RleDecoder&lt;<span class="lifetime">&#39;a</span>, smol_str::SmolStr&gt;,
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; ChangeOpsIter&lt;<span class="lifetime">&#39;a</span>&gt; {
@@ -817,6 +941,8 @@
             <span class="kw">let </span>action = <span class="self">self</span>.action.next_in_col(<span class="string">&quot;action&quot;</span>)<span class="question-mark">?</span>;
             <span class="kw">let </span>val = <span class="self">self</span>.val.next_in_col(<span class="string">&quot;value&quot;</span>)<span class="question-mark">?</span>;
             <span class="kw">let </span>pred = <span class="self">self</span>.pred.next_in_col(<span class="string">&quot;pred&quot;</span>)<span class="question-mark">?</span>;
+            <span class="kw">let </span>expand = <span class="self">self</span>.expand.maybe_next_in_col(<span class="string">&quot;expand&quot;</span>)<span class="question-mark">?</span>.unwrap_or(<span class="bool-val">false</span>);
+            <span class="kw">let </span>mark_name = <span class="self">self</span>.mark_name.maybe_next_in_col(<span class="string">&quot;mark_name&quot;</span>)<span class="question-mark">?</span>;
 
             <span class="comment">// This check is necessary to ensure that OpType::from_action_and_value
             // cannot panic later in the process.
@@ -829,6 +955,8 @@
                 action,
                 val,
                 pred,
+                expand,
+                mark_name,
             }))
         }
     }
@@ -875,6 +1003,8 @@
         <span class="kw">let </span><span class="kw-2">mut </span>pred_group: <span class="prelude-ty">Option</span>&lt;RleRange&lt;u64&gt;&gt; = <span class="prelude-val">None</span>;
         <span class="kw">let </span><span class="kw-2">mut </span>pred_actor: <span class="prelude-ty">Option</span>&lt;RleRange&lt;u64&gt;&gt; = <span class="prelude-val">None</span>;
         <span class="kw">let </span><span class="kw-2">mut </span>pred_ctr: <span class="prelude-ty">Option</span>&lt;DeltaRange&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>expand: <span class="prelude-ty">Option</span>&lt;MaybeBooleanRange&gt; = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>mark_name: <span class="prelude-ty">Option</span>&lt;RleRange&lt;smol_str::SmolStr&gt;&gt; = <span class="prelude-val">None</span>;
         <span class="kw">let </span><span class="kw-2">mut </span>other = Columns::empty();
 
         <span class="kw">for </span>(index, col) <span class="kw">in </span>columns.into_iter().enumerate() {
@@ -929,6 +1059,8 @@
                     }
                     <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(ParseChangeColumnsError::MismatchingColumn { index }),
                 },
+                (EXPAND_COL_ID, ColumnType::Boolean) =&gt; expand = <span class="prelude-val">Some</span>(col.range().into()),
+                (MARK_NAME_COL_ID, ColumnType::String) =&gt; mark_name = <span class="prelude-val">Some</span>(col.range().into()),
                 (other_type, other_col) =&gt; {
                     <span class="macro">tracing::warn!</span>(typ=<span class="question-mark">?</span>other_type, id=<span class="question-mark">?</span>other_col, <span class="string">&quot;unknown column&quot;</span>);
                     other.append(col);
@@ -954,6 +1086,8 @@
             action: action.unwrap_or(<span class="number">0</span>..<span class="number">0</span>).into(),
             val: val.unwrap_or_else(|| ValueRange::new((<span class="number">0</span>..<span class="number">0</span>).into(), (<span class="number">0</span>..<span class="number">0</span>).into())),
             pred,
+            expand: expand.unwrap_or_else(|| (<span class="number">0</span>..<span class="number">0</span>).into()),
+            mark_name: mark_name.unwrap_or_else(|| (<span class="number">0</span>..<span class="number">0</span>).into()),
         })
     }
 }
@@ -971,6 +1105,8 @@
                      pred <span class="kw">in </span>proptest::collection::vec(opid(), <span class="number">0</span>..<span class="number">20</span>),
                      action <span class="kw">in </span><span class="number">0_u64</span>..<span class="number">6</span>,
                      obj <span class="kw">in </span>opid(),
+                     mark_name <span class="kw">in </span>proptest::option::of(any::&lt;String&gt;().prop_map(|s| s.into())),
+                     expand <span class="kw">in </span>any::&lt;bool&gt;(),
                      insert <span class="kw">in </span>any::&lt;bool&gt;()) -&gt; ChangeOp {
 
                     <span class="kw">let </span>val = <span class="kw">if </span>action == <span class="number">5 </span>&amp;&amp; !(value.is_int() || value.is_uint()) {
@@ -983,6 +1119,8 @@
                 pred,
                 action,
                 insert,
+                expand,
+                mark_name,
             }
         }
     }

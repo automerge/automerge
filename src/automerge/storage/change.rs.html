@@ -510,6 +510,8 @@
 <a href="#509" id="509">509</a>
 <a href="#510" id="510">510</a>
 <a href="#511" id="511">511</a>
+<a href="#512" id="512">512</a>
+<a href="#513" id="513">513</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::{borrow::Cow, io::Write, marker::PhantomData, num::NonZeroU64, ops::Range};
 
 <span class="kw">use crate</span>::{convert, ActorId, ChangeHash, ScalarValue};
@@ -949,6 +951,8 @@
     <span class="kw">fn </span>action(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64;
     <span class="kw">fn </span>val(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Cow&lt;<span class="lifetime">&#39;a</span>, ScalarValue&gt;;
     <span class="kw">fn </span>pred(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>::PredIter;
+    <span class="kw">fn </span>expand(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool;
+    <span class="kw">fn </span>mark_name(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Cow&lt;<span class="lifetime">&#39;a</span>, smol_str::SmolStr&gt;&gt;;
 }
 
 <span class="kw">impl </span>ChangeBuilder&lt;Set&lt;NonZeroU64&gt;, Set&lt;ActorId&gt;, Set&lt;u64&gt;, Set&lt;i64&gt;&gt; {

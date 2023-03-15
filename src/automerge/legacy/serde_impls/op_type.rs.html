@@ -23,10 +23,12 @@
 <a href="#22" id="22">22</a>
 <a href="#23" id="23">23</a>
 <a href="#24" id="24">24</a>
+<a href="#25" id="25">25</a>
+<a href="#26" id="26">26</a>
 </pre><pre class="rust"><code><span class="kw">use </span>serde::{Serialize, Serializer};
 
 <span class="kw">use </span><span class="kw">super</span>::op::RawOpType;
-<span class="kw">use crate</span>::{ObjType, OpType};
+<span class="kw">use crate</span>::{legacy::OpType, ObjType};
 
 <span class="kw">impl </span>Serialize <span class="kw">for </span>OpType {
     <span class="kw">fn </span>serialize&lt;S&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, serializer: S) -&gt; <span class="prelude-ty">Result</span>&lt;S::Ok, S::Error&gt;
@@ -43,6 +45,8 @@
             OpType::Delete =&gt; RawOpType::Del,
             OpType::Increment(<span class="kw">_</span>) =&gt; RawOpType::Inc,
             OpType::Put(<span class="kw">_</span>) =&gt; RawOpType::Set,
+            OpType::MarkBegin(<span class="kw">_</span>) =&gt; RawOpType::MarkBegin,
+            OpType::MarkEnd(<span class="kw">_</span>) =&gt; RawOpType::MarkEnd,
         };
         raw_type.serialize(serializer)
     }

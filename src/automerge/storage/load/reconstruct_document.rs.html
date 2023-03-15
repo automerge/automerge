@@ -369,27 +369,6 @@
 <a href="#368" id="368">368</a>
 <a href="#369" id="369">369</a>
 <a href="#370" id="370">370</a>
-<a href="#371" id="371">371</a>
-<a href="#372" id="372">372</a>
-<a href="#373" id="373">373</a>
-<a href="#374" id="374">374</a>
-<a href="#375" id="375">375</a>
-<a href="#376" id="376">376</a>
-<a href="#377" id="377">377</a>
-<a href="#378" id="378">378</a>
-<a href="#379" id="379">379</a>
-<a href="#380" id="380">380</a>
-<a href="#381" id="381">381</a>
-<a href="#382" id="382">382</a>
-<a href="#383" id="383">383</a>
-<a href="#384" id="384">384</a>
-<a href="#385" id="385">385</a>
-<a href="#386" id="386">386</a>
-<a href="#387" id="387">387</a>
-<a href="#388" id="388">388</a>
-<a href="#389" id="389">389</a>
-<a href="#390" id="390">390</a>
-<a href="#391" id="391">391</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">super</span>::change_collector::ChangeCollector;
 <span class="kw">use </span>std::collections::{BTreeSet, HashMap};
 <span class="kw">use </span>tracing::instrument;
@@ -409,8 +388,6 @@
     </span>OpsOutOfOrder,
     <span class="attr">#[error(<span class="string">&quot;error reading operation: {0:?}&quot;</span>)]
     </span>ReadOp(Box&lt;<span class="kw">dyn </span>std::error::Error + Send + Sync + <span class="lifetime">&#39;static</span>&gt;),
-    <span class="attr">#[error(<span class="string">&quot;an operation contained an invalid action&quot;</span>)]
-    </span>InvalidAction,
     <span class="attr">#[error(<span class="string">&quot;an operation referenced a missing actor id&quot;</span>)]
     </span>MissingActor,
     <span class="attr">#[error(<span class="string">&quot;invalid changes: {0}&quot;</span>)]
@@ -421,6 +398,8 @@
     </span>MissingOps,
     <span class="attr">#[error(<span class="string">&quot;succ out of order&quot;</span>)]
     </span>SuccOutOfOrder,
+    <span class="attr">#[error(transparent)]
+    </span>InvalidOp(<span class="attr">#[from] </span><span class="kw">crate</span>::error::InvalidOpType),
 }
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>MismatchedHeads {
@@ -737,9 +716,10 @@
             <span class="kw">return </span><span class="prelude-val">Err</span>(Error::MissingActor);
         }
     }
+    <span class="kw">let </span>action = OpType::from_action_and_value(op.action, op.value, op.mark_name, op.expand);
     <span class="prelude-val">Ok</span>(Op {
         id: check_opid(m, op.id)<span class="question-mark">?</span>,
-        action: parse_optype(op.action, op.value)<span class="question-mark">?</span>,
+        action,
         key,
         succ: m.try_sorted_opids(op.succ).ok_or(Error::SuccOutOfOrder)<span class="question-mark">?</span>,
         pred: OpIds::empty(),
@@ -756,28 +736,6 @@
         <span class="prelude-val">None </span>=&gt; {
             <span class="macro">tracing::error!</span>(<span class="string">&quot;missing actor&quot;</span>);
             <span class="prelude-val">Err</span>(Error::MissingActor)
-        }
-    }
-}
-
-<span class="kw">fn </span>parse_optype(action_index: usize, value: ScalarValue) -&gt; <span class="prelude-ty">Result</span>&lt;OpType, Error&gt; {
-    <span class="kw">match </span>action_index {
-        <span class="number">0 </span>=&gt; <span class="prelude-val">Ok</span>(OpType::Make(ObjType::Map)),
-        <span class="number">1 </span>=&gt; <span class="prelude-val">Ok</span>(OpType::Put(value)),
-        <span class="number">2 </span>=&gt; <span class="prelude-val">Ok</span>(OpType::Make(ObjType::List)),
-        <span class="number">3 </span>=&gt; <span class="prelude-val">Ok</span>(OpType::Delete),
-        <span class="number">4 </span>=&gt; <span class="prelude-val">Ok</span>(OpType::Make(ObjType::Text)),
-        <span class="number">5 </span>=&gt; <span class="kw">match </span>value {
-            ScalarValue::Int(i) =&gt; <span class="prelude-val">Ok</span>(OpType::Increment(i)),
-            <span class="kw">_ </span>=&gt; {
-                <span class="macro">tracing::error!</span>(<span class="question-mark">?</span>value, <span class="string">&quot;invalid value for counter op&quot;</span>);
-                <span class="prelude-val">Err</span>(Error::InvalidAction)
-            }
-        },
-        <span class="number">6 </span>=&gt; <span class="prelude-val">Ok</span>(OpType::Make(ObjType::Table)),
-        other =&gt; {
-            <span class="macro">tracing::error!</span>(action = other, <span class="string">&quot;unknown action type&quot;</span>);
-            <span class="prelude-val">Err</span>(Error::InvalidAction)
         }
     }
 }

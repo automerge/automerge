@@ -198,10 +198,20 @@
 <a href="#197" id="197">197</a>
 <a href="#198" id="198">198</a>
 <a href="#199" id="199">199</a>
+<a href="#200" id="200">200</a>
+<a href="#201" id="201">201</a>
+<a href="#202" id="202">202</a>
+<a href="#203" id="203">203</a>
+<a href="#204" id="204">204</a>
+<a href="#205" id="205">205</a>
+<a href="#206" id="206">206</a>
+<a href="#207" id="207">207</a>
+<a href="#208" id="208">208</a>
+<a href="#209" id="209">209</a>
 </pre><pre class="rust"><code><span class="kw">use crate</span>::{
     error::AutomergeError, exid::ExId, keys::Keys, keys_at::KeysAt, list_range::ListRange,
-    list_range_at::ListRangeAt, map_range::MapRange, map_range_at::MapRangeAt, parents::Parents,
-    values::Values, Change, ChangeHash, ObjType, Prop, Value,
+    list_range_at::ListRangeAt, map_range::MapRange, map_range_at::MapRangeAt, marks::Mark,
+    parents::Parents, values::Values, Change, ChangeHash, ObjType, Prop, Value,
 };
 
 <span class="kw">use </span>std::ops::RangeBounds;
@@ -328,6 +338,16 @@
 
     <span class="doccomment">/// Get the type of this object, if it is an object.
     </span><span class="kw">fn </span>object_type&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;ObjType, AutomergeError&gt;;
+
+    <span class="doccomment">/// Get all marks on a current sequence
+    </span><span class="kw">fn </span>marks&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;Mark&lt;<span class="lifetime">&#39;_</span>&gt;&gt;, AutomergeError&gt;;
+
+    <span class="doccomment">/// Get all marks on a sequence at a given heads
+    </span><span class="kw">fn </span>marks_at&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        heads: <span class="kw-2">&amp;</span>[ChangeHash],
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;Mark&lt;<span class="lifetime">&#39;_</span>&gt;&gt;, AutomergeError&gt;;
 
     <span class="doccomment">/// Get the string represented by the given text object.
     </span><span class="kw">fn </span>text&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt;;

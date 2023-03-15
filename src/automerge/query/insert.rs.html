@@ -124,6 +124,12 @@
 <a href="#123" id="123">123</a>
 <a href="#124" id="124">124</a>
 <a href="#125" id="125">125</a>
+<a href="#126" id="126">126</a>
+<a href="#127" id="127">127</a>
+<a href="#128" id="128">128</a>
+<a href="#129" id="129">129</a>
+<a href="#130" id="130">130</a>
+<a href="#131" id="131">131</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error::AutomergeError;
 <span class="kw">use </span><span class="kw">crate</span>::op_tree::OpTreeNode;
 <span class="kw">use </span><span class="kw">crate</span>::query::{OpTree, QueryResult, TreeQuery};
@@ -236,7 +242,13 @@
             <span class="self">self</span>.last_seen = <span class="prelude-val">None</span>;
             <span class="self">self</span>.last_insert = element.elemid();
         }
-        <span class="kw">if </span><span class="self">self</span>.last_seen.is_none() &amp;&amp; element.visible() {
+        <span class="comment">/*-------------------*/
+        </span><span class="kw">if </span><span class="self">self</span>.valid.is_some() &amp;&amp; element.valid_mark_anchor() {
+            <span class="self">self</span>.last_valid_insert = <span class="prelude-val">Some</span>(element.elemid_or_key());
+            <span class="self">self</span>.valid = <span class="prelude-val">None</span>;
+        }
+        <span class="comment">/*-------------------*/
+        </span><span class="kw">if </span><span class="self">self</span>.last_seen.is_none() &amp;&amp; element.visible() {
             <span class="kw">if </span><span class="self">self</span>.seen &gt;= <span class="self">self</span>.target {
                 <span class="kw">return </span>QueryResult::Finish;
             }

@@ -371,7 +371,6 @@
 <a href="#370" id="370">370</a>
 <a href="#371" id="371">371</a>
 <a href="#372" id="372">372</a>
-<a href="#373" id="373">373</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::{fmt::Debug, mem, ops::RangeBounds};
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="kw">crate</span>::op_set::OpSetMetadata;
@@ -693,8 +692,7 @@
 
 <span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>tests {
-    <span class="kw">use </span><span class="kw">crate</span>::legacy <span class="kw">as </span>amp;
-    <span class="kw">use </span><span class="kw">crate</span>::types::{Op, OpId};
+    <span class="kw">use </span><span class="kw">crate</span>::types::{Op, OpId, OpType};
 
     <span class="kw">use super</span>::<span class="kw-2">*</span>;
 
@@ -702,7 +700,7 @@
         <span class="kw">let </span>zero = OpId::new(<span class="number">0</span>, <span class="number">0</span>);
         Op {
             id: zero,
-            action: amp::OpType::Put(<span class="number">0</span>.into()),
+            action: OpType::Put(<span class="number">0</span>.into()),
             key: zero.into(),
             succ: Default::default(),
             pred: Default::default(),

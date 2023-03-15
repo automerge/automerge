@@ -730,9 +730,57 @@
 <a href="#729" id="729">729</a>
 <a href="#730" id="730">730</a>
 <a href="#731" id="731">731</a>
+<a href="#732" id="732">732</a>
+<a href="#733" id="733">733</a>
+<a href="#734" id="734">734</a>
+<a href="#735" id="735">735</a>
+<a href="#736" id="736">736</a>
+<a href="#737" id="737">737</a>
+<a href="#738" id="738">738</a>
+<a href="#739" id="739">739</a>
+<a href="#740" id="740">740</a>
+<a href="#741" id="741">741</a>
+<a href="#742" id="742">742</a>
+<a href="#743" id="743">743</a>
+<a href="#744" id="744">744</a>
+<a href="#745" id="745">745</a>
+<a href="#746" id="746">746</a>
+<a href="#747" id="747">747</a>
+<a href="#748" id="748">748</a>
+<a href="#749" id="749">749</a>
+<a href="#750" id="750">750</a>
+<a href="#751" id="751">751</a>
+<a href="#752" id="752">752</a>
+<a href="#753" id="753">753</a>
+<a href="#754" id="754">754</a>
+<a href="#755" id="755">755</a>
+<a href="#756" id="756">756</a>
+<a href="#757" id="757">757</a>
+<a href="#758" id="758">758</a>
+<a href="#759" id="759">759</a>
+<a href="#760" id="760">760</a>
+<a href="#761" id="761">761</a>
+<a href="#762" id="762">762</a>
+<a href="#763" id="763">763</a>
+<a href="#764" id="764">764</a>
+<a href="#765" id="765">765</a>
+<a href="#766" id="766">766</a>
+<a href="#767" id="767">767</a>
+<a href="#768" id="768">768</a>
+<a href="#769" id="769">769</a>
+<a href="#770" id="770">770</a>
+<a href="#771" id="771">771</a>
+<a href="#772" id="772">772</a>
+<a href="#773" id="773">773</a>
+<a href="#774" id="774">774</a>
+<a href="#775" id="775">775</a>
+<a href="#776" id="776">776</a>
+<a href="#777" id="777">777</a>
+<a href="#778" id="778">778</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::num::NonZeroU64;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
+<span class="kw">use </span><span class="kw">crate</span>::marks::{ExpandMark, Mark};
 <span class="kw">use </span><span class="kw">crate</span>::query::{<span class="self">self</span>, OpIdSearch};
 <span class="kw">use </span><span class="kw">crate</span>::storage::Change <span class="kw">as </span>StoredChange;
 <span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, ObjId, OpId, OpIds, TextEncoding};
@@ -1370,7 +1418,7 @@
                         <span class="kw">for </span>(offset, v) <span class="kw">in </span>values.iter().enumerate() {
                             <span class="kw">let </span>op = <span class="kw-2">&amp;</span><span class="self">self</span>.operations[start + offset].<span class="number">1</span>;
                             <span class="kw">let </span>value = (v.clone().into(), doc.ops().id_to_exid(op.id));
-                            obs.insert(doc, ex_obj.clone(), index + offset, value)
+                            obs.insert(doc, ex_obj.clone(), index + offset, value, <span class="bool-val">false</span>)
                         }
                     }
                 }
@@ -1378,6 +1426,51 @@
         }
 
         <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>mark&lt;Obs: OpObserver&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        doc: <span class="kw-2">&amp;mut </span>Automerge,
+        op_observer: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span>Obs&gt;,
+        ex_obj: <span class="kw-2">&amp;</span>ExId,
+        mark: Mark&lt;<span class="lifetime">&#39;_</span>&gt;,
+        expand: ExpandMark,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
+        <span class="kw">let </span>(obj, _obj_type) = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(obs) = op_observer {
+            <span class="kw">let </span>action = OpType::MarkBegin(expand.before(), mark.data.clone().into_owned());
+            <span class="self">self</span>.do_insert(doc, <span class="prelude-val">Some</span>(obs), obj, mark.start, action)<span class="question-mark">?</span>;
+            <span class="self">self</span>.do_insert(
+                doc,
+                <span class="prelude-val">Some</span>(obs),
+                obj,
+                mark.end,
+                OpType::MarkEnd(expand.after()),
+            )<span class="question-mark">?</span>;
+            <span class="kw">if </span>mark.value().is_null() {
+                obs.unmark(doc, ex_obj.clone(), mark.name(), mark.start, mark.end);
+            } <span class="kw">else </span>{
+                obs.mark(doc, ex_obj.clone(), <span class="prelude-val">Some</span>(mark).into_iter())
+            }
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>action = OpType::MarkBegin(expand.before(), mark.data.into_owned());
+            <span class="self">self</span>.do_insert::&lt;Obs&gt;(doc, <span class="prelude-val">None</span>, obj, mark.start, action)<span class="question-mark">?</span>;
+            <span class="self">self</span>.do_insert::&lt;Obs&gt;(doc, <span class="prelude-val">None</span>, obj, mark.end, OpType::MarkEnd(expand.after()))<span class="question-mark">?</span>;
+        }
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>unmark&lt;Obs: OpObserver&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        doc: <span class="kw-2">&amp;mut </span>Automerge,
+        op_observer: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span>Obs&gt;,
+        ex_obj: <span class="kw-2">&amp;</span>ExId,
+        name: <span class="kw-2">&amp;</span>str,
+        start: usize,
+        end: usize,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
+        <span class="kw">let </span>mark = Mark::new(name.to_string(), ScalarValue::Null, start, end);
+        <span class="self">self</span>.mark(doc, op_observer, ex_obj, mark, ExpandMark::None)
     }
 
     <span class="kw">fn </span>finalize_op&lt;Obs: OpObserver&gt;(
@@ -1392,23 +1485,24 @@
         </span><span class="kw">if let </span><span class="prelude-val">Some</span>(op_observer) = op_observer {
             <span class="kw">let </span>ex_obj = doc.ops().id_to_exid(obj.<span class="number">0</span>);
             <span class="kw">if </span>op.insert {
-                <span class="kw">let </span>obj_type = doc.ops().object_type(<span class="kw-2">&amp;</span>obj);
-                <span class="macro">assert!</span>(obj_type.unwrap().is_sequence());
-                <span class="kw">match </span>(obj_type, prop) {
-                    (<span class="prelude-val">Some</span>(ObjType::List), Prop::Seq(index)) =&gt; {
-                        <span class="kw">let </span>value = (op.value(), doc.ops().id_to_exid(op.id));
-                        op_observer.insert(doc, ex_obj, index, value)
-                    }
-                    (<span class="prelude-val">Some</span>(ObjType::Text), Prop::Seq(index)) =&gt; {
-                        <span class="comment">// FIXME
-                        </span><span class="kw">if </span>op_observer.text_as_seq() {
+                <span class="kw">if </span>!op.is_mark() {
+                    <span class="kw">let </span>obj_type = doc.ops().object_type(<span class="kw-2">&amp;</span>obj);
+                    <span class="macro">assert!</span>(obj_type.unwrap().is_sequence());
+                    <span class="kw">match </span>(obj_type, prop) {
+                        (<span class="prelude-val">Some</span>(ObjType::List), Prop::Seq(index)) =&gt; {
                             <span class="kw">let </span>value = (op.value(), doc.ops().id_to_exid(op.id));
-                            op_observer.insert(doc, ex_obj, index, value)
-                        } <span class="kw">else </span>{
-                            op_observer.splice_text(doc, ex_obj, index, op.to_str())
+                            op_observer.insert(doc, ex_obj, index, value, <span class="bool-val">false</span>)
                         }
+                        (<span class="prelude-val">Some</span>(ObjType::Text), Prop::Seq(index)) =&gt; {
+                            <span class="kw">if </span>op_observer.text_as_seq() {
+                                <span class="kw">let </span>value = (op.value(), doc.ops().id_to_exid(op.id));
+                                op_observer.insert(doc, ex_obj, index, value, <span class="bool-val">false</span>)
+                            } <span class="kw">else </span>{
+                                op_observer.splice_text(doc, ex_obj, index, op.to_str())
+                            }
+                        }
+                        <span class="kw">_ </span>=&gt; {}
                     }
-                    <span class="kw">_ </span>=&gt; {}
                 }
             } <span class="kw">else if </span>op.is_delete() {
                 op_observer.delete(doc, ex_obj, prop);

@@ -798,130 +798,29 @@
 <a href="#797" id="797">797</a>
 <a href="#798" id="798">798</a>
 <a href="#799" id="799">799</a>
-<a href="#800" id="800">800</a>
-<a href="#801" id="801">801</a>
-<a href="#802" id="802">802</a>
-<a href="#803" id="803">803</a>
-<a href="#804" id="804">804</a>
-<a href="#805" id="805">805</a>
-<a href="#806" id="806">806</a>
-<a href="#807" id="807">807</a>
-<a href="#808" id="808">808</a>
-<a href="#809" id="809">809</a>
-<a href="#810" id="810">810</a>
-<a href="#811" id="811">811</a>
-<a href="#812" id="812">812</a>
-<a href="#813" id="813">813</a>
-<a href="#814" id="814">814</a>
-<a href="#815" id="815">815</a>
-<a href="#816" id="816">816</a>
-<a href="#817" id="817">817</a>
-<a href="#818" id="818">818</a>
-<a href="#819" id="819">819</a>
-<a href="#820" id="820">820</a>
-<a href="#821" id="821">821</a>
-<a href="#822" id="822">822</a>
-<a href="#823" id="823">823</a>
-<a href="#824" id="824">824</a>
-<a href="#825" id="825">825</a>
-<a href="#826" id="826">826</a>
-<a href="#827" id="827">827</a>
-<a href="#828" id="828">828</a>
-<a href="#829" id="829">829</a>
-<a href="#830" id="830">830</a>
-<a href="#831" id="831">831</a>
-<a href="#832" id="832">832</a>
-<a href="#833" id="833">833</a>
-<a href="#834" id="834">834</a>
-<a href="#835" id="835">835</a>
-<a href="#836" id="836">836</a>
-<a href="#837" id="837">837</a>
-<a href="#838" id="838">838</a>
-<a href="#839" id="839">839</a>
-<a href="#840" id="840">840</a>
-<a href="#841" id="841">841</a>
-<a href="#842" id="842">842</a>
-<a href="#843" id="843">843</a>
-<a href="#844" id="844">844</a>
-<a href="#845" id="845">845</a>
-<a href="#846" id="846">846</a>
-<a href="#847" id="847">847</a>
-<a href="#848" id="848">848</a>
-<a href="#849" id="849">849</a>
-<a href="#850" id="850">850</a>
-<a href="#851" id="851">851</a>
-<a href="#852" id="852">852</a>
-<a href="#853" id="853">853</a>
-<a href="#854" id="854">854</a>
-<a href="#855" id="855">855</a>
-<a href="#856" id="856">856</a>
-<a href="#857" id="857">857</a>
-<a href="#858" id="858">858</a>
-<a href="#859" id="859">859</a>
-<a href="#860" id="860">860</a>
-<a href="#861" id="861">861</a>
-<a href="#862" id="862">862</a>
-<a href="#863" id="863">863</a>
-<a href="#864" id="864">864</a>
-<a href="#865" id="865">865</a>
-<a href="#866" id="866">866</a>
-<a href="#867" id="867">867</a>
-<a href="#868" id="868">868</a>
-<a href="#869" id="869">869</a>
-<a href="#870" id="870">870</a>
-<a href="#871" id="871">871</a>
-<a href="#872" id="872">872</a>
-<a href="#873" id="873">873</a>
-<a href="#874" id="874">874</a>
-<a href="#875" id="875">875</a>
-<a href="#876" id="876">876</a>
-<a href="#877" id="877">877</a>
-<a href="#878" id="878">878</a>
-<a href="#879" id="879">879</a>
-<a href="#880" id="880">880</a>
-<a href="#881" id="881">881</a>
-<a href="#882" id="882">882</a>
-<a href="#883" id="883">883</a>
-<a href="#884" id="884">884</a>
-<a href="#885" id="885">885</a>
-<a href="#886" id="886">886</a>
-<a href="#887" id="887">887</a>
-<a href="#888" id="888">888</a>
-<a href="#889" id="889">889</a>
-<a href="#890" id="890">890</a>
-<a href="#891" id="891">891</a>
-<a href="#892" id="892">892</a>
-<a href="#893" id="893">893</a>
-<a href="#894" id="894">894</a>
-<a href="#895" id="895">895</a>
-<a href="#896" id="896">896</a>
-<a href="#897" id="897">897</a>
-<a href="#898" id="898">898</a>
-<a href="#899" id="899">899</a>
-<a href="#900" id="900">900</a>
-<a href="#901" id="901">901</a>
-<a href="#902" id="902">902</a>
-<a href="#903" id="903">903</a>
-<a href="#904" id="904">904</a>
-<a href="#905" id="905">905</a>
-<a href="#906" id="906">906</a>
-<a href="#907" id="907">907</a>
-<a href="#908" id="908">908</a>
-<a href="#909" id="909">909</a>
-<a href="#910" id="910">910</a>
-<a href="#911" id="911">911</a>
-<a href="#912" id="912">912</a>
-<a href="#913" id="913">913</a>
-<a href="#914" id="914">914</a>
-<a href="#915" id="915">915</a>
-</pre><pre class="rust"><code><span class="kw">use </span>std::{borrow::Cow, collections::HashSet, iter::Peekable};
+</pre><pre class="rust"><code><span class="kw">use </span>std::borrow::Cow;
 
 <span class="kw">use </span>itertools::Itertools;
 
 <span class="kw">use crate</span>::{
-    types::{ElemId, Key, ListEncoding, ObjId, Op, OpId},
-    ObjType, OpObserver, OpType, ScalarValue, Value,
+    marks::{Mark, MarkStateMachine},
+    types::{Key, ListEncoding, ObjId, Op, OpId, Prop},
+    Automerge, ObjType, OpObserver, OpType, Value,
 };
+
+<span class="attr">#[derive(Debug, Default)]
+</span><span class="kw">struct </span>TextState&lt;<span class="lifetime">&#39;a</span>&gt; {
+    text: String,
+    len: usize,
+    marks: MarkStateMachine&lt;<span class="lifetime">&#39;a</span>&gt;,
+    finished: Vec&lt;Mark&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
+}
+
+<span class="kw">struct </span>Put&lt;<span class="lifetime">&#39;a</span>&gt; {
+    value: Value&lt;<span class="lifetime">&#39;a</span>&gt;,
+    key: Key,
+    id: OpId,
+}
 
 <span class="doccomment">/// Traverse the &quot;current&quot; state of the document, notifying `observer`
 ///
@@ -933,7 +832,8 @@
 ///
 /// Due to only notifying of visible operations the observer will only be called with `put`,
 /// `insert`, and `splice`, operations.
-</span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>observe_current_state&lt;O: OpObserver&gt;(doc: <span class="kw-2">&amp;</span><span class="kw">crate</span>::Automerge, observer: <span class="kw-2">&amp;mut </span>O) {
+
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>observe_current_state&lt;O: OpObserver&gt;(doc: <span class="kw-2">&amp;</span>Automerge, observer: <span class="kw-2">&amp;mut </span>O) {
     <span class="comment">// The OpSet already exposes operations in the order they appear in the document.
     // `OpSet::iter_objs` iterates over the objects in causal order, this means that parent objects
     // will always appear before their children. Furthermore, the operations within each object are
@@ -942,323 +842,172 @@
     // Effectively then we iterate over each object, then we group the operations in the object by
     // key and for each key find the visible operations for that key. Then we notify the observer
     // for each of those visible operations.
-    </span><span class="kw">let </span><span class="kw-2">mut </span>visible_objs = HashSet::new();
-    visible_objs.insert(ObjId::root());
-    <span class="kw">for </span>(obj, typ, ops) <span class="kw">in </span>doc.ops().iter_objs() {
-        <span class="kw">if </span>!visible_objs.contains(obj) {
-            <span class="kw">continue</span>;
-        }
-        <span class="kw">let </span>ops_by_key = ops.group_by(|o| o.key);
-        <span class="kw">let </span>actions = ops_by_key
-            .into_iter()
-            .flat_map(|(key, key_ops)| key_actions(key, key_ops));
+    </span><span class="kw">for </span>(obj, typ, ops) <span class="kw">in </span>doc.ops().iter_objs() {
         <span class="kw">if </span>typ == ObjType::Text &amp;&amp; !observer.text_as_seq() {
-            track_new_objs_and_notify(
-                <span class="kw-2">&amp;mut </span>visible_objs,
-                doc,
-                obj,
-                typ,
-                observer,
-                text_actions(actions),
-            )
-        } <span class="kw">else if </span>typ == ObjType::List {
-            track_new_objs_and_notify(
-                <span class="kw-2">&amp;mut </span>visible_objs,
-                doc,
-                obj,
-                typ,
-                observer,
-                list_actions(actions),
-            )
+            observe_text(doc, observer, obj, ops)
+        } <span class="kw">else if </span>typ.is_sequence() {
+            observe_list(doc, observer, obj, ops);
         } <span class="kw">else </span>{
-            track_new_objs_and_notify(<span class="kw-2">&amp;mut </span>visible_objs, doc, obj, typ, observer, actions)
+            observe_map(doc, observer, obj, ops);
         }
     }
 }
 
-<span class="kw">fn </span>track_new_objs_and_notify&lt;N: Action, I: Iterator&lt;Item = N&gt;, O: OpObserver&gt;(
-    visible_objs: <span class="kw-2">&amp;mut </span>HashSet&lt;ObjId&gt;,
-    doc: <span class="kw-2">&amp;</span><span class="kw">crate</span>::Automerge,
-    obj: <span class="kw-2">&amp;</span>ObjId,
-    typ: ObjType,
+<span class="kw">fn </span>observe_text&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;, O: OpObserver&gt;(
+    doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
     observer: <span class="kw-2">&amp;mut </span>O,
-    actions: I,
+    obj: <span class="kw-2">&amp;</span>ObjId,
+    ops: I,
 ) {
     <span class="kw">let </span>exid = doc.id_to_exid(obj.<span class="number">0</span>);
-    <span class="kw">for </span>action <span class="kw">in </span>actions {
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(obj) = action.made_object() {
-            visible_objs.insert(obj);
-        }
-        action.notify_observer(doc, <span class="kw-2">&amp;</span>exid, obj, typ, observer);
-    }
-}
-
-<span class="kw">trait </span>Action {
-    <span class="doccomment">/// Notify an observer of whatever this action does
-    </span><span class="kw">fn </span>notify_observer&lt;O: OpObserver&gt;(
-        <span class="self">self</span>,
-        doc: <span class="kw-2">&amp;</span><span class="kw">crate</span>::Automerge,
-        exid: <span class="kw-2">&amp;</span><span class="kw">crate</span>::ObjId,
-        obj: <span class="kw-2">&amp;</span>ObjId,
-        typ: ObjType,
-        observer: <span class="kw-2">&amp;mut </span>O,
-    );
-
-    <span class="doccomment">/// If this action created an object, return the ID of that object
-    </span><span class="kw">fn </span>made_object(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;ObjId&gt;;
-}
-
-<span class="kw">fn </span>key_actions&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;&gt;(
-    key: Key,
-    key_ops: I,
-) -&gt; <span class="kw">impl </span>Iterator&lt;Item = SimpleAction&lt;<span class="lifetime">&#39;a</span>&gt;&gt; {
-    <span class="attr">#[derive(Clone)]
-    </span><span class="kw">enum </span>CurrentOp&lt;<span class="lifetime">&#39;a</span>&gt; {
-        Put {
-            value: Value&lt;<span class="lifetime">&#39;a</span>&gt;,
-            id: OpId,
-            conflicted: bool,
-        },
-        Insert(Value&lt;<span class="lifetime">&#39;a</span>&gt;, OpId),
-    }
-    <span class="kw">let </span>current_ops = key_ops
-        .filter(|o| o.visible())
-        .filter_map(|o| <span class="kw">match </span>o.action {
-            OpType::Make(obj_type) =&gt; {
-                <span class="kw">let </span>value = Value::Object(obj_type);
-                <span class="kw">if </span>o.insert {
-                    <span class="prelude-val">Some</span>(CurrentOp::Insert(value, o.id))
-                } <span class="kw">else </span>{
-                    <span class="prelude-val">Some</span>(CurrentOp::Put {
-                        value,
-                        id: o.id,
-                        conflicted: <span class="bool-val">false</span>,
-                    })
-                }
-            }
-            OpType::Put(<span class="kw-2">ref </span>value) =&gt; {
-                <span class="kw">let </span>value = Value::Scalar(Cow::Borrowed(value));
-                <span class="kw">if </span>o.insert {
-                    <span class="prelude-val">Some</span>(CurrentOp::Insert(value, o.id))
-                } <span class="kw">else </span>{
-                    <span class="prelude-val">Some</span>(CurrentOp::Put {
-                        value,
-                        id: o.id,
-                        conflicted: <span class="bool-val">false</span>,
-                    })
-                }
-            }
-            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
-        });
-    current_ops
-        .coalesce(|previous, current| <span class="kw">match </span>(previous, current) {
-            (CurrentOp::Put { .. }, CurrentOp::Put { value, id, .. }) =&gt; <span class="prelude-val">Ok</span>(CurrentOp::Put {
-                value,
-                id,
-                conflicted: <span class="bool-val">true</span>,
-            }),
-            (previous, current) =&gt; <span class="prelude-val">Err</span>((previous, current)),
-        })
-        .map(<span class="kw">move </span>|op| <span class="kw">match </span>op {
-            CurrentOp::Put {
-                value,
-                id,
-                conflicted,
-            } =&gt; SimpleAction::Put {
-                prop: key,
-                tagged_value: (value, id),
-                conflict: conflicted,
-            },
-            CurrentOp::Insert(val, id) =&gt; SimpleAction::Insert {
-                elem_id: ElemId(id),
-                tagged_value: (val, id),
-            },
-        })
-}
-
-<span class="doccomment">/// Either a &quot;put&quot; or &quot;insert&quot; action. i.e. not splicing for text values
-</span><span class="kw">enum </span>SimpleAction&lt;<span class="lifetime">&#39;a</span>&gt; {
-    Put {
-        prop: Key,
-        tagged_value: (Value&lt;<span class="lifetime">&#39;a</span>&gt;, OpId),
-        conflict: bool,
-    },
-    Insert {
-        elem_id: ElemId,
-        tagged_value: (Value&lt;<span class="lifetime">&#39;a</span>&gt;, OpId),
-    },
-}
-
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Action <span class="kw">for </span>SimpleAction&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">fn </span>notify_observer&lt;O: OpObserver&gt;(
-        <span class="self">self</span>,
-        doc: <span class="kw-2">&amp;</span><span class="kw">crate</span>::Automerge,
-        exid: <span class="kw-2">&amp;</span><span class="kw">crate</span>::ObjId,
-        obj: <span class="kw-2">&amp;</span>ObjId,
-        typ: ObjType,
-        observer: <span class="kw-2">&amp;mut </span>O,
-    ) {
-        <span class="kw">let </span>encoding = <span class="kw">match </span>typ {
-            ObjType::Text =&gt; ListEncoding::Text(doc.text_encoding()),
-            <span class="kw">_ </span>=&gt; ListEncoding::List,
-        };
-        <span class="kw">match </span><span class="self">self </span>{
-            <span class="self">Self</span>::Put {
-                prop,
-                tagged_value,
-                conflict,
-            } =&gt; {
-                <span class="kw">let </span>tagged_value = (tagged_value.<span class="number">0</span>, doc.id_to_exid(tagged_value.<span class="number">1</span>));
-                <span class="kw">let </span>prop = doc.ops().export_key(<span class="kw-2">*</span>obj, prop, encoding).unwrap();
-                observer.put(doc, exid.clone(), prop, tagged_value, conflict);
-            }
-            <span class="self">Self</span>::Insert {
-                elem_id,
-                tagged_value: (value, opid),
-            } =&gt; {
-                <span class="kw">let </span>index = doc
-                    .ops()
-                    .search(obj, <span class="kw">crate</span>::query::ElemIdPos::new(elem_id, encoding))
-                    .index()
-                    .unwrap();
-                <span class="kw">let </span>tagged_value = (value, doc.id_to_exid(opid));
-                observer.insert(doc, doc.id_to_exid(obj.<span class="number">0</span>), index, tagged_value);
-            }
-        }
-    }
-
-    <span class="kw">fn </span>made_object(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;ObjId&gt; {
-        <span class="kw">match </span><span class="self">self </span>{
-            <span class="self">Self</span>::Put {
-                tagged_value: (Value::Object(<span class="kw">_</span>), id),
-                ..
-            } =&gt; <span class="prelude-val">Some</span>((<span class="kw-2">*</span>id).into()),
-            <span class="self">Self</span>::Insert {
-                tagged_value: (Value::Object(<span class="kw">_</span>), id),
-                ..
-            } =&gt; <span class="prelude-val">Some</span>((<span class="kw-2">*</span>id).into()),
-            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
-        }
-    }
-}
-
-<span class="doccomment">/// An `Action` which splices for text values
-</span><span class="kw">enum </span>TextAction&lt;<span class="lifetime">&#39;a</span>&gt; {
-    Action(SimpleAction&lt;<span class="lifetime">&#39;a</span>&gt;),
-    Splice { start: ElemId, chars: String },
-}
-
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Action <span class="kw">for </span>TextAction&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">fn </span>notify_observer&lt;O: OpObserver&gt;(
-        <span class="self">self</span>,
-        doc: <span class="kw-2">&amp;</span><span class="kw">crate</span>::Automerge,
-        exid: <span class="kw-2">&amp;</span><span class="kw">crate</span>::ObjId,
-        obj: <span class="kw-2">&amp;</span>ObjId,
-        typ: ObjType,
-        observer: <span class="kw-2">&amp;mut </span>O,
-    ) {
-        <span class="kw">match </span><span class="self">self </span>{
-            <span class="self">Self</span>::Action(action) =&gt; action.notify_observer(doc, exid, obj, typ, observer),
-            <span class="self">Self</span>::Splice { start, chars } =&gt; {
-                <span class="kw">let </span>index = doc
-                    .ops()
-                    .search(
-                        obj,
-                        <span class="kw">crate</span>::query::ElemIdPos::new(
-                            start,
-                            ListEncoding::Text(doc.text_encoding()),
-                        ),
-                    )
-                    .index()
-                    .unwrap();
-                observer.splice_text(doc, doc.id_to_exid(obj.<span class="number">0</span>), index, chars.as_str());
-            }
-        }
-    }
-
-    <span class="kw">fn </span>made_object(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;ObjId&gt; {
-        <span class="kw">match </span><span class="self">self </span>{
-            <span class="self">Self</span>::Action(action) =&gt; action.made_object(),
-            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
-        }
-    }
-}
-
-<span class="kw">fn </span>list_actions&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = SimpleAction&lt;<span class="lifetime">&#39;a</span>&gt;&gt;&gt;(
-    actions: I,
-) -&gt; <span class="kw">impl </span>Iterator&lt;Item = SimpleAction&lt;<span class="lifetime">&#39;a</span>&gt;&gt; {
-    actions.map(|a| <span class="kw">match </span>a {
-        SimpleAction::Put {
-            prop: Key::Seq(elem_id),
-            tagged_value,
-            ..
-        } =&gt; SimpleAction::Insert {
-            elem_id,
-            tagged_value,
-        },
-        a =&gt; a,
-    })
-}
-
-<span class="doccomment">/// Condense consecutive `SimpleAction::Insert` actions into one `TextAction::Splice`
-</span><span class="kw">fn </span>text_actions&lt;<span class="lifetime">&#39;a</span>, I&gt;(actions: I) -&gt; <span class="kw">impl </span>Iterator&lt;Item = TextAction&lt;<span class="lifetime">&#39;a</span>&gt;&gt;
-<span class="kw">where
-    </span>I: Iterator&lt;Item = SimpleAction&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
-{
-    TextActions {
-        ops: actions.peekable(),
-    }
-}
-
-<span class="kw">struct </span>TextActions&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = SimpleAction&lt;<span class="lifetime">&#39;a</span>&gt;&gt;&gt; {
-    ops: Peekable&lt;I&gt;,
-}
-
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = SimpleAction&lt;<span class="lifetime">&#39;a</span>&gt;&gt;&gt; Iterator <span class="kw">for </span>TextActions&lt;<span class="lifetime">&#39;a</span>, I&gt; {
-    <span class="kw">type </span>Item = TextAction&lt;<span class="lifetime">&#39;a</span>&gt;;
-
-    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(SimpleAction::Insert { .. }) = <span class="self">self</span>.ops.peek() {
-            <span class="kw">let </span>(start, value) = <span class="kw">match </span><span class="self">self</span>.ops.next() {
-                <span class="prelude-val">Some</span>(SimpleAction::Insert {
-                    tagged_value: (value, opid),
-                    ..
-                }) =&gt; (opid, value),
-                <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(),
-            };
-            <span class="kw">let </span><span class="kw-2">mut </span>chars = <span class="kw">match </span>value {
-                Value::Scalar(Cow::Borrowed(ScalarValue::Str(s))) =&gt; s.to_string(),
-                <span class="kw">_ </span>=&gt; <span class="string">&quot;\u{fffc}&quot;</span>.to_string(),
-            };
-            <span class="kw">while let </span><span class="prelude-val">Some</span>(SimpleAction::Insert { .. }) = <span class="self">self</span>.ops.peek() {
-                <span class="kw">if let </span><span class="prelude-val">Some</span>(SimpleAction::Insert {
-                    tagged_value: (value, <span class="kw">_</span>),
-                    ..
-                }) = <span class="self">self</span>.ops.next()
-                {
-                    <span class="kw">match </span>value {
-                        Value::Scalar(Cow::Borrowed(ScalarValue::Str(s))) =&gt; chars.push_str(s),
-                        <span class="kw">_ </span>=&gt; chars.push(<span class="string">&#39;\u{fffc}&#39;</span>),
+    <span class="kw">let </span>ops_by_key = ops.group_by(|o| o.elemid_or_key());
+    <span class="kw">let </span>encoding = ListEncoding::Text(doc.text_encoding());
+    <span class="kw">let </span>state = TextState::default();
+    <span class="kw">let </span>state = ops_by_key
+        .into_iter()
+        .fold(state, |<span class="kw-2">mut </span>state, (_key, key_ops)| {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(o) = key_ops.filter(|o| o.visible_or_mark()).last() {
+                <span class="kw">match </span><span class="kw-2">&amp;</span>o.action {
+                    OpType::Make(<span class="kw">_</span>) | OpType::Put(<span class="kw">_</span>) =&gt; {
+                        state.text.push_str(o.to_str());
+                        state.len += o.width(encoding);
                     }
+                    OpType::MarkBegin(<span class="kw">_</span>, data) =&gt; {
+                        <span class="kw">if let </span><span class="prelude-val">Some</span>(mark) = state.marks.mark_begin(o.id, state.len, data, doc) {
+                            state.finished.push(mark);
+                        }
+                    }
+                    OpType::MarkEnd(<span class="kw">_</span>) =&gt; {
+                        <span class="kw">if let </span><span class="prelude-val">Some</span>(mark) = state.marks.mark_end(o.id, state.len, doc) {
+                            state.finished.push(mark);
+                        }
+                    }
+                    OpType::Increment(<span class="kw">_</span>) | OpType::Delete =&gt; {}
                 }
             }
-            <span class="prelude-val">Some</span>(TextAction::Splice {
-                start: ElemId(start),
-                chars,
-            })
-        } <span class="kw">else </span>{
-            <span class="self">self</span>.ops.next().map(TextAction::Action)
-        }
-    }
+            state
+        });
+    observer.splice_text(doc, exid.clone(), <span class="number">0</span>, state.text.as_str());
+    observer.mark(doc, exid, state.finished.into_iter());
+}
+
+<span class="kw">fn </span>observe_list&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;, O: OpObserver&gt;(
+    doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
+    observer: <span class="kw-2">&amp;mut </span>O,
+    obj: <span class="kw-2">&amp;</span>ObjId,
+    ops: I,
+) {
+    <span class="kw">let </span>exid = doc.id_to_exid(obj.<span class="number">0</span>);
+    <span class="kw">let </span><span class="kw-2">mut </span>marks = MarkStateMachine::default();
+    <span class="kw">let </span>ops_by_key = ops.group_by(|o| o.elemid_or_key());
+    <span class="kw">let </span><span class="kw-2">mut </span>len = <span class="number">0</span>;
+    <span class="kw">let </span><span class="kw-2">mut </span>finished = Vec::new();
+    ops_by_key
+        .into_iter()
+        .filter_map(|(_key, key_ops)| {
+            key_ops
+                .filter(|o| o.visible_or_mark())
+                .filter_map(|o| <span class="kw">match </span><span class="kw-2">&amp;</span>o.action {
+                    OpType::Make(obj_type) =&gt; <span class="prelude-val">Some</span>((Value::Object(<span class="kw-2">*</span>obj_type), o.id)),
+                    OpType::Put(value) =&gt; <span class="prelude-val">Some</span>((Value::Scalar(Cow::Borrowed(value)), o.id)),
+                    OpType::MarkBegin(<span class="kw">_</span>, data) =&gt; {
+                        <span class="kw">if let </span><span class="prelude-val">Some</span>(mark) = marks.mark_begin(o.id, len, data, doc) {
+                            <span class="comment">// side effect
+                            </span>finished.push(mark)
+                        }
+                        <span class="prelude-val">None
+                    </span>}
+                    OpType::MarkEnd(<span class="kw">_</span>) =&gt; {
+                        <span class="kw">if let </span><span class="prelude-val">Some</span>(mark) = marks.mark_end(o.id, len, doc) {
+                            <span class="comment">// side effect
+                            </span>finished.push(mark)
+                        }
+                        <span class="prelude-val">None
+                    </span>}
+                    <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+                })
+                .enumerate()
+                .last()
+                .map(|value| {
+                    <span class="kw">let </span>pos = len;
+                    len += <span class="number">1</span>; <span class="comment">// increment - side effect
+                    </span>(pos, value)
+                })
+        })
+        .for_each(|(index, (val_enum, (value, opid)))| {
+            <span class="kw">let </span>tagged_value = (value, doc.id_to_exid(opid));
+            <span class="kw">let </span>conflict = val_enum &gt; <span class="number">0</span>;
+            observer.insert(doc, exid.clone(), index, tagged_value, conflict);
+        });
+    observer.mark(doc, exid, finished.into_iter());
+}
+
+<span class="kw">fn </span>observe_map_key&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;&gt;(
+    (key, key_ops): (Key, I),
+) -&gt; <span class="prelude-ty">Option</span>&lt;(usize, Put&lt;<span class="lifetime">&#39;a</span>&gt;)&gt; {
+    key_ops
+        .filter(|o| o.visible())
+        .filter_map(|o| <span class="kw">match </span><span class="kw-2">&amp;</span>o.action {
+            OpType::Make(obj_type) =&gt; {
+                <span class="kw">let </span>value = Value::Object(<span class="kw-2">*</span>obj_type);
+                <span class="prelude-val">Some</span>(Put {
+                    value,
+                    key,
+                    id: o.id,
+                })
+            }
+            OpType::Put(value) =&gt; {
+                <span class="kw">let </span>value = Value::Scalar(Cow::Borrowed(value));
+                <span class="prelude-val">Some</span>(Put {
+                    value,
+                    key,
+                    id: o.id,
+                })
+            }
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+        })
+        .enumerate()
+        .last()
+}
+
+<span class="kw">fn </span>observe_map&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;, O: OpObserver&gt;(
+    doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
+    observer: <span class="kw-2">&amp;mut </span>O,
+    obj: <span class="kw-2">&amp;</span>ObjId,
+    ops: I,
+) {
+    <span class="kw">let </span>exid = doc.id_to_exid(obj.<span class="number">0</span>);
+    <span class="kw">let </span>ops_by_key = ops.group_by(|o| o.key);
+    ops_by_key
+        .into_iter()
+        .filter_map(observe_map_key)
+        .filter_map(|(i, put)| {
+            <span class="kw">let </span>tagged_value = (put.value, doc.id_to_exid(put.id));
+            <span class="kw">let </span>prop = doc
+                .ops()
+                .m
+                .props
+                .safe_get(put.key.prop_index()<span class="question-mark">?</span>)
+                .map(|s| Prop::Map(s.to_string()))<span class="question-mark">?</span>;
+            <span class="kw">let </span>conflict = i &gt; <span class="number">0</span>;
+            <span class="prelude-val">Some</span>((tagged_value, prop, conflict))
+        })
+        .for_each(|(tagged_value, prop, conflict)| {
+            observer.put(doc, exid.clone(), prop, tagged_value, conflict);
+        });
 }
 
 <span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>tests {
     <span class="kw">use </span>std::{borrow::Cow, fs};
 
-    <span class="kw">use crate</span>::{transaction::Transactable, Automerge, ObjType, OpObserver, Prop, ReadDoc, Value};
+    <span class="kw">use crate</span>::{
+        marks::Mark, transaction::Transactable, Automerge, ObjType, OpObserver, Prop, ReadDoc,
+        Value,
+    };
+    <span class="comment">//use crate::{transaction::Transactable, Automerge, ObjType, OpObserver, Prop, ReadDoc, Value};
 
-    <span class="comment">// Observer ops often carry a &quot;tagged value&quot;, which is a value and the OpID of the op which
+    // Observer ops often carry a &quot;tagged value&quot;, which is a value and the OpID of the op which
     // created that value. For a lot of values (i.e. any scalar value) we don&#39;t care about the
     // opid. This type implements `PartialEq` for the `Untagged` variant by ignoring the tag, which
     // allows us to express tests which don&#39;t care about the tag.
@@ -1406,6 +1155,7 @@
             objid: <span class="kw">crate</span>::ObjId,
             index: usize,
             tagged_value: (<span class="kw">crate</span>::Value&lt;<span class="lifetime">&#39;_</span>&gt;, <span class="kw">crate</span>::ObjId),
+            _conflict: bool,
         ) {
             <span class="self">self</span>.ops.push(ObserverCall::Insert {
                 obj: objid,
@@ -1481,6 +1231,24 @@
 
         <span class="kw">fn </span>text_as_seq(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
             <span class="self">self</span>.text_as_seq
+        }
+
+        <span class="kw">fn </span>mark&lt;<span class="lifetime">&#39;a</span>, R: ReadDoc, M: Iterator&lt;Item = Mark&lt;<span class="lifetime">&#39;a</span>&gt;&gt;&gt;(
+            <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+            _doc: <span class="kw-2">&amp;</span>R,
+            _objid: <span class="kw">crate</span>::ObjId,
+            _mark: M,
+        ) {
+        }
+
+        <span class="kw">fn </span>unmark&lt;R: ReadDoc&gt;(
+            <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+            _doc: <span class="kw-2">&amp;</span>R,
+            _objid: <span class="kw">crate</span>::ObjId,
+            _name: <span class="kw-2">&amp;</span>str,
+            _start: usize,
+            _end: usize,
+        ) {
         }
     }
 

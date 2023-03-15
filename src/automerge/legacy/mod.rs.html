@@ -275,12 +275,103 @@
 <a href="#274" id="274">274</a>
 <a href="#275" id="275">275</a>
 <a href="#276" id="276">276</a>
+<a href="#277" id="277">277</a>
+<a href="#278" id="278">278</a>
+<a href="#279" id="279">279</a>
+<a href="#280" id="280">280</a>
+<a href="#281" id="281">281</a>
+<a href="#282" id="282">282</a>
+<a href="#283" id="283">283</a>
+<a href="#284" id="284">284</a>
+<a href="#285" id="285">285</a>
+<a href="#286" id="286">286</a>
+<a href="#287" id="287">287</a>
+<a href="#288" id="288">288</a>
+<a href="#289" id="289">289</a>
+<a href="#290" id="290">290</a>
+<a href="#291" id="291">291</a>
+<a href="#292" id="292">292</a>
+<a href="#293" id="293">293</a>
+<a href="#294" id="294">294</a>
+<a href="#295" id="295">295</a>
+<a href="#296" id="296">296</a>
+<a href="#297" id="297">297</a>
+<a href="#298" id="298">298</a>
+<a href="#299" id="299">299</a>
+<a href="#300" id="300">300</a>
+<a href="#301" id="301">301</a>
+<a href="#302" id="302">302</a>
+<a href="#303" id="303">303</a>
+<a href="#304" id="304">304</a>
+<a href="#305" id="305">305</a>
+<a href="#306" id="306">306</a>
+<a href="#307" id="307">307</a>
+<a href="#308" id="308">308</a>
+<a href="#309" id="309">309</a>
+<a href="#310" id="310">310</a>
+<a href="#311" id="311">311</a>
+<a href="#312" id="312">312</a>
+<a href="#313" id="313">313</a>
+<a href="#314" id="314">314</a>
+<a href="#315" id="315">315</a>
+<a href="#316" id="316">316</a>
+<a href="#317" id="317">317</a>
+<a href="#318" id="318">318</a>
+<a href="#319" id="319">319</a>
+<a href="#320" id="320">320</a>
+<a href="#321" id="321">321</a>
+<a href="#322" id="322">322</a>
+<a href="#323" id="323">323</a>
+<a href="#324" id="324">324</a>
+<a href="#325" id="325">325</a>
+<a href="#326" id="326">326</a>
+<a href="#327" id="327">327</a>
+<a href="#328" id="328">328</a>
+<a href="#329" id="329">329</a>
+<a href="#330" id="330">330</a>
+<a href="#331" id="331">331</a>
+<a href="#332" id="332">332</a>
+<a href="#333" id="333">333</a>
+<a href="#334" id="334">334</a>
+<a href="#335" id="335">335</a>
+<a href="#336" id="336">336</a>
+<a href="#337" id="337">337</a>
+<a href="#338" id="338">338</a>
+<a href="#339" id="339">339</a>
+<a href="#340" id="340">340</a>
+<a href="#341" id="341">341</a>
+<a href="#342" id="342">342</a>
+<a href="#343" id="343">343</a>
+<a href="#344" id="344">344</a>
+<a href="#345" id="345">345</a>
+<a href="#346" id="346">346</a>
+<a href="#347" id="347">347</a>
+<a href="#348" id="348">348</a>
+<a href="#349" id="349">349</a>
+<a href="#350" id="350">350</a>
+<a href="#351" id="351">351</a>
+<a href="#352" id="352">352</a>
+<a href="#353" id="353">353</a>
+<a href="#354" id="354">354</a>
+<a href="#355" id="355">355</a>
+<a href="#356" id="356">356</a>
+<a href="#357" id="357">357</a>
+<a href="#358" id="358">358</a>
+<a href="#359" id="359">359</a>
+<a href="#360" id="360">360</a>
+<a href="#361" id="361">361</a>
+<a href="#362" id="362">362</a>
+<a href="#363" id="363">363</a>
+<a href="#364" id="364">364</a>
+<a href="#365" id="365">365</a>
+<a href="#366" id="366">366</a>
+<a href="#367" id="367">367</a>
 </pre><pre class="rust"><code><span class="kw">mod </span>serde_impls;
 <span class="kw">mod </span>utility_impls;
 
 <span class="kw">use </span>std::num::NonZeroU64;
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="kw">crate</span>::types::{ActorId, ChangeHash, ObjType, OpType, ScalarValue};
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="kw">crate</span>::types::{ActorId, ChangeHash, ObjType, ScalarValue};
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="kw">crate</span>::value::DataType;
 
 <span class="kw">use </span>serde::{Deserialize, Serialize};
@@ -481,6 +572,96 @@
     }
 }
 
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpTypeParts {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) action: u64,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) value: ScalarValue,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) expand: bool,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) mark_name: <span class="prelude-ty">Option</span>&lt;smol_str::SmolStr&gt;,
+}
+
+<span class="comment">// Like `types::OpType` except using a String for mark names
+</span><span class="attr">#[derive(PartialEq, Debug, Clone)]
+</span><span class="kw">pub enum </span>OpType {
+    Make(ObjType),
+    Delete,
+    Increment(i64),
+    Put(ScalarValue),
+    MarkBegin(MarkData),
+    MarkEnd(bool),
+}
+
+<span class="kw">impl </span>OpType {
+    <span class="doccomment">/// Create a new legacy OpType
+    ///
+    /// This is really only meant to be used to convert from a crate::Change to a
+    /// crate::legacy::Change, so the arguments should all have been validated. Consequently it
+    /// does not return an error and instead panics on the following conditions
+    ///
+    /// # Panics
+    ///
+    /// * If The action index is unrecognized
+    /// * If the action index indicates that the value should be numeric but the value is not a
+    ///   number
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>from_parts(
+        OpTypeParts {
+            action,
+            value,
+            expand,
+            mark_name,
+        }: OpTypeParts,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="kw">match </span>action {
+            <span class="number">0 </span>=&gt; <span class="self">Self</span>::Make(ObjType::Map),
+            <span class="number">1 </span>=&gt; <span class="self">Self</span>::Put(value),
+            <span class="number">2 </span>=&gt; <span class="self">Self</span>::Make(ObjType::List),
+            <span class="number">3 </span>=&gt; <span class="self">Self</span>::Delete,
+            <span class="number">4 </span>=&gt; <span class="self">Self</span>::Make(ObjType::Text),
+            <span class="number">5 </span>=&gt; <span class="kw">match </span>value {
+                ScalarValue::Int(i) =&gt; <span class="self">Self</span>::Increment(i),
+                ScalarValue::Uint(i) =&gt; <span class="self">Self</span>::Increment(i <span class="kw">as </span>i64),
+                <span class="kw">_ </span>=&gt; <span class="macro">panic!</span>(<span class="string">&quot;non numeric value for integer action&quot;</span>),
+            },
+            <span class="number">6 </span>=&gt; <span class="self">Self</span>::Make(ObjType::Table),
+            <span class="number">7 </span>=&gt; <span class="kw">match </span>mark_name {
+                <span class="prelude-val">Some</span>(name) =&gt; <span class="self">Self</span>::MarkBegin(MarkData {
+                    name,
+                    value,
+                    expand,
+                }),
+                <span class="prelude-val">None </span>=&gt; <span class="self">Self</span>::MarkEnd(expand),
+            },
+            other =&gt; <span class="macro">panic!</span>(<span class="string">&quot;unknown action type {}&quot;</span>, other),
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>action_index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; u64 {
+        <span class="kw">match </span><span class="self">self </span>{
+            <span class="self">Self</span>::Make(ObjType::Map) =&gt; <span class="number">0</span>,
+            <span class="self">Self</span>::Put(<span class="kw">_</span>) =&gt; <span class="number">1</span>,
+            <span class="self">Self</span>::Make(ObjType::List) =&gt; <span class="number">2</span>,
+            <span class="self">Self</span>::Delete =&gt; <span class="number">3</span>,
+            <span class="self">Self</span>::Make(ObjType::Text) =&gt; <span class="number">4</span>,
+            <span class="self">Self</span>::Increment(<span class="kw">_</span>) =&gt; <span class="number">5</span>,
+            <span class="self">Self</span>::Make(ObjType::Table) =&gt; <span class="number">6</span>,
+            <span class="self">Self</span>::MarkBegin(<span class="kw">_</span>) | <span class="self">Self</span>::MarkEnd(<span class="kw">_</span>) =&gt; <span class="number">7</span>,
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>expand(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="macro">matches!</span>(
+            <span class="self">self</span>,
+            <span class="self">Self</span>::MarkBegin(MarkData { expand: <span class="bool-val">true</span>, .. }) | <span class="self">Self</span>::MarkEnd(<span class="bool-val">true</span>)
+        )
+    }
+}
+
+<span class="attr">#[derive(PartialEq, Debug, Clone)]
+</span><span class="kw">pub struct </span>MarkData {
+    <span class="kw">pub </span>name: smol_str::SmolStr,
+    <span class="kw">pub </span>value: ScalarValue,
+    <span class="kw">pub </span>expand: bool,
+}
+
 <span class="attr">#[derive(PartialEq, Debug, Clone)]
 </span><span class="kw">pub struct </span>Op {
     <span class="kw">pub </span>action: OpType,
@@ -494,6 +675,7 @@
     <span class="kw">pub fn </span>primitive_value(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;ScalarValue&gt; {
         <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.action {
             OpType::Put(v) =&gt; <span class="prelude-val">Some</span>(v.clone()),
+            OpType::MarkBegin(MarkData { value, .. }) =&gt; <span class="prelude-val">Some</span>(value.clone()),
             OpType::Increment(i) =&gt; <span class="prelude-val">Some</span>(ScalarValue::Int(<span class="kw-2">*</span>i)),
             <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
         }

@@ -64,13 +64,17 @@
 <a href="#63" id="63">63</a>
 <a href="#64" id="64">64</a>
 <a href="#65" id="65">65</a>
+<a href="#66" id="66">66</a>
+<a href="#67" id="67">67</a>
 </pre><pre class="rust"><code><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>raw;
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>raw::{RawDecoder, RawEncoder};
 <span class="kw">mod </span>rle;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>rle::{RleDecoder, RleEncoder};
 <span class="kw">mod </span>boolean;
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>boolean::{BooleanDecoder, BooleanEncoder};
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>boolean::{
+    BooleanDecoder, BooleanEncoder, MaybeBooleanDecoder, MaybeBooleanEncoder,
+};
 <span class="kw">mod </span>delta;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>delta::{DeltaDecoder, DeltaEncoder};
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">mod </span>leb128;

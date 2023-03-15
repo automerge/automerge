@@ -404,6 +404,10 @@
 <a href="#403" id="403">403</a>
 <a href="#404" id="404">404</a>
 <a href="#405" id="405">405</a>
+<a href="#406" id="406">406</a>
+<a href="#407" id="407">407</a>
+<a href="#408" id="408">408</a>
+<a href="#409" id="409">409</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::clock::Clock;
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 <span class="kw">use </span><span class="kw">crate</span>::indexed_cache::IndexedCache;
@@ -482,6 +486,10 @@
         IterObjs {
             trees: objs.into_iter(),
         }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>iter_ops(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>ObjId) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span>Op&gt; {
+        <span class="self">self</span>.trees.get(obj).map(|o| o.iter()).into_iter().flatten()
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>parents(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: ObjId) -&gt; Parents&lt;<span class="lifetime">&#39;_</span>&gt; {

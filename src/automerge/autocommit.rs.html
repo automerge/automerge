@@ -671,9 +671,64 @@
 <a href="#670" id="670">670</a>
 <a href="#671" id="671">671</a>
 <a href="#672" id="672">672</a>
+<a href="#673" id="673">673</a>
+<a href="#674" id="674">674</a>
+<a href="#675" id="675">675</a>
+<a href="#676" id="676">676</a>
+<a href="#677" id="677">677</a>
+<a href="#678" id="678">678</a>
+<a href="#679" id="679">679</a>
+<a href="#680" id="680">680</a>
+<a href="#681" id="681">681</a>
+<a href="#682" id="682">682</a>
+<a href="#683" id="683">683</a>
+<a href="#684" id="684">684</a>
+<a href="#685" id="685">685</a>
+<a href="#686" id="686">686</a>
+<a href="#687" id="687">687</a>
+<a href="#688" id="688">688</a>
+<a href="#689" id="689">689</a>
+<a href="#690" id="690">690</a>
+<a href="#691" id="691">691</a>
+<a href="#692" id="692">692</a>
+<a href="#693" id="693">693</a>
+<a href="#694" id="694">694</a>
+<a href="#695" id="695">695</a>
+<a href="#696" id="696">696</a>
+<a href="#697" id="697">697</a>
+<a href="#698" id="698">698</a>
+<a href="#699" id="699">699</a>
+<a href="#700" id="700">700</a>
+<a href="#701" id="701">701</a>
+<a href="#702" id="702">702</a>
+<a href="#703" id="703">703</a>
+<a href="#704" id="704">704</a>
+<a href="#705" id="705">705</a>
+<a href="#706" id="706">706</a>
+<a href="#707" id="707">707</a>
+<a href="#708" id="708">708</a>
+<a href="#709" id="709">709</a>
+<a href="#710" id="710">710</a>
+<a href="#711" id="711">711</a>
+<a href="#712" id="712">712</a>
+<a href="#713" id="713">713</a>
+<a href="#714" id="714">714</a>
+<a href="#715" id="715">715</a>
+<a href="#716" id="716">716</a>
+<a href="#717" id="717">717</a>
+<a href="#718" id="718">718</a>
+<a href="#719" id="719">719</a>
+<a href="#720" id="720">720</a>
+<a href="#721" id="721">721</a>
+<a href="#722" id="722">722</a>
+<a href="#723" id="723">723</a>
+<a href="#724" id="724">724</a>
+<a href="#725" id="725">725</a>
+<a href="#726" id="726">726</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
+<span class="kw">use </span><span class="kw">crate</span>::marks::{ExpandMark, Mark};
 <span class="kw">use </span><span class="kw">crate</span>::op_observer::{BranchableObserver, OpObserver};
 <span class="kw">use </span><span class="kw">crate</span>::sync::SyncDoc;
 <span class="kw">use </span><span class="kw">crate</span>::transaction::{CommitOptions, Transactable};
@@ -954,6 +1009,11 @@
     }
 
     <span class="attr">#[doc(hidden)]
+    </span><span class="kw">pub fn </span>import_obj(<span class="kw-2">&amp;</span><span class="self">self</span>, s: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;ExId, AutomergeError&gt; {
+        <span class="self">self</span>.doc.import_obj(s)
+    }
+
+    <span class="attr">#[doc(hidden)]
     </span><span class="kw">pub fn </span>dump(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
         <span class="self">self</span>.ensure_transaction_closed();
         <span class="self">self</span>.doc.dump()
@@ -1112,6 +1172,18 @@
 
     <span class="kw">fn </span>object_type&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;ObjType, AutomergeError&gt; {
         <span class="self">self</span>.doc.object_type(obj)
+    }
+
+    <span class="kw">fn </span>marks&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;Mark&lt;<span class="lifetime">&#39;_</span>&gt;&gt;, AutomergeError&gt; {
+        <span class="self">self</span>.doc.marks(obj)
+    }
+
+    <span class="kw">fn </span>marks_at&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        heads: <span class="kw-2">&amp;</span>[ChangeHash],
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;Mark&lt;<span class="lifetime">&#39;_</span>&gt;&gt;, AutomergeError&gt; {
+        <span class="self">self</span>.doc.marks_at(obj, heads)
     }
 
     <span class="kw">fn </span>text&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt; {
@@ -1291,6 +1363,42 @@
             pos,
             del,
             text,
+        )
+    }
+
+    <span class="kw">fn </span>mark&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: O,
+        mark: Mark&lt;<span class="lifetime">&#39;_</span>&gt;,
+        expand: ExpandMark,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
+        <span class="self">self</span>.ensure_transaction_open();
+        <span class="kw">let </span>(current, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
+        tx.mark(
+            <span class="kw-2">&amp;mut </span><span class="self">self</span>.doc,
+            current.observer(),
+            obj.as_ref(),
+            mark,
+            expand,
+        )
+    }
+
+    <span class="kw">fn </span>unmark&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: O,
+        key: <span class="kw-2">&amp;</span>str,
+        start: usize,
+        end: usize,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
+        <span class="self">self</span>.ensure_transaction_open();
+        <span class="kw">let </span>(current, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
+        tx.unmark(
+            <span class="kw-2">&amp;mut </span><span class="self">self</span>.doc,
+            current.observer(),
+            obj.as_ref(),
+            key,
+            start,
+            end,
         )
     }
 

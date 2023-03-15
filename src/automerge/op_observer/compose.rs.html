@@ -101,6 +101,31 @@
 <a href="#100" id="100">100</a>
 <a href="#101" id="101">101</a>
 <a href="#102" id="102">102</a>
+<a href="#103" id="103">103</a>
+<a href="#104" id="104">104</a>
+<a href="#105" id="105">105</a>
+<a href="#106" id="106">106</a>
+<a href="#107" id="107">107</a>
+<a href="#108" id="108">108</a>
+<a href="#109" id="109">109</a>
+<a href="#110" id="110">110</a>
+<a href="#111" id="111">111</a>
+<a href="#112" id="112">112</a>
+<a href="#113" id="113">113</a>
+<a href="#114" id="114">114</a>
+<a href="#115" id="115">115</a>
+<a href="#116" id="116">116</a>
+<a href="#117" id="117">117</a>
+<a href="#118" id="118">118</a>
+<a href="#119" id="119">119</a>
+<a href="#120" id="120">120</a>
+<a href="#121" id="121">121</a>
+<a href="#122" id="122">122</a>
+<a href="#123" id="123">123</a>
+<a href="#124" id="124">124</a>
+<a href="#125" id="125">125</a>
+<a href="#126" id="126">126</a>
+<a href="#127" id="127">127</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">super</span>::OpObserver;
 
 <span class="kw">pub fn </span>compose&lt;<span class="lifetime">&#39;a</span>, O1: OpObserver, O2: OpObserver&gt;(
@@ -122,10 +147,11 @@
         objid: <span class="kw">crate</span>::ObjId,
         index: usize,
         tagged_value: (<span class="kw">crate</span>::Value&lt;<span class="lifetime">&#39;_</span>&gt;, <span class="kw">crate</span>::ObjId),
+        conflict: bool,
     ) {
         <span class="self">self</span>.obs1
-            .insert(doc, objid.clone(), index, tagged_value.clone());
-        <span class="self">self</span>.obs2.insert(doc, objid, index, tagged_value);
+            .insert(doc, objid.clone(), index, tagged_value.clone(), conflict);
+        <span class="self">self</span>.obs2.insert(doc, objid, index, tagged_value, conflict);
     }
 
     <span class="kw">fn </span>splice_text&lt;R: <span class="kw">crate</span>::ReadDoc&gt;(
@@ -185,6 +211,30 @@
         <span class="self">self</span>.obs1
             .increment(doc, objid.clone(), prop.clone(), tagged_value.clone());
         <span class="self">self</span>.obs2.increment(doc, objid, prop, tagged_value);
+    }
+
+    <span class="kw">fn </span>mark&lt;<span class="lifetime">&#39;b</span>, R: <span class="kw">crate</span>::ReadDoc, M: Iterator&lt;Item = <span class="kw">crate</span>::marks::Mark&lt;<span class="lifetime">&#39;b</span>&gt;&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span>R,
+        objid: <span class="kw">crate</span>::ObjId,
+        mark: M,
+    ) {
+        <span class="kw">let </span>marks: Vec&lt;<span class="kw">_</span>&gt; = mark.collect();
+        <span class="self">self</span>.obs1
+            .mark(doc, objid.clone(), marks.clone().into_iter());
+        <span class="self">self</span>.obs2.mark(doc, objid, marks.into_iter());
+    }
+
+    <span class="kw">fn </span>unmark&lt;R: <span class="kw">crate</span>::ReadDoc&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        doc: <span class="kw-2">&amp;</span>R,
+        objid: <span class="kw">crate</span>::ObjId,
+        name: <span class="kw-2">&amp;</span>str,
+        start: usize,
+        end: usize,
+    ) {
+        <span class="self">self</span>.obs1.unmark(doc, objid.clone(), name, start, end);
+        <span class="self">self</span>.obs2.unmark(doc, objid, name, start, end);
     }
 
     <span class="kw">fn </span>delete_map&lt;R: <span class="kw">crate</span>::ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>R, objid: <span class="kw">crate</span>::ObjId, key: <span class="kw-2">&amp;</span>str) {

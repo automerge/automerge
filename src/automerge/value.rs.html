@@ -747,6 +747,12 @@
 <a href="#746" id="746">746</a>
 <a href="#747" id="747">747</a>
 <a href="#748" id="748">748</a>
+<a href="#749" id="749">749</a>
+<a href="#750" id="750">750</a>
+<a href="#751" id="751">751</a>
+<a href="#752" id="752">752</a>
+<a href="#753" id="753">753</a>
+<a href="#754" id="754">754</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error;
 <span class="kw">use </span><span class="kw">crate</span>::types::ObjType;
 <span class="kw">use </span>serde::{Deserialize, Serialize, Serializer};
@@ -1087,6 +1093,12 @@
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;ScalarValue&gt; <span class="kw">for </span>Value&lt;<span class="lifetime">&#39;a</span>&gt; {
     <span class="kw">fn </span>from(v: ScalarValue) -&gt; <span class="self">Self </span>{
         Value::Scalar(Cow::Owned(v))
+    }
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ScalarValue&gt; <span class="kw">for </span>Value&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>from(v: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>ScalarValue) -&gt; <span class="self">Self </span>{
+        Value::Scalar(Cow::Borrowed(v))
     }
 }
 

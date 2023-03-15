@@ -92,7 +92,24 @@
 <a href="#91" id="91">91</a>
 <a href="#92" id="92">92</a>
 <a href="#93" id="93">93</a>
+<a href="#94" id="94">94</a>
+<a href="#95" id="95">95</a>
+<a href="#96" id="96">96</a>
+<a href="#97" id="97">97</a>
+<a href="#98" id="98">98</a>
+<a href="#99" id="99">99</a>
+<a href="#100" id="100">100</a>
+<a href="#101" id="101">101</a>
+<a href="#102" id="102">102</a>
+<a href="#103" id="103">103</a>
+<a href="#104" id="104">104</a>
+<a href="#105" id="105">105</a>
+<a href="#106" id="106">106</a>
+<a href="#107" id="107">107</a>
+<a href="#108" id="108">108</a>
+<a href="#109" id="109">109</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
+<span class="kw">use </span><span class="kw">crate</span>::marks::{ExpandMark, Mark};
 <span class="kw">use crate</span>::{AutomergeError, ChangeHash, ObjType, Prop, ReadDoc, ScalarValue};
 
 <span class="doccomment">/// A way of mutating a document within a single change.
@@ -180,6 +197,21 @@
         pos: usize,
         del: usize,
         text: <span class="kw-2">&amp;</span>str,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt;;
+
+    <span class="kw">fn </span>mark&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: O,
+        mark: Mark&lt;<span class="lifetime">&#39;_</span>&gt;,
+        expand: ExpandMark,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt;;
+
+    <span class="kw">fn </span>unmark&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        obj: O,
+        key: <span class="kw-2">&amp;</span>str,
+        start: usize,
+        end: usize,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt;;
 
     <span class="doccomment">/// The heads this transaction will be based on
