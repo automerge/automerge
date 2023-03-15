@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, BTreeSet},
+};
 
 use crate::convert;
 
@@ -243,6 +246,14 @@ where
 
     fn val(&self) -> std::borrow::Cow<'aschangeop, crate::ScalarValue> {
         self.op.val()
+    }
+
+    fn expand(&self) -> bool {
+        self.op.expand()
+    }
+
+    fn mark_name(&self) -> Option<Cow<'aschangeop, smol_str::SmolStr>> {
+        self.op.mark_name()
     }
 }
 

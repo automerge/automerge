@@ -1,6 +1,7 @@
 use std::num::NonZeroU64;
 
 use crate::exid::ExId;
+use crate::marks::{ExpandMark, Mark};
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
 use crate::types::{Key, ListEncoding, ObjId, OpId, OpIds, TextEncoding};
@@ -638,7 +639,7 @@ impl TransactionInner {
                         for (offset, v) in values.iter().enumerate() {
                             let op = &self.operations[start + offset].1;
                             let value = (v.clone().into(), doc.ops().id_to_exid(op.id));
-                            obs.insert(doc, ex_obj.clone(), index + offset, value)
+                            obs.insert(doc, ex_obj.clone(), index + offset, value, false)
                         }
                     }
                 }
@@ -646,6 +647,51 @@ impl TransactionInner {
         }
 
         Ok(())
+    }
+
+    pub(crate) fn mark<Obs: OpObserver>(
+        &mut self,
+        doc: &mut Automerge,
+        op_observer: Option<&mut Obs>,
+        ex_obj: &ExId,
+        mark: Mark<'_>,
+        expand: ExpandMark,
+    ) -> Result<(), AutomergeError> {
+        let (obj, _obj_type) = doc.exid_to_obj(ex_obj)?;
+        if let Some(obs) = op_observer {
+            let action = OpType::MarkBegin(expand.before(), mark.data.clone().into_owned());
+            self.do_insert(doc, Some(obs), obj, mark.start, action)?;
+            self.do_insert(
+                doc,
+                Some(obs),
+                obj,
+                mark.end,
+                OpType::MarkEnd(expand.after()),
+            )?;
+            if mark.value().is_null() {
+                obs.unmark(doc, ex_obj.clone(), mark.name(), mark.start, mark.end);
+            } else {
+                obs.mark(doc, ex_obj.clone(), Some(mark).into_iter())
+            }
+        } else {
+            let action = OpType::MarkBegin(expand.before(), mark.data.into_owned());
+            self.do_insert::<Obs>(doc, None, obj, mark.start, action)?;
+            self.do_insert::<Obs>(doc, None, obj, mark.end, OpType::MarkEnd(expand.after()))?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn unmark<Obs: OpObserver>(
+        &mut self,
+        doc: &mut Automerge,
+        op_observer: Option<&mut Obs>,
+        ex_obj: &ExId,
+        name: &str,
+        start: usize,
+        end: usize,
+    ) -> Result<(), AutomergeError> {
+        let mark = Mark::new(name.to_string(), ScalarValue::Null, start, end);
+        self.mark(doc, op_observer, ex_obj, mark, ExpandMark::None)
     }
 
     fn finalize_op<Obs: OpObserver>(
@@ -660,23 +706,24 @@ impl TransactionInner {
         if let Some(op_observer) = op_observer {
             let ex_obj = doc.ops().id_to_exid(obj.0);
             if op.insert {
-                let obj_type = doc.ops().object_type(&obj);
-                assert!(obj_type.unwrap().is_sequence());
-                match (obj_type, prop) {
-                    (Some(ObjType::List), Prop::Seq(index)) => {
-                        let value = (op.value(), doc.ops().id_to_exid(op.id));
-                        op_observer.insert(doc, ex_obj, index, value)
-                    }
-                    (Some(ObjType::Text), Prop::Seq(index)) => {
-                        // FIXME
-                        if op_observer.text_as_seq() {
+                if !op.is_mark() {
+                    let obj_type = doc.ops().object_type(&obj);
+                    assert!(obj_type.unwrap().is_sequence());
+                    match (obj_type, prop) {
+                        (Some(ObjType::List), Prop::Seq(index)) => {
                             let value = (op.value(), doc.ops().id_to_exid(op.id));
-                            op_observer.insert(doc, ex_obj, index, value)
-                        } else {
-                            op_observer.splice_text(doc, ex_obj, index, op.to_str())
+                            op_observer.insert(doc, ex_obj, index, value, false)
                         }
+                        (Some(ObjType::Text), Prop::Seq(index)) => {
+                            if op_observer.text_as_seq() {
+                                let value = (op.value(), doc.ops().id_to_exid(op.id));
+                                op_observer.insert(doc, ex_obj, index, value, false)
+                            } else {
+                                op_observer.splice_text(doc, ex_obj, index, op.to_str())
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             } else if op.is_delete() {
                 op_observer.delete(doc, ex_obj, prop);

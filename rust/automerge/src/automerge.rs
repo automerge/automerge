@@ -4,10 +4,13 @@ use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::ops::RangeBounds;
 
+use itertools::Itertools;
+
 use crate::change_graph::ChangeGraph;
 use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
 use crate::keys::Keys;
+use crate::marks::{Mark, MarkStateMachine};
 use crate::op_observer::{BranchableObserver, OpObserver};
 use crate::op_set::OpSet;
 use crate::parents::Parents;
@@ -16,14 +19,13 @@ use crate::transaction::{
     self, CommitOptions, Failure, Observed, Success, Transaction, TransactionArgs, UnObserved,
 };
 use crate::types::{
-    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ListEncoding, ObjId, Op, OpId,
-    OpType, ScalarValue, TextEncoding, Value,
+    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ListEncoding, MarkData, ObjId, Op,
+    OpId, OpType, ScalarValue, TextEncoding, Value,
 };
 use crate::{
     query, AutomergeError, Change, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType,
     Prop, ReadDoc, Values,
 };
-use serde::Serialize;
 
 mod current_state;
 
@@ -400,11 +402,23 @@ impl Automerge {
     pub(crate) fn exid_to_obj(&self, id: &ExId) -> Result<(ObjId, ObjType), AutomergeError> {
         match id {
             ExId::Root => Ok((ObjId::root(), ObjType::Map)),
+            ExId::Id(..) => {
+                let obj = ObjId(self.exid_to_opid(id)?);
+                if let Some(obj_type) = self.ops.object_type(&obj) {
+                    Ok((obj, obj_type))
+                } else {
+                    Err(AutomergeError::NotAnObject)
+                }
+            }
+        }
+    }
+
+    pub(crate) fn exid_to_opid(&self, id: &ExId) -> Result<OpId, AutomergeError> {
+        match id {
+            ExId::Root => Err(AutomergeError::Fail),
             ExId::Id(ctr, actor, idx) => {
-                // do a direct get here b/c this could be foriegn and not be within the array
-                // bounds
-                let obj = if self.ops.m.actors.cache.get(*idx) == Some(actor) {
-                    ObjId(OpId::new(*ctr, *idx))
+                if self.ops.m.actors.cache.get(*idx) == Some(actor) {
+                    Ok(OpId::new(*ctr, *idx))
                 } else {
                     // FIXME - make a real error
                     let idx = self
@@ -413,12 +427,7 @@ impl Automerge {
                         .actors
                         .lookup(actor)
                         .ok_or(AutomergeError::Fail)?;
-                    ObjId(OpId::new(*ctr, idx))
-                };
-                if let Some(obj_type) = self.ops.object_type(&obj) {
-                    Ok((obj, obj_type))
-                } else {
-                    Err(AutomergeError::NotAnObject)
+                    Ok(OpId::new(*ctr, idx))
                 }
             }
         }
@@ -723,7 +732,12 @@ impl Automerge {
                     obj,
                     Op {
                         id,
-                        action: OpType::from_action_and_value(c.action, c.val),
+                        action: OpType::from_action_and_value(
+                            c.action,
+                            c.val,
+                            c.mark_name,
+                            c.expand,
+                        ),
                         key,
                         succ: Default::default(),
                         pred,
@@ -913,8 +927,21 @@ impl Automerge {
 
     #[doc(hidden)]
     pub fn import(&self, s: &str) -> Result<(ExId, ObjType), AutomergeError> {
-        if s == "_root" {
+        let obj = self.import_obj(s)?;
+        if obj == ExId::Root {
             Ok((ExId::Root, ObjType::Map))
+        } else {
+            let obj_type = self
+                .object_type(&obj)
+                .map_err(|_| AutomergeError::InvalidObjId(s.to_owned()))?;
+            Ok((obj, obj_type))
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn import_obj(&self, s: &str) -> Result<ExId, AutomergeError> {
+        if s == "_root" {
+            Ok(ExId::Root)
         } else {
             let n = s
                 .find('@')
@@ -930,10 +957,7 @@ impl Automerge {
                 .lookup(&actor)
                 .ok_or_else(|| AutomergeError::InvalidObjId(s.to_owned()))?;
             let obj = ExId::Id(counter, self.ops.m.actors.cache[actor].clone(), actor);
-            let obj_type = self
-                .object_type(&obj)
-                .map_err(|_| AutomergeError::InvalidObjId(s.to_owned()))?;
-            Ok((obj, obj_type))
+            Ok(obj)
         }
     }
 
@@ -967,6 +991,10 @@ impl Automerge {
                 OpType::Make(obj) => format!("make({})", obj),
                 OpType::Increment(obj) => format!("inc({})", obj),
                 OpType::Delete => format!("del{}", 0),
+                OpType::MarkBegin(_, MarkData { name, value }) => {
+                    format!("mark({},{})", name, value)
+                }
+                OpType::MarkEnd(_) => "/mark".to_string(),
             };
             let pred: Vec<_> = op.pred.iter().map(|id| self.to_string(*id)).collect();
             let succ: Vec<_> = op.succ.into_iter().map(|id| self.to_string(*id)).collect();
@@ -1045,11 +1073,18 @@ impl Automerge {
         };
 
         if op.insert {
-            if obj_type == Some(ObjType::Text) {
+            if op.is_mark() {
+                if let OpType::MarkEnd(_) = op.action {
+                    let q = self
+                        .ops
+                        .search(obj, query::SeekMark::new(op.id.prev(), pos, encoding));
+                    observer.mark(self, ex_obj, q.marks.into_iter());
+                }
+            } else if obj_type == Some(ObjType::Text) {
                 observer.splice_text(self, ex_obj, seen, op.to_str());
             } else {
                 let value = (op.value(), self.ops.id_to_exid(op.id));
-                observer.insert(self, ex_obj, seen, value);
+                observer.insert(self, ex_obj, seen, value, false);
             }
         } else if op.is_delete() {
             if let Some(winner) = &values.last() {
@@ -1081,7 +1116,7 @@ impl Automerge {
                 .unwrap_or(false);
             let value = (op.value(), self.ops.id_to_exid(op.id));
             if op.is_list_op() && !had_value_before {
-                observer.insert(self, ex_obj, seen, value);
+                observer.insert(self, ex_obj, seen, value, false);
             } else if just_conflict {
                 observer.flag_conflict(self, ex_obj, key);
             } else {
@@ -1309,6 +1344,64 @@ impl ReadDoc for Automerge {
         Ok(buffer)
     }
 
+    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
+        let (obj, obj_type) = self.exid_to_obj(obj.as_ref())?;
+        let encoding = ListEncoding::new(obj_type, self.text_encoding);
+        let ops_by_key = self.ops().iter_ops(&obj).group_by(|o| o.elemid_or_key());
+        let mut pos = 0;
+        let mut marks = MarkStateMachine::default();
+
+        Ok(ops_by_key
+            .into_iter()
+            .filter_map(|(_key, key_ops)| {
+                key_ops
+                    .filter(|o| o.visible_or_mark())
+                    .last()
+                    .and_then(|o| match &o.action {
+                        OpType::Make(_) | OpType::Put(_) => {
+                            pos += o.width(encoding);
+                            None
+                        }
+                        OpType::MarkBegin(_, data) => marks.mark_begin(o.id, pos, data, self),
+                        OpType::MarkEnd(_) => marks.mark_end(o.id, pos, self),
+                        OpType::Increment(_) | OpType::Delete => None,
+                    })
+            })
+            .collect())
+    }
+
+    fn marks_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<Mark<'_>>, AutomergeError> {
+        let (obj, obj_type) = self.exid_to_obj(obj.as_ref())?;
+        let clock = self.clock_at(heads);
+        let encoding = ListEncoding::new(obj_type, self.text_encoding);
+        let ops_by_key = self.ops().iter_ops(&obj).group_by(|o| o.elemid_or_key());
+        let mut window = query::VisWindow::default();
+        let mut pos = 0;
+        let mut marks = MarkStateMachine::default();
+
+        Ok(ops_by_key
+            .into_iter()
+            .filter_map(|(_key, key_ops)| {
+                key_ops
+                    .filter(|o| window.visible_at(o, pos, &clock))
+                    .last()
+                    .and_then(|o| match &o.action {
+                        OpType::Make(_) | OpType::Put(_) => {
+                            pos += o.width(encoding);
+                            None
+                        }
+                        OpType::MarkBegin(_, data) => marks.mark_begin(o.id, pos, data, self),
+                        OpType::MarkEnd(_) => marks.mark_end(o.id, pos, self),
+                        OpType::Increment(_) | OpType::Delete => None,
+                    })
+            })
+            .collect())
+    }
+
     fn get<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
@@ -1438,15 +1531,4 @@ impl Default for Automerge {
     fn default() -> Self {
         Self::new()
     }
-}
-
-#[derive(Serialize, Debug, Clone, PartialEq)]
-pub(crate) struct SpanInfo {
-    pub(crate) id: ExId,
-    pub(crate) time: i64,
-    pub(crate) start: usize,
-    pub(crate) end: usize,
-    #[serde(rename = "type")]
-    pub(crate) span_type: String,
-    pub(crate) value: ScalarValue,
 }

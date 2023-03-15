@@ -255,6 +255,18 @@ mod convert_expanded {
                 None => Cow::Owned(ScalarValue::Null),
             }
         }
+
+        fn expand(&self) -> bool {
+            self.action.expand()
+        }
+
+        fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
+            if let legacy::OpType::MarkBegin(legacy::MarkData { name, .. }) = &self.action {
+                Some(Cow::Borrowed(name))
+            } else {
+                None
+            }
+        }
     }
 
     impl<'a> convert::OpId<&'a ActorId> for &'a legacy::OpId {
@@ -278,7 +290,12 @@ impl From<&Change> for crate::ExpandedChange {
         let operations = c
             .iter_ops()
             .map(|o| crate::legacy::Op {
-                action: crate::types::OpType::from_action_and_value(o.action, o.val),
+                action: crate::legacy::OpType::from_parts(crate::legacy::OpTypeParts {
+                    action: o.action,
+                    value: o.val,
+                    expand: o.expand,
+                    mark_name: o.mark_name,
+                }),
                 insert: o.insert,
                 key: match o.key {
                     StoredKey::Elem(e) if e.is_head() => {

@@ -5,7 +5,9 @@ use serde::{
 };
 
 use super::read_field;
-use crate::legacy::{DataType, Key, ObjType, ObjectId, Op, OpId, OpType, ScalarValue, SortedVec};
+use crate::legacy::{
+    DataType, Key, MarkData, ObjType, ObjectId, Op, OpId, OpType, ScalarValue, SortedVec,
+};
 
 impl Serialize for Op {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -50,6 +52,16 @@ impl Serialize for Op {
             OpType::Increment(n) => op.serialize_field("value", &n)?,
             OpType::Put(ScalarValue::Counter(c)) => op.serialize_field("value", &c.start)?,
             OpType::Put(value) => op.serialize_field("value", &value)?,
+            OpType::MarkBegin(MarkData {
+                name,
+                value,
+                expand,
+            }) => {
+                op.serialize_field("name", &name)?;
+                op.serialize_field("value", &value)?;
+                op.serialize_field("expand", &expand)?
+            }
+            OpType::MarkEnd(expand) => op.serialize_field("expand", &expand)?,
             _ => {}
         }
         op.serialize_field("pred", &self.pred)?;
@@ -71,6 +83,8 @@ pub(crate) enum RawOpType {
     Del,
     Inc,
     Set,
+    MarkBegin,
+    MarkEnd,
 }
 
 impl Serialize for RawOpType {
@@ -86,6 +100,8 @@ impl Serialize for RawOpType {
             RawOpType::Del => "del",
             RawOpType::Inc => "inc",
             RawOpType::Set => "set",
+            RawOpType::MarkBegin => "markBegin",
+            RawOpType::MarkEnd => "markEnd",
         };
         serializer.serialize_str(s)
     }
@@ -104,8 +120,8 @@ impl<'de> Deserialize<'de> for RawOpType {
             "del",
             "inc",
             "set",
-            "mark",
-            "unmark",
+            "markBegin",
+            "markEnd",
         ];
         // TODO: Probably more efficient to deserialize to a `&str`
         let raw_type = String::deserialize(deserializer)?;
@@ -117,6 +133,8 @@ impl<'de> Deserialize<'de> for RawOpType {
             "del" => Ok(RawOpType::Del),
             "inc" => Ok(RawOpType::Inc),
             "set" => Ok(RawOpType::Set),
+            "markBegin" => Ok(RawOpType::MarkBegin),
+            "markEnd" => Ok(RawOpType::MarkEnd),
             other => Err(Error::unknown_variant(other, VARIANTS)),
         }
     }
@@ -189,24 +207,7 @@ impl<'de> Deserialize<'de> for Op {
                     RawOpType::MakeList => OpType::Make(ObjType::List),
                     RawOpType::MakeText => OpType::Make(ObjType::Text),
                     RawOpType::Del => OpType::Delete,
-                    RawOpType::Set => {
-                        let value = if let Some(datatype) = datatype {
-                            let raw_value = value
-                                .ok_or_else(|| Error::missing_field("value"))?
-                                .unwrap_or(ScalarValue::Null);
-                            raw_value.as_datatype(datatype).map_err(|e| {
-                                Error::invalid_value(
-                                    Unexpected::Other(e.unexpected.as_str()),
-                                    &e.expected.as_str(),
-                                )
-                            })?
-                        } else {
-                            value
-                                .ok_or_else(|| Error::missing_field("value"))?
-                                .unwrap_or(ScalarValue::Null)
-                        };
-                        OpType::Put(value)
-                    }
+                    RawOpType::Set => OpType::Put(unwrap_value(value, datatype)?),
                     RawOpType::Inc => match value.flatten() {
                         Some(ScalarValue::Int(n)) => Ok(OpType::Increment(n)),
                         Some(ScalarValue::Uint(n)) => Ok(OpType::Increment(n as i64)),
@@ -230,6 +231,18 @@ impl<'de> Deserialize<'de> for Op {
                         }
                         None => Err(Error::missing_field("value")),
                     }?,
+                    RawOpType::MarkBegin => {
+                        let name = name.ok_or_else(|| Error::missing_field("name"))?;
+                        let name = smol_str::SmolStr::new(name);
+                        let expand = expand.unwrap_or(false);
+                        let value = unwrap_value(value, datatype)?;
+                        OpType::MarkBegin(MarkData {
+                            name,
+                            value,
+                            expand,
+                        })
+                    }
+                    RawOpType::MarkEnd => OpType::MarkEnd(expand.unwrap_or(false)),
                 };
                 Ok(Op {
                     action,
@@ -241,6 +254,27 @@ impl<'de> Deserialize<'de> for Op {
             }
         }
         deserializer.deserialize_struct("Operation", FIELDS, OperationVisitor)
+    }
+}
+
+fn unwrap_value<E: Error>(
+    value: Option<Option<ScalarValue>>,
+    datatype: Option<DataType>,
+) -> Result<ScalarValue, E> {
+    if let Some(datatype) = datatype {
+        let raw_value = value
+            .ok_or_else(|| Error::missing_field("value"))?
+            .unwrap_or(ScalarValue::Null);
+        raw_value.as_datatype(datatype).map_err(|e| {
+            Error::invalid_value(
+                Unexpected::Other(e.unexpected.as_str()),
+                &e.expected.as_str(),
+            )
+        })
+    } else {
+        Ok(value
+            .ok_or_else(|| Error::missing_field("value"))?
+            .unwrap_or(ScalarValue::Null))
     }
 }
 

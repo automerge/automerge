@@ -7,6 +7,9 @@ use crate::transaction::Transactable;
 use crate::*;
 use std::convert::TryInto;
 
+use crate::op_observer::HasPatches;
+use test_log::test;
+
 #[test]
 fn insert_op() -> Result<(), AutomergeError> {
     let mut doc = Automerge::new();
@@ -1479,15 +1482,18 @@ fn observe_counter_change_application_overwrite() {
 
     assert_eq!(
         doc3.observer().take_patches(),
-        vec![Patch::Put {
+        vec![Patch {
             obj: ExId::Root,
             path: vec![],
-            prop: Prop::Map("counter".into()),
-            value: (
-                ScalarValue::Str("mystring".into()).into(),
-                ExId::Id(2, doc2.get_actor().clone(), 1)
-            ),
-            conflict: false
+            action: PatchAction::PutMap {
+                key: "counter".into(),
+                value: (
+                    ScalarValue::Str("mystring".into()).into(),
+                    ExId::Id(2, doc2.get_actor().clone(), 1)
+                ),
+                conflict: false,
+                expose: false
+            }
         }]
     );
 
@@ -1514,29 +1520,29 @@ fn observe_counter_change_application() {
     new_doc.observer().take_patches();
     new_doc.apply_changes(changes).unwrap();
     assert_eq!(
-        new_doc.observer().take_patches(),
+        new_doc
+            .observer()
+            .take_patches()
+            .into_iter()
+            .map(|p| p.action)
+            .collect::<Vec<_>>(),
         vec![
-            Patch::Put {
-                obj: ExId::Root,
-                path: vec![],
-                prop: Prop::Map("counter".into()),
+            PatchAction::PutMap {
+                key: "counter".into(),
                 value: (
                     ScalarValue::counter(1).into(),
                     ExId::Id(1, doc.get_actor().clone(), 0)
                 ),
-                conflict: false
+                conflict: false,
+                expose: false,
             },
-            Patch::Increment {
-                obj: ExId::Root,
-                path: vec![],
+            PatchAction::Increment {
                 prop: Prop::Map("counter".into()),
-                value: (2, ExId::Id(2, doc.get_actor().clone(), 0)),
+                value: 2,
             },
-            Patch::Increment {
-                obj: ExId::Root,
-                path: vec![],
+            PatchAction::Increment {
                 prop: Prop::Map("counter".into()),
-                value: (5, ExId::Id(3, doc.get_actor().clone(), 0)),
+                value: 5,
             }
         ]
     );

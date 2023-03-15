@@ -1941,6 +1941,40 @@ describe('Automerge', () => {
       assert.deepEqual(mat.text, "ab011ij")
     })
 
+    it('propogates exceptions thrown in patch callback', () => {
+      const doc = create(true)
+      doc.enablePatches(true)
+      let mat : any = doc.materialize("/")
+      doc.putObject("/", "text", "abcdefghij")
+      assert.throws(() => {
+        doc.applyPatches(mat, {}, (patches, info) => {
+          throw new RangeError("hello world")
+        })
+      }, /RangeError: hello world/)
+    })
+
+    it('patch callback has correct patch info', () => {
+      const doc = create(true)
+      let mat : any = doc.materialize("/")
+      doc.putObject("/", "text", "abcdefghij")
+
+      let before = doc.materialize("/")
+      let from = doc.getHeads()
+
+      doc.enablePatches(true)
+      doc.splice("/text", 2, 2, "00")
+
+      let after = doc.materialize("/")
+      let to = doc.getHeads()
+
+      doc.applyPatches(mat, {}, (patches, info) => {
+        assert.deepEqual(info.before, before);
+        assert.deepEqual(info.after, after);
+        assert.deepEqual(info.from, from);
+        assert.deepEqual(info.to, to);
+      })
+    })
+
     it('can handle utf16 text', () => {
       const doc = create(true)
       doc.enablePatches(true)

@@ -19,10 +19,11 @@ impl<'a, O1: OpObserver, O2: OpObserver> OpObserver for ComposeObservers<'a, O1,
         objid: crate::ObjId,
         index: usize,
         tagged_value: (crate::Value<'_>, crate::ObjId),
+        conflict: bool,
     ) {
         self.obs1
-            .insert(doc, objid.clone(), index, tagged_value.clone());
-        self.obs2.insert(doc, objid, index, tagged_value);
+            .insert(doc, objid.clone(), index, tagged_value.clone(), conflict);
+        self.obs2.insert(doc, objid, index, tagged_value, conflict);
     }
 
     fn splice_text<R: crate::ReadDoc>(
@@ -82,6 +83,30 @@ impl<'a, O1: OpObserver, O2: OpObserver> OpObserver for ComposeObservers<'a, O1,
         self.obs1
             .increment(doc, objid.clone(), prop.clone(), tagged_value.clone());
         self.obs2.increment(doc, objid, prop, tagged_value);
+    }
+
+    fn mark<'b, R: crate::ReadDoc, M: Iterator<Item = crate::marks::Mark<'b>>>(
+        &mut self,
+        doc: &'b R,
+        objid: crate::ObjId,
+        mark: M,
+    ) {
+        let marks: Vec<_> = mark.collect();
+        self.obs1
+            .mark(doc, objid.clone(), marks.clone().into_iter());
+        self.obs2.mark(doc, objid, marks.into_iter());
+    }
+
+    fn unmark<R: crate::ReadDoc>(
+        &mut self,
+        doc: &R,
+        objid: crate::ObjId,
+        name: &str,
+        start: usize,
+        end: usize,
+    ) {
+        self.obs1.unmark(doc, objid.clone(), name, start, end);
+        self.obs2.unmark(doc, objid, name, start, end);
     }
 
     fn delete_map<R: crate::ReadDoc>(&mut self, doc: &R, objid: crate::ObjId, key: &str) {

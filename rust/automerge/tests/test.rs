@@ -6,7 +6,7 @@ use automerge::{
 use std::fs;
 
 // set up logging for all the tests
-//use test_log::test;
+use test_log::test;
 
 #[allow(unused_imports)]
 use automerge_test::{

@@ -319,8 +319,7 @@ struct CounterData {
 
 #[cfg(test)]
 mod tests {
-    use crate::legacy as amp;
-    use crate::types::{Op, OpId};
+    use crate::types::{Op, OpId, OpType};
 
     use super::*;
 
@@ -328,7 +327,7 @@ mod tests {
         let zero = OpId::new(0, 0);
         Op {
             id: zero,
-            action: amp::OpType::Put(0.into()),
+            action: OpType::Put(0.into()),
             key: zero.into(),
             succ: Default::default(),
             pred: Default::default(),

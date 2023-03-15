@@ -25,6 +25,7 @@ mod opid;
 mod opid_vis;
 mod prop;
 mod prop_at;
+mod seek_mark;
 mod seek_op;
 mod seek_op_with_patch;
 
@@ -46,6 +47,7 @@ pub(crate) use opid::OpIdSearch;
 pub(crate) use opid_vis::OpIdVisSearch;
 pub(crate) use prop::Prop;
 pub(crate) use prop_at::PropAt;
+pub(crate) use seek_mark::SeekMark;
 pub(crate) use seek_op::SeekOp;
 pub(crate) use seek_op_with_patch::SeekOpWithPatch;
 
@@ -287,7 +289,7 @@ pub(crate) struct VisWindow {
 }
 
 impl VisWindow {
-    fn visible_at(&mut self, op: &Op, pos: usize, clock: &Clock) -> bool {
+    pub(crate) fn visible_at(&mut self, op: &Op, pos: usize, clock: &Clock) -> bool {
         if !clock.covers(&op.id) {
             return false;
         }

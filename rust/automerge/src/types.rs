@@ -14,6 +14,7 @@ mod opids;
 pub(crate) use opids::OpIds;
 
 pub(crate) use crate::clock::Clock;
+pub(crate) use crate::marks::MarkData;
 pub(crate) use crate::value::{Counter, ScalarValue, Value};
 
 pub(crate) const HEAD: ElemId = ElemId(OpId(0, 0));
@@ -198,6 +199,8 @@ pub enum OpType {
     Delete,
     Increment(i64),
     Put(ScalarValue),
+    MarkBegin(bool, MarkData),
+    MarkEnd(bool),
 }
 
 impl OpType {
@@ -213,6 +216,7 @@ impl OpType {
             Self::Make(ObjType::Text) => 4,
             Self::Increment(_) => 5,
             Self::Make(ObjType::Table) => 6,
+            Self::MarkBegin(_, _) | Self::MarkEnd(_) => 7,
         }
     }
 
@@ -227,11 +231,17 @@ impl OpType {
                 _ => Err(error::InvalidOpType::NonNumericInc),
             },
             6 => Ok(()),
+            7 => Ok(()),
             _ => Err(error::InvalidOpType::UnknownAction(action)),
         }
     }
 
-    pub(crate) fn from_action_and_value(action: u64, value: ScalarValue) -> OpType {
+    pub(crate) fn from_action_and_value(
+        action: u64,
+        value: ScalarValue,
+        mark_name: Option<smol_str::SmolStr>,
+        expand: bool,
+    ) -> OpType {
         match action {
             0 => Self::Make(ObjType::Map),
             1 => Self::Put(value),
@@ -244,8 +254,26 @@ impl OpType {
                 _ => unreachable!("validate_action_and_value returned NonNumericInc"),
             },
             6 => Self::Make(ObjType::Table),
+            7 => match mark_name {
+                Some(name) => Self::MarkBegin(expand, MarkData { name, value }),
+                None => Self::MarkEnd(expand),
+            },
             _ => unreachable!("validate_action_and_value returned UnknownAction"),
         }
+    }
+
+    pub(crate) fn to_str(&self) -> &str {
+        if let OpType::Put(ScalarValue::Str(s)) = &self {
+            s
+        } else if self.is_mark() {
+            ""
+        } else {
+            "\u{fffc}"
+        }
+    }
+
+    pub(crate) fn is_mark(&self) -> bool {
+        matches!(&self, OpType::MarkBegin(_, _) | OpType::MarkEnd(_))
     }
 }
 
@@ -426,6 +454,13 @@ impl Display for Prop {
 }
 
 impl Key {
+    pub(crate) fn prop_index(&self) -> Option<usize> {
+        match self {
+            Key::Map(n) => Some(*n),
+            Key::Seq(_) => None,
+        }
+    }
+
     pub(crate) fn elemid(&self) -> Option<ElemId> {
         match self {
             Key::Map(_) => None,
@@ -457,6 +492,16 @@ impl OpId {
         self.0
             .cmp(&other.0)
             .then_with(|| actors[self.1 as usize].cmp(&actors[other.1 as usize]))
+    }
+
+    #[inline]
+    pub(crate) fn prev(&self) -> OpId {
+        OpId(self.0 - 1, self.1)
+    }
+
+    #[inline]
+    pub(crate) fn next(&self) -> OpId {
+        OpId(self.0 + 1, self.1)
     }
 }
 
@@ -582,14 +627,20 @@ impl Op {
     }
 
     pub(crate) fn to_str(&self) -> &str {
-        if let OpType::Put(ScalarValue::Str(s)) = &self.action {
-            s
-        } else {
-            "\u{fffc}"
-        }
+        self.action.to_str()
     }
 
     pub(crate) fn visible(&self) -> bool {
+        if self.is_inc() || self.is_mark() {
+            false
+        } else if self.is_counter() {
+            self.succ.len() <= self.incs()
+        } else {
+            self.succ.is_empty()
+        }
+    }
+
+    pub(crate) fn visible_or_mark(&self) -> bool {
         if self.is_inc() {
             false
         } else if self.is_counter() {
@@ -617,6 +668,18 @@ impl Op {
 
     pub(crate) fn is_counter(&self) -> bool {
         matches!(&self.action, OpType::Put(ScalarValue::Counter(_)))
+    }
+
+    pub(crate) fn is_mark(&self) -> bool {
+        self.action.is_mark()
+    }
+
+    pub(crate) fn valid_mark_anchor(&self) -> bool {
+        self.succ.is_empty()
+            && matches!(
+                &self.action,
+                OpType::MarkBegin(true, _) | OpType::MarkEnd(false)
+            )
     }
 
     pub(crate) fn is_noop(&self, action: &OpType) -> bool {
@@ -655,6 +718,10 @@ impl Op {
         match &self.action {
             OpType::Make(obj_type) => Value::Object(*obj_type),
             OpType::Put(scalar) => Value::Scalar(Cow::Borrowed(scalar)),
+            OpType::MarkBegin(_, mark) => {
+                Value::Scalar(Cow::Owned(format!("markBegin={}", mark.value).into()))
+            }
+            OpType::MarkEnd(_) => Value::Scalar(Cow::Owned("markEnd".into())),
             _ => panic!("cant convert op into a value - {:?}", self),
         }
     }
@@ -675,6 +742,8 @@ impl Op {
             OpType::Make(obj) => format!("make{}", obj),
             OpType::Increment(val) => format!("inc:{}", val),
             OpType::Delete => "del".to_string(),
+            OpType::MarkBegin(_, _) => "markBegin".to_string(),
+            OpType::MarkEnd(_) => "markEnd".to_string(),
         }
     }
 }

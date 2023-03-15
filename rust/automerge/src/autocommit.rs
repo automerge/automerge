@@ -1,6 +1,7 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
+use crate::marks::{ExpandMark, Mark};
 use crate::op_observer::{BranchableObserver, OpObserver};
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
@@ -281,6 +282,11 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
     }
 
     #[doc(hidden)]
+    pub fn import_obj(&self, s: &str) -> Result<ExId, AutomergeError> {
+        self.doc.import_obj(s)
+    }
+
+    #[doc(hidden)]
     pub fn dump(&mut self) {
         self.ensure_transaction_closed();
         self.doc.dump()
@@ -439,6 +445,18 @@ impl<Obs: Observation> ReadDoc for AutoCommitWithObs<Obs> {
 
     fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
         self.doc.object_type(obj)
+    }
+
+    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
+        self.doc.marks(obj)
+    }
+
+    fn marks_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<Mark<'_>>, AutomergeError> {
+        self.doc.marks_at(obj, heads)
     }
 
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
@@ -618,6 +636,42 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
             pos,
             del,
             text,
+        )
+    }
+
+    fn mark<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        mark: Mark<'_>,
+        expand: ExpandMark,
+    ) -> Result<(), AutomergeError> {
+        self.ensure_transaction_open();
+        let (current, tx) = self.transaction.as_mut().unwrap();
+        tx.mark(
+            &mut self.doc,
+            current.observer(),
+            obj.as_ref(),
+            mark,
+            expand,
+        )
+    }
+
+    fn unmark<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        key: &str,
+        start: usize,
+        end: usize,
+    ) -> Result<(), AutomergeError> {
+        self.ensure_transaction_open();
+        let (current, tx) = self.transaction.as_mut().unwrap();
+        tx.unmark(
+            &mut self.doc,
+            current.observer(),
+            obj.as_ref(),
+            key,
+            start,
+            end,
         )
     }
 

@@ -1,4 +1,5 @@
 use crate::exid::ExId;
+use crate::marks::{ExpandMark, Mark};
 use crate::{AutomergeError, ChangeHash, ObjType, Prop, ReadDoc, ScalarValue};
 
 /// A way of mutating a document within a single change.
@@ -86,6 +87,21 @@ pub trait Transactable: ReadDoc {
         pos: usize,
         del: usize,
         text: &str,
+    ) -> Result<(), AutomergeError>;
+
+    fn mark<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        mark: Mark<'_>,
+        expand: ExpandMark,
+    ) -> Result<(), AutomergeError>;
+
+    fn unmark<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        key: &str,
+        start: usize,
+        end: usize,
     ) -> Result<(), AutomergeError>;
 
     /// The heads this transaction will be based on

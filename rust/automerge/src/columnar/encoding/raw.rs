@@ -59,6 +59,10 @@ impl<'a> RawDecoder<'a> {
     pub(crate) fn done(&self) -> bool {
         self.offset >= self.data.len()
     }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
 }
 
 impl<'a> From<&'a [u8]> for RawDecoder<'a> {

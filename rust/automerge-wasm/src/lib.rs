@@ -25,11 +25,13 @@
     while_true
 )]
 #![allow(clippy::unused_unit)]
+use am::marks::Mark;
 use am::transaction::CommitOptions;
 use am::transaction::{Observed, Transactable, UnObserved};
 use am::ScalarValue;
 use automerge as am;
-use automerge::{sync::SyncDoc, Change, ObjId, Prop, ReadDoc, TextEncoding, Value, ROOT};
+use automerge::{sync::SyncDoc, Change, Prop, ReadDoc, TextEncoding, Value, ROOT};
+use automerge::{ToggleObserver, VecOpObserver16};
 use js_sys::{Array, Function, Object, Uint8Array};
 use serde::ser::Serialize;
 use std::borrow::Cow;
@@ -40,14 +42,10 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 mod interop;
-mod observer;
-mod sequence_tree;
 mod sync;
 mod value;
 
-use observer::Observer;
-
-use interop::{alloc, get_heads, import_obj, js_set, to_js_err, to_prop, AR, JS};
+use interop::{alloc, get_heads, import_obj, js_get, js_set, to_js_err, to_prop, AR, JS};
 use sync::SyncState;
 use value::Datatype;
 
@@ -60,7 +58,7 @@ macro_rules! log {
     };
 }
 
-type AutoCommit = am::AutoCommitWithObs<Observed<Observer>>;
+type AutoCommit = am::AutoCommitWithObs<Observed<ToggleObserver<VecOpObserver16>>>;
 
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
@@ -82,6 +80,15 @@ impl std::default::Default for TextRepresentation {
     }
 }
 
+impl From<TextRepresentation> for am::op_observer::TextRepresentation {
+    fn from(tr: TextRepresentation) -> Self {
+        match tr {
+            TextRepresentation::Array => am::op_observer::TextRepresentation::Array,
+            TextRepresentation::String => am::op_observer::TextRepresentation::String,
+        }
+    }
+}
+
 #[wasm_bindgen]
 #[derive(Debug)]
 pub struct Automerge {
@@ -97,7 +104,10 @@ impl Automerge {
         actor: Option<String>,
         text_rep: TextRepresentation,
     ) -> Result<Automerge, error::BadActorId> {
-        let mut doc = AutoCommit::default().with_encoding(TextEncoding::Utf16);
+        let mut doc = AutoCommit::default()
+            .with_observer(ToggleObserver::default().with_text_rep(text_rep.into()))
+            .with_encoding(TextEncoding::Utf16);
+        doc.observer().set_text_rep(text_rep.into());
         if let Some(a) = actor {
             let a = automerge::ActorId::from(hex::decode(a)?.to_vec());
             doc.set_actor(a);
@@ -545,8 +555,9 @@ impl Automerge {
         let enable = enable
             .as_bool()
             .ok_or_else(|| to_js_err("must pass a bool to enablePatches"))?;
-        let old_enabled = self.doc.observer().enable(enable);
-        self.doc.observer().set_text_rep(self.text_rep);
+        let heads = self.doc.get_heads();
+        let old_enabled = self.doc.observer().enable(enable, heads);
+        self.doc.observer().set_text_rep(self.text_rep.into());
         Ok(old_enabled.into())
     }
 
@@ -571,11 +582,12 @@ impl Automerge {
         object: JsValue,
         meta: JsValue,
         callback: JsValue,
-    ) -> Result<JsValue, error::ApplyPatch> {
+    ) -> Result<JsValue, JsValue> {
         let mut object = object
             .dyn_into::<Object>()
             .map_err(|_| error::ApplyPatch::NotObjectd)?;
-        let patches = self.doc.observer().take_patches();
+        let end_heads = self.doc.get_heads();
+        let (patches, begin_heads) = self.doc.observer().take_patches(end_heads.clone());
         let callback = callback.dyn_into::<Function>().ok();
 
         // even if there are no patches we may need to update the meta object
@@ -594,18 +606,23 @@ impl Automerge {
             object = self.apply_patch(object, p, 0, &meta, &mut exposed)?;
         }
 
+        self.finalize_exposed(&object, exposed, &meta)?;
+
         if let Some(c) = &callback {
             if !patches.is_empty() {
                 let patches: Array = patches
                     .into_iter()
+                    .map(interop::JsPatch)
                     .map(JsValue::try_from)
                     .collect::<Result<_, _>>()?;
-                c.call3(&JsValue::undefined(), &patches.into(), &before, &object)
-                    .map_err(error::ApplyPatch::PatchCallback)?;
+                let info = Object::new();
+                js_set(&info, "before", &before)?;
+                js_set(&info, "after", &object)?;
+                js_set(&info, "from", AR::from(begin_heads))?;
+                js_set(&info, "to", AR::from(end_heads))?;
+                c.call2(&JsValue::undefined(), &patches.into(), &info)?;
             }
         }
-
-        self.finalize_exposed(&object, exposed, &meta)?;
 
         Ok(object.into())
     }
@@ -616,10 +633,11 @@ impl Automerge {
         // committed.
         // If we pop the patches then we won't be able to revert them.
 
-        let patches = self.doc.observer().take_patches();
+        let heads = self.doc.get_heads();
+        let (patches, _heads) = self.doc.observer().take_patches(heads);
         let result = Array::new();
         for p in patches {
-            result.push(&p.try_into()?);
+            result.push(&interop::JsPatch(p).try_into()?);
         }
         Ok(result)
     }
@@ -702,17 +720,12 @@ impl Automerge {
     #[wasm_bindgen(js_name = getHeads)]
     pub fn get_heads(&mut self) -> Array {
         let heads = self.doc.get_heads();
-        let heads: Array = heads
-            .iter()
-            .map(|h| JsValue::from_str(&hex::encode(h.0)))
-            .collect();
-        heads
+        AR::from(heads).into()
     }
 
     #[wasm_bindgen(js_name = getActorId)]
     pub fn get_actor_id(&self) -> String {
-        let actor = self.doc.get_actor();
-        actor.to_string()
+        self.doc.get_actor().to_string()
     }
 
     #[wasm_bindgen(js_name = getLastLocalChange)]
@@ -775,7 +788,8 @@ impl Automerge {
     ) -> Result<JsValue, error::Materialize> {
         let (obj, obj_type) = self.import(obj).unwrap_or((ROOT, am::ObjType::Map));
         let heads = get_heads(heads)?;
-        let _patches = self.doc.observer().take_patches(); // throw away patches
+        let current_heads = self.doc.get_heads();
+        let _patches = self.doc.observer().take_patches(current_heads); // throw away patches
         Ok(self.export_object(&obj, obj_type.into(), heads.as_ref(), &meta)?)
     }
 
@@ -785,6 +799,77 @@ impl Automerge {
         let options = CommitOptions { message, time };
         let hash = self.doc.empty_change(options);
         JsValue::from_str(&hex::encode(hash))
+    }
+
+    pub fn mark(
+        &mut self,
+        obj: JsValue,
+        range: JsValue,
+        name: JsValue,
+        value: JsValue,
+        datatype: JsValue,
+    ) -> Result<(), error::Mark> {
+        let (obj, _) = self.import(obj)?;
+
+        let range = range
+            .dyn_into::<Object>()
+            .map_err(|_| error::Mark::InvalidRange)?;
+
+        let start = js_get(&range, "start").map_err(|_| error::Mark::InvalidStart)?;
+        let start = start.try_into().map_err(|_| error::Mark::InvalidStart)?;
+
+        let end = js_get(&range, "end").map_err(|_| error::Mark::InvalidEnd)?;
+        let end = end.try_into().map_err(|_| error::Mark::InvalidEnd)?;
+
+        let expand = js_get(&range, "expand").ok();
+        let expand = expand.map(|s| s.try_into()).transpose()?;
+        let expand = expand.unwrap_or_default();
+
+        let name = name.as_string().ok_or(error::Mark::InvalidName)?;
+
+        let value = self
+            .import_scalar(&value, &datatype.as_string())
+            .ok_or_else(|| error::Mark::InvalidValue)?;
+
+        self.doc
+            .mark(&obj, Mark::new(name, value, start, end), expand)?;
+        Ok(())
+    }
+
+    pub fn unmark(
+        &mut self,
+        obj: JsValue,
+        key: JsValue,
+        start: f64,
+        end: f64,
+    ) -> Result<(), JsValue> {
+        let (obj, _) = self.import(obj)?;
+        let key = key.as_string().ok_or("key must be a string")?;
+        self.doc
+            .unmark(&obj, &key, start as usize, end as usize)
+            .map_err(to_js_err)?;
+        Ok(())
+    }
+
+    pub fn marks(&mut self, obj: JsValue, heads: Option<Array>) -> Result<JsValue, JsValue> {
+        let (obj, _) = self.import(obj)?;
+        let heads = get_heads(heads)?;
+        let marks = if let Some(heads) = heads {
+            self.doc.marks_at(obj, &heads).map_err(to_js_err)?
+        } else {
+            self.doc.marks(obj).map_err(to_js_err)?
+        };
+        let result = Array::new();
+        for m in marks {
+            let mark = Object::new();
+            let (_datatype, value) = alloc(&m.value().clone().into(), self.text_rep);
+            js_set(&mark, "name", m.name())?;
+            js_set(&mark, "value", value)?;
+            js_set(&mark, "start", m.start as i32)?;
+            js_set(&mark, "end", m.end as i32)?;
+            result.push(&mark.into());
+        }
+        Ok(result.into())
     }
 }
 
@@ -812,7 +897,7 @@ pub fn load(
         TextRepresentation::Array
     };
     let mut doc = am::AutoCommitWithObs::<UnObserved>::load(&data)?
-        .with_observer(Observer::default().with_text_rep(text_rep))
+        .with_observer(ToggleObserver::default().with_text_rep(text_rep.into()))
         .with_encoding(TextEncoding::Utf16);
     if let Some(s) = actor {
         let actor =
@@ -1149,6 +1234,32 @@ pub mod error {
 
     impl From<DecodeChange> for JsValue {
         fn from(e: DecodeChange) -> Self {
+            JsValue::from(e.to_string())
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum Mark {
+        #[error("invalid object id: {0}")]
+        ImportObj(#[from] interop::error::ImportObj),
+        #[error(transparent)]
+        Automerge(#[from] AutomergeError),
+        #[error(transparent)]
+        Expand(#[from] interop::error::BadExpand),
+        #[error("Invalid mark name")]
+        InvalidName,
+        #[error("Invalid mark value")]
+        InvalidValue,
+        #[error("start must be a number")]
+        InvalidStart,
+        #[error("end must be a number")]
+        InvalidEnd,
+        #[error("range must be an object")]
+        InvalidRange,
+    }
+
+    impl From<Mark> for JsValue {
+        fn from(e: Mark) -> Self {
             JsValue::from(e.to_string())
         }
     }

@@ -110,6 +110,12 @@ impl<'a> TreeQuery<'a> for InsertNth {
             self.last_seen = None;
             self.last_insert = element.elemid();
         }
+        /*-------------------*/
+        if self.valid.is_some() && element.valid_mark_anchor() {
+            self.last_valid_insert = Some(element.elemid_or_key());
+            self.valid = None;
+        }
+        /*-------------------*/
         if self.last_seen.is_none() && element.visible() {
             if self.seen >= self.target {
                 return QueryResult::Finish;
