@@ -3,7 +3,7 @@ name = "automerge-test"
 version = "0.2.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/automerge/automerge-rs"
+repository = "https://github.com/automerge/automerge"
 rust-version = "1.57.0"
 description = "Utilities for testing automerge libraries"
 
