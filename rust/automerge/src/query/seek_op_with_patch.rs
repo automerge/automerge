@@ -98,30 +98,12 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                 } else {
                     self.pos += child.len();
 
-                    // When we skip over a subtree, we need to count the number of visible list
-                    // elements we're skipping over. Each node stores the number of visible
-                    // elements it contains. However, it could happen that a visible element is
-                    // split across two tree nodes. To avoid double-counting in this situation, we
-                    // subtract one if the last visible element also appears in this tree node.
                     let mut num_vis = child.index.visible_len(self.encoding);
-                    if num_vis > 0 {
-                        // FIXME: I think this is wrong: we should subtract one only if this
-                        // subtree contains a *visible* (i.e. empty succs) operation for the list
-                        // element with elemId `last_seen`; this will subtract one even if all
-                        // values for this list element have been deleted in this subtree.
-                        if let Some(last_seen) = self.last_seen {
-                            if child.index.has_visible(&last_seen) {
-                                num_vis -= 1;
-                            }
-                        }
-                        self.seen += num_vis;
+                    self.seen += num_vis;
 
-                        // FIXME: this is also wrong: `last_seen` needs to be the elemId of the
-                        // last *visible* list element in this subtree, but I think this returns
-                        // the last operation's elemId regardless of whether it's visible or not.
-                        // This will lead to incorrect counting if `last_seen` is not visible: it's
-                        // not counted towards `num_vis`, so we shouldn't be subtracting 1.
-                        self.last_seen = Some(ops[child.last()].elemid_or_key());
+                    let last_elemid = ops[child.last()].elemid_or_key();
+                    if child.index.has_visible(&last_elemid) {
+                        self.last_seen = Some(last_elemid);
                     }
                     QueryResult::Next
                 }

@@ -1558,3 +1558,35 @@ fn get_changes_heads_empty() {
     let heads = doc.get_heads();
     assert_eq!(doc.get_changes(&heads).unwrap(), Vec::<&Change>::new());
 }
+
+#[test]
+fn big_list() {
+    let mut doc = Automerge::new();
+    let mut tx = doc.transaction();
+    let list_id = tx
+        .put_object(&ROOT, "list", ObjType::List)
+        .unwrap();
+    tx.commit();
+
+    let change1 = doc.get_last_local_change().unwrap().clone();
+    let mut tx = doc.transaction();
+
+    const N: usize = B;
+    for i in 0..=N {
+        tx.insert(&list_id, i, ScalarValue::Null).unwrap();
+    }
+    for i in 0..=N {
+        tx.put_object(&list_id, i, ObjType::Map).unwrap();
+    }
+    tx.commit();
+
+    let change2 = doc.get_last_local_change().unwrap().clone();
+    let mut new_doc = Automerge::new();
+    let mut obs = VecOpObserver::default();
+    new_doc.apply_changes_with(vec![change1], Some(&mut obs)).unwrap();
+    new_doc.apply_changes_with(vec![change2], Some(&mut obs)).unwrap();
+
+    let patches = obs.take_patches();
+    let matches = matches!(patches.last().unwrap(), Patch::Put { prop: Prop::Seq(N), .. });
+    assert!(matches);
+}
