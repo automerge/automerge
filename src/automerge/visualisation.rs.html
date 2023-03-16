@@ -281,6 +281,7 @@
 <a href="#280" id="280">280</a>
 <a href="#281" id="281">281</a>
 <a href="#282" id="282">282</a>
+<a href="#283" id="283">283</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::types::{ObjId, Op};
 <span class="kw">use </span>fxhash::FxHasher;
 <span class="kw">use </span>std::{borrow::Cow, collections::HashMap, hash::BuildHasherDefault};
@@ -529,6 +530,7 @@
     ) -&gt; <span class="self">Self </span>{
         <span class="kw">let </span>op_description = <span class="kw">match </span><span class="kw-2">&amp;</span>op.action {
             <span class="kw">crate</span>::OpType::Delete =&gt; <span class="string">&quot;del&quot;</span>.to_string(),
+            <span class="kw">crate</span>::OpType::Put(<span class="kw">crate</span>::ScalarValue::F64(v)) =&gt; <span class="macro">format!</span>(<span class="string">&quot;set {:.2}&quot;</span>, v),
             <span class="kw">crate</span>::OpType::Put(v) =&gt; <span class="macro">format!</span>(<span class="string">&quot;set {}&quot;</span>, v),
             <span class="kw">crate</span>::OpType::Make(obj) =&gt; <span class="macro">format!</span>(<span class="string">&quot;make {}&quot;</span>, obj),
             <span class="kw">crate</span>::OpType::Increment(v) =&gt; <span class="macro">format!</span>(<span class="string">&quot;inc {}&quot;</span>, v),
