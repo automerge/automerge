@@ -81,6 +81,8 @@ pub(crate) struct Reconstructed<Output> {
     pub(crate) result: Output,
     /// The heads of the document
     pub(crate) heads: BTreeSet<ChangeHash>,
+    /// The heads that were encoded in the document
+    pub(crate) encoded_heads: BTreeSet<ChangeHash>,
 }
 
 #[derive(Debug)]
@@ -208,16 +210,14 @@ pub(crate) fn reconstruct_document<'a, O: DocObserver>(
 
     let super::change_collector::CollectedChanges { history, heads } =
         collector.finish(&metadata)?;
-    if matches!(mode, VerificationMode::Check) {
-        let expected_heads: BTreeSet<_> = doc.heads().iter().cloned().collect();
-        if expected_heads != heads {
-            tracing::error!(?expected_heads, ?heads, "mismatching heads");
-            return Err(Error::MismatchingHeads(MismatchedHeads {
-                changes: history,
-                expected_heads,
-                derived_heads: heads,
-            }));
-        }
+    let encoded_heads = doc.heads().iter().cloned().collect();
+    if matches!(mode, VerificationMode::Check) && encoded_heads != heads {
+        tracing::error!(?encoded_heads, ?heads, "mismatching heads");
+        return Err(Error::MismatchingHeads(MismatchedHeads {
+            changes: history,
+            expected_heads: encoded_heads,
+            derived_heads: heads,
+        }));
     }
     let result = observer.finish(metadata);
 
@@ -226,6 +226,7 @@ pub(crate) fn reconstruct_document<'a, O: DocObserver>(
         changes: history.into_iter().map(Change::new).collect(),
         heads,
         max_op,
+        encoded_heads,
     })
 }
 

@@ -7,6 +7,7 @@ use std::ops::RangeBounds;
 use itertools::Itertools;
 
 use crate::change_graph::ChangeGraph;
+use crate::clocks::Clocks;
 use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
 use crate::keys::Keys;
@@ -23,8 +24,8 @@ use crate::types::{
     OpId, OpType, ScalarValue, TextEncoding, Value,
 };
 use crate::{
-    query, AutomergeError, Change, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType,
-    Prop, ReadDoc, Values,
+    doctor, query, AutomergeError, Change, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt,
+    ObjType, Prop, ReadDoc, Values,
 };
 
 mod current_state;
@@ -477,38 +478,7 @@ impl Automerge {
         let mut am = match first_chunk {
             storage::Chunk::Document(d) => {
                 tracing::trace!("first chunk is document chunk, inflating");
-                let storage::load::Reconstructed {
-                    max_op,
-                    result: op_set,
-                    changes,
-                    heads,
-                } = storage::load::reconstruct_document(&d, mode, OpSet::builder())
-                    .map_err(|e| load::Error::InflateDocument(Box::new(e)))?;
-                let mut hashes_by_index = HashMap::new();
-                let mut actor_to_history: HashMap<usize, Vec<usize>> = HashMap::new();
-                let mut change_graph = ChangeGraph::new();
-                for (index, change) in changes.iter().enumerate() {
-                    // SAFETY: This should be fine because we just constructed an opset containing
-                    // all the changes
-                    let actor_index = op_set.m.actors.lookup(change.actor_id()).unwrap();
-                    actor_to_history.entry(actor_index).or_default().push(index);
-                    hashes_by_index.insert(index, change.hash());
-                    change_graph.add_change(change, actor_index)?;
-                }
-                let history_index = hashes_by_index.into_iter().map(|(k, v)| (v, k)).collect();
-                Self {
-                    queue: vec![],
-                    history: changes,
-                    history_index,
-                    states: actor_to_history,
-                    change_graph,
-                    ops: op_set,
-                    deps: heads.into_iter().collect(),
-                    saved: Default::default(),
-                    actor: Actor::Unused(ActorId::random()),
-                    max_op,
-                    text_encoding: Default::default(),
-                }
+                Self::load_doc_chunk(d, mode)?.0
             }
             storage::Chunk::Change(stored_change) => {
                 tracing::trace!("first chunk is change chunk");
@@ -590,6 +560,48 @@ impl Automerge {
         self.apply_changes_with(changes, op_observer)?;
         let delta = self.ops.len() - start;
         Ok(delta)
+    }
+
+    fn load_doc_chunk(
+        d: crate::storage::Document<'_>,
+        mode: VerificationMode,
+    ) -> Result<(Self, BTreeSet<ChangeHash>), AutomergeError> {
+        let storage::load::Reconstructed {
+            max_op,
+            result: op_set,
+            changes,
+            heads,
+            encoded_heads,
+        } = storage::load::reconstruct_document(&d, mode, OpSet::builder())
+            .map_err(|e| load::Error::InflateDocument(Box::new(e)))?;
+        let mut hashes_by_index = HashMap::new();
+        let mut actor_to_history: HashMap<usize, Vec<usize>> = HashMap::new();
+        let mut change_graph = ChangeGraph::new();
+        for (index, change) in changes.iter().enumerate() {
+            // SAFETY: This should be fine because we just constructed an opset containing
+            // all the changes
+            let actor_index = op_set.m.actors.lookup(change.actor_id()).unwrap();
+            actor_to_history.entry(actor_index).or_default().push(index);
+            hashes_by_index.insert(index, change.hash());
+            change_graph.add_change(change, actor_index)?;
+        }
+        let history_index = hashes_by_index.into_iter().map(|(k, v)| (v, k)).collect();
+        Ok((
+            Self {
+                queue: vec![],
+                history: changes,
+                history_index,
+                states: actor_to_history,
+                change_graph,
+                ops: op_set,
+                deps: heads.into_iter().collect(),
+                saved: Default::default(),
+                actor: Actor::Unused(ActorId::random()),
+                max_op,
+                text_encoding: Default::default(),
+            },
+            encoded_heads,
+        ))
     }
 
     fn duplicate_seq(&self, change: &Change) -> bool {
@@ -886,6 +898,26 @@ impl Automerge {
         self.change_graph.clock_for_heads(heads)
     }
 
+    pub(crate) fn change_of(&self, opid: OpId) -> Option<&Change> {
+        let changes_for_actor = &self.states[&opid.actor()];
+        for change_index in changes_for_actor.iter().rev() {
+            let change = &self.history[*change_index];
+            if u64::from(change.start_op()) <= opid.counter() && change.max_op() >= opid.counter() {
+                return Some(change);
+            }
+        }
+        None
+    }
+
+    pub(crate) fn build_clocks(&self) -> Clocks {
+        let mut clocks = Clocks::new();
+        for change in &self.history {
+            let actor_index = self.ops.m.actors.lookup(change.actor_id()).unwrap();
+            clocks.add_change(change, actor_index).unwrap();
+        }
+        clocks
+    }
+
     fn get_hash(&self, actor: usize, seq: u64) -> Result<ChangeHash, AutomergeError> {
         self.states
             .get(&actor)
@@ -1169,6 +1201,83 @@ impl Automerge {
             .into_iter()
             .filter_map(|h| other.get_change_by_hash(&h))
             .collect()
+    }
+
+    pub(crate) fn changes_topo(&self) -> impl Iterator<Item = &Change> {
+        self.change_graph.topo().map(|h| {
+            let idx = self.history_index.get(h).unwrap();
+            &self.history[*idx]
+        })
+    }
+
+    /// Attempt to repair a corrupted document
+    ///
+    /// If you have a document which fails to load, throwing a "mismatched heads error", then this
+    /// function _may_ be able to repair it. If a repair is possible this will return
+    /// `Ok(Some(repaired_document))`, otherwise it will return `Ok(None)`.
+    ///
+    /// Note that `data` must contain a single chunk.
+    pub fn repair(data: &[u8]) -> Result<Option<Self>, crate::error::RepairError> {
+        if data.is_empty() {
+            tracing::trace!("no data, nothing to do");
+            return Ok(Some(Self::new()));
+        }
+        tracing::trace!("loading first chunk");
+        let (remaining, first_chunk) = storage::Chunk::parse(storage::parse::Input::new(data))
+            .map_err(|e| crate::error::RepairError::Parse(e.to_string()))?;
+        if !first_chunk.checksum_valid() {
+            return Err(crate::error::RepairError::BadCheckSum);
+        }
+        if !remaining.is_empty() {
+            return Err(crate::error::RepairError::MultipleChunks);
+        }
+
+        let (mut doc, encoded_heads) = match first_chunk {
+            storage::Chunk::Document(d) => Self::load_doc_chunk(d, VerificationMode::DontCheck)?,
+            _ => return Err(crate::error::RepairError::NotADocChunk),
+        };
+        let derived_heads = doc
+            .get_heads()
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<ChangeHash>>();
+        if encoded_heads == derived_heads {
+            tracing::info!("heads matched already, nothing to do");
+            return Ok(Some(doc));
+        }
+
+        // Update the opset to repair anything we think might be wrong
+        doctor::heal(&mut doc);
+
+        // Now rebuild the change log to match the changes in the opset
+        let crate::storage::Rebuilt {
+            heads,
+            changes,
+            change_graph,
+        } = crate::storage::rebuild_changelog(&doc);
+        doc.deps = heads.into_iter().map(|h| h.0).collect();
+        doc.history_index = doc
+            .history
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.hash(), i))
+            .collect();
+        doc.change_graph = change_graph;
+        doc.history = changes;
+
+        // Check if we managed to fix things
+        if doc
+            .get_heads()
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<ChangeHash>>()
+            != encoded_heads
+        {
+            tracing::info!(expected_heads=?encoded_heads, heads=?doc.get_heads(), "repair failed");
+            Ok(None)
+        } else {
+            Ok(Some(doc))
+        }
     }
 }
 

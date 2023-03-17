@@ -6,6 +6,7 @@ use clap::{
     Parser,
 };
 use is_terminal::IsTerminal;
+use tracing_subscriber::EnvFilter;
 
 mod color_json;
 mod examine;
@@ -13,6 +14,7 @@ mod examine_sync;
 mod export;
 mod import;
 mod merge;
+mod repair;
 
 #[derive(Parser, Debug)]
 #[clap(about = "Automerge CLI")]
@@ -112,6 +114,8 @@ enum Command {
     /// Read an automerge document and print a JSON representation of the changes in it to stdout
     Examine {
         input_file: Option<PathBuf>,
+        /// Whether to verify the head hashes of a compressed document
+        #[clap(long, action = clap::ArgAction::SetFalse)]
         skip_verifying_heads: SkipVerifyFlag,
     },
 
@@ -127,6 +131,9 @@ enum Command {
         /// The file(s) to compact. If empty assumes stdin
         input: Vec<PathBuf>,
     },
+
+    /// Attempt to repair a document which has mismatching heads
+    Repair { input_file: Option<PathBuf> },
 }
 
 fn open_file_or_stdin(maybe_path: Option<PathBuf>) -> Result<Box<dyn std::io::Read>> {
@@ -156,7 +163,10 @@ fn create_file_or_stdout(maybe_path: Option<PathBuf>) -> Result<Box<dyn std::io:
 }
 
 fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_writer(std::io::stderr)
+        .init();
     let opts = Opts::parse();
     match opts.cmd {
         Command::Export {
@@ -234,6 +244,12 @@ fn main() -> Result<()> {
                     eprintln!("Failed to merge: {}", e);
                 }
             };
+            Ok(())
+        }
+        Command::Repair { input_file } => {
+            let in_buffer = open_file_or_stdin(input_file)?;
+            let out_buffer = std::io::stdout();
+            repair::repair(in_buffer, out_buffer, std::io::stdout().is_terminal());
             Ok(())
         }
     }

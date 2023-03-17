@@ -105,3 +105,17 @@ pub enum InvalidOpType {
     #[error("non numeric argument for inc op")]
     NonNumericInc,
 }
+
+#[derive(Error, Debug)]
+pub enum RepairError {
+    #[error("not a document chunk")]
+    NotADocChunk,
+    #[error("bad checksum")]
+    BadCheckSum,
+    #[error(transparent)]
+    Automerge(#[from] AutomergeError),
+    #[error("multiple chunks, can only repair a single document chunk")]
+    MultipleChunks,
+    #[error("unable to parse: {0}")]
+    Parse(String),
+}

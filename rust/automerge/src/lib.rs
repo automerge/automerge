@@ -246,8 +246,10 @@ mod autoserde;
 mod change;
 mod change_graph;
 mod clock;
+mod clocks;
 mod columnar;
 mod convert;
+pub mod doctor;
 mod error;
 mod exid;
 mod indexed_cache;
@@ -295,6 +297,7 @@ pub use op_observer::{
 };
 pub use parents::{Parent, Parents};
 pub use read::ReadDoc;
+pub use storage::VerificationMode;
 pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, TextEncoding};
 pub use value::{ScalarValue, Value};
 pub use values::Values;

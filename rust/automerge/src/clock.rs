@@ -58,6 +58,18 @@ impl Clock {
             .or_insert(data);
     }
 
+    pub(crate) fn set(&mut self, actor_index: usize, counter: usize) {
+        self.0.entry(actor_index).and_modify(|d| {
+            d.max_op = counter as u64;
+        });
+    }
+
+    pub(crate) fn merge(&mut self, other: &Self) {
+        for (actor, data) in &other.0 {
+            self.include(*actor, *data);
+        }
+    }
+
     pub(crate) fn covers(&self, id: &OpId) -> bool {
         if let Some(data) = self.0.get(&id.actor()) {
             data.max_op >= id.counter()
