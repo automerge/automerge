@@ -1,9 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+#[cfg(feature = "optree-visualisation")]
+use std::collections::HashMap;
+
 use crate::{
     clock::{Clock, ClockData},
     Change, ChangeHash,
 };
+
+#[cfg(feature = "optree-visualisation")]
+mod visualise;
 
 /// The graph of changes
 ///
@@ -18,7 +24,7 @@ pub(crate) struct ChangeGraph {
     nodes_by_hash: BTreeMap<ChangeHash, NodeIdx>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct NodeIdx(u32);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -29,10 +35,40 @@ struct HashIdx(u32);
 
 #[derive(Debug, Clone)]
 struct Edge {
-    // Edges are always child -> parent so we only store the target, the child is implicit
-    // as you get the edge from the child
-    target: NodeIdx,
-    next: Option<EdgeIdx>,
+    parent: NodeIdx,
+    child: NodeIdx,
+    next: Edges,
+}
+
+impl Edge {
+    fn next(&self) -> Option<EdgeIdx> {
+        self.next.0
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Edges(Option<EdgeIdx>);
+
+impl Edges {
+    fn empty() -> Self {
+        Self(None)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_none()
+    }
+
+    fn add_edge(&mut self, new_edge_idx: EdgeIdx, edges: &mut [Edge]) {
+        if let Some(edge_idx) = self.0 {
+            let mut edge = &mut edges[edge_idx.0 as usize];
+            while let Some(next) = edge.next() {
+                edge = &mut edges[next.0 as usize];
+            }
+            edge.next = Edges(Some(new_edge_idx));
+        } else {
+            self.0 = Some(new_edge_idx);
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -41,7 +77,8 @@ struct ChangeNode {
     actor_index: usize,
     seq: u64,
     max_op: u64,
-    parents: Option<EdgeIdx>,
+    parents: Edges,
+    children: Edges,
 }
 
 impl ChangeGraph {
@@ -84,7 +121,8 @@ impl ChangeGraph {
             actor_index,
             seq: change.seq(),
             max_op: change.max_op(),
-            parents: None,
+            parents: Edges::empty(),
+            children: Edges::empty(),
         });
         idx
     }
@@ -96,33 +134,44 @@ impl ChangeGraph {
     }
 
     fn add_parent(&mut self, child_idx: NodeIdx, parent_idx: NodeIdx) {
-        let new_edge_idx = EdgeIdx(self.edges.len() as u32);
-        let new_edge = Edge {
-            target: parent_idx,
-            next: None,
+        let child_edge_idx = EdgeIdx(self.edges.len() as u32);
+        let child_edge = Edge {
+            parent: parent_idx,
+            child: child_idx,
+            next: Edges::empty(),
         };
-        self.edges.push(new_edge);
+        self.edges.push(child_edge);
 
         let child = &mut self.nodes[child_idx.0 as usize];
-        if let Some(edge_idx) = child.parents {
-            let mut edge = &mut self.edges[edge_idx.0 as usize];
-            while let Some(next) = edge.next {
-                edge = &mut self.edges[next.0 as usize];
-            }
-            edge.next = Some(new_edge_idx);
-        } else {
-            child.parents = Some(new_edge_idx);
-        }
+        child.parents.add_edge(child_edge_idx, &mut self.edges);
+
+        let parent_edge_idx = EdgeIdx(self.edges.len() as u32);
+        let parent_edge = Edge {
+            parent: parent_idx,
+            child: child_idx,
+            next: Edges::empty(),
+        };
+        self.edges.push(parent_edge);
+
+        let parent = &mut self.nodes[parent_idx.0 as usize];
+        parent.children.add_edge(parent_edge_idx, &mut self.edges);
     }
 
     fn parents(&self, node_idx: NodeIdx) -> impl Iterator<Item = NodeIdx> + '_ {
         let mut edge_idx = self.nodes[node_idx.0 as usize].parents;
         std::iter::from_fn(move || {
-            let this_edge_idx = edge_idx?;
+            let this_edge_idx = edge_idx.0?;
             let edge = &self.edges[this_edge_idx.0 as usize];
             edge_idx = edge.next;
-            Some(edge.target)
+            Some(edge.parent)
         })
+    }
+
+    fn children(&self, node_idx: NodeIdx) -> Children<'_> {
+        Children {
+            graph: self,
+            edges: self.nodes[node_idx.0 as usize].children,
+        }
     }
 
     pub(crate) fn clock_for_heads(&self, heads: &[ChangeHash]) -> Clock {
@@ -179,6 +228,139 @@ impl ChangeGraph {
             f(node, hash);
             to_visit.extend(self.parents(idx));
         }
+    }
+
+    fn roots(&self) -> impl Iterator<Item = NodeIdx> + '_ {
+        self.nodes.iter().enumerate().filter_map(|(idx, node)| {
+            if node.parents.is_empty() {
+                Some(NodeIdx(idx as u32))
+            } else {
+                None
+            }
+        })
+    }
+
+    /// An iterator over the transitive dependencies of `hash` in topological order
+    #[allow(dead_code)]
+    pub(crate) fn deps_topo(&self, hash: &ChangeHash) -> impl Iterator<Item = &ChangeHash> {
+        let node = self.nodes_by_hash.get(hash).copied();
+        let ancestors = Deps::new(self, node).collect::<BTreeSet<_>>();
+        let node_idxes = (0_u32..self.nodes.len() as u32)
+            .map(NodeIdx)
+            .collect::<BTreeSet<_>>();
+        let non_ancestors = node_idxes.difference(&ancestors).copied().collect();
+        Topo::pruning(self, non_ancestors)
+    }
+
+    /// A topological traversal of the graph
+    pub(crate) fn topo(&self) -> impl Iterator<Item = &ChangeHash> {
+        Topo::new(self)
+    }
+
+    /// Return a grpahviz representation of the change graph
+    ///
+    /// Any changes which are in `labels` will be labelled with the corresponding string. Otherwise
+    /// the label will be `change_{n}` where `n` is a unique integer for each change.
+    #[allow(dead_code)]
+    #[cfg(feature = "optree-visualisation")]
+    pub(crate) fn visualise(&self, labels: HashMap<ChangeHash, String>) -> String {
+        let mut out = Vec::new();
+        let labelled = visualise::LabelledGraph::new(self, labels);
+        dot::render(&labelled, &mut out).unwrap();
+        String::from_utf8_lossy(&out[..]).to_string()
+    }
+}
+
+struct Children<'a> {
+    graph: &'a ChangeGraph,
+    edges: Edges,
+}
+
+impl<'a> Iterator for Children<'a> {
+    type Item = NodeIdx;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let edge_idx = self.edges.0?;
+        let edge = &self.graph.edges[edge_idx.0 as usize];
+        self.edges = edge.next;
+        Some(edge.child)
+    }
+}
+
+struct Topo<'a> {
+    graph: &'a ChangeGraph,
+    to_process: Vec<NodeIdx>,
+    visited: BTreeSet<NodeIdx>,
+    prune: BTreeSet<NodeIdx>,
+}
+
+impl<'a> Topo<'a> {
+    fn new(graph: &'a ChangeGraph) -> Self {
+        Self {
+            graph,
+            to_process: graph.roots().collect(),
+            visited: BTreeSet::new(),
+            prune: BTreeSet::new(),
+        }
+    }
+
+    fn pruning(graph: &'a ChangeGraph, prune: BTreeSet<NodeIdx>) -> Self {
+        Self {
+            graph,
+            to_process: graph.roots().collect(),
+            visited: BTreeSet::new(),
+            prune,
+        }
+    }
+}
+
+impl<'a> Iterator for Topo<'a> {
+    type Item = &'a ChangeHash;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = self.to_process.pop()?;
+        self.visited.insert(next);
+        for child in self.graph.children(next) {
+            if self.graph.parents(child).all(|p| self.visited.contains(&p))
+                && !self.visited.contains(&child)
+                && !self.prune.contains(&child)
+            {
+                self.to_process.push(child);
+            }
+        }
+        let hash = &self.graph.hashes[self.graph.nodes[next.0 as usize].hash_idx.0 as usize];
+        Some(hash)
+    }
+}
+
+struct Deps<'a> {
+    to_process: Vec<NodeIdx>,
+    visited: BTreeSet<NodeIdx>,
+    graph: &'a ChangeGraph,
+}
+
+impl<'a> Deps<'a> {
+    fn new(graph: &'a ChangeGraph, node: Option<NodeIdx>) -> Self {
+        let to_process = node.map(|n| vec![n]).unwrap_or_default();
+        Self {
+            to_process,
+            visited: BTreeSet::new(),
+            graph,
+        }
+    }
+}
+
+impl<'a> Iterator for Deps<'a> {
+    type Item = NodeIdx;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = self.to_process.pop()?;
+        for parent in self.graph.parents(next) {
+            if !self.visited.contains(&parent) {
+                self.to_process.push(parent);
+            }
+        }
+        Some(next)
     }
 }
 
@@ -245,6 +427,43 @@ mod tests {
         let expected_changes = vec![change3, change4].into_iter().collect::<BTreeSet<_>>();
 
         assert_eq!(changes, expected_changes);
+    }
+
+    #[test]
+    fn topo() {
+        let mut builder = TestGraphBuilder::new();
+        let actor1 = builder.actor();
+        let actor2 = builder.actor();
+        let actor3 = builder.actor();
+        let change1 = builder.change(&actor1, 10, &[]);
+        let change2 = builder.change(&actor2, 20, &[change1]);
+        let change3 = builder.change(&actor3, 30, &[change1]);
+        let change4 = builder.change(&actor1, 10, &[change2, change3]);
+        let graph = builder.build();
+
+        let topo = graph.topo().collect::<Vec<_>>();
+        if topo != vec![&change1, &change2, &change3, &change4]
+            && topo != vec![&change1, &change3, &change2, &change4]
+        {
+            panic!("not topological: {:?}", topo);
+        }
+    }
+
+    #[test]
+    fn deps_topo() {
+        let mut builder = TestGraphBuilder::new();
+        let actor1 = builder.actor();
+        let actor2 = builder.actor();
+        let actor3 = builder.actor();
+        let change1 = builder.change(&actor1, 10, &[]);
+        let change2 = builder.change(&actor2, 20, &[change1]);
+        let change3 = builder.change(&actor3, 30, &[change1]);
+        let _change4 = builder.change(&actor1, 10, &[change2, change3]);
+        let change5 = builder.change(&actor3, 1, &[change3]);
+        let graph = builder.build();
+
+        let topo = graph.deps_topo(&change5).collect::<Vec<_>>();
+        assert_eq!(topo, vec![&change1, &change3, &change5]);
     }
 
     struct TestGraphBuilder {
