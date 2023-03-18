@@ -1497,3 +1497,58 @@ fn bad_change_on_optree_node_boundary() {
         .unwrap();
     Automerge::load(doc2.save().as_slice()).unwrap();
 }
+
+#[test]
+fn regression_nth_miscount() {
+    let mut doc = Automerge::new();
+    doc.transact::<_, _, AutomergeError>(|d| {
+        let list_id = d.put_object(ROOT, "listval", ObjType::List).unwrap();
+        for i in 0..30 {
+            d.insert(&list_id, i, ScalarValue::Null).unwrap();
+            let map = d.put_object(&list_id, i, ObjType::Map).unwrap();
+            d.put(map, "test", ScalarValue::Int(i.try_into().unwrap()))
+                .unwrap();
+        }
+        Ok(())
+    })
+    .unwrap();
+    for i in 0..30 {
+        let (obj_type, list_id) = doc.get(ROOT, "listval").unwrap().unwrap();
+        assert_eq!(obj_type, automerge::Value::Object(ObjType::List));
+        let (obj_type, map_id) = doc.get(&list_id, i).unwrap().unwrap();
+        assert_eq!(obj_type, automerge::Value::Object(ObjType::Map));
+        let (obj_type, _) = doc.get(map_id, "test").unwrap().unwrap();
+        assert_eq!(
+            obj_type,
+            automerge::Value::Scalar(std::borrow::Cow::Borrowed(&ScalarValue::Int(
+                i.try_into().unwrap()
+            )))
+        )
+    }
+}
+
+#[test]
+fn regression_nth_miscount_smaller() {
+    let mut doc = Automerge::new();
+    doc.transact::<_, _, AutomergeError>(|d| {
+        let list_id = d.put_object(ROOT, "listval", ObjType::List).unwrap();
+        for i in 0..60 {
+            d.insert(&list_id, i, ScalarValue::Null).unwrap();
+            d.put(&list_id, i, ScalarValue::Int(i.try_into().unwrap()))
+                .unwrap();
+        }
+        Ok(())
+    })
+    .unwrap();
+    for i in 0..60 {
+        let (obj_type, list_id) = doc.get(ROOT, "listval").unwrap().unwrap();
+        assert_eq!(obj_type, automerge::Value::Object(ObjType::List));
+        let (obj_type, _) = doc.get(list_id, i).unwrap().unwrap();
+        assert_eq!(
+            obj_type,
+            automerge::Value::Scalar(std::borrow::Cow::Borrowed(&ScalarValue::Int(
+                i.try_into().unwrap()
+            )))
+        )
+    }
+}

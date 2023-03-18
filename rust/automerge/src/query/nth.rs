@@ -97,6 +97,8 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
             let last_elemid = ops[child.last()].elemid_or_key();
             if child.index.has_visible(&last_elemid) {
                 self.last_seen = Some(last_elemid);
+            } else if self.last_seen.is_some() && Some(last_elemid) != self.last_seen {
+                self.last_seen = None;
             }
             QueryResult::Next
         }
@@ -115,7 +117,7 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
             self.last_width = element.width(self.encoding);
             self.seen += self.last_width;
             // we have a new visible element
-            self.last_seen = Some(element.elemid_or_key())
+            self.last_seen = Some(element.elemid_or_key());
         }
         if self.seen > self.target && visible {
             self.ops.push(element);
