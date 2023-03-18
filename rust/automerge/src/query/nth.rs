@@ -5,6 +5,8 @@ use crate::query::{QueryResult, TreeQuery};
 use crate::types::{Key, ListEncoding, Op, OpIds};
 use std::fmt::Debug;
 
+/// The Nth query walks the tree to find the n-th Node. It skips parts of the tree where it knows
+/// that the nth node can not be in them
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Nth<'a> {
     target: usize,
@@ -74,7 +76,12 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
     }
 
     fn query_node(&mut self, child: &OpTreeNode, ops: &[Op]) -> QueryResult {
+        // We note the number of values stored in / below the node `child`
         let mut num_vis = child.index.visible_len(self.encoding);
+        // Nodes are sorted by key (obj, prop, ?) and time. We can only see a key twice as
+        // visible if it is the last element and has a conflict and occurs as visible again in
+        // the next node. To prevent double-counting it, we subtract 1 (to pretend we didn't see
+        // it yet 🫣).
         if let Some(last_seen) = self.last_seen {
             if child.index.has_visible(&last_seen) {
                 num_vis -= 1;
@@ -82,6 +89,7 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
         }
 
         if self.seen + num_vis > self.target {
+            // Enter this node as the nth element is in this node
             QueryResult::Descend
         } else {
             // skip this node as no useful ops in it
@@ -94,6 +102,11 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
             // - the insert was at a previous node and this is a long run of overwrites so last_seen should already be set correctly
             // - the visible op is in this node and the elemid references it so it can be set here
             // - the visible op is in a future node and so it will be counted as seen there
+            // ⚠️ We also need to reset last_seen if it is set to something else than the last item
+            //   in the child. This means that the child contains an `insert` (so last_seen should
+            //   be reset to None), but no visible op (so last_seen should not be set to a new value)
+            //   The visible op also cannot be in a previous node, because then `last_seen` would
+            //   already be set to the same elemid as the last element in the child.
             let last_elemid = ops[child.last()].elemid_or_key();
             if child.index.has_visible(&last_elemid) {
                 self.last_seen = Some(last_elemid);
