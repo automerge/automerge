@@ -295,6 +295,7 @@ pub use op_observer::{
 };
 pub use parents::{Parent, Parents};
 pub use read::ReadDoc;
+pub use sequence_tree::SequenceTree;
 pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, TextEncoding};
 pub use value::{ScalarValue, Value};
 pub use values::Values;

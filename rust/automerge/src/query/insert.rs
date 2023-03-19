@@ -97,6 +97,8 @@ impl<'a> TreeQuery<'a> for InsertNth {
             let last_elemid = ops[child.last()].elemid_or_key();
             if child.index.has_visible(&last_elemid) {
                 self.last_seen = Some(last_elemid);
+            } else if self.last_seen.is_some() && Some(last_elemid) != self.last_seen {
+                self.last_seen = None;
             }
             QueryResult::Next
         }

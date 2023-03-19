@@ -1,7 +1,8 @@
+use automerge::op_observer::HasPatches;
 use automerge::transaction::Transactable;
 use automerge::{
-    ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjType, ReadDoc,
-    ScalarValue, VecOpObserver, ROOT,
+    ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjId, ObjType, Patch,
+    PatchAction, Prop, ReadDoc, ScalarValue, SequenceTree, Value, VecOpObserver, ROOT,
 };
 use std::fs;
 
@@ -1514,13 +1515,13 @@ fn regression_nth_miscount() {
     .unwrap();
     for i in 0..30 {
         let (obj_type, list_id) = doc.get(ROOT, "listval").unwrap().unwrap();
-        assert_eq!(obj_type, automerge::Value::Object(ObjType::List));
+        assert_eq!(obj_type, Value::Object(ObjType::List));
         let (obj_type, map_id) = doc.get(&list_id, i).unwrap().unwrap();
-        assert_eq!(obj_type, automerge::Value::Object(ObjType::Map));
+        assert_eq!(obj_type, Value::Object(ObjType::Map));
         let (obj_type, _) = doc.get(map_id, "test").unwrap().unwrap();
         assert_eq!(
             obj_type,
-            automerge::Value::Scalar(std::borrow::Cow::Borrowed(&ScalarValue::Int(
+            Value::Scalar(std::borrow::Cow::Borrowed(&ScalarValue::Int(
                 i.try_into().unwrap()
             )))
         )
@@ -1542,13 +1543,104 @@ fn regression_nth_miscount_smaller() {
     .unwrap();
     for i in 0..60 {
         let (obj_type, list_id) = doc.get(ROOT, "listval").unwrap().unwrap();
-        assert_eq!(obj_type, automerge::Value::Object(ObjType::List));
+        assert_eq!(obj_type, Value::Object(ObjType::List));
         let (obj_type, _) = doc.get(list_id, i).unwrap().unwrap();
         assert_eq!(
             obj_type,
-            automerge::Value::Scalar(std::borrow::Cow::Borrowed(&ScalarValue::Int(
+            Value::Scalar(std::borrow::Cow::Borrowed(&ScalarValue::Int(
                 i.try_into().unwrap()
             )))
         )
     }
+}
+
+#[test]
+fn regression_insert_opid() {
+    let mut doc = Automerge::new();
+    let mut tx = doc.transaction();
+    let list_id = tx
+        .put_object(&automerge::ROOT, "list", ObjType::List)
+        .unwrap();
+    tx.commit();
+
+    let change1 = doc.get_last_local_change().unwrap().clone();
+    let mut tx = doc.transaction();
+
+    const N: usize = 30;
+    for i in 0..=N {
+        tx.insert(&list_id, i, ScalarValue::Null).unwrap();
+        tx.put(&list_id, i, ScalarValue::Int(i as i64)).unwrap();
+    }
+    tx.commit();
+
+    let change2 = doc.get_last_local_change().unwrap().clone();
+    let mut new_doc = Automerge::new();
+    let mut obs = VecOpObserver::default();
+    new_doc
+        .apply_changes_with(vec![change1], Some(&mut obs))
+        .unwrap();
+    new_doc
+        .apply_changes_with(vec![change2], Some(&mut obs))
+        .unwrap();
+
+    for i in 0..=N {
+        let (doc_val, _) = doc.get(&list_id, i).unwrap().unwrap();
+        let (new_doc_val, _) = new_doc.get(&list_id, i).unwrap().unwrap();
+
+        assert_eq!(
+            doc_val,
+            Value::Scalar(std::borrow::Cow::Owned(ScalarValue::Int(i as i64)))
+        );
+        assert_eq!(
+            new_doc_val,
+            Value::Scalar(std::borrow::Cow::Owned(ScalarValue::Int(i as i64)))
+        );
+    }
+
+    let patches = obs.take_patches();
+
+    let mut expected_patches = Vec::new();
+    expected_patches.push(Patch {
+        obj: ROOT,
+        path: vec![],
+        action: PatchAction::PutMap {
+            key: "list".to_string(),
+            expose: false,
+            value: (
+                Value::Object(ObjType::List),
+                ObjId::Id(1, doc.get_actor().clone(), 0),
+            ),
+            conflict: false,
+        },
+    });
+    for i in 0..=N {
+        let mut seq_tree = SequenceTree::new();
+        seq_tree.push((
+            Value::Scalar(std::borrow::Cow::Owned(ScalarValue::Null)),
+            ObjId::Id(2 * (i + 1) as u64, doc.get_actor().clone(), 0),
+        ));
+        expected_patches.push(Patch {
+            obj: ObjId::Id(1, doc.get_actor().clone(), 0),
+            path: vec![(ROOT, Prop::Map("list".into()))],
+            action: PatchAction::Insert {
+                index: i,
+                values: seq_tree,
+                conflict: false,
+            },
+        });
+        expected_patches.push(Patch {
+            obj: ObjId::Id(1, doc.get_actor().clone(), 0),
+            path: vec![(ROOT, Prop::Map("list".into()))],
+            action: PatchAction::PutSeq {
+                index: i,
+                value: (
+                    Value::Scalar(std::borrow::Cow::Owned(ScalarValue::Int(i as i64))),
+                    ObjId::Id((2 * (i + 1) + 1) as u64, doc.get_actor().clone(), 0),
+                ),
+                conflict: false,
+                expose: false,
+            },
+        });
+    }
+    assert_eq!(patches, expected_patches);
 }
