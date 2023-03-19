@@ -1,4 +1,5 @@
 use automerge::op_observer::HasPatches;
+use automerge::op_tree::B;
 use automerge::transaction::Transactable;
 use automerge::{
     ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjId, ObjType, Patch,
@@ -1533,7 +1534,7 @@ fn regression_nth_miscount_smaller() {
     let mut doc = Automerge::new();
     doc.transact::<_, _, AutomergeError>(|d| {
         let list_id = d.put_object(ROOT, "listval", ObjType::List).unwrap();
-        for i in 0..60 {
+        for i in 0..B * 4 {
             d.insert(&list_id, i, ScalarValue::Null).unwrap();
             d.put(&list_id, i, ScalarValue::Int(i.try_into().unwrap()))
                 .unwrap();
@@ -1541,7 +1542,7 @@ fn regression_nth_miscount_smaller() {
         Ok(())
     })
     .unwrap();
-    for i in 0..60 {
+    for i in 0..B * 4 {
         let (obj_type, list_id) = doc.get(ROOT, "listval").unwrap().unwrap();
         assert_eq!(obj_type, Value::Object(ObjType::List));
         let (obj_type, _) = doc.get(list_id, i).unwrap().unwrap();
@@ -1643,4 +1644,44 @@ fn regression_insert_opid() {
         });
     }
     assert_eq!(patches, expected_patches);
+}
+
+#[test]
+fn big_list() {
+    let mut doc = Automerge::new();
+    let mut tx = doc.transaction();
+    let list_id = tx.put_object(&ROOT, "list", ObjType::List).unwrap();
+    tx.commit();
+
+    let change1 = doc.get_last_local_change().unwrap().clone();
+    let mut tx = doc.transaction();
+
+    const N: usize = B;
+    for i in 0..=N {
+        tx.insert(&list_id, i, ScalarValue::Null).unwrap();
+    }
+    for i in 0..=N {
+        tx.put_object(&list_id, i, ObjType::Map).unwrap();
+    }
+    tx.commit();
+
+    let change2 = doc.get_last_local_change().unwrap().clone();
+    let mut new_doc = Automerge::new();
+    let mut obs = VecOpObserver::default();
+    new_doc
+        .apply_changes_with(vec![change1], Some(&mut obs))
+        .unwrap();
+    new_doc
+        .apply_changes_with(vec![change2], Some(&mut obs))
+        .unwrap();
+
+    let patches = obs.take_patches();
+    let matches = matches!(
+        patches.last().unwrap(),
+        Patch {
+            action: PatchAction::PutSeq { index: N, .. },
+            ..
+        }
+    );
+    assert!(matches);
 }

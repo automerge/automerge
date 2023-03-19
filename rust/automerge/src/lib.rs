@@ -261,7 +261,7 @@ mod map_range_at;
 pub mod marks;
 pub mod op_observer;
 mod op_set;
-mod op_tree;
+pub mod op_tree;
 mod parents;
 mod query;
 mod read;
