@@ -962,7 +962,7 @@
     }
 
     <span class="doccomment">/// Save this document, but don&#39;t run it through DEFLATE afterwards
-    </span><span class="kw">pub fn </span>save_and_verify(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;u8&gt;,AutomergeError&gt; {
+    </span><span class="kw">pub fn </span>save_and_verify(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;u8&gt;, AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_closed();
         <span class="self">self</span>.doc.save_and_verify()
     }

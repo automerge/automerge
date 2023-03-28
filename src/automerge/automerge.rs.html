@@ -2333,7 +2333,7 @@
     }
 
     <span class="doccomment">/// Save the document and attempt to load it before returning - slow!
-    </span><span class="kw">pub fn </span>save_and_verify(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;u8&gt;,AutomergeError&gt; {
+    </span><span class="kw">pub fn </span>save_and_verify(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;u8&gt;, AutomergeError&gt; {
         <span class="kw">let </span>bytes = <span class="self">self</span>.save();
         <span class="self">Self</span>::load(<span class="kw-2">&amp;</span>bytes)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(bytes)
