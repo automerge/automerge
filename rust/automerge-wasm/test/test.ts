@@ -2203,5 +2203,18 @@ describe('Automerge', () => {
         assert.deepStrictEqual(mat.key, new RawString("value"))
     })
 
+    it("has a method to save without compression and to do a full verification on save", () => {
+        let doc1 = create(false);
+        doc1.enablePatches(true)
+        doc1.put("/", "key", "value")
+        let doc2 = load(doc1.saveNoCompress(), true) // big!
+        let doc3 = load(doc1.saveAndVerify(), true) // slow!
+        let mat1: any = doc1.materialize()
+        let mat2: any = doc2.materialize()
+        let mat3: any = doc3.materialize()
+        assert.deepStrictEqual(mat1, mat2)
+        assert.deepStrictEqual(mat2, mat3)
+    })
+
   })
 })

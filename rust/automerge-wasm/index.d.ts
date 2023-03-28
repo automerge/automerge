@@ -224,6 +224,8 @@ export class Automerge {
 
   // save and load to local store
   save(): Uint8Array;
+  saveNoCompress(): Uint8Array;
+  saveAndVerify(): Uint8Array;
   saveIncremental(): Uint8Array;
   loadIncremental(data: Uint8Array): number;
 

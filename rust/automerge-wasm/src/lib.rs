@@ -668,6 +668,18 @@ impl Automerge {
         Uint8Array::from(bytes.as_slice())
     }
 
+    #[wasm_bindgen(js_name = saveNoCompress)]
+    pub fn save_nocompress(&mut self) -> Uint8Array {
+        let bytes = self.doc.save_nocompress();
+        Uint8Array::from(bytes.as_slice())
+    }
+
+    #[wasm_bindgen(js_name = saveAndVerify)]
+    pub fn save_and_verify(&mut self) -> Result<Uint8Array, error::Load> {
+        let bytes = self.doc.save_and_verify()?;
+        Ok(Uint8Array::from(bytes.as_slice()))
+    }
+
     #[wasm_bindgen(js_name = loadIncremental)]
     pub fn load_incremental(&mut self, data: Uint8Array) -> Result<f64, error::Load> {
         let data = data.to_vec();
