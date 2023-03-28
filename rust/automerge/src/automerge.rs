@@ -791,7 +791,7 @@ impl Automerge {
     }
 
     /// Save the document and attempt to load it before returning - slow!
-    pub fn save_and_verify(&mut self) -> Result<Vec<u8>,AutomergeError> {
+    pub fn save_and_verify(&mut self) -> Result<Vec<u8>, AutomergeError> {
         let bytes = self.save();
         Self::load(&bytes)?;
         Ok(bytes)
