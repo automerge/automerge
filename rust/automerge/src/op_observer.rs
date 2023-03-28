@@ -13,6 +13,29 @@ pub use patch::{Patch, PatchAction};
 pub use toggle_observer::ToggleObserver;
 pub use vec_observer::{HasPatches, TextRepresentation, VecOpObserver, VecOpObserver16};
 
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum ObserverContext {
+    Change,
+    Apply,
+    Load,
+    LoadIncremental,
+    Sync,
+    Merge,
+}
+
+impl std::fmt::Display for ObserverContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Change => write!(f, "change"),
+            Self::Apply => write!(f, "apply"),
+            Self::Load => write!(f, "load"),
+            Self::Sync => write!(f, "sync"),
+            Self::Merge => write!(f, "merge"),
+            Self::LoadIncremental => write!(f, "load_incremental"),
+        }
+    }
+}
+
 /// An observer of operations applied to the document.
 pub trait OpObserver {
     /// A new value has been inserted into the given object.
@@ -25,6 +48,7 @@ pub trait OpObserver {
     fn insert<R: ReadDoc>(
         &mut self,
         doc: &R,
+        ctx: ObserverContext,
         objid: ExId,
         index: usize,
         tagged_value: (Value<'_>, ExId),
@@ -32,7 +56,14 @@ pub trait OpObserver {
     );
 
     /// Some text has been spliced into a text object
-    fn splice_text<R: ReadDoc>(&mut self, _doc: &R, _objid: ExId, _index: usize, _value: &str);
+    fn splice_text<R: ReadDoc>(
+        &mut self,
+        _doc: &R,
+        _ctx: ObserverContext,
+        _objid: ExId,
+        _index: usize,
+        _value: &str,
+    );
 
     /// A new value has been put into the given object.
     ///
@@ -45,6 +76,7 @@ pub trait OpObserver {
     fn put<R: ReadDoc>(
         &mut self,
         doc: &R,
+        ctx: ObserverContext,
         objid: ExId,
         prop: Prop,
         tagged_value: (Value<'_>, ExId),
@@ -64,6 +96,7 @@ pub trait OpObserver {
     fn expose<R: ReadDoc>(
         &mut self,
         doc: &R,
+        ctx: ObserverContext,
         objid: ExId,
         prop: Prop,
         tagged_value: (Value<'_>, ExId),
@@ -75,7 +108,14 @@ pub trait OpObserver {
     /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
     /// - `objid`: the object that has been put into.
     /// - `prop`: the prop that the value as been put at.
-    fn flag_conflict<R: ReadDoc>(&mut self, _doc: &R, _objid: ExId, _prop: Prop) {}
+    fn flag_conflict<R: ReadDoc>(
+        &mut self,
+        _doc: &R,
+        _ctx: ObserverContext,
+        _objid: ExId,
+        _prop: Prop,
+    ) {
+    }
 
     /// A counter has been incremented.
     ///
@@ -87,6 +127,7 @@ pub trait OpObserver {
     fn increment<R: ReadDoc>(
         &mut self,
         doc: &R,
+        ctx: ObserverContext,
         objid: ExId,
         prop: Prop,
         tagged_value: (i64, ExId),
@@ -97,10 +138,10 @@ pub trait OpObserver {
     /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
     /// - `objid`: the object that has been deleted in.
     /// - `prop`: the prop to be deleted
-    fn delete<R: ReadDoc>(&mut self, doc: &R, objid: ExId, prop: Prop) {
+    fn delete<R: ReadDoc>(&mut self, doc: &R, ctx: ObserverContext, objid: ExId, prop: Prop) {
         match prop {
-            Prop::Map(k) => self.delete_map(doc, objid, &k),
-            Prop::Seq(i) => self.delete_seq(doc, objid, i, 1),
+            Prop::Map(k) => self.delete_map(doc, ctx, objid, &k),
+            Prop::Seq(i) => self.delete_seq(doc, ctx, objid, i, 1),
         }
     }
 
@@ -109,7 +150,7 @@ pub trait OpObserver {
     /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
     /// - `objid`: the object that has been deleted in.
     /// - `key`: the map key to be deleted
-    fn delete_map<R: ReadDoc>(&mut self, doc: &R, objid: ExId, key: &str);
+    fn delete_map<R: ReadDoc>(&mut self, doc: &R, ctx: ObserverContext, objid: ExId, key: &str);
 
     /// A one or more list values have beeen deleted.
     ///
@@ -117,16 +158,32 @@ pub trait OpObserver {
     /// - `objid`: the object that has been deleted in.
     /// - `index`: the index of the deletion
     /// - `num`: the number of sequential elements deleted
-    fn delete_seq<R: ReadDoc>(&mut self, doc: &R, objid: ExId, index: usize, num: usize);
+    fn delete_seq<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        ctx: ObserverContext,
+        objid: ExId,
+        index: usize,
+        num: usize,
+    );
 
     fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(
         &mut self,
         doc: &'a R,
+        ctx: ObserverContext,
         objid: ExId,
         mark: M,
     );
 
-    fn unmark<R: ReadDoc>(&mut self, doc: &R, objid: ExId, name: &str, start: usize, end: usize);
+    fn unmark<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        ctx: ObserverContext,
+        objid: ExId,
+        name: &str,
+        start: usize,
+        end: usize,
+    );
 
     /// Whether to call sequence methods or `splice_text` when encountering changes in text
     ///
@@ -160,6 +217,7 @@ impl OpObserver for () {
     fn insert<R: ReadDoc>(
         &mut self,
         _doc: &R,
+        _ctx: ObserverContext,
         _objid: ExId,
         _index: usize,
         _tagged_value: (Value<'_>, ExId),
@@ -167,11 +225,20 @@ impl OpObserver for () {
     ) {
     }
 
-    fn splice_text<R: ReadDoc>(&mut self, _doc: &R, _objid: ExId, _index: usize, _value: &str) {}
+    fn splice_text<R: ReadDoc>(
+        &mut self,
+        _doc: &R,
+        _ctx: ObserverContext,
+        _objid: ExId,
+        _index: usize,
+        _value: &str,
+    ) {
+    }
 
     fn put<R: ReadDoc>(
         &mut self,
         _doc: &R,
+        _ctx: ObserverContext,
         _objid: ExId,
         _prop: Prop,
         _tagged_value: (Value<'_>, ExId),
@@ -182,6 +249,7 @@ impl OpObserver for () {
     fn expose<R: ReadDoc>(
         &mut self,
         _doc: &R,
+        _ctx: ObserverContext,
         _objid: ExId,
         _prop: Prop,
         _tagged_value: (Value<'_>, ExId),
@@ -192,6 +260,7 @@ impl OpObserver for () {
     fn increment<R: ReadDoc>(
         &mut self,
         _doc: &R,
+        _ctx: ObserverContext,
         _objid: ExId,
         _prop: Prop,
         _tagged_value: (i64, ExId),
@@ -201,6 +270,7 @@ impl OpObserver for () {
     fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(
         &mut self,
         _doc: &'a R,
+        _ctx: ObserverContext,
         _objid: ExId,
         _mark: M,
     ) {
@@ -209,6 +279,7 @@ impl OpObserver for () {
     fn unmark<R: ReadDoc>(
         &mut self,
         _doc: &R,
+        _ctx: ObserverContext,
         _objid: ExId,
         _name: &str,
         _start: usize,
@@ -216,9 +287,24 @@ impl OpObserver for () {
     ) {
     }
 
-    fn delete_map<R: ReadDoc>(&mut self, _doc: &R, _objid: ExId, _key: &str) {}
+    fn delete_map<R: ReadDoc>(
+        &mut self,
+        _doc: &R,
+        _ctx: ObserverContext,
+        _objid: ExId,
+        _key: &str,
+    ) {
+    }
 
-    fn delete_seq<R: ReadDoc>(&mut self, _doc: &R, _objid: ExId, _index: usize, _num: usize) {}
+    fn delete_seq<R: ReadDoc>(
+        &mut self,
+        _doc: &R,
+        _ctx: ObserverContext,
+        _objid: ExId,
+        _index: usize,
+        _num: usize,
+    ) {
+    }
 }
 
 impl BranchableObserver for () {

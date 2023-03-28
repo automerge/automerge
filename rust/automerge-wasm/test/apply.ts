@@ -104,8 +104,8 @@ describe('Automerge', () => {
       doc1.putObject("/", "list", "abc");
       const patches = doc1.popPatches()
       assert.deepEqual( patches, [
-        { action: 'put', path: [ 'list' ], value: "" },
-        { action: 'splice', path: [ 'list', 0 ], value: 'abc' }])
+        { action: 'put', path: [ 'list' ], value: "", context: 'change' },
+        { action: 'splice', path: [ 'list', 0 ], value: 'abc', context: 'change' }])
     })
 
     it('it should allow registering type wrappers', () => {

@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::{marks::Mark, ObjId, Prop, Value};
+use crate::{marks::Mark, ObjId, ObserverContext, Prop, Value};
 use core::fmt::Debug;
 
 use crate::sequence_tree::SequenceTree;
@@ -9,6 +9,7 @@ use crate::sequence_tree::SequenceTree;
 pub struct Patch<T: PartialEq + Clone + Debug> {
     pub obj: ObjId,
     pub path: Vec<(ObjId, Prop)>,
+    pub ctx: ObserverContext,
     pub action: PatchAction<T>,
 }
 

@@ -6,7 +6,7 @@ use core::fmt::Debug;
 use crate::{marks::Mark, ObjId, OpObserver, Prop, ReadDoc, Value};
 
 use crate::op_observer::BranchableObserver;
-use crate::op_observer::{HasPatches, TextRepresentation};
+use crate::op_observer::{HasPatches, ObserverContext, TextRepresentation};
 
 #[derive(Debug, Clone)]
 pub struct ToggleObserver<T> {
@@ -74,6 +74,7 @@ impl<T: OpObserver + HasPatches> OpObserver for ToggleObserver<T> {
     fn insert<R: ReadDoc>(
         &mut self,
         doc: &R,
+        ctx: ObserverContext,
         obj: ObjId,
         index: usize,
         tagged_value: (Value<'_>, ObjId),
@@ -81,80 +82,108 @@ impl<T: OpObserver + HasPatches> OpObserver for ToggleObserver<T> {
     ) {
         if self.enabled {
             self.observer
-                .insert(doc, obj, index, tagged_value, conflict)
+                .insert(doc, ctx, obj, index, tagged_value, conflict)
         }
     }
 
-    fn splice_text<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, index: usize, value: &str) {
+    fn splice_text<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        ctx: ObserverContext,
+        obj: ObjId,
+        index: usize,
+        value: &str,
+    ) {
         if self.enabled {
-            self.observer.splice_text(doc, obj, index, value)
+            self.observer.splice_text(doc, ctx, obj, index, value)
         }
     }
 
-    fn delete_seq<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, index: usize, length: usize) {
+    fn delete_seq<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        ctx: ObserverContext,
+        obj: ObjId,
+        index: usize,
+        length: usize,
+    ) {
         if self.enabled {
-            self.observer.delete_seq(doc, obj, index, length)
+            self.observer.delete_seq(doc, ctx, obj, index, length)
         }
     }
 
-    fn delete_map<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, key: &str) {
+    fn delete_map<R: ReadDoc>(&mut self, doc: &R, ctx: ObserverContext, obj: ObjId, key: &str) {
         if self.enabled {
-            self.observer.delete_map(doc, obj, key)
+            self.observer.delete_map(doc, ctx, obj, key)
         }
     }
 
     fn put<R: ReadDoc>(
         &mut self,
         doc: &R,
+        ctx: ObserverContext,
         obj: ObjId,
         prop: Prop,
         tagged_value: (Value<'_>, ObjId),
         conflict: bool,
     ) {
         if self.enabled {
-            self.observer.put(doc, obj, prop, tagged_value, conflict)
+            self.observer
+                .put(doc, ctx, obj, prop, tagged_value, conflict)
         }
     }
 
     fn expose<R: ReadDoc>(
         &mut self,
         doc: &R,
+        ctx: ObserverContext,
         obj: ObjId,
         prop: Prop,
         tagged_value: (Value<'_>, ObjId),
         conflict: bool,
     ) {
         if self.enabled {
-            self.observer.expose(doc, obj, prop, tagged_value, conflict)
+            self.observer
+                .expose(doc, ctx, obj, prop, tagged_value, conflict)
         }
     }
 
     fn increment<R: ReadDoc>(
         &mut self,
         doc: &R,
+        ctx: ObserverContext,
         obj: ObjId,
         prop: Prop,
         tagged_value: (i64, ObjId),
     ) {
         if self.enabled {
-            self.observer.increment(doc, obj, prop, tagged_value)
+            self.observer.increment(doc, ctx, obj, prop, tagged_value)
         }
     }
 
     fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(
         &mut self,
         doc: &'a R,
+        ctx: ObserverContext,
         obj: ObjId,
         mark: M,
     ) {
         if self.enabled {
-            self.observer.mark(doc, obj, mark)
+            self.observer.mark(doc, ctx, obj, mark)
         }
     }
 
-    fn unmark<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, name: &str, start: usize, end: usize) {
+    fn unmark<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        ctx: ObserverContext,
+        obj: ObjId,
+        name: &str,
+        start: usize,
+        end: usize,
+    ) {
         if self.enabled {
-            self.observer.unmark(doc, obj, name, start, end)
+            self.observer.unmark(doc, ctx, obj, name, start, end)
         }
     }
 

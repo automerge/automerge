@@ -43,7 +43,10 @@ fn main() {
 }
 
 fn get_changes(_doc: &Automerge, patches: Vec<Patch<char>>) {
-    for Patch { obj, path, action } in patches {
+    for Patch {
+        obj, path, action, ..
+    } in patches
+    {
         match action {
             PatchAction::PutMap { key, value, .. } => {
                 println!(

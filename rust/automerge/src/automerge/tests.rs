@@ -1483,6 +1483,7 @@ fn observe_counter_change_application_overwrite() {
     assert_eq!(
         doc3.observer().take_patches(),
         vec![Patch {
+            ctx: ObserverContext::Merge,
             obj: ExId::Root,
             path: vec![],
             action: PatchAction::PutMap {

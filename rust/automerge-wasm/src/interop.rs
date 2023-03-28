@@ -1300,6 +1300,7 @@ impl TryFrom<JsPatch> for JsValue {
                     "value",
                     alloc(&value.0, TextRepresentation::String).1,
                 )?;
+                js_set(&result, "context", p.0.ctx.to_string())?;
                 Ok(result.into())
             }
             PatchAction::PutSeq { index, value, .. } => {
@@ -1314,6 +1315,7 @@ impl TryFrom<JsPatch> for JsValue {
                     "value",
                     alloc(&value.0, TextRepresentation::String).1,
                 )?;
+                js_set(&result, "context", p.0.ctx.to_string())?;
                 Ok(result.into())
             }
             PatchAction::Insert { index, values, .. } => {
@@ -1331,6 +1333,7 @@ impl TryFrom<JsPatch> for JsValue {
                         .map(|v| alloc(&v.0, TextRepresentation::String).1)
                         .collect::<Array>(),
                 )?;
+                js_set(&result, "context", p.0.ctx.to_string())?;
                 Ok(result.into())
             }
             PatchAction::SpliceText { index, value, .. } => {
@@ -1342,12 +1345,14 @@ impl TryFrom<JsPatch> for JsValue {
                 )?;
                 let bytes: Vec<u16> = value.iter().cloned().collect();
                 js_set(&result, "value", String::from_utf16_lossy(bytes.as_slice()))?;
+                js_set(&result, "context", p.0.ctx.to_string())?;
                 Ok(result.into())
             }
             PatchAction::Increment { prop, value, .. } => {
                 js_set(&result, "action", "inc")?;
                 js_set(&result, "path", export_path(path.as_slice(), &prop))?;
                 js_set(&result, "value", &JsValue::from_f64(value as f64))?;
+                js_set(&result, "context", p.0.ctx.to_string())?;
                 Ok(result.into())
             }
             PatchAction::DeleteMap { key, .. } => {
@@ -1357,6 +1362,7 @@ impl TryFrom<JsPatch> for JsValue {
                     "path",
                     export_path(path.as_slice(), &Prop::Map(key)),
                 )?;
+                js_set(&result, "context", p.0.ctx.to_string())?;
                 Ok(result.into())
             }
             PatchAction::DeleteSeq { index, length, .. } => {
@@ -1366,9 +1372,8 @@ impl TryFrom<JsPatch> for JsValue {
                     "path",
                     export_path(path.as_slice(), &Prop::Seq(index)),
                 )?;
-                if length > 1 {
-                    js_set(&result, "length", length)?;
-                }
+                js_set(&result, "length", length)?;
+                js_set(&result, "context", p.0.ctx.to_string())?;
                 Ok(result.into())
             }
             PatchAction::Mark { marks, .. } => {
@@ -1388,6 +1393,7 @@ impl TryFrom<JsPatch> for JsValue {
                     marks_array.push(&mark);
                 }
                 js_set(&result, "marks", marks_array)?;
+                js_set(&result, "context", p.0.ctx.to_string())?;
                 Ok(result.into())
             }
             PatchAction::Unmark {
@@ -1398,6 +1404,7 @@ impl TryFrom<JsPatch> for JsValue {
                 js_set(&result, "name", name)?;
                 js_set(&result, "start", start as i32)?;
                 js_set(&result, "end", end as i32)?;
+                js_set(&result, "context", p.0.ctx.to_string())?;
                 Ok(result.into())
             }
         }

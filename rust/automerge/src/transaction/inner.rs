@@ -5,7 +5,10 @@ use crate::marks::{ExpandMark, Mark};
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
 use crate::types::{Key, ListEncoding, ObjId, OpId, OpIds, TextEncoding};
-use crate::{op_tree::OpSetMetadata, types::Op, Automerge, Change, ChangeHash, OpObserver, Prop};
+use crate::{
+    op_tree::OpSetMetadata, types::Op, Automerge, Change, ChangeHash, ObserverContext, OpObserver,
+    Prop,
+};
 use crate::{AutomergeError, ObjType, OpType, ScalarValue};
 
 #[derive(Debug, Clone)]
@@ -598,7 +601,7 @@ impl TransactionInner {
 
         if deleted > 0 {
             if let Some(obs) = op_observer.as_mut() {
-                obs.delete_seq(doc, ex_obj.clone(), index, deleted);
+                obs.delete_seq(doc, ObserverContext::Change, ex_obj.clone(), index, deleted);
             }
         }
 
@@ -632,14 +635,21 @@ impl TransactionInner {
             if let Some(obs) = op_observer.as_mut() {
                 match splice_type {
                     SpliceType::Text(text, _) if !obs.text_as_seq() => {
-                        obs.splice_text(doc, ex_obj, index, text)
+                        obs.splice_text(doc, ObserverContext::Change, ex_obj, index, text)
                     }
                     SpliceType::List | SpliceType::Text(..) => {
                         let start = self.operations.len() - values.len();
                         for (offset, v) in values.iter().enumerate() {
                             let op = &self.operations[start + offset].1;
                             let value = (v.clone().into(), doc.ops().id_to_exid(op.id));
-                            obs.insert(doc, ex_obj.clone(), index + offset, value, false)
+                            obs.insert(
+                                doc,
+                                ObserverContext::Change,
+                                ex_obj.clone(),
+                                index + offset,
+                                value,
+                                false,
+                            )
                         }
                     }
                 }
@@ -669,9 +679,21 @@ impl TransactionInner {
                 OpType::MarkEnd(expand.after()),
             )?;
             if mark.value().is_null() {
-                obs.unmark(doc, ex_obj.clone(), mark.name(), mark.start, mark.end);
+                obs.unmark(
+                    doc,
+                    ObserverContext::Change,
+                    ex_obj.clone(),
+                    mark.name(),
+                    mark.start,
+                    mark.end,
+                );
             } else {
-                obs.mark(doc, ex_obj.clone(), Some(mark).into_iter())
+                obs.mark(
+                    doc,
+                    ObserverContext::Change,
+                    ex_obj.clone(),
+                    Some(mark).into_iter(),
+                )
             }
         } else {
             let action = OpType::MarkBegin(expand.before(), mark.data.into_owned());
@@ -712,26 +734,52 @@ impl TransactionInner {
                     match (obj_type, prop) {
                         (Some(ObjType::List), Prop::Seq(index)) => {
                             let value = (op.value(), doc.ops().id_to_exid(op.id));
-                            op_observer.insert(doc, ex_obj, index, value, false)
+                            op_observer.insert(
+                                doc,
+                                ObserverContext::Change,
+                                ex_obj,
+                                index,
+                                value,
+                                false,
+                            )
                         }
                         (Some(ObjType::Text), Prop::Seq(index)) => {
                             if op_observer.text_as_seq() {
                                 let value = (op.value(), doc.ops().id_to_exid(op.id));
-                                op_observer.insert(doc, ex_obj, index, value, false)
+                                op_observer.insert(
+                                    doc,
+                                    ObserverContext::Change,
+                                    ex_obj,
+                                    index,
+                                    value,
+                                    false,
+                                )
                             } else {
-                                op_observer.splice_text(doc, ex_obj, index, op.to_str())
+                                op_observer.splice_text(
+                                    doc,
+                                    ObserverContext::Change,
+                                    ex_obj,
+                                    index,
+                                    op.to_str(),
+                                )
                             }
                         }
                         _ => {}
                     }
                 }
             } else if op.is_delete() {
-                op_observer.delete(doc, ex_obj, prop);
+                op_observer.delete(doc, ObserverContext::Change, ex_obj, prop);
             } else if let Some(value) = op.get_increment_value() {
-                op_observer.increment(doc, ex_obj, prop, (value, doc.ops().id_to_exid(op.id)));
+                op_observer.increment(
+                    doc,
+                    ObserverContext::Change,
+                    ex_obj,
+                    prop,
+                    (value, doc.ops().id_to_exid(op.id)),
+                );
             } else {
                 let value = (op.value(), doc.ops().id_to_exid(op.id));
-                op_observer.put(doc, ex_obj, prop, value, false);
+                op_observer.put(doc, ObserverContext::Change, ex_obj, prop, value, false);
             }
         }
         self.operations.push((obj, op));

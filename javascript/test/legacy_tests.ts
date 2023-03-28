@@ -349,16 +349,19 @@ describe("Automerge", () => {
         assert.strictEqual(callbacks.length, 1)
         assert.deepStrictEqual(callbacks[0].patches[0], {
           action: "put",
+          context: "change",
           path: ["birds"],
           value: [],
         })
         assert.deepStrictEqual(callbacks[0].patches[1], {
           action: "insert",
+          context: "change",
           path: ["birds", 0],
           values: [""],
         })
         assert.deepStrictEqual(callbacks[0].patches[2], {
           action: "splice",
+          context: "change",
           path: ["birds", 0, 0],
           value: "Goldfinch",
         })
@@ -379,11 +382,13 @@ describe("Automerge", () => {
         assert.strictEqual(callbacks.length, 1)
         assert.deepStrictEqual(callbacks[0].patches[0], {
           action: "put",
+          context: "change",
           path: ["bird"],
           value: "",
         })
         assert.deepStrictEqual(callbacks[0].patches[1], {
           action: "splice",
+          context: "change",
           path: ["bird", 0],
           value: "Goldfinch",
         })
@@ -1583,10 +1588,30 @@ describe("Automerge", () => {
       })
       assert.strictEqual(callbacks.length, 1)
       assert.deepStrictEqual(callbacks[0].patches, [
-        { action: "put", path: ["birds"], value: [] },
-        { action: "insert", path: ["birds", 0], values: ["", ""] },
-        { action: "splice", path: ["birds", 0, 0], value: "Goldfinch" },
-        { action: "splice", path: ["birds", 1, 0], value: "Chaffinch" },
+        {
+          action: "put",
+          context: "load_incremental",
+          path: ["birds"],
+          value: [],
+        },
+        {
+          action: "insert",
+          context: "load_incremental",
+          path: ["birds", 0],
+          values: ["", ""],
+        },
+        {
+          action: "splice",
+          context: "load_incremental",
+          path: ["birds", 0, 0],
+          value: "Goldfinch",
+        },
+        {
+          action: "splice",
+          context: "load_incremental",
+          path: ["birds", 1, 0],
+          value: "Chaffinch",
+        },
       ])
       assert.deepStrictEqual(callbacks[0].opts.before, {})
       assert.strictEqual(callbacks[0].opts.after, reloaded)
@@ -1797,16 +1822,19 @@ describe("Automerge", () => {
       assert.strictEqual(callbacks.length, 1)
       assert.deepStrictEqual(callbacks[0].patch[0], {
         action: "put",
+        context: "apply",
         path: ["birds"],
         value: [],
       })
       assert.deepStrictEqual(callbacks[0].patch[1], {
         action: "insert",
+        context: "apply",
         path: ["birds", 0],
         values: [""],
       })
       assert.deepStrictEqual(callbacks[0].patch[2], {
         action: "splice",
+        context: "apply",
         path: ["birds", 0, 0],
         value: "Goldfinch",
       })
@@ -1825,10 +1853,25 @@ describe("Automerge", () => {
         patchCallback: p => patches.push(...p),
       })
       assert.deepStrictEqual(patches, [
-        { action: "put", path: ["birds"], value: [] },
-        { action: "insert", path: ["birds", 0], values: ["", ""] },
-        { action: "splice", path: ["birds", 0, 0], value: "Goldfinch" },
-        { action: "splice", path: ["birds", 1, 0], value: "Chaffinch" },
+        { action: "put", context: "apply", path: ["birds"], value: [] },
+        {
+          action: "insert",
+          context: "apply",
+          path: ["birds", 0],
+          values: ["", ""],
+        },
+        {
+          action: "splice",
+          context: "apply",
+          path: ["birds", 0, 0],
+          value: "Goldfinch",
+        },
+        {
+          action: "splice",
+          context: "apply",
+          path: ["birds", 1, 0],
+          value: "Chaffinch",
+        },
       ])
     })
 
@@ -1843,8 +1886,13 @@ describe("Automerge", () => {
       })
       Automerge.applyChanges(before, Automerge.getAllChanges(s1))
       assert.deepStrictEqual(patches, [
-        { action: "put", path: ["bird"], value: "" },
-        { action: "splice", path: ["bird", 0], value: "Goldfinch" },
+        { action: "put", context: "apply", path: ["bird"], value: "" },
+        {
+          action: "splice",
+          context: "apply",
+          path: ["bird", 0],
+          value: "Goldfinch",
+        },
       ])
     })
   })

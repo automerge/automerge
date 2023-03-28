@@ -7,7 +7,7 @@ use crate::{marks::Mark, ObjId, OpObserver, Prop, ReadDoc, ScalarValue, Value};
 use crate::sequence_tree::SequenceTree;
 
 use crate::op_observer::BranchableObserver;
-use crate::op_observer::{Patch, PatchAction};
+use crate::op_observer::{ObserverContext, Patch, PatchAction};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TextRepresentation {
@@ -136,13 +136,18 @@ impl<T: TextIndex> VecOpObserverInner<T> {
         }
     }
 
-    fn maybe_append(&mut self, obj: &ObjId) -> Option<&mut PatchAction<T::Item>> {
+    fn maybe_append(
+        &mut self,
+        obj: &ObjId,
+        ctx: ObserverContext,
+    ) -> Option<&mut PatchAction<T::Item>> {
         match self.patches.last_mut() {
             Some(Patch {
                 obj: tail_obj,
+                ctx: tail_ctx,
                 action,
                 ..
-            }) if obj == tail_obj => Some(action),
+            }) if obj == tail_obj && &ctx == tail_ctx => Some(action),
             _ => None,
         }
     }
@@ -152,6 +157,7 @@ impl<T: TextIndex> OpObserver for VecOpObserverInner<T> {
     fn insert<R: ReadDoc>(
         &mut self,
         doc: &R,
+        ctx: ObserverContext,
         obj: ObjId,
         index: usize,
         tagged_value: (Value<'_>, ObjId),
@@ -162,7 +168,7 @@ impl<T: TextIndex> OpObserver for VecOpObserverInner<T> {
             index: tail_index,
             values,
             ..
-        }) = self.maybe_append(&obj)
+        }) = self.maybe_append(&obj, ctx)
         {
             let range = *tail_index..=*tail_index + values.len();
             if range.contains(&index) {
@@ -178,15 +184,27 @@ impl<T: TextIndex> OpObserver for VecOpObserverInner<T> {
                 values,
                 conflict,
             };
-            self.patches.push(Patch { obj, path, action });
+            self.patches.push(Patch {
+                obj,
+                path,
+                action,
+                ctx,
+            });
         }
     }
 
-    fn splice_text<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, index: usize, value: &str) {
+    fn splice_text<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        ctx: ObserverContext,
+        obj: ObjId,
+        index: usize,
+        value: &str,
+    ) {
         if self.text_rep == TextRepresentation::Array {
             for (offset, c) in value.chars().map(ScalarValue::from).enumerate() {
                 let value = (c.into(), ObjId::Root);
-                self.insert(doc, obj.clone(), index + offset, value, false);
+                self.insert(doc, ctx, obj.clone(), index + offset, value, false);
             }
             return;
         }
@@ -194,7 +212,7 @@ impl<T: TextIndex> OpObserver for VecOpObserverInner<T> {
             index: tail_index,
             value: prev_value,
             ..
-        }) = self.maybe_append(&obj)
+        }) = self.maybe_append(&obj, ctx)
         {
             let range = *tail_index..=*tail_index + prev_value.len();
             if range.contains(&index) {
@@ -211,12 +229,24 @@ impl<T: TextIndex> OpObserver for VecOpObserverInner<T> {
                 v.push(ch)
             }
             let action = PatchAction::SpliceText { index, value: v };
-            self.patches.push(Patch { obj, path, action });
+            self.patches.push(Patch {
+                obj,
+                path,
+                action,
+                ctx,
+            });
         }
     }
 
-    fn delete_seq<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, index: usize, length: usize) {
-        match self.maybe_append(&obj) {
+    fn delete_seq<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        ctx: ObserverContext,
+        obj: ObjId,
+        index: usize,
+        length: usize,
+    ) {
+        match self.maybe_append(&obj, ctx) {
             Some(PatchAction::SpliceText {
                 index: tail_index,
                 value,
@@ -257,22 +287,33 @@ impl<T: TextIndex> OpObserver for VecOpObserverInner<T> {
         }
         if let Some(path) = self.get_path(doc, &obj) {
             let action = PatchAction::DeleteSeq { index, length };
-            self.patches.push(Patch { obj, path, action })
+            self.patches.push(Patch {
+                obj,
+                path,
+                action,
+                ctx,
+            })
         }
     }
 
-    fn delete_map<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, key: &str) {
+    fn delete_map<R: ReadDoc>(&mut self, doc: &R, ctx: ObserverContext, obj: ObjId, key: &str) {
         if let Some(path) = self.get_path(doc, &obj) {
             let action = PatchAction::DeleteMap {
                 key: key.to_owned(),
             };
-            self.patches.push(Patch { obj, path, action })
+            self.patches.push(Patch {
+                obj,
+                path,
+                action,
+                ctx,
+            })
         }
     }
 
     fn put<R: ReadDoc>(
         &mut self,
         doc: &R,
+        ctx: ObserverContext,
         obj: ObjId,
         prop: Prop,
         tagged_value: (Value<'_>, ObjId),
@@ -295,13 +336,19 @@ impl<T: TextIndex> OpObserver for VecOpObserverInner<T> {
                     conflict,
                 },
             };
-            self.patches.push(Patch { obj, path, action })
+            self.patches.push(Patch {
+                obj,
+                path,
+                action,
+                ctx,
+            })
         }
     }
 
     fn expose<R: ReadDoc>(
         &mut self,
         doc: &R,
+        ctx: ObserverContext,
         obj: ObjId,
         prop: Prop,
         tagged_value: (Value<'_>, ObjId),
@@ -324,13 +371,19 @@ impl<T: TextIndex> OpObserver for VecOpObserverInner<T> {
                     conflict,
                 },
             };
-            self.patches.push(Patch { obj, path, action })
+            self.patches.push(Patch {
+                obj,
+                path,
+                action,
+                ctx,
+            })
         }
     }
 
     fn increment<R: ReadDoc>(
         &mut self,
         doc: &R,
+        ctx: ObserverContext,
         obj: ObjId,
         prop: Prop,
         tagged_value: (i64, ObjId),
@@ -338,17 +391,23 @@ impl<T: TextIndex> OpObserver for VecOpObserverInner<T> {
         if let Some(path) = self.get_path(doc, &obj) {
             let value = tagged_value.0;
             let action = PatchAction::Increment { prop, value };
-            self.patches.push(Patch { obj, path, action })
+            self.patches.push(Patch {
+                obj,
+                path,
+                action,
+                ctx,
+            })
         }
     }
 
     fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(
         &mut self,
         doc: &'a R,
+        ctx: ObserverContext,
         obj: ObjId,
         mark: M,
     ) {
-        if let Some(PatchAction::Mark { marks, .. }) = self.maybe_append(&obj) {
+        if let Some(PatchAction::Mark { marks, .. }) = self.maybe_append(&obj, ctx) {
             for m in mark {
                 marks.push(m.into_owned())
             }
@@ -358,19 +417,37 @@ impl<T: TextIndex> OpObserver for VecOpObserverInner<T> {
             let marks: Vec<_> = mark.map(|m| m.into_owned()).collect();
             if !marks.is_empty() {
                 let action = PatchAction::Mark { marks };
-                self.patches.push(Patch { obj, path, action });
+                self.patches.push(Patch {
+                    obj,
+                    path,
+                    action,
+                    ctx,
+                });
             }
         }
     }
 
-    fn unmark<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, name: &str, start: usize, end: usize) {
+    fn unmark<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        ctx: ObserverContext,
+        obj: ObjId,
+        name: &str,
+        start: usize,
+        end: usize,
+    ) {
         if let Some(path) = self.get_path(doc, &obj) {
             let action = PatchAction::Unmark {
                 name: name.to_string(),
                 start,
                 end,
             };
-            self.patches.push(Patch { obj, path, action });
+            self.patches.push(Patch {
+                obj,
+                path,
+                action,
+                ctx,
+            });
         }
     }
 
@@ -396,69 +473,96 @@ impl OpObserver for VecOpObserver {
     fn insert<R: ReadDoc>(
         &mut self,
         doc: &R,
+        ctx: ObserverContext,
         obj: ObjId,
         index: usize,
         tagged_value: (Value<'_>, ObjId),
         conflict: bool,
     ) {
-        self.0.insert(doc, obj, index, tagged_value, conflict)
+        self.0.insert(doc, ctx, obj, index, tagged_value, conflict)
     }
 
-    fn splice_text<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, index: usize, value: &str) {
-        self.0.splice_text(doc, obj, index, value)
+    fn splice_text<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        ctx: ObserverContext,
+        obj: ObjId,
+        index: usize,
+        value: &str,
+    ) {
+        self.0.splice_text(doc, ctx, obj, index, value)
     }
 
-    fn delete_seq<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, index: usize, length: usize) {
-        self.0.delete_seq(doc, obj, index, length)
+    fn delete_seq<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        ctx: ObserverContext,
+        obj: ObjId,
+        index: usize,
+        length: usize,
+    ) {
+        self.0.delete_seq(doc, ctx, obj, index, length)
     }
 
-    fn delete_map<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, key: &str) {
-        self.0.delete_map(doc, obj, key)
+    fn delete_map<R: ReadDoc>(&mut self, doc: &R, ctx: ObserverContext, obj: ObjId, key: &str) {
+        self.0.delete_map(doc, ctx, obj, key)
     }
 
     fn put<R: ReadDoc>(
         &mut self,
         doc: &R,
+        ctx: ObserverContext,
         obj: ObjId,
         prop: Prop,
         tagged_value: (Value<'_>, ObjId),
         conflict: bool,
     ) {
-        self.0.put(doc, obj, prop, tagged_value, conflict)
+        self.0.put(doc, ctx, obj, prop, tagged_value, conflict)
     }
 
     fn expose<R: ReadDoc>(
         &mut self,
         doc: &R,
+        ctx: ObserverContext,
         obj: ObjId,
         prop: Prop,
         tagged_value: (Value<'_>, ObjId),
         conflict: bool,
     ) {
-        self.0.expose(doc, obj, prop, tagged_value, conflict)
+        self.0.expose(doc, ctx, obj, prop, tagged_value, conflict)
     }
 
     fn increment<R: ReadDoc>(
         &mut self,
         doc: &R,
+        ctx: ObserverContext,
         obj: ObjId,
         prop: Prop,
         tagged_value: (i64, ObjId),
     ) {
-        self.0.increment(doc, obj, prop, tagged_value)
+        self.0.increment(doc, ctx, obj, prop, tagged_value)
     }
 
     fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(
         &mut self,
         doc: &'a R,
+        ctx: ObserverContext,
         obj: ObjId,
         mark: M,
     ) {
-        self.0.mark(doc, obj, mark)
+        self.0.mark(doc, ctx, obj, mark)
     }
 
-    fn unmark<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, name: &str, start: usize, end: usize) {
-        self.0.unmark(doc, obj, name, start, end)
+    fn unmark<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        ctx: ObserverContext,
+        obj: ObjId,
+        name: &str,
+        start: usize,
+        end: usize,
+    ) {
+        self.0.unmark(doc, ctx, obj, name, start, end)
     }
 
     fn text_as_seq(&self) -> bool {
@@ -470,69 +574,96 @@ impl OpObserver for VecOpObserver16 {
     fn insert<R: ReadDoc>(
         &mut self,
         doc: &R,
+        ctx: ObserverContext,
         obj: ObjId,
         index: usize,
         tagged_value: (Value<'_>, ObjId),
         conflict: bool,
     ) {
-        self.0.insert(doc, obj, index, tagged_value, conflict)
+        self.0.insert(doc, ctx, obj, index, tagged_value, conflict)
     }
 
-    fn splice_text<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, index: usize, value: &str) {
-        self.0.splice_text(doc, obj, index, value)
+    fn splice_text<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        ctx: ObserverContext,
+        obj: ObjId,
+        index: usize,
+        value: &str,
+    ) {
+        self.0.splice_text(doc, ctx, obj, index, value)
     }
 
-    fn delete_seq<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, index: usize, length: usize) {
-        self.0.delete_seq(doc, obj, index, length)
+    fn delete_seq<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        ctx: ObserverContext,
+        obj: ObjId,
+        index: usize,
+        length: usize,
+    ) {
+        self.0.delete_seq(doc, ctx, obj, index, length)
     }
 
-    fn delete_map<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, key: &str) {
-        self.0.delete_map(doc, obj, key)
+    fn delete_map<R: ReadDoc>(&mut self, doc: &R, ctx: ObserverContext, obj: ObjId, key: &str) {
+        self.0.delete_map(doc, ctx, obj, key)
     }
 
     fn put<R: ReadDoc>(
         &mut self,
         doc: &R,
+        ctx: ObserverContext,
         obj: ObjId,
         prop: Prop,
         tagged_value: (Value<'_>, ObjId),
         conflict: bool,
     ) {
-        self.0.put(doc, obj, prop, tagged_value, conflict)
+        self.0.put(doc, ctx, obj, prop, tagged_value, conflict)
     }
 
     fn expose<R: ReadDoc>(
         &mut self,
         doc: &R,
+        ctx: ObserverContext,
         obj: ObjId,
         prop: Prop,
         tagged_value: (Value<'_>, ObjId),
         conflict: bool,
     ) {
-        self.0.expose(doc, obj, prop, tagged_value, conflict)
+        self.0.expose(doc, ctx, obj, prop, tagged_value, conflict)
     }
 
     fn increment<R: ReadDoc>(
         &mut self,
         doc: &R,
+        ctx: ObserverContext,
         obj: ObjId,
         prop: Prop,
         tagged_value: (i64, ObjId),
     ) {
-        self.0.increment(doc, obj, prop, tagged_value)
+        self.0.increment(doc, ctx, obj, prop, tagged_value)
     }
 
     fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(
         &mut self,
         doc: &'a R,
+        ctx: ObserverContext,
         obj: ObjId,
         mark: M,
     ) {
-        self.0.mark(doc, obj, mark)
+        self.0.mark(doc, ctx, obj, mark)
     }
 
-    fn unmark<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, name: &str, start: usize, end: usize) {
-        self.0.unmark(doc, obj, name, start, end)
+    fn unmark<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        ctx: ObserverContext,
+        obj: ObjId,
+        name: &str,
+        start: usize,
+        end: usize,
+    ) {
+        self.0.unmark(doc, ctx, obj, name, start, end)
     }
 
     fn text_as_seq(&self) -> bool {

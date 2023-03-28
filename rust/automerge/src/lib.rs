@@ -291,7 +291,7 @@ pub use list_range_at::ListRangeAt;
 pub use map_range::MapRange;
 pub use map_range_at::MapRangeAt;
 pub use op_observer::{
-    OpObserver, Patch, PatchAction, ToggleObserver, VecOpObserver, VecOpObserver16,
+    ObserverContext, OpObserver, Patch, PatchAction, ToggleObserver, VecOpObserver, VecOpObserver16,
 };
 pub use parents::{Parent, Parents};
 pub use read::ReadDoc;

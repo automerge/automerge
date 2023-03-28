@@ -73,7 +73,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     storage::{parse, Change as StoredChange, ReadChangeOpError},
-    Automerge, AutomergeError, Change, ChangeHash, OpObserver, ReadDoc,
+    Automerge, AutomergeError, Change, ChangeHash, ObserverContext, OpObserver, ReadDoc,
 };
 
 mod bloom;
@@ -321,7 +321,7 @@ impl Automerge {
 
         let changes_is_empty = message_changes.is_empty();
         if !changes_is_empty {
-            self.apply_changes_with(message_changes, op_observer)?;
+            self.apply_changes_with_ctx(message_changes, op_observer, ObserverContext::Sync)?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
                 &self.get_heads().into_iter().collect(),

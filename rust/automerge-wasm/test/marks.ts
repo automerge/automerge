@@ -229,13 +229,13 @@ describe('Automerge', () => {
       let patches = doc.popPatches();
       let util = require('util')
       assert.deepEqual(patches, [
-        { action: 'put', path: [ 'list' ], value: '' },
+        { action: 'put', path: [ 'list' ], value: '', context: 'change' },
         {
           action: 'splice', path: [ 'list', 0 ],
-          value: 'the quick fox jumps over the lazy dog'
+          value: 'the quick fox jumps over the lazy dog', context: 'change'
         },
         {
-          action: 'mark', path: [ 'list' ],
+          action: 'mark', path: [ 'list' ], context: 'change',
           marks: [
             { name: 'bold', value: true, start: 0, end: 37  },
             { name: 'itallic', value: true, start: 4, end: 19 },
@@ -268,10 +268,11 @@ describe('Automerge', () => {
       let patches = doc3.popPatches();
 
       assert.deepEqual(patches, [
-          { action: 'put', path: [ 'foo' ], value: 'bar' },
+          { action: 'put', path: [ 'foo' ], value: 'bar', context: 'merge' },
           {
             action: 'mark',
             path: [ 'list' ],
+            context: 'merge',
             marks: [
               { name: 'x', value: 'a', start: 0, end: 5 },
               { name: 'x', value: 'b', start: 8, end: 11 },
@@ -294,7 +295,7 @@ describe('Automerge', () => {
       let patches1 = doc1.popPatches().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches1, [{
-        action: 'mark', path: [ 'list' ], marks: [ { name: 'xxx', value: 'aaa', start: 5, end: 10 }],
+        action: 'mark', path: [ 'list' ], marks: [ { name: 'xxx', value: 'aaa', start: 5, end: 10 }], context: 'change',
       }]);
 
       let doc2 : Automerge = create(true);
@@ -304,7 +305,10 @@ describe('Automerge', () => {
       let patches2 = doc2.popPatches().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches2, [{
-        action: 'mark', path: ['list'], marks: [ { name: 'xxx', value: 'aaa', start: 5, end: 10}],
+        action: 'mark',
+        path: ['list'],
+        context: 'load_incremental',
+        marks: [ { name: 'xxx', value: 'aaa', start: 5, end: 10}],
       }]);
     })
 
@@ -325,7 +329,7 @@ describe('Automerge', () => {
           { name: 'xxx', value: 'aaa', start: 5, end: 15 },
           { name: 'xxx', value: 'aaa', start: 10, end: 20 },
           { name: 'xxx', value: 'aaa', start: 15, end: 25 },
-        ] },
+        ], context: 'change' },
       ]);
 
       let doc2 : Automerge = create(true);
@@ -335,7 +339,12 @@ describe('Automerge', () => {
       let patches2 = doc2.popPatches().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches2, [
-        { action: 'mark', path: ['list'], marks: [ { name: 'xxx', value: 'aaa', start: 5, end: 25}] },
+        {
+          action: 'mark',
+          path: ['list'],
+          context: 'load_incremental' ,
+          marks: [ { name: 'xxx', value: 'aaa', start: 5, end: 25}]
+        }
       ]);
     })
 
@@ -356,7 +365,7 @@ describe('Automerge', () => {
           { name: 'xxx', value: 'aaa', start: 5, end: 15 },
           { name: 'xxx', value: 'bbb', start: 10, end: 20 },
           { name: 'xxx', value: 'aaa', start: 15, end: 25 },
-        ]}
+        ], context: 'change'}
       ]);
 
       let doc2 : Automerge = create(true);
@@ -366,7 +375,7 @@ describe('Automerge', () => {
       let patches2 = doc2.popPatches().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches2, [
-        { action: 'mark', path: ['list'], marks: [
+        { action: 'mark', path: ['list'], context: 'load_incremental', marks: [
           { name: 'xxx', value: 'aaa', start: 5, end: 10 },
           { name: 'xxx', value: 'bbb', start: 10, end: 15 },
           { name: 'xxx', value: 'aaa', start: 15, end: 25 },
@@ -387,7 +396,7 @@ describe('Automerge', () => {
       let patches1 = doc1.popPatches().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches1, [
-        { action: 'mark', path: [ 'list' ], marks: [
+        { action: 'mark', path: [ 'list' ], context: 'change', marks: [
           { name: 'xxx', value: 'aaa', start: 5, end:15 },
           { name: 'yyy', value: 'aaa', start: 10, end: 20 },
           { name: 'zzz', value: 'aaa', start: 15, end: 25 },
@@ -401,7 +410,7 @@ describe('Automerge', () => {
       let patches2 = doc2.popPatches().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches2, [
-        { action: 'mark', path: [ 'list' ], marks: [
+        { action: 'mark', path: [ 'list' ], context: 'load_incremental', marks: [
           { name: 'xxx', value: 'aaa', start: 5, end: 15 },
           { name: 'yyy', value: 'aaa', start: 10, end: 20 },
           { name: 'zzz', value: 'aaa', start: 15, end: 25 },
@@ -430,13 +439,16 @@ describe('Automerge', () => {
       let patches1 = doc1.popPatches().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches1, [
-        { action: 'mark', path: [ 'list' ], marks: [
+        { action: 'mark', path: [ 'list' ], context: 'change', marks: [
             { name: 'xxx', value: 'aaa', start: 10, end: 20 },
             { name: 'xxx', value: 'aaa', start: 15, end: 25 },
+          ]
+        },
+        { action: 'mark', path: [ 'list' ], context: 'merge', marks: [
             { name: 'xxx', value: 'bbb', start: 5, end: 10 },
             { name: 'xxx', value: 'bbb', start: 25, end: 30 },
           ]
-        },
+        }
       ]);
 
       let doc3 : Automerge = create(true);
@@ -453,7 +465,7 @@ describe('Automerge', () => {
           { name: 'xxx', value: 'bbb', start: 25, end: 30  },
       ]);
 
-      assert.deepEqual(patches2, [{ action: 'mark', path: [ 'list' ], marks }]);
+      assert.deepEqual(patches2, [{ action: 'mark', path: [ 'list' ], context: 'load_incremental', marks }]);
     })
 
     it('does not show marks hidden in merge', () => {
@@ -477,7 +489,7 @@ describe('Automerge', () => {
       let patches1 = doc1.popPatches().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches1, [
-        { action: 'mark', path: [ 'list' ], marks: [
+        { action: 'mark', path: [ 'list' ], context: 'change', marks: [
             { name: 'xxx', value: 'aaa', start: 10, end: 20 },
             { name: 'xxx', value: 'aaa', start: 15, end: 25 },
           ]
@@ -491,7 +503,7 @@ describe('Automerge', () => {
       let patches2 = doc3.popPatches().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches2, [
-        { action: 'mark', path: [ 'list' ], marks: [
+        { action: 'mark', path: [ 'list' ], context: 'load_incremental', marks: [
           { name: 'xxx', value: 'aaa', start: 10, end: 25 },
         ]}
       ]);
@@ -518,9 +530,12 @@ describe('Automerge', () => {
       let patches1 = doc1.popPatches().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches1, [
-        { action: 'mark', path: [ 'list' ], marks: [
+        { action: 'mark', path: [ 'list' ], context: 'change', marks: [
             { name: 'xxx', value: 'aaa', start: 5, end: 11 },
             { name: 'xxx', value: 'aaa', start: 19, end: 25 },
+          ]
+        },
+        { action: 'mark', path: [ 'list' ], context: 'merge', marks: [
             { name: 'xxx', value: 'aaa', start: 11, end: 19 },
           ]
         },
@@ -533,7 +548,7 @@ describe('Automerge', () => {
       let patches2 = doc3.popPatches().filter((p:any) => p.action == "mark")
 
       assert.deepEqual(patches2, [
-        { action: 'mark', path: [ 'list' ], marks: [
+        { action: 'mark', path: [ 'list' ], context: 'load_incremental', marks: [
           { name: 'xxx', value: 'aaa', start: 5, end: 25 },
         ]}
       ]);

@@ -11,7 +11,7 @@ use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
 use crate::keys::Keys;
 use crate::marks::{Mark, MarkStateMachine};
-use crate::op_observer::{BranchableObserver, OpObserver};
+use crate::op_observer::{BranchableObserver, ObserverContext, OpObserver};
 use crate::op_set::OpSet;
 use crate::parents::Parents;
 use crate::storage::{self, load, CompressConfig, VerificationMode};
@@ -545,7 +545,7 @@ impl Automerge {
             }
         }
         if let Some(observer) = &mut observer {
-            current_state::observe_current_state(&am, *observer);
+            current_state::observe_current_state(&am, *observer, ObserverContext::Load);
         }
         Ok(am)
     }
@@ -574,7 +574,7 @@ impl Automerge {
                 .with_encoding(self.text_encoding)
                 .with_actor(self.actor_id());
             if let Some(obs) = op_observer {
-                current_state::observe_current_state(&doc, obs);
+                current_state::observe_current_state(&doc, obs, ObserverContext::LoadIncremental);
             }
             *self = doc;
             return Ok(self.ops.len());
@@ -587,7 +587,7 @@ impl Automerge {
             }
         };
         let start = self.ops.len();
-        self.apply_changes_with(changes, op_observer)?;
+        self.apply_changes_with_ctx(changes, op_observer, ObserverContext::LoadIncremental)?;
         let delta = self.ops.len() - start;
         Ok(delta)
     }
@@ -617,7 +617,16 @@ impl Automerge {
     pub fn apply_changes_with<I: IntoIterator<Item = Change>, Obs: OpObserver>(
         &mut self,
         changes: I,
+        op_observer: Option<&mut Obs>,
+    ) -> Result<(), AutomergeError> {
+        self.apply_changes_with_ctx(changes, op_observer, ObserverContext::Apply)
+    }
+
+    pub(crate) fn apply_changes_with_ctx<I: IntoIterator<Item = Change>, Obs: OpObserver>(
+        &mut self,
+        changes: I,
         mut op_observer: Option<&mut Obs>,
+        ctx: ObserverContext,
     ) -> Result<(), AutomergeError> {
         // Record this so we can avoid observing each individual change and instead just observe
         // the final state after all the changes have been applied. We can only do this for an
@@ -634,9 +643,9 @@ impl Automerge {
                 }
                 if self.is_causally_ready(&c) {
                     if empty_at_start {
-                        self.apply_change::<()>(c, &mut None);
+                        self.apply_change::<()>(c, &mut None, ctx);
                     } else {
-                        self.apply_change(c, &mut op_observer);
+                        self.apply_change(c, &mut op_observer, ctx);
                     }
                 } else {
                     self.queue.push(c);
@@ -646,26 +655,31 @@ impl Automerge {
         while let Some(c) = self.pop_next_causally_ready_change() {
             if !self.history_index.contains_key(&c.hash()) {
                 if empty_at_start {
-                    self.apply_change::<()>(c, &mut None);
+                    self.apply_change::<()>(c, &mut None, ctx);
                 } else {
-                    self.apply_change(c, &mut op_observer);
+                    self.apply_change(c, &mut op_observer, ctx);
                 }
             }
         }
         if empty_at_start {
-            if let Some(observer) = &mut op_observer {
-                current_state::observe_current_state(self, *observer);
+            if let Some(observer) = op_observer {
+                current_state::observe_current_state(self, observer, ctx);
             }
         }
         Ok(())
     }
 
-    fn apply_change<Obs: OpObserver>(&mut self, change: Change, observer: &mut Option<&mut Obs>) {
+    fn apply_change<Obs: OpObserver>(
+        &mut self,
+        change: Change,
+        observer: &mut Option<&mut Obs>,
+        ctx: ObserverContext,
+    ) {
         let ops = self.import_ops(&change);
         self.update_history(change, ops.len());
         if let Some(observer) = observer {
             for (obj, op) in ops {
-                self.insert_op_with_observer(&obj, op, *observer);
+                self.insert_op_with_observer(&obj, op, *observer, ctx);
             }
         } else {
             for (obj, op) in ops {
@@ -766,7 +780,7 @@ impl Automerge {
             .cloned()
             .collect::<Vec<_>>();
         tracing::trace!(changes=?changes.iter().map(|c| c.hash()).collect::<Vec<_>>(), "merging new changes");
-        self.apply_changes_with(changes, op_observer)?;
+        self.apply_changes_with_ctx(changes, op_observer, ObserverContext::Merge)?;
         Ok(self.get_heads())
     }
 
@@ -1046,6 +1060,7 @@ impl Automerge {
         obj: &ObjId,
         op: Op,
         observer: &mut Obs,
+        ctx: ObserverContext,
     ) -> Op {
         let obj_type = self.ops.object_type(obj);
         let encoding = obj_type
@@ -1078,23 +1093,23 @@ impl Automerge {
                     let q = self
                         .ops
                         .search(obj, query::SeekMark::new(op.id.prev(), pos, encoding));
-                    observer.mark(self, ex_obj, q.marks.into_iter());
+                    observer.mark(self, ctx, ex_obj, q.marks.into_iter());
                 }
             } else if obj_type == Some(ObjType::Text) {
-                observer.splice_text(self, ex_obj, seen, op.to_str());
+                observer.splice_text(self, ctx, ex_obj, seen, op.to_str());
             } else {
                 let value = (op.value(), self.ops.id_to_exid(op.id));
-                observer.insert(self, ex_obj, seen, value, false);
+                observer.insert(self, ctx, ex_obj, seen, value, false);
             }
         } else if op.is_delete() {
             if let Some(winner) = &values.last() {
                 let value = (winner.value(), self.ops.id_to_exid(winner.id));
                 let conflict = values.len() > 1;
-                observer.expose(self, ex_obj, key, value, conflict);
+                observer.expose(self, ctx, ex_obj, key, value, conflict);
             } else if had_value_before {
                 match key {
-                    Prop::Map(k) => observer.delete_map(self, ex_obj, &k),
-                    Prop::Seq(index) => observer.delete_seq(self, ex_obj, index, last_width),
+                    Prop::Map(k) => observer.delete_map(self, ctx, ex_obj, &k),
+                    Prop::Seq(index) => observer.delete_seq(self, ctx, ex_obj, index, last_width),
                 }
             }
         } else if let Some(value) = op.get_increment_value() {
@@ -1107,7 +1122,7 @@ impl Automerge {
                 .unwrap_or_default()
             {
                 // we have observed the value
-                observer.increment(self, ex_obj, key, (value, self.ops.id_to_exid(op.id)));
+                observer.increment(self, ctx, ex_obj, key, (value, self.ops.id_to_exid(op.id)));
             }
         } else {
             let just_conflict = values
@@ -1116,12 +1131,12 @@ impl Automerge {
                 .unwrap_or(false);
             let value = (op.value(), self.ops.id_to_exid(op.id));
             if op.is_list_op() && !had_value_before {
-                observer.insert(self, ex_obj, seen, value, false);
+                observer.insert(self, ctx, ex_obj, seen, value, false);
             } else if just_conflict {
-                observer.flag_conflict(self, ex_obj, key);
+                observer.flag_conflict(self, ctx, ex_obj, key);
             } else {
                 let conflict = !values.is_empty();
-                observer.put(self, ex_obj, key, value, conflict);
+                observer.put(self, ctx, ex_obj, key, value, conflict);
             }
         }
 
