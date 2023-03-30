@@ -5,7 +5,7 @@ use std::{
 };
 
 pub(crate) const B: usize = 16;
-pub(crate) type SequenceTree<T> = SequenceTreeInternal<T>;
+pub type SequenceTree<T> = SequenceTreeInternal<T>;
 
 #[derive(Clone, Debug)]
 pub struct SequenceTreeInternal<T> {

@@ -229,6 +229,12 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
     }
 
     /// Save this document, but don't run it through DEFLATE afterwards
+    pub fn save_and_verify(&mut self) -> Result<Vec<u8>, AutomergeError> {
+        self.ensure_transaction_closed();
+        self.doc.save_and_verify()
+    }
+
+    /// Save this document, but don't run it through DEFLATE afterwards
     pub fn save_nocompress(&mut self) -> Vec<u8> {
         self.ensure_transaction_closed();
         self.doc.save_nocompress()

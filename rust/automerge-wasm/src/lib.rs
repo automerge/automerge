@@ -1,6 +1,6 @@
 #![doc(
-    html_logo_url = "https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg",
-    html_favicon_url = "https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"
+    html_logo_url = "https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg",
+    html_favicon_url = "https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"
 )]
 #![warn(
     missing_debug_implementations,
@@ -674,6 +674,18 @@ impl Automerge {
     pub fn save_incremental(&mut self) -> Uint8Array {
         let bytes = self.doc.save_incremental();
         Uint8Array::from(bytes.as_slice())
+    }
+
+    #[wasm_bindgen(js_name = saveNoCompress)]
+    pub fn save_nocompress(&mut self) -> Uint8Array {
+        let bytes = self.doc.save_nocompress();
+        Uint8Array::from(bytes.as_slice())
+    }
+
+    #[wasm_bindgen(js_name = saveAndVerify)]
+    pub fn save_and_verify(&mut self) -> Result<Uint8Array, error::Load> {
+        let bytes = self.doc.save_and_verify()?;
+        Ok(Uint8Array::from(bytes.as_slice()))
     }
 
     #[wasm_bindgen(js_name = loadIncremental)]

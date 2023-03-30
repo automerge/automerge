@@ -795,6 +795,13 @@ impl Automerge {
         bytes
     }
 
+    /// Save the document and attempt to load it before returning - slow!
+    pub fn save_and_verify(&mut self) -> Result<Vec<u8>, AutomergeError> {
+        let bytes = self.save();
+        Self::load(&bytes)?;
+        Ok(bytes)
+    }
+
     /// Save this document, but don't run it through DEFLATE afterwards
     pub fn save_nocompress(&mut self) -> Vec<u8> {
         let heads = self.get_heads();

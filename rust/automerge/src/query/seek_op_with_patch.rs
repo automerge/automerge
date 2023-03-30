@@ -104,24 +104,29 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
                     // split across two tree nodes. To avoid double-counting in this situation, we
                     // subtract one if the last visible element also appears in this tree node.
                     let mut num_vis = child.index.visible_len(self.encoding);
-                    if num_vis > 0 {
-                        // FIXME: I think this is wrong: we should subtract one only if this
-                        // subtree contains a *visible* (i.e. empty succs) operation for the list
-                        // element with elemId `last_seen`; this will subtract one even if all
-                        // values for this list element have been deleted in this subtree.
-                        if let Some(last_seen) = self.last_seen {
-                            if child.index.has_visible(&last_seen) {
-                                num_vis -= 1;
-                            }
+                    if let Some(last_seen) = self.last_seen {
+                        if child.index.has_visible(&last_seen) {
+                            num_vis -= 1;
                         }
-                        self.seen += num_vis;
+                    }
+                    self.seen += num_vis;
 
-                        // FIXME: this is also wrong: `last_seen` needs to be the elemId of the
-                        // last *visible* list element in this subtree, but I think this returns
-                        // the last operation's elemId regardless of whether it's visible or not.
-                        // This will lead to incorrect counting if `last_seen` is not visible: it's
-                        // not counted towards `num_vis`, so we shouldn't be subtracting 1.
-                        self.last_seen = Some(ops[child.last()].elemid_or_key());
+                    // We have updated seen by the number of visible elements in this index, before we skip it.
+                    // We also need to keep track of the last elemid that we have seen (and counted as seen).
+                    // We can just use the elemid of the last op in this node as either:
+                    // - the insert was at a previous node and this is a long run of overwrites so last_seen should already be set correctly
+                    // - the visible op is in this node and the elemid references it so it can be set here
+                    // - the visible op is in a future node and so it will be counted as seen there
+                    // ⚠️ We also need to reset last_seen if it is set to something else than the last item
+                    //   in the child. This means that the child contains an `insert` (so last_seen should
+                    //   be reset to None), but no visible op (so last_seen should not be set to a new value)
+                    //   The visible op also cannot be in a previous node, because then `last_seen` would
+                    //   already be set to the same elemid as the last element in the child.
+                    let last_elemid = ops[child.last()].elemid_or_key();
+                    if child.index.has_visible(&last_elemid) {
+                        self.last_seen = Some(last_elemid);
+                    } else if self.last_seen.is_some() && Some(last_elemid) != self.last_seen {
+                        self.last_seen = None;
                     }
                     QueryResult::Next
                 }

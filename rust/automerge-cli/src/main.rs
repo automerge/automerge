@@ -112,6 +112,9 @@ enum Command {
     /// Read an automerge document and print a JSON representation of the changes in it to stdout
     Examine {
         input_file: Option<PathBuf>,
+
+        /// Whether to verify the head hashes of a compressed document
+        #[clap(long, action = clap::ArgAction::SetFalse)]
         skip_verifying_heads: SkipVerifyFlag,
     },
 

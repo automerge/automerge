@@ -1,6 +1,6 @@
 ## Automerge WASM Low Level Interface
 
-This package is a low level interface to the [automerge rust](https://github.com/automerge/automerge-rs/tree/experiment) CRDT.  The api is intended to be as "close to the metal" as possible with only a few ease of use accommodations.  This library is used as the underpinnings for the [Automerge JS wrapper](https://github.com/automerge/automerge-rs/tree/experiment/automerge-js) and can be used as is or as a basis for another higher level expression of a CRDT.
+This package is a low level interface to the [automerge rust](https://github.com/automerge/automerge/tree/main/rust/automerge) CRDT.  The api is intended to be as "close to the metal" as possible with only a few ease of use accommodations.  This library is used as the underpinnings for the [Automerge JS wrapper](https://github.com/automerge/automerge/tree/main/javascript) and can be used as is or as a basis for another higher level expression of a CRDT.
 
 All example code can be found in `test/readme.ts`
 

@@ -186,8 +186,8 @@
 //!
 
 #![doc(
-    html_logo_url = "https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg",
-    html_favicon_url = "https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"
+    html_logo_url = "https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg",
+    html_favicon_url = "https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"
 )]
 #![warn(
     missing_debug_implementations,
@@ -261,7 +261,7 @@ mod map_range_at;
 pub mod marks;
 pub mod op_observer;
 mod op_set;
-mod op_tree;
+pub mod op_tree;
 mod parents;
 mod query;
 mod read;
@@ -295,6 +295,7 @@ pub use op_observer::{
 };
 pub use parents::{Parent, Parents};
 pub use read::ReadDoc;
+pub use sequence_tree::SequenceTree;
 pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, TextEncoding};
 pub use value::{ScalarValue, Value};
 pub use values::Values;
