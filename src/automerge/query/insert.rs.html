@@ -130,6 +130,8 @@
 <a href="#129" id="129">129</a>
 <a href="#130" id="130">130</a>
 <a href="#131" id="131">131</a>
+<a href="#132" id="132">132</a>
+<a href="#133" id="133">133</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error::AutomergeError;
 <span class="kw">use </span><span class="kw">crate</span>::op_tree::OpTreeNode;
 <span class="kw">use </span><span class="kw">crate</span>::query::{OpTree, QueryResult, TreeQuery};
@@ -229,6 +231,8 @@
             </span><span class="kw">let </span>last_elemid = ops[child.last()].elemid_or_key();
             <span class="kw">if </span>child.index.has_visible(<span class="kw-2">&amp;</span>last_elemid) {
                 <span class="self">self</span>.last_seen = <span class="prelude-val">Some</span>(last_elemid);
+            } <span class="kw">else if </span><span class="self">self</span>.last_seen.is_some() &amp;&amp; <span class="prelude-val">Some</span>(last_elemid) != <span class="self">self</span>.last_seen {
+                <span class="self">self</span>.last_seen = <span class="prelude-val">None</span>;
             }
             QueryResult::Next
         }

@@ -290,6 +290,11 @@
 <a href="#289" id="289">289</a>
 <a href="#290" id="290">290</a>
 <a href="#291" id="291">291</a>
+<a href="#292" id="292">292</a>
+<a href="#293" id="293">293</a>
+<a href="#294" id="294">294</a>
+<a href="#295" id="295">295</a>
+<a href="#296" id="296">296</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTreeNode};
 <span class="kw">use </span><span class="kw">crate</span>::query::{binary_search_by, QueryResult, TreeQuery};
 <span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, Op, HEAD};
@@ -396,24 +401,29 @@
                     // split across two tree nodes. To avoid double-counting in this situation, we
                     // subtract one if the last visible element also appears in this tree node.
                     </span><span class="kw">let </span><span class="kw-2">mut </span>num_vis = child.index.visible_len(<span class="self">self</span>.encoding);
-                    <span class="kw">if </span>num_vis &gt; <span class="number">0 </span>{
-                        <span class="comment">// FIXME: I think this is wrong: we should subtract one only if this
-                        // subtree contains a *visible* (i.e. empty succs) operation for the list
-                        // element with elemId `last_seen`; this will subtract one even if all
-                        // values for this list element have been deleted in this subtree.
-                        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(last_seen) = <span class="self">self</span>.last_seen {
-                            <span class="kw">if </span>child.index.has_visible(<span class="kw-2">&amp;</span>last_seen) {
-                                num_vis -= <span class="number">1</span>;
-                            }
+                    <span class="kw">if let </span><span class="prelude-val">Some</span>(last_seen) = <span class="self">self</span>.last_seen {
+                        <span class="kw">if </span>child.index.has_visible(<span class="kw-2">&amp;</span>last_seen) {
+                            num_vis -= <span class="number">1</span>;
                         }
-                        <span class="self">self</span>.seen += num_vis;
+                    }
+                    <span class="self">self</span>.seen += num_vis;
 
-                        <span class="comment">// FIXME: this is also wrong: `last_seen` needs to be the elemId of the
-                        // last *visible* list element in this subtree, but I think this returns
-                        // the last operation&#39;s elemId regardless of whether it&#39;s visible or not.
-                        // This will lead to incorrect counting if `last_seen` is not visible: it&#39;s
-                        // not counted towards `num_vis`, so we shouldn&#39;t be subtracting 1.
-                        </span><span class="self">self</span>.last_seen = <span class="prelude-val">Some</span>(ops[child.last()].elemid_or_key());
+                    <span class="comment">// We have updated seen by the number of visible elements in this index, before we skip it.
+                    // We also need to keep track of the last elemid that we have seen (and counted as seen).
+                    // We can just use the elemid of the last op in this node as either:
+                    // - the insert was at a previous node and this is a long run of overwrites so last_seen should already be set correctly
+                    // - the visible op is in this node and the elemid references it so it can be set here
+                    // - the visible op is in a future node and so it will be counted as seen there
+                    // ⚠️ We also need to reset last_seen if it is set to something else than the last item
+                    //   in the child. This means that the child contains an `insert` (so last_seen should
+                    //   be reset to None), but no visible op (so last_seen should not be set to a new value)
+                    //   The visible op also cannot be in a previous node, because then `last_seen` would
+                    //   already be set to the same elemid as the last element in the child.
+                    </span><span class="kw">let </span>last_elemid = ops[child.last()].elemid_or_key();
+                    <span class="kw">if </span>child.index.has_visible(<span class="kw-2">&amp;</span>last_elemid) {
+                        <span class="self">self</span>.last_seen = <span class="prelude-val">Some</span>(last_elemid);
+                    } <span class="kw">else if </span><span class="self">self</span>.last_seen.is_some() &amp;&amp; <span class="prelude-val">Some</span>(last_elemid) != <span class="self">self</span>.last_seen {
+                        <span class="self">self</span>.last_seen = <span class="prelude-val">None</span>;
                     }
                     QueryResult::Next
                 }

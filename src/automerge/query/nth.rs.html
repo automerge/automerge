@@ -126,6 +126,21 @@
 <a href="#125" id="125">125</a>
 <a href="#126" id="126">126</a>
 <a href="#127" id="127">127</a>
+<a href="#128" id="128">128</a>
+<a href="#129" id="129">129</a>
+<a href="#130" id="130">130</a>
+<a href="#131" id="131">131</a>
+<a href="#132" id="132">132</a>
+<a href="#133" id="133">133</a>
+<a href="#134" id="134">134</a>
+<a href="#135" id="135">135</a>
+<a href="#136" id="136">136</a>
+<a href="#137" id="137">137</a>
+<a href="#138" id="138">138</a>
+<a href="#139" id="139">139</a>
+<a href="#140" id="140">140</a>
+<a href="#141" id="141">141</a>
+<a href="#142" id="142">142</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error::AutomergeError;
 <span class="kw">use </span><span class="kw">crate</span>::op_set::OpSet;
 <span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpTree, OpTreeNode};
@@ -133,7 +148,9 @@
 <span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, Op, OpIds};
 <span class="kw">use </span>std::fmt::Debug;
 
-<span class="attr">#[derive(Debug, Clone, PartialEq)]
+<span class="doccomment">/// The Nth query walks the tree to find the n-th Node. It skips parts of the tree where it knows
+/// that the nth node can not be in them
+</span><span class="attr">#[derive(Debug, Clone, PartialEq)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Nth&lt;<span class="lifetime">&#39;a</span>&gt; {
     target: usize,
     seen: usize,
@@ -202,15 +219,21 @@
     </span>}
 
     <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, child: <span class="kw-2">&amp;</span>OpTreeNode, ops: <span class="kw-2">&amp;</span>[Op]) -&gt; QueryResult {
-        <span class="kw">let </span><span class="kw-2">mut </span>num_vis = child.index.visible_len(<span class="self">self</span>.encoding);
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(last_seen) = <span class="self">self</span>.last_seen {
+        <span class="comment">// We note the number of values stored in / below the node `child`
+        </span><span class="kw">let </span><span class="kw-2">mut </span>num_vis = child.index.visible_len(<span class="self">self</span>.encoding);
+        <span class="comment">// Nodes are sorted by key (obj, prop, ?) and time. We can only see a key twice as
+        // visible if it is the last element and has a conflict and occurs as visible again in
+        // the next node. To prevent double-counting it, we subtract 1 (to pretend we didn&#39;t see
+        // it yet 🫣).
+        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(last_seen) = <span class="self">self</span>.last_seen {
             <span class="kw">if </span>child.index.has_visible(<span class="kw-2">&amp;</span>last_seen) {
                 num_vis -= <span class="number">1</span>;
             }
         }
 
         <span class="kw">if </span><span class="self">self</span>.seen + num_vis &gt; <span class="self">self</span>.target {
-            QueryResult::Descend
+            <span class="comment">// Enter this node as the nth element is in this node
+            </span>QueryResult::Descend
         } <span class="kw">else </span>{
             <span class="comment">// skip this node as no useful ops in it
             </span><span class="self">self</span>.pos += child.len();
@@ -222,9 +245,16 @@
             // - the insert was at a previous node and this is a long run of overwrites so last_seen should already be set correctly
             // - the visible op is in this node and the elemid references it so it can be set here
             // - the visible op is in a future node and so it will be counted as seen there
+            // ⚠️ We also need to reset last_seen if it is set to something else than the last item
+            //   in the child. This means that the child contains an `insert` (so last_seen should
+            //   be reset to None), but no visible op (so last_seen should not be set to a new value)
+            //   The visible op also cannot be in a previous node, because then `last_seen` would
+            //   already be set to the same elemid as the last element in the child.
             </span><span class="kw">let </span>last_elemid = ops[child.last()].elemid_or_key();
             <span class="kw">if </span>child.index.has_visible(<span class="kw-2">&amp;</span>last_elemid) {
                 <span class="self">self</span>.last_seen = <span class="prelude-val">Some</span>(last_elemid);
+            } <span class="kw">else if </span><span class="self">self</span>.last_seen.is_some() &amp;&amp; <span class="prelude-val">Some</span>(last_elemid) != <span class="self">self</span>.last_seen {
+                <span class="self">self</span>.last_seen = <span class="prelude-val">None</span>;
             }
             QueryResult::Next
         }
@@ -243,7 +273,7 @@
             <span class="self">self</span>.last_width = element.width(<span class="self">self</span>.encoding);
             <span class="self">self</span>.seen += <span class="self">self</span>.last_width;
             <span class="comment">// we have a new visible element
-            </span><span class="self">self</span>.last_seen = <span class="prelude-val">Some</span>(element.elemid_or_key())
+            </span><span class="self">self</span>.last_seen = <span class="prelude-val">Some</span>(element.elemid_or_key());
         }
         <span class="kw">if </span><span class="self">self</span>.seen &gt; <span class="self">self</span>.target &amp;&amp; visible {
             <span class="self">self</span>.ops.push(element);

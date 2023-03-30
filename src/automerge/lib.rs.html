@@ -302,6 +302,7 @@
 <a href="#301" id="301">301</a>
 <a href="#302" id="302">302</a>
 <a href="#303" id="303">303</a>
+<a href="#304" id="304">304</a>
 </pre><pre class="rust"><code><span class="doccomment">//! # Automerge
 //!
 //! Automerge is a library of data structures for building collaborative,
@@ -565,7 +566,7 @@
 <span class="kw">pub mod </span>marks;
 <span class="kw">pub mod </span>op_observer;
 <span class="kw">mod </span>op_set;
-<span class="kw">mod </span>op_tree;
+<span class="kw">pub mod </span>op_tree;
 <span class="kw">mod </span>parents;
 <span class="kw">mod </span>query;
 <span class="kw">mod </span>read;
@@ -599,6 +600,7 @@
 };
 <span class="kw">pub use </span>parents::{Parent, Parents};
 <span class="kw">pub use </span>read::ReadDoc;
+<span class="kw">pub use </span>sequence_tree::SequenceTree;
 <span class="kw">pub use </span>types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, TextEncoding};
 <span class="kw">pub use </span>value::{ScalarValue, Value};
 <span class="kw">pub use </span>values::Values;
