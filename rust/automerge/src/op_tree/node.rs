@@ -7,7 +7,7 @@ use std::{
 pub(crate) use crate::op_set::OpSetMetadata;
 use crate::query::{ChangeVisibility, Index, QueryResult, TreeQuery};
 use crate::types::Op;
-pub(crate) const B: usize = 16;
+pub const B: usize = 16;
 
 #[derive(Clone, Debug)]
 pub(crate) struct OpTreeNode {

@@ -16,7 +16,8 @@ mod node;
 
 pub(crate) use iter::OpTreeIter;
 #[allow(unused)]
-pub(crate) use node::{OpTreeNode, B};
+pub(crate) use node::OpTreeNode;
+pub use node::B;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct OpTree {
