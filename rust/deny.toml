@@ -175,12 +175,9 @@ deny = [
 ]
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
-    # duct, which we only depend on for integration tests in automerge-cli,
-    # pulls in a version of os_pipe which in turn pulls in a version of
-    # windows-sys which is different to the version in pulled in by is-terminal.
-    # This is fine to ignore for now because it doesn't end up in downstream
-    # dependencies.
-    { name = "windows-sys", version = "0.42.0" }
+    # redox_syscall has a dupliucate version included by prettytable
+    # which is only used in tests
+    { name = "redox_syscall", version = "0.2.16" }
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate 
 # detection. Unlike skip, it also includes the entire tree of transitive 
