@@ -151,13 +151,22 @@ impl TransactionInner {
     pub(crate) fn rollback(self, doc: &mut Automerge) -> usize {
         let num = self.pending_ops();
         // remove in reverse order so sets are removed before makes etc...
+        let encoding = ListEncoding::List; // encoding doesnt matter here - we dont care what the index is
         for (obj, op) in self.operations.into_iter().rev() {
             for pred_id in &op.pred {
-                if let Some(p) = doc.ops().search(&obj, OpIdSearch::new(*pred_id)).index() {
+                if let Some(p) = doc
+                    .ops()
+                    .search(&obj, OpIdSearch::opid(*pred_id, encoding))
+                    .found()
+                {
                     doc.ops_mut().change_vis(&obj, p, |o| o.remove_succ(&op));
                 }
             }
-            if let Some(pos) = doc.ops().search(&obj, OpIdSearch::new(op.id)).index() {
+            if let Some(pos) = doc
+                .ops()
+                .search(&obj, OpIdSearch::opid(op.id, encoding))
+                .found()
+            {
                 doc.ops_mut().remove(&obj, pos);
             }
         }
@@ -188,7 +197,7 @@ impl TransactionInner {
         prop: P,
         value: V,
     ) -> Result<(), AutomergeError> {
-        let (obj, obj_type) = doc.exid_to_obj(ex_obj)?;
+        let (obj, obj_type, _) = doc.exid_to_obj(ex_obj)?;
         let value = value.into();
         let prop = prop.into();
         match (&prop, obj_type) {
@@ -222,7 +231,7 @@ impl TransactionInner {
         prop: P,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
-        let (obj, obj_type) = doc.exid_to_obj(ex_obj)?;
+        let (obj, obj_type, _) = doc.exid_to_obj(ex_obj)?;
         let prop = prop.into();
         match (&prop, obj_type) {
             (Prop::Map(_), ObjType::Map) => Ok(()),
@@ -290,7 +299,7 @@ impl TransactionInner {
         index: usize,
         value: V,
     ) -> Result<(), AutomergeError> {
-        let (obj, obj_type) = doc.exid_to_obj(ex_obj)?;
+        let (obj, obj_type, _) = doc.exid_to_obj(ex_obj)?;
         if !matches!(obj_type, ObjType::List | ObjType::Text) {
             return Err(AutomergeError::InvalidOp(obj_type));
         }
@@ -308,7 +317,7 @@ impl TransactionInner {
         index: usize,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
-        let (obj, obj_type) = doc.exid_to_obj(ex_obj)?;
+        let (obj, obj_type, _) = doc.exid_to_obj(ex_obj)?;
         if !matches!(obj_type, ObjType::List | ObjType::Text) {
             return Err(AutomergeError::InvalidOp(obj_type));
         }
@@ -377,37 +386,42 @@ impl TransactionInner {
 
         let id = self.next_id();
         let prop_index = doc.ops_mut().m.props.cache(prop.clone());
-        let query = doc.ops().search(&obj, query::Prop::new(prop_index));
+        let key = Key::Map(prop_index);
+        let prop: Prop = prop.into();
+        let query = doc
+            .ops()
+            .seek_ops_by_prop(&obj, prop.clone(), ListEncoding::List, None);
+        let ops = query.ops;
+        let ops_pos = query.ops_pos;
 
         // no key present to delete
-        if query.ops.is_empty() && action == OpType::Delete {
+        if ops.is_empty() && action == OpType::Delete {
             return Ok(None);
         }
 
-        if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
+        if ops.len() == 1 && ops[0].is_noop(&action) {
             return Ok(None);
         }
 
         // increment operations are only valid against counter values.
         // if there are multiple values (from conflicts) then we just need one of them to be a counter.
-        if matches!(action, OpType::Increment(_)) && query.ops.iter().all(|op| !op.is_counter()) {
+        if matches!(action, OpType::Increment(_)) && ops.iter().all(|op| !op.is_counter()) {
             return Err(AutomergeError::MissingCounter);
         }
 
-        let pred = doc.ops().m.sorted_opids(query.ops.iter().map(|o| o.id));
+        let pred = doc.ops().m.sorted_opids(ops.iter().map(|o| o.id));
 
         let op = Op {
             id,
             action,
-            key: Key::Map(prop_index),
+            key,
             succ: Default::default(),
             pred,
             insert: false,
         };
 
-        let pos = query.pos;
-        let ops_pos = query.ops_pos;
-        self.insert_local_op(doc, op_observer, Prop::Map(prop), op, pos, obj, &ops_pos);
+        let pos = query.end_pos;
+        self.insert_local_op(doc, op_observer, prop, op, pos, obj, &ops_pos);
 
         Ok(Some(id))
     }
@@ -422,7 +436,7 @@ impl TransactionInner {
     ) -> Result<Option<OpId>, AutomergeError> {
         let query = doc
             .ops()
-            .search(&obj, query::Nth::new(index, ListEncoding::List));
+            .search(&obj, query::Nth::new(index, ListEncoding::List, None));
 
         let id = self.next_id();
         let pred = doc.ops().m.sorted_opids(query.ops.iter().map(|o| o.id));
@@ -447,7 +461,7 @@ impl TransactionInner {
             insert: false,
         };
 
-        let pos = query.pos;
+        let pos = query.pos();
         let ops_pos = query.ops_pos;
         self.insert_local_op(doc, op_observer, Prop::Seq(index), op, pos, obj, &ops_pos);
 
@@ -474,7 +488,7 @@ impl TransactionInner {
         ex_obj: &ExId,
         prop: P,
     ) -> Result<(), AutomergeError> {
-        let (obj, obj_type) = doc.exid_to_obj(ex_obj)?;
+        let (obj, obj_type, _) = doc.exid_to_obj(ex_obj)?;
         let prop = prop.into();
         if obj_type == ObjType::Text {
             let index = prop.to_index().ok_or(AutomergeError::InvalidOp(obj_type))?;
@@ -506,7 +520,7 @@ impl TransactionInner {
         del: usize,
         vals: impl IntoIterator<Item = ScalarValue>,
     ) -> Result<(), AutomergeError> {
-        let (obj, obj_type) = doc.exid_to_obj(ex_obj)?;
+        let (obj, obj_type, _) = doc.exid_to_obj(ex_obj)?;
         if !matches!(obj_type, ObjType::List | ObjType::Text) {
             return Err(AutomergeError::InvalidOp(obj_type));
         }
@@ -534,7 +548,7 @@ impl TransactionInner {
         del: usize,
         text: &str,
     ) -> Result<(), AutomergeError> {
-        let (obj, obj_type) = doc.exid_to_obj(ex_obj)?;
+        let (obj, obj_type, _) = doc.exid_to_obj(ex_obj)?;
         if obj_type != ObjType::Text {
             return Err(AutomergeError::InvalidOp(obj_type));
         }
@@ -570,7 +584,9 @@ impl TransactionInner {
         let mut deleted = 0;
         while deleted < del {
             // TODO: could do this with a single custom query
-            let query = doc.ops().search(&obj, query::Nth::new(index, encoding));
+            let query = doc
+                .ops()
+                .search(&obj, query::Nth::new(index, encoding, None));
 
             // if we delete in the middle of a multi-character
             // move cursor back to the beginning and expand the del width
@@ -626,7 +642,8 @@ impl TransactionInner {
                 self.operations.push((obj, op));
             }
 
-            doc.ops_mut().hint(&obj, cursor - width, pos - 1);
+            doc.ops_mut()
+                .hint(&obj, cursor - width, pos - 1, width, key);
 
             // handle the observer
             if let Some(obs) = op_observer.as_mut() {
@@ -657,9 +674,10 @@ impl TransactionInner {
         mark: Mark<'_>,
         expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
-        let (obj, _obj_type) = doc.exid_to_obj(ex_obj)?;
+        let (obj, _obj_type, _encoding) = doc.exid_to_obj(ex_obj)?;
         if let Some(obs) = op_observer {
             let action = OpType::MarkBegin(expand.before(), mark.data.clone().into_owned());
+            // FIXME - encoding not considered
             self.do_insert(doc, Some(obs), obj, mark.start, action)?;
             self.do_insert(
                 doc,

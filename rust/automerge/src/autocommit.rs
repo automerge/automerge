@@ -5,13 +5,10 @@ use crate::marks::{ExpandMark, Mark};
 use crate::op_observer::{BranchableObserver, OpObserver};
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
-use crate::{
-    sync, Keys, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType, Parents, ReadDoc,
-    ScalarValue,
-};
+use crate::{sync, ObjType, Parents, ReadDoc, ScalarValue};
 use crate::{
     transaction::{Observation, Observed, TransactionInner, UnObserved},
-    ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop, TextEncoding, Value, Values,
+    ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop, TextEncoding, Value,
 };
 
 /// An automerge document that automatically manages transactions.
@@ -407,53 +404,64 @@ impl<Obs: Observation> ReadDoc for AutoCommitWithObs<Obs> {
         self.doc.path_to_object(obj)
     }
 
-    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_, '_> {
+    fn keys<'a, O: AsRef<ExId>>(&'a self, obj: O) -> Box<dyn Iterator<Item = String> + 'a> {
         self.doc.keys(obj)
     }
 
-    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt<'_, '_> {
+    fn keys_at<'a, O: AsRef<ExId>>(
+        &'a self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Box<dyn Iterator<Item = String> + 'a> {
         self.doc.keys_at(obj, heads)
     }
 
-    fn map_range<O: AsRef<ExId>, R: RangeBounds<String>>(
-        &self,
+    fn map_range<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
+        &'a self,
         obj: O,
         range: R,
-    ) -> MapRange<'_, R> {
+    ) -> Box<dyn Iterator<Item = (&'a str, Value<'a>, ExId)> + 'a> {
         self.doc.map_range(obj, range)
     }
 
-    fn map_range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
-        &self,
+    fn map_range_at<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
+        &'a self,
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> MapRangeAt<'_, R> {
+    ) -> Box<dyn Iterator<Item = (&'a str, Value<'a>, ExId)> + 'a> {
         self.doc.map_range_at(obj, range, heads)
     }
 
-    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
-        &self,
+    fn list_range<'a, O: AsRef<ExId>, R: RangeBounds<usize> + 'a>(
+        &'a self,
         obj: O,
         range: R,
-    ) -> ListRange<'_, R> {
+    ) -> Box<dyn Iterator<Item = (usize, Value<'a>, ExId)> + 'a> {
         self.doc.list_range(obj, range)
     }
 
-    fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
-        &self,
+    fn list_range_at<'a, O: AsRef<ExId>, R: RangeBounds<usize> + 'a>(
+        &'a self,
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> ListRangeAt<'_, R> {
+    ) -> Box<dyn Iterator<Item = (usize, Value<'a>, ExId)> + 'a> {
         self.doc.list_range_at(obj, range, heads)
     }
 
-    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
+    fn values<'a, O: AsRef<ExId>>(
+        &'a self,
+        obj: O,
+    ) -> Box<dyn Iterator<Item = (Value<'a>, ExId)> + 'a> {
         self.doc.values(obj)
     }
 
-    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
+    fn values_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Box<dyn Iterator<Item = (Value<'_>, ExId)> + '_> {
         self.doc.values_at(obj, heads)
     }
 

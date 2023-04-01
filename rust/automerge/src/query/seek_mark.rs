@@ -1,7 +1,7 @@
 use crate::marks::Mark;
 use crate::op_tree::OpSetMetadata;
-use crate::query::{QueryResult, TreeQuery};
-use crate::types::{Key, ListEncoding, Op, OpId, OpType};
+use crate::query::{ListState, OpTreeNode, QueryResult, TreeQuery};
+use crate::types::{ListEncoding, Op, OpId, OpType};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -9,15 +9,12 @@ use std::fmt::Debug;
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SeekMark<'a> {
     /// the mark we are looking for
+    idx: ListState,
     id: OpId,
     end: usize,
-    encoding: ListEncoding,
     found: bool,
     mark_name: smol_str::SmolStr,
     next_mark: Option<Mark<'a>>,
-    pos: usize,
-    seen: usize,
-    last_seen: Option<Key>,
     super_marks: HashMap<OpId, smol_str::SmolStr>,
     pub(crate) marks: Vec<Mark<'a>>,
 }
@@ -25,32 +22,24 @@ pub(crate) struct SeekMark<'a> {
 impl<'a> SeekMark<'a> {
     pub(crate) fn new(id: OpId, end: usize, encoding: ListEncoding) -> Self {
         SeekMark {
+            idx: ListState::new(encoding, usize::MAX),
             id,
-            encoding,
             end,
             found: false,
             next_mark: None,
             mark_name: "".into(),
-            pos: 0,
-            seen: 0,
-            last_seen: None,
             super_marks: Default::default(),
             marks: Default::default(),
-        }
-    }
-
-    fn count_visible(&mut self, e: &Op) {
-        if e.insert {
-            self.last_seen = None
-        }
-        if e.visible() && self.last_seen.is_none() {
-            self.seen += e.width(self.encoding);
-            self.last_seen = Some(e.elemid_or_key())
         }
     }
 }
 
 impl<'a> TreeQuery<'a> for SeekMark<'a> {
+    fn query_node(&mut self, child: &OpTreeNode, _ops: &[Op]) -> QueryResult {
+        self.idx.check_if_node_is_clean(child);
+        QueryResult::Descend
+    }
+
     fn query_element_with_metadata(&mut self, op: &'a Op, m: &OpSetMetadata) -> QueryResult {
         match &op.action {
             OpType::MarkBegin(_, data) if op.id == self.id => {
@@ -60,7 +49,7 @@ impl<'a> TreeQuery<'a> for SeekMark<'a> {
                 self.found = true;
                 self.mark_name = data.name.clone();
                 // retain the name and the value
-                self.next_mark = Some(Mark::from_data(self.seen, self.seen, data));
+                self.next_mark = Some(Mark::from_data(self.idx.index, self.idx.index, data));
                 // change id to the end id
                 self.id = self.id.next();
                 // remove all marks that dont match
@@ -74,7 +63,7 @@ impl<'a> TreeQuery<'a> for SeekMark<'a> {
                             self.super_marks.insert(op.id.next(), mark.name.clone());
                             if self.super_marks.len() == 1 {
                                 // complete a mark
-                                next_mark.end = self.seen;
+                                next_mark.end = self.idx.index;
                                 self.marks.push(next_mark.clone());
                             }
                         }
@@ -84,11 +73,11 @@ impl<'a> TreeQuery<'a> for SeekMark<'a> {
                     }
                 }
             }
-            OpType::MarkEnd(_) if self.end == self.pos => {
+            OpType::MarkEnd(_) if self.end == self.idx.pos => {
                 if self.super_marks.is_empty() {
                     // complete a mark
                     if let Some(next_mark) = &mut self.next_mark {
-                        next_mark.end = self.seen;
+                        next_mark.end = self.idx.index;
                         self.marks.push(next_mark.clone());
                     }
                 }
@@ -99,26 +88,25 @@ impl<'a> TreeQuery<'a> for SeekMark<'a> {
                 if let Some(next_mark) = &mut self.next_mark {
                     if self.super_marks.is_empty() {
                         // begin a new mark
-                        next_mark.start = self.seen;
+                        next_mark.start = self.idx.index;
                     }
                 }
             }
             _ => {}
         }
         // the end op hasn't been inserted yet so we need to work off the position
-        if self.end == self.pos {
+        if self.end == self.idx.pos {
             if self.super_marks.is_empty() {
                 // complete a mark
                 if let Some(next_mark) = &mut self.next_mark {
-                    next_mark.end = self.seen;
+                    next_mark.end = self.idx.index;
                     self.marks.push(next_mark.clone());
                 }
             }
             return QueryResult::Finish;
         }
 
-        self.pos += 1;
-        self.count_visible(op);
+        self.idx.process_op(op, op.elemid_or_key(), op.visible());
         QueryResult::Next
     }
 }

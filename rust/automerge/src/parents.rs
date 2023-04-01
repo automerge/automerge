@@ -1,6 +1,6 @@
 use crate::op_set;
 use crate::op_set::OpSet;
-use crate::types::{ListEncoding, ObjId};
+use crate::types::ObjId;
 use crate::{exid::ExId, Prop};
 
 /// An iterator over the "parents" of an object
@@ -48,21 +48,12 @@ impl<'a> Iterator for Parents<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.obj.is_root() {
-            None
-        } else if let Some(op_set::Parent { obj, key, visible }) = self.ops.parent_object(&self.obj)
-        {
-            self.obj = obj;
-            Some(Parent {
-                obj: self.ops.id_to_exid(self.obj.0),
-                prop: self
-                    .ops
-                    .export_key(self.obj, key, ListEncoding::List)
-                    .unwrap(),
-                visible,
-            })
-        } else {
-            None
+            return None;
         }
+        let op_set::Parent { obj, prop, visible } = self.ops.parent_object(&self.obj, None)?;
+        self.obj = obj;
+        let obj = self.ops.id_to_exid(self.obj.0);
+        Some(Parent { obj, prop, visible })
     }
 }
 

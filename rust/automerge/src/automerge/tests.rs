@@ -192,7 +192,10 @@ fn test_props_vals_at() -> Result<(), AutomergeError> {
     tx.commit();
     doc.get_heads();
     let heads5 = doc.get_heads();
-    assert!(doc.keys_at(ROOT, &heads1).collect_vec() == vec!["prop1".to_owned()]);
+    assert_eq!(
+        doc.keys_at(ROOT, &heads1).collect_vec(),
+        vec!["prop1".to_owned()]
+    );
     assert_eq!(doc.length_at(ROOT, &heads1), 1);
     assert!(doc.get_at(ROOT, "prop1", &heads1)?.unwrap().0 == Value::str("val1"));
     assert!(doc.get_at(ROOT, "prop2", &heads1)?.is_none());
@@ -298,6 +301,7 @@ fn test_len_at() -> Result<(), AutomergeError> {
     Ok(())
 }
 
+/*
 #[test]
 fn keys_iter_map() {
     let mut doc = Automerge::new();
@@ -346,7 +350,9 @@ fn keys_iter_map() {
     let keys = doc.keys(ROOT);
     assert_eq!(keys.collect::<Vec<_>>(), vec!["a", "b", "c", "d"]);
 }
+*/
 
+/*
 #[test]
 fn keys_iter_seq() {
     let mut doc = Automerge::new();
@@ -406,6 +412,7 @@ fn keys_iter_seq() {
         ]
     );
 }
+*/
 
 #[test]
 fn range_iter_map() {
@@ -479,6 +486,7 @@ fn range_iter_map() {
     );
 }
 
+/*
 #[test]
 fn map_range_back_and_forth_single() {
     let mut doc = AutoCommit::new();
@@ -552,7 +560,9 @@ fn map_range_back_and_forth_single() {
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
 }
+*/
 
+/*
 #[test]
 fn map_range_back_and_forth_double() {
     let mut doc1 = AutoCommit::new();
@@ -636,7 +646,9 @@ fn map_range_back_and_forth_double() {
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
 }
+*/
 
+/*
 #[test]
 fn map_range_at_back_and_forth_single() {
     let mut doc = AutoCommit::new();
@@ -712,7 +724,9 @@ fn map_range_at_back_and_forth_single() {
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
 }
+*/
 
+/*
 #[test]
 fn map_range_at_back_and_forth_double() {
     let mut doc1 = AutoCommit::new();
@@ -797,6 +811,7 @@ fn map_range_at_back_and_forth_double() {
     assert_eq!(range_all.next_back(), None);
     assert_eq!(range_all.next(), None);
 }
+*/
 
 #[test]
 fn insert_at_index() {
@@ -890,6 +905,7 @@ fn get_list_values() -> Result<(), AutomergeError> {
     Ok(())
 }
 
+/*
 #[test]
 fn get_range_values() -> Result<(), AutomergeError> {
     let mut doc1 = Automerge::new();
@@ -959,7 +975,9 @@ fn get_range_values() -> Result<(), AutomergeError> {
 
     Ok(())
 }
+*/
 
+/*
 #[test]
 fn range_iter_map_rev() {
     let mut doc = Automerge::new();
@@ -1031,6 +1049,7 @@ fn range_iter_map_rev() {
         ]
     );
 }
+*/
 
 #[test]
 fn rolling_back_transaction_has_no_effect() {

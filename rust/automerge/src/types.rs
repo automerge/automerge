@@ -159,6 +159,12 @@ pub enum ObjType {
     Text,
 }
 
+impl Default for ObjType {
+    fn default() -> Self {
+        ObjType::Map
+    }
+}
+
 impl ObjType {
     pub fn is_sequence(&self) -> bool {
         matches!(self, Self::List | Self::Text)
@@ -687,6 +693,30 @@ impl Op {
         }
     }
 
+    pub(crate) fn visible_at(&self, clock: Option<&Clock>) -> bool {
+        if let Some(clock) = clock {
+            if self.is_inc() || self.is_mark() {
+                false
+            } else {
+                clock.covers(&self.id) && !self.succ_iter().any(|i| clock.covers(i))
+            }
+        } else {
+            self.visible()
+        }
+    }
+
+    pub(crate) fn visible_or_mark_at(&self, clock: Option<&Clock>) -> bool {
+        if let Some(clock) = clock {
+            if self.is_inc() {
+                false
+            } else {
+                clock.covers(&self.id) && !self.succ_iter().any(|i| clock.covers(i))
+            }
+        } else {
+            self.visible_or_mark()
+        }
+    }
+
     pub(crate) fn visible_or_mark(&self) -> bool {
         if self.is_inc() {
             false
@@ -742,7 +772,13 @@ impl Op {
     }
 
     pub(crate) fn elemid(&self) -> Option<ElemId> {
-        self.elemid_or_key().elemid()
+        if self.insert {
+            Some(ElemId(self.id))
+        } else if let Key::Seq(e) = self.key {
+            Some(e)
+        } else {
+            None
+        }
     }
 
     pub(crate) fn elemid_or_key(&self) -> Key {
@@ -761,6 +797,15 @@ impl Op {
         }
     }
 
+    pub(crate) fn value_at(&self, clock: Option<&Clock>) -> Value<'_> {
+        if let Some(clock) = clock {
+            if let OpType::Put(ScalarValue::Counter(c)) = &self.action {
+                return Value::counter(c.value_at(clock));
+            }
+        }
+        self.value()
+    }
+
     pub(crate) fn value(&self) -> Value<'_> {
         match &self.action {
             OpType::Make(obj_type) => Value::Object(*obj_type),
@@ -769,14 +814,6 @@ impl Op {
                 Value::Scalar(Cow::Owned(format!("markBegin={}", mark.value).into()))
             }
             OpType::MarkEnd(_) => Value::Scalar(Cow::Owned("markEnd".into())),
-            _ => panic!("cant convert op into a value - {:?}", self),
-        }
-    }
-
-    pub(crate) fn clone_value(&self) -> Value<'static> {
-        match &self.action {
-            OpType::Make(obj_type) => Value::Object(*obj_type),
-            OpType::Put(scalar) => Value::Scalar(Cow::Owned(scalar.clone())),
             _ => panic!("cant convert op into a value - {:?}", self),
         }
     }
