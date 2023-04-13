@@ -146,3 +146,39 @@ change one subsystem at a time and add good commit messages which describe what
 the change is and why you're making it (err on the side of longer commit
 messages). `git blame` should give future maintainers a good idea of why
 something is the way it is.
+
+### Releasing
+
+There are four artefacts in this repository which need releasing:
+
+* The `@automerge/automerge` NPM package
+* The `@automerge/automerge-wasm` NPM package
+* The automerge deno crate
+* The `automerge` rust crate
+
+#### JS Packages
+
+The NPM and Deno packages are all released automatically by CI tooling whenever
+the version number in the respective `package.json` changes. This means that
+the process for releasing a new JS version is:
+
+1. Bump the version in the `js/automerge-wasm/package.json` (skip this if there
+   are no new changes to the WASM)
+2. Bump the version of `@automerge/automerge-wasm` we depend on in `js/automerge/package.json`
+3. Bump the version in `@automerge/automerge`
+
+Put all of these bumps in a PR and wait for a clean CI run. Then merge the PR.
+The CI tooling will pick up a push to `main` with a new version and publish it
+to NPM. This does depend on an access token available as `NPM_TOKEN` in the 
+actions environment, this token is generated with a 30 day expiry date so needs
+(manually) refreshing every so often.
+
+#### Rust Package
+
+This is much easier, but less automatic. The steps to release are:
+
+1. Bump the version in `automerge/Cargo.toml`
+2. Push a PR and merge once clean
+3. Tag the release as `rust/automerge@<version>`
+4. Push the tag to the repository
+5. Publish the release with `cargo publish`
