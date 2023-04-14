@@ -156,7 +156,7 @@ impl TransactionInner {
             for pred_id in &op.pred {
                 if let Some(p) = doc
                     .ops()
-                    .search(&obj, OpIdSearch::opid(*pred_id, encoding))
+                    .search(&obj, OpIdSearch::opid(*pred_id, encoding, None))
                     .found()
                 {
                     doc.ops_mut().change_vis(&obj, p, |o| o.remove_succ(&op));
@@ -164,7 +164,7 @@ impl TransactionInner {
             }
             if let Some(pos) = doc
                 .ops()
-                .search(&obj, OpIdSearch::opid(op.id, encoding))
+                .search(&obj, OpIdSearch::opid(op.id, encoding, None))
                 .found()
             {
                 doc.ops_mut().remove(&obj, pos);

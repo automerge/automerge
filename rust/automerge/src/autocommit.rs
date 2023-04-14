@@ -400,8 +400,24 @@ impl<Obs: Observation> ReadDoc for AutoCommitWithObs<Obs> {
         self.doc.parents(obj)
     }
 
+    fn parents_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Parents<'_>, AutomergeError> {
+        self.doc.parents_at(obj, heads)
+    }
+
     fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<(ExId, Prop)>, AutomergeError> {
         self.doc.path_to_object(obj)
+    }
+
+    fn path_to_object_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<(ExId, Prop)>, AutomergeError> {
+        self.doc.path_to_object_at(obj, heads)
     }
 
     fn keys<'a, O: AsRef<ExId>>(&'a self, obj: O) -> Box<dyn Iterator<Item = String> + 'a> {

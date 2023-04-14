@@ -458,8 +458,8 @@ impl Automerge {
         self.ops.id_to_exid(id)
     }
 
-    pub(crate) fn tagged_value<'a>(&self, op: &'a Op) -> (Value<'a>, ExId) {
-        (op.value(), self.id_to_exid(op.id))
+    pub(crate) fn tagged_value_at<'a>(&self, op: &'a Op, clock: &Clock) -> (Value<'a>, ExId) {
+        (op.value_at(Some(clock)), self.id_to_exid(op.id))
     }
 
     /// Load a document.
@@ -1150,11 +1150,29 @@ impl Automerge {
 impl ReadDoc for Automerge {
     fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
         let (obj_id, _, _) = self.exid_to_obj(obj.as_ref())?;
-        Ok(self.ops.parents(obj_id))
+        Ok(self.ops.parents(obj_id, None))
+    }
+
+    fn parents_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Parents<'_>, AutomergeError> {
+        let (obj_id, _, _) = self.exid_to_obj(obj.as_ref())?;
+        let clock = self.clock_at(heads);
+        Ok(self.ops.parents(obj_id, Some(clock)))
     }
 
     fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<(ExId, Prop)>, AutomergeError> {
         Ok(self.parents(obj.as_ref().clone())?.path())
+    }
+
+    fn path_to_object_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<(ExId, Prop)>, AutomergeError> {
+        Ok(self.parents_at(obj.as_ref().clone(), heads)?.path())
     }
 
     fn keys<'a, O: AsRef<ExId>>(&'a self, obj: O) -> Box<dyn Iterator<Item = String> + 'a> {
@@ -1307,7 +1325,7 @@ impl ReadDoc for Automerge {
     fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
         let (obj, _obj_type, encoding) = self.exid_to_obj(obj.as_ref())?;
         let ops_by_key = self.ops().iter_ops(&obj).group_by(|o| o.elemid_or_key());
-        let mut pos = 0;
+        let mut index = 0;
         let mut marks = MarkStateMachine::default();
 
         Ok(ops_by_key
@@ -1318,11 +1336,11 @@ impl ReadDoc for Automerge {
                     .last()
                     .and_then(|o| match &o.action {
                         OpType::Make(_) | OpType::Put(_) => {
-                            pos += o.width(encoding);
+                            index += o.width(encoding);
                             None
                         }
-                        OpType::MarkBegin(_, data) => marks.mark_begin(o.id, pos, data, self),
-                        OpType::MarkEnd(_) => marks.mark_end(o.id, pos, self),
+                        OpType::MarkBegin(_, data) => marks.mark_begin(o.id, index, data, self),
+                        OpType::MarkEnd(_) => marks.mark_end(o.id, index, self),
                         OpType::Increment(_) | OpType::Delete => None,
                     })
             })
@@ -1337,7 +1355,7 @@ impl ReadDoc for Automerge {
         let (obj, _obj_type, encoding) = self.exid_to_obj(obj.as_ref())?;
         let clock = self.clock_at(heads);
         let ops_by_key = self.ops().iter_ops(&obj).group_by(|o| o.elemid_or_key());
-        let mut pos = 0;
+        let mut index = 0;
         let mut marks = MarkStateMachine::default();
 
         Ok(ops_by_key
@@ -1348,11 +1366,11 @@ impl ReadDoc for Automerge {
                     .last()
                     .and_then(|o| match &o.action {
                         OpType::Make(_) | OpType::Put(_) => {
-                            pos += o.width(encoding);
+                            index += o.width(encoding);
                             None
                         }
-                        OpType::MarkBegin(_, data) => marks.mark_begin(o.id, pos, data, self),
-                        OpType::MarkEnd(_) => marks.mark_end(o.id, pos, self),
+                        OpType::MarkBegin(_, data) => marks.mark_begin(o.id, index, data, self),
+                        OpType::MarkEnd(_) => marks.mark_end(o.id, index, self),
                         OpType::Increment(_) | OpType::Delete => None,
                     })
             })

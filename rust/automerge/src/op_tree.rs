@@ -283,10 +283,10 @@ impl OpTreeInternal {
         &'a self,
         opid: OpId,
         encoding: ListEncoding,
-        _clock: Option<&Clock>,
+        clock: Option<&Clock>,
         meta: &OpSetMetadata,
     ) -> Option<(&'a Op, usize, bool)> {
-        let query = self.search(query::OpIdSearch::opid(opid, encoding), meta);
+        let query = self.search(query::OpIdSearch::opid(opid, encoding, clock), meta);
         let pos = query.found()?;
         let mut iter = self.iter();
         let op = iter.nth(pos)?;

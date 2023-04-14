@@ -1,7 +1,7 @@
 use crate::op_set;
 use crate::op_set::OpSet;
 use crate::types::ObjId;
-use crate::{exid::ExId, Prop};
+use crate::{clock::Clock, exid::ExId, Prop};
 
 /// An iterator over the "parents" of an object
 ///
@@ -15,6 +15,7 @@ use crate::{exid::ExId, Prop};
 pub struct Parents<'a> {
     pub(crate) obj: ObjId,
     pub(crate) ops: &'a OpSet,
+    pub(crate) clock: Option<Clock>,
 }
 
 impl<'a> Parents<'a> {
@@ -50,7 +51,8 @@ impl<'a> Iterator for Parents<'a> {
         if self.obj.is_root() {
             return None;
         }
-        let op_set::Parent { obj, prop, visible } = self.ops.parent_object(&self.obj, None)?;
+        let op_set::Parent { obj, prop, visible } =
+            self.ops.parent_object(&self.obj, self.clock.as_ref())?;
         self.obj = obj;
         let obj = self.ops.id_to_exid(self.obj.0);
         Some(Parent { obj, prop, visible })

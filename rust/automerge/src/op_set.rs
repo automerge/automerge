@@ -88,8 +88,12 @@ impl OpSetInternal {
         self.trees.get(obj).map(|o| o.iter()).into_iter().flatten()
     }
 
-    pub(crate) fn parents(&self, obj: ObjId) -> Parents<'_> {
-        Parents { obj, ops: self }
+    pub(crate) fn parents(&self, obj: ObjId, clock: Option<Clock>) -> Parents<'_> {
+        Parents {
+            obj,
+            ops: self,
+            clock,
+        }
     }
 
     pub(crate) fn parent_object(&self, obj: &ObjId, clock: Option<&Clock>) -> Option<Parent> {

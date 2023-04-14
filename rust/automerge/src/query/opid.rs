@@ -1,6 +1,7 @@
 use crate::op_tree::OpTreeNode;
 use crate::query::OpSetMetadata;
 use crate::query::{ListState, QueryResult, TreeQuery};
+use crate::types::Clock;
 use crate::types::{ListEncoding, Op, OpId};
 use std::cmp::Ordering;
 
@@ -8,6 +9,7 @@ use std::cmp::Ordering;
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct OpIdSearch<'a> {
     idx: ListState,
+    clock: Option<&'a Clock>,
     target: SearchTarget<'a>,
 }
 
@@ -19,9 +21,10 @@ enum SearchTarget<'a> {
 }
 
 impl<'a> OpIdSearch<'a> {
-    pub(crate) fn opid(target: OpId, encoding: ListEncoding) -> Self {
+    pub(crate) fn opid(target: OpId, encoding: ListEncoding, clock: Option<&'a Clock>) -> Self {
         OpIdSearch {
             idx: ListState::new(encoding, usize::MAX),
+            clock,
             target: SearchTarget::OpId(target, None),
         }
     }
@@ -35,6 +38,7 @@ impl<'a> OpIdSearch<'a> {
         };
         OpIdSearch {
             idx: ListState::new(encoding, usize::MAX),
+            clock: None,
             target,
         }
     }
@@ -67,12 +71,16 @@ impl<'a> OpIdSearch<'a> {
 impl<'a> TreeQuery<'a> for OpIdSearch<'a> {
     fn query_node(&mut self, child: &OpTreeNode, ops: &[Op]) -> QueryResult {
         self.idx.check_if_node_is_clean(child);
-        match &self.target {
-            SearchTarget::OpId(id, _) if !child.index.ops.contains(id) => {
-                self.idx.process_node(child, ops);
-                QueryResult::Next
+        if self.clock.is_some() {
+            QueryResult::Descend
+        } else {
+            match &self.target {
+                SearchTarget::OpId(id, _) if !child.index.ops.contains(id) => {
+                    self.idx.process_node(child, ops);
+                    QueryResult::Next
+                }
+                _ => QueryResult::Descend,
             }
-            _ => QueryResult::Descend,
         }
     }
 
@@ -102,8 +110,11 @@ impl<'a> TreeQuery<'a> for OpIdSearch<'a> {
             }
             SearchTarget::Complete(_) => return QueryResult::Finish, // this should never happen
         }
-        self.idx
-            .process_op(element, element.elemid_or_key(), element.visible());
+        self.idx.process_op(
+            element,
+            element.elemid_or_key(),
+            element.visible_at(self.clock),
+        );
         QueryResult::Next
     }
 }

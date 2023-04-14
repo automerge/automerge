@@ -26,6 +26,11 @@ pub trait ReadDoc {
     /// This function may in future be changed to allow getting the parents from the id of a scalar
     /// value.
     fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError>;
+    fn parents_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Parents<'_>, AutomergeError>;
 
     /// Get the path to an object
     ///
@@ -36,6 +41,12 @@ pub trait ReadDoc {
     ///
     /// * If the object ID `obj` is not in the document
     fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<(ExId, Prop)>, AutomergeError>;
+
+    fn path_to_object_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<(ExId, Prop)>, AutomergeError>;
 
     /// Get the keys of the object `obj`.
     ///

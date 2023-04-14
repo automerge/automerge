@@ -68,5 +68,79 @@ describe('Automerge', () => {
         ])
         assert.deepStrictEqual(patches11, [])
     })
+    it('it should be able to handle diffing simple marks', () => {
+        let doc1 = create(true);
+        let text = doc1.putObject("/", "text", "the quick fox jumps over the lazy dog");
+        let heads1 = doc1.getHeads();
+        doc1.mark(text, { start: 3, end: 6 } , "bold" , true)
+        let heads2 = doc1.getHeads();
+        let patches12 = doc1.diff(heads1,heads2);
+        let patches21 = doc1.diff(heads2,heads1);
+        assert.deepStrictEqual(patches12, [
+          { action: "mark", path: ["text"], marks: [ { start: 3, end: 6, name: "bold", value: true } ] },
+        ])
+        assert.deepStrictEqual(patches21, [
+          { action: "mark", path: ["text"], marks: [ { start: 3, end: 6, name: "bold", value: null } ] },
+        ])
+    })
+    it('it should be able to handle diffing complex marks', () => {
+        let doc1 = create(true);
+        let text = doc1.putObject("/", "text", "the quick fox jumps over the lazy dog");
+        doc1.mark(text, { start: 0, end: 37 } , "bold" , true)
+        doc1.mark(text, { start: 5, end: 10 } , "font" , 'san-serif')
+        doc1.mark(text, { start: 20, end: 25 } , "font" , 'san-serif')
+        let heads1 = doc1.getHeads();
+        doc1.mark(text, { start: 0, end: 37 } , "font" , 'monospace')
+        doc1.mark(text, { start: 5, end: 10 } , "bold" , false)
+        doc1.mark(text, { start: 20, end: 25 } , "bold" , false)
+        let heads2 = doc1.getHeads();
+        let patches12 = doc1.diff(heads1,heads2);
+        let patches21 = doc1.diff(heads2,heads1);
+        assert.deepStrictEqual(patches12, [
+          { action: "mark", path: ["text"], marks: [
+            { start: 5, end: 10, name: "bold", value: false },
+            { start: 20, end: 25, name: "bold", value: false },
+            { start: 0, end: 37, name: "font", value: "monospace" },
+          ] },
+        ])
+        assert.deepStrictEqual(patches21, [
+          { action: "mark", path: ["text"], marks: [
+            { start: 5, end: 10, name: "bold", value: true },
+            { start: 20, end: 25, name: "bold", value: true },
+            { start: 0, end: 5, name: "font", value: null },
+            { start: 5, end: 10, name: "font", value: "san-serif" },
+            { start: 10, end: 20, name: "font", value: null },
+            { start: 20, end: 25, name: "font", value: "san-serif" },
+            { start: 25, end: 37, name: "font", value: null },
+          ] },
+        ])
+    })
+    it('it should be able to handle diffing complex marks (2)', () => {
+        let doc1 = create(true);
+        let text = doc1.putObject("/", "text", "the quick fox jumps over the lazy dog");
+        doc1.mark(text, { start: 0, end: 10 } , "bold" , true)
+        doc1.mark(text, { start: 15, end: 17 } , "bold" , true)
+        doc1.mark(text, { start: 25, end: 35 } , "bold" , true)
+        let heads1 = doc1.getHeads();
+        doc1.mark(text, { start: 8, end: 15 } , "bold" , false)
+        doc1.mark(text, { start: 20, end: 27 } , "bold" , false)
+        let heads2 = doc1.getHeads();
+        let patches12 = doc1.diff(heads1,heads2);
+        let patches21 = doc1.diff(heads2,heads1);
+        assert.deepStrictEqual(patches12, [
+          { action: "mark", path: ["text"], marks: [
+            { start: 8, end: 15, name: "bold", value: false },
+            { start: 20, end: 27, name: "bold", value: false },
+          ] },
+        ])
+        assert.deepStrictEqual(patches21, [
+          { action: "mark", path: ["text"], marks: [
+            { start: 8, end: 10, name: "bold", value: true },
+            { start: 20, end: 25, name: "bold", value: null },
+            { start: 25, end: 27, name: "bold", value: true },
+            { start: 10, end: 15, name: "bold", value: null },
+          ] },
+        ])
+    })
   })
 })

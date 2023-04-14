@@ -279,17 +279,6 @@ impl OpType {
         }
     }
 
-    pub(crate) fn to_i64(&self) -> i64 {
-        match self {
-            OpType::Put(ScalarValue::Counter(c)) => c.current,
-            OpType::Put(ScalarValue::Int(i)) => *i,
-            OpType::Put(ScalarValue::Uint(i)) => *i as i64,
-            OpType::Put(ScalarValue::F64(i)) => *i as i64,
-            OpType::Increment(n) => *n,
-            _ => 0,
-        }
-    }
-
     pub(crate) fn is_mark(&self) -> bool {
         matches!(&self, OpType::MarkBegin(_, _) | OpType::MarkEnd(_))
     }
@@ -804,6 +793,13 @@ impl Op {
             }
         }
         self.value()
+    }
+
+    pub(crate) fn scalar_value(&self) -> Option<&ScalarValue> {
+        match &self.action {
+            OpType::Put(scalar) => Some(scalar),
+            _ => None,
+        }
     }
 
     pub(crate) fn value(&self) -> Value<'_> {
