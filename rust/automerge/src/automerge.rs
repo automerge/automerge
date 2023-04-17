@@ -8,6 +8,7 @@ use itertools::Itertools;
 use crate::change_graph::ChangeGraph;
 use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
+use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{Mark, MarkStateMachine};
 use crate::op_observer::{BranchableObserver, OpObserver};
 use crate::op_set::OpSet;
@@ -432,22 +433,6 @@ impl Automerge {
                 }
             }
         }
-    }
-
-    pub(crate) fn export_key_and_value<'a, R: RangeBounds<String>>(
-        &'a self,
-        op: &'a Op,
-        clock: Option<&Clock>,
-        range: &R,
-    ) -> Option<(&'a str, Value<'a>, ExId)> {
-        if let Key::Map(n) = &op.key {
-            if let Some(prop) = self.ops.m.props.safe_get(*n) {
-                if range.contains(prop) {
-                    return Some((prop, op.value_at(clock), self.id_to_exid(op.id)));
-                }
-            }
-        }
-        None
     }
 
     pub(crate) fn export_value<'a>(&self, op: &'a Op, clock: Option<&Clock>) -> (Value<'a>, ExId) {
@@ -1175,44 +1160,30 @@ impl ReadDoc for Automerge {
         Ok(self.parents_at(obj.as_ref().clone(), heads)?.path())
     }
 
-    fn keys<'a, O: AsRef<ExId>>(&'a self, obj: O) -> Box<dyn Iterator<Item = String> + 'a> {
-        Box::new(
-            self.exid_to_just_obj(obj.as_ref())
-                .ok()
-                .map(|obj| self.ops.keys(&obj, None))
-                .into_iter()
-                .flatten(),
-        )
+    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
+        self.exid_to_just_obj(obj.as_ref())
+            .ok()
+            .map(|obj| self.ops.keys(&obj, None))
+            .unwrap_or_default()
     }
 
-    fn keys_at<'a, O: AsRef<ExId>>(
-        &'a self,
-        obj: O,
-        heads: &[ChangeHash],
-    ) -> Box<dyn Iterator<Item = String> + 'a> {
+    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_> {
         let clock = self.clock_at(heads);
-        Box::new(
-            self.exid_to_just_obj(obj.as_ref())
-                .ok()
-                .map(|obj| self.ops.keys(&obj, Some(clock)))
-                .into_iter()
-                .flatten(),
-        )
+        self.exid_to_just_obj(obj.as_ref())
+            .ok()
+            .map(|obj| self.ops.keys(&obj, Some(clock)))
+            .unwrap_or_default()
     }
 
     fn map_range<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
         &'a self,
         obj: O,
         range: R,
-    ) -> Box<dyn Iterator<Item = (&'a str, Value<'a>, ExId)> + 'a> {
-        Box::new(
-            self.exid_to_just_obj(obj.as_ref())
-                .ok()
-                .map(|obj| self.ops.top_ops(&obj, None))
-                .into_iter()
-                .flatten()
-                .filter_map(move |top| self.export_key_and_value(top.op, None, &range)),
-        )
+    ) -> MapRange<'a, R> {
+        self.exid_to_just_obj(obj.as_ref())
+            .ok()
+            .map(|obj| self.ops.map_range(&obj, range, None))
+            .unwrap_or_default()
     }
 
     fn map_range_at<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
@@ -1220,73 +1191,59 @@ impl ReadDoc for Automerge {
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> Box<dyn Iterator<Item = (&'a str, Value<'a>, ExId)> + 'a> {
+    ) -> MapRange<'a, R> {
         let clock = self.clock_at(heads);
-        Box::new(
-            self.exid_to_just_obj(obj.as_ref())
-                .ok()
-                .map(|obj| self.ops.top_ops(&obj, Some(clock.clone())))
-                .into_iter()
-                .flatten()
-                .filter_map(move |top| self.export_key_and_value(top.op, Some(&clock), &range)),
-        )
+        self.exid_to_just_obj(obj.as_ref())
+            .ok()
+            .map(|obj| self.ops.map_range(&obj, range, Some(clock)))
+            .unwrap_or_default()
     }
 
-    fn list_range<'a, O: AsRef<ExId>, R: RangeBounds<usize> + 'a>(
-        &'a self,
-        obj: O,
-        range: R,
-    ) -> Box<dyn Iterator<Item = (usize, Value<'a>, ExId)> + 'a> {
-        Box::new(
-            self.exid_to_obj(obj.as_ref())
-                .ok()
-                .map(|(obj, _, encoding)| self.ops.list_range(&obj, range, encoding, None))
-                .into_iter()
-                .flatten(),
-        )
-    }
-
-    fn list_range_at<'a, O: AsRef<ExId>, R: RangeBounds<usize> + 'a>(
-        &'a self,
-        obj: O,
-        range: R,
-        heads: &[ChangeHash],
-    ) -> Box<dyn Iterator<Item = (usize, Value<'a>, ExId)> + 'a> {
-        let clock = self.clock_at(heads);
-        Box::new(
-            self.exid_to_obj(obj.as_ref())
-                .ok()
-                .map(|(obj, _, encoding)| self.ops.list_range(&obj, range, encoding, Some(clock)))
-                .into_iter()
-                .flatten(),
-        )
-    }
-
-    fn values<O: AsRef<ExId>>(&self, obj: O) -> Box<dyn Iterator<Item = (Value<'_>, ExId)> + '_> {
-        Box::new(
-            self.exid_to_just_obj(obj.as_ref())
-                .ok()
-                .map(|obj| self.ops.top_ops(&obj, None))
-                .into_iter()
-                .flatten()
-                .map(|top| self.export_value(top.op, None)),
-        )
-    }
-
-    fn values_at<O: AsRef<ExId>>(
+    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
         &self,
         obj: O,
+        range: R,
+    ) -> ListRange<'_, R> {
+        self.exid_to_obj(obj.as_ref())
+            .ok()
+            .map(|(obj, _, encoding)| self.ops.list_range(&obj, range, encoding, None))
+            .unwrap_or_default()
+    }
+
+    fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
+        obj: O,
+        range: R,
         heads: &[ChangeHash],
-    ) -> Box<dyn Iterator<Item = (Value<'_>, ExId)> + '_> {
+    ) -> ListRange<'_, R> {
         let clock = self.clock_at(heads);
-        Box::new(
-            self.exid_to_obj(obj.as_ref())
-                .ok()
-                .map(|obj| self.ops.top_ops(&obj.0, Some(clock.clone())))
-                .into_iter()
-                .flatten()
-                .map(move |top| self.export_value(top.op, Some(&clock))),
-        )
+        self.exid_to_obj(obj.as_ref())
+            .ok()
+            .map(|(obj, _, encoding)| self.ops.list_range(&obj, range, encoding, Some(clock)))
+            .unwrap_or_default()
+    }
+
+    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
+        self.exid_to_just_obj(obj.as_ref())
+            .ok()
+            .map(|obj| Values {
+                iter: Some((self.ops.top_ops(&obj, None), self, None)),
+            })
+            .unwrap_or_default()
+    }
+
+    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
+        let clock = self.clock_at(heads);
+        self.exid_to_just_obj(obj.as_ref())
+            .ok()
+            .map(|obj| Values {
+                iter: Some((
+                    self.ops.top_ops(&obj, Some(clock.clone())),
+                    self,
+                    Some(clock),
+                )),
+            })
+            .unwrap_or_default()
     }
 
     fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {

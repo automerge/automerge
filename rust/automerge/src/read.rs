@@ -1,6 +1,10 @@
 use crate::{
-    error::AutomergeError, exid::ExId, marks::Mark, parents::Parents, Change, ChangeHash, ObjType,
-    Prop, Value,
+    error::AutomergeError,
+    exid::ExId,
+    iter::{Keys, ListRange, MapRange, Values},
+    marks::Mark,
+    parents::Parents,
+    Change, ChangeHash, ObjType, Prop, Value,
 };
 
 use std::ops::RangeBounds;
@@ -52,17 +56,12 @@ pub trait ReadDoc {
     ///
     /// For a map this returns the keys of the map.
     /// For a list this returns the element ids (opids) encoded as strings.
-    //fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_, '_>;
-    fn keys<'a, O: AsRef<ExId>>(&'a self, obj: O) -> Box<dyn Iterator<Item = String> + 'a>;
+    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_>;
 
     /// Get the keys of the object `obj` as at `heads`
     ///
     /// See [`Self::keys`]
-    fn keys_at<'a, O: AsRef<ExId>>(
-        &'a self,
-        obj: O,
-        heads: &[ChangeHash],
-    ) -> Box<dyn Iterator<Item = String> + 'a>;
+    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_>;
 
     /// Iterate over the keys and values of the map `obj` in the given range.
     ///
@@ -74,7 +73,7 @@ pub trait ReadDoc {
         &'a self,
         obj: O,
         range: R,
-    ) -> Box<dyn Iterator<Item = (&'a str, Value<'a>, ExId)> + 'a>;
+    ) -> MapRange<'a, R>;
 
     /// Iterate over the keys and values of the map `obj` in the given range as
     /// at `heads`
@@ -90,17 +89,17 @@ pub trait ReadDoc {
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> Box<dyn Iterator<Item = (&'a str, Value<'a>, ExId)> + 'a>;
+    ) -> MapRange<'a, R>;
 
     /// Iterate over the indexes and values of the list or text `obj` in the given range.
     ///
     /// The reuturned iterator yields `(index, value, exid)` tuples, where the third
     /// element is the ID of the operation which created the value.
-    fn list_range<'a, O: AsRef<ExId>, R: RangeBounds<usize> + 'a>(
-        &'a self,
+    fn list_range<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
         obj: O,
         range: R,
-    ) -> Box<dyn Iterator<Item = (usize, Value<'a>, ExId)> + 'a>;
+    ) -> ListRange<'_, R>;
 
     /// Iterate over the indexes and values of the list or text `obj` in the given range as at `heads`
     ///
@@ -108,18 +107,18 @@ pub trait ReadDoc {
     /// element is the ID of the operation which created the value.
     ///
     /// See [`Self::list_range`]
-    fn list_range_at<'a, O: AsRef<ExId>, R: RangeBounds<usize> + 'a>(
-        &'a self,
+    fn list_range_at<O: AsRef<ExId>, R: RangeBounds<usize>>(
+        &self,
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> Box<dyn Iterator<Item = (usize, Value<'a>, ExId)> + 'a>;
+    ) -> ListRange<'_, R>;
 
     /// Iterate over the values in a map, list, or text object
     ///
     /// The returned iterator yields `(value, exid)` tuples, where the second element
     /// is the ID of the operation which created the value.
-    fn values<O: AsRef<ExId>>(&self, obj: O) -> Box<dyn Iterator<Item = (Value<'_>, ExId)> + '_>;
+    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_>;
 
     /// Iterate over the values in a map, list, or text object as at `heads`
     ///
@@ -127,11 +126,7 @@ pub trait ReadDoc {
     /// is the ID of the operation which created the value.
     ///
     /// See [`Self::values`]
-    fn values_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeHash],
-    ) -> Box<dyn Iterator<Item = (Value<'_>, ExId)> + '_>;
+    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_>;
 
     /// Get the length of the given object.
     ///

@@ -1,7 +1,8 @@
 use crate::clock::Clock;
 use crate::exid::ExId;
 use crate::indexed_cache::IndexedCache;
-use crate::iter::TopOp;
+use crate::iter::{Keys, ListRange, ListRangeInner, MapRange, MapRangeInner, TopOps};
+use crate::op_tree::OpTreeIter;
 use crate::op_tree::{self, LastInsert, OpTree, OpsFound, SeekOpFound};
 use crate::parents::Parents;
 use crate::query::TreeQuery;
@@ -9,7 +10,7 @@ use crate::types::{
     self, ActorId, Export, Exportable, Key, ListEncoding, ObjId, Op, OpId, OpIds, OpType, Prop,
     TextEncoding,
 };
-use crate::{ObjType, Value};
+use crate::ObjType;
 use fxhash::FxBuildHasher;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
@@ -74,9 +75,7 @@ impl OpSetInternal {
     }
 
     /// Iterate over objects in the opset in causal order
-    pub(crate) fn iter_objs(
-        &self,
-    ) -> impl Iterator<Item = (&ObjId, ObjType, op_tree::OpTreeIter<'_>)> + '_ {
+    pub(crate) fn iter_objs(&self) -> impl Iterator<Item = (&ObjId, ObjType, OpTreeIter<'_>)> + '_ {
         let mut objs: Vec<_> = self.trees.iter().map(|t| (t.0, t.1.objtype, t.1)).collect();
         objs.sort_by(|a, b| self.m.lamport_cmp((a.0).0, (b.0).0));
         IterObjs {
@@ -131,16 +130,11 @@ impl OpSetInternal {
             .unwrap_or_default()
     }
 
-    pub(crate) fn top_ops<'a>(
-        &'a self,
-        obj: &ObjId,
-        clock: Option<Clock>,
-    ) -> impl Iterator<Item = TopOp<'a>> {
+    pub(crate) fn top_ops<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> TopOps<'a> {
         self.trees
             .get(obj)
             .map(|tree| tree.internal.top_ops(clock))
-            .into_iter()
-            .flatten()
+            .unwrap_or_default()
     }
 
     pub(crate) fn seek_op_with_observer<'a>(
@@ -296,7 +290,7 @@ impl OpSetInternal {
                 // do it the hard way - walk each op
                 _ => self
                     .top_ops(obj, clock)
-                    .fold(0, |acc, top| acc + top.op.width(encoding)),
+                    .fold(0, |acc, op| acc + op.width(encoding)),
             }
         } else {
             0
@@ -304,40 +298,47 @@ impl OpSetInternal {
     }
 
     pub(crate) fn text(&self, obj: &ObjId, clock: Option<Clock>) -> String {
-        self.top_ops(obj, clock)
-            .map(|top| top.op.to_str())
-            .collect()
+        self.top_ops(obj, clock).map(|op| op.to_str()).collect()
     }
 
-    pub(crate) fn keys<'a>(
-        &'a self,
-        obj: &ObjId,
-        clock: Option<Clock>,
-    ) -> impl Iterator<Item = String> + 'a {
-        self.top_ops(obj, clock)
-            .map(|top| self.to_string(top.op.key))
+    pub(crate) fn keys<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> Keys<'a> {
+        Keys {
+            iter: Some((self.top_ops(obj, clock), self)),
+        }
     }
 
-    pub(crate) fn list_range<'a, R: RangeBounds<usize> + 'a>(
-        &'a self,
+    pub(crate) fn list_range<R: RangeBounds<usize>>(
+        &self,
         obj: &ObjId,
         range: R,
         encoding: ListEncoding,
         clock: Option<Clock>,
-    ) -> impl Iterator<Item = (usize, Value<'a>, ExId)> + 'a {
-        self.top_ops(obj, clock.clone())
-            .scan(0, move |state, top| {
-                let index = *state;
-                //let (value, id) = self.export_value(top.op, None);
-                *state += top.op.width(encoding);
-                Some((
-                    index,
-                    top.op.value_at(clock.as_ref()),
-                    self.id_to_exid(top.op.id),
-                ))
-                //Some((index, value, id))
-            })
-            .filter(move |(index, _, _)| range.contains(index))
+    ) -> ListRange<'_, R> {
+        ListRange {
+            iter: Some(ListRangeInner {
+                iter: self.top_ops(obj, clock.clone()),
+                op_set: self,
+                state: 0,
+                encoding,
+                range,
+                clock,
+            }),
+        }
+    }
+    pub(crate) fn map_range<R: RangeBounds<String>>(
+        &self,
+        obj: &ObjId,
+        range: R,
+        clock: Option<Clock>,
+    ) -> MapRange<'_, R> {
+        MapRange {
+            iter: Some(MapRangeInner {
+                iter: self.top_ops(obj, clock.clone()),
+                op_set: self,
+                range,
+                clock,
+            }),
+        }
     }
 
     pub(crate) fn to_string<E: Exportable>(&self, id: E) -> String {
@@ -374,7 +375,7 @@ pub(crate) struct IterObjs<'a> {
 }
 
 impl<'a> Iterator for IterObjs<'a> {
-    type Item = (&'a ObjId, ObjType, op_tree::OpTreeIter<'a>);
+    type Item = (&'a ObjId, ObjType, OpTreeIter<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
         self.trees
@@ -387,7 +388,7 @@ impl<'a> Iterator for IterObjs<'a> {
 pub(crate) struct Iter<'a> {
     opset: &'a OpSet,
     trees: std::vec::IntoIter<(&'a ObjId, ObjType, &'a op_tree::OpTree)>,
-    current: Option<(&'a ObjId, ObjType, op_tree::OpTreeIter<'a>)>,
+    current: Option<(&'a ObjId, ObjType, OpTreeIter<'a>)>,
 }
 impl<'a> Iterator for Iter<'a> {
     type Item = (&'a ObjId, ObjType, &'a Op);

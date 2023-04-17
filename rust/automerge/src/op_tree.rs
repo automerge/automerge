@@ -190,7 +190,7 @@ impl OpTreeInternal {
         self.root_node.as_ref().map_or(0, |n| n.len())
     }
 
-    pub(crate) fn top_ops(&self, clock: Option<Clock>) -> TopOps<'_, OpTreeIter<'_>> {
+    pub(crate) fn top_ops(&self, clock: Option<Clock>) -> TopOps<'_> {
         TopOps::new(OpTreeIter::new(self), clock)
     }
 

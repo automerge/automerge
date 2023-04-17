@@ -251,7 +251,7 @@ mod convert;
 mod error;
 mod exid;
 mod indexed_cache;
-mod iter;
+pub mod iter;
 mod legacy;
 pub mod marks;
 pub mod op_observer;
