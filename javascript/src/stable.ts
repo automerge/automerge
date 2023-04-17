@@ -242,6 +242,7 @@ export function clone<T>(
   // `change` uses the presence of state.heads to determine if we are in a view
   // set it to undefined to indicate that this is a full fat document
   const { heads: _oldHeads, ...stateSansHeads } = state
+  stateSansHeads.patchCallback = opts.patchCallback
   return handle.applyPatches(doc, { ...stateSansHeads, handle })
 }
 

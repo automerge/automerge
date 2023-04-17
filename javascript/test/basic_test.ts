@@ -303,6 +303,18 @@ describe("Automerge", () => {
     })
   })
 
+  describe("clone", () => {
+    it("should not copy the patchcallback", () => {
+      const patches: Automerge.Patch[][] = []
+      let doc = Automerge.init<{ foo: string | undefined }>({
+        patchCallback: p => patches.push(p),
+      })
+      let doc2 = Automerge.clone(doc)
+      doc2 = Automerge.change(doc2, d => (d.foo = "bar"))
+      assert.deepEqual(patches.length, 0)
+    })
+  })
+
   describe("emptyChange", () => {
     it("should generate a hash", () => {
       let doc = Automerge.init()
