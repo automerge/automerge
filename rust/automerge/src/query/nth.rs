@@ -35,7 +35,7 @@ impl<'a> Nth<'a> {
         if let Some(e) = self.ops.first().and_then(|op| op.elemid()) {
             Ok(Key::Seq(e))
         } else {
-            Err(AutomergeError::InvalidIndex(self.idx.target - 1))
+            Err(AutomergeError::InvalidIndex(self.idx.target().saturating_sub(1)))
         }
     }
 
@@ -55,7 +55,7 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
 
     fn can_shortcut_search(&mut self, tree: &'a OpTree) -> bool {
         if let Some(last) = &tree.last_insert {
-            if last.index == self.idx.target - 1 {
+            if last.index == self.idx.target().saturating_sub(1) {
                 if let Some(op) = tree.internal.get(last.pos) {
                     self.idx.seek(last);
                     self.ops.push(op);
@@ -85,7 +85,7 @@ impl<'a> TreeQuery<'a> for Nth<'a> {
             self.idx.process_op(element, key, visible);
             if visible && self.idx.done() {
                 self.ops.push(element);
-                self.ops_pos.push(self.idx.pos - 1);
+                self.ops_pos.push(self.idx.pos().saturating_sub(1));
             }
             QueryResult::Next
         }

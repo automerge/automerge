@@ -49,7 +49,7 @@ impl<'a> TreeQuery<'a> for SeekMark<'a> {
                 self.found = true;
                 self.mark_name = data.name.clone();
                 // retain the name and the value
-                self.next_mark = Some(Mark::from_data(self.idx.index, self.idx.index, data));
+                self.next_mark = Some(Mark::from_data(self.idx.index(), self.idx.index(), data));
                 // change id to the end id
                 self.id = self.id.next();
                 // remove all marks that dont match
@@ -63,7 +63,7 @@ impl<'a> TreeQuery<'a> for SeekMark<'a> {
                             self.super_marks.insert(op.id.next(), mark.name.clone());
                             if self.super_marks.len() == 1 {
                                 // complete a mark
-                                next_mark.end = self.idx.index;
+                                next_mark.end = self.idx.index();
                                 self.marks.push(next_mark.clone());
                             }
                         }
@@ -73,11 +73,11 @@ impl<'a> TreeQuery<'a> for SeekMark<'a> {
                     }
                 }
             }
-            OpType::MarkEnd(_) if self.end == self.idx.pos => {
+            OpType::MarkEnd(_) if self.end == self.idx.pos() => {
                 if self.super_marks.is_empty() {
                     // complete a mark
                     if let Some(next_mark) = &mut self.next_mark {
-                        next_mark.end = self.idx.index;
+                        next_mark.end = self.idx.index();
                         self.marks.push(next_mark.clone());
                     }
                 }
@@ -88,18 +88,18 @@ impl<'a> TreeQuery<'a> for SeekMark<'a> {
                 if let Some(next_mark) = &mut self.next_mark {
                     if self.super_marks.is_empty() {
                         // begin a new mark
-                        next_mark.start = self.idx.index;
+                        next_mark.start = self.idx.index();
                     }
                 }
             }
             _ => {}
         }
         // the end op hasn't been inserted yet so we need to work off the position
-        if self.end == self.idx.pos {
+        if self.end == self.idx.pos() {
             if self.super_marks.is_empty() {
                 // complete a mark
                 if let Some(next_mark) = &mut self.next_mark {
-                    next_mark.end = self.idx.index;
+                    next_mark.end = self.idx.index();
                     self.marks.push(next_mark.clone());
                 }
             }

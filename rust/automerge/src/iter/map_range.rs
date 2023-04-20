@@ -8,15 +8,31 @@ use crate::value::Value;
 
 use super::TopOps;
 
+// this iterator is created by the Automerge::map_range() and
+// Automerge::map_range_at() methods
+
 pub struct MapRange<'a, R: RangeBounds<String>> {
-    pub(crate) iter: Option<MapRangeInner<'a, R>>,
+    iter: Option<MapRangeInner<'a, R>>,
 }
 
-pub(crate) struct MapRangeInner<'a, R: RangeBounds<String>> {
-    pub(crate) iter: TopOps<'a>,
-    pub(crate) op_set: &'a OpSet,
-    pub(crate) range: R,
-    pub(crate) clock: Option<Clock>,
+struct MapRangeInner<'a, R: RangeBounds<String>> {
+    iter: TopOps<'a>,
+    op_set: &'a OpSet,
+    range: R,
+    clock: Option<Clock>,
+}
+
+impl<'a, R: RangeBounds<String>> MapRange<'a, R> {
+    pub(crate) fn new(iter: TopOps<'a>, op_set: &'a OpSet, range: R, clock: Option<Clock>) -> Self {
+        MapRange {
+            iter: Some(MapRangeInner {
+                iter,
+                op_set,
+                range,
+                clock,
+            }),
+        }
+    }
 }
 
 impl<'a, R: RangeBounds<String>> Default for MapRange<'a, R> {

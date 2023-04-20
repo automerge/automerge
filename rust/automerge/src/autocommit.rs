@@ -95,6 +95,19 @@ impl<Obs: OpObserver + BranchableObserver> AutoCommitWithObs<Observed<Obs>> {
         self.ensure_transaction_closed();
         self.observation.observer()
     }
+
+    pub fn diff(
+        &mut self,
+        before: &[ChangeHash],
+        after: &[ChangeHash],
+    ) -> Result<Obs, AutomergeError> {
+        self.ensure_transaction_closed();
+
+        let observer = self.observation.observer();
+        let mut branch = observer.explicit_branch();
+        self.doc.observe_diff(before, after, &mut branch)?;
+        Ok(branch)
+    }
 }
 
 impl<Obs: Observation + Clone> AutoCommitWithObs<Obs> {
@@ -315,22 +328,6 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
         self.doc.get_heads()
     }
 
-    pub fn diff(
-        &mut self,
-        start: &[ChangeHash],
-        end: &[ChangeHash],
-    ) -> Result<Obs::Obs, AutomergeError> {
-        self.ensure_transaction_closed();
-
-        if let Some(observer) = self.observation.observer() {
-            let mut branch = observer.explicit_branch();
-            self.doc.diff_with_observer(start, end, &mut branch)?;
-            Ok(branch)
-        } else {
-            Err(AutomergeError::NoObserver)
-        }
-    }
-
     /// Commit any uncommitted changes
     ///
     /// Returns `None` if there were no operations to commit
@@ -407,18 +404,6 @@ impl<Obs: Observation> ReadDoc for AutoCommitWithObs<Obs> {
         heads: &[ChangeHash],
     ) -> Result<Parents<'_>, AutomergeError> {
         self.doc.parents_at(obj, heads)
-    }
-
-    fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<(ExId, Prop)>, AutomergeError> {
-        self.doc.path_to_object(obj)
-    }
-
-    fn path_to_object_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeHash],
-    ) -> Result<Vec<(ExId, Prop)>, AutomergeError> {
-        self.doc.path_to_object_at(obj, heads)
     }
 
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {

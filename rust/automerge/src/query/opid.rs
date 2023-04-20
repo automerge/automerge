@@ -52,18 +52,18 @@ impl<'a> OpIdSearch<'a> {
     }
 
     pub(crate) fn pos(&self) -> usize {
-        self.idx.pos
+        self.idx.pos()
     }
 
     pub(crate) fn index(&self) -> usize {
-        self.idx.index
+        self.idx.index()
     }
 
     pub(crate) fn index_for(&self, op: &Op) -> usize {
-        if Some(op.elemid_or_key()) == self.idx.last_seen {
+        if self.idx.was_last_seen(op.elemid_or_key()) {
             self.idx.last_index()
         } else {
-            self.idx.index
+            self.idx.index()
         }
     }
 }
@@ -88,7 +88,7 @@ impl<'a> TreeQuery<'a> for OpIdSearch<'a> {
         match self.target {
             SearchTarget::OpId(target, None) => {
                 if element.id == target {
-                    self.target = SearchTarget::Complete(self.idx.pos);
+                    self.target = SearchTarget::Complete(self.idx.pos());
                     return QueryResult::Finish;
                 }
             }
@@ -97,14 +97,14 @@ impl<'a> TreeQuery<'a> for OpIdSearch<'a> {
                     if op.insert {
                         self.target = SearchTarget::Op(op);
                     } else {
-                        self.target = SearchTarget::Complete(self.idx.pos);
+                        self.target = SearchTarget::Complete(self.idx.pos());
                         return QueryResult::Finish;
                     }
                 }
             }
             SearchTarget::Op(op) => {
                 if element.insert && m.lamport_cmp(element.id, op.id) == Ordering::Less {
-                    self.target = SearchTarget::Complete(self.idx.pos);
+                    self.target = SearchTarget::Complete(self.idx.pos());
                     return QueryResult::Finish;
                 }
             }

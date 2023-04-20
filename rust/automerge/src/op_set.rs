@@ -1,14 +1,16 @@
 use crate::clock::Clock;
 use crate::exid::ExId;
 use crate::indexed_cache::IndexedCache;
-use crate::iter::{Keys, ListRange, ListRangeInner, MapRange, MapRangeInner, TopOps};
+use crate::iter::{Keys, ListRange, MapRange, TopOps};
 use crate::op_tree::OpTreeIter;
-use crate::op_tree::{self, LastInsert, OpTree, OpsFound, SeekOpFound};
+use crate::op_tree::{
+    self, FoundOpWithObserver, FoundOpWithoutObserver, LastInsert, OpTree, OpsFound,
+};
 use crate::parents::Parents;
 use crate::query::TreeQuery;
 use crate::types::{
-    self, ActorId, Export, Exportable, Key, ListEncoding, ObjId, Op, OpId, OpIds, OpType, Prop,
-    TextEncoding,
+    self, ActorId, Export, Exportable, Key, ListEncoding, ObjId, ObjMeta, Op, OpId, OpIds, OpType,
+    Prop, TextEncoding,
 };
 use crate::ObjType;
 use fxhash::FxBuildHasher;
@@ -28,12 +30,21 @@ pub(crate) struct OpSetInternal {
     trees: HashMap<ObjId, OpTree, FxBuildHasher>,
     /// The number of operations in the opset.
     length: usize,
+    /// UTF8 or UTF16 text encoding
+    text_encoding: TextEncoding,
     /// Metadata about the operations in this opset.
     pub(crate) m: OpSetMetadata,
-    pub(crate) text_encoding: TextEncoding,
 }
 
 impl OpSetInternal {
+    pub(crate) fn text_encoding(&self) -> &TextEncoding {
+        &self.text_encoding
+    }
+
+    pub(crate) fn text_encoding_mut(&mut self) -> &mut TextEncoding {
+        &mut self.text_encoding
+    }
+
     pub(crate) fn builder() -> OpSetBuilder {
         OpSetBuilder::new()
     }
@@ -97,7 +108,7 @@ impl OpSetInternal {
 
     pub(crate) fn parent_object(&self, obj: &ObjId, clock: Option<&Clock>) -> Option<Parent> {
         let parent = self.trees.get(obj)?.parent?;
-        let (_obj_type, encoding) = self.encoding(&parent)?;
+        let (_typ, encoding) = self.type_and_encoding(&parent)?;
         let (op, index, visible) = self
             .trees
             .get(&parent)
@@ -137,22 +148,22 @@ impl OpSetInternal {
             .unwrap_or_default()
     }
 
-    pub(crate) fn seek_op_with_observer<'a>(
+    pub(crate) fn find_op_with_observer<'a>(
         &'a self,
-        obj: &ObjId,
+        obj: &ObjMeta,
         op: &'a Op,
-        encoding: ListEncoding,
-    ) -> SeekOpFound<'a> {
-        if let Some(tree) = self.trees.get(obj) {
-            tree.internal.seek_op_with_observer(op, encoding, &self.m)
+    ) -> FoundOpWithObserver<'a> {
+        if let Some(tree) = self.trees.get(&obj.id) {
+            tree.internal
+                .find_op_with_observer(op, obj.encoding, &self.m)
         } else {
             Default::default()
         }
     }
 
-    pub(crate) fn seek_op_simple<'a>(&'a self, obj: &ObjId, op: &'a Op) -> SeekOpFound<'a> {
+    pub(crate) fn find_op_without_observer(&self, obj: &ObjId, op: &Op) -> FoundOpWithoutObserver {
         if let Some(tree) = self.trees.get(obj) {
-            tree.internal.seek_op_simple(op, &self.m)
+            tree.internal.find_op_without_observer(op, &self.m)
         } else {
             Default::default()
         }
@@ -249,7 +260,7 @@ impl OpSetInternal {
         self.trees.get(id).map(|tree| tree.objtype)
     }
 
-    pub(crate) fn encoding(&self, id: &ObjId) -> Option<(ObjType, ListEncoding)> {
+    pub(crate) fn type_and_encoding(&self, id: &ObjId) -> Option<(ObjType, ListEncoding)> {
         let objtype = self.trees.get(id).map(|tree| tree.objtype)?;
         let encoding = ListEncoding::new(objtype, self.text_encoding);
         Some((objtype, encoding))
@@ -314,16 +325,13 @@ impl OpSetInternal {
         encoding: ListEncoding,
         clock: Option<Clock>,
     ) -> ListRange<'_, R> {
-        ListRange {
-            iter: Some(ListRangeInner {
-                iter: self.top_ops(obj, clock.clone()),
-                op_set: self,
-                state: 0,
-                encoding,
-                range,
-                clock,
-            }),
-        }
+        ListRange::new(
+            self.top_ops(obj, clock.clone()),
+            self,
+            encoding,
+            range,
+            clock,
+        )
     }
     pub(crate) fn map_range<R: RangeBounds<String>>(
         &self,
@@ -331,14 +339,7 @@ impl OpSetInternal {
         range: R,
         clock: Option<Clock>,
     ) -> MapRange<'_, R> {
-        MapRange {
-            iter: Some(MapRangeInner {
-                iter: self.top_ops(obj, clock.clone()),
-                op_set: self,
-                range,
-                clock,
-            }),
-        }
+        MapRange::new(self.top_ops(obj, clock.clone()), self, range, clock)
     }
 
     pub(crate) fn to_string<E: Exportable>(&self, id: E) -> String {
@@ -480,7 +481,7 @@ pub(crate) mod tests {
     use crate::{
         op_set::OpSet,
         op_tree::B,
-        types::{Key, ListEncoding, ObjId, Op, OpId},
+        types::{Key, ObjId, ObjMeta, Op, OpId},
         ActorId, ScalarValue,
     };
 
@@ -583,8 +584,8 @@ pub(crate) mod tests {
     fn seek_on_page_boundary() {
         let (set, new_op) = optree_with_only_internally_visible_ops();
 
-        let q1 = set.seek_op_simple(&ObjId::root(), &new_op);
-        let q2 = set.seek_op_with_observer(&ObjId::root(), &new_op, ListEncoding::List);
+        let q1 = set.find_op_without_observer(&ObjId::root(), &new_op);
+        let q2 = set.find_op_with_observer(&ObjMeta::root(), &new_op);
 
         // we've inserted `B - 1` elements for "a", so the index should be `B`
         assert_eq!(q1.pos, B);

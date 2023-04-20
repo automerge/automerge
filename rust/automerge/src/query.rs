@@ -129,20 +129,24 @@ impl TextWidth {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Index {
     /// The map of visible keys to the number of visible operations for that key.
-    pub(crate) visible: HashMap<Key, usize, FxBuildHasher>,
+    visible: HashMap<Key, usize, FxBuildHasher>,
     visible_text: TextWidth,
     /// Set of opids found in this node and below.
     ops: HashSet<OpId, FxBuildHasher>,
-    pub(crate) clean: bool,
+    never_seen_puts: bool,
 }
 
 impl Index {
+    pub(crate) fn has_never_seen_puts(&self) -> bool {
+        self.never_seen_puts
+    }
+
     pub(crate) fn new() -> Self {
         Index {
             visible: Default::default(),
             visible_text: TextWidth { utf8: 0, utf16: 0 },
             ops: Default::default(),
-            clean: true,
+            never_seen_puts: true,
         }
     }
 
@@ -194,10 +198,7 @@ impl Index {
     }
 
     pub(crate) fn insert(&mut self, op: &Op) {
-        self.clean &= op.insert;
-        if !op.insert && self.clean {
-            panic!("xxxx");
-        }
+        self.never_seen_puts &= op.insert;
         self.ops.insert(op.id);
         if op.visible() {
             let key = op.elemid_or_key();
@@ -238,7 +239,7 @@ impl Index {
                 .or_insert(*other_len);
         }
         self.visible_text.merge(&other.visible_text);
-        self.clean &= other.clean;
+        self.never_seen_puts &= other.never_seen_puts;
     }
 }
 

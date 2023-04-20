@@ -6,7 +6,7 @@ use crate::{
     Automerge, OpObserver,
 };
 use crate::{
-    types::{Key, ListEncoding, ObjId, Op, OpId, Prop},
+    types::{Key, ListEncoding, ObjId, ObjMeta, Op, OpId, Prop},
     ObjType, OpType,
 };
 use std::cmp::Ordering;
@@ -61,7 +61,7 @@ impl OpTree {
 
     pub(crate) fn index(&self, encoding: ListEncoding) -> Option<&Index> {
         let node = self.internal.root_node.as_ref()?;
-        if encoding == ListEncoding::List || node.index.clean {
+        if encoding == ListEncoding::List || node.index.has_never_seen_puts() {
             Some(&node.index)
         } else {
             None
@@ -70,7 +70,13 @@ impl OpTree {
 }
 
 #[derive(Default, Clone, Debug)]
-pub(crate) struct SeekOpFound<'a> {
+pub(crate) struct FoundOpWithoutObserver {
+    pub(crate) succ: Vec<usize>,
+    pub(crate) pos: usize,
+}
+
+#[derive(Default, Clone, Debug)]
+pub(crate) struct FoundOpWithObserver<'a> {
     pub(crate) before: Option<&'a Op>,
     pub(crate) num_before: usize,
     pub(crate) overwritten: Option<&'a Op>,
@@ -80,39 +86,26 @@ pub(crate) struct SeekOpFound<'a> {
     pub(crate) index: usize,
 }
 
-impl<'a> SeekOpFound<'a> {
-    fn simple(pos: usize, succ: Vec<usize>) -> Self {
-        Self {
-            before: None,
-            num_before: 0,
-            overwritten: None,
-            after: None,
-            index: 0,
-            succ,
-            pos,
-        }
-    }
-
+impl<'a> FoundOpWithObserver<'a> {
     pub(crate) fn observe<Obs: OpObserver>(
         &self,
-        obj: &ObjId,
-        obj_type: ObjType,
-        encoding: ListEncoding,
+        obj: &ObjMeta,
         op: &Op,
         doc: &Automerge,
         observer: &mut Obs,
     ) {
-        let ex_obj = doc.ops().id_to_exid(obj.0);
+        let ex_obj = doc.ops().id_to_exid(obj.id.0);
 
         if op.insert {
             if op.is_mark() {
                 if let OpType::MarkEnd(_) = op.action {
-                    let q = doc
-                        .ops()
-                        .search(obj, query::SeekMark::new(op.id.prev(), self.pos, encoding));
+                    let q = doc.ops().search(
+                        &obj.id,
+                        query::SeekMark::new(op.id.prev(), self.pos, obj.encoding),
+                    );
                     observer.mark(doc, ex_obj, q.marks.into_iter());
                 }
-            } else if obj_type == ObjType::Text {
+            } else if obj.typ == ObjType::Text {
                 observer.splice_text(doc, ex_obj, self.index, op.to_str());
             } else {
                 let value = (op.value(), doc.ops().id_to_exid(op.id));
@@ -131,7 +124,7 @@ impl<'a> SeekOpFound<'a> {
                 (None, Some(over), None) => match key {
                     Prop::Map(k) => observer.delete_map(doc, ex_obj, &k),
                     Prop::Seq(index) => {
-                        observer.delete_seq(doc, ex_obj, index, over.width(encoding))
+                        observer.delete_seq(doc, ex_obj, index, over.width(obj.encoding))
                     }
                 },
                 (Some(before), Some(_), None) => {
@@ -194,12 +187,12 @@ impl OpTreeInternal {
         TopOps::new(OpTreeIter::new(self), clock)
     }
 
-    pub(crate) fn seek_update_for_op_simple<'a>(
-        &'a self,
+    pub(crate) fn found_op_without_observer(
+        &self,
         meta: &OpSetMetadata,
-        op: &'a Op,
+        op: &Op,
         mut pos: usize,
-    ) -> SeekOpFound<'a> {
+    ) -> FoundOpWithoutObserver {
         let mut iter = self.iter();
         let mut succ = vec![];
         let mut next = iter.nth(pos);
@@ -220,16 +213,16 @@ impl OpTreeInternal {
             next = iter.next();
         }
 
-        SeekOpFound::simple(pos, succ)
+        FoundOpWithoutObserver { pos, succ }
     }
 
-    pub(crate) fn seek_update_for_op_for_observer<'a>(
+    pub(crate) fn found_op_with_observer<'a>(
         &'a self,
         meta: &OpSetMetadata,
         op: &'a Op,
         mut pos: usize,
         index: usize,
-    ) -> SeekOpFound<'a> {
+    ) -> FoundOpWithObserver<'a> {
         let mut iter = self.iter();
         let mut found = None;
         let mut before = None;
@@ -268,7 +261,7 @@ impl OpTreeInternal {
 
         pos = found.unwrap_or(pos);
 
-        SeekOpFound {
+        FoundOpWithObserver {
             before,
             num_before,
             after,
@@ -303,35 +296,35 @@ impl OpTreeInternal {
         Some((op, index, op.visible()))
     }
 
-    pub(crate) fn seek_op_with_observer<'a>(
+    pub(crate) fn find_op_with_observer<'a>(
         &'a self,
         op: &'a Op,
         encoding: ListEncoding,
         meta: &OpSetMetadata,
-    ) -> SeekOpFound<'a> {
+    ) -> FoundOpWithObserver<'a> {
         if let Key::Seq(_) = op.key {
             let query = self.search(query::OpIdSearch::op(op, encoding), meta);
             let pos = query.pos();
             let index = query.index();
-            self.seek_update_for_op_for_observer(meta, op, pos, index)
+            self.found_op_with_observer(meta, op, pos, index)
         } else {
             let pos = self.binary_search_by(|o| meta.key_cmp(&o.key, &op.key));
-            self.seek_update_for_op_for_observer(meta, op, pos, 0)
+            self.found_op_with_observer(meta, op, pos, 0)
         }
     }
 
-    pub(crate) fn seek_op_simple<'a>(
-        &'a self,
-        op: &'a Op,
+    pub(crate) fn find_op_without_observer(
+        &self,
+        op: &Op,
         meta: &OpSetMetadata,
-    ) -> SeekOpFound<'a> {
+    ) -> FoundOpWithoutObserver {
         if let Key::Seq(_) = op.key {
             let query = self.search(query::SimpleOpIdSearch::op(op), meta);
             let pos = query.pos;
-            self.seek_update_for_op_simple(meta, op, pos)
+            self.found_op_without_observer(meta, op, pos)
         } else {
             let pos = self.binary_search_by(|o| meta.key_cmp(&o.key, &op.key));
-            self.seek_update_for_op_simple(meta, op, pos)
+            self.found_op_without_observer(meta, op, pos)
         }
     }
 
@@ -538,19 +531,18 @@ impl<'a> OpsFound<'a> {
             ops: vec![],
             ops_pos: vec![],
         };
-        let mut op = iter.nth(start_pos);
-        loop {
-            match op {
-                Some(op) if op.elemid_or_key() == key => {
-                    if op.visible_at(clock) {
-                        found.ops.push(op);
-                        found.ops_pos.push(found.end_pos);
-                    }
-                    found.end_pos += 1;
+        let mut next = iter.nth(start_pos);
+        while let Some(op) = next {
+            if op.elemid_or_key() == key {
+                if op.visible_at(clock) {
+                    found.ops.push(op);
+                    found.ops_pos.push(found.end_pos);
                 }
-                _ => break,
+                found.end_pos += 1;
+            } else {
+                break;
             }
-            op = iter.next();
+            next = iter.next();
         }
         found
     }

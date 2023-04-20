@@ -9,17 +9,41 @@ use crate::value::Value;
 
 use super::TopOps;
 
+// this iterator is created by the Automerge::list_range()
+// and Automerge::list_range_at() methods
+
 pub struct ListRange<'a, R: RangeBounds<usize>> {
-    pub(crate) iter: Option<ListRangeInner<'a, R>>,
+    iter: Option<ListRangeInner<'a, R>>,
 }
 
-pub(crate) struct ListRangeInner<'a, R: RangeBounds<usize>> {
-    pub(crate) iter: TopOps<'a>,
-    pub(crate) op_set: &'a OpSet,
-    pub(crate) state: usize,
-    pub(crate) encoding: ListEncoding,
-    pub(crate) range: R,
-    pub(crate) clock: Option<Clock>,
+impl<'a, R: RangeBounds<usize>> ListRange<'a, R> {
+    pub(crate) fn new(
+        iter: TopOps<'a>,
+        op_set: &'a OpSet,
+        encoding: ListEncoding,
+        range: R,
+        clock: Option<Clock>,
+    ) -> Self {
+        Self {
+            iter: Some(ListRangeInner {
+                iter,
+                op_set,
+                state: 0,
+                encoding,
+                range,
+                clock,
+            }),
+        }
+    }
+}
+
+struct ListRangeInner<'a, R: RangeBounds<usize>> {
+    iter: TopOps<'a>,
+    op_set: &'a OpSet,
+    state: usize,
+    encoding: ListEncoding,
+    range: R,
+    clock: Option<Clock>,
 }
 
 impl<'a, R: RangeBounds<usize>> Default for ListRange<'a, R> {

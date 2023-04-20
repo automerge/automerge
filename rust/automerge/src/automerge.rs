@@ -18,7 +18,7 @@ use crate::transaction::{
     self, CommitOptions, Failure, Observed, Success, Transaction, TransactionArgs, UnObserved,
 };
 use crate::types::{
-    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ListEncoding, MarkData, ObjId, Op,
+    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, MarkData, ObjId, ObjMeta, Op,
     OpId, OpType, TextEncoding, Value,
 };
 use crate::{AutomergeError, Change, ObjType, Prop, ReadDoc};
@@ -159,14 +159,14 @@ impl Automerge {
     }
 
     pub(crate) fn text_encoding(&self) -> TextEncoding {
-        self.ops.text_encoding
+        *self.ops.text_encoding()
     }
 
     /// Change the text encoding of this view of the document
     ///
     /// This is a cheap operation, it just changes the way indexes are calculated
     pub fn with_encoding(mut self, encoding: TextEncoding) -> Self {
-        self.ops.text_encoding = encoding;
+        *self.ops.text_encoding_mut() = encoding;
         self
     }
 
@@ -394,45 +394,29 @@ impl Automerge {
         Ok(f)
     }
 
-    pub(crate) fn exid_to_just_obj(&self, id: &ExId) -> Result<ObjId, AutomergeError> {
-        self.exid_to_obj(id).map(|(obj, _, _)| obj)
-    }
-
-    pub(crate) fn exid_to_obj(
-        &self,
-        id: &ExId,
-    ) -> Result<(ObjId, ObjType, ListEncoding), AutomergeError> {
-        match id {
-            ExId::Root => Ok((ObjId::root(), ObjType::Map, ListEncoding::List)),
-            ExId::Id(..) => {
-                let obj = ObjId(self.exid_to_opid(id)?);
-                if let Some((obj_type, encoding)) = self.ops.encoding(&obj) {
-                    Ok((obj, obj_type, encoding))
-                } else {
-                    Err(AutomergeError::NotAnObject)
-                }
-            }
+    pub(crate) fn get_obj_meta(&self, id: ObjId) -> Result<ObjMeta, AutomergeError> {
+        if id.is_root() {
+            Ok(ObjMeta::root())
+        } else if let Some((typ, encoding)) = self.ops.type_and_encoding(&id) {
+            Ok(ObjMeta { id, typ, encoding })
+        } else {
+            Err(AutomergeError::NotAnObject)
         }
     }
-
-    pub(crate) fn exid_to_opid(&self, id: &ExId) -> Result<OpId, AutomergeError> {
-        match id {
-            ExId::Root => Err(AutomergeError::Fail),
+    pub(crate) fn exid_to_obj(&self, id: &ExId) -> Result<ObjMeta, AutomergeError> {
+        let obj = match id {
+            ExId::Root => ObjId::root(),
             ExId::Id(ctr, actor, idx) => {
                 if self.ops.m.actors.cache.get(*idx) == Some(actor) {
-                    Ok(OpId::new(*ctr, *idx))
+                    ObjId(OpId::new(*ctr, *idx))
+                } else if let Some(backup_idx) = self.ops.m.actors.lookup(actor) {
+                    ObjId(OpId::new(*ctr, backup_idx))
                 } else {
-                    // FIXME - make a real error
-                    let idx = self
-                        .ops
-                        .m
-                        .actors
-                        .lookup(actor)
-                        .ok_or(AutomergeError::Fail)?;
-                    Ok(OpId::new(*ctr, idx))
+                    return Err(AutomergeError::InvalidObjId(id.to_string()));
                 }
             }
-        }
+        };
+        self.get_obj_meta(obj)
     }
 
     pub(crate) fn export_value<'a>(&self, op: &'a Op, clock: Option<&Clock>) -> (Value<'a>, ExId) {
@@ -441,10 +425,6 @@ impl Automerge {
 
     pub(crate) fn id_to_exid(&self, id: OpId) -> ExId {
         self.ops.id_to_exid(id)
-    }
-
-    pub(crate) fn tagged_value_at<'a>(&self, op: &'a Op, clock: &Clock) -> (Value<'a>, ExId) {
-        (op.value_at(Some(clock)), self.id_to_exid(op.id))
     }
 
     /// Load a document.
@@ -580,7 +560,7 @@ impl Automerge {
             let mut doc =
                 Self::load_with::<()>(data, OnPartialLoad::Ignore, VerificationMode::Check, None)?;
             doc = doc
-                .with_encoding(self.ops.text_encoding)
+                .with_encoding(*self.ops.text_encoding())
                 .with_actor(self.actor_id());
             if let Some(obs) = op_observer {
                 current_state::observe_current_state(&doc, obs);
@@ -643,9 +623,9 @@ impl Automerge {
                 }
                 if self.is_causally_ready(&c) {
                     if empty_at_start {
-                        self.apply_change::<()>(c, &mut None);
+                        self.apply_change::<()>(c, &mut None)?;
                     } else {
-                        self.apply_change(c, &mut op_observer);
+                        self.apply_change(c, &mut op_observer)?;
                     }
                 } else {
                     self.queue.push(c);
@@ -655,9 +635,9 @@ impl Automerge {
         while let Some(c) = self.pop_next_causally_ready_change() {
             if !self.history_index.contains_key(&c.hash()) {
                 if empty_at_start {
-                    self.apply_change::<()>(c, &mut None);
+                    self.apply_change::<()>(c, &mut None)?;
                 } else {
-                    self.apply_change(c, &mut op_observer);
+                    self.apply_change(c, &mut op_observer)?;
                 }
             }
         }
@@ -669,12 +649,17 @@ impl Automerge {
         Ok(())
     }
 
-    fn apply_change<Obs: OpObserver>(&mut self, change: Change, observer: &mut Option<&mut Obs>) {
+    fn apply_change<Obs: OpObserver>(
+        &mut self,
+        change: Change,
+        observer: &mut Option<&mut Obs>,
+    ) -> Result<(), AutomergeError> {
         let ops = self.import_ops(&change);
         self.update_history(change, ops.len());
         for (obj, op) in ops {
-            self.insert_op(&obj, op, observer);
+            self.insert_op(&obj, op, observer)?;
         }
+        Ok(())
     }
 
     fn is_causally_ready(&self, change: &Change) -> bool {
@@ -971,16 +956,6 @@ impl Automerge {
         }
     }
 
-    /*
-        pub(crate) fn to_string<E: Exportable>(&self, id: E) -> String {
-            match id.export() {
-                Export::Id(id) => format!("{}@{}", id.counter(), &self.ops.m.actors[id.actor()]),
-                Export::Prop(index) => self.ops.m.props[index].clone(),
-                Export::Special(s) => s,
-            }
-        }
-    */
-
     pub(crate) fn to_short_string<E: Exportable>(&self, id: E) -> String {
         match id.export() {
             Export::Id(id) => {
@@ -1055,7 +1030,7 @@ impl Automerge {
         let objects = objects.map(|os| {
             os.iter()
                 .filter_map(|o| self.exid_to_obj(o).ok())
-                .map(|o| o.0)
+                .map(|o| o.id)
                 .collect()
         });
         self.ops.visualise(objects)
@@ -1066,14 +1041,14 @@ impl Automerge {
         obj: &ObjId,
         op: Op,
         observer: &mut Option<&mut Obs>,
-    ) {
+    ) -> Result<(), AutomergeError> {
         let (pos, succ) = if let Some(observer) = observer {
-            let (obj_type, encoding) = self.ops.encoding(obj).unwrap_or_default();
-            let found = self.ops.seek_op_with_observer(obj, &op, encoding);
-            found.observe(obj, obj_type, encoding, &op, self, *observer);
+            let obj = self.get_obj_meta(*obj)?;
+            let found = self.ops.find_op_with_observer(&obj, &op);
+            found.observe(&obj, &op, self, *observer);
             (found.pos, found.succ)
         } else {
-            let found = self.ops.seek_op_simple(obj, &op);
+            let found = self.ops.find_op_without_observer(obj, &op);
             (found.pos, found.succ)
         };
 
@@ -1082,15 +1057,19 @@ impl Automerge {
         if !op.is_delete() {
             self.ops.insert(pos, obj, op);
         }
+        Ok(())
     }
 
-    pub fn diff_with_observer<Obs: OpObserver>(
+    /// Observe changes in the document between the 'before'
+    /// and 'after' heads.  If the arguments are reverse it will
+    /// observe the same changes in the opposite order.
+    pub fn observe_diff<Obs: OpObserver>(
         &self,
-        start: &[ChangeHash],
-        end: &[ChangeHash],
+        before: &[ChangeHash],
+        after: &[ChangeHash],
         observer: &mut Obs,
     ) -> Result<(), AutomergeError> {
-        diff::observe_diff(self, start, end, observer);
+        diff::observe_diff(self, before, after, observer);
         Ok(())
     }
 
@@ -1134,8 +1113,8 @@ impl Automerge {
 
 impl ReadDoc for Automerge {
     fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError> {
-        let (obj_id, _, _) = self.exid_to_obj(obj.as_ref())?;
-        Ok(self.ops.parents(obj_id, None))
+        let obj = self.exid_to_obj(obj.as_ref())?;
+        Ok(self.ops.parents(obj.id, None))
     }
 
     fn parents_at<O: AsRef<ExId>>(
@@ -1143,35 +1122,23 @@ impl ReadDoc for Automerge {
         obj: O,
         heads: &[ChangeHash],
     ) -> Result<Parents<'_>, AutomergeError> {
-        let (obj_id, _, _) = self.exid_to_obj(obj.as_ref())?;
+        let obj = self.exid_to_obj(obj.as_ref())?;
         let clock = self.clock_at(heads);
-        Ok(self.ops.parents(obj_id, Some(clock)))
-    }
-
-    fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<(ExId, Prop)>, AutomergeError> {
-        Ok(self.parents(obj.as_ref().clone())?.path())
-    }
-
-    fn path_to_object_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeHash],
-    ) -> Result<Vec<(ExId, Prop)>, AutomergeError> {
-        Ok(self.parents_at(obj.as_ref().clone(), heads)?.path())
+        Ok(self.ops.parents(obj.id, Some(clock)))
     }
 
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
-        self.exid_to_just_obj(obj.as_ref())
+        self.exid_to_obj(obj.as_ref())
             .ok()
-            .map(|obj| self.ops.keys(&obj, None))
+            .map(|obj| self.ops.keys(&obj.id, None))
             .unwrap_or_default()
     }
 
     fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_> {
         let clock = self.clock_at(heads);
-        self.exid_to_just_obj(obj.as_ref())
+        self.exid_to_obj(obj.as_ref())
             .ok()
-            .map(|obj| self.ops.keys(&obj, Some(clock)))
+            .map(|obj| self.ops.keys(&obj.id, Some(clock)))
             .unwrap_or_default()
     }
 
@@ -1180,9 +1147,9 @@ impl ReadDoc for Automerge {
         obj: O,
         range: R,
     ) -> MapRange<'a, R> {
-        self.exid_to_just_obj(obj.as_ref())
+        self.exid_to_obj(obj.as_ref())
             .ok()
-            .map(|obj| self.ops.map_range(&obj, range, None))
+            .map(|obj| self.ops.map_range(&obj.id, range, None))
             .unwrap_or_default()
     }
 
@@ -1193,9 +1160,9 @@ impl ReadDoc for Automerge {
         heads: &[ChangeHash],
     ) -> MapRange<'a, R> {
         let clock = self.clock_at(heads);
-        self.exid_to_just_obj(obj.as_ref())
+        self.exid_to_obj(obj.as_ref())
             .ok()
-            .map(|obj| self.ops.map_range(&obj, range, Some(clock)))
+            .map(|obj| self.ops.map_range(&obj.id, range, Some(clock)))
             .unwrap_or_default()
     }
 
@@ -1206,7 +1173,7 @@ impl ReadDoc for Automerge {
     ) -> ListRange<'_, R> {
         self.exid_to_obj(obj.as_ref())
             .ok()
-            .map(|(obj, _, encoding)| self.ops.list_range(&obj, range, encoding, None))
+            .map(|obj| self.ops.list_range(&obj.id, range, obj.encoding, None))
             .unwrap_or_default()
     }
 
@@ -1219,54 +1186,54 @@ impl ReadDoc for Automerge {
         let clock = self.clock_at(heads);
         self.exid_to_obj(obj.as_ref())
             .ok()
-            .map(|(obj, _, encoding)| self.ops.list_range(&obj, range, encoding, Some(clock)))
+            .map(|obj| {
+                self.ops
+                    .list_range(&obj.id, range, obj.encoding, Some(clock))
+            })
             .unwrap_or_default()
     }
 
     fn values<O: AsRef<ExId>>(&self, obj: O) -> Values<'_> {
-        self.exid_to_just_obj(obj.as_ref())
+        self.exid_to_obj(obj.as_ref())
             .ok()
-            .map(|obj| Values {
-                iter: Some((self.ops.top_ops(&obj, None), self, None)),
-            })
+            .map(|obj| Values::new(self.ops.top_ops(&obj.id, None), self, None))
             .unwrap_or_default()
     }
 
     fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Values<'_> {
         let clock = self.clock_at(heads);
-        self.exid_to_just_obj(obj.as_ref())
+        self.exid_to_obj(obj.as_ref())
             .ok()
-            .map(|obj| Values {
-                iter: Some((
-                    self.ops.top_ops(&obj, Some(clock.clone())),
+            .map(|obj| {
+                Values::new(
+                    self.ops.top_ops(&obj.id, Some(clock.clone())),
                     self,
                     Some(clock),
-                )),
+                )
             })
             .unwrap_or_default()
     }
 
     fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
         self.exid_to_obj(obj.as_ref())
-            .map(|(obj, _, encoding)| self.ops.length(&obj, encoding, None))
+            .map(|obj| self.ops.length(&obj.id, obj.encoding, None))
             .unwrap_or(0)
     }
 
     fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
         let clock = self.clock_at(heads);
         self.exid_to_obj(obj.as_ref())
-            .map(|(obj, _, encoding)| self.ops.length(&obj, encoding, Some(clock)))
+            .map(|obj| self.ops.length(&obj.id, obj.encoding, Some(clock)))
             .unwrap_or(0)
     }
 
     fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
-        let (_, obj_type, _) = self.exid_to_obj(obj.as_ref())?;
-        Ok(obj_type)
+        self.exid_to_obj(obj.as_ref()).map(|obj| obj.typ)
     }
 
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
-        let (obj, _obj_type, _encoding) = self.exid_to_obj(obj.as_ref())?;
-        Ok(self.ops.text(&obj, None))
+        let obj = self.exid_to_obj(obj.as_ref())?;
+        Ok(self.ops.text(&obj.id, None))
     }
 
     fn text_at<O: AsRef<ExId>>(
@@ -1274,14 +1241,14 @@ impl ReadDoc for Automerge {
         obj: O,
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError> {
-        let (obj, _obj_type, _encoding) = self.exid_to_obj(obj.as_ref())?;
+        let obj = self.exid_to_obj(obj.as_ref())?;
         let clock = self.clock_at(heads);
-        Ok(self.ops.text(&obj, Some(clock)))
+        Ok(self.ops.text(&obj.id, Some(clock)))
     }
 
     fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
-        let (obj, _obj_type, encoding) = self.exid_to_obj(obj.as_ref())?;
-        let ops_by_key = self.ops().iter_ops(&obj).group_by(|o| o.elemid_or_key());
+        let obj = self.exid_to_obj(obj.as_ref())?;
+        let ops_by_key = self.ops().iter_ops(&obj.id).group_by(|o| o.elemid_or_key());
         let mut index = 0;
         let mut marks = MarkStateMachine::default();
 
@@ -1289,11 +1256,11 @@ impl ReadDoc for Automerge {
             .into_iter()
             .filter_map(|(_key, key_ops)| {
                 key_ops
-                    .filter(|o| o.visible_or_mark())
+                    .filter(|o| o.visible_or_mark(None))
                     .last()
                     .and_then(|o| match &o.action {
                         OpType::Make(_) | OpType::Put(_) => {
-                            index += o.width(encoding);
+                            index += o.width(obj.encoding);
                             None
                         }
                         OpType::MarkBegin(_, data) => marks.mark_begin(o.id, index, data, self),
@@ -1309,9 +1276,9 @@ impl ReadDoc for Automerge {
         obj: O,
         heads: &[ChangeHash],
     ) -> Result<Vec<Mark<'_>>, AutomergeError> {
-        let (obj, _obj_type, encoding) = self.exid_to_obj(obj.as_ref())?;
+        let obj = self.exid_to_obj(obj.as_ref())?;
         let clock = self.clock_at(heads);
-        let ops_by_key = self.ops().iter_ops(&obj).group_by(|o| o.elemid_or_key());
+        let ops_by_key = self.ops().iter_ops(&obj.id).group_by(|o| o.elemid_or_key());
         let mut index = 0;
         let mut marks = MarkStateMachine::default();
 
@@ -1319,11 +1286,11 @@ impl ReadDoc for Automerge {
             .into_iter()
             .filter_map(|(_key, key_ops)| {
                 key_ops
-                    .filter(|o| o.visible_or_mark_at(Some(&clock)))
+                    .filter(|o| o.visible_or_mark(Some(&clock)))
                     .last()
                     .and_then(|o| match &o.action {
                         OpType::Make(_) | OpType::Put(_) => {
-                            index += o.width(encoding);
+                            index += o.width(obj.encoding);
                             None
                         }
                         OpType::MarkBegin(_, data) => marks.mark_begin(o.id, index, data, self),
@@ -1339,11 +1306,11 @@ impl ReadDoc for Automerge {
         obj: O,
         prop: P,
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        let (obj, _obj_type, encoding) = self.exid_to_obj(obj.as_ref())?;
+        let obj = self.exid_to_obj(obj.as_ref())?;
         let clock = None;
         Ok(self
             .ops
-            .seek_ops_by_prop(&obj, prop.into(), encoding, clock)
+            .seek_ops_by_prop(&obj.id, prop.into(), obj.encoding, clock)
             .ops
             .into_iter()
             .last()
@@ -1356,11 +1323,11 @@ impl ReadDoc for Automerge {
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Option<(Value<'_>, ExId)>, AutomergeError> {
-        let (obj, _obj_type, encoding) = self.exid_to_obj(obj.as_ref())?;
+        let obj = self.exid_to_obj(obj.as_ref())?;
         let clock = Some(self.clock_at(heads));
         Ok(self
             .ops
-            .seek_ops_by_prop(&obj, prop.into(), encoding, clock.as_ref())
+            .seek_ops_by_prop(&obj.id, prop.into(), obj.encoding, clock.as_ref())
             .ops
             .into_iter()
             .last()
@@ -1372,11 +1339,11 @@ impl ReadDoc for Automerge {
         obj: O,
         prop: P,
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
-        let (obj, _obj_type, encoding) = self.exid_to_obj(obj.as_ref())?;
+        let obj = self.exid_to_obj(obj.as_ref())?;
         let clock = None;
         Ok(self
             .ops
-            .seek_ops_by_prop(&obj, prop.into(), encoding, clock)
+            .seek_ops_by_prop(&obj.id, prop.into(), obj.encoding, clock)
             .ops
             .into_iter()
             .map(|op| self.export_value(op, clock))
@@ -1390,11 +1357,11 @@ impl ReadDoc for Automerge {
         heads: &[ChangeHash],
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         let prop = prop.into();
-        let (obj, _obj_type, encoding) = self.exid_to_obj(obj.as_ref())?;
+        let obj = self.exid_to_obj(obj.as_ref())?;
         let clock = Some(self.clock_at(heads));
         Ok(self
             .ops
-            .seek_ops_by_prop(&obj, prop, encoding, clock.as_ref())
+            .seek_ops_by_prop(&obj.id, prop, obj.encoding, clock.as_ref())
             .ops
             .into_iter()
             .map(|op| self.export_value(op, clock.as_ref()))

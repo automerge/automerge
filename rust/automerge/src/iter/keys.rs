@@ -4,6 +4,9 @@ use crate::op_set::OpSet;
 
 use super::TopOps;
 
+// this iterator is created by the Automerge::keys()
+// and Automerge::keys_at() methods
+
 #[derive(Default)]
 pub struct Keys<'a> {
     pub(crate) iter: Option<(TopOps<'a>, &'a OpSet)>,
@@ -21,6 +24,6 @@ impl<'a> Iterator for Keys<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         self.iter
             .as_mut()
-            .and_then(|(i, op_set)| i.next().map(|op| op_set.to_string(op.key)))
+            .and_then(|(i, op_set)| i.next().map(|op| op_set.to_string(op.elemid_or_key())))
     }
 }

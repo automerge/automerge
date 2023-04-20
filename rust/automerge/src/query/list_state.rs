@@ -4,13 +4,13 @@ use crate::types::{Key, ListEncoding, Op};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ListState {
-    pub(crate) encoding: ListEncoding,
-    pub(crate) last_seen: Option<Key>,
-    pub(crate) last_width: usize,
-    pub(crate) target: usize,
-    pub(crate) index: usize,
-    pub(crate) pos: usize,
-    pub(crate) clean: bool,
+    encoding: ListEncoding,
+    last_seen: Option<Key>,
+    last_width: usize,
+    never_seen_puts: bool,
+    target: usize,
+    index: usize,
+    pos: usize,
 }
 
 // There are two indexes being tracked in lists
@@ -27,18 +27,24 @@ impl ListState {
             last_width: 0,
             index: 0,
             pos: 0,
-            clean: true,
+            never_seen_puts: true,
         }
     }
 
+    pub(crate) fn was_last_seen(&self, key: Key) -> bool {
+      self.last_seen == Some(key)
+    }
+
+    // lists that have never seen puts (only inserts and deletes)
+    // can take advantage of a faster codepath
     pub(crate) fn check_if_node_is_clean(&mut self, node: &OpTreeNode) {
-        self.clean &= node.index.clean;
+        self.never_seen_puts &= node.index.has_never_seen_puts();
     }
 
     pub(crate) fn process_node(&mut self, node: &OpTreeNode, ops: &[Op]) -> QueryResult {
         if self.encoding == ListEncoding::List {
             self.process_list_node(node, ops)
-        } else if self.clean {
+        } else if self.never_seen_puts {
             // text node is clean - use the indexes
             self.process_text_node(node)
         } else {
@@ -98,7 +104,7 @@ impl ListState {
 
     pub(crate) fn process_op(&mut self, op: &Op, current: Key, visible: bool) {
         if visible {
-            if self.clean {
+            if self.never_seen_puts {
                 // clean sequnces are simple - only insert and deletes
                 self.last_width = op.width(self.encoding);
                 self.index += self.last_width;
@@ -122,6 +128,18 @@ impl ListState {
         self.pos += 1;
     }
 
+    pub(crate) fn target(&self) -> usize {
+      self.target
+    }
+
+    pub(crate) fn pos(&self) -> usize {
+      self.pos
+    }
+
+    pub(crate) fn index(&self) -> usize {
+      self.index
+    }
+
     pub(crate) fn last_index(&self) -> usize {
         self.index - self.last_width
     }
@@ -136,7 +154,4 @@ impl ListState {
         self.pos = last.pos + 1;
     }
 
-    pub(crate) fn pos(&self) -> usize {
-        self.pos
-    }
 }

@@ -89,21 +89,6 @@ impl<'a> MarkStateMachine<'a> {
         })
     }
 
-    /*
-        pub(crate) fn mark_or_unmark(
-            &mut self,
-            op: &'a Op,
-            pos: usize,
-            doc: &'a Automerge,
-        ) -> Option<Mark<'a>> {
-            match &op.action {
-                OpType::MarkBegin(_, m) => self.mark_or_unmark_begin(op.id, pos, m, doc),
-                OpType::MarkEnd(_) => self.mark_or_unmark_end(op.id, pos, doc),
-                _ => None,
-            }
-        }
-    */
-
     pub(crate) fn mark_or_unmark_begin(
         &mut self,
         id: OpId,

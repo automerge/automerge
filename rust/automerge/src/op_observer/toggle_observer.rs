@@ -10,7 +10,7 @@ use crate::op_observer::{HasPatches, TextRepresentation};
 
 #[derive(Debug, Clone)]
 pub struct ToggleObserver<T> {
-    pub enabled: bool,
+    enabled: bool,
     last_heads: Option<Vec<ChangeHash>>,
     observer: T,
 }

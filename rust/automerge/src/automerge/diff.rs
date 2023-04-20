@@ -29,72 +29,57 @@ impl<'a> Deref for Winner<'a> {
     }
 }
 
-struct OpState {}
+fn process<'a, T: Iterator<Item = &'a Op>>(
+    ops: T,
+    before: &'a Clock,
+    after: &'a Clock,
+) -> Option<Patch<'a>> {
+    let mut before_op = None;
+    let mut after_op = None;
 
-impl OpState {
-    fn process<'a, T: Iterator<Item = &'a Op>>(
-        ops: T,
-        before: &'a Clock,
-        after: &'a Clock,
-    ) -> Option<Patch<'a>> {
-        let mut before_op = None;
-        let mut after_op = None;
+    for op in ops {
+        let predates_before = op.predates(before);
+        let predates_after = op.predates(after);
 
-        for op in ops {
-            let predates_before = op.predates(before);
-            let predates_after = op.predates(after);
-
-            if predates_before && !op.was_deleted_before(before) {
-                Self::push_top(&mut before_op, op, predates_after, before);
-            }
-
-            if predates_after && !op.was_deleted_before(after) {
-                Self::push_top(&mut after_op, op, predates_before, after);
-            }
+        if predates_before && !op.was_deleted_before(before) {
+            push_top(&mut before_op, op, predates_after, before);
         }
-        Self::resolve(before_op, after_op)
-    }
 
-    fn push_top<'a>(
-        top: &mut Option<Winner<'a>>,
-        op: &'a Op,
-        cross_visible: bool,
-        clock: &'a Clock,
-    ) {
-        match &op.action {
-            OpType::Increment(_) => {} // can ignore - info captured inside Counter
-            _ => {
-                top.replace(Winner {
-                    op,
-                    clock,
-                    cross_visible,
-                    conflict: top.is_some(),
-                });
-            }
+        if predates_after && !op.was_deleted_before(after) {
+            push_top(&mut after_op, op, predates_before, after);
         }
     }
+    resolve(before_op, after_op)
+}
 
-    fn resolve<'a>(before: Option<Winner<'a>>, after: Option<Winner<'a>>) -> Option<Patch<'a>> {
-        match (before, after) {
-            (None, Some(b)) if b.is_mark() => Some(Patch::Mark(b, MarkType::Add)),
-            (None, Some(b)) => Some(Patch::New(b)),
-            (Some(a), None) if a.is_mark() => Some(Patch::Mark(a, MarkType::Del)),
-            (Some(a), None) => Some(Patch::Delete(a)),
-            (Some(_), Some(b)) if b.is_mark() => Some(Patch::Mark(b, MarkType::Old)),
-            (Some(a), Some(b)) if a.op.id == b.op.id => Some(Patch::Old(a, b)),
-            (Some(a), Some(b)) if a.op.id != b.op.id => Some(Patch::Update(a, b)),
-            _ => None,
+fn push_top<'a>(top: &mut Option<Winner<'a>>, op: &'a Op, cross_visible: bool, clock: &'a Clock) {
+    match &op.action {
+        OpType::Increment(_) => {} // can ignore - info captured inside Counter
+        _ => {
+            top.replace(Winner {
+                op,
+                clock,
+                cross_visible,
+                conflict: top.is_some(),
+            });
         }
     }
 }
 
-impl Op {
-    fn was_deleted_before(&self, clock: &Clock) -> bool {
-        self.succ_iter().any(|i| clock.covers(i))
-    }
-
-    fn predates(&self, clock: &Clock) -> bool {
-        clock.covers(&self.id)
+fn resolve<'a>(before: Option<Winner<'a>>, after: Option<Winner<'a>>) -> Option<Patch<'a>> {
+    match (before, after) {
+        (None, Some(after)) if after.is_mark() => Some(Patch::Mark(after, MarkType::Add)),
+        (None, Some(after)) => Some(Patch::New(after)),
+        (Some(before), None) if before.is_mark() => Some(Patch::Mark(before, MarkType::Del)),
+        (Some(before), None) => Some(Patch::Delete(before)),
+        (Some(_), Some(after)) if after.is_mark() => Some(Patch::Mark(after, MarkType::Old)),
+        (Some(before), Some(after)) if before.op.id == after.op.id => {
+            Some(Patch::Old { before, after })
+        }
+        (Some(before), Some(after)) if before.op.id != after.op.id => {
+            Some(Patch::Update { before, after })
+        }
+        _ => None,
     }
 }
 
@@ -108,8 +93,14 @@ enum MarkType {
 #[derive(Debug, Clone)]
 enum Patch<'a> {
     New(Winner<'a>),
-    Old(Winner<'a>, Winner<'a>),
-    Update(Winner<'a>, Winner<'a>),
+    Old {
+        before: Winner<'a>,
+        after: Winner<'a>,
+    },
+    Update {
+        before: Winner<'a>,
+        after: Winner<'a>,
+    },
     Delete(Winner<'a>),
     Mark(Winner<'a>, MarkType),
 }
@@ -118,8 +109,8 @@ impl<'a> Patch<'a> {
     fn op(&'a self) -> &'a Op {
         match self {
             Patch::New(op) => op,
-            Patch::Update(_, op) => op,
-            Patch::Old(_, op) => op,
+            Patch::Update { after, .. } => after,
+            Patch::Old { after, .. } => after,
             Patch::Delete(op) => op,
             Patch::Mark(op, _) => op,
         }
@@ -145,7 +136,7 @@ pub(crate) fn observe_diff<O: OpObserver>(
         let ops_by_key = ops.group_by(|o| o.elemid_or_key());
         let diffs = ops_by_key
             .into_iter()
-            .filter_map(|(_key, key_ops)| OpState::process(key_ops, &before, &after));
+            .filter_map(|(_key, key_ops)| process(key_ops, &before, &after));
 
         if typ == ObjType::Text && !observer.text_as_seq() {
             observe_text_diff(doc_at_after, observer, obj, diffs)
@@ -175,33 +166,33 @@ fn observe_list_diff<'a, I: Iterator<Item = Patch<'a>>, O: OpObserver>(
                 &doc,
                 exid.clone(),
                 index,
-                doc.as_ref().tagged_value_at(&op, op.clock),
+                doc.as_ref().export_value(&op, Some(op.clock)),
                 op.conflict,
             );
             index + 1
         }
-        Patch::Update(old, new) => {
+        Patch::Update { before, after } => {
             let exid = exid.clone();
             let prop = index.into();
-            let value = doc.as_ref().tagged_value_at(&new, new.clock);
-            let conflict = !old.conflict && new.conflict;
-            if new.cross_visible {
+            let value = doc.as_ref().export_value(&after, Some(after.clock));
+            let conflict = !before.conflict && after.conflict;
+            if after.cross_visible {
                 observer.expose(&doc, exid, prop, value, conflict);
             } else {
                 observer.put(&doc, exid, prop, value, conflict);
             }
             index + 1
         }
-        Patch::Old(old, new) => {
-            if !old.conflict && new.conflict {
+        Patch::Old { before, after } => {
+            if !before.conflict && after.conflict {
                 observer.flag_conflict(&doc, exid.clone(), index.into());
             }
-            if let Some(n) = get_inc(&old, &new) {
+            if let Some(n) = get_inc(&before, &after) {
                 observer.increment(
                     &doc,
                     exid.clone(),
                     index.into(),
-                    (n, doc.as_ref().id_to_exid(new.id)),
+                    (n, doc.as_ref().id_to_exid(after.id)),
                 );
             }
             index + 1
@@ -234,14 +225,14 @@ fn observe_text_diff<'a, I: Iterator<Item = Patch<'a>>, O: OpObserver>(
             observer.splice_text(&doc, exid.clone(), index, op.to_str());
             index + op.width(encoding)
         }
-        Patch::Update(old, new) => {
-            observer.delete_seq(&doc, exid.clone(), index, old.width(encoding));
-            observer.splice_text(&doc, exid.clone(), index, new.to_str());
-            index + new.width(encoding)
+        Patch::Update { before, after } => {
+            observer.delete_seq(&doc, exid.clone(), index, before.width(encoding));
+            observer.splice_text(&doc, exid.clone(), index, after.to_str());
+            index + after.width(encoding)
         }
-        Patch::Old(_old, new) => index + new.width(encoding),
-        Patch::Delete(old) => {
-            observer.delete_seq(&doc, exid.clone(), index, old.width(encoding));
+        Patch::Old { after, .. } => index + after.width(encoding),
+        Patch::Delete(before) => {
+            observer.delete_seq(&doc, exid.clone(), index, before.width(encoding));
             index
         }
     });
@@ -264,34 +255,34 @@ fn observe_map_diff<'a, I: Iterator<Item = Patch<'a>>, O: OpObserver>(
                 &doc,
                 exid.clone(),
                 prop.into(),
-                doc.as_ref().tagged_value_at(&op, op.clock),
+                doc.as_ref().export_value(&op, Some(op.clock)),
                 op.conflict,
             ),
-            Patch::Update(old, new) => {
+            Patch::Update { before, after } => {
                 let exid = exid.clone();
                 let prop = prop.into();
-                let value = doc.as_ref().tagged_value_at(&new, new.clock);
-                let conflict = !old.conflict && new.conflict;
-                if new.cross_visible {
+                let value = doc.as_ref().export_value(&after, Some(after.clock));
+                let conflict = !before.conflict && after.conflict;
+                if after.cross_visible {
                     observer.expose(&doc, exid, prop, value, conflict);
                 } else {
                     observer.put(&doc, exid, prop, value, conflict);
                 }
             }
-            Patch::Old(old, new) => {
-                if !old.conflict && new.conflict {
+            Patch::Old { before, after } => {
+                if !before.conflict && after.conflict {
                     observer.flag_conflict(&doc, exid.clone(), prop.into());
                 }
-                if let Some(n) = get_inc(&old, &new) {
+                if let Some(n) = get_inc(&before, &after) {
                     observer.increment(
                         &doc,
                         exid.clone(),
                         prop.into(),
-                        (n, doc.as_ref().id_to_exid(new.id)),
+                        (n, doc.as_ref().id_to_exid(after.id)),
                     );
                 }
             }
-            Patch::Delete(_old) => observer.delete_map(&doc, exid.clone(), prop),
+            Patch::Delete(_) => observer.delete_map(&doc, exid.clone(), prop),
             Patch::Mark(_, _) => {}
         });
 }
@@ -300,11 +291,11 @@ fn get_prop<'a>(doc: &'a Automerge, op: &Op) -> Option<&'a str> {
     Some(doc.ops().m.props.safe_get(op.key.prop_index()?)?)
 }
 
-fn get_inc(old: &Winner<'_>, new: &Winner<'_>) -> Option<i64> {
-    if let (Some(ScalarValue::Counter(old_c)), Some(ScalarValue::Counter(new_c))) =
-        (old.scalar_value(), new.scalar_value())
+fn get_inc(before: &Winner<'_>, after: &Winner<'_>) -> Option<i64> {
+    if let (Some(ScalarValue::Counter(before_c)), Some(ScalarValue::Counter(after_c))) =
+        (before.scalar_value(), after.scalar_value())
     {
-        let n = new_c.value_at(new.clock) - old_c.value_at(old.clock);
+        let n = after_c.value_at(after.clock) - before_c.value_at(before.clock);
         if n != 0 {
             return Some(n);
         }
@@ -320,115 +311,115 @@ fn get_inc(old: &Winner<'_>, new: &Winner<'_>) -> Option<i64> {
 
 #[derive(Default, Debug, Clone, PartialEq)]
 struct MarkDiff<'a> {
-    old: MarkStateMachine<'a>,
-    new: MarkStateMachine<'a>,
-    old_marks: Vec<Mark<'a>>,
-    new_marks: Vec<Mark<'a>>,
+    before: MarkStateMachine<'a>,
+    after: MarkStateMachine<'a>,
+    before_marks: Vec<Mark<'a>>,
+    after_marks: Vec<Mark<'a>>,
 }
 
 impl<'a> MarkDiff<'a> {
     fn process(&mut self, index: usize, mark_type: MarkType, op: &'a Op, doc: &'a Automerge) {
         match mark_type {
             MarkType::Add => self.add(index, op, doc),
-            MarkType::Old => self.old(index, op, doc),
+            MarkType::Old => self.before(index, op, doc),
             MarkType::Del => self.del(index, op, doc),
         }
     }
 
     fn add(&mut self, index: usize, op: &'a Op, doc: &'a Automerge) {
         let mark = match &op.action {
-            OpType::MarkBegin(_, data) => self.new.mark_begin(op.id, index, data, doc),
-            OpType::MarkEnd(_) => self.new.mark_end(op.id, index, doc),
+            OpType::MarkBegin(_, data) => self.after.mark_begin(op.id, index, data, doc),
+            OpType::MarkEnd(_) => self.after.mark_end(op.id, index, doc),
             _ => None,
         };
         if let Some(m) = mark {
-            self.new_marks.push(m);
+            self.after_marks.push(m);
         }
     }
 
-    fn old(&mut self, index: usize, op: &'a Op, doc: &'a Automerge) {
+    fn before(&mut self, index: usize, op: &'a Op, doc: &'a Automerge) {
         let marks = match &op.action {
             OpType::MarkBegin(_, data) => (
-                self.old.mark_begin(op.id, index, data, doc),
-                self.new.mark_begin(op.id, index, data, doc),
+                self.before.mark_begin(op.id, index, data, doc),
+                self.after.mark_begin(op.id, index, data, doc),
             ),
             OpType::MarkEnd(_) => (
-                self.old.mark_end(op.id, index, doc),
-                self.new.mark_end(op.id, index, doc),
+                self.before.mark_end(op.id, index, doc),
+                self.after.mark_end(op.id, index, doc),
             ),
             _ => (None, None),
         };
         match marks {
-            (Some(old), Some(new)) if old != new => {
-                self.new_marks.push(new);
-                self.old_marks.push(old)
+            (Some(before), Some(after)) if before != after => {
+                self.after_marks.push(after);
+                self.before_marks.push(before)
             }
-            (Some(old), None) => self.old_marks.push(old),
-            (None, Some(new)) => self.new_marks.push(new),
+            (Some(before), None) => self.before_marks.push(before),
+            (None, Some(after)) => self.after_marks.push(after),
             _ => {}
         }
     }
 
     fn del(&mut self, index: usize, op: &'a Op, doc: &'a Automerge) {
         let mark = match &op.action {
-            OpType::MarkBegin(_, data) => self.old.mark_begin(op.id, index, data, doc),
-            OpType::MarkEnd(_) => self.old.mark_end(op.id, index, doc),
+            OpType::MarkBegin(_, data) => self.before.mark_begin(op.id, index, data, doc),
+            OpType::MarkEnd(_) => self.before.mark_end(op.id, index, doc),
             _ => None,
         };
         if let Some(m) = mark {
-            self.old_marks.push(m);
+            self.before_marks.push(m);
         }
     }
 
     fn finish(&mut self) -> Option<Vec<Mark<'a>>> {
         let mut f = BTreeMap::new();
-        'new_marks: for new in &mut self.new_marks {
-            for old in &mut self.old_marks {
-                if new.start > old.end {
-                    continue; // 'new_marks; // too far - next mark
+        'after_marks: for after in &mut self.after_marks {
+            for before in &mut self.before_marks {
+                if after.start > before.end {
+                    continue; // 'after_marks; // too far - next mark
                 }
-                if new.data.name != old.data.name || old.start >= old.end {
+                if after.data.name != before.data.name || before.start >= before.end {
                     continue;
                 }
-                if new.end >= old.start {
-                    // old       ------------*
-                    // new   ----------------*
-                    mark(&mut f, new.start, old.start, new);
-                    if new.end > old.start {
-                        new.start = std::cmp::max(new.start, old.start);
+                if after.end >= before.start {
+                    // before       ------------*
+                    // after   ----------------*
+                    mark(&mut f, after.start, before.start, after);
+                    if after.end > before.start {
+                        after.start = std::cmp::max(after.start, before.start);
                     } else {
-                        continue 'new_marks;
+                        continue 'after_marks;
                     }
                 }
-                if new.start >= old.start {
-                    // old ------------*
-                    // new    ---------*
-                    if new.start > old.start {
-                        old.start = std::cmp::min(old.start, new.start);
-                        unmark(&mut f, old.start, new.start, old);
+                if after.start >= before.start {
+                    // before ------------*
+                    // after    ---------*
+                    if after.start > before.start {
+                        before.start = std::cmp::min(before.start, after.start);
+                        unmark(&mut f, before.start, after.start, before);
                     }
-                    if new.end > old.end {
-                        if new.data.value != old.data.value {
-                            mark(&mut f, new.start, old.end, new);
+                    if after.end > before.end {
+                        if after.data.value != before.data.value {
+                            mark(&mut f, after.start, before.end, after);
                         }
-                        new.start = old.end;
-                        old.start = old.end;
+                        after.start = before.end;
+                        before.start = before.end;
                         continue;
                     } else {
-                        if new.data.value != old.data.value {
-                            mark(&mut f, new.start, new.end, new);
+                        if after.data.value != before.data.value {
+                            mark(&mut f, after.start, after.end, after);
                         }
-                        old.start = new.end;
-                        continue 'new_marks;
+                        before.start = after.end;
+                        continue 'after_marks;
                     }
                 }
             }
-            // mark new
-            mark(&mut f, new.start, new.end, new);
+            // mark after
+            mark(&mut f, after.start, after.end, after);
         }
-        for old in &self.old_marks {
-            if old.start != old.end {
-                unmark(&mut f, old.start, old.end, old);
+        for before in &self.before_marks {
+            if before.start != before.end {
+                unmark(&mut f, before.start, before.end, before);
             }
         }
         if !f.is_empty() {
@@ -629,19 +620,6 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         heads: &[ChangeHash],
     ) -> Result<crate::Parents<'_>, AutomergeError> {
         self.doc.parents_at(obj, heads)
-    }
-
-    fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<(ExId, Prop)>, AutomergeError> {
-        log!("PATH TO OBJECT AT");
-        self.doc.path_to_object_at(obj, self.heads)
-    }
-
-    fn path_to_object_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeHash],
-    ) -> Result<Vec<(ExId, Prop)>, AutomergeError> {
-        self.doc.path_to_object_at(obj, heads)
     }
 
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
@@ -1391,9 +1369,4 @@ mod tests {
             .as_ref()
         );
     }
-
-    // test text update that changes length
-    // test unicode width issues
-    // explicitly test
-    // test for path change / at() api?
 }

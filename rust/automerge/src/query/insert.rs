@@ -30,12 +30,12 @@ impl InsertNth {
     }
 
     pub(crate) fn pos(&self) -> usize {
-        self.valid.unwrap_or(self.idx.pos)
+        self.valid.unwrap_or(self.idx.pos())
     }
 
     pub(crate) fn key(&self) -> Result<Key, AutomergeError> {
         self.last_valid_insert
-            .ok_or(AutomergeError::InvalidIndex(self.idx.target))
+            .ok_or(AutomergeError::InvalidIndex(self.idx.target()))
     }
 }
 
@@ -46,7 +46,7 @@ impl<'a> TreeQuery<'a> for InsertNth {
 
     fn can_shortcut_search(&mut self, tree: &'a OpTree) -> bool {
         if let Some(last) = &tree.last_insert {
-            if last.index + last.width == self.idx.target {
+            if last.index + last.width == self.idx.target() {
                 self.valid = Some(last.pos + 1);
                 self.last_valid_insert = Some(last.key);
                 return true;
@@ -65,7 +65,7 @@ impl<'a> TreeQuery<'a> for InsertNth {
         let visible = element.visible();
         // an insert after we're done - could be a valid insert point
         if element.insert && self.valid.is_none() && self.idx.done() {
-            self.valid = Some(self.idx.pos);
+            self.valid = Some(self.idx.pos());
         }
         // sticky marks
         if self.valid.is_some() && element.valid_mark_anchor() {

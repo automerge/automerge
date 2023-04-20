@@ -247,18 +247,6 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
         self.doc.parents_at(obj, heads)
     }
 
-    fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<(ExId, Prop)>, AutomergeError> {
-        self.doc.path_to_object(obj)
-    }
-
-    fn path_to_object_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeHash],
-    ) -> Result<Vec<(ExId, Prop)>, AutomergeError> {
-        self.doc.path_to_object_at(obj, heads)
-    }
-
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
         self.doc.get_missing_deps(heads)
     }

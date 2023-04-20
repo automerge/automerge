@@ -30,27 +30,15 @@ pub trait ReadDoc {
     /// This function may in future be changed to allow getting the parents from the id of a scalar
     /// value.
     fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError>;
+
+    /// Get the parents of the object `obj` as at `heads`
+    ///
+    /// See [`Self::parents`]
     fn parents_at<O: AsRef<ExId>>(
         &self,
         obj: O,
         heads: &[ChangeHash],
     ) -> Result<Parents<'_>, AutomergeError>;
-
-    /// Get the path to an object
-    ///
-    /// "path" here means the sequence of `(object Id, key)` pairs which leads
-    /// to the object in question.
-    ///
-    /// ### Errors
-    ///
-    /// * If the object ID `obj` is not in the document
-    fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<(ExId, Prop)>, AutomergeError>;
-
-    fn path_to_object_at<O: AsRef<ExId>>(
-        &self,
-        obj: O,
-        heads: &[ChangeHash],
-    ) -> Result<Vec<(ExId, Prop)>, AutomergeError>;
 
     /// Get the keys of the object `obj`.
     ///

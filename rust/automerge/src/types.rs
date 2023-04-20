@@ -159,12 +159,6 @@ pub enum ObjType {
     Text,
 }
 
-impl Default for ObjType {
-    fn default() -> Self {
-        ObjType::Map
-    }
-}
-
 impl ObjType {
     pub fn is_sequence(&self) -> bool {
         matches!(self, Self::List | Self::Text)
@@ -529,6 +523,23 @@ impl ObjId {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct ObjMeta {
+    pub(crate) id: ObjId,
+    pub(crate) typ: ObjType,
+    pub(crate) encoding: ListEncoding,
+}
+
+impl ObjMeta {
+    pub(crate) fn root() -> Self {
+        Self {
+            id: ObjId::root(),
+            typ: ObjType::Map,
+            encoding: ListEncoding::List,
+        }
+    }
+}
+
 /// How indexes into text sequeces are calculated
 ///
 /// Automerge text objects are internally sequences of utf8 characters. This
@@ -694,21 +705,11 @@ impl Op {
         }
     }
 
-    pub(crate) fn visible_or_mark_at(&self, clock: Option<&Clock>) -> bool {
-        if let Some(clock) = clock {
-            if self.is_inc() {
-                false
-            } else {
-                clock.covers(&self.id) && !self.succ_iter().any(|i| clock.covers(i))
-            }
-        } else {
-            self.visible_or_mark()
-        }
-    }
-
-    pub(crate) fn visible_or_mark(&self) -> bool {
+    pub(crate) fn visible_or_mark(&self, clock: Option<&Clock>) -> bool {
         if self.is_inc() {
             false
+        } else if let Some(clock) = clock {
+            clock.covers(&self.id) && !self.succ_iter().any(|i| clock.covers(i))
         } else if self.is_counter() {
             self.succ.len() <= self.incs()
         } else {
@@ -825,6 +826,14 @@ impl Op {
             OpType::MarkBegin(_, _) => "markBegin".to_string(),
             OpType::MarkEnd(_) => "markEnd".to_string(),
         }
+    }
+
+    pub(crate) fn was_deleted_before(&self, clock: &Clock) -> bool {
+        self.succ_iter().any(|i| clock.covers(i))
+    }
+
+    pub(crate) fn predates(&self, clock: &Clock) -> bool {
+        clock.covers(&self.id)
     }
 }
 
