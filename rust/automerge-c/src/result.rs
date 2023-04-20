@@ -1,3 +1,4 @@
+use am::marks::Mark;
 use automerge as am;
 
 use std::ops::{Range, RangeFrom, RangeFull, RangeTo};
@@ -80,6 +81,12 @@ impl From<am::sync::State> for AMresult {
 impl From<am::iter::Values<'static>> for AMresult {
     fn from(pairs: am::iter::Values<'static>) -> Self {
         Self::items(pairs.map(|(v, o)| AMitem::exact(o, v.into())).collect())
+    }
+}
+
+impl From<&am::ScalarValue> for AMresult {
+    fn from(value: &am::ScalarValue) -> Self {
+        Self::item(value.into())
     }
 }
 
@@ -358,6 +365,20 @@ impl From<Result<Vec<u8>, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<Vec<u8>, am::AutomergeError>) -> Self {
         match maybe {
             Ok(bytes) => Self::item(am::Value::bytes(bytes).into()),
+            Err(e) => Self::error(&e.to_string()),
+        }
+    }
+}
+
+impl From<Result<Vec<Mark<'static>>, am::AutomergeError>> for AMresult {
+    fn from(maybe: Result<Vec<Mark<'static>>, am::AutomergeError>) -> Self {
+        match maybe {
+            Ok(marks) => {
+                for mark in marks.iter() {
+                    dbg!(mark.name(), mark.start, mark.end);
+                }
+                Self::items(marks.iter().map(|mark| mark.clone().into()).collect())
+            }
             Err(e) => Self::error(&e.to_string()),
         }
     }
