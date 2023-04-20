@@ -93,7 +93,7 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
 
     fn val(&self) -> Cow<'a, ScalarValue> {
         match &self.op.action {
-            OpType::Make(..) | OpType::Delete | OpType::MarkEnd(..) => {
+            OpType::Make(..) | OpType::Delete | OpType::MarkEnd(..) | OpType::Move(..) => {
                 Cow::Owned(ScalarValue::Null)
             }
             OpType::Increment(i) => Cow::Owned(ScalarValue::Int(*i)),
@@ -141,6 +141,17 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
             Some(Cow::Owned(name.clone()))
         } else {
             None
+        }
+    }
+
+    fn source(&self) -> convert::ObjId<Self::OpId> {
+        if let OpType::Move(o) = &self.op.action {
+            convert::ObjId::Op(OpIdWithMetadata {
+                opid: o.opid(),
+                metadata: self.metadata,
+            })
+        } else {
+            convert::ObjId::Root
         }
     }
 }

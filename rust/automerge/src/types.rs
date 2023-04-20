@@ -201,6 +201,7 @@ pub enum OpType {
     Put(ScalarValue),
     MarkBegin(bool, MarkData),
     MarkEnd(bool),
+    Move(ObjId),
 }
 
 impl OpType {
@@ -217,6 +218,7 @@ impl OpType {
             Self::Increment(_) => 5,
             Self::Make(ObjType::Table) => 6,
             Self::MarkBegin(_, _) | Self::MarkEnd(_) => 7,
+            Self::Move(_) => 8,
         }
     }
 
@@ -230,8 +232,7 @@ impl OpType {
                 ScalarValue::Int(_) | ScalarValue::Uint(_) => Ok(()),
                 _ => Err(error::InvalidOpType::NonNumericInc),
             },
-            6 => Ok(()),
-            7 => Ok(()),
+            6..=8 => Ok(()),
             _ => Err(error::InvalidOpType::UnknownAction(action)),
         }
     }
@@ -240,6 +241,7 @@ impl OpType {
         action: u64,
         value: ScalarValue,
         mark_name: Option<smol_str::SmolStr>,
+        source: ObjId,
         expand: bool,
     ) -> OpType {
         match action {
@@ -258,6 +260,7 @@ impl OpType {
                 Some(name) => Self::MarkBegin(expand, MarkData { name, value }),
                 None => Self::MarkEnd(expand),
             },
+            8 => Self::Move(source),
             _ => unreachable!("validate_action_and_value returned UnknownAction"),
         }
     }
@@ -506,7 +509,7 @@ impl OpId {
 }
 
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
-pub(crate) struct ObjId(pub(crate) OpId);
+pub struct ObjId(pub(crate) OpId);
 
 impl ObjId {
     pub(crate) const fn root() -> Self {
@@ -585,6 +588,7 @@ pub(crate) struct Op {
     pub(crate) succ: OpIds,
     pub(crate) pred: OpIds,
     pub(crate) insert: bool,
+    pub(crate) invalid_move: bool,
 }
 
 impl Op {
@@ -631,7 +635,7 @@ impl Op {
     }
 
     pub(crate) fn visible(&self) -> bool {
-        if self.is_inc() || self.is_mark() {
+        if self.is_inc() || self.is_mark() || self.invalid_move {
             false
         } else if self.is_counter() {
             self.succ.len() <= self.incs()
@@ -641,7 +645,7 @@ impl Op {
     }
 
     pub(crate) fn visible_or_mark(&self) -> bool {
-        if self.is_inc() {
+        if self.is_inc() || self.invalid_move {
             false
         } else if self.is_counter() {
             self.succ.len() <= self.incs()
@@ -660,6 +664,10 @@ impl Op {
 
     pub(crate) fn is_delete(&self) -> bool {
         matches!(&self.action, OpType::Delete)
+    }
+
+    pub(crate) fn is_move(&self) -> bool {
+        matches!(&self.action, OpType::Move(_))
     }
 
     pub(crate) fn is_inc(&self) -> bool {
@@ -714,6 +722,13 @@ impl Op {
         }
     }
 
+    pub(crate) fn get_move_source(&self) -> ObjId {
+        match self.action {
+            OpType::Move(o)  => o,
+            _ => ObjId::root(),
+        }
+    }
+
     pub(crate) fn value(&self) -> Value<'_> {
         match &self.action {
             OpType::Make(obj_type) => Value::Object(*obj_type),
@@ -744,6 +759,7 @@ impl Op {
             OpType::Delete => "del".to_string(),
             OpType::MarkBegin(_, _) => "markBegin".to_string(),
             OpType::MarkEnd(_) => "markEnd".to_string(),
+            OpType::Move(_) => "move".to_string(),
         }
     }
 }

@@ -1685,3 +1685,31 @@ fn big_list() {
     );
     assert!(matches);
 }
+
+#[test]
+fn move_test() {
+    let mut doc = Automerge::new();
+    let mut tx = doc.transaction();
+    let a_id = tx.put_object(&ROOT, "a", ObjType::Map).unwrap();
+    let b_id = tx.put_object(&ROOT, "b", ObjType::Map).unwrap();
+
+    dbg!(&a_id);
+    dbg!(&b_id);
+
+    tx.move_object(&a_id, "b", &b_id).unwrap();
+    tx.move_object(&b_id, "c", &a_id).unwrap();
+    tx.move_object(&ROOT, "c", &a_id).unwrap();
+    tx.commit();
+
+    let keys = doc.keys(&ROOT);
+    for k in keys {
+        dbg!(k);
+    }
+
+    dbg!("%%%%%\n");
+    let values = doc.values(&a_id);
+    for v in values {
+        dbg!(v);
+    }
+    dbg!("%%%%%\n");
+}

@@ -267,6 +267,12 @@ mod convert_expanded {
                 None
             }
         }
+
+        fn source(&self) -> convert::ObjId<Self::OpId> {
+            // move() not defined in legacy docs
+            convert::ObjId::Root
+        }
+
     }
 
     impl<'a> convert::OpId<&'a ActorId> for &'a legacy::OpId {

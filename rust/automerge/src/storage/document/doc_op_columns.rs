@@ -30,6 +30,7 @@ const VAL_COL_ID: ColumnId = ColumnId::new(5);
 const SUCC_COL_ID: ColumnId = ColumnId::new(8);
 const EXPAND_COL_ID: ColumnId = ColumnId::new(9);
 const MARK_NAME_COL_ID: ColumnId = ColumnId::new(10);
+const SOURCE_COL_ID: ColumnId = ColumnId::new(11);
 
 /// The form operations take in the compressed document format.
 #[derive(Debug)]
@@ -43,6 +44,7 @@ pub(crate) struct DocOp {
     pub(crate) succ: Vec<OpId>,
     pub(crate) expand: bool,
     pub(crate) mark_name: Option<smol_str::SmolStr>,
+    pub(crate) source: ObjId,
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +60,7 @@ pub(crate) struct DocOpColumns {
     other: Columns,
     expand: MaybeBooleanRange,
     mark_name: RleRange<smol_str::SmolStr>,
+    source: Option<ObjIdRange>
 }
 
 struct DocId {
@@ -98,6 +101,7 @@ pub(crate) trait AsDocOp<'a> {
     fn succ(&self) -> Self::SuccIter;
     fn expand(&self) -> bool;
     fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>>;
+    fn source(&self) -> convert::ObjId<Self::OpId>;
 }
 
 impl DocOpColumns {
@@ -128,7 +132,8 @@ impl DocOpColumns {
         let val = ValueRange::encode(ops.clone().map(|o| o.val()), out);
         let succ = OpIdListRange::encode(ops.clone().map(|o| o.succ()), out);
         let expand = MaybeBooleanRange::encode(ops.clone().map(|o| o.expand()), out);
-        let mark_name = RleRange::encode(ops.map(|o| o.mark_name()), out);
+        let mark_name = RleRange::encode(ops.clone().map(|o| o.mark_name()), out);
+        let source = ObjIdRange::encode(ops.map(|o| o.source()), out);
         Self {
             obj,
             key,
@@ -139,6 +144,7 @@ impl DocOpColumns {
             succ,
             expand,
             mark_name,
+            source,
             other: Columns::empty(),
         }
     }
@@ -158,6 +164,7 @@ impl DocOpColumns {
         let mut succ = OpIdListEncoder::new();
         let mut expand = MaybeBooleanEncoder::new();
         let mut mark_name = RleEncoder::<_, smol_str::SmolStr>::new(Vec::new());
+        let mut source = ObjIdEncoder::new();
         for op in ops {
             obj.append(op.obj());
             key.append(op.key());
@@ -168,6 +175,7 @@ impl DocOpColumns {
             succ.append(op.succ());
             expand.append(op.expand());
             mark_name.append(op.mark_name());
+            source.append(op.source());
         }
         let obj = obj.finish(out);
         let key = key.finish(out);
@@ -195,6 +203,7 @@ impl DocOpColumns {
         let (mark_name_out, _) = mark_name.finish();
         out.extend(mark_name_out);
         let mark_name = RleRange::from(mark_name_start..out.len());
+        let source = source.finish(out);
 
         DocOpColumns {
             obj,
@@ -206,6 +215,7 @@ impl DocOpColumns {
             succ,
             expand,
             mark_name,
+            source,
             other: Columns::empty(),
         }
     }
@@ -221,6 +231,7 @@ impl DocOpColumns {
             succ: self.succ.iter(data),
             expand: self.expand.decoder(data),
             mark_name: self.mark_name.decoder(data),
+            source: self.source.as_ref().map(|o| o.iter(data) ),
         }
     }
 
@@ -322,6 +333,7 @@ pub(crate) struct DocOpColumnIter<'a> {
     succ: OpIdListIter<'a>,
     expand: MaybeBooleanDecoder<'a>,
     mark_name: RleDecoder<'a, smol_str::SmolStr>,
+    source: Option<ObjIdIter<'a>>,
 }
 
 impl<'a> DocOpColumnIter<'a> {
@@ -368,6 +380,12 @@ impl<'a> DocOpColumnIter<'a> {
             let insert = self.insert.next_in_col("insert")?;
             let expand = self.expand.maybe_next_in_col("expand")?.unwrap_or(false);
             let mark_name = self.mark_name.maybe_next_in_col("mark_name")?;
+            let source = if let Some(ref mut sources) = self.source {
+                sources.next_in_col("source")?
+            } else {
+                ObjId::root()
+            };
+
             Ok(Some(DocOp {
                 id,
                 value,
@@ -378,6 +396,7 @@ impl<'a> DocOpColumnIter<'a> {
                 insert,
                 expand,
                 mark_name,
+                source,
             }))
         }
     }
@@ -415,6 +434,8 @@ impl TryFrom<Columns> for DocOpColumns {
         let mut expand: Option<MaybeBooleanRange> = None;
         let mut mark_name: Option<RleRange<smol_str::SmolStr>> = None;
         let mut other = Columns::empty();
+        let mut source_actor: Option<RleRange<u64>> = None;
+        let mut source_ctr: Option<RleRange<u64>> = None;
 
         for (index, col) in columns.into_iter().enumerate() {
             match (col.id(), col.col_type()) {
@@ -469,6 +490,9 @@ impl TryFrom<Columns> for DocOpColumns {
                 },
                 (EXPAND_COL_ID, ColumnType::Boolean) => expand = Some(col.range().into()),
                 (MARK_NAME_COL_ID, ColumnType::String) => mark_name = Some(col.range().into()),
+
+                (SOURCE_COL_ID, ColumnType::Actor) => source_actor = Some(col.range().into()),
+                (SOURCE_COL_ID, ColumnType::DeltaInteger) => source_ctr = Some(col.range().into()),
                 (other_col, other_type) => {
                     tracing::warn!(id=?other_col, typ=?other_type, "unknown column type");
                     other.append(col)
@@ -499,6 +523,10 @@ impl TryFrom<Columns> for DocOpColumns {
             ),
             expand: expand.unwrap_or_else(|| (0..0).into()),
             mark_name: mark_name.unwrap_or_else(|| (0..0).into()),
+            source: ObjIdRange::new(
+                source_actor.unwrap_or_else(|| (0..0).into()),
+                source_ctr.unwrap_or_else(|| (0..0).into()),
+            ),
             other,
         })
     }

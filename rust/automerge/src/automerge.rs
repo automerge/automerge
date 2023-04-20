@@ -736,12 +736,14 @@ impl Automerge {
                             c.action,
                             c.val,
                             c.mark_name,
+                            c.source,
                             c.expand,
                         ),
                         key,
                         succ: Default::default(),
                         pred,
                         insert: c.insert,
+                        invalid_move: false,
                     },
                 )
             })
@@ -1002,6 +1004,7 @@ impl Automerge {
                     format!("mark({},{})", name, value)
                 }
                 OpType::MarkEnd(_) => "/mark".to_string(),
+                OpType::Move(o) => format!("move({}@{})", o.opid().counter(), self.ops.m.actors[o.opid().actor()]),
             };
             let pred: Vec<_> = op.pred.iter().map(|id| self.to_string(*id)).collect();
             let succ: Vec<_> = op.succ.into_iter().map(|id| self.to_string(*id)).collect();
@@ -1045,6 +1048,7 @@ impl Automerge {
         if !op.is_delete() {
             self.ops.insert(pos, obj, op.clone());
         }
+
         op
     }
 
@@ -1371,7 +1375,7 @@ impl ReadDoc for Automerge {
                         }
                         OpType::MarkBegin(_, data) => marks.mark_begin(o.id, pos, data, self),
                         OpType::MarkEnd(_) => marks.mark_end(o.id, pos, self),
-                        OpType::Increment(_) | OpType::Delete => None,
+                        OpType::Increment(_) | OpType::Delete | OpType::Move(_) => None,
                     })
             })
             .collect())
@@ -1403,7 +1407,7 @@ impl ReadDoc for Automerge {
                         }
                         OpType::MarkBegin(_, data) => marks.mark_begin(o.id, pos, data, self),
                         OpType::MarkEnd(_) => marks.mark_end(o.id, pos, self),
-                        OpType::Increment(_) | OpType::Delete => None,
+                        OpType::Increment(_) | OpType::Delete | OpType::Move(_) => None,
                     })
             })
             .collect())

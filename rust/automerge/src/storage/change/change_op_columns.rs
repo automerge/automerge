@@ -34,6 +34,7 @@ const VAL_COL_ID: ColumnId = ColumnId::new(5);
 const PRED_COL_ID: ColumnId = ColumnId::new(7);
 const EXPAND_COL_ID: ColumnId = ColumnId::new(8);
 const MARK_NAME_COL_ID: ColumnId = ColumnId::new(9);
+const SOURCE_COL_ID: ColumnId = ColumnId::new(11);
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ChangeOp {
@@ -45,6 +46,7 @@ pub(crate) struct ChangeOp {
     pub(crate) obj: ObjId,
     pub(crate) expand: bool,
     pub(crate) mark_name: Option<smol_str::SmolStr>,
+    pub(crate) source: ObjId,
 }
 
 impl<'a, A: AsChangeOp<'a, ActorId = usize, OpId = OpId>> From<A> for ChangeOp {
@@ -65,6 +67,10 @@ impl<'a, A: AsChangeOp<'a, ActorId = usize, OpId = OpId>> From<A> for ChangeOp {
             action: a.action(),
             expand: a.expand(),
             mark_name: a.mark_name().map(|n| n.into_owned()),
+            source: match a.source() {
+                convert::ObjId::Root => ObjId::root(),
+                convert::ObjId::Op(o) => ObjId(o),
+            },
         }
     }
 }
@@ -113,6 +119,14 @@ impl<'a> AsChangeOp<'a> for &'a ChangeOp {
     fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
         self.mark_name.as_ref().map(Cow::Borrowed)
     }
+
+    fn source(&self) -> convert::ObjId<Self::OpId> {
+        if self.source.is_root() {
+            convert::ObjId::Root
+        } else {
+            convert::ObjId::Op(self.source.opid())
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -125,6 +139,7 @@ pub(crate) struct ChangeOpsColumns {
     pred: OpIdListRange,
     expand: MaybeBooleanRange,
     mark_name: RleRange<smol_str::SmolStr>,
+    source: Option<ObjIdRange>,
 }
 
 impl ChangeOpsColumns {
@@ -139,6 +154,7 @@ impl ChangeOpsColumns {
             pred: self.pred.iter(data),
             expand: self.expand.decoder(data),
             mark_name: self.mark_name.decoder(data),
+            source: self.source.as_ref().map(|o| o.iter(data)),
         }
     }
 
@@ -174,7 +190,8 @@ impl ChangeOpsColumns {
         let pred = OpIdListRange::encode(ops.clone().map(|o| o.pred()), out);
         let expand = MaybeBooleanRange::encode(ops.clone().map(|o| o.expand()), out);
         let mark_name =
-            RleRange::encode::<Cow<'_, smol_str::SmolStr>, _>(ops.map(|o| o.mark_name()), out);
+            RleRange::encode::<Cow<'_, smol_str::SmolStr>, _>(ops.clone().map(|o| o.mark_name()), out);
+        let source = ObjIdRange::encode(ops.map(|o| o.source()), out);
         Self {
             obj,
             key,
@@ -184,6 +201,7 @@ impl ChangeOpsColumns {
             pred,
             expand,
             mark_name,
+            source,
         }
     }
 
@@ -201,6 +219,7 @@ impl ChangeOpsColumns {
         let mut pred = OpIdListEncoder::new();
         let mut expand = MaybeBooleanEncoder::new();
         let mut mark_name = RleEncoder::<_, smol_str::SmolStr>::new(Vec::new());
+        let mut source = ObjIdEncoder::new();
         for op in ops {
             tracing::trace!(expand=?op.expand(), "expand");
             obj.append(op.obj());
@@ -211,6 +230,7 @@ impl ChangeOpsColumns {
             pred.append(op.pred());
             expand.append(op.expand());
             mark_name.append(op.mark_name());
+            source.append(op.source())
         }
         let obj = obj.finish(out);
         let key = key.finish(out);
@@ -237,6 +257,7 @@ impl ChangeOpsColumns {
         let (mark_name, _) = mark_name.finish();
         out.extend(mark_name);
         let mark_name = RleRange::from(mark_name_start..out.len());
+        let source = source.finish(out);
 
         Self {
             obj,
@@ -247,6 +268,7 @@ impl ChangeOpsColumns {
             pred,
             expand,
             mark_name,
+            source,
         }
     }
 
@@ -351,6 +373,7 @@ pub(crate) struct ChangeOpsIter<'a> {
     pred: OpIdListIter<'a>,
     expand: MaybeBooleanDecoder<'a>,
     mark_name: RleDecoder<'a, smol_str::SmolStr>,
+    source: Option<ObjIdIter<'a>>,
 }
 
 impl<'a> ChangeOpsIter<'a> {
@@ -374,6 +397,11 @@ impl<'a> ChangeOpsIter<'a> {
             let pred = self.pred.next_in_col("pred")?;
             let expand = self.expand.maybe_next_in_col("expand")?.unwrap_or(false);
             let mark_name = self.mark_name.maybe_next_in_col("mark_name")?;
+            let source = if let Some(ref mut sources) = self.source {
+                sources.next_in_col("source")?
+            } else {
+                ObjId::root()
+            };
 
             // This check is necessary to ensure that OpType::from_action_and_value
             // cannot panic later in the process.
@@ -388,6 +416,7 @@ impl<'a> ChangeOpsIter<'a> {
                 pred,
                 expand,
                 mark_name,
+                source,
             }))
         }
     }
@@ -437,6 +466,8 @@ impl TryFrom<Columns> for ChangeOpsColumns {
         let mut expand: Option<MaybeBooleanRange> = None;
         let mut mark_name: Option<RleRange<smol_str::SmolStr>> = None;
         let mut other = Columns::empty();
+        let mut source_actor: Option<RleRange<u64>> = None;
+        let mut source_ctr: Option<RleRange<u64>> = None;
 
         for (index, col) in columns.into_iter().enumerate() {
             match (col.id(), col.col_type()) {
@@ -492,6 +523,8 @@ impl TryFrom<Columns> for ChangeOpsColumns {
                 },
                 (EXPAND_COL_ID, ColumnType::Boolean) => expand = Some(col.range().into()),
                 (MARK_NAME_COL_ID, ColumnType::String) => mark_name = Some(col.range().into()),
+                (SOURCE_COL_ID, ColumnType::Actor) => source_actor = Some(col.range().into()),
+                (SOURCE_COL_ID, ColumnType::Integer) => source_ctr = Some(col.range().into()),
                 (other_type, other_col) => {
                     tracing::warn!(typ=?other_type, id=?other_col, "unknown column");
                     other.append(col);
@@ -519,6 +552,10 @@ impl TryFrom<Columns> for ChangeOpsColumns {
             pred,
             expand: expand.unwrap_or_else(|| (0..0).into()),
             mark_name: mark_name.unwrap_or_else(|| (0..0).into()),
+            source: ObjIdRange::new(
+                source_actor.unwrap_or_else(|| (0..0).into()),
+                source_ctr.unwrap_or_else(|| (0..0).into()),
+            ),
         })
     }
 }
@@ -538,7 +575,8 @@ mod tests {
                      obj in opid(),
                      mark_name in proptest::option::of(any::<String>().prop_map(|s| s.into())),
                      expand in any::<bool>(),
-                     insert in any::<bool>()) -> ChangeOp {
+                     insert in any::<bool>(),
+                     source in opid()) -> ChangeOp {
 
                     let val = if action == 5 && !(value.is_int() || value.is_uint()) {
                         ScalarValue::Uint(0)
@@ -552,6 +590,7 @@ mod tests {
                 insert,
                 expand,
                 mark_name,
+                source: source.into(),
             }
         }
     }

@@ -322,6 +322,7 @@ impl LoadingObject {
                     succ: OpIds::empty(),
                     key: *key,
                     action: OpType::Delete,
+                    invalid_move: false,
                 },
             )?;
         }
@@ -345,7 +346,7 @@ fn import_op(m: &mut OpSetMetadata, op: DocOp) -> Result<Op, Error> {
             return Err(Error::MissingActor);
         }
     }
-    let action = OpType::from_action_and_value(op.action, op.value, op.mark_name, op.expand);
+    let action = OpType::from_action_and_value(op.action, op.value, op.mark_name, op.source, op.expand);
     Ok(Op {
         id: check_opid(m, op.id)?,
         action,
@@ -353,6 +354,7 @@ fn import_op(m: &mut OpSetMetadata, op: DocOp) -> Result<Op, Error> {
         succ: m.try_sorted_opids(op.succ).ok_or(Error::SuccOutOfOrder)?,
         pred: OpIds::empty(),
         insert: op.insert,
+        invalid_move: false,
     })
 }
 

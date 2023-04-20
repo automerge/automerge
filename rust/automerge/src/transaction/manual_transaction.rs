@@ -362,6 +362,15 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         self.do_tx(|tx, doc, obs| tx.unmark(doc, obs, obj.as_ref(), name, start, end))
     }
 
+    fn move_object<O: AsRef<ExId>, P: Into<Prop>>(
+            &mut self,
+            ex_obj: O,
+            prop: P,
+            ex_source: O,
+        )-> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, obs| tx.move_object(doc, obs, ex_obj.as_ref(), prop, ex_source.as_ref()))
+    }
+
     fn base_heads(&self) -> Vec<ChangeHash> {
         self.doc.get_heads()
     }

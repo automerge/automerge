@@ -439,6 +439,7 @@ pub(crate) trait AsChangeOp<'a> {
     fn pred(&self) -> Self::PredIter;
     fn expand(&self) -> bool;
     fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>>;
+    fn source(&self) -> convert::ObjId<Self::OpId>;
 }
 
 impl ChangeBuilder<Set<NonZeroU64>, Set<ActorId>, Set<u64>, Set<i64>> {

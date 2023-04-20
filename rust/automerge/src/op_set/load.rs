@@ -47,6 +47,7 @@ impl DocObserver for OpSetBuilder {
             trees: self.completed_objects,
             length: len,
             m: metadata,
+            moves: Vec::new(),
         }
     }
 }

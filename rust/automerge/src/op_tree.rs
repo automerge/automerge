@@ -3,7 +3,7 @@ use std::{fmt::Debug, mem, ops::RangeBounds};
 pub(crate) use crate::op_set::OpSetMetadata;
 use crate::{
     clock::Clock,
-    query::{self, ChangeVisibility, QueryResult, TreeQuery},
+    query::{self, ChangeVisibility, QueryResult, TreeQuery}, op_set::OpSet,
 };
 use crate::{
     types::{ObjId, Op, OpId},
@@ -90,10 +90,10 @@ impl OpTreeInternal {
     pub(crate) fn map_range<'a, R: RangeBounds<String>>(
         &'a self,
         range: R,
-        meta: &'a OpSetMetadata,
+        opset: &'a OpSet,
     ) -> Option<query::MapRange<'a, R>> {
         if self.root_node.is_some() {
-            Some(query::MapRange::new(range, self, meta))
+            Some(query::MapRange::new(range, self, opset))
         } else {
             None
         }
@@ -112,12 +112,13 @@ impl OpTreeInternal {
         }
     }
 
-    pub(crate) fn list_range<R: RangeBounds<usize>>(
-        &self,
+    pub(crate) fn list_range<'a, R: RangeBounds<usize>>(
+        &'a self,
         range: R,
-    ) -> Option<query::ListRange<'_, R>> {
+        opset: &'a OpSet,
+    ) -> Option<query::ListRange<'a, R>> {
         if self.root_node.is_some() {
-            Some(query::ListRange::new(range, self))
+            Some(query::ListRange::new(range, self, opset))
         } else {
             None
         }
@@ -159,7 +160,7 @@ impl OpTreeInternal {
     /// # Panics
     ///
     /// Panics if `index > len`.
-    pub(crate) fn insert(&mut self, index: usize, op: Op) {
+    pub(crate) fn insert(&mut self, index: usize, op: Op) -> usize {
         assert!(
             index <= self.len(),
             "tried to insert at {} but len is {}",
@@ -209,6 +210,7 @@ impl OpTreeInternal {
             self.root_node = Some(root)
         }
         assert_eq!(self.len(), old_len + 1, "{:#?}", self);
+        element
     }
 
     /// Get the `element` at `index` in the sequence.

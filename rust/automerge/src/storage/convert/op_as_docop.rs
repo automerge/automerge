@@ -126,6 +126,14 @@ impl<'a> AsDocOp<'a> for OpAsDocOp<'a> {
             None
         }
     }
+
+    fn source(&self) -> convert::ObjId<Self::OpId> {
+        if let OpType::Move(o) = &self.op.action {
+            convert::ObjId::Op(translate(self.actor_lookup, o.opid()))
+        } else {
+            convert::ObjId::Root
+        }
+    }
 }
 
 pub(crate) struct OpAsDocOpSuccIter<'a> {

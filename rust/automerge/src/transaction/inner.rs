@@ -6,7 +6,7 @@ use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
 use crate::types::{Key, ListEncoding, ObjId, OpId, OpIds, TextEncoding};
 use crate::{op_tree::OpSetMetadata, types::Op, Automerge, Change, ChangeHash, OpObserver, Prop};
-use crate::{AutomergeError, ObjType, OpType, ScalarValue};
+use crate::{AutomergeError, ObjType, OpType, ScalarValue, ReadDoc};
 
 #[derive(Debug, Clone)]
 pub(crate) struct TransactionInner {
@@ -248,6 +248,7 @@ impl TransactionInner {
             succ: Default::default(),
             pred: Default::default(),
             insert: true,
+            invalid_move: false,
         }
     }
 
@@ -259,6 +260,7 @@ impl TransactionInner {
             succ: Default::default(),
             pred,
             insert: false,
+            invalid_move: false,
         }
     }
 
@@ -340,6 +342,7 @@ impl TransactionInner {
             succ: Default::default(),
             pred: Default::default(),
             insert: true,
+            invalid_move: false,
         };
 
         doc.ops_mut().insert(query.pos(), &obj, op.clone());
@@ -403,6 +406,7 @@ impl TransactionInner {
             succ: Default::default(),
             pred,
             insert: false,
+            invalid_move: false,
         };
 
         let pos = query.pos;
@@ -445,6 +449,7 @@ impl TransactionInner {
             succ: Default::default(),
             pred,
             insert: false,
+            invalid_move: false,
         };
 
         let pos = query.pos;
@@ -680,6 +685,30 @@ impl TransactionInner {
         }
         Ok(())
     }
+
+    pub(crate) fn move_object<Obs: OpObserver, P: Into<Prop>>(
+        &mut self,
+        doc: &mut Automerge,
+        _op_observer: Option<&mut Obs>, // TODO
+        ex_obj: &ExId,
+        prop: P,
+        ex_source: &ExId
+    )-> Result<(), AutomergeError> {
+
+        let (obj, _obj_type) = doc.exid_to_obj(ex_obj)?;
+        let (source, _source_type) = doc.exid_to_obj(ex_source)?;
+
+        if source.is_root() {
+            return Err(AutomergeError::CannotMoveRoot);
+        }
+
+        if let Some(_) = self.local_op::<Obs>(doc, None, obj, prop.into(), OpType::Move(source))? {
+            let parent = doc.parents(&ex_source)?.next().unwrap();
+            self.local_op::<Obs>(doc, None, doc.exid_to_obj(&parent.obj)?.0, parent.prop, OpType::Delete)?;
+        }
+        Ok(())
+    }
+
 
     pub(crate) fn unmark<Obs: OpObserver>(
         &mut self,

@@ -255,6 +255,10 @@ where
     fn mark_name(&self) -> Option<Cow<'aschangeop, smol_str::SmolStr>> {
         self.op.mark_name()
     }
+
+    fn source(&self) -> convert::ObjId<Self::OpId> {
+        self.op.source().map(|o| self.actors.translate_opid(&o) )
+    }
 }
 
 pub(crate) struct WithChangeActorsPredIter<'actors, 'aschangeop, A, I, O, C, P> {

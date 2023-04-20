@@ -1,5 +1,5 @@
 use crate::error;
-use crate::types::ObjType;
+use crate::types::{ObjType};
 use serde::{Deserialize, Serialize, Serializer};
 use smol_str::SmolStr;
 use std::borrow::Cow;

@@ -54,6 +54,8 @@ pub enum AutomergeError {
     NonChangeCompressed,
     #[error("id was not an object id")]
     NotAnObject,
+    #[error("cannot move root")]
+    CannotMoveRoot,
 }
 
 impl PartialEq for AutomergeError {
@@ -104,4 +106,6 @@ pub enum InvalidOpType {
     UnknownAction(u64),
     #[error("non numeric argument for inc op")]
     NonNumericInc,
+    #[error("tried to move without element id")]
+    NonElemId,
 }

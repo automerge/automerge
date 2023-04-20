@@ -681,6 +681,17 @@ impl<Obs: Observation> Transactable for AutoCommitWithObs<Obs> {
         )
     }
 
+    fn move_object<O: AsRef<ExId>, P: Into<Prop>>(
+        &mut self,
+        ex_obj: O,
+        prop: P,
+        ex_source: O
+    )-> Result<(), AutomergeError> {
+        self.ensure_transaction_open();
+        let (current, tx) = self.transaction.as_mut().unwrap();
+        tx.move_object(&mut self.doc, current.observer(), ex_obj.as_ref(), prop, ex_source.as_ref())
+    }
+
     fn base_heads(&self) -> Vec<ChangeHash> {
         self.doc.get_heads()
     }

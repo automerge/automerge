@@ -82,7 +82,7 @@ fn observe_text<'a, I: Iterator<Item = &'a Op>, O: OpObserver>(
                             state.finished.push(mark);
                         }
                     }
-                    OpType::Increment(_) | OpType::Delete => {}
+                    OpType::Increment(_) | OpType::Delete | OpType::Move(_) => {}
                 }
             }
             state

@@ -104,6 +104,13 @@ pub trait Transactable: ReadDoc {
         end: usize,
     ) -> Result<(), AutomergeError>;
 
+    fn move_object<O: AsRef<ExId>, P: Into<Prop>>(
+        &mut self,
+        ex_obj: O,
+        prop: P,
+        ex_source: O,
+    )-> Result<(), AutomergeError>;
+
     /// The heads this transaction will be based on
     fn base_heads(&self) -> Vec<ChangeHash>;
 }

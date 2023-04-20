@@ -23,6 +23,8 @@ pub(crate) struct OpSetInternal {
     trees: HashMap<ObjId, OpTree, FxBuildHasher>,
     /// The number of operations in the opset.
     length: usize,
+    // move ops, ordered by lamport timestamp
+    moves: Vec<(ObjId, usize)>,
     /// Metadata about the operations in this opset.
     pub(crate) m: OpSetMetadata,
 }
@@ -42,6 +44,7 @@ impl OpSetInternal {
                 actors: IndexedCache::new(),
                 props: IndexedCache::new(),
             },
+            moves: Vec::new(),
         }
     }
 
@@ -135,7 +138,7 @@ impl OpSetInternal {
         range: R,
     ) -> Option<query::MapRange<'_, R>> {
         if let Some(tree) = self.trees.get(&obj) {
-            tree.internal.map_range(range, &self.m)
+            tree.internal.map_range(range, &self)
         } else {
             None
         }
@@ -160,7 +163,7 @@ impl OpSetInternal {
         range: R,
     ) -> Option<query::ListRange<'_, R>> {
         if let Some(tree) = self.trees.get(&obj) {
-            tree.internal.list_range(range)
+            tree.internal.list_range(range, &self)
         } else {
             None
         }
@@ -216,6 +219,65 @@ impl OpSetInternal {
         }
     }
 
+    pub(crate) fn resolve_moves(&mut self, obj: &ObjId, index: usize) {
+        let op = &self.trees.get(obj).unwrap().internal.ops[index];
+        let ret = self.moves.binary_search_by(|(o, idx)| {
+            let t = self.trees.get(o).unwrap();
+            let e = &t.internal.ops[*idx];
+
+            self.m.lamport_cmp(e.id, op.id)
+        });
+
+        let insert_at = match ret {
+            Err(insert_at) => insert_at,
+            Ok(_) => unreachable!("this op should not already exist!"),
+        };
+
+        let mut parents: HashMap<ObjId, ObjId> = HashMap::new();
+
+        self.moves.insert(insert_at, (*obj, index));
+        for (o, i) in &self.moves {
+            let mut dest = *o;
+            let src = self.trees.get(&o).unwrap().internal.ops[*i].get_move_source();
+
+            if src == *o {
+                dbg!("Move to self, boo!");
+                let tree = self.trees.get_mut(&o).unwrap();
+                let mut e = tree.internal.ops.get_mut(*i).unwrap();
+                e.invalid_move = true;
+                continue;
+            }
+            dbg!(src);
+
+            loop {
+                let parent = if parents.contains_key(&dest) {
+                                parents[&dest]
+                            } else {
+                                self.trees.get(&dest).unwrap().parent.unwrap_or(ObjId::root())
+                            };
+
+                if parent.is_root() {
+                    dbg!("No loop, yay!");
+                    let tree = self.trees.get_mut(&o).unwrap();
+                    let mut e = tree.internal.ops.get_mut(*i).unwrap();
+                    e.invalid_move = false;
+                    parents.insert(src, *o);
+                    dbg!("adding to parents", src, *o);
+                    break
+                }
+                if parent == src {
+                    dbg!("Loop, boo!");
+                    let tree = self.trees.get_mut(&o).unwrap();
+                    let mut e = tree.internal.ops.get_mut(*i).unwrap();
+                    e.invalid_move = true;
+                    break
+                }
+
+                dest = parent
+            }
+        }
+    }
+
     pub(crate) fn remove(&mut self, obj: &ObjId, index: usize) -> Op {
         // this happens on rollback - be sure to go back to the old state
         let tree = self.trees.get_mut(obj).unwrap();
@@ -254,8 +316,12 @@ impl OpSetInternal {
 
         if let Some(tree) = self.trees.get_mut(obj) {
             tree.last_insert = None;
-            tree.internal.insert(index, element);
+            let is_move = element.is_move();
+            let pos = tree.internal.insert(index, element);
             self.length += 1;
+            if is_move {
+                self.resolve_moves(obj, pos);
+            }
         } else {
             tracing::warn!("attempting to insert op for unknown object");
         }

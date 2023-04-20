@@ -1,4 +1,5 @@
 use crate::exid::ExId;
+use crate::op_set::OpSet;
 use crate::op_tree::{OpSetMetadata, OpTreeInternal};
 use crate::types::{Key, OpId};
 use crate::values::ValueIter;
@@ -15,7 +16,7 @@ pub(crate) struct MapRange<'a, R: RangeBounds<String>> {
     index_back: usize,
     last_key_back: Option<Key>,
     op_tree: &'a OpTreeInternal,
-    meta: &'a OpSetMetadata,
+    opset: &'a OpSet,
 }
 
 impl<'a, R: RangeBounds<String>> ValueIter<'a> for MapRange<'a, R> {
@@ -25,7 +26,7 @@ impl<'a, R: RangeBounds<String>> ValueIter<'a> for MapRange<'a, R> {
 }
 
 impl<'a, R: RangeBounds<String>> MapRange<'a, R> {
-    pub(crate) fn new(range: R, op_tree: &'a OpTreeInternal, meta: &'a OpSetMetadata) -> Self {
+    pub(crate) fn new(range: R, op_tree: &'a OpTreeInternal, opset: &'a OpSet) -> Self {
         Self {
             range,
             index: 0,
@@ -34,7 +35,7 @@ impl<'a, R: RangeBounds<String>> MapRange<'a, R> {
             index_back: op_tree.len(),
             last_key_back: None,
             op_tree,
-            meta,
+            opset,
         }
     }
 }
@@ -51,11 +52,15 @@ impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
             self.index += 1;
             if op.visible() {
                 let prop = match op.key {
-                    Key::Map(m) => self.meta.props.get(m),
+                    Key::Map(m) => self.opset.m.props.get(m),
                     Key::Seq(_) => return None, // this is a list
                 };
                 if self.range.contains(prop) {
-                    let result = self.next_result.replace((prop, op.value(), op.id));
+                    let result = if op.is_move() {
+                        self.next_result.replace((prop, Value::Object(self.opset.object_type(&op.get_move_source()).unwrap()), *op.get_move_source().opid()))
+                    } else {
+                        self.next_result.replace((prop, op.value(), op.id))
+                    };
                     if Some(op.key) != self.last_key {
                         self.last_key = Some(op.key);
                         if result.is_some() {
@@ -78,11 +83,15 @@ impl<'a, R: RangeBounds<String>> DoubleEndedIterator for MapRange<'a, R> {
             if Some(op.key) != self.last_key_back && op.visible() {
                 self.last_key_back = Some(op.key);
                 let prop = match op.key {
-                    Key::Map(m) => self.meta.props.get(m),
+                    Key::Map(m) => self.opset.m.props.get(m),
                     Key::Seq(_) => return None, // this is a list
                 };
                 if self.range.contains(prop) {
-                    return Some((prop, op.value(), op.id));
+                    return if op.is_move() {
+                        Some((prop, Value::Object(self.opset.object_type(&op.get_move_source()).unwrap()), *op.get_move_source().opid()))
+                    } else {
+                        Some((prop, op.value(), op.id))
+                    };
                 }
             }
         }
@@ -91,7 +100,7 @@ impl<'a, R: RangeBounds<String>> DoubleEndedIterator for MapRange<'a, R> {
         if let Some((prop, a, b)) = self.next_result.take() {
             let last_prop = match self.last_key_back {
                 None => None,
-                Some(Key::Map(u)) => Some(self.meta.props.get(u).as_str()),
+                Some(Key::Map(u)) => Some(self.opset.m.props.get(u).as_str()),
                 Some(Key::Seq(_)) => None,
             };
 
