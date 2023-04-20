@@ -851,16 +851,10 @@ impl Automerge {
     pub fn unmark(
         &mut self,
         obj: JsValue,
-        key: JsValue,
-        start: f64,
-        end: f64,
-    ) -> Result<(), JsValue> {
-        let (obj, _) = self.import(obj)?;
-        let key = key.as_string().ok_or("key must be a string")?;
-        self.doc
-            .unmark(&obj, &key, start as usize, end as usize)
-            .map_err(to_js_err)?;
-        Ok(())
+        range: JsValue,
+        name: JsValue,
+    ) -> Result<(), error::Mark> {
+        self.mark(obj, range, name, JsValue::NULL, JsValue::from_str("null"))
     }
 
     pub fn marks(&mut self, obj: JsValue, heads: Option<Array>) -> Result<JsValue, JsValue> {
