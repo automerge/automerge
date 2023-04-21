@@ -32,7 +32,7 @@ impl ListState {
     }
 
     pub(crate) fn was_last_seen(&self, key: Key) -> bool {
-      self.last_seen == Some(key)
+        self.last_seen == Some(key)
     }
 
     // lists that have never seen puts (only inserts and deletes)
@@ -129,15 +129,15 @@ impl ListState {
     }
 
     pub(crate) fn target(&self) -> usize {
-      self.target
+        self.target
     }
 
     pub(crate) fn pos(&self) -> usize {
-      self.pos
+        self.pos
     }
 
     pub(crate) fn index(&self) -> usize {
-      self.index
+        self.index
     }
 
     pub(crate) fn last_index(&self) -> usize {
@@ -153,5 +153,4 @@ impl ListState {
         self.index = last.index + last.width;
         self.pos = last.pos + 1;
     }
-
 }

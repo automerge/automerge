@@ -1197,7 +1197,8 @@ impl Automerge {
                 // only valid obj's should make it to this point ...
                 let path: Vec<_> = self
                     .doc
-                    .parents(&obj)?.path()
+                    .parents(&obj)?
+                    .path()
                     .iter()
                     .map(|p| prop_to_js(&p.1))
                     .collect();

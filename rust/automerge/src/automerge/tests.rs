@@ -940,7 +940,7 @@ fn get_range_values() -> Result<(), AutomergeError> {
 
     assert_eq!(doc1.map_range_at(ROOT, range.clone(), &v1).count(), 2);
 
-    for (key, val1, id) in doc1.map_range_at(ROOT, range.clone(), &v1) {
+    for (key, val1, id) in doc1.map_range_at(ROOT, range, &v1) {
         let val2 = doc1.get_at(ROOT, key, &v1)?;
         assert_eq!(Some((val1, id)), val2);
     }

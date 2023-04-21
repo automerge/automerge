@@ -77,8 +77,8 @@ impl From<am::sync::State> for AMresult {
     }
 }
 
-impl From<am::Values<'static>> for AMresult {
-    fn from(pairs: am::Values<'static>) -> Self {
+impl From<am::iter::Values<'static>> for AMresult {
+    fn from(pairs: am::iter::Values<'static>) -> Self {
         Self::items(pairs.map(|(v, o)| AMitem::exact(o, v.into())).collect())
     }
 }
@@ -89,20 +89,14 @@ impl From<AMresult> for *mut AMresult {
     }
 }
 
-impl From<am::Keys<'_, '_>> for AMresult {
-    fn from(keys: am::Keys<'_, '_>) -> Self {
+impl From<am::iter::Keys<'_>> for AMresult {
+    fn from(keys: am::iter::Keys<'_>) -> Self {
         Self::items(keys.map(|s| s.into()).collect())
     }
 }
 
-impl From<am::KeysAt<'_, '_>> for AMresult {
-    fn from(keys: am::KeysAt<'_, '_>) -> Self {
-        Self::items(keys.map(|s| s.into()).collect())
-    }
-}
-
-impl From<am::ListRange<'static, Range<usize>>> for AMresult {
-    fn from(list_range: am::ListRange<'static, Range<usize>>) -> Self {
+impl From<am::iter::ListRange<'static, Range<usize>>> for AMresult {
+    fn from(list_range: am::iter::ListRange<'static, Range<usize>>) -> Self {
         Self::items(
             list_range
                 .map(|(i, v, o)| AMitem::indexed(AMindex::Pos(i), o, v.into()))
@@ -111,18 +105,8 @@ impl From<am::ListRange<'static, Range<usize>>> for AMresult {
     }
 }
 
-impl From<am::ListRangeAt<'static, Range<usize>>> for AMresult {
-    fn from(list_range: am::ListRangeAt<'static, Range<usize>>) -> Self {
-        Self::items(
-            list_range
-                .map(|(i, v, o)| AMitem::indexed(AMindex::Pos(i), o, v.into()))
-                .collect(),
-        )
-    }
-}
-
-impl From<am::MapRange<'static, Range<String>>> for AMresult {
-    fn from(map_range: am::MapRange<'static, Range<String>>) -> Self {
+impl From<am::iter::MapRange<'static, Range<String>>> for AMresult {
+    fn from(map_range: am::iter::MapRange<'static, Range<String>>) -> Self {
         Self::items(
             map_range
                 .map(|(k, v, o)| AMitem::indexed(AMindex::Key(k.into()), o, v.into()))
@@ -131,8 +115,8 @@ impl From<am::MapRange<'static, Range<String>>> for AMresult {
     }
 }
 
-impl From<am::MapRangeAt<'static, Range<String>>> for AMresult {
-    fn from(map_range: am::MapRangeAt<'static, Range<String>>) -> Self {
+impl From<am::iter::MapRange<'static, RangeFrom<String>>> for AMresult {
+    fn from(map_range: am::iter::MapRange<'static, RangeFrom<String>>) -> Self {
         Self::items(
             map_range
                 .map(|(k, v, o)| AMitem::indexed(AMindex::Key(k.into()), o, v.into()))
@@ -141,8 +125,8 @@ impl From<am::MapRangeAt<'static, Range<String>>> for AMresult {
     }
 }
 
-impl From<am::MapRange<'static, RangeFrom<String>>> for AMresult {
-    fn from(map_range: am::MapRange<'static, RangeFrom<String>>) -> Self {
+impl From<am::iter::MapRange<'static, RangeFull>> for AMresult {
+    fn from(map_range: am::iter::MapRange<'static, RangeFull>) -> Self {
         Self::items(
             map_range
                 .map(|(k, v, o)| AMitem::indexed(AMindex::Key(k.into()), o, v.into()))
@@ -151,48 +135,8 @@ impl From<am::MapRange<'static, RangeFrom<String>>> for AMresult {
     }
 }
 
-impl From<am::MapRangeAt<'static, RangeFrom<String>>> for AMresult {
-    fn from(map_range: am::MapRangeAt<'static, RangeFrom<String>>) -> Self {
-        Self::items(
-            map_range
-                .map(|(k, v, o)| AMitem::indexed(AMindex::Key(k.into()), o, v.into()))
-                .collect(),
-        )
-    }
-}
-
-impl From<am::MapRange<'static, RangeFull>> for AMresult {
-    fn from(map_range: am::MapRange<'static, RangeFull>) -> Self {
-        Self::items(
-            map_range
-                .map(|(k, v, o)| AMitem::indexed(AMindex::Key(k.into()), o, v.into()))
-                .collect(),
-        )
-    }
-}
-
-impl From<am::MapRangeAt<'static, RangeFull>> for AMresult {
-    fn from(map_range: am::MapRangeAt<'static, RangeFull>) -> Self {
-        Self::items(
-            map_range
-                .map(|(k, v, o)| AMitem::indexed(AMindex::Key(k.into()), o, v.into()))
-                .collect(),
-        )
-    }
-}
-
-impl From<am::MapRange<'static, RangeTo<String>>> for AMresult {
-    fn from(map_range: am::MapRange<'static, RangeTo<String>>) -> Self {
-        Self::items(
-            map_range
-                .map(|(k, v, o)| AMitem::indexed(AMindex::Key(k.into()), o, v.into()))
-                .collect(),
-        )
-    }
-}
-
-impl From<am::MapRangeAt<'static, RangeTo<String>>> for AMresult {
-    fn from(map_range: am::MapRangeAt<'static, RangeTo<String>>) -> Self {
+impl From<am::iter::MapRange<'static, RangeTo<String>>> for AMresult {
+    fn from(map_range: am::iter::MapRange<'static, RangeTo<String>>) -> Self {
         Self::items(
             map_range
                 .map(|(k, v, o)| AMitem::indexed(AMindex::Key(k.into()), o, v.into()))
