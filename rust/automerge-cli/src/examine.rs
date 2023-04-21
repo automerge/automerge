@@ -1,7 +1,7 @@
 use automerge as am;
 use thiserror::Error;
 
-use crate::{color_json::print_colored_json, SkipVerifyFlag};
+use crate::{color_json::print_colored_json, VerifyFlag};
 
 #[derive(Error, Debug)]
 pub enum ExamineError {
@@ -25,7 +25,7 @@ pub enum ExamineError {
 pub(crate) fn examine(
     mut input: impl std::io::Read,
     mut output: impl std::io::Write,
-    skip: SkipVerifyFlag,
+    skip: VerifyFlag,
     is_tty: bool,
 ) -> Result<(), ExamineError> {
     let mut buf: Vec<u8> = Vec::new();

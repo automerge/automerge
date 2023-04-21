@@ -2,7 +2,7 @@ use anyhow::Result;
 use automerge as am;
 use automerge::ReadDoc;
 
-use crate::{color_json::print_colored_json, SkipVerifyFlag};
+use crate::{color_json::print_colored_json, VerifyFlag};
 
 pub(crate) fn map_to_json(doc: &am::Automerge, obj: &am::ObjId) -> serde_json::Value {
     let keys = doc.keys(obj);
@@ -72,7 +72,7 @@ fn scalar_to_json(val: &am::ScalarValue) -> serde_json::Value {
     }
 }
 
-fn get_state_json(input_data: Vec<u8>, skip: SkipVerifyFlag) -> Result<serde_json::Value> {
+fn get_state_json(input_data: Vec<u8>, skip: VerifyFlag) -> Result<serde_json::Value> {
     let doc = skip.load(&input_data).unwrap(); // FIXME
     Ok(map_to_json(&doc, &am::ObjId::Root))
 }
@@ -80,7 +80,7 @@ fn get_state_json(input_data: Vec<u8>, skip: SkipVerifyFlag) -> Result<serde_jso
 pub(crate) fn export_json(
     mut changes_reader: impl std::io::Read,
     mut writer: impl std::io::Write,
-    skip: SkipVerifyFlag,
+    skip: VerifyFlag,
     is_tty: bool,
 ) -> Result<()> {
     let mut input_data = vec![];
