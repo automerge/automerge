@@ -7,6 +7,13 @@ use crate::value::ScalarValue;
 use crate::Automerge;
 use std::borrow::Cow;
 
+/// Marks let you store out-of-bound information about sequences.
+///
+/// The motivating use-case is rich text editing, see <https://www.inkandswitch.com/peritext/>.
+/// Each position in the sequence can be affected by only one Mark of the same "name".
+/// If multiple collaborators have set marks with the same name but different values
+/// in overlapping ranges, automerge will chose a consistent (but arbitrary) value
+/// when reading marks from the doc.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Mark<'a> {
     pub start: usize,
@@ -168,6 +175,10 @@ impl Display for MarkData {
     }
 }
 
+/// ExpandMark allows you to decide whether new text inserted at the start/end of your
+/// mark should also inherit the mark.
+/// See <https://www.inkandswitch.com/peritext/> for details and
+/// suggestions of which value to use for which operations when building a rich text editor.
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum ExpandMark {
     Before,

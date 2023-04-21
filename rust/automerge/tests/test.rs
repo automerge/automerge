@@ -1,3 +1,4 @@
+use automerge::marks::{ExpandMark, Mark};
 use automerge::op_observer::HasPatches;
 use automerge::op_tree::B;
 use automerge::transaction::Transactable;
@@ -1684,4 +1685,43 @@ fn big_list() {
         }
     );
     assert!(matches);
+}
+
+#[test]
+fn marks() {
+    let mut doc = Automerge::new();
+    let mut tx = doc.transaction();
+
+    let text_id = tx.put_object(&ROOT, "text", ObjType::Text).unwrap();
+
+    tx.splice_text(&text_id, 0, 0, "hello world").unwrap();
+
+    let mark = Mark::new("bold".to_string(), true, 0, "hello".len());
+    tx.mark(&text_id, mark, ExpandMark::Both).unwrap();
+
+    // add " cool" (it will be bold because ExpandMark::Both)
+    tx.splice_text(&text_id, "hello".len(), 0, " cool").unwrap();
+
+    // unbold "hello"
+    tx.unmark(&text_id, "bold", 0, "hello".len(), ExpandMark::Before)
+        .unwrap();
+
+    // insert "why " before hello.
+    tx.splice_text(&text_id, 0, 0, "why ").unwrap();
+
+    let marks = tx.marks(&text_id).unwrap();
+
+    // should empty marks be returned?
+    // probably not in this case (where they can never grow)
+    // but not sure how to detect that case reliably.
+    assert_eq!(marks.len(), 2);
+    assert_eq!(marks[0].start, 0);
+    assert_eq!(marks[0].end, 0);
+    assert_eq!(marks[0].name(), "bold");
+    assert_eq!(marks[0].value(), &ScalarValue::from(true));
+
+    assert_eq!(marks[1].start, 9);
+    assert_eq!(marks[1].end, 14);
+    assert_eq!(marks[1].name(), "bold");
+    assert_eq!(marks[1].value(), &ScalarValue::from(true));
 }

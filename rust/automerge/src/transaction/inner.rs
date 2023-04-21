@@ -681,6 +681,7 @@ impl TransactionInner {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn unmark<Obs: OpObserver>(
         &mut self,
         doc: &mut Automerge,
@@ -689,9 +690,10 @@ impl TransactionInner {
         name: &str,
         start: usize,
         end: usize,
+        expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
         let mark = Mark::new(name.to_string(), ScalarValue::Null, start, end);
-        self.mark(doc, op_observer, ex_obj, mark, ExpandMark::None)
+        self.mark(doc, op_observer, ex_obj, mark, expand)
     }
 
     fn finalize_op<Obs: OpObserver>(

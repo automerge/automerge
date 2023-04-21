@@ -194,7 +194,7 @@ export class Automerge {
 
   // marks
   mark(obj: ObjID, range: MarkRange, name: string, value: Value, datatype?: Datatype): void;
-  unmark(obj: ObjID, name: string, start: number, end: number): void;
+  unmark(obj: ObjID, range: MarkRange, name: string): void;
   marks(obj: ObjID, heads?: Heads): Mark[];
 
   // returns a single value - if there is a conflict return the winner

@@ -31,7 +31,7 @@ describe('Automerge', () => {
       doc.mark(list, { start: 2, end: 8 }, "bold" , true)
       let marks = doc.marks(list);
       assert.deepStrictEqual(marks, [{ name: 'bold', value: true, start: 2, end: 8 }])
-      doc.unmark(list, 'bold', 4, 6)
+      doc.unmark(list, { start: 4, end: 6, expand: 'none' }, 'bold')
       doc.insert(list, 7, "A")
       doc.insert(list, 3, "A")
       marks = doc.marks(list);
@@ -53,7 +53,7 @@ describe('Automerge', () => {
         { name: 'underline', value: true, start: 3, end: 6 },
         { name: 'bold', value: true, start: 2, end: 8 },
       ])
-      doc.unmark(list, 'bold', 4, 6)
+      doc.unmark(list, { start: 4, end: 6 }, 'bold')
       doc.insert(list, 7, "A")
       doc.insert(list, 3, "A")
       marks = doc.marks(list);
@@ -62,7 +62,7 @@ describe('Automerge', () => {
         { name: 'underline', value: true, start: 4, end: 7 },
         { name: 'bold', value: true, start: 7, end: 10 },
       ])
-      doc.unmark(list, 'bold', 0, 11)
+      doc.unmark(list, { start: 0, end: 11 }, 'bold')
       marks = doc.marks(list);
       assert.deepStrictEqual(marks, [
         { name: 'underline', value: true, start: 4, end: 7 }
@@ -558,7 +558,7 @@ describe('Automerge', () => {
       let heads3 = doc1.getHeads();
       let marks3 = doc1.marks(list);
 
-      doc1.unmark(list, "xxx", 9, 20)
+      doc1.unmark(list, { start: 9, end: 20 }, "xxx")
 
       let heads4 = doc1.getHeads();
       let marks4 = doc1.marks(list);

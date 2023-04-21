@@ -89,6 +89,7 @@ pub trait Transactable: ReadDoc {
         text: &str,
     ) -> Result<(), AutomergeError>;
 
+    /// Mark a sequence
     fn mark<O: AsRef<ExId>>(
         &mut self,
         obj: O,
@@ -96,12 +97,14 @@ pub trait Transactable: ReadDoc {
         expand: ExpandMark,
     ) -> Result<(), AutomergeError>;
 
+    /// Remove a Mark from a sequence
     fn unmark<O: AsRef<ExId>>(
         &mut self,
         obj: O,
         key: &str,
         start: usize,
         end: usize,
+        expand: ExpandMark,
     ) -> Result<(), AutomergeError>;
 
     /// The heads this transaction will be based on

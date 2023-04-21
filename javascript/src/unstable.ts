@@ -268,9 +268,8 @@ export function mark<T>(
 export function unmark<T>(
   doc: Doc<T>,
   prop: stable.Prop,
-  name: string,
-  start: number,
-  end: number
+  range: MarkRange,
+  name: string
 ) {
   if (!_is_proxy(doc)) {
     throw new RangeError("object cannot be modified outside of a change block")
@@ -282,7 +281,7 @@ export function unmark<T>(
   }
   const obj = `${objectId}/${prop}`
   try {
-    return state.handle.unmark(obj, name, start, end)
+    return state.handle.unmark(obj, range, name)
   } catch (e) {
     throw new RangeError(`Cannot unmark: ${e}`)
   }
