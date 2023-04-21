@@ -32,8 +32,8 @@ const INSERT_COL_ID: ColumnId = ColumnId::new(3);
 const ACTION_COL_ID: ColumnId = ColumnId::new(4);
 const VAL_COL_ID: ColumnId = ColumnId::new(5);
 const PRED_COL_ID: ColumnId = ColumnId::new(7);
-const EXPAND_COL_ID: ColumnId = ColumnId::new(8);
-const MARK_NAME_COL_ID: ColumnId = ColumnId::new(9);
+const EXPAND_COL_ID: ColumnId = ColumnId::new(9);
+const MARK_NAME_COL_ID: ColumnId = ColumnId::new(10);
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ChangeOp {
