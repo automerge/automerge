@@ -37,7 +37,7 @@ pub(crate) fn examine(
         .map_err(|e| ExamineError::ApplyingInitialChanges { source: e })?;
     let uncompressed_changes: Vec<_> = doc
         .get_changes(&[])
-        .unwrap()
+        .map_err(|e| ExamineError::ApplyingInitialChanges { source: e })?
         .iter()
         .map(|c| c.decode())
         .collect();
