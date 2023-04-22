@@ -162,10 +162,10 @@ The NPM and Deno packages are all released automatically by CI tooling whenever
 the version number in the respective `package.json` changes. This means that
 the process for releasing a new JS version is:
 
-1. Bump the version in the `js/automerge-wasm/package.json` (skip this if there
+1. Bump the version in the `rust/automerge-wasm/package.json` (skip this if there
    are no new changes to the WASM)
-2. Bump the version of `@automerge/automerge-wasm` we depend on in `js/automerge/package.json`
-3. Bump the version in `@automerge/automerge`
+2. Bump the version of `@automerge/automerge-wasm` we depend on in `javascript/package.json`
+3. Bump the version in `@automerge/automerge` also in `javascript/package.json`
 
 Put all of these bumps in a PR and wait for a clean CI run. Then merge the PR.
 The CI tooling will pick up a push to `main` with a new version and publish it
