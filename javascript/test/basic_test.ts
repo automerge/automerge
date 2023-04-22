@@ -303,6 +303,46 @@ describe("Automerge", () => {
     })
   })
 
+  describe("merge", () => {
+    it("it should handle conflicts the same in merges as with loads", () => {
+      let doc1 = Automerge.from({ sub: { x: 0, y: 0 } })
+      let doc2 = Automerge.clone(doc1)
+      let doc3 = Automerge.clone(doc1)
+      let doc4 = Automerge.clone(doc1)
+
+      // same counter - different actors
+      doc1 = Automerge.change(doc1, d => (d.sub.x = 1))
+      doc2 = Automerge.change(doc2, d => (d.sub.x = 2))
+      doc3 = Automerge.change(doc3, d => (d.sub.x = 3))
+      doc4 = Automerge.change(doc4, d => (d.sub.x = 4))
+
+      // differrent counter and different actors
+      doc1 = Automerge.change(doc1, d => (d.sub.y = 1))
+
+      doc2 = Automerge.change(doc2, d => (d.sub.y = 2))
+      doc2 = Automerge.change(doc2, d => (d.sub.y = 3))
+
+      doc3 = Automerge.change(doc3, d => (d.sub.y = 4))
+      doc3 = Automerge.change(doc3, d => (d.sub.y = 5))
+      doc3 = Automerge.change(doc3, d => (d.sub.y = 6))
+
+      doc4 = Automerge.change(doc4, d => (d.sub.y = 7))
+      doc4 = Automerge.change(doc4, d => (d.sub.y = 8))
+      doc4 = Automerge.change(doc4, d => (d.sub.y = 9))
+      doc4 = Automerge.change(doc4, d => (d.sub.y = 10))
+
+      let docM = Automerge.init()
+      docM = Automerge.merge(docM, doc1)
+      docM = Automerge.merge(docM, doc2)
+      docM = Automerge.merge(docM, doc3)
+      docM = Automerge.merge(docM, doc4)
+
+      let docL = Automerge.load(Automerge.save(docM))
+
+      assert.deepEqual(docM.sub.x, docL.sub.x)
+    })
+  })
+
   describe("clone", () => {
     it("should not copy the patchcallback", () => {
       const patches: Automerge.Patch[][] = []
