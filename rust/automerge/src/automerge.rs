@@ -1432,7 +1432,7 @@ impl ReadDoc for Automerge {
         prop: P,
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?.0;
-        let mut result = match prop.into() {
+        Ok(match prop.into() {
             Prop::Map(p) => {
                 let prop = self.ops.m.props.lookup(&p);
                 if let Some(p) = prop {
@@ -1458,9 +1458,7 @@ impl ReadDoc for Automerge {
                     .map(|o| (o.value(), self.id_to_exid(o.id)))
                     .collect()
             }
-        };
-        result.sort_by(|a, b| b.1.cmp(&a.1));
-        Ok(result)
+        })
     }
 
     fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
