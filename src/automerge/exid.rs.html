@@ -204,30 +204,10 @@
 <a href="#203" id="203">203</a>
 <a href="#204" id="204">204</a>
 <a href="#205" id="205">205</a>
-<a href="#206" id="206">206</a>
-<a href="#207" id="207">207</a>
-<a href="#208" id="208">208</a>
-<a href="#209" id="209">209</a>
-<a href="#210" id="210">210</a>
-<a href="#211" id="211">211</a>
-<a href="#212" id="212">212</a>
-<a href="#213" id="213">213</a>
-<a href="#214" id="214">214</a>
-<a href="#215" id="215">215</a>
-<a href="#216" id="216">216</a>
-<a href="#217" id="217">217</a>
-<a href="#218" id="218">218</a>
-<a href="#219" id="219">219</a>
-<a href="#220" id="220">220</a>
-<a href="#221" id="221">221</a>
-<a href="#222" id="222">222</a>
-<a href="#223" id="223">223</a>
-<a href="#224" id="224">224</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::storage::parse;
 <span class="kw">use </span><span class="kw">crate</span>::ActorId;
 <span class="kw">use </span>serde::Serialize;
 <span class="kw">use </span>serde::Serializer;
-<span class="kw">use </span>std::cmp::{Ord, Ordering};
 <span class="kw">use </span>std::fmt;
 <span class="kw">use </span>std::hash::{Hash, Hasher};
 
@@ -374,24 +354,6 @@
                 actor.hash(state);
             }
         }
-    }
-}
-
-<span class="kw">impl </span>Ord <span class="kw">for </span>ExId {
-    <span class="kw">fn </span>cmp(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; Ordering {
-        <span class="kw">match </span>(<span class="self">self</span>, other) {
-            (ExId::Root, ExId::Root) =&gt; Ordering::Equal,
-            (ExId::Root, <span class="kw">_</span>) =&gt; Ordering::Less,
-            (<span class="kw">_</span>, ExId::Root) =&gt; Ordering::Greater,
-            (ExId::Id(c1, a1, <span class="kw">_</span>), ExId::Id(c2, a2, <span class="kw">_</span>)) <span class="kw">if </span>c1 == c2 =&gt; a2.cmp(a1),
-            (ExId::Id(c1, <span class="kw">_</span>, <span class="kw">_</span>), ExId::Id(c2, <span class="kw">_</span>, <span class="kw">_</span>)) =&gt; c1.cmp(c2),
-        }
-    }
-}
-
-<span class="kw">impl </span>PartialOrd <span class="kw">for </span>ExId {
-    <span class="kw">fn </span>partial_cmp(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Ordering&gt; {
-        <span class="prelude-val">Some</span>(<span class="self">self</span>.cmp(other))
     }
 }
 
