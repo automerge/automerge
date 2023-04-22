@@ -47,7 +47,8 @@ test-log = { version = "0.2.10", features=["trace"], default-features = false}
 tracing-subscriber = {version = "0.3.9", features = ["fmt", "env-filter"] }
 automerge-test = { path = "../automerge-test" }
 prettytable = "0.10.0"
-regex = "1.8.0"
+# Workaround for https://github.com/tokio-rs/tracing/issues/2565
+regex = { version = "1.0", features = ["unicode-case", "unicode-perl"] }
 
 [[bench]]
 name = "range"
