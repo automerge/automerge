@@ -1266,6 +1266,37 @@ impl ReadDoc for Automerge {
         Ok(self.ops.text(&obj.id, None))
     }
 
+    fn text_position_to_address<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        position: usize) -> Result<ExId, AutomergeError> {
+        let obj = self.exid_to_obj(obj.as_ref())?.0;
+        let query = self.ops.search(&obj, query::ListVals::new());
+        if position < query.ops.len() {
+            let q = query.ops.get(position).unwrap();
+            return Ok(self.id_to_exid(q.id));
+        } else {
+            return Err(AutomergeError::InvalidIndex(position));
+        }
+    }
+
+    fn text_address_to_position<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        address: ExId) -> Result<usize, AutomergeError> {
+        let obj = self.exid_to_obj(obj.as_ref())?.0;
+        let query = self.ops.search(&obj, query::ListVals::new());
+        let mut position = 0;
+        let internal_address = self.exid_to_opid(&address).unwrap();
+        for q in &query.ops {
+            if q.id == internal_address {
+                return Ok(position)
+            }
+            position += 1;
+        }
+        return Err(AutomergeError::InvalidObjId("".to_owned())) // TODO: better error
+    }
+
     fn text_at<O: AsRef<ExId>>(
         &self,
         obj: O,

@@ -163,6 +163,33 @@ fn test_save_text() -> Result<(), AutomergeError> {
     Ok(())
 }
 
+
+#[test]
+fn test_text_position_api() -> Result<(), AutomergeError> {
+        let mut doc = Automerge::new();
+    let mut tx = doc.transaction();
+    let text = tx.put_object(ROOT, "text", ObjType::Text)?;
+    tx.commit();
+    let heads1 = doc.get_heads();
+    let mut tx = doc.transaction();
+    tx.splice_text(&text, 0, 0, "hello world")?;
+    tx.commit();
+    let heads2 = doc.get_heads();
+    let mut tx = doc.transaction();
+    tx.splice_text(&text, 6, 0, "big bad ")?;
+    tx.commit();
+    let heads3 = doc.get_heads();
+
+    let address0 = doc.text_position_to_address(&text, 0).unwrap();
+    let pos0 = doc.text_address_to_position(&text, address0).unwrap();
+    assert!(pos0 == 0);
+    let address1 = doc.text_position_to_address(&text, 6).unwrap();
+    let pos1 = doc.text_address_to_position(&text, address1).unwrap();
+    assert!(pos1 == 6);
+    Ok(())
+}
+
+
 #[test]
 fn test_props_vals_at() -> Result<(), AutomergeError> {
     let mut doc = Automerge::new();

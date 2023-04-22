@@ -492,6 +492,23 @@ impl<Obs: Observation> ReadDoc for AutoCommitWithObs<Obs> {
         self.doc.text_at(obj, heads)
     }
 
+    fn text_position_to_address<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        position: usize
+    ) -> Result<ExId, AutomergeError> {
+        self.doc.text_position_to_address(obj, position)
+    }
+
+    fn text_address_to_position<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        address: ExId
+    ) -> Result<usize, AutomergeError> {
+        self.doc.text_address_to_position(obj, address)
+    }
+
+
     fn get<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
