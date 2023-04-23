@@ -1283,7 +1283,7 @@ impl ReadDoc for Automerge {
     fn text_address_to_position<O: AsRef<ExId>>(
         &self,
         obj: O,
-        address: ExId) -> Result<usize, AutomergeError> {
+        address: &ExId) -> Result<usize, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?.0;
         let query = self.ops.search(&obj, query::ListVals::new());
         let mut position = 0;
@@ -1294,7 +1294,7 @@ impl ReadDoc for Automerge {
             }
             position += 1;
         }
-        return Err(AutomergeError::InvalidObjId("".to_owned())) // TODO: better error
+        return Err(AutomergeError::InvalidObjId(address.to_string()))
     }
 
     fn text_at<O: AsRef<ExId>>(
