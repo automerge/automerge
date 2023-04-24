@@ -1109,6 +1109,36 @@ impl Automerge {
             .filter_map(|h| other.get_change_by_hash(&h))
             .collect()
     }
+
+    fn calculate_marks<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: Option<&[ChangeHash]>,
+    ) -> Result<Vec<Mark<'_>>, AutomergeError> {
+        let obj = self.exid_to_obj(obj.as_ref())?;
+        let clock = heads.map(|heads| self.clock_at(heads));
+        let ops_by_key = self.ops().iter_ops(&obj.id).group_by(|o| o.elemid_or_key());
+        let mut index = 0;
+        let mut marks = MarkStateMachine::default();
+
+        Ok(ops_by_key
+            .into_iter()
+            .filter_map(|(_key, key_ops)| {
+                key_ops
+                    .filter(|o| o.visible_or_mark(clock.as_ref()))
+                    .last()
+                    .and_then(|o| match &o.action {
+                        OpType::Make(_) | OpType::Put(_) => {
+                            index += o.width(obj.encoding);
+                            None
+                        }
+                        OpType::MarkBegin(_, data) => marks.mark_begin(o.id, index, data, self),
+                        OpType::MarkEnd(_) => marks.mark_end(o.id, index, self),
+                        OpType::Increment(_) | OpType::Delete => None,
+                    })
+            })
+            .collect())
+    }
 }
 
 impl ReadDoc for Automerge {
@@ -1247,28 +1277,7 @@ impl ReadDoc for Automerge {
     }
 
     fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        let ops_by_key = self.ops().iter_ops(&obj.id).group_by(|o| o.elemid_or_key());
-        let mut index = 0;
-        let mut marks = MarkStateMachine::default();
-
-        Ok(ops_by_key
-            .into_iter()
-            .filter_map(|(_key, key_ops)| {
-                key_ops
-                    .filter(|o| o.visible_or_mark(None))
-                    .last()
-                    .and_then(|o| match &o.action {
-                        OpType::Make(_) | OpType::Put(_) => {
-                            index += o.width(obj.encoding);
-                            None
-                        }
-                        OpType::MarkBegin(_, data) => marks.mark_begin(o.id, index, data, self),
-                        OpType::MarkEnd(_) => marks.mark_end(o.id, index, self),
-                        OpType::Increment(_) | OpType::Delete => None,
-                    })
-            })
-            .collect())
+        self.calculate_marks(obj, None)
     }
 
     fn marks_at<O: AsRef<ExId>>(
@@ -1276,29 +1285,7 @@ impl ReadDoc for Automerge {
         obj: O,
         heads: &[ChangeHash],
     ) -> Result<Vec<Mark<'_>>, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?;
-        let clock = self.clock_at(heads);
-        let ops_by_key = self.ops().iter_ops(&obj.id).group_by(|o| o.elemid_or_key());
-        let mut index = 0;
-        let mut marks = MarkStateMachine::default();
-
-        Ok(ops_by_key
-            .into_iter()
-            .filter_map(|(_key, key_ops)| {
-                key_ops
-                    .filter(|o| o.visible_or_mark(Some(&clock)))
-                    .last()
-                    .and_then(|o| match &o.action {
-                        OpType::Make(_) | OpType::Put(_) => {
-                            index += o.width(obj.encoding);
-                            None
-                        }
-                        OpType::MarkBegin(_, data) => marks.mark_begin(o.id, index, data, self),
-                        OpType::MarkEnd(_) => marks.mark_end(o.id, index, self),
-                        OpType::Increment(_) | OpType::Delete => None,
-                    })
-            })
-            .collect())
+        self.calculate_marks(obj, Some(heads))
     }
 
     fn get<O: AsRef<ExId>, P: Into<Prop>>(
