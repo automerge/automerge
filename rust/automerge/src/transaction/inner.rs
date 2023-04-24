@@ -4,7 +4,7 @@ use crate::exid::ExId;
 use crate::marks::{ExpandMark, Mark};
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
-use crate::types::{Key, ListEncoding, ObjId, OpId, OpIds, TextEncoding};
+use crate::types::{Key, ListEncoding, ObjId, OpId, OpIds};
 use crate::{op_tree::OpSetMetadata, types::Op, Automerge, Change, ChangeHash, OpObserver, Prop};
 use crate::{AutomergeError, ObjType, OpType, ScalarValue};
 
@@ -506,7 +506,7 @@ impl TransactionInner {
                     index,
                     del: 1,
                     values: vec![],
-                    splice_type: SpliceType::Text("", doc.text_encoding()),
+                    splice_type: SpliceType::Text(""),
                 },
             )?;
         } else {
@@ -567,7 +567,7 @@ impl TransactionInner {
                 index,
                 del,
                 values,
-                splice_type: SpliceType::Text(text, doc.text_encoding()),
+                splice_type: SpliceType::Text(text),
             },
         )
     }
@@ -654,7 +654,7 @@ impl TransactionInner {
             // handle the observer
             if let Some(obs) = op_observer.as_mut() {
                 match splice_type {
-                    SpliceType::Text(text, _) if !obs.text_as_seq() => {
+                    SpliceType::Text(text) if !obs.text_as_seq() => {
                         obs.splice_text(doc, ex_obj, index, text)
                     }
                     SpliceType::List | SpliceType::Text(..) => {
@@ -761,14 +761,14 @@ impl TransactionInner {
 
 enum SpliceType<'a> {
     List,
-    Text(&'a str, TextEncoding),
+    Text(&'a str),
 }
 
 impl<'a> SpliceType<'a> {
     fn encoding(&self) -> ListEncoding {
         match self {
             SpliceType::List => ListEncoding::List,
-            SpliceType::Text(_, encoding) => ListEncoding::Text(*encoding),
+            SpliceType::Text(_) => ListEncoding::Text,
         }
     }
 }

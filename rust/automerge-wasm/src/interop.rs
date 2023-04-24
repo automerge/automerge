@@ -799,7 +799,7 @@ impl Automerge {
     pub(crate) fn apply_patch_to_array(
         &self,
         array: &Object,
-        patch: &Patch<u16>,
+        patch: &Patch,
         meta: &JsValue,
         exposed: &mut HashSet<ObjId>,
     ) -> Result<Object, error::ApplyPatch> {
@@ -854,8 +854,7 @@ impl Automerge {
                 match self.text_rep {
                     TextRepresentation::String => Err(error::ApplyPatch::SpliceTextInSeq),
                     TextRepresentation::Array => {
-                        let bytes: Vec<u16> = value.iter().cloned().collect();
-                        let val = String::from_utf16_lossy(bytes.as_slice());
+                        let val = String::from(value);
                         let elems = val
                             .chars()
                             .map(|c| {
@@ -879,7 +878,7 @@ impl Automerge {
     pub(crate) fn apply_patch_to_map(
         &self,
         map: &Object,
-        patch: &Patch<u16>,
+        patch: &Patch,
         meta: &JsValue,
         exposed: &mut HashSet<ObjId>,
     ) -> Result<Object, error::ApplyPatch> {
@@ -939,7 +938,7 @@ impl Automerge {
     pub(crate) fn apply_patch(
         &self,
         obj: Object,
-        patch: &Patch<u16>,
+        patch: &Patch,
         depth: usize,
         meta: &JsValue,
         exposed: &mut HashSet<ObjId>,
@@ -987,7 +986,7 @@ impl Automerge {
     fn apply_patch_to_text(
         &self,
         string: &JsString,
-        patch: &Patch<u16>,
+        patch: &Patch,
     ) -> Result<JsValue, error::ApplyPatch> {
         match &patch.action {
             PatchAction::DeleteSeq { index, length, .. } => {
@@ -1002,10 +1001,7 @@ impl Automerge {
                 let length = string.length();
                 let before = string.slice(0, index);
                 let after = string.slice(index, length);
-                let bytes: Vec<u16> = value.iter().cloned().collect();
-                let result = before
-                    .concat(&String::from_utf16_lossy(bytes.as_slice()).into())
-                    .concat(&after);
+                let result = before.concat(&String::from(value).into()).concat(&after);
                 Ok(result.into())
             }
             _ => Ok(string.into()),
@@ -1261,8 +1257,8 @@ fn set_hidden_value<V: Into<JsValue>>(
     Ok(())
 }
 
-pub(crate) struct JsPatch(pub(crate) Patch<u16>);
-pub(crate) struct JsPatches(pub(crate) Vec<Patch<u16>>);
+pub(crate) struct JsPatch(pub(crate) Patch);
+pub(crate) struct JsPatches(pub(crate) Vec<Patch>);
 
 fn export_path(path: &[(ObjId, Prop)], end: &Prop) -> Array {
     let result = Array::new();
@@ -1340,8 +1336,7 @@ impl TryFrom<JsPatch> for JsValue {
                     "path",
                     export_path(path.as_slice(), &Prop::Seq(index)),
                 )?;
-                let bytes: Vec<u16> = value.iter().cloned().collect();
-                js_set(&result, "value", String::from_utf16_lossy(bytes.as_slice()))?;
+                js_set(&result, "value", String::from(&value))?;
                 Ok(result.into())
             }
             PatchAction::Increment { prop, value, .. } => {

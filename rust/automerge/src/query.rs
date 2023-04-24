@@ -1,5 +1,5 @@
 use crate::op_tree::{OpSetMetadata, OpTree, OpTreeNode};
-use crate::types::{Key, ListEncoding, Op, OpId, TextEncoding};
+use crate::types::{Key, ListEncoding, Op, OpId};
 use fxhash::FxBuildHasher;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
@@ -74,14 +74,12 @@ pub(crate) enum QueryResult {
 
 #[derive(Clone, Debug, PartialEq)]
 struct TextWidth {
-    utf8: usize,
-    utf16: usize,
+    width: usize,
 }
 
 impl TextWidth {
     fn add_op(&mut self, op: &Op) {
-        self.utf8 += op.width(ListEncoding::Text(TextEncoding::Utf8));
-        self.utf16 += op.width(ListEncoding::Text(TextEncoding::Utf16));
+        self.width += op.width(ListEncoding::Text);
     }
 
     fn remove_op(&mut self, op: &Op) {
@@ -112,17 +110,11 @@ impl TextWidth {
         //
         // Really this is a sign that we should be tracking the type of the Index (List or Text) at
         // the type level, but for now we just look the other way.
-        self.utf8 = self
-            .utf8
-            .saturating_sub(op.width(ListEncoding::Text(TextEncoding::Utf8)));
-        self.utf16 = self
-            .utf16
-            .saturating_sub(op.width(ListEncoding::Text(TextEncoding::Utf16)));
+        self.width = self.width.saturating_sub(op.width(ListEncoding::Text));
     }
 
     fn merge(&mut self, other: &TextWidth) {
-        self.utf8 += other.utf8;
-        self.utf16 += other.utf16;
+        self.width += other.width;
     }
 }
 
@@ -144,7 +136,7 @@ impl Index {
     pub(crate) fn new() -> Self {
         Index {
             visible: Default::default(),
-            visible_text: TextWidth { utf8: 0, utf16: 0 },
+            visible_text: TextWidth { width: 0 },
             ops: Default::default(),
             never_seen_puts: true,
         }
@@ -154,8 +146,7 @@ impl Index {
     pub(crate) fn visible_len(&self, encoding: ListEncoding) -> usize {
         match encoding {
             ListEncoding::List => self.visible.len(),
-            ListEncoding::Text(TextEncoding::Utf8) => self.visible_text.utf8,
-            ListEncoding::Text(TextEncoding::Utf16) => self.visible_text.utf16,
+            ListEncoding::Text => self.visible_text.width,
         }
     }
 

@@ -9,7 +9,7 @@ use crate::transaction::{CommitOptions, Transactable};
 use crate::{sync, ObjType, Parents, ReadDoc, ScalarValue};
 use crate::{
     transaction::{Observation, Observed, TransactionInner, UnObserved},
-    ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor, Prop, TextEncoding, Value,
+    ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor, Prop, Value,
 };
 
 /// An automerge document that automatically manages transactions.
@@ -165,14 +165,6 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
 
     pub fn get_actor(&self) -> &ActorId {
         self.doc.get_actor()
-    }
-
-    /// Change the text encoding of this view of the document
-    ///
-    /// This is a cheap operation, it just changes the way indexes are calculated
-    pub fn with_encoding(mut self, encoding: TextEncoding) -> Self {
-        self.doc = self.doc.with_encoding(encoding);
-        self
     }
 
     fn ensure_transaction_open(&mut self) {

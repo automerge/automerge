@@ -19,7 +19,7 @@ use crate::transaction::{
 };
 use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, MarkData, ObjId, ObjMeta, Op,
-    OpId, OpType, TextEncoding, Value,
+    OpId, OpType, Value,
 };
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop, ReadDoc};
 
@@ -156,18 +156,6 @@ impl Automerge {
                 self.actor = Actor::Unused(actor);
             }
         }
-    }
-
-    pub(crate) fn text_encoding(&self) -> TextEncoding {
-        *self.ops.text_encoding()
-    }
-
-    /// Change the text encoding of this view of the document
-    ///
-    /// This is a cheap operation, it just changes the way indexes are calculated
-    pub fn with_encoding(mut self, encoding: TextEncoding) -> Self {
-        self.ops.set_text_encoding(encoding);
-        self
     }
 
     /// Set the actor id for this document.
@@ -578,9 +566,7 @@ impl Automerge {
         if self.is_empty() {
             let mut doc =
                 Self::load_with::<()>(data, OnPartialLoad::Ignore, VerificationMode::Check, None)?;
-            doc = doc
-                .with_encoding(*self.ops.text_encoding())
-                .with_actor(self.actor_id());
+            doc = doc.with_actor(self.actor_id());
             if let Some(obs) = op_observer {
                 current_state::observe_current_state(&doc, obs);
             }
