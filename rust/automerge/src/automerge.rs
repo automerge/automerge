@@ -166,7 +166,7 @@ impl Automerge {
     ///
     /// This is a cheap operation, it just changes the way indexes are calculated
     pub fn with_encoding(mut self, encoding: TextEncoding) -> Self {
-        *self.ops.text_encoding_mut() = encoding;
+        self.ops.set_text_encoding(encoding);
         self
     }
 
