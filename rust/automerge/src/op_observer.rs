@@ -1,18 +1,12 @@
 use crate::exid::ExId;
 
 use crate::marks::Mark;
-use crate::Prop;
-use crate::ReadDoc;
-use crate::Value;
+use crate::{Prop, ReadDoc, Value};
 
-mod compose;
 mod patch;
-mod toggle_observer;
 mod vec_observer;
-pub use compose::compose;
 pub use patch::{Patch, PatchAction};
-pub use toggle_observer::ToggleObserver;
-pub use vec_observer::{HasPatches, TextRepresentation, VecOpObserver};
+pub use vec_observer::{TextRepresentation, VecOpObserver};
 
 /// An observer of operations applied to the document.
 pub trait OpObserver {
@@ -127,40 +121,9 @@ pub trait OpObserver {
         mark: M,
     );
 
-    /// Whether to call sequence methods or `splice_text` when encountering changes in text
-    ///
-    /// Returns `false` by default
-    fn text_as_seq(&self) -> bool {
-        false
+    fn compare(&self, _other: &Self) -> bool {
+        panic!("no implemented!")
     }
-}
-
-/// An observer which can be branched
-///
-/// This is used when observing operations in a transaction. In this case `branch` will be called
-/// at the beginning of the transaction to return a new observer and then `merge` will be called
-/// with the branched observer as `other` when the transaction is comitted.
-pub trait BranchableObserver {
-    /// Branch of a new op_observer later to be merged
-    ///
-    /// Called when creating a new transaction.  Observer branch will be merged on `commit()` or
-    /// thrown away on `rollback()`
-    fn branch(&self) -> Self;
-
-    /// Branch used by diff to communicate that patches are explicitly being asked for
-    fn explicit_branch(&self) -> Self
-    where
-        Self: Sized,
-    {
-        self.branch()
-    }
-
-    /// Merge observed information from a transaction.
-    ///
-    /// Called by AutoCommit on `commit()`
-    ///
-    /// - `other`: Another Op Observer of the same type
-    fn merge(&mut self, other: &Self);
 }
 
 impl OpObserver for () {
@@ -216,9 +179,4 @@ impl OpObserver for () {
     fn delete_map<R: ReadDoc>(&mut self, _doc: &R, _objid: ExId, _key: &str) {}
 
     fn delete_seq<R: ReadDoc>(&mut self, _doc: &R, _objid: ExId, _index: usize, _num: usize) {}
-}
-
-impl BranchableObserver for () {
-    fn merge(&mut self, _other: &Self) {}
-    fn branch(&self) -> Self {}
 }

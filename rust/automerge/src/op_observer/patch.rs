@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::{marks::Mark, ObjId, Prop, Value};
 use core::fmt::Debug;
 use std::fmt;

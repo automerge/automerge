@@ -6,11 +6,12 @@ use std::ops::RangeBounds;
 
 use crate::{
     exid::ExId,
+    history::History,
     iter::{Keys, ListRange, MapRange, Values},
     marks::{Mark, MarkStateMachine},
     types::{Clock, ListEncoding, MarkData, ObjId, Op, Prop, ScalarValue},
     value::Value,
-    Automerge, AutomergeError, ChangeHash, Cursor, ObjType, OpObserver, OpType, ReadDoc,
+    Automerge, AutomergeError, ChangeHash, Cursor, ObjType, OpType, ReadDoc,
 };
 
 #[derive(Clone, Debug)]
@@ -117,172 +118,222 @@ impl<'a> Patch<'a> {
     }
 }
 
-pub(crate) fn observe_diff<O: OpObserver>(
+pub(crate) fn observe_diff(
     doc: &Automerge,
-    before_heads: &[ChangeHash],
-    after_heads: &[ChangeHash],
-    observer: &mut O,
+    //before_heads: &[ChangeHash],
+    //after_heads: &[ChangeHash],
+    before: &Clock,
+    after: &Clock,
+    //observer: &mut O,
+    history: &mut History,
 ) {
-    let before = doc.clock_at(before_heads);
-    let after = doc.clock_at(after_heads);
+    //let before = doc.clock_at(before_heads);
+    //let after = doc.clock_at(after_heads);
     // FIXME - this fork is expensive
     // we really need a Doc::At object to make this cheap and easy
     // this is critical to keep paths accurate when rendering patches
-    let doc_at_after = ReadDocAt {
-        doc,
-        heads: after_heads,
-    }; //doc.fork_at(after_heads).unwrap();
+    /*
+        let doc_at_after = ReadDocAt {
+            doc,
+            heads: after_heads,
+        }; //doc.fork_at(after_heads).unwrap();
+    */
     for (obj, typ, ops) in doc.ops().iter_objs() {
         let ops_by_key = ops.group_by(|o| o.elemid_or_key());
         let diffs = ops_by_key
             .into_iter()
-            .filter_map(|(_key, key_ops)| process(key_ops, &before, &after));
+            .filter_map(|(_key, key_ops)| process(key_ops, before, after));
 
-        if typ == ObjType::Text && !observer.text_as_seq() {
-            observe_text_diff(doc_at_after, observer, obj, diffs)
+        if typ == ObjType::Text && !doc.text_as_seq() {
+            observe_text_diff(doc, history, obj, diffs)
         } else if typ.is_sequence() {
-            observe_list_diff(doc_at_after, observer, obj, diffs);
+            observe_list_diff(doc, history, obj, diffs);
         } else {
-            observe_map_diff(doc_at_after, observer, obj, diffs);
+            observe_map_diff(doc, history, obj, diffs);
         }
     }
 }
 
-fn observe_list_diff<'a, I: Iterator<Item = Patch<'a>>, O: OpObserver>(
-    doc: ReadDocAt<'_, '_>,
-    observer: &mut O,
+fn observe_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
+    //doc: ReadDocAt<'_, '_>,
+    doc: &Automerge,
+    //observer: &mut O,
+    history: &mut History,
     obj: &ObjId,
     patches: I,
 ) {
     let mut marks = MarkDiff::default();
-    let exid = doc.as_ref().id_to_exid(obj.0);
+    //let exid = doc.as_ref().id_to_exid(obj.0);
     patches.fold(0, |index, patch| match patch {
         Patch::Mark(op, mark_type) => {
-            marks.process(index, mark_type, op.op, doc.as_ref());
+            //marks.process(index, mark_type, op.op, doc.as_ref());
+            marks.process(index, mark_type, op.op, doc);
             index
         }
         Patch::New(op) => {
-            observer.insert(
-                &doc,
-                exid.clone(),
-                index,
-                doc.as_ref().export_value(&op, Some(op.clock)),
-                op.conflict,
-            );
+            /*
+                        observer.insert(
+                            &doc,
+                            exid.clone(),
+                            index,
+                            doc.as_ref().export_value(&op, Some(op.clock)),
+                            op.conflict,
+                        );
+            */
+            let value = op.value_at(Some(op.clock)).into();
+            history.insert(*obj, index, value, op.id, op.conflict);
             index + 1
         }
         Patch::Update { before, after } => {
-            let exid = exid.clone();
-            let prop = index.into();
-            let value = doc.as_ref().export_value(&after, Some(after.clock));
+            //let exid = exid.clone();
+            //let prop = index.into();
+            //let value = doc.as_ref().export_value(&after, Some(after.clock));
             let conflict = !before.conflict && after.conflict;
             if after.cross_visible {
-                observer.expose(&doc, exid, prop, value, conflict);
+                //observer.expose(&doc, exid, prop, value, conflict);
+                let value = after.value_at(Some(after.clock)).into();
+                history.put_seq(*obj, index, value, after.id, conflict, true)
             } else {
-                observer.put(&doc, exid, prop, value, conflict);
+                //observer.put(&doc, exid, prop, value, conflict);
+                let value = after.value_at(Some(after.clock)).into();
+                history.put_seq(*obj, index, value, after.id, conflict, false)
             }
             index + 1
         }
         Patch::Old { before, after } => {
             if !before.conflict && after.conflict {
-                observer.flag_conflict(&doc, exid.clone(), index.into());
+                //observer.flag_conflict(&doc, exid.clone(), index.into());
+                history.flag_conflict_seq(*obj, index);
             }
             if let Some(n) = get_inc(&before, &after) {
-                observer.increment(
-                    &doc,
-                    exid.clone(),
-                    index.into(),
-                    (n, doc.as_ref().id_to_exid(after.id)),
-                );
+                /*
+                                observer.increment(
+                                    &doc,
+                                    exid.clone(),
+                                    index.into(),
+                                    (n, doc.as_ref().id_to_exid(after.id)),
+                                );
+                */
+                history.increment_seq(*obj, index, n, after.id);
             }
             index + 1
         }
         Patch::Delete(_) => {
-            observer.delete_seq(&doc, exid.clone(), index, 1);
+            //observer.delete_seq(&doc, exid.clone(), index, 1);
+            history.delete_seq(*obj, index, 1);
             index
         }
     });
     if let Some(m) = marks.finish() {
-        observer.mark(&doc, exid, m.into_iter());
+        history.mark(*obj, &m);
+        //observer.mark(&doc, exid, m.into_iter());
     }
 }
 
-fn observe_text_diff<'a, I: Iterator<Item = Patch<'a>>, O: OpObserver>(
-    doc: ReadDocAt<'_, '_>,
-    observer: &mut O,
+fn observe_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
+    //doc: ReadDocAt<'_, '_>,
+    doc: &Automerge,
+    //observer: &mut O,
+    history: &mut History,
     obj: &ObjId,
     patches: I,
 ) {
     let mut marks = MarkDiff::default();
-    let exid = doc.as_ref().id_to_exid(obj.0);
+    //let exid = doc.as_ref().id_to_exid(obj.0);
     let encoding = ListEncoding::Text;
     patches.fold(0, |index, patch| match &patch {
         Patch::Mark(op, mark_type) => {
-            marks.process(index, *mark_type, op.op, doc.as_ref());
+            //marks.process(index, *mark_type, op.op, doc.as_ref());
+            marks.process(index, *mark_type, op.op, doc);
             index
         }
         Patch::New(op) => {
-            observer.splice_text(&doc, exid.clone(), index, op.to_str());
+            //observer.splice_text(&doc, exid.clone(), index, op.to_str());
+            history.splice(*obj, index, op.to_str());
             index + op.width(encoding)
         }
         Patch::Update { before, after } => {
-            observer.delete_seq(&doc, exid.clone(), index, before.width(encoding));
-            observer.splice_text(&doc, exid.clone(), index, after.to_str());
+            //observer.delete_seq(&doc, exid.clone(), index, before.width(encoding));
+            //observer.splice_text(&doc, exid.clone(), index, after.to_str());
+            history.delete_seq(*obj, index, before.width(encoding));
+            history.splice(*obj, index, after.to_str());
             index + after.width(encoding)
         }
         Patch::Old { after, .. } => index + after.width(encoding),
         Patch::Delete(before) => {
-            observer.delete_seq(&doc, exid.clone(), index, before.width(encoding));
+            //observer.delete_seq(&doc, exid.clone(), index, before.width(encoding));
+            history.delete_seq(*obj, index, before.width(encoding));
             index
         }
     });
     if let Some(m) = marks.finish() {
-        observer.mark(&doc, exid, m.into_iter());
+        //observer.mark(&doc, exid, m.into_iter());
+        history.mark(*obj, &m);
     }
 }
 
-fn observe_map_diff<'a, I: Iterator<Item = Patch<'a>>, O: OpObserver>(
-    doc: ReadDocAt<'_, '_>,
-    observer: &mut O,
+fn observe_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
+    //doc: ReadDocAt<'_, '_>,
+    doc: &Automerge,
+    //observer: &mut O,
+    history: &mut History,
     obj: &ObjId,
     diffs: I,
 ) {
-    let exid = doc.as_ref().id_to_exid(obj.0);
+    //let exid = doc.as_ref().id_to_exid(obj.0);
     diffs
-        .filter_map(|patch| Some((get_prop(doc.doc, patch.op())?, patch)))
-        .for_each(|(prop, patch)| match patch {
-            Patch::New(op) => observer.put(
-                &doc,
-                exid.clone(),
-                prop.into(),
-                doc.as_ref().export_value(&op, Some(op.clock)),
-                op.conflict,
-            ),
+        //.filter_map(|patch| Some((get_prop(doc.doc, patch.op())?, patch)))
+        .filter_map(|patch| Some((get_prop(doc, patch.op())?, patch)))
+        .for_each(|(key, patch)| match patch {
+            Patch::New(op) => {
+                /*
+                                observer.put(
+                                    &doc,
+                                    exid.clone(),
+                                    key.clone().into(),
+                                    doc.as_ref().export_value(&op, Some(op.clock)),
+                                    op.conflict,
+                                );
+                */
+                let value = op.value_at(Some(op.clock)).into();
+                history.put_map(*obj, key, value, op.id, op.conflict, false)
+            }
             Patch::Update { before, after } => {
-                let exid = exid.clone();
-                let prop = prop.into();
-                let value = doc.as_ref().export_value(&after, Some(after.clock));
+                //let exid = exid.clone();
+                //let prop = key.clone().into();
+                //let value = doc.as_ref().export_value(&after, Some(after.clock));
                 let conflict = !before.conflict && after.conflict;
                 if after.cross_visible {
-                    observer.expose(&doc, exid, prop, value, conflict);
+                    //observer.expose(&doc, exid, prop, value, conflict);
+                    let value = after.value_at(Some(after.clock)).into();
+                    history.put_map(*obj, key, value, after.id, conflict, true)
                 } else {
-                    observer.put(&doc, exid, prop, value, conflict);
+                    //observer.put(&doc, exid, prop, value, conflict);
+                    let value = after.value_at(Some(after.clock)).into();
+                    history.put_map(*obj, key, value, after.id, conflict, false)
                 }
             }
             Patch::Old { before, after } => {
                 if !before.conflict && after.conflict {
-                    observer.flag_conflict(&doc, exid.clone(), prop.into());
+                    //observer.flag_conflict(&doc, exid.clone(), key.into());
+                    history.flag_conflict_map(*obj, key);
                 }
                 if let Some(n) = get_inc(&before, &after) {
-                    observer.increment(
-                        &doc,
-                        exid.clone(),
-                        prop.into(),
-                        (n, doc.as_ref().id_to_exid(after.id)),
-                    );
+                    /*
+                                        observer.increment(
+                                            &doc,
+                                            exid.clone(),
+                                            key.into(),
+                                            (n, doc.as_ref().id_to_exid(after.id)),
+                                        );
+                    */
+                    history.increment_map(*obj, key, n, after.id);
                 }
             }
-            Patch::Delete(_) => observer.delete_map(&doc, exid.clone(), prop),
+            Patch::Delete(_) => {
+                //observer.delete_map(&doc, exid.clone(), key);
+                history.delete_map(*obj, key)
+            }
             Patch::Mark(_, _) => {}
         });
 }
@@ -478,9 +529,9 @@ fn mark<'a>(
 }
 
 #[derive(Debug, Clone, Copy)]
-struct ReadDocAt<'a, 'b> {
-    doc: &'a Automerge,
-    heads: &'b [ChangeHash],
+pub(crate) struct ReadDocAt<'a, 'b> {
+    pub(crate) doc: &'a Automerge,
+    pub(crate) heads: &'b [ChangeHash],
 }
 
 impl<'a, 'b> AsRef<Automerge> for ReadDocAt<'a, 'b> {
@@ -653,9 +704,8 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
 mod tests {
 
     use crate::{
-        marks::Mark, op_observer::HasPatches, transaction::Observed, transaction::Transactable,
-        types::MarkData, AutoCommitWithObs, ObjType, Patch, PatchAction, Prop, ScalarValue, Value,
-        VecOpObserver, ROOT,
+        marks::Mark, transaction::Transactable, types::MarkData, AutoCommit, ObjType, Patch,
+        PatchAction, Prop, ScalarValue, Value, VecOpObserver, ROOT,
     };
     use itertools::Itertools;
 
@@ -780,7 +830,7 @@ mod tests {
 
     #[test]
     fn basic_diff_map_put1() {
-        let mut doc = AutoCommitWithObs::<Observed<VecOpObserver>>::default();
+        let mut doc = AutoCommit::default();
         doc.put(ROOT, "key", "value1").unwrap();
         let heads1 = doc.get_heads();
         doc.put(ROOT, "key", "value2a").unwrap();
@@ -788,7 +838,9 @@ mod tests {
         doc.put(ROOT, "key", "value2c").unwrap();
         let heads2 = doc.get_heads();
         doc.put(ROOT, "key", "value3").unwrap();
-        let patches = doc.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc
+            .diff(&heads1, &heads2, VecOpObserver::default())
+            .take_patches();
 
         assert_eq!(
             exp(patches),
@@ -804,7 +856,7 @@ mod tests {
 
     #[test]
     fn basic_diff_map_put_conflict() {
-        let mut doc1 = AutoCommitWithObs::<Observed<VecOpObserver>>::default();
+        let mut doc1 = AutoCommit::default();
         doc1.put(ROOT, "key", "value1").unwrap();
         let heads1 = doc1.get_heads();
 
@@ -820,7 +872,9 @@ mod tests {
 
         let heads2 = doc1.get_heads();
         doc1.put(ROOT, "key", "value3").unwrap();
-        let patches = doc1.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc1
+            .diff(&heads1, &heads2, VecOpObserver::default())
+            .take_patches();
 
         assert_eq!(
             exp(patches),
@@ -836,7 +890,7 @@ mod tests {
 
     #[test]
     fn basic_diff_map_put_conflict_with_del() {
-        let mut doc1 = AutoCommitWithObs::<Observed<VecOpObserver>>::default();
+        let mut doc1 = AutoCommit::default();
         doc1.put(ROOT, "key1", "value1").unwrap();
         doc1.put(ROOT, "key2", "value2").unwrap();
         let heads1 = doc1.get_heads();
@@ -853,7 +907,9 @@ mod tests {
 
         let heads2 = doc1.get_heads();
         doc1.put(ROOT, "key", "value3").unwrap();
-        let patches = doc1.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc1
+            .diff(&heads1, &heads2, VecOpObserver::default())
+            .take_patches();
 
         assert_eq!(
             exp(patches),
@@ -878,7 +934,7 @@ mod tests {
 
     #[test]
     fn basic_diff_map_put_conflict_old_value() {
-        let mut doc1 = AutoCommitWithObs::<Observed<VecOpObserver>>::default();
+        let mut doc1 = AutoCommit::default();
         doc1.put(ROOT, "key", "value1").unwrap();
 
         let mut doc2 = doc1.fork();
@@ -895,7 +951,9 @@ mod tests {
 
         let heads2 = doc1.get_heads();
         doc1.put(ROOT, "key", "value3").unwrap();
-        let patches = doc1.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc1
+            .diff(&heads1, &heads2, VecOpObserver::default())
+            .take_patches();
 
         assert_eq!(
             exp(patches),
@@ -911,7 +969,7 @@ mod tests {
 
     #[test]
     fn basic_diff_map_put_conflict_old_value_and_del() {
-        let mut doc1 = AutoCommitWithObs::<Observed<VecOpObserver>>::default();
+        let mut doc1 = AutoCommit::default();
         doc1.put(ROOT, "key", "value1").unwrap();
 
         let mut doc2 = doc1.fork();
@@ -929,20 +987,24 @@ mod tests {
 
         let heads2 = doc1.get_heads();
         doc1.put(ROOT, "key", "value3").unwrap();
-        let patches = doc1.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc1
+            .diff(&heads1, &heads2, VecOpObserver::default())
+            .take_patches();
 
         assert_eq!(exp(patches), vec![],);
     }
 
     #[test]
     fn basic_diff_map_del1() {
-        let mut doc = AutoCommitWithObs::<Observed<VecOpObserver>>::default();
+        let mut doc = AutoCommit::default();
         doc.put(ROOT, "key", "value1").unwrap();
         let heads1 = doc.get_heads();
         doc.delete(ROOT, "key").unwrap();
         let heads2 = doc.get_heads();
         doc.put(ROOT, "key", "value3").unwrap();
-        let patches = doc.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc
+            .diff(&heads1, &heads2, VecOpObserver::default())
+            .take_patches();
 
         assert_eq!(
             exp(patches),
@@ -955,7 +1017,7 @@ mod tests {
 
     #[test]
     fn basic_diff_map_del2() {
-        let mut doc = AutoCommitWithObs::<Observed<VecOpObserver>>::default();
+        let mut doc = AutoCommit::default();
         doc.put(ROOT, "key", "value1").unwrap();
         let heads1 = doc.get_heads();
         doc.put(ROOT, "key", "value2a").unwrap();
@@ -963,7 +1025,9 @@ mod tests {
         doc.delete(ROOT, "key").unwrap();
         let heads2 = doc.get_heads();
         doc.put(ROOT, "key", "value3").unwrap();
-        let patches = doc.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc
+            .diff(&heads1, &heads2, VecOpObserver::default())
+            .take_patches();
 
         assert_eq!(
             exp(patches),
@@ -976,7 +1040,7 @@ mod tests {
 
     #[test]
     fn basic_diff_map_del3() {
-        let mut doc = AutoCommitWithObs::<Observed<VecOpObserver>>::default();
+        let mut doc = AutoCommit::default();
         doc.put(ROOT, "key", "value1").unwrap();
         let heads1 = doc.get_heads();
         doc.put(ROOT, "key", "value2a").unwrap();
@@ -985,7 +1049,9 @@ mod tests {
         doc.put(ROOT, "key", "value2c").unwrap();
         let heads2 = doc.get_heads();
         doc.put(ROOT, "key", "value3").unwrap();
-        let patches = doc.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc
+            .diff(&heads1, &heads2, VecOpObserver::default())
+            .take_patches();
 
         assert_eq!(
             exp(patches),
@@ -1001,7 +1067,7 @@ mod tests {
 
     #[test]
     fn basic_diff_map_counter1() {
-        let mut doc = AutoCommitWithObs::<Observed<VecOpObserver>>::default();
+        let mut doc = AutoCommit::default();
         doc.put(ROOT, "key", ScalarValue::counter(10)).unwrap();
         let heads1 = doc.get_heads();
         doc.increment(ROOT, "key", 3).unwrap();
@@ -1009,7 +1075,9 @@ mod tests {
         doc.increment(ROOT, "key", 5).unwrap();
         let heads2 = doc.get_heads();
         doc.put(ROOT, "key", "overwrite").unwrap();
-        let patches = doc.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc
+            .diff(&heads1, &heads2, VecOpObserver::default())
+            .take_patches();
 
         assert_eq!(
             exp(patches),
@@ -1022,7 +1090,7 @@ mod tests {
 
     #[test]
     fn basic_diff_map_counter2() {
-        let mut doc = AutoCommitWithObs::<Observed<VecOpObserver>>::default();
+        let mut doc = AutoCommit::default();
         let heads1 = doc.get_heads();
         doc.put(ROOT, "key", ScalarValue::counter(10)).unwrap();
         doc.increment(ROOT, "key", 3).unwrap();
@@ -1030,7 +1098,9 @@ mod tests {
         let heads2 = doc.get_heads();
         doc.increment(ROOT, "key", 5).unwrap();
         doc.put(ROOT, "key", "overwrite").unwrap();
-        let patches = doc.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc
+            .diff(&heads1, &heads2, VecOpObserver::default())
+            .take_patches();
 
         assert_eq!(
             exp(patches),
@@ -1046,7 +1116,7 @@ mod tests {
 
     #[test]
     fn basic_diff_list_insert1() {
-        let mut doc = AutoCommitWithObs::<Observed<VecOpObserver>>::default();
+        let mut doc = AutoCommit::default();
         let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
         doc.insert(&list, 0, 10).unwrap();
         doc.insert(&list, 1, 20).unwrap();
@@ -1057,7 +1127,9 @@ mod tests {
         doc.insert(&list, 3, 35).unwrap();
         doc.delete(&list, 0).unwrap();
         let heads2 = doc.get_heads();
-        let patches = doc.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc
+            .diff(&heads1, &heads2, VecOpObserver::default())
+            .take_patches();
         assert_eq!(
             exp(patches),
             vec![
@@ -1085,7 +1157,7 @@ mod tests {
 
     #[test]
     fn basic_diff_list_insert2() {
-        let mut doc = AutoCommitWithObs::<Observed<VecOpObserver>>::default();
+        let mut doc = AutoCommit::default();
         let list = doc.put_object(ROOT, "list", ObjType::List).unwrap();
         doc.insert(&list, 0, 10).unwrap();
         doc.insert(&list, 1, 20).unwrap();
@@ -1097,7 +1169,9 @@ mod tests {
         doc.insert(&list, 1, 27).unwrap();
         doc.insert(&list, 1, 28).unwrap();
         let heads2 = doc.get_heads();
-        let patches = doc.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc
+            .diff(&heads1, &heads2, VecOpObserver::default())
+            .take_patches();
         assert_eq!(
             exp(patches),
             vec![ObservedPatch {
@@ -1112,7 +1186,7 @@ mod tests {
 
     #[test]
     fn diff_list_concurrent_update() {
-        let mut doc1 = AutoCommitWithObs::<Observed<VecOpObserver>>::default();
+        let mut doc1 = AutoCommit::default();
         let list = doc1.put_object(ROOT, "list", ObjType::List).unwrap();
 
         doc1.insert(&list, 0, 10).unwrap();
@@ -1137,7 +1211,9 @@ mod tests {
 
         let heads2 = doc1.get_heads();
 
-        let patches = doc1.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc1
+            .diff(&heads1, &heads2, VecOpObserver::default())
+            .take_patches();
 
         assert_eq!(
             exp(patches),
@@ -1162,7 +1238,7 @@ mod tests {
 
     #[test]
     fn diff_list_interleaved_concurrent_counters() {
-        let mut doc1 = AutoCommitWithObs::<Observed<VecOpObserver>>::default();
+        let mut doc1 = AutoCommit::default();
         let list = doc1.put_object(ROOT, "list", ObjType::List).unwrap();
 
         doc1.insert(&list, 0, 10).unwrap();
@@ -1226,7 +1302,9 @@ mod tests {
         doc1.put(&list, 2, 0).unwrap();
         doc1.put(&list, 3, 0).unwrap();
 
-        let patches = doc1.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc1
+            .diff(&heads1, &heads2, VecOpObserver::default())
+            .take_patches();
 
         let exp = exp(patches);
         assert_eq!(
@@ -1264,7 +1342,7 @@ mod tests {
 
     #[test]
     fn diff_of_lists_with_concurrent_deletes_and_puts() {
-        let mut doc1 = AutoCommitWithObs::<Observed<VecOpObserver>>::default();
+        let mut doc1 = AutoCommit::default();
         let list = doc1.put_object(ROOT, "list", ObjType::List).unwrap();
 
         doc1.insert(&list, 0, 10).unwrap();
@@ -1300,7 +1378,9 @@ mod tests {
 
         let heads2 = doc1.get_heads();
 
-        let patches = doc1.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc1
+            .diff(&heads1, &heads2, VecOpObserver::default())
+            .take_patches();
         let exp1 = exp(patches);
         assert_eq!(
             exp1.get(0),
@@ -1325,7 +1405,9 @@ mod tests {
             .as_ref()
         );
 
-        let patches = doc1.diff(&heads1a, &heads2).unwrap().take_patches();
+        let patches = doc1
+            .diff(&heads1a, &heads2, VecOpObserver::default())
+            .take_patches();
         let exp2 = exp(patches);
         assert_eq!(
             exp2.get(0),
@@ -1339,7 +1421,9 @@ mod tests {
             .as_ref()
         );
 
-        let patches = doc1.diff(&heads1b, &heads2).unwrap().take_patches();
+        let patches = doc1
+            .diff(&heads1b, &heads2, VecOpObserver::default())
+            .take_patches();
         let exp3 = exp(patches);
         assert_eq!(
             exp3.get(0),
@@ -1356,7 +1440,7 @@ mod tests {
 
     #[test]
     fn diff_counter_exposed() {
-        let mut doc1 = AutoCommitWithObs::<Observed<VecOpObserver>>::default();
+        let mut doc1 = AutoCommit::default();
         doc1.put(ROOT, "key", "x").unwrap();
 
         let mut doc2 = doc1.fork();
@@ -1389,7 +1473,9 @@ mod tests {
 
         let heads2b = doc1.get_heads();
 
-        let patches = doc1.diff(&heads1, &heads2a).unwrap().take_patches();
+        let patches = doc1
+            .diff(&heads1, &heads2a, VecOpObserver::default())
+            .take_patches();
         let exp1 = exp(patches);
         assert_eq!(
             exp1.get(0),
@@ -1403,7 +1489,9 @@ mod tests {
             .as_ref()
         );
 
-        let patches = doc1.diff(&heads2a, &heads2b).unwrap().take_patches();
+        let patches = doc1
+            .diff(&heads2a, &heads2b, VecOpObserver::default())
+            .take_patches();
         let exp1 = exp(patches);
         assert_eq!(
             exp1.get(0),
@@ -1420,7 +1508,7 @@ mod tests {
 
     #[test]
     fn simple_marks() {
-        let mut doc1 = AutoCommitWithObs::<Observed<VecOpObserver>>::default();
+        let mut doc1 = AutoCommit::default();
         let text = doc1.put_object(ROOT, "text", ObjType::Text).unwrap();
         doc1.splice_text(&text, 0, 0, "the quick fox jumps over the lazy dog")
             .unwrap();
@@ -1433,7 +1521,9 @@ mod tests {
         .unwrap();
 
         let heads2 = doc1.get_heads();
-        let patches12 = doc1.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches12 = doc1
+            .diff(&heads1, &heads2, VecOpObserver::default())
+            .take_patches();
         let exp1 = exp(patches12);
         assert_eq!(
             exp1,
@@ -1448,7 +1538,9 @@ mod tests {
             }]
         );
 
-        let patches21 = doc1.diff(&heads2, &heads1).unwrap().take_patches();
+        let patches21 = doc1
+            .diff(&heads2, &heads1, VecOpObserver::default())
+            .take_patches();
         let exp2 = exp(patches21);
         assert_eq!(
             exp2,

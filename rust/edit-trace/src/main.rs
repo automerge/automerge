@@ -1,6 +1,6 @@
 use automerge::ObjType;
 use automerge::ReadDoc;
-use automerge::{transaction::Transactable, Automerge, AutomergeError, ROOT};
+use automerge::{transaction::Transactable, VecOpObserver, AutoCommit, AutomergeError, ROOT};
 use std::time::Instant;
 
 fn main() -> Result<(), AutomergeError> {
@@ -17,29 +17,36 @@ fn main() -> Result<(), AutomergeError> {
         }
         commands.push((pos, del, vals));
     }
-    let mut doc = Automerge::new();
+    let mut doc = AutoCommit::new();
+    doc.update_diff_cursor();
 
     let now = Instant::now();
-    let mut tx = doc.transaction();
-    let text = tx.put_object(ROOT, "text", ObjType::Text).unwrap();
+    //let mut tx = doc.transaction();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     for (i, (pos, del, vals)) in commands.into_iter().enumerate() {
         if i % 1000 == 0 {
             println!("Processed {} edits in {} ms", i, now.elapsed().as_millis());
         }
-        tx.splice_text(&text, pos, del, &vals)?;
+        doc.splice_text(&text, pos, del, &vals)?;
     }
-    tx.commit();
     println!("Done in {} ms", now.elapsed().as_millis());
+    let commit = Instant::now();
+    doc.commit();
+    println!("Commit in {} ms", commit.elapsed().as_millis());
+    let observe = Instant::now();
+    let _patches = doc.diff_incremental::<VecOpObserver>().take_patches();
+    println!("Patches in {} ms", observe.elapsed().as_millis());
     let save = Instant::now();
     let bytes = doc.save();
     println!("Saved in {} ms", save.elapsed().as_millis());
 
     let fork = Instant::now();
-    let _other = doc.fork_at(&doc.get_heads());
+    let heads = doc.get_heads();
+    let _other = doc.fork_at(&heads);
     println!("ForkAt in {} ms", fork.elapsed().as_millis());
 
     let load = Instant::now();
-    let _ = Automerge::load(&bytes).unwrap();
+    let _ = AutoCommit::load(&bytes).unwrap();
     println!("Loaded in {} ms", load.elapsed().as_millis());
 
     let get_txt = Instant::now();

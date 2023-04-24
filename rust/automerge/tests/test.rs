@@ -1,5 +1,4 @@
 use automerge::marks::{ExpandMark, Mark};
-use automerge::op_observer::HasPatches;
 use automerge::op_tree::B;
 use automerge::transaction::Transactable;
 use automerge::{
@@ -1008,7 +1007,7 @@ fn observe_counter_change_application() {
     doc.increment(ROOT, "counter", 5).unwrap();
     let changes = doc.get_changes(&[]).unwrap().into_iter().cloned();
 
-    let mut doc = AutoCommit::new().with_observer(VecOpObserver::default());
+    let mut doc = AutoCommit::new();
     doc.apply_changes(changes).unwrap();
 }
 

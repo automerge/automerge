@@ -1,9 +1,9 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
+use crate::history::History;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{ExpandMark, Mark};
-use crate::op_observer::BranchableObserver;
 use crate::AutomergeError;
 use crate::{
     Automerge, ChangeHash, Cursor, ObjType, OpObserver, Prop, ReadDoc, ScalarValue, Value,
@@ -30,14 +30,21 @@ pub struct Transaction<'a, Obs: observation::Observation> {
     inner: Option<TransactionInner>,
     // As with `inner` this is an `Option` so we can `take` it during `commit`
     observation: Option<Obs>,
+    history: History,
     doc: &'a mut Automerge,
 }
 
 impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
-    pub(crate) fn new(doc: &'a mut Automerge, args: TransactionArgs, obs: Obs) -> Self {
+    pub(crate) fn new(
+        doc: &'a mut Automerge,
+        args: TransactionArgs,
+        obs: Obs,
+        history: History,
+    ) -> Self {
         Self {
             inner: Some(TransactionInner::new(args)),
             doc,
+            history,
             observation: Some(obs),
         }
     }
@@ -53,7 +60,7 @@ impl<'a> Transaction<'a, observation::UnObserved> {
     }
 }
 
-impl<'a, Obs: OpObserver + BranchableObserver> Transaction<'a, observation::Observed<Obs>> {
+impl<'a, Obs: OpObserver> Transaction<'a, observation::Observed<Obs>> {
     pub fn observer(&mut self) -> &mut Obs {
         self.observation.as_mut().unwrap().observer()
     }
@@ -93,6 +100,9 @@ impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
     pub fn commit_with(mut self, options: CommitOptions) -> Obs::CommitResult {
         let tx = self.inner.take().unwrap();
         let hash = tx.commit(self.doc, options.message, options.time);
+        if let Some(obs) = self.observation.as_mut().and_then(|o| o.observer()) {
+            self.history.observe(obs, self.doc, None);
+        }
         let obs = self.observation.take().unwrap();
         obs.make_result(hash)
     }
@@ -105,14 +115,10 @@ impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
 
     fn do_tx<F, O>(&mut self, f: F) -> O
     where
-        F: FnOnce(&mut TransactionInner, &mut Automerge, Option<&mut Obs::Obs>) -> O,
+        F: FnOnce(&mut TransactionInner, &mut Automerge, &mut History) -> O,
     {
         let tx = self.inner.as_mut().unwrap();
-        if let Some(obs) = self.observation.as_mut() {
-            f(tx, self.doc, obs.observer())
-        } else {
-            f(tx, self.doc, None)
-        }
+        f(tx, self.doc, &mut self.history)
     }
 }
 
@@ -296,7 +302,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         prop: P,
         value: V,
     ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.put(doc, obs, obj.as_ref(), prop, value))
+        self.do_tx(|tx, doc, hist| tx.put(doc, hist, obj.as_ref(), prop, value))
     }
 
     fn put_object<O: AsRef<ExId>, P: Into<Prop>>(
@@ -305,7 +311,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         prop: P,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.put_object(doc, obs, obj.as_ref(), prop, value))
+        self.do_tx(|tx, doc, hist| tx.put_object(doc, hist, obj.as_ref(), prop, value))
     }
 
     fn insert<O: AsRef<ExId>, V: Into<ScalarValue>>(
@@ -314,7 +320,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         index: usize,
         value: V,
     ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.insert(doc, obs, obj.as_ref(), index, value))
+        self.do_tx(|tx, doc, hist| tx.insert(doc, hist, obj.as_ref(), index, value))
     }
 
     fn insert_object<O: AsRef<ExId>>(
@@ -323,7 +329,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         index: usize,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.insert_object(doc, obs, obj.as_ref(), index, value))
+        self.do_tx(|tx, doc, hist| tx.insert_object(doc, hist, obj.as_ref(), index, value))
     }
 
     fn increment<O: AsRef<ExId>, P: Into<Prop>>(
@@ -332,7 +338,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         prop: P,
         value: i64,
     ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.increment(doc, obs, obj.as_ref(), prop, value))
+        self.do_tx(|tx, doc, hist| tx.increment(doc, hist, obj.as_ref(), prop, value))
     }
 
     fn delete<O: AsRef<ExId>, P: Into<Prop>>(
@@ -340,7 +346,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         obj: O,
         prop: P,
     ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.delete(doc, obs, obj.as_ref(), prop))
+        self.do_tx(|tx, doc, hist| tx.delete(doc, hist, obj.as_ref(), prop))
     }
 
     /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
@@ -352,7 +358,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         del: usize,
         vals: V,
     ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.splice(doc, obs, obj.as_ref(), pos, del, vals))
+        self.do_tx(|tx, doc, hist| tx.splice(doc, hist, obj.as_ref(), pos, del, vals))
     }
 
     fn splice_text<O: AsRef<ExId>>(
@@ -362,7 +368,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         del: usize,
         text: &str,
     ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.splice_text(doc, obs, obj.as_ref(), pos, del, text))
+        self.do_tx(|tx, doc, hist| tx.splice_text(doc, hist, obj.as_ref(), pos, del, text))
     }
 
     fn mark<O: AsRef<ExId>>(
@@ -371,7 +377,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         mark: Mark<'_>,
         expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.mark(doc, obs, obj.as_ref(), mark, expand))
+        self.do_tx(|tx, doc, hist| tx.mark(doc, hist, obj.as_ref(), mark, expand))
     }
 
     fn unmark<O: AsRef<ExId>>(
@@ -382,7 +388,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         end: usize,
         expand: ExpandMark,
     ) -> Result<(), AutomergeError> {
-        self.do_tx(|tx, doc, obs| tx.unmark(doc, obs, obj.as_ref(), name, start, end, expand))
+        self.do_tx(|tx, doc, hist| tx.unmark(doc, hist, obj.as_ref(), name, start, end, expand))
     }
 
     fn base_heads(&self) -> Vec<ChangeHash> {

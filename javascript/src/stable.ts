@@ -170,7 +170,6 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
   const freeze = !!opts.freeze
   const patchCallback = opts.patchCallback
   const handle = ApiHandler.create(opts.enableTextV2 || false, opts.actor)
-  handle.enablePatches(true)
   handle.enableFreeze(!!opts.freeze)
   handle.registerDatatype("counter", (n: number) => new Counter(n))
   const textV2 = opts.enableTextV2 || false
@@ -472,7 +471,6 @@ export function load<T>(
   const actor = opts.actor
   const patchCallback = opts.patchCallback
   const handle = ApiHandler.load(data, opts.enableTextV2 || false, actor)
-  handle.enablePatches(true)
   handle.enableFreeze(!!opts.freeze)
   handle.registerDatatype("counter", (n: number) => new Counter(n))
   const textV2 = opts.enableTextV2 || false

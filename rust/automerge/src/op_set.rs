@@ -448,8 +448,9 @@ impl OpSetMetadata {
         }
     }
 
-    pub(crate) fn lamport_cmp(&self, left: OpId, right: OpId) -> Ordering {
-        left.lamport_cmp(&right, &self.actors.cache)
+    pub(crate) fn lamport_cmp<O: AsRef<OpId>>(&self, left: O, right: O) -> Ordering {
+        left.as_ref()
+            .lamport_cmp(right.as_ref(), &self.actors.cache)
     }
 
     pub(crate) fn sorted_opids<I: Iterator<Item = OpId>>(&self, opids: I) -> OpIds {

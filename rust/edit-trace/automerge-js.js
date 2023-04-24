@@ -1,6 +1,6 @@
 // Apply the paper editing trace to an Automerge.Text object, one char at a time
 const { edits, finalText } = require('./editing-trace')
-const Automerge = require('../../javascript')
+const Automerge = require('../../javascript').unstable;
 
 let start = new Date()
 let state = Automerge.from({text: ""})

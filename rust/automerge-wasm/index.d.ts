@@ -219,10 +219,11 @@ export class Automerge {
   rollback(): number;
 
   // patches
-  enablePatches(enable: boolean): boolean;
   enableFreeze(enable: boolean): boolean;
   registerDatatype(datatype: string, callback: Function): void;
   popPatches(): Patch[];
+  truncatePatches();
+  resetPatches();
 
   // save and load to local store
   save(): Uint8Array;

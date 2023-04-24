@@ -1,13 +1,12 @@
 use crate::hydrate;
-use crate::op_observer::{HasPatches, TextRepresentation};
+use crate::op_observer::TextRepresentation;
 use crate::text_value::TextValue;
-use crate::transaction::{Observed, Transactable};
+use crate::transaction::Transactable;
 use crate::*;
 
 #[test]
 fn simple_hydrate() -> Result<(), AutomergeError> {
-    let mut doc = AutoCommitWithObs::<Observed<VecOpObserver>>::default()
-        .with_observer(VecOpObserver::default().with_text_rep(TextRepresentation::String));
+    let mut doc = AutoCommit::default().with_text_rep(TextRepresentation::String);
     let list = doc.put_object(&ObjId::Root, "list", ObjType::List)?;
     doc.insert(&list, 0, 5)?;
     doc.insert(&list, 1, 6)?;
@@ -28,7 +27,12 @@ fn simple_hydrate() -> Result<(), AutomergeError> {
     );
     doc.splice_text(&text, 6, 0, "big bad ")?;
     assert_eq!(doc.text(&text)?, "hello big bad world".to_owned());
-    let patches = doc.observer().take_patches();
+    let heads = doc.get_heads();
+    let cursor = doc.diff_cursor().to_vec();
+    let patches = doc
+        .diff(&cursor, &heads, VecOpObserver::default())
+        .take_patches();
+    doc.update_diff_cursor();
     hydrated.apply_patches(patches)?;
     assert_eq!(
         hydrated.as_map().unwrap().get("text"),

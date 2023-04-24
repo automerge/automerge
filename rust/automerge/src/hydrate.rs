@@ -1,5 +1,6 @@
 use crate::types::{Clock, ObjId, Op, OpType};
 use crate::{error::HydrateError, value, ObjType, Patch, PatchAction, Prop, ScalarValue};
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 mod list;
@@ -74,8 +75,19 @@ impl From<value::Value<'_>> for Value {
             value::Value::Object(ObjType::Map) => Value::Map(Map::default()),
             value::Value::Object(ObjType::List) => Value::List(List::default()),
             value::Value::Object(ObjType::Text) => Value::Text(Text::default()),
-            value::Value::Object(ObjType::Table) => panic!(),
+            value::Value::Object(ObjType::Table) => Value::Map(Map::default()),
             value::Value::Scalar(s) => Value::Scalar(s.into_owned()),
+        }
+    }
+}
+
+impl From<Value> for value::Value<'_> {
+    fn from(value: Value) -> Self {
+        match value {
+            Value::Map(_) => value::Value::Object(ObjType::Map),
+            Value::List(_) => value::Value::Object(ObjType::List),
+            Value::Text(_) => value::Value::Object(ObjType::Text),
+            Value::Scalar(s) => value::Value::Scalar(Cow::Owned(s)),
         }
     }
 }

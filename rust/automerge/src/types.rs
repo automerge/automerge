@@ -506,6 +506,18 @@ impl OpId {
     }
 }
 
+impl AsRef<OpId> for OpId {
+    fn as_ref(&self) -> &OpId {
+        self
+    }
+}
+
+impl AsRef<OpId> for ObjId {
+    fn as_ref(&self) -> &OpId {
+        &self.0
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
 pub(crate) struct ObjId(pub(crate) OpId);
 

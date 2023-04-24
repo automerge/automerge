@@ -44,7 +44,6 @@ where
         self.lookup.get(item).cloned()
     }
 
-    #[allow(dead_code)]
     pub(crate) fn len(&self) -> usize {
         self.cache.len()
     }

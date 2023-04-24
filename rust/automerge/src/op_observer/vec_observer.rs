@@ -1,12 +1,9 @@
-#![allow(dead_code)]
-
 use core::fmt::Debug;
 
-use crate::{marks::Mark, ObjId, OpObserver, Prop, ReadDoc, ScalarValue, Value};
+use crate::{marks::Mark, ObjId, OpObserver, Prop, ReadDoc, Value};
 
 use crate::sequence_tree::SequenceTree;
 
-use crate::op_observer::BranchableObserver;
 use crate::op_observer::{Patch, PatchAction};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -27,44 +24,13 @@ impl TextRepresentation {
 
 impl std::default::Default for TextRepresentation {
     fn default() -> Self {
-        TextRepresentation::Array
+        TextRepresentation::Array // FIXME
     }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct VecOpObserver {
     pub(crate) patches: Vec<Patch>,
-    pub(crate) text_rep: TextRepresentation,
-}
-
-pub trait HasPatches {
-    type Patches;
-
-    fn take_patches(&mut self) -> Self::Patches;
-    fn with_text_rep(self, text_rep: TextRepresentation) -> Self;
-    fn set_text_rep(&mut self, text_rep: TextRepresentation);
-    fn get_text_rep(&self) -> TextRepresentation;
-}
-
-impl HasPatches for VecOpObserver {
-    type Patches = Vec<Patch>;
-
-    fn take_patches(&mut self) -> Self::Patches {
-        std::mem::take(&mut self.patches)
-    }
-
-    fn with_text_rep(mut self, text_rep: TextRepresentation) -> Self {
-        self.text_rep = text_rep;
-        self
-    }
-
-    fn set_text_rep(&mut self, text_rep: TextRepresentation) {
-        self.text_rep = text_rep;
-    }
-
-    fn get_text_rep(&self) -> TextRepresentation {
-        self.text_rep
-    }
 }
 
 impl VecOpObserver {
@@ -87,6 +53,10 @@ impl VecOpObserver {
             }) if obj == tail_obj => Some(action),
             _ => None,
         }
+    }
+
+    pub fn take_patches(&mut self) -> Vec<Patch> {
+        std::mem::take(&mut self.patches)
     }
 }
 
@@ -125,13 +95,6 @@ impl OpObserver for VecOpObserver {
     }
 
     fn splice_text<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, index: usize, value: &str) {
-        if self.text_rep == TextRepresentation::Array {
-            for (offset, c) in value.chars().map(ScalarValue::from).enumerate() {
-                let value = (c.into(), ObjId::Root);
-                self.insert(doc, obj.clone(), index + offset, value, false);
-            }
-            return;
-        }
         if let Some(PatchAction::SpliceText {
             index: tail_index,
             value: prev_value,
@@ -302,20 +265,16 @@ impl OpObserver for VecOpObserver {
         }
     }
 
-    fn text_as_seq(&self) -> bool {
-        self.text_rep == TextRepresentation::Array
+    fn compare(&self, other: &Self) -> bool {
+        if self.patches != other.patches {
+            panic!("patches dont match");
+        }
+        true
     }
 }
 
-impl BranchableObserver for VecOpObserver {
-    fn merge(&mut self, other: &Self) {
-        self.patches.extend_from_slice(other.patches.as_slice())
-    }
-
-    fn branch(&self) -> Self {
-        VecOpObserver {
-            patches: vec![],
-            text_rep: self.text_rep,
-        }
+impl AsMut<VecOpObserver> for VecOpObserver {
+    fn as_mut(&mut self) -> &mut Self {
+        self
     }
 }

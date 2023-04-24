@@ -1,9 +1,10 @@
+use crate::history::History;
 use crate::iter::TopOps;
 pub(crate) use crate::op_set::OpSetMetadata;
 use crate::{
     clock::Clock,
     query::{self, ChangeVisibility, Index, QueryResult, TreeQuery},
-    Automerge, OpObserver,
+    Automerge,
 };
 use crate::{
     types::{Key, ListEncoding, ObjId, ObjMeta, Op, OpId, Prop},
@@ -87,15 +88,13 @@ pub(crate) struct FoundOpWithObserver<'a> {
 }
 
 impl<'a> FoundOpWithObserver<'a> {
-    pub(crate) fn observe<Obs: OpObserver>(
+    pub(crate) fn observe(
         &self,
         obj: &ObjMeta,
         op: &Op,
         doc: &Automerge,
-        observer: &mut Obs,
+        history: &mut History,
     ) {
-        let ex_obj = doc.ops().id_to_exid(obj.id.0);
-
         if op.insert {
             if op.is_mark() {
                 if let OpType::MarkEnd(_) = op.action {
@@ -103,13 +102,12 @@ impl<'a> FoundOpWithObserver<'a> {
                         &obj.id,
                         query::SeekMark::new(op.id.prev(), self.pos, obj.encoding),
                     );
-                    observer.mark(doc, ex_obj, q.marks.into_iter());
+                    history.mark(obj.id, &q.marks);
                 }
             } else if obj.typ == ObjType::Text {
-                observer.splice_text(doc, ex_obj, self.index, op.to_str());
+                history.splice(obj.id, self.index, op.to_str());
             } else {
-                let value = (op.value(), doc.ops().id_to_exid(op.id));
-                observer.insert(doc, ex_obj, self.index, value, false);
+                history.insert(obj.id, self.index, op.value().into(), op.id, false);
             }
             return;
         }
@@ -122,42 +120,47 @@ impl<'a> FoundOpWithObserver<'a> {
         if op.is_delete() {
             match (self.before, self.overwritten, self.after) {
                 (None, Some(over), None) => match key {
-                    Prop::Map(k) => observer.delete_map(doc, ex_obj, &k),
+                    Prop::Map(k) => history.delete_map(obj.id, &k),
                     Prop::Seq(index) => {
-                        observer.delete_seq(doc, ex_obj, index, over.width(obj.encoding))
+                        history.delete_seq(obj.id, index, over.width(obj.encoding))
                     }
                 },
                 (Some(before), Some(_), None) => {
-                    let value = (before.value(), doc.ops().id_to_exid(before.id));
                     let conflict = self.num_before > 1;
-                    observer.expose(doc, ex_obj, key, value, conflict);
+                    history.put(
+                        obj.id,
+                        &key,
+                        before.value().into(),
+                        before.id,
+                        conflict,
+                        true,
+                    );
                 }
                 _ => { /* do nothing */ }
             }
         } else if let Some(value) = op.get_increment_value() {
-            // only observe this increment if the counter is visible, i.e. the counter's
             if self.after.is_none() {
                 if let Some(counter) = self.overwritten {
                     if op.overwrites(counter) {
-                        observer.increment(doc, ex_obj, key, (value, doc.ops().id_to_exid(op.id)));
+                        history.increment(obj.id, &key, value, op.id);
                     }
                 }
             }
         } else {
             let conflict = self.before.is_some();
-            let value = (op.value(), doc.ops().id_to_exid(op.id));
+            //let value = (op.value(), doc.ops().id_to_exid(op.id));
             if op.is_list_op()
                 && self.overwritten.is_none()
                 && self.before.is_none()
                 && self.after.is_none()
             {
-                observer.insert(doc, ex_obj, self.index, value, conflict);
+                history.insert(obj.id, self.index, op.value().into(), op.id, conflict);
             } else if self.after.is_some() {
                 if self.before.is_none() {
-                    observer.flag_conflict(doc, ex_obj, key);
+                    history.flag_conflict(obj.id, &key);
                 }
             } else {
-                observer.put(doc, ex_obj, key, value, conflict);
+                history.put(obj.id, &key, op.value().into(), op.id, conflict, false);
             }
         }
     }

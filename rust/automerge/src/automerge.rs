@@ -8,10 +8,11 @@ use itertools::Itertools;
 use crate::change_graph::ChangeGraph;
 use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
+use crate::history::History;
 use crate::hydrate;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{Mark, MarkStateMachine};
-use crate::op_observer::{BranchableObserver, OpObserver};
+use crate::op_observer::{OpObserver, TextRepresentation};
 use crate::op_set::OpSet;
 use crate::parents::Parents;
 use crate::storage::{self, load, CompressConfig, VerificationMode};
@@ -25,7 +26,7 @@ use crate::types::{
 use crate::{AutomergeError, Change, Cursor, ObjType, Prop, ReadDoc};
 
 mod current_state;
-mod diff;
+pub(crate) mod diff;
 
 #[cfg(test)]
 mod tests;
@@ -100,6 +101,8 @@ pub struct Automerge {
     actor: Actor,
     /// The maximum operation counter this document has seen.
     max_op: u64,
+    /// Treat text as sequences with for history/observers
+    text_rep: TextRepresentation,
 }
 
 impl Automerge {
@@ -116,6 +119,7 @@ impl Automerge {
             saved: Default::default(),
             actor: Actor::Unused(ActorId::random()),
             max_op: 0,
+            text_rep: TextRepresentation::default(),
         }
     }
 
@@ -197,16 +201,16 @@ impl Automerge {
     /// Start a transaction.
     pub fn transaction(&mut self) -> Transaction<'_, UnObserved> {
         let args = self.transaction_args();
-        Transaction::new(self, args, UnObserved)
+        Transaction::new(self, args, UnObserved, History::innactive())
     }
 
     /// Start a transaction with an observer
-    pub fn transaction_with_observer<Obs: OpObserver + BranchableObserver>(
+    pub fn transaction_with_observer<Obs: OpObserver>(
         &mut self,
         op_observer: Obs,
     ) -> Transaction<'_, Observed<Obs>> {
         let args = self.transaction_args();
-        Transaction::new(self, args, Observed::new(op_observer))
+        Transaction::new(self, args, Observed::new(op_observer), History::active())
     }
 
     pub(crate) fn transaction_args(&mut self) -> TransactionArgs {
@@ -285,7 +289,7 @@ impl Automerge {
     pub fn transact_observed<F, O, E, Obs>(&mut self, f: F) -> transaction::Result<O, Obs, E>
     where
         F: FnOnce(&mut Transaction<'_, Observed<Obs>>) -> Result<O, E>,
-        Obs: OpObserver + BranchableObserver + Default,
+        Obs: OpObserver + Default,
     {
         self.transact_observed_with_impl(None::<&dyn Fn(&O) -> CommitOptions>, f)
     }
@@ -299,7 +303,7 @@ impl Automerge {
     where
         F: FnOnce(&mut Transaction<'_, Observed<Obs>>) -> Result<O, E>,
         C: FnOnce(&O) -> CommitOptions,
-        Obs: OpObserver + BranchableObserver + Default,
+        Obs: OpObserver + Default,
     {
         self.transact_observed_with_impl(Some(c), f)
     }
@@ -312,7 +316,7 @@ impl Automerge {
     where
         F: FnOnce(&mut Transaction<'_, Observed<Obs>>) -> Result<O, E>,
         C: FnOnce(&O) -> CommitOptions,
-        Obs: OpObserver + BranchableObserver + Default,
+        Obs: OpObserver + Default,
     {
         let observer = Obs::default();
         let mut tx = self.transaction_with_observer(observer);
@@ -378,6 +382,7 @@ impl Automerge {
             }
         }
         let mut f = Self::new();
+        f.set_text_rep(self.get_text_rep());
         f.set_actor(ActorId::random());
         f.apply_changes(changes.into_iter().rev().cloned())?;
         Ok(f)
@@ -437,7 +442,13 @@ impl Automerge {
 
     /// Load a document.
     pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {
-        Self::load_with::<()>(data, OnPartialLoad::Error, VerificationMode::Check, None)
+        Self::load_with::<()>(
+            data,
+            OnPartialLoad::Error,
+            VerificationMode::Check,
+            None,
+            TextRepresentation::default(),
+        )
     }
 
     /// Load a document without verifying the head hashes
@@ -449,6 +460,7 @@ impl Automerge {
             OnPartialLoad::Error,
             VerificationMode::DontCheck,
             None,
+            TextRepresentation::default(),
         )
     }
 
@@ -459,6 +471,7 @@ impl Automerge {
         on_error: OnPartialLoad,
         mode: VerificationMode,
         mut observer: Option<&mut Obs>,
+        text_rep: TextRepresentation,
     ) -> Result<Self, AutomergeError> {
         if data.is_empty() {
             tracing::trace!("no data, initializing empty document");
@@ -505,6 +518,7 @@ impl Automerge {
                     saved: Default::default(),
                     actor: Actor::Unused(ActorId::random()),
                     max_op,
+                    text_rep,
                 }
             }
             storage::Chunk::Change(stored_change) => {
@@ -542,9 +556,15 @@ impl Automerge {
             }
         }
         if let Some(observer) = &mut observer {
-            current_state::observe_current_state(&am, *observer);
+            am.observe_current_state(*observer);
         }
         Ok(am)
+    }
+
+    pub(crate) fn observe_current_state<Obs: OpObserver>(&self, observer: &mut Obs) {
+        let mut history = History::active();
+        current_state::observe_current_state(self, &mut history);
+        history.observe(observer, self, None);
     }
 
     /// Load an incremental save of a document.
@@ -564,12 +584,42 @@ impl Automerge {
         data: &[u8],
         op_observer: Option<&mut Obs>,
     ) -> Result<usize, AutomergeError> {
+        let mut history = History::new(!self.is_empty() && op_observer.is_some());
+        let delta = self.load_incremental_inner(data, &mut history)?;
+        self.observe_history(op_observer, history);
+        Ok(delta)
+    }
+
+    pub(crate) fn observe_history<Obs: OpObserver>(
+        &self,
+        op_observer: Option<&mut Obs>,
+        mut history: History,
+    ) {
+        if let Some(obs) = op_observer {
+            if history.is_active() {
+                history.observe(obs, self, None);
+            } else {
+                self.observe_current_state(obs);
+            }
+        }
+    }
+
+    pub(crate) fn load_incremental_inner(
+        &mut self,
+        data: &[u8],
+        history: &mut History,
+    ) -> Result<usize, AutomergeError> {
         if self.is_empty() {
-            let mut doc =
-                Self::load_with::<()>(data, OnPartialLoad::Ignore, VerificationMode::Check, None)?;
+            let mut doc = Self::load_with::<()>(
+                data,
+                OnPartialLoad::Ignore,
+                VerificationMode::Check,
+                None,
+                self.text_rep,
+            )?;
             doc = doc.with_actor(self.actor_id());
-            if let Some(obs) = op_observer {
-                current_state::observe_current_state(&doc, obs);
+            if history.is_active() {
+                current_state::observe_current_state(&doc, history);
             }
             *self = doc;
             return Ok(self.ops.len());
@@ -582,7 +632,7 @@ impl Automerge {
             }
         };
         let start = self.ops.len();
-        self.apply_changes_with(changes, op_observer)?;
+        self.apply_changes_inner(changes, history)?;
         let delta = self.ops.len() - start;
         Ok(delta)
     }
@@ -612,13 +662,23 @@ impl Automerge {
     pub fn apply_changes_with<I: IntoIterator<Item = Change>, Obs: OpObserver>(
         &mut self,
         changes: I,
-        mut op_observer: Option<&mut Obs>,
+        op_observer: Option<&mut Obs>,
+    ) -> Result<(), AutomergeError> {
+        let mut history = History::new(!self.is_empty() && op_observer.is_some());
+        self.apply_changes_inner(changes, &mut history)?;
+        self.observe_history(op_observer, history);
+        Ok(())
+    }
+
+    pub(crate) fn apply_changes_inner<I: IntoIterator<Item = Change>>(
+        &mut self,
+        changes: I,
+        history: &mut History,
     ) -> Result<(), AutomergeError> {
         // Record this so we can avoid observing each individual change and instead just observe
         // the final state after all the changes have been applied. We can only do this for an
         // empty document right now, once we have logic to produce the diffs between arbitrary
         // states of the OpSet we can make this cleaner.
-        let empty_at_start = self.is_empty();
         for c in changes {
             if !self.history_index.contains_key(&c.hash()) {
                 if self.duplicate_seq(&c) {
@@ -628,11 +688,7 @@ impl Automerge {
                     ));
                 }
                 if self.is_causally_ready(&c) {
-                    if empty_at_start {
-                        self.apply_change::<()>(c, &mut None)?;
-                    } else {
-                        self.apply_change(c, &mut op_observer)?;
-                    }
+                    self.apply_change(c, history)?;
                 } else {
                     self.queue.push(c);
                 }
@@ -640,30 +696,21 @@ impl Automerge {
         }
         while let Some(c) = self.pop_next_causally_ready_change() {
             if !self.history_index.contains_key(&c.hash()) {
-                if empty_at_start {
-                    self.apply_change::<()>(c, &mut None)?;
-                } else {
-                    self.apply_change(c, &mut op_observer)?;
-                }
-            }
-        }
-        if empty_at_start {
-            if let Some(observer) = &mut op_observer {
-                current_state::observe_current_state(self, *observer);
+                self.apply_change(c, history)?;
             }
         }
         Ok(())
     }
 
-    fn apply_change<Obs: OpObserver>(
+    fn apply_change(
         &mut self,
         change: Change,
-        observer: &mut Option<&mut Obs>,
+        history: &mut History,
     ) -> Result<(), AutomergeError> {
         let ops = self.import_ops(&change);
         self.update_history(change, ops.len());
         for (obj, op) in ops {
-            self.insert_op(&obj, op, observer)?;
+            self.insert_op(&obj, op, history)?;
         }
         Ok(())
     }
@@ -753,6 +800,17 @@ impl Automerge {
         other: &mut Self,
         op_observer: Option<&mut Obs>,
     ) -> Result<Vec<ChangeHash>, AutomergeError> {
+        let mut history = History::new(!self.is_empty() && op_observer.is_some());
+        let result = self.merge_inner(other, &mut history)?;
+        self.observe_history(op_observer, history);
+        Ok(result)
+    }
+
+    pub(crate) fn merge_inner(
+        &mut self,
+        other: &mut Self,
+        history: &mut History,
+    ) -> Result<Vec<ChangeHash>, AutomergeError> {
         // TODO: Make this fallible and figure out how to do this transactionally
         let changes = self
             .get_changes_added(other)
@@ -760,7 +818,7 @@ impl Automerge {
             .cloned()
             .collect::<Vec<_>>();
         tracing::trace!(changes=?changes.iter().map(|c| c.hash()).collect::<Vec<_>>(), "merging new changes");
-        self.apply_changes_with(changes, op_observer)?;
+        self.apply_changes_inner(changes, history)?;
         Ok(self.get_heads())
     }
 
@@ -1042,16 +1100,16 @@ impl Automerge {
         self.ops.visualise(objects)
     }
 
-    pub(crate) fn insert_op<Obs: OpObserver>(
+    pub(crate) fn insert_op(
         &mut self,
         obj: &ObjId,
         op: Op,
-        observer: &mut Option<&mut Obs>,
+        history: &mut History,
     ) -> Result<(), AutomergeError> {
-        let (pos, succ) = if let Some(observer) = observer {
+        let (pos, succ) = if history.is_active() {
             let obj = self.get_obj_meta(*obj)?;
             let found = self.ops.find_op_with_observer(&obj, &op);
-            found.observe(&obj, &op, self, *observer);
+            found.observe(&obj, &op, self, history);
             (found.pos, found.succ)
         } else {
             let found = self.ops.find_op_without_observer(obj, &op);
@@ -1071,12 +1129,32 @@ impl Automerge {
     /// observe the same changes in the opposite order.
     pub fn observe_diff<Obs: OpObserver>(
         &self,
-        before: &[ChangeHash],
-        after: &[ChangeHash],
+        before_heads: &[ChangeHash],
+        after_heads: &[ChangeHash],
         observer: &mut Obs,
-    ) -> Result<(), AutomergeError> {
-        diff::observe_diff(self, before, after, observer);
-        Ok(())
+    ) {
+        let mut history = History::active();
+        let before = self.clock_at(before_heads);
+        let after = self.clock_at(after_heads);
+        diff::observe_diff(self, &before, &after, &mut history);
+        history.observe(observer, self, Some(after_heads));
+    }
+
+    pub fn set_text_rep(&mut self, text_rep: TextRepresentation) {
+        self.text_rep = text_rep
+    }
+
+    pub fn get_text_rep(&self) -> TextRepresentation {
+        self.text_rep
+    }
+
+    pub fn with_text_rep(mut self, text_rep: TextRepresentation) -> Self {
+        self.text_rep = text_rep;
+        self
+    }
+
+    pub(crate) fn text_as_seq(&self) -> bool {
+        self.text_rep == TextRepresentation::Array
     }
 
     /// Get the heads of this document.
