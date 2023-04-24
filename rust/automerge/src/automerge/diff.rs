@@ -635,28 +635,50 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
 mod tests {
 
     use crate::{
-        op_observer::HasPatches, transaction::Observed, transaction::Transactable,
-        AutoCommitWithObs, ObjType, Patch, PatchAction, Prop, ScalarValue, Value, VecOpObserver,
-        ROOT,
+        marks::Mark, op_observer::HasPatches, transaction::Observed, transaction::Transactable,
+        types::MarkData, AutoCommitWithObs, ObjType, Patch, PatchAction, Prop, ScalarValue, Value,
+        VecOpObserver, ROOT,
     };
     use itertools::Itertools;
 
     #[derive(Debug, Clone, PartialEq)]
     struct ObservedPatch {
-        action: String,
+        action: ObservedAction,
         path: String,
-        value: Value<'static>,
-        conflict: bool,
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    enum ObservedAction {
+        PutMap {
+            value: Value<'static>,
+            conflict: bool,
+        },
+        PutSeq {
+            value: Value<'static>,
+            conflict: bool,
+        },
+        Insert {
+            values: Vec<Value<'static>>,
+            conflict: bool,
+        },
+        DelMap,
+        DelSeq,
+        Increment(i64),
+        SpliceText(String),
+        Mark(Vec<ObservedMark>),
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    struct ObservedMark {
+        start: usize,
+        end: usize,
+        name: String,
+        value: ScalarValue,
     }
 
     fn ex_path_and<I: Iterator<Item = Prop>, V: Into<Prop>>(props: I, val: V) -> String {
         format!("/{}", props.chain(Some(val.into())).join("/"))
     }
-
-    // counter + increment in diff
-    // old counter + increment in diff
-    // old counter + increment in diff plus delete
-    // old counter + increment in diff plus overwrite
 
     impl From<&Patch<char>> for ObservedPatch {
         fn from(patch: &Patch<char>) -> Self {
@@ -668,10 +690,11 @@ mod tests {
                     conflict,
                     ..
                 } => ObservedPatch {
-                    action: "put_map".into(),
+                    action: ObservedAction::PutMap {
+                        value: value.0,
+                        conflict,
+                    },
                     path: ex_path_and(path, key),
-                    value: value.0,
-                    conflict,
                 },
                 PatchAction::PutSeq {
                     index,
@@ -679,48 +702,56 @@ mod tests {
                     conflict,
                     ..
                 } => ObservedPatch {
-                    action: "put_seq".into(),
+                    action: ObservedAction::PutSeq {
+                        value: value.0,
+                        conflict,
+                    },
                     path: ex_path_and(path, index),
-                    value: value.0,
-                    conflict,
                 },
                 PatchAction::DeleteMap { key } => ObservedPatch {
-                    action: "del_map".into(),
+                    action: ObservedAction::DelMap,
                     path: ex_path_and(path, key),
-                    value: "".into(),
-                    conflict: false,
                 },
                 PatchAction::DeleteSeq { index, .. } => ObservedPatch {
-                    action: "del_seq".into(),
+                    action: ObservedAction::DelSeq,
                     path: ex_path_and(path, index),
-                    value: "".into(),
-                    conflict: false,
                 },
                 PatchAction::Increment { prop, value } => ObservedPatch {
-                    action: "inc".into(),
+                    action: ObservedAction::Increment(value),
                     path: ex_path_and(path, prop),
-                    value: value.into(),
-                    conflict: false,
                 },
                 PatchAction::Insert {
                     index,
                     values,
                     conflict,
                 } => ObservedPatch {
-                    action: "insert".into(),
+                    action: ObservedAction::Insert {
+                        values: values.into_iter().map(|(v, _)| v.clone()).collect(),
+                        conflict,
+                    },
                     path: ex_path_and(path, index),
-                    value: values.iter().map(|v| format!("{}", &v.0)).join(",").into(),
-                    conflict,
                 },
                 PatchAction::SpliceText { index, value } => ObservedPatch {
-                    action: "splice".into(),
+                    action: ObservedAction::SpliceText(value.into_iter().collect::<String>()),
                     path: ex_path_and(path, index),
-                    value: value.into_iter().collect::<String>().into(),
-                    conflict: false,
                 },
-                PatchAction::Mark { .. } => {
-                    todo!()
-                }
+                PatchAction::Mark { marks } => ObservedPatch {
+                    action: ObservedAction::Mark(
+                        marks
+                            .into_iter()
+                            .map(|Mark { start, end, data }| {
+                                let MarkData { name, value } = data.as_ref();
+                                ObservedMark {
+                                    start,
+                                    end,
+                                    name: name.to_string(),
+                                    value: value.clone(),
+                                }
+                            })
+                            .collect(),
+                    ),
+                    path: format!("/{}", path.clone().join("/")),
+                },
                 PatchAction::Unmark { .. } => {
                     todo!()
                 }
@@ -748,9 +779,10 @@ mod tests {
             exp(patches),
             vec![ObservedPatch {
                 path: "/key".into(),
-                action: "put_map".into(),
-                value: "value2c".into(),
-                conflict: false,
+                action: ObservedAction::PutMap {
+                    value: "value2c".into(),
+                    conflict: false,
+                },
             }]
         );
     }
@@ -779,9 +811,10 @@ mod tests {
             exp(patches),
             vec![ObservedPatch {
                 path: "/key".into(),
-                action: "put_map".into(),
-                value: "v2_value2c".into(),
-                conflict: true,
+                action: ObservedAction::PutMap {
+                    value: "v2_value2c".into(),
+                    conflict: true,
+                },
             }]
         );
     }
@@ -812,15 +845,17 @@ mod tests {
             vec![
                 ObservedPatch {
                     path: "/key1".into(),
-                    action: "put_map".into(),
-                    value: "doc2_value2".into(),
-                    conflict: false,
+                    action: ObservedAction::PutMap {
+                        value: "doc2_value2".into(),
+                        conflict: false,
+                    },
                 },
                 ObservedPatch {
                     path: "/key2".into(),
-                    action: "put_map".into(),
-                    value: "doc1_value2".into(),
-                    conflict: false,
+                    action: ObservedAction::PutMap {
+                        value: "doc1_value2".into(),
+                        conflict: false,
+                    },
                 },
             ]
         );
@@ -851,9 +886,10 @@ mod tests {
             exp(patches),
             vec![ObservedPatch {
                 path: "/key".into(),
-                action: "put_map".into(),
-                value: "v2_value2c".into(),
-                conflict: true,
+                action: ObservedAction::PutMap {
+                    value: "v2_value2c".into(),
+                    conflict: true,
+                },
             }]
         );
     }
@@ -881,14 +917,6 @@ mod tests {
         let patches = doc1.diff(&heads1, &heads2).unwrap().take_patches();
 
         assert_eq!(exp(patches), vec![],);
-        /*
-                    vec![ObservedPatch {
-                        path: "/key".into(),
-                        action: "del_map".into(),
-                        value: "".into(),
-                        conflict: false,
-                    }]
-        */
     }
 
     #[test]
@@ -905,9 +933,7 @@ mod tests {
             exp(patches),
             vec![ObservedPatch {
                 path: "/key".into(),
-                action: "del_map".into(),
-                value: "".into(),
-                conflict: false,
+                action: ObservedAction::DelMap,
             }]
         );
     }
@@ -928,9 +954,7 @@ mod tests {
             exp(patches),
             vec![ObservedPatch {
                 path: "/key".into(),
-                action: "del_map".into(),
-                value: "".into(),
-                conflict: false,
+                action: ObservedAction::DelMap,
             }]
         );
     }
@@ -952,9 +976,10 @@ mod tests {
             exp(patches),
             vec![ObservedPatch {
                 path: "/key".into(),
-                action: "put_map".into(),
-                value: "value2c".into(),
-                conflict: false,
+                action: ObservedAction::PutMap {
+                    value: "value2c".into(),
+                    conflict: false,
+                },
             }]
         );
     }
@@ -975,9 +1000,7 @@ mod tests {
             exp(patches),
             vec![ObservedPatch {
                 path: "/key".into(),
-                action: "inc".into(),
-                value: 12.into(),
-                conflict: false,
+                action: ObservedAction::Increment(12),
             }]
         );
     }
@@ -998,9 +1021,10 @@ mod tests {
             exp(patches),
             vec![ObservedPatch {
                 path: "/key".into(),
-                action: "put_map".into(),
-                value: ScalarValue::counter(17).into(),
-                conflict: false,
+                action: ObservedAction::PutMap {
+                    value: ScalarValue::counter(17).into(),
+                    conflict: false,
+                },
             }]
         );
     }
@@ -1024,21 +1048,21 @@ mod tests {
             vec![
                 ObservedPatch {
                     path: "/list/0".into(),
-                    action: "del_seq".into(),
-                    value: "".into(),
-                    conflict: false,
+                    action: ObservedAction::DelSeq,
                 },
                 ObservedPatch {
                     path: "/list/0".into(),
-                    action: "insert".into(),
-                    value: "25".into(),
-                    conflict: false,
+                    action: ObservedAction::Insert {
+                        values: vec![25.into()],
+                        conflict: false
+                    },
                 },
                 ObservedPatch {
                     path: "/list/2".into(),
-                    action: "insert".into(),
-                    value: "35".into(),
-                    conflict: false,
+                    action: ObservedAction::Insert {
+                        values: vec![35.into()],
+                        conflict: false
+                    },
                 },
             ]
         );
@@ -1063,15 +1087,16 @@ mod tests {
             exp(patches),
             vec![ObservedPatch {
                 path: "/list/1".into(),
-                action: "insert".into(),
-                value: "28,27,26,25".into(),
-                conflict: false,
+                action: ObservedAction::Insert {
+                    values: vec![28.into(), 27.into(), 26.into(), 25.into(),],
+                    conflict: false,
+                }
             },]
         );
     }
 
     #[test]
-    fn diff_list_concurent_update() {
+    fn diff_list_concurrent_update() {
         let mut doc1 = AutoCommitWithObs::<Observed<VecOpObserver>>::default();
         let list = doc1.put_object(ROOT, "list", ObjType::List).unwrap();
 
@@ -1104,15 +1129,17 @@ mod tests {
             vec![
                 ObservedPatch {
                     path: "/list/1".into(),
-                    action: "put_seq".into(),
-                    value: 21.into(),
-                    conflict: true,
+                    action: ObservedAction::PutSeq {
+                        value: 21.into(),
+                        conflict: true,
+                    },
                 },
                 ObservedPatch {
                     path: "/list/2".into(),
-                    action: "insert".into(),
-                    value: "36".into(),
-                    conflict: false,
+                    action: ObservedAction::Insert {
+                        values: vec![36.into()],
+                        conflict: false
+                    },
                 },
             ]
         );
@@ -1191,9 +1218,10 @@ mod tests {
             exp.get(0),
             Some(ObservedPatch {
                 path: "/list/2".into(),
-                action: "put_seq".into(),
-                value: ScalarValue::counter(19).into(),
-                conflict: true,
+                action: ObservedAction::PutSeq {
+                    value: ScalarValue::counter(19).into(),
+                    conflict: true
+                },
             })
             .as_ref()
         );
@@ -1201,9 +1229,10 @@ mod tests {
             exp.get(1),
             Some(ObservedPatch {
                 path: "/list/3".into(),
-                action: "put_seq".into(),
-                value: ScalarValue::counter(140).into(),
-                conflict: true,
+                action: ObservedAction::PutSeq {
+                    value: ScalarValue::counter(140).into(),
+                    conflict: true,
+                },
             })
             .as_ref()
         );
@@ -1211,9 +1240,7 @@ mod tests {
             exp.get(2),
             Some(ObservedPatch {
                 path: "/list/4".into(),
-                action: "del_seq".into(),
-                value: "".into(),
-                conflict: false,
+                action: ObservedAction::DelSeq,
             })
             .as_ref()
         );
@@ -1221,7 +1248,7 @@ mod tests {
     }
 
     #[test]
-    fn diff_of_lists_with_concurrent_delets_and_puts() {
+    fn diff_of_lists_with_concurrent_deletes_and_puts() {
         let mut doc1 = AutoCommitWithObs::<Observed<VecOpObserver>>::default();
         let list = doc1.put_object(ROOT, "list", ObjType::List).unwrap();
 
@@ -1264,9 +1291,10 @@ mod tests {
             exp1.get(0),
             Some(ObservedPatch {
                 path: "/list/3".into(),
-                action: "put_seq".into(),
-                value: ScalarValue::Str("C".into()).into(),
-                conflict: false,
+                action: ObservedAction::PutSeq {
+                    value: ScalarValue::Str("C".into()).into(),
+                    conflict: false,
+                },
             })
             .as_ref()
         );
@@ -1274,9 +1302,10 @@ mod tests {
             exp1.get(1),
             Some(ObservedPatch {
                 path: "/list/4".into(),
-                action: "put_seq".into(),
-                value: ScalarValue::Str("Z".into()).into(),
-                conflict: false,
+                action: ObservedAction::PutSeq {
+                    value: ScalarValue::Str("Z".into()).into(),
+                    conflict: false,
+                },
             })
             .as_ref()
         );
@@ -1287,9 +1316,10 @@ mod tests {
             exp2.get(0),
             Some(ObservedPatch {
                 path: "/list/4".into(),
-                action: "insert".into(),
-                value: ScalarValue::Str("\"Z\"".into()).into(),
-                conflict: false,
+                action: ObservedAction::Insert {
+                    values: vec![ScalarValue::Str("Z".into()).into()],
+                    conflict: false,
+                },
             })
             .as_ref()
         );
@@ -1300,9 +1330,10 @@ mod tests {
             exp3.get(0),
             Some(ObservedPatch {
                 path: "/list/3".into(),
-                action: "insert".into(),
-                value: ScalarValue::Str("\"C\"".into()).into(),
-                conflict: false,
+                action: ObservedAction::Insert {
+                    values: vec![ScalarValue::Str("C".into()).into()],
+                    conflict: false,
+                }
             })
             .as_ref()
         );
@@ -1349,9 +1380,10 @@ mod tests {
             exp1.get(0),
             Some(ObservedPatch {
                 path: "/key".into(),
-                action: "put_map".into(),
-                value: ScalarValue::Int(4).into(),
-                conflict: true,
+                action: ObservedAction::PutMap {
+                    value: ScalarValue::Int(4).into(),
+                    conflict: true,
+                },
             })
             .as_ref()
         );
@@ -1362,11 +1394,58 @@ mod tests {
             exp1.get(0),
             Some(ObservedPatch {
                 path: "/key".into(),
-                action: "put_map".into(),
-                value: ScalarValue::Counter(12.into()).into(),
-                conflict: false,
+                action: ObservedAction::PutMap {
+                    value: ScalarValue::Counter(12.into()).into(),
+                    conflict: false,
+                },
             })
             .as_ref()
+        );
+    }
+
+    #[test]
+    fn simple_marks() {
+        let mut doc1 = AutoCommitWithObs::<Observed<VecOpObserver>>::default();
+        let text = doc1.put_object(ROOT, "text", ObjType::Text).unwrap();
+        doc1.splice_text(&text, 0, 0, "the quick fox jumps over the lazy dog")
+            .unwrap();
+        let heads1 = doc1.get_heads();
+        doc1.mark(
+            text,
+            Mark::new("bold".into(), ScalarValue::Boolean(true), 3, 6),
+            crate::marks::ExpandMark::After,
+        )
+        .unwrap();
+
+        let heads2 = doc1.get_heads();
+        let patches12 = doc1.diff(&heads1, &heads2).unwrap().take_patches();
+        let exp1 = exp(patches12);
+        assert_eq!(
+            exp1,
+            vec![ObservedPatch {
+                path: "/text".into(),
+                action: ObservedAction::Mark(vec![ObservedMark {
+                    start: 3,
+                    end: 6,
+                    name: "bold".to_string(),
+                    value: ScalarValue::Boolean(true),
+                }]),
+            }]
+        );
+
+        let patches21 = doc1.diff(&heads2, &heads1).unwrap().take_patches();
+        let exp2 = exp(patches21);
+        assert_eq!(
+            exp2,
+            vec![ObservedPatch {
+                path: "/text".into(),
+                action: ObservedAction::Mark(vec![ObservedMark {
+                    start: 3,
+                    end: 6,
+                    name: "bold".to_string(),
+                    value: ScalarValue::Null,
+                }]),
+            }]
         );
     }
 }
