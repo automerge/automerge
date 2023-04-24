@@ -2,6 +2,7 @@ use crate::storage::parse;
 use crate::ActorId;
 use serde::Serialize;
 use serde::Serializer;
+use std::cmp::{Ord, Ordering};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
@@ -163,6 +164,24 @@ impl Serialize for ExId {
 impl AsRef<ExId> for ExId {
     fn as_ref(&self) -> &ExId {
         self
+    }
+}
+
+impl Ord for ExId {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (ExId::Root, ExId::Root) => Ordering::Equal,
+            (ExId::Root, _) => Ordering::Less,
+            (_, ExId::Root) => Ordering::Greater,
+            (ExId::Id(c1, a1, _), ExId::Id(c2, a2, _)) if c1 == c2 => a1.cmp(a2),
+            (ExId::Id(c1, _, _), ExId::Id(c2, _, _)) => c1.cmp(c2),
+        }
+    }
+}
+
+impl PartialOrd for ExId {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
