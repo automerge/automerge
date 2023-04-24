@@ -7,9 +7,7 @@ use crate::Automerge;
 
 use super::TopOps;
 
-// this iterator is created by the Automerge::values()
-// and Automerge::values_at() methods
-
+/// Iterator created by the [`crate::ReadDoc::values()`] and [`crate::ReadDoc::values_at()`] methods
 #[derive(Default)]
 pub struct Values<'a> {
     iter: Option<(TopOps<'a>, &'a Automerge, Option<Clock>)>,

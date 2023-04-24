@@ -4,9 +4,7 @@ use crate::op_set::OpSet;
 
 use super::TopOps;
 
-// this iterator is created by the Automerge::keys()
-// and Automerge::keys_at() methods
-
+/// Iterator created by the [`crate::ReadDoc::keys()`] and [`crate::ReadDoc::keys_at()`] methods
 #[derive(Default)]
 pub struct Keys<'a> {
     pub(crate) iter: Option<(TopOps<'a>, &'a OpSet)>,
