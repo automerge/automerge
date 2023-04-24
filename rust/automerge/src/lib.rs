@@ -247,6 +247,7 @@ mod convert;
 mod cursor;
 mod error;
 mod exid;
+pub mod hydrate;
 mod indexed_cache;
 pub mod iter;
 mod legacy;

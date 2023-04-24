@@ -8,6 +8,7 @@ use itertools::Itertools;
 use crate::change_graph::ChangeGraph;
 use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
+use crate::hydrate;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{Mark, MarkStateMachine};
 use crate::op_observer::{BranchableObserver, OpObserver};
@@ -882,7 +883,7 @@ impl Automerge {
             .find(|c| c.actor_id() == self.get_actor());
     }
 
-    fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
+    pub(crate) fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
         self.change_graph.clock_for_heads(heads)
     }
 
@@ -1143,6 +1144,11 @@ impl Automerge {
                     })
             })
             .collect())
+    }
+
+    pub fn hydrate(&self, heads: Option<&[ChangeHash]>) -> hydrate::Value {
+        let clock = heads.map(|heads| self.clock_at(heads));
+        self.hydrate_map(&ObjId::root(), clock.as_ref())
     }
 }
 

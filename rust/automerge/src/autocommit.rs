@@ -1,6 +1,7 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
+use crate::hydrate;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{ExpandMark, Mark};
 use crate::op_observer::{BranchableObserver, OpObserver};
@@ -50,7 +51,7 @@ use crate::{
 /// then you can obtain a mutable reference to the observer with [`Self::observer`]
 #[derive(Debug, Clone)]
 pub struct AutoCommitWithObs<Obs: Observation> {
-    doc: Automerge,
+    pub(crate) doc: Automerge,
     transaction: Option<(Obs, TransactionInner)>,
     observation: Obs,
 }
@@ -382,6 +383,10 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
     pub fn sync(&mut self) -> impl SyncDoc + '_ {
         self.ensure_transaction_closed();
         SyncWrapper { inner: self }
+    }
+
+    pub fn hydrate(&self, heads: Option<&[ChangeHash]>) -> hydrate::Value {
+        self.doc.hydrate(heads)
     }
 }
 

@@ -12,6 +12,11 @@ pub(crate) struct TopOps<'a> {
     last_op: Option<(usize, &'a Op)>,
 }
 
+pub(crate) struct TopOp<'a> {
+    pub(crate) op: &'a Op,
+    pub(crate) conflict: bool,
+}
+
 impl<'a> TopOps<'a> {
     pub(crate) fn new(iter: OpTreeIter<'a>, clock: Option<Clock>) -> Self {
         Self {
@@ -27,10 +32,10 @@ impl<'a> TopOps<'a> {
 }
 
 impl<'a> Iterator for TopOps<'a> {
-    type Item = &'a Op;
+    type Item = TopOp<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut result = None;
+        let mut result_op = None;
         loop {
             if let Some(op) = self.iter.next() {
                 let key = op.elemid_or_key();
@@ -43,7 +48,7 @@ impl<'a> Iterator for TopOps<'a> {
                         self.num_ops += 1;
                     }
                     Some(_) => {
-                        result = self.last_op.take().map(|(_op_pos, op)| op);
+                        result_op = self.last_op.take().map(|(_op_pos, op)| op);
                         if visible {
                             self.last_op = Some((self.pos, op));
                         }
@@ -61,14 +66,17 @@ impl<'a> Iterator for TopOps<'a> {
                     }
                 }
                 self.pos += 1;
-                if result.is_some() {
+                if result_op.is_some() {
                     break;
                 }
             } else {
-                result = self.last_op.take().map(|(_op_pos, op)| op);
+                result_op = self.last_op.take().map(|(_op_pos, op)| op);
                 break;
             }
         }
-        result
+        result_op.map(|op| TopOp {
+            op,
+            conflict: self.num_ops > 1,
+        })
     }
 }
