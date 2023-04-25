@@ -8,9 +8,7 @@ use crate::value::Value;
 
 use super::TopOps;
 
-// this iterator is created by the Automerge::map_range() and
-// Automerge::map_range_at() methods
-
+/// Iterator created by the [`crate::ReadDoc::map_range()`] and [`crate::ReadDoc::map_range_at()`] methods
 pub struct MapRange<'a, R: RangeBounds<String>> {
     iter: Option<MapRangeInner<'a, R>>,
 }

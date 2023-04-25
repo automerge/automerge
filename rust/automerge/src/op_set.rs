@@ -41,8 +41,8 @@ impl OpSetInternal {
         &self.text_encoding
     }
 
-    pub(crate) fn text_encoding_mut(&mut self) -> &mut TextEncoding {
-        &mut self.text_encoding
+    pub(crate) fn set_text_encoding(&mut self, encoding: TextEncoding) {
+        self.text_encoding = encoding;
     }
 
     pub(crate) fn builder() -> OpSetBuilder {

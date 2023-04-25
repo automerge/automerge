@@ -9,9 +9,7 @@ use crate::value::Value;
 
 use super::TopOps;
 
-// this iterator is created by the Automerge::list_range()
-// and Automerge::list_range_at() methods
-
+/// Iterator created by the [`crate::ReadDoc::list_range()`] and [`crate::ReadDoc::list_range_at()`] methods
 pub struct ListRange<'a, R: RangeBounds<usize>> {
     iter: Option<ListRangeInner<'a, R>>,
 }
