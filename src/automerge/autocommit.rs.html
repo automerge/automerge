@@ -733,20 +733,33 @@
 <a href="#732" id="732">732</a>
 <a href="#733" id="733">733</a>
 <a href="#734" id="734">734</a>
+<a href="#735" id="735">735</a>
+<a href="#736" id="736">736</a>
+<a href="#737" id="737">737</a>
+<a href="#738" id="738">738</a>
+<a href="#739" id="739">739</a>
+<a href="#740" id="740">740</a>
+<a href="#741" id="741">741</a>
+<a href="#742" id="742">742</a>
+<a href="#743" id="743">743</a>
+<a href="#744" id="744">744</a>
+<a href="#745" id="745">745</a>
+<a href="#746" id="746">746</a>
+<a href="#747" id="747">747</a>
+<a href="#748" id="748">748</a>
+<a href="#749" id="749">749</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
+<span class="kw">use </span><span class="kw">crate</span>::iter::{Keys, ListRange, MapRange, Values};
 <span class="kw">use </span><span class="kw">crate</span>::marks::{ExpandMark, Mark};
 <span class="kw">use </span><span class="kw">crate</span>::op_observer::{BranchableObserver, OpObserver};
 <span class="kw">use </span><span class="kw">crate</span>::sync::SyncDoc;
 <span class="kw">use </span><span class="kw">crate</span>::transaction::{CommitOptions, Transactable};
-<span class="kw">use crate</span>::{
-    sync, Keys, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType, Parents, ReadDoc,
-    ScalarValue,
-};
+<span class="kw">use crate</span>::{sync, ObjType, Parents, ReadDoc, ScalarValue};
 <span class="kw">use crate</span>::{
     transaction::{Observation, Observed, TransactionInner, UnObserved},
-    ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop, TextEncoding, Value, Values,
+    ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop, TextEncoding, Value,
 };
 
 <span class="doccomment">/// An automerge document that automatically manages transactions.
@@ -831,6 +844,19 @@
     <span class="kw">pub fn </span>observer(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut </span>Obs {
         <span class="self">self</span>.ensure_transaction_closed();
         <span class="self">self</span>.observation.observer()
+    }
+
+    <span class="kw">pub fn </span>diff(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        before: <span class="kw-2">&amp;</span>[ChangeHash],
+        after: <span class="kw-2">&amp;</span>[ChangeHash],
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Obs, AutomergeError&gt; {
+        <span class="self">self</span>.ensure_transaction_closed();
+
+        <span class="kw">let </span>observer = <span class="self">self</span>.observation.observer();
+        <span class="kw">let </span><span class="kw-2">mut </span>branch = observer.explicit_branch();
+        <span class="self">self</span>.doc.observe_diff(before, after, <span class="kw-2">&amp;mut </span>branch)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(branch)
     }
 }
 
@@ -1122,32 +1148,36 @@
         <span class="self">self</span>.doc.parents(obj)
     }
 
-    <span class="kw">fn </span>path_to_object&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(ExId, Prop)&gt;, AutomergeError&gt; {
-        <span class="self">self</span>.doc.path_to_object(obj)
+    <span class="kw">fn </span>parents_at&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        heads: <span class="kw-2">&amp;</span>[ChangeHash],
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Parents&lt;<span class="lifetime">&#39;_</span>&gt;, AutomergeError&gt; {
+        <span class="self">self</span>.doc.parents_at(obj, heads)
     }
 
-    <span class="kw">fn </span>keys&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; Keys&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt; {
+    <span class="kw">fn </span>keys&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; Keys&lt;<span class="lifetime">&#39;_</span>&gt; {
         <span class="self">self</span>.doc.keys(obj)
     }
 
-    <span class="kw">fn </span>keys_at&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; KeysAt&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt; {
+    <span class="kw">fn </span>keys_at&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; Keys&lt;<span class="lifetime">&#39;_</span>&gt; {
         <span class="self">self</span>.doc.keys_at(obj, heads)
     }
 
-    <span class="kw">fn </span>map_range&lt;O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;String&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
+    <span class="kw">fn </span>map_range&lt;<span class="lifetime">&#39;a</span>, O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;String&gt; + <span class="lifetime">&#39;a</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
         obj: O,
         range: R,
-    ) -&gt; MapRange&lt;<span class="lifetime">&#39;_</span>, R&gt; {
+    ) -&gt; MapRange&lt;<span class="lifetime">&#39;a</span>, R&gt; {
         <span class="self">self</span>.doc.map_range(obj, range)
     }
 
-    <span class="kw">fn </span>map_range_at&lt;O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;String&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
+    <span class="kw">fn </span>map_range_at&lt;<span class="lifetime">&#39;a</span>, O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;String&gt; + <span class="lifetime">&#39;a</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
         obj: O,
         range: R,
         heads: <span class="kw-2">&amp;</span>[ChangeHash],
-    ) -&gt; MapRangeAt&lt;<span class="lifetime">&#39;_</span>, R&gt; {
+    ) -&gt; MapRange&lt;<span class="lifetime">&#39;a</span>, R&gt; {
         <span class="self">self</span>.doc.map_range_at(obj, range, heads)
     }
 
@@ -1164,7 +1194,7 @@
         obj: O,
         range: R,
         heads: <span class="kw-2">&amp;</span>[ChangeHash],
-    ) -&gt; ListRangeAt&lt;<span class="lifetime">&#39;_</span>, R&gt; {
+    ) -&gt; ListRange&lt;<span class="lifetime">&#39;_</span>, R&gt; {
         <span class="self">self</span>.doc.list_range_at(obj, range, heads)
     }
 

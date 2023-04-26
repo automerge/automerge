@@ -114,18 +114,6 @@
 <a href="#113" id="113">113</a>
 <a href="#114" id="114">114</a>
 <a href="#115" id="115">115</a>
-<a href="#116" id="116">116</a>
-<a href="#117" id="117">117</a>
-<a href="#118" id="118">118</a>
-<a href="#119" id="119">119</a>
-<a href="#120" id="120">120</a>
-<a href="#121" id="121">121</a>
-<a href="#122" id="122">122</a>
-<a href="#123" id="123">123</a>
-<a href="#124" id="124">124</a>
-<a href="#125" id="125">125</a>
-<a href="#126" id="126">126</a>
-<a href="#127" id="127">127</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">super</span>::OpObserver;
 
 <span class="kw">pub fn </span>compose&lt;<span class="lifetime">&#39;a</span>, O1: OpObserver, O2: OpObserver&gt;(
@@ -223,18 +211,6 @@
         <span class="self">self</span>.obs1
             .mark(doc, objid.clone(), marks.clone().into_iter());
         <span class="self">self</span>.obs2.mark(doc, objid, marks.into_iter());
-    }
-
-    <span class="kw">fn </span>unmark&lt;R: <span class="kw">crate</span>::ReadDoc&gt;(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        doc: <span class="kw-2">&amp;</span>R,
-        objid: <span class="kw">crate</span>::ObjId,
-        name: <span class="kw-2">&amp;</span>str,
-        start: usize,
-        end: usize,
-    ) {
-        <span class="self">self</span>.obs1.unmark(doc, objid.clone(), name, start, end);
-        <span class="self">self</span>.obs2.unmark(doc, objid, name, start, end);
     }
 
     <span class="kw">fn </span>delete_map&lt;R: <span class="kw">crate</span>::ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>R, objid: <span class="kw">crate</span>::ObjId, key: <span class="kw-2">&amp;</span>str) {

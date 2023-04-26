@@ -541,25 +541,6 @@
 <a href="#540" id="540">540</a>
 <a href="#541" id="541">541</a>
 <a href="#542" id="542">542</a>
-<a href="#543" id="543">543</a>
-<a href="#544" id="544">544</a>
-<a href="#545" id="545">545</a>
-<a href="#546" id="546">546</a>
-<a href="#547" id="547">547</a>
-<a href="#548" id="548">548</a>
-<a href="#549" id="549">549</a>
-<a href="#550" id="550">550</a>
-<a href="#551" id="551">551</a>
-<a href="#552" id="552">552</a>
-<a href="#553" id="553">553</a>
-<a href="#554" id="554">554</a>
-<a href="#555" id="555">555</a>
-<a href="#556" id="556">556</a>
-<a href="#557" id="557">557</a>
-<a href="#558" id="558">558</a>
-<a href="#559" id="559">559</a>
-<a href="#560" id="560">560</a>
-<a href="#561" id="561">561</a>
 </pre><pre class="rust"><code><span class="attr">#![allow(dead_code)]
 
 </span><span class="kw">use </span>core::fmt::Debug;
@@ -925,17 +906,6 @@
         }
     }
 
-    <span class="kw">fn </span>unmark&lt;R: ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>R, obj: ObjId, name: <span class="kw-2">&amp;</span>str, start: usize, end: usize) {
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(path) = <span class="self">self</span>.get_path(doc, <span class="kw-2">&amp;</span>obj) {
-            <span class="kw">let </span>action = PatchAction::Unmark {
-                name: name.to_string(),
-                start,
-                end,
-            };
-            <span class="self">self</span>.patches.push(Patch { obj, path, action });
-        }
-    }
-
     <span class="kw">fn </span>text_as_seq(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
         <span class="self">self</span>.text_rep == TextRepresentation::Array
     }
@@ -1019,10 +989,6 @@
         <span class="self">self</span>.<span class="number">0</span>.mark(doc, obj, mark)
     }
 
-    <span class="kw">fn </span>unmark&lt;R: ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>R, obj: ObjId, name: <span class="kw-2">&amp;</span>str, start: usize, end: usize) {
-        <span class="self">self</span>.<span class="number">0</span>.unmark(doc, obj, name, start, end)
-    }
-
     <span class="kw">fn </span>text_as_seq(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
         <span class="self">self</span>.<span class="number">0</span>.text_as_seq()
     }
@@ -1091,10 +1057,6 @@
         mark: M,
     ) {
         <span class="self">self</span>.<span class="number">0</span>.mark(doc, obj, mark)
-    }
-
-    <span class="kw">fn </span>unmark&lt;R: ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>R, obj: ObjId, name: <span class="kw-2">&amp;</span>str, start: usize, end: usize) {
-        <span class="self">self</span>.<span class="number">0</span>.unmark(doc, obj, name, start, end)
     }
 
     <span class="kw">fn </span>text_as_seq(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {

@@ -369,6 +369,11 @@
 <a href="#368" id="368">368</a>
 <a href="#369" id="369">369</a>
 <a href="#370" id="370">370</a>
+<a href="#371" id="371">371</a>
+<a href="#372" id="372">372</a>
+<a href="#373" id="373">373</a>
+<a href="#374" id="374">374</a>
+<a href="#375" id="375">375</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">super</span>::change_collector::ChangeCollector;
 <span class="kw">use </span>std::collections::{BTreeSet, HashMap};
 <span class="kw">use </span>tracing::instrument;
@@ -671,8 +676,13 @@
                 op.pred = meta.sorted_opids(preds.into_iter());
             }
             <span class="kw">if let </span>OpType::Put(ScalarValue::Counter(c)) = <span class="kw-2">&amp;mut </span>op.action {
-                <span class="kw">let </span>inc_ops = op.succ.iter().filter_map(|s| <span class="self">self</span>.inc_ops.get(s).copied());
-                c.increment(inc_ops);
+                <span class="kw">for </span>(inc, id) <span class="kw">in </span>op
+                    .succ
+                    .iter()
+                    .filter_map(|s| <span class="self">self</span>.inc_ops.get(s).map(|inc| (inc, s)))
+                {
+                    c.increment(<span class="kw-2">*</span>inc, <span class="kw-2">*</span>id);
+                }
             }
             collector.collect(<span class="self">self</span>.id, op.clone())<span class="question-mark">?</span>;
             ops.push(op)

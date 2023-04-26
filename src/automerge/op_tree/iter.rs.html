@@ -441,6 +441,12 @@
 <a href="#440" id="440">440</a>
 <a href="#441" id="441">441</a>
 <a href="#442" id="442">442</a>
+<a href="#443" id="443">443</a>
+<a href="#444" id="444">444</a>
+<a href="#445" id="445">445</a>
+<a href="#446" id="446">446</a>
+<a href="#447" id="447">447</a>
+<a href="#448" id="448">448</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::cmp::Ordering;
 
 <span class="kw">use </span><span class="kw">crate</span>::types::Op;
@@ -449,6 +455,12 @@
 
 <span class="attr">#[derive(Clone)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpTreeIter&lt;<span class="lifetime">&#39;a</span>&gt;(Inner&lt;<span class="lifetime">&#39;a</span>&gt;);
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Default <span class="kw">for </span>OpTreeIter&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
+        OpTreeIter(Inner::Empty)
+    }
+}
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; OpTreeIter&lt;<span class="lifetime">&#39;a</span>&gt; {
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(tree: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeInternal) -&gt; OpTreeIter&lt;<span class="lifetime">&#39;a</span>&gt; {

@@ -467,30 +467,6 @@
 <a href="#466" id="466">466</a>
 <a href="#467" id="467">467</a>
 <a href="#468" id="468">468</a>
-<a href="#469" id="469">469</a>
-<a href="#470" id="470">470</a>
-<a href="#471" id="471">471</a>
-<a href="#472" id="472">472</a>
-<a href="#473" id="473">473</a>
-<a href="#474" id="474">474</a>
-<a href="#475" id="475">475</a>
-<a href="#476" id="476">476</a>
-<a href="#477" id="477">477</a>
-<a href="#478" id="478">478</a>
-<a href="#479" id="479">479</a>
-<a href="#480" id="480">480</a>
-<a href="#481" id="481">481</a>
-<a href="#482" id="482">482</a>
-<a href="#483" id="483">483</a>
-<a href="#484" id="484">484</a>
-<a href="#485" id="485">485</a>
-<a href="#486" id="486">486</a>
-<a href="#487" id="487">487</a>
-<a href="#488" id="488">488</a>
-<a href="#489" id="489">489</a>
-<a href="#490" id="490">490</a>
-<a href="#491" id="491">491</a>
-<a href="#492" id="492">492</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::{
     cmp::{min, Ordering},
     fmt::Debug,
@@ -543,13 +519,12 @@
         query: <span class="kw-2">&amp;mut </span>Q,
         m: <span class="kw-2">&amp;</span>OpSetMetadata,
         ops: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>[Op],
-        <span class="kw-2">mut </span>skip: <span class="prelude-ty">Option</span>&lt;usize&gt;,
     ) -&gt; bool
     <span class="kw">where
         </span>Q: TreeQuery&lt;<span class="lifetime">&#39;a</span>&gt;,
     {
         <span class="kw">if </span><span class="self">self</span>.is_leaf() {
-            <span class="kw">for </span>e <span class="kw">in </span><span class="self">self</span>.elements.iter().skip(skip.unwrap_or(<span class="number">0</span>)) {
+            <span class="kw">for </span>e <span class="kw">in </span><span class="self">self</span>.elements.iter() {
                 <span class="kw">if </span>query.query_element_with_metadata(<span class="kw-2">&amp;</span>ops[<span class="kw-2">*</span>e], m) == QueryResult::Finish {
                     <span class="kw">return </span><span class="bool-val">true</span>;
                 }
@@ -557,41 +532,18 @@
             <span class="bool-val">false
         </span>} <span class="kw">else </span>{
             <span class="kw">for </span>(child_index, child) <span class="kw">in </span><span class="self">self</span>.children.iter().enumerate() {
-                <span class="kw">match </span>skip {
-                    <span class="prelude-val">Some</span>(n) <span class="kw">if </span>n &gt; child.len() =&gt; {
-                        skip = <span class="prelude-val">Some</span>(n - child.len() - <span class="number">1</span>);
-                    }
-                    <span class="prelude-val">Some</span>(n) <span class="kw">if </span>n == child.len() =&gt; {
-                        skip = <span class="prelude-val">Some</span>(<span class="number">0</span>); <span class="comment">// important to not be None so we never call query_node again
-                        </span><span class="kw">if </span><span class="self">self</span>.search_element(query, m, ops, child_index) {
+                <span class="comment">// descend and try find it
+                </span><span class="kw">match </span>query.query_node_with_metadata(child, m, ops) {
+                    QueryResult::Descend =&gt; {
+                        <span class="kw">if </span>child.search(query, m, ops) {
                             <span class="kw">return </span><span class="bool-val">true</span>;
                         }
                     }
-                    <span class="prelude-val">Some</span>(n) =&gt; {
-                        <span class="kw">if </span>child.search(query, m, ops, <span class="prelude-val">Some</span>(n)) {
-                            <span class="kw">return </span><span class="bool-val">true</span>;
-                        }
-                        skip = <span class="prelude-val">Some</span>(<span class="number">0</span>); <span class="comment">// important to not be None so we never call query_node again
-                        </span><span class="kw">if </span><span class="self">self</span>.search_element(query, m, ops, child_index) {
-                            <span class="kw">return </span><span class="bool-val">true</span>;
-                        }
-                    }
-                    <span class="prelude-val">None </span>=&gt; {
-                        <span class="comment">// descend and try find it
-                        </span><span class="kw">match </span>query.query_node_with_metadata(child, m, ops) {
-                            QueryResult::Descend =&gt; {
-                                <span class="kw">if </span>child.search(query, m, ops, <span class="prelude-val">None</span>) {
-                                    <span class="kw">return </span><span class="bool-val">true</span>;
-                                }
-                            }
-                            QueryResult::Finish =&gt; <span class="kw">return </span><span class="bool-val">true</span>,
-                            QueryResult::Next =&gt; (),
-                            QueryResult::Skip(<span class="kw">_</span>) =&gt; <span class="macro">panic!</span>(<span class="string">&quot;had skip from non-root node&quot;</span>),
-                        }
-                        <span class="kw">if </span><span class="self">self</span>.search_element(query, m, ops, child_index) {
-                            <span class="kw">return </span><span class="bool-val">true</span>;
-                        }
-                    }
+                    QueryResult::Finish =&gt; <span class="kw">return </span><span class="bool-val">true</span>,
+                    QueryResult::Next =&gt; (),
+                }
+                <span class="kw">if </span><span class="self">self</span>.search_element(query, m, ops, child_index) {
+                    <span class="kw">return </span><span class="bool-val">true</span>;
                 }
             }
             <span class="bool-val">false

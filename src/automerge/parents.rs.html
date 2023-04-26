@@ -113,17 +113,10 @@
 <a href="#112" id="112">112</a>
 <a href="#113" id="113">113</a>
 <a href="#114" id="114">114</a>
-<a href="#115" id="115">115</a>
-<a href="#116" id="116">116</a>
-<a href="#117" id="117">117</a>
-<a href="#118" id="118">118</a>
-<a href="#119" id="119">119</a>
-<a href="#120" id="120">120</a>
-<a href="#121" id="121">121</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_set;
 <span class="kw">use </span><span class="kw">crate</span>::op_set::OpSet;
-<span class="kw">use </span><span class="kw">crate</span>::types::{ListEncoding, ObjId};
-<span class="kw">use crate</span>::{exid::ExId, Prop};
+<span class="kw">use </span><span class="kw">crate</span>::types::ObjId;
+<span class="kw">use crate</span>::{clock::Clock, exid::ExId, Prop};
 
 <span class="doccomment">/// An iterator over the &quot;parents&quot; of an object
 ///
@@ -137,6 +130,7 @@
 </span><span class="kw">pub struct </span>Parents&lt;<span class="lifetime">&#39;a</span>&gt; {
     <span class="kw">pub</span>(<span class="kw">crate</span>) obj: ObjId,
     <span class="kw">pub</span>(<span class="kw">crate</span>) ops: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSet,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;,
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Parents&lt;<span class="lifetime">&#39;a</span>&gt; {
@@ -170,21 +164,13 @@
 
     <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
         <span class="kw">if </span><span class="self">self</span>.obj.is_root() {
-            <span class="prelude-val">None
-        </span>} <span class="kw">else if let </span><span class="prelude-val">Some</span>(op_set::Parent { obj, key, visible }) = <span class="self">self</span>.ops.parent_object(<span class="kw-2">&amp;</span><span class="self">self</span>.obj)
-        {
-            <span class="self">self</span>.obj = obj;
-            <span class="prelude-val">Some</span>(Parent {
-                obj: <span class="self">self</span>.ops.id_to_exid(<span class="self">self</span>.obj.<span class="number">0</span>),
-                prop: <span class="self">self
-                    </span>.ops
-                    .export_key(<span class="self">self</span>.obj, key, ListEncoding::List)
-                    .unwrap(),
-                visible,
-            })
-        } <span class="kw">else </span>{
-            <span class="prelude-val">None
-        </span>}
+            <span class="kw">return </span><span class="prelude-val">None</span>;
+        }
+        <span class="kw">let </span>op_set::Parent { obj, prop, visible } =
+            <span class="self">self</span>.ops.parent_object(<span class="kw-2">&amp;</span><span class="self">self</span>.obj, <span class="self">self</span>.clock.as_ref())<span class="question-mark">?</span>;
+        <span class="self">self</span>.obj = obj;
+        <span class="kw">let </span>obj = <span class="self">self</span>.ops.id_to_exid(<span class="self">self</span>.obj.<span class="number">0</span>);
+        <span class="prelude-val">Some</span>(Parent { obj, prop, visible })
     }
 }
 

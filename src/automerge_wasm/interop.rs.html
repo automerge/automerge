@@ -1686,6 +1686,8 @@
 <a href="#1685" id="1685">1685</a>
 <a href="#1686" id="1686">1686</a>
 <a href="#1687" id="1687">1687</a>
+<a href="#1688" id="1688">1688</a>
+<a href="#1689" id="1689">1689</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error::InsertObject;
 <span class="kw">use </span><span class="kw">crate</span>::value::Datatype;
 <span class="kw">use crate</span>::{Automerge, TextRepresentation};
@@ -2560,7 +2562,7 @@
                     }
                 }
             }
-            PatchAction::Mark { .. } | PatchAction::Unmark { .. } =&gt; <span class="prelude-val">Ok</span>(result.into()),
+            PatchAction::Mark { .. } =&gt; <span class="prelude-val">Ok</span>(result.into()),
         }
     }
 
@@ -2620,9 +2622,7 @@
             <span class="comment">//PatchAction::SpliceText { .. } =&gt; Err(to_js_err(&quot;cannot Splice into map&quot;)),
             </span>PatchAction::SpliceText { .. } =&gt; <span class="prelude-val">Err</span>(error::ApplyPatch::SpliceTextInMap),
             PatchAction::PutSeq { .. } =&gt; <span class="prelude-val">Err</span>(error::ApplyPatch::PutIdxInMap),
-            PatchAction::Mark { .. } | PatchAction::Unmark { .. } =&gt; {
-                <span class="prelude-val">Err</span>(error::ApplyPatch::MarkInMap)
-            }
+            PatchAction::Mark { .. } =&gt; <span class="prelude-val">Err</span>(error::ApplyPatch::MarkInMap),
         }
     }
 
@@ -2885,8 +2885,9 @@
                 <span class="comment">// only valid obj&#39;s should make it to this point ...
                 </span><span class="kw">let </span>path: Vec&lt;<span class="kw">_</span>&gt; = <span class="self">self
                     </span>.doc
-                    .path_to_object(<span class="kw-2">&amp;</span>obj)<span class="question-mark">?
-                    </span>.iter()
+                    .parents(<span class="kw-2">&amp;</span>obj)<span class="question-mark">?
+                    </span>.path()
+                    .iter()
                     .map(|p| prop_to_js(<span class="kw-2">&amp;</span>p.<span class="number">1</span>))
                     .collect();
                 <span class="kw">let </span>value = <span class="self">self</span>.export_object(<span class="kw-2">&amp;</span>obj, obj_type.into(), <span class="prelude-val">None</span>, meta)<span class="question-mark">?</span>;
@@ -2951,6 +2952,7 @@
 }
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>JsPatch(<span class="kw">pub</span>(<span class="kw">crate</span>) Patch&lt;u16&gt;);
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>JsPatches(<span class="kw">pub</span>(<span class="kw">crate</span>) Vec&lt;Patch&lt;u16&gt;&gt;);
 
 <span class="kw">fn </span>export_path(path: <span class="kw-2">&amp;</span>[(ObjId, Prop)], end: <span class="kw-2">&amp;</span>Prop) -&gt; Array {
     <span class="kw">let </span>result = Array::new();
@@ -3078,17 +3080,19 @@
                 js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;marks&quot;</span>, marks_array)<span class="question-mark">?</span>;
                 <span class="prelude-val">Ok</span>(result.into())
             }
-            PatchAction::Unmark {
-                name, start, end, ..
-            } =&gt; {
-                js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;action&quot;</span>, <span class="string">&quot;unmark&quot;</span>)<span class="question-mark">?</span>;
-                js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;path&quot;</span>, export_just_path(path.as_slice()))<span class="question-mark">?</span>;
-                js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;name&quot;</span>, name)<span class="question-mark">?</span>;
-                js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;start&quot;</span>, start <span class="kw">as </span>i32)<span class="question-mark">?</span>;
-                js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;end&quot;</span>, end <span class="kw">as </span>i32)<span class="question-mark">?</span>;
-                <span class="prelude-val">Ok</span>(result.into())
-            }
         }
+    }
+}
+
+<span class="kw">impl </span>TryFrom&lt;JsPatches&gt; <span class="kw">for </span>Array {
+    <span class="kw">type </span>Error = error::Export;
+
+    <span class="kw">fn </span>try_from(patches: JsPatches) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, <span class="self">Self</span>::Error&gt; {
+        <span class="kw">let </span>result = Array::new();
+        <span class="kw">for </span>p <span class="kw">in </span>patches.<span class="number">0 </span>{
+            result.push(<span class="kw-2">&amp;</span>JsPatch(p).try_into()<span class="question-mark">?</span>);
+        }
+        <span class="prelude-val">Ok</span>(result)
     }
 }
 

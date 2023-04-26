@@ -94,87 +94,30 @@
 <a href="#93" id="93">93</a>
 <a href="#94" id="94">94</a>
 <a href="#95" id="95">95</a>
-<a href="#96" id="96">96</a>
-<a href="#97" id="97">97</a>
-<a href="#98" id="98">98</a>
-<a href="#99" id="99">99</a>
-<a href="#100" id="100">100</a>
-<a href="#101" id="101">101</a>
-<a href="#102" id="102">102</a>
-<a href="#103" id="103">103</a>
-<a href="#104" id="104">104</a>
-<a href="#105" id="105">105</a>
-<a href="#106" id="106">106</a>
-<a href="#107" id="107">107</a>
-<a href="#108" id="108">108</a>
-<a href="#109" id="109">109</a>
-<a href="#110" id="110">110</a>
-<a href="#111" id="111">111</a>
-<a href="#112" id="112">112</a>
-<a href="#113" id="113">113</a>
-<a href="#114" id="114">114</a>
-<a href="#115" id="115">115</a>
-<a href="#116" id="116">116</a>
-<a href="#117" id="117">117</a>
-<a href="#118" id="118">118</a>
-<a href="#119" id="119">119</a>
-<a href="#120" id="120">120</a>
-<a href="#121" id="121">121</a>
-<a href="#122" id="122">122</a>
-<a href="#123" id="123">123</a>
-<a href="#124" id="124">124</a>
-<a href="#125" id="125">125</a>
-<a href="#126" id="126">126</a>
-<a href="#127" id="127">127</a>
-<a href="#128" id="128">128</a>
-<a href="#129" id="129">129</a>
-<a href="#130" id="130">130</a>
-<a href="#131" id="131">131</a>
-<a href="#132" id="132">132</a>
-<a href="#133" id="133">133</a>
-<a href="#134" id="134">134</a>
-<a href="#135" id="135">135</a>
-<a href="#136" id="136">136</a>
-<a href="#137" id="137">137</a>
-<a href="#138" id="138">138</a>
-<a href="#139" id="139">139</a>
-<a href="#140" id="140">140</a>
-<a href="#141" id="141">141</a>
-<a href="#142" id="142">142</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error::AutomergeError;
 <span class="kw">use </span><span class="kw">crate</span>::op_set::OpSet;
 <span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpTree, OpTreeNode};
-<span class="kw">use </span><span class="kw">crate</span>::query::{QueryResult, TreeQuery};
-<span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, Op, OpIds};
+<span class="kw">use </span><span class="kw">crate</span>::query::{ListState, QueryResult, TreeQuery};
+<span class="kw">use </span><span class="kw">crate</span>::types::{Clock, Key, ListEncoding, Op, OpIds};
 <span class="kw">use </span>std::fmt::Debug;
 
 <span class="doccomment">/// The Nth query walks the tree to find the n-th Node. It skips parts of the tree where it knows
 /// that the nth node can not be in them
 </span><span class="attr">#[derive(Debug, Clone, PartialEq)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Nth&lt;<span class="lifetime">&#39;a</span>&gt; {
-    target: usize,
-    seen: usize,
-    encoding: ListEncoding,
-    last_width: usize,
-    <span class="doccomment">/// last_seen is the target elemid of the last `seen` operation.
-    /// It is used to avoid double counting visible elements (which arise through conflicts) that are split across nodes.
-    </span>last_seen: <span class="prelude-ty">Option</span>&lt;Key&gt;,
+    idx: ListState,
+    clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;,
     <span class="kw">pub</span>(<span class="kw">crate</span>) ops: Vec&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;,
     <span class="kw">pub</span>(<span class="kw">crate</span>) ops_pos: Vec&lt;usize&gt;,
-    <span class="kw">pub</span>(<span class="kw">crate</span>) pos: usize,
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Nth&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(target: usize, encoding: ListEncoding) -&gt; <span class="self">Self </span>{
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(target: usize, encoding: ListEncoding, clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;) -&gt; <span class="self">Self </span>{
         Nth {
-            target,
-            seen: <span class="number">0</span>,
-            last_width: <span class="number">1</span>,
-            encoding,
-            last_seen: <span class="prelude-val">None</span>,
+            idx: ListState::new(encoding, target + <span class="number">1</span>),
+            clock,
             ops: <span class="macro">vec!</span>[],
             ops_pos: <span class="macro">vec!</span>[],
-            pos: <span class="number">0</span>,
         }
     }
 
@@ -188,12 +131,18 @@
         </span><span class="kw">if let </span><span class="prelude-val">Some</span>(e) = <span class="self">self</span>.ops.first().and_then(|op| op.elemid()) {
             <span class="prelude-val">Ok</span>(Key::Seq(e))
         } <span class="kw">else </span>{
-            <span class="prelude-val">Err</span>(AutomergeError::InvalidIndex(<span class="self">self</span>.target))
+            <span class="prelude-val">Err</span>(AutomergeError::InvalidIndex(
+                <span class="self">self</span>.idx.target().saturating_sub(<span class="number">1</span>),
+            ))
         }
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>index(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-        <span class="self">self</span>.seen - <span class="self">self</span>.last_width
+        <span class="self">self</span>.idx.last_index()
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>pos(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.idx.pos()
     }
 }
 
@@ -203,14 +152,12 @@
     }
 
     <span class="kw">fn </span>can_shortcut_search(<span class="kw-2">&amp;mut </span><span class="self">self</span>, tree: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTree) -&gt; bool {
-        <span class="kw">if let </span><span class="prelude-val">Some</span>((index, pos)) = <span class="kw-2">&amp;</span>tree.last_insert {
-            <span class="kw">if </span><span class="kw-2">*</span>index == <span class="self">self</span>.target {
-                <span class="kw">if let </span><span class="prelude-val">Some</span>(op) = tree.internal.get(<span class="kw-2">*</span>pos) {
-                    <span class="self">self</span>.last_width = op.width(<span class="self">self</span>.encoding);
-                    <span class="self">self</span>.seen = <span class="kw-2">*</span>index + <span class="self">self</span>.last_width;
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(last) = <span class="kw-2">&amp;</span>tree.last_insert {
+            <span class="kw">if </span>last.index == <span class="self">self</span>.idx.target().saturating_sub(<span class="number">1</span>) {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(op) = tree.internal.get(last.pos) {
+                    <span class="self">self</span>.idx.seek(last);
                     <span class="self">self</span>.ops.push(op);
-                    <span class="self">self</span>.ops_pos.push(<span class="kw-2">*</span>pos);
-                    <span class="self">self</span>.pos = <span class="kw-2">*</span>pos + <span class="number">1</span>;
+                    <span class="self">self</span>.ops_pos.push(last.pos);
                     <span class="kw">return </span><span class="bool-val">true</span>;
                 }
             }
@@ -219,68 +166,27 @@
     </span>}
 
     <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, child: <span class="kw-2">&amp;</span>OpTreeNode, ops: <span class="kw-2">&amp;</span>[Op]) -&gt; QueryResult {
-        <span class="comment">// We note the number of values stored in / below the node `child`
-        </span><span class="kw">let </span><span class="kw-2">mut </span>num_vis = child.index.visible_len(<span class="self">self</span>.encoding);
-        <span class="comment">// Nodes are sorted by key (obj, prop, ?) and time. We can only see a key twice as
-        // visible if it is the last element and has a conflict and occurs as visible again in
-        // the next node. To prevent double-counting it, we subtract 1 (to pretend we didn&#39;t see
-        // it yet 🫣).
-        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(last_seen) = <span class="self">self</span>.last_seen {
-            <span class="kw">if </span>child.index.has_visible(<span class="kw-2">&amp;</span>last_seen) {
-                num_vis -= <span class="number">1</span>;
-            }
-        }
-
-        <span class="kw">if </span><span class="self">self</span>.seen + num_vis &gt; <span class="self">self</span>.target {
-            <span class="comment">// Enter this node as the nth element is in this node
-            </span>QueryResult::Descend
+        <span class="self">self</span>.idx.check_if_node_is_clean(child);
+        <span class="kw">if </span><span class="self">self</span>.clock.is_none() {
+            <span class="self">self</span>.idx.process_node(child, ops)
         } <span class="kw">else </span>{
-            <span class="comment">// skip this node as no useful ops in it
-            </span><span class="self">self</span>.pos += child.len();
-            <span class="self">self</span>.seen += num_vis;
-
-            <span class="comment">// We have updated seen by the number of visible elements in this index, before we skip it.
-            // We also need to keep track of the last elemid that we have seen (and counted as seen).
-            // We can just use the elemid of the last op in this node as either:
-            // - the insert was at a previous node and this is a long run of overwrites so last_seen should already be set correctly
-            // - the visible op is in this node and the elemid references it so it can be set here
-            // - the visible op is in a future node and so it will be counted as seen there
-            // ⚠️ We also need to reset last_seen if it is set to something else than the last item
-            //   in the child. This means that the child contains an `insert` (so last_seen should
-            //   be reset to None), but no visible op (so last_seen should not be set to a new value)
-            //   The visible op also cannot be in a previous node, because then `last_seen` would
-            //   already be set to the same elemid as the last element in the child.
-            </span><span class="kw">let </span>last_elemid = ops[child.last()].elemid_or_key();
-            <span class="kw">if </span>child.index.has_visible(<span class="kw-2">&amp;</span>last_elemid) {
-                <span class="self">self</span>.last_seen = <span class="prelude-val">Some</span>(last_elemid);
-            } <span class="kw">else if </span><span class="self">self</span>.last_seen.is_some() &amp;&amp; <span class="prelude-val">Some</span>(last_elemid) != <span class="self">self</span>.last_seen {
-                <span class="self">self</span>.last_seen = <span class="prelude-val">None</span>;
-            }
-            QueryResult::Next
+            QueryResult::Descend
         }
     }
 
     <span class="kw">fn </span>query_element(<span class="kw-2">&amp;mut </span><span class="self">self</span>, element: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op) -&gt; QueryResult {
-        <span class="kw">if </span>element.insert {
-            <span class="kw">if </span><span class="self">self</span>.seen &gt; <span class="self">self</span>.target {
-                <span class="kw">return </span>QueryResult::Finish;
+        <span class="kw">if </span>element.insert &amp;&amp; <span class="self">self</span>.idx.done() {
+            QueryResult::Finish
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>visible = element.visible_at(<span class="self">self</span>.clock.as_ref());
+            <span class="kw">let </span>key = element.elemid_or_key();
+            <span class="self">self</span>.idx.process_op(element, key, visible);
+            <span class="kw">if </span>visible &amp;&amp; <span class="self">self</span>.idx.done() {
+                <span class="self">self</span>.ops.push(element);
+                <span class="self">self</span>.ops_pos.push(<span class="self">self</span>.idx.pos().saturating_sub(<span class="number">1</span>));
             }
-            <span class="comment">// we have a new potentially visible element so reset last_seen
-            </span><span class="self">self</span>.last_seen = <span class="prelude-val">None
-        </span>}
-        <span class="kw">let </span>visible = element.visible();
-        <span class="kw">if </span>visible &amp;&amp; <span class="self">self</span>.last_seen.is_none() {
-            <span class="self">self</span>.last_width = element.width(<span class="self">self</span>.encoding);
-            <span class="self">self</span>.seen += <span class="self">self</span>.last_width;
-            <span class="comment">// we have a new visible element
-            </span><span class="self">self</span>.last_seen = <span class="prelude-val">Some</span>(element.elemid_or_key());
+            QueryResult::Next
         }
-        <span class="kw">if </span><span class="self">self</span>.seen &gt; <span class="self">self</span>.target &amp;&amp; visible {
-            <span class="self">self</span>.ops.push(element);
-            <span class="self">self</span>.ops_pos.push(<span class="self">self</span>.pos);
-        }
-        <span class="self">self</span>.pos += <span class="number">1</span>;
-        QueryResult::Next
     }
 }
 </code></pre></div>

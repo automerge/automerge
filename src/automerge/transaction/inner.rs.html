@@ -779,6 +779,25 @@
 <a href="#778" id="778">778</a>
 <a href="#779" id="779">779</a>
 <a href="#780" id="780">780</a>
+<a href="#781" id="781">781</a>
+<a href="#782" id="782">782</a>
+<a href="#783" id="783">783</a>
+<a href="#784" id="784">784</a>
+<a href="#785" id="785">785</a>
+<a href="#786" id="786">786</a>
+<a href="#787" id="787">787</a>
+<a href="#788" id="788">788</a>
+<a href="#789" id="789">789</a>
+<a href="#790" id="790">790</a>
+<a href="#791" id="791">791</a>
+<a href="#792" id="792">792</a>
+<a href="#793" id="793">793</a>
+<a href="#794" id="794">794</a>
+<a href="#795" id="795">795</a>
+<a href="#796" id="796">796</a>
+<a href="#797" id="797">797</a>
+<a href="#798" id="798">798</a>
+<a href="#799" id="799">799</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::num::NonZeroU64;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
@@ -932,13 +951,22 @@
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>rollback(<span class="self">self</span>, doc: <span class="kw-2">&amp;mut </span>Automerge) -&gt; usize {
         <span class="kw">let </span>num = <span class="self">self</span>.pending_ops();
         <span class="comment">// remove in reverse order so sets are removed before makes etc...
+        </span><span class="kw">let </span>encoding = ListEncoding::List; <span class="comment">// encoding doesnt matter here - we dont care what the index is
         </span><span class="kw">for </span>(obj, op) <span class="kw">in </span><span class="self">self</span>.operations.into_iter().rev() {
             <span class="kw">for </span>pred_id <span class="kw">in </span><span class="kw-2">&amp;</span>op.pred {
-                <span class="kw">if let </span><span class="prelude-val">Some</span>(p) = doc.ops().search(<span class="kw-2">&amp;</span>obj, OpIdSearch::new(<span class="kw-2">*</span>pred_id)).index() {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(p) = doc
+                    .ops()
+                    .search(<span class="kw-2">&amp;</span>obj, OpIdSearch::opid(<span class="kw-2">*</span>pred_id, encoding, <span class="prelude-val">None</span>))
+                    .found()
+                {
                     doc.ops_mut().change_vis(<span class="kw-2">&amp;</span>obj, p, |o| o.remove_succ(<span class="kw-2">&amp;</span>op));
                 }
             }
-            <span class="kw">if let </span><span class="prelude-val">Some</span>(pos) = doc.ops().search(<span class="kw-2">&amp;</span>obj, OpIdSearch::new(op.id)).index() {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(pos) = doc
+                .ops()
+                .search(<span class="kw-2">&amp;</span>obj, OpIdSearch::opid(op.id, encoding, <span class="prelude-val">None</span>))
+                .found()
+            {
                 doc.ops_mut().remove(<span class="kw-2">&amp;</span>obj, pos);
             }
         }
@@ -969,16 +997,16 @@
         prop: P,
         value: V,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
-        <span class="kw">let </span>(obj, obj_type) = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
+        <span class="kw">let </span>obj = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
         <span class="kw">let </span>value = value.into();
         <span class="kw">let </span>prop = prop.into();
-        <span class="kw">match </span>(<span class="kw-2">&amp;</span>prop, obj_type) {
+        <span class="kw">match </span>(<span class="kw-2">&amp;</span>prop, obj.typ) {
             (Prop::Map(<span class="kw">_</span>), ObjType::Map) =&gt; <span class="prelude-val">Ok</span>(()),
             (Prop::Seq(<span class="kw">_</span>), ObjType::List) =&gt; <span class="prelude-val">Ok</span>(()),
             (Prop::Seq(<span class="kw">_</span>), ObjType::Text) =&gt; <span class="prelude-val">Ok</span>(()),
-            <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(AutomergeError::InvalidOp(obj_type)),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(AutomergeError::InvalidOp(obj.typ)),
         }<span class="question-mark">?</span>;
-        <span class="self">self</span>.local_op(doc, op_observer, obj, prop, value.into())<span class="question-mark">?</span>;
+        <span class="self">self</span>.local_op(doc, op_observer, obj.id, prop, value.into())<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(())
     }
 
@@ -1003,15 +1031,15 @@
         prop: P,
         value: ObjType,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;ExId, AutomergeError&gt; {
-        <span class="kw">let </span>(obj, obj_type) = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
+        <span class="kw">let </span>obj = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
         <span class="kw">let </span>prop = prop.into();
-        <span class="kw">match </span>(<span class="kw-2">&amp;</span>prop, obj_type) {
+        <span class="kw">match </span>(<span class="kw-2">&amp;</span>prop, obj.typ) {
             (Prop::Map(<span class="kw">_</span>), ObjType::Map) =&gt; <span class="prelude-val">Ok</span>(()),
             (Prop::Seq(<span class="kw">_</span>), ObjType::List) =&gt; <span class="prelude-val">Ok</span>(()),
-            <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(AutomergeError::InvalidOp(obj_type)),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(AutomergeError::InvalidOp(obj.typ)),
         }<span class="question-mark">?</span>;
         <span class="kw">let </span>id = <span class="self">self
-            </span>.local_op(doc, op_observer, obj, prop, value.into())<span class="question-mark">?
+            </span>.local_op(doc, op_observer, obj.id, prop, value.into())<span class="question-mark">?
             </span>.unwrap();
         <span class="kw">let </span>id = doc.id_to_exid(id);
         <span class="prelude-val">Ok</span>(id)
@@ -1071,13 +1099,13 @@
         index: usize,
         value: V,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
-        <span class="kw">let </span>(obj, obj_type) = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
-        <span class="kw">if </span>!<span class="macro">matches!</span>(obj_type, ObjType::List | ObjType::Text) {
-            <span class="kw">return </span><span class="prelude-val">Err</span>(AutomergeError::InvalidOp(obj_type));
+        <span class="kw">let </span>obj = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
+        <span class="kw">if </span>!<span class="macro">matches!</span>(obj.typ, ObjType::List | ObjType::Text) {
+            <span class="kw">return </span><span class="prelude-val">Err</span>(AutomergeError::InvalidOp(obj.typ));
         }
         <span class="kw">let </span>value = value.into();
         <span class="macro">tracing::trace!</span>(obj=<span class="question-mark">?</span>obj, value=<span class="question-mark">?</span>value, <span class="string">&quot;inserting value&quot;</span>);
-        <span class="self">self</span>.do_insert(doc, op_observer, obj, index, value.into())<span class="question-mark">?</span>;
+        <span class="self">self</span>.do_insert(doc, op_observer, obj.id, index, value.into())<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(())
     }
 
@@ -1089,11 +1117,11 @@
         index: usize,
         value: ObjType,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;ExId, AutomergeError&gt; {
-        <span class="kw">let </span>(obj, obj_type) = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
-        <span class="kw">if </span>!<span class="macro">matches!</span>(obj_type, ObjType::List | ObjType::Text) {
-            <span class="kw">return </span><span class="prelude-val">Err</span>(AutomergeError::InvalidOp(obj_type));
+        <span class="kw">let </span>obj = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
+        <span class="kw">if </span>!<span class="macro">matches!</span>(obj.typ, ObjType::List | ObjType::Text) {
+            <span class="kw">return </span><span class="prelude-val">Err</span>(AutomergeError::InvalidOp(obj.typ));
         }
-        <span class="kw">let </span>id = <span class="self">self</span>.do_insert(doc, op_observer, obj, index, value.into())<span class="question-mark">?</span>;
+        <span class="kw">let </span>id = <span class="self">self</span>.do_insert(doc, op_observer, obj.id, index, value.into())<span class="question-mark">?</span>;
         <span class="kw">let </span>id = doc.id_to_exid(id);
         <span class="prelude-val">Ok</span>(id)
     }
@@ -1158,37 +1186,42 @@
 
         <span class="kw">let </span>id = <span class="self">self</span>.next_id();
         <span class="kw">let </span>prop_index = doc.ops_mut().m.props.cache(prop.clone());
-        <span class="kw">let </span>query = doc.ops().search(<span class="kw-2">&amp;</span>obj, query::Prop::new(prop_index));
+        <span class="kw">let </span>key = Key::Map(prop_index);
+        <span class="kw">let </span>prop: Prop = prop.into();
+        <span class="kw">let </span>query = doc
+            .ops()
+            .seek_ops_by_prop(<span class="kw-2">&amp;</span>obj, prop.clone(), ListEncoding::List, <span class="prelude-val">None</span>);
+        <span class="kw">let </span>ops = query.ops;
+        <span class="kw">let </span>ops_pos = query.ops_pos;
 
         <span class="comment">// no key present to delete
-        </span><span class="kw">if </span>query.ops.is_empty() &amp;&amp; action == OpType::Delete {
+        </span><span class="kw">if </span>ops.is_empty() &amp;&amp; action == OpType::Delete {
             <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>);
         }
 
-        <span class="kw">if </span>query.ops.len() == <span class="number">1 </span>&amp;&amp; query.ops[<span class="number">0</span>].is_noop(<span class="kw-2">&amp;</span>action) {
+        <span class="kw">if </span>ops.len() == <span class="number">1 </span>&amp;&amp; ops[<span class="number">0</span>].is_noop(<span class="kw-2">&amp;</span>action) {
             <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>);
         }
 
         <span class="comment">// increment operations are only valid against counter values.
         // if there are multiple values (from conflicts) then we just need one of them to be a counter.
-        </span><span class="kw">if </span><span class="macro">matches!</span>(action, OpType::Increment(<span class="kw">_</span>)) &amp;&amp; query.ops.iter().all(|op| !op.is_counter()) {
+        </span><span class="kw">if </span><span class="macro">matches!</span>(action, OpType::Increment(<span class="kw">_</span>)) &amp;&amp; ops.iter().all(|op| !op.is_counter()) {
             <span class="kw">return </span><span class="prelude-val">Err</span>(AutomergeError::MissingCounter);
         }
 
-        <span class="kw">let </span>pred = doc.ops().m.sorted_opids(query.ops.iter().map(|o| o.id));
+        <span class="kw">let </span>pred = doc.ops().m.sorted_opids(ops.iter().map(|o| o.id));
 
         <span class="kw">let </span>op = Op {
             id,
             action,
-            key: Key::Map(prop_index),
+            key,
             succ: Default::default(),
             pred,
             insert: <span class="bool-val">false</span>,
         };
 
-        <span class="kw">let </span>pos = query.pos;
-        <span class="kw">let </span>ops_pos = query.ops_pos;
-        <span class="self">self</span>.insert_local_op(doc, op_observer, Prop::Map(prop), op, pos, obj, <span class="kw-2">&amp;</span>ops_pos);
+        <span class="kw">let </span>pos = query.end_pos;
+        <span class="self">self</span>.insert_local_op(doc, op_observer, prop, op, pos, obj, <span class="kw-2">&amp;</span>ops_pos);
 
         <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(id))
     }
@@ -1203,7 +1236,7 @@
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;OpId&gt;, AutomergeError&gt; {
         <span class="kw">let </span>query = doc
             .ops()
-            .search(<span class="kw-2">&amp;</span>obj, query::Nth::new(index, ListEncoding::List));
+            .search(<span class="kw-2">&amp;</span>obj, query::Nth::new(index, ListEncoding::List, <span class="prelude-val">None</span>));
 
         <span class="kw">let </span>id = <span class="self">self</span>.next_id();
         <span class="kw">let </span>pred = doc.ops().m.sorted_opids(query.ops.iter().map(|o| o.id));
@@ -1228,7 +1261,7 @@
             insert: <span class="bool-val">false</span>,
         };
 
-        <span class="kw">let </span>pos = query.pos;
+        <span class="kw">let </span>pos = query.pos();
         <span class="kw">let </span>ops_pos = query.ops_pos;
         <span class="self">self</span>.insert_local_op(doc, op_observer, Prop::Seq(index), op, pos, obj, <span class="kw-2">&amp;</span>ops_pos);
 
@@ -1243,8 +1276,14 @@
         prop: P,
         value: i64,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
-        <span class="kw">let </span>obj = doc.exid_to_obj(obj)<span class="question-mark">?</span>.<span class="number">0</span>;
-        <span class="self">self</span>.local_op(doc, op_observer, obj, prop.into(), OpType::Increment(value))<span class="question-mark">?</span>;
+        <span class="kw">let </span>obj = doc.exid_to_obj(obj)<span class="question-mark">?</span>;
+        <span class="self">self</span>.local_op(
+            doc,
+            op_observer,
+            obj.id,
+            prop.into(),
+            OpType::Increment(value),
+        )<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(())
     }
 
@@ -1255,15 +1294,15 @@
         ex_obj: <span class="kw-2">&amp;</span>ExId,
         prop: P,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
-        <span class="kw">let </span>(obj, obj_type) = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
+        <span class="kw">let </span>obj = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
         <span class="kw">let </span>prop = prop.into();
-        <span class="kw">if </span>obj_type == ObjType::Text {
-            <span class="kw">let </span>index = prop.to_index().ok_or(AutomergeError::InvalidOp(obj_type))<span class="question-mark">?</span>;
+        <span class="kw">if </span>obj.typ == ObjType::Text {
+            <span class="kw">let </span>index = prop.to_index().ok_or(AutomergeError::InvalidOp(obj.typ))<span class="question-mark">?</span>;
             <span class="self">self</span>.inner_splice(
                 doc,
                 op_observer,
                 SpliceArgs {
-                    obj,
+                    obj: obj.id,
                     index,
                     del: <span class="number">1</span>,
                     values: <span class="macro">vec!</span>[],
@@ -1271,7 +1310,7 @@
                 },
             )<span class="question-mark">?</span>;
         } <span class="kw">else </span>{
-            <span class="self">self</span>.local_op(doc, op_observer, obj, prop, OpType::Delete)<span class="question-mark">?</span>;
+            <span class="self">self</span>.local_op(doc, op_observer, obj.id, prop, OpType::Delete)<span class="question-mark">?</span>;
         }
         <span class="prelude-val">Ok</span>(())
     }
@@ -1287,16 +1326,16 @@
         del: usize,
         vals: <span class="kw">impl </span>IntoIterator&lt;Item = ScalarValue&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
-        <span class="kw">let </span>(obj, obj_type) = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
-        <span class="kw">if </span>!<span class="macro">matches!</span>(obj_type, ObjType::List | ObjType::Text) {
-            <span class="kw">return </span><span class="prelude-val">Err</span>(AutomergeError::InvalidOp(obj_type));
+        <span class="kw">let </span>obj = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
+        <span class="kw">if </span>!<span class="macro">matches!</span>(obj.typ, ObjType::List | ObjType::Text) {
+            <span class="kw">return </span><span class="prelude-val">Err</span>(AutomergeError::InvalidOp(obj.typ));
         }
         <span class="kw">let </span>values = vals.into_iter().collect();
         <span class="self">self</span>.inner_splice(
             doc,
             op_observer,
             SpliceArgs {
-                obj,
+                obj: obj.id,
                 index,
                 del,
                 values,
@@ -1315,16 +1354,16 @@
         del: usize,
         text: <span class="kw-2">&amp;</span>str,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
-        <span class="kw">let </span>(obj, obj_type) = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
-        <span class="kw">if </span>obj_type != ObjType::Text {
-            <span class="kw">return </span><span class="prelude-val">Err</span>(AutomergeError::InvalidOp(obj_type));
+        <span class="kw">let </span>obj = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
+        <span class="kw">if </span>obj.typ != ObjType::Text {
+            <span class="kw">return </span><span class="prelude-val">Err</span>(AutomergeError::InvalidOp(obj.typ));
         }
         <span class="kw">let </span>values = text.chars().map(ScalarValue::from).collect();
         <span class="self">self</span>.inner_splice(
             doc,
             op_observer,
             SpliceArgs {
-                obj,
+                obj: obj.id,
                 index,
                 del,
                 values,
@@ -1351,7 +1390,9 @@
         </span><span class="kw">let </span><span class="kw-2">mut </span>deleted = <span class="number">0</span>;
         <span class="kw">while </span>deleted &lt; del {
             <span class="comment">// TODO: could do this with a single custom query
-            </span><span class="kw">let </span>query = doc.ops().search(<span class="kw-2">&amp;</span>obj, query::Nth::new(index, encoding));
+            </span><span class="kw">let </span>query = doc
+                .ops()
+                .search(<span class="kw-2">&amp;</span>obj, query::Nth::new(index, encoding, <span class="prelude-val">None</span>));
 
             <span class="comment">// if we delete in the middle of a multi-character
             // move cursor back to the beginning and expand the del width
@@ -1407,7 +1448,8 @@
                 <span class="self">self</span>.operations.push((obj, op));
             }
 
-            doc.ops_mut().hint(<span class="kw-2">&amp;</span>obj, cursor - width, pos - <span class="number">1</span>);
+            doc.ops_mut()
+                .hint(<span class="kw-2">&amp;</span>obj, cursor - width, pos - <span class="number">1</span>, width, key);
 
             <span class="comment">// handle the observer
             </span><span class="kw">if let </span><span class="prelude-val">Some</span>(obs) = op_observer.as_mut() {
@@ -1438,26 +1480,22 @@
         mark: Mark&lt;<span class="lifetime">&#39;_</span>&gt;,
         expand: ExpandMark,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
-        <span class="kw">let </span>(obj, _obj_type) = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
+        <span class="kw">let </span>obj = doc.exid_to_obj(ex_obj)<span class="question-mark">?</span>;
         <span class="kw">if let </span><span class="prelude-val">Some</span>(obs) = op_observer {
             <span class="kw">let </span>action = OpType::MarkBegin(expand.before(), mark.data.clone().into_owned());
-            <span class="self">self</span>.do_insert(doc, <span class="prelude-val">Some</span>(obs), obj, mark.start, action)<span class="question-mark">?</span>;
+            <span class="self">self</span>.do_insert(doc, <span class="prelude-val">Some</span>(obs), obj.id, mark.start, action)<span class="question-mark">?</span>;
             <span class="self">self</span>.do_insert(
                 doc,
                 <span class="prelude-val">Some</span>(obs),
-                obj,
+                obj.id,
                 mark.end,
                 OpType::MarkEnd(expand.after()),
             )<span class="question-mark">?</span>;
-            <span class="kw">if </span>mark.value().is_null() {
-                obs.unmark(doc, ex_obj.clone(), mark.name(), mark.start, mark.end);
-            } <span class="kw">else </span>{
-                obs.mark(doc, ex_obj.clone(), <span class="prelude-val">Some</span>(mark).into_iter())
-            }
+            obs.mark(doc, ex_obj.clone(), <span class="prelude-val">Some</span>(mark).into_iter());
         } <span class="kw">else </span>{
             <span class="kw">let </span>action = OpType::MarkBegin(expand.before(), mark.data.into_owned());
-            <span class="self">self</span>.do_insert::&lt;Obs&gt;(doc, <span class="prelude-val">None</span>, obj, mark.start, action)<span class="question-mark">?</span>;
-            <span class="self">self</span>.do_insert::&lt;Obs&gt;(doc, <span class="prelude-val">None</span>, obj, mark.end, OpType::MarkEnd(expand.after()))<span class="question-mark">?</span>;
+            <span class="self">self</span>.do_insert::&lt;Obs&gt;(doc, <span class="prelude-val">None</span>, obj.id, mark.start, action)<span class="question-mark">?</span>;
+            <span class="self">self</span>.do_insert::&lt;Obs&gt;(doc, <span class="prelude-val">None</span>, obj.id, mark.end, OpType::MarkEnd(expand.after()))<span class="question-mark">?</span>;
         }
         <span class="prelude-val">Ok</span>(())
     }

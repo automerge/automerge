@@ -223,10 +223,6 @@
 <a href="#222" id="222">222</a>
 <a href="#223" id="223">223</a>
 <a href="#224" id="224">224</a>
-<a href="#225" id="225">225</a>
-<a href="#226" id="226">226</a>
-<a href="#227" id="227">227</a>
-<a href="#228" id="228">228</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 
 <span class="kw">use </span><span class="kw">crate</span>::marks::Mark;
@@ -356,8 +352,6 @@
         mark: M,
     );
 
-    <span class="kw">fn </span>unmark&lt;R: ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>R, objid: ExId, name: <span class="kw-2">&amp;</span>str, start: usize, end: usize);
-
     <span class="doccomment">/// Whether to call sequence methods or `splice_text` when encountering changes in text
     ///
     /// Returns `false` by default
@@ -377,6 +371,14 @@
     /// Called when creating a new transaction.  Observer branch will be merged on `commit()` or
     /// thrown away on `rollback()`
     </span><span class="kw">fn </span>branch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>;
+
+    <span class="doccomment">/// Branch used by diff to communicate that patches are explicitly being asked for
+    </span><span class="kw">fn </span>explicit_branch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self
+    </span><span class="kw">where
+        </span><span class="self">Self</span>: Sized,
+    {
+        <span class="self">self</span>.branch()
+    }
 
     <span class="doccomment">/// Merge observed information from a transaction.
     ///
@@ -433,16 +435,6 @@
         _doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>R,
         _objid: ExId,
         _mark: M,
-    ) {
-    }
-
-    <span class="kw">fn </span>unmark&lt;R: ReadDoc&gt;(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        _doc: <span class="kw-2">&amp;</span>R,
-        _objid: ExId,
-        _name: <span class="kw-2">&amp;</span>str,
-        _start: usize,
-        _end: usize,
     ) {
     }
 

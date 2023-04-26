@@ -208,10 +208,15 @@
 <a href="#207" id="207">207</a>
 <a href="#208" id="208">208</a>
 <a href="#209" id="209">209</a>
+<a href="#210" id="210">210</a>
+<a href="#211" id="211">211</a>
 </pre><pre class="rust"><code><span class="kw">use crate</span>::{
-    error::AutomergeError, exid::ExId, keys::Keys, keys_at::KeysAt, list_range::ListRange,
-    list_range_at::ListRangeAt, map_range::MapRange, map_range_at::MapRangeAt, marks::Mark,
-    parents::Parents, values::Values, Change, ChangeHash, ObjType, Prop, Value,
+    error::AutomergeError,
+    exid::ExId,
+    iter::{Keys, ListRange, MapRange, Values},
+    marks::Mark,
+    parents::Parents,
+    Change, ChangeHash, ObjType, Prop, Value,
 };
 
 <span class="kw">use </span>std::ops::RangeBounds;
@@ -238,26 +243,25 @@
     /// value.
     </span><span class="kw">fn </span>parents&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;Parents&lt;<span class="lifetime">&#39;_</span>&gt;, AutomergeError&gt;;
 
-    <span class="doccomment">/// Get the path to an object
+    <span class="doccomment">/// Get the parents of the object `obj` as at `heads`
     ///
-    /// &quot;path&quot; here means the sequence of `(object Id, key)` pairs which leads
-    /// to the object in question.
-    ///
-    /// ### Errors
-    ///
-    /// * If the object ID `obj` is not in the document
-    </span><span class="kw">fn </span>path_to_object&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;(ExId, Prop)&gt;, AutomergeError&gt;;
+    /// See [`Self::parents`]
+    </span><span class="kw">fn </span>parents_at&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        heads: <span class="kw-2">&amp;</span>[ChangeHash],
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Parents&lt;<span class="lifetime">&#39;_</span>&gt;, AutomergeError&gt;;
 
     <span class="doccomment">/// Get the keys of the object `obj`.
     ///
     /// For a map this returns the keys of the map.
     /// For a list this returns the element ids (opids) encoded as strings.
-    </span><span class="kw">fn </span>keys&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; Keys&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt;;
+    </span><span class="kw">fn </span>keys&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; Keys&lt;<span class="lifetime">&#39;_</span>&gt;;
 
     <span class="doccomment">/// Get the keys of the object `obj` as at `heads`
     ///
     /// See [`Self::keys`]
-    </span><span class="kw">fn </span>keys_at&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; KeysAt&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt;;
+    </span><span class="kw">fn </span>keys_at&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; Keys&lt;<span class="lifetime">&#39;_</span>&gt;;
 
     <span class="doccomment">/// Iterate over the keys and values of the map `obj` in the given range.
     ///
@@ -265,11 +269,11 @@
     ///
     /// The returned iterator yields `(key, value, exid)` tuples, where the
     /// third element is the ID of the operation which created the value.
-    </span><span class="kw">fn </span>map_range&lt;O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;String&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
+    </span><span class="kw">fn </span>map_range&lt;<span class="lifetime">&#39;a</span>, O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;String&gt; + <span class="lifetime">&#39;a</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
         obj: O,
         range: R,
-    ) -&gt; MapRange&lt;<span class="lifetime">&#39;_</span>, R&gt;;
+    ) -&gt; MapRange&lt;<span class="lifetime">&#39;a</span>, R&gt;;
 
     <span class="doccomment">/// Iterate over the keys and values of the map `obj` in the given range as
     /// at `heads`
@@ -280,12 +284,12 @@
     /// third element is the ID of the operation which created the value.
     ///
     /// See [`Self::map_range`]
-    </span><span class="kw">fn </span>map_range_at&lt;O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;String&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
+    </span><span class="kw">fn </span>map_range_at&lt;<span class="lifetime">&#39;a</span>, O: AsRef&lt;ExId&gt;, R: RangeBounds&lt;String&gt; + <span class="lifetime">&#39;a</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
         obj: O,
         range: R,
         heads: <span class="kw-2">&amp;</span>[ChangeHash],
-    ) -&gt; MapRangeAt&lt;<span class="lifetime">&#39;_</span>, R&gt;;
+    ) -&gt; MapRange&lt;<span class="lifetime">&#39;a</span>, R&gt;;
 
     <span class="doccomment">/// Iterate over the indexes and values of the list or text `obj` in the given range.
     ///
@@ -308,7 +312,7 @@
         obj: O,
         range: R,
         heads: <span class="kw-2">&amp;</span>[ChangeHash],
-    ) -&gt; ListRangeAt&lt;<span class="lifetime">&#39;_</span>, R&gt;;
+    ) -&gt; ListRange&lt;<span class="lifetime">&#39;_</span>, R&gt;;
 
     <span class="doccomment">/// Iterate over the values in a map, list, or text object
     ///

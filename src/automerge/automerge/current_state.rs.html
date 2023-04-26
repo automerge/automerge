@@ -788,16 +788,6 @@
 <a href="#787" id="787">787</a>
 <a href="#788" id="788">788</a>
 <a href="#789" id="789">789</a>
-<a href="#790" id="790">790</a>
-<a href="#791" id="791">791</a>
-<a href="#792" id="792">792</a>
-<a href="#793" id="793">793</a>
-<a href="#794" id="794">794</a>
-<a href="#795" id="795">795</a>
-<a href="#796" id="796">796</a>
-<a href="#797" id="797">797</a>
-<a href="#798" id="798">798</a>
-<a href="#799" id="799">799</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::borrow::Cow;
 
 <span class="kw">use </span>itertools::Itertools;
@@ -866,7 +856,7 @@
     <span class="kw">let </span>state = ops_by_key
         .into_iter()
         .fold(state, |<span class="kw-2">mut </span>state, (_key, key_ops)| {
-            <span class="kw">if let </span><span class="prelude-val">Some</span>(o) = key_ops.filter(|o| o.visible_or_mark()).last() {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(o) = key_ops.filter(|o| o.visible_or_mark(<span class="prelude-val">None</span>)).last() {
                 <span class="kw">match </span><span class="kw-2">&amp;</span>o.action {
                     OpType::Make(<span class="kw">_</span>) | OpType::Put(<span class="kw">_</span>) =&gt; {
                         state.text.push_str(o.to_str());
@@ -906,7 +896,7 @@
         .into_iter()
         .filter_map(|(_key, key_ops)| {
             key_ops
-                .filter(|o| o.visible_or_mark())
+                .filter(|o| o.visible_or_mark(<span class="prelude-val">None</span>))
                 .filter_map(|o| <span class="kw">match </span><span class="kw-2">&amp;</span>o.action {
                     OpType::Make(obj_type) =&gt; <span class="prelude-val">Some</span>((Value::Object(<span class="kw-2">*</span>obj_type), o.id)),
                     OpType::Put(value) =&gt; <span class="prelude-val">Some</span>((Value::Scalar(Cow::Borrowed(value)), o.id)),
@@ -1238,16 +1228,6 @@
             _doc: <span class="kw-2">&amp;</span>R,
             _objid: <span class="kw">crate</span>::ObjId,
             _mark: M,
-        ) {
-        }
-
-        <span class="kw">fn </span>unmark&lt;R: ReadDoc&gt;(
-            <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-            _doc: <span class="kw-2">&amp;</span>R,
-            _objid: <span class="kw">crate</span>::ObjId,
-            _name: <span class="kw-2">&amp;</span>str,
-            _start: usize,
-            _end: usize,
         ) {
         }
     }

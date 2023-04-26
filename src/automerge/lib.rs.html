@@ -290,19 +290,6 @@
 <a href="#289" id="289">289</a>
 <a href="#290" id="290">290</a>
 <a href="#291" id="291">291</a>
-<a href="#292" id="292">292</a>
-<a href="#293" id="293">293</a>
-<a href="#294" id="294">294</a>
-<a href="#295" id="295">295</a>
-<a href="#296" id="296">296</a>
-<a href="#297" id="297">297</a>
-<a href="#298" id="298">298</a>
-<a href="#299" id="299">299</a>
-<a href="#300" id="300">300</a>
-<a href="#301" id="301">301</a>
-<a href="#302" id="302">302</a>
-<a href="#303" id="303">303</a>
-<a href="#304" id="304">304</a>
 </pre><pre class="rust"><code><span class="doccomment">//! # Automerge
 //!
 //! Automerge is a library of data structures for building collaborative,
@@ -556,13 +543,8 @@
 <span class="kw">mod </span>error;
 <span class="kw">mod </span>exid;
 <span class="kw">mod </span>indexed_cache;
-<span class="kw">mod </span>keys;
-<span class="kw">mod </span>keys_at;
+<span class="kw">pub mod </span>iter;
 <span class="kw">mod </span>legacy;
-<span class="kw">mod </span>list_range;
-<span class="kw">mod </span>list_range_at;
-<span class="kw">mod </span>map_range;
-<span class="kw">mod </span>map_range_at;
 <span class="kw">pub mod </span>marks;
 <span class="kw">pub mod </span>op_observer;
 <span class="kw">mod </span>op_set;
@@ -576,7 +558,6 @@
 <span class="kw">pub mod </span>transaction;
 <span class="kw">mod </span>types;
 <span class="kw">mod </span>value;
-<span class="kw">mod </span>values;
 <span class="attr">#[cfg(feature = <span class="string">&quot;optree-visualisation&quot;</span>)]
 </span><span class="kw">mod </span>visualisation;
 
@@ -588,13 +569,7 @@
 <span class="kw">pub use </span>error::InvalidActorId;
 <span class="kw">pub use </span>error::InvalidChangeHashSlice;
 <span class="kw">pub use </span>exid::{ExId <span class="kw">as </span>ObjId, ObjIdFromBytesError};
-<span class="kw">pub use </span>keys::Keys;
-<span class="kw">pub use </span>keys_at::KeysAt;
 <span class="kw">pub use </span>legacy::Change <span class="kw">as </span>ExpandedChange;
-<span class="kw">pub use </span>list_range::ListRange;
-<span class="kw">pub use </span>list_range_at::ListRangeAt;
-<span class="kw">pub use </span>map_range::MapRange;
-<span class="kw">pub use </span>map_range_at::MapRangeAt;
 <span class="kw">pub use </span>op_observer::{
     OpObserver, Patch, PatchAction, ToggleObserver, VecOpObserver, VecOpObserver16,
 };
@@ -603,7 +578,6 @@
 <span class="kw">pub use </span>sequence_tree::SequenceTree;
 <span class="kw">pub use </span>types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, TextEncoding};
 <span class="kw">pub use </span>value::{ScalarValue, Value};
-<span class="kw">pub use </span>values::Values;
 
 <span class="doccomment">/// The object ID for the root map of a document
 </span><span class="kw">pub const </span>ROOT: ObjId = ObjId::Root;

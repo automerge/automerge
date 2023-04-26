@@ -372,18 +372,249 @@
 <a href="#371" id="371">371</a>
 <a href="#372" id="372">372</a>
 <a href="#373" id="373">373</a>
-</pre><pre class="rust"><code><span class="kw">use </span>std::{fmt::Debug, mem, ops::RangeBounds};
-
+<a href="#374" id="374">374</a>
+<a href="#375" id="375">375</a>
+<a href="#376" id="376">376</a>
+<a href="#377" id="377">377</a>
+<a href="#378" id="378">378</a>
+<a href="#379" id="379">379</a>
+<a href="#380" id="380">380</a>
+<a href="#381" id="381">381</a>
+<a href="#382" id="382">382</a>
+<a href="#383" id="383">383</a>
+<a href="#384" id="384">384</a>
+<a href="#385" id="385">385</a>
+<a href="#386" id="386">386</a>
+<a href="#387" id="387">387</a>
+<a href="#388" id="388">388</a>
+<a href="#389" id="389">389</a>
+<a href="#390" id="390">390</a>
+<a href="#391" id="391">391</a>
+<a href="#392" id="392">392</a>
+<a href="#393" id="393">393</a>
+<a href="#394" id="394">394</a>
+<a href="#395" id="395">395</a>
+<a href="#396" id="396">396</a>
+<a href="#397" id="397">397</a>
+<a href="#398" id="398">398</a>
+<a href="#399" id="399">399</a>
+<a href="#400" id="400">400</a>
+<a href="#401" id="401">401</a>
+<a href="#402" id="402">402</a>
+<a href="#403" id="403">403</a>
+<a href="#404" id="404">404</a>
+<a href="#405" id="405">405</a>
+<a href="#406" id="406">406</a>
+<a href="#407" id="407">407</a>
+<a href="#408" id="408">408</a>
+<a href="#409" id="409">409</a>
+<a href="#410" id="410">410</a>
+<a href="#411" id="411">411</a>
+<a href="#412" id="412">412</a>
+<a href="#413" id="413">413</a>
+<a href="#414" id="414">414</a>
+<a href="#415" id="415">415</a>
+<a href="#416" id="416">416</a>
+<a href="#417" id="417">417</a>
+<a href="#418" id="418">418</a>
+<a href="#419" id="419">419</a>
+<a href="#420" id="420">420</a>
+<a href="#421" id="421">421</a>
+<a href="#422" id="422">422</a>
+<a href="#423" id="423">423</a>
+<a href="#424" id="424">424</a>
+<a href="#425" id="425">425</a>
+<a href="#426" id="426">426</a>
+<a href="#427" id="427">427</a>
+<a href="#428" id="428">428</a>
+<a href="#429" id="429">429</a>
+<a href="#430" id="430">430</a>
+<a href="#431" id="431">431</a>
+<a href="#432" id="432">432</a>
+<a href="#433" id="433">433</a>
+<a href="#434" id="434">434</a>
+<a href="#435" id="435">435</a>
+<a href="#436" id="436">436</a>
+<a href="#437" id="437">437</a>
+<a href="#438" id="438">438</a>
+<a href="#439" id="439">439</a>
+<a href="#440" id="440">440</a>
+<a href="#441" id="441">441</a>
+<a href="#442" id="442">442</a>
+<a href="#443" id="443">443</a>
+<a href="#444" id="444">444</a>
+<a href="#445" id="445">445</a>
+<a href="#446" id="446">446</a>
+<a href="#447" id="447">447</a>
+<a href="#448" id="448">448</a>
+<a href="#449" id="449">449</a>
+<a href="#450" id="450">450</a>
+<a href="#451" id="451">451</a>
+<a href="#452" id="452">452</a>
+<a href="#453" id="453">453</a>
+<a href="#454" id="454">454</a>
+<a href="#455" id="455">455</a>
+<a href="#456" id="456">456</a>
+<a href="#457" id="457">457</a>
+<a href="#458" id="458">458</a>
+<a href="#459" id="459">459</a>
+<a href="#460" id="460">460</a>
+<a href="#461" id="461">461</a>
+<a href="#462" id="462">462</a>
+<a href="#463" id="463">463</a>
+<a href="#464" id="464">464</a>
+<a href="#465" id="465">465</a>
+<a href="#466" id="466">466</a>
+<a href="#467" id="467">467</a>
+<a href="#468" id="468">468</a>
+<a href="#469" id="469">469</a>
+<a href="#470" id="470">470</a>
+<a href="#471" id="471">471</a>
+<a href="#472" id="472">472</a>
+<a href="#473" id="473">473</a>
+<a href="#474" id="474">474</a>
+<a href="#475" id="475">475</a>
+<a href="#476" id="476">476</a>
+<a href="#477" id="477">477</a>
+<a href="#478" id="478">478</a>
+<a href="#479" id="479">479</a>
+<a href="#480" id="480">480</a>
+<a href="#481" id="481">481</a>
+<a href="#482" id="482">482</a>
+<a href="#483" id="483">483</a>
+<a href="#484" id="484">484</a>
+<a href="#485" id="485">485</a>
+<a href="#486" id="486">486</a>
+<a href="#487" id="487">487</a>
+<a href="#488" id="488">488</a>
+<a href="#489" id="489">489</a>
+<a href="#490" id="490">490</a>
+<a href="#491" id="491">491</a>
+<a href="#492" id="492">492</a>
+<a href="#493" id="493">493</a>
+<a href="#494" id="494">494</a>
+<a href="#495" id="495">495</a>
+<a href="#496" id="496">496</a>
+<a href="#497" id="497">497</a>
+<a href="#498" id="498">498</a>
+<a href="#499" id="499">499</a>
+<a href="#500" id="500">500</a>
+<a href="#501" id="501">501</a>
+<a href="#502" id="502">502</a>
+<a href="#503" id="503">503</a>
+<a href="#504" id="504">504</a>
+<a href="#505" id="505">505</a>
+<a href="#506" id="506">506</a>
+<a href="#507" id="507">507</a>
+<a href="#508" id="508">508</a>
+<a href="#509" id="509">509</a>
+<a href="#510" id="510">510</a>
+<a href="#511" id="511">511</a>
+<a href="#512" id="512">512</a>
+<a href="#513" id="513">513</a>
+<a href="#514" id="514">514</a>
+<a href="#515" id="515">515</a>
+<a href="#516" id="516">516</a>
+<a href="#517" id="517">517</a>
+<a href="#518" id="518">518</a>
+<a href="#519" id="519">519</a>
+<a href="#520" id="520">520</a>
+<a href="#521" id="521">521</a>
+<a href="#522" id="522">522</a>
+<a href="#523" id="523">523</a>
+<a href="#524" id="524">524</a>
+<a href="#525" id="525">525</a>
+<a href="#526" id="526">526</a>
+<a href="#527" id="527">527</a>
+<a href="#528" id="528">528</a>
+<a href="#529" id="529">529</a>
+<a href="#530" id="530">530</a>
+<a href="#531" id="531">531</a>
+<a href="#532" id="532">532</a>
+<a href="#533" id="533">533</a>
+<a href="#534" id="534">534</a>
+<a href="#535" id="535">535</a>
+<a href="#536" id="536">536</a>
+<a href="#537" id="537">537</a>
+<a href="#538" id="538">538</a>
+<a href="#539" id="539">539</a>
+<a href="#540" id="540">540</a>
+<a href="#541" id="541">541</a>
+<a href="#542" id="542">542</a>
+<a href="#543" id="543">543</a>
+<a href="#544" id="544">544</a>
+<a href="#545" id="545">545</a>
+<a href="#546" id="546">546</a>
+<a href="#547" id="547">547</a>
+<a href="#548" id="548">548</a>
+<a href="#549" id="549">549</a>
+<a href="#550" id="550">550</a>
+<a href="#551" id="551">551</a>
+<a href="#552" id="552">552</a>
+<a href="#553" id="553">553</a>
+<a href="#554" id="554">554</a>
+<a href="#555" id="555">555</a>
+<a href="#556" id="556">556</a>
+<a href="#557" id="557">557</a>
+<a href="#558" id="558">558</a>
+<a href="#559" id="559">559</a>
+<a href="#560" id="560">560</a>
+<a href="#561" id="561">561</a>
+<a href="#562" id="562">562</a>
+<a href="#563" id="563">563</a>
+<a href="#564" id="564">564</a>
+<a href="#565" id="565">565</a>
+<a href="#566" id="566">566</a>
+<a href="#567" id="567">567</a>
+<a href="#568" id="568">568</a>
+<a href="#569" id="569">569</a>
+<a href="#570" id="570">570</a>
+<a href="#571" id="571">571</a>
+<a href="#572" id="572">572</a>
+<a href="#573" id="573">573</a>
+<a href="#574" id="574">574</a>
+<a href="#575" id="575">575</a>
+<a href="#576" id="576">576</a>
+<a href="#577" id="577">577</a>
+<a href="#578" id="578">578</a>
+<a href="#579" id="579">579</a>
+<a href="#580" id="580">580</a>
+<a href="#581" id="581">581</a>
+<a href="#582" id="582">582</a>
+<a href="#583" id="583">583</a>
+<a href="#584" id="584">584</a>
+<a href="#585" id="585">585</a>
+<a href="#586" id="586">586</a>
+<a href="#587" id="587">587</a>
+<a href="#588" id="588">588</a>
+<a href="#589" id="589">589</a>
+<a href="#590" id="590">590</a>
+<a href="#591" id="591">591</a>
+<a href="#592" id="592">592</a>
+<a href="#593" id="593">593</a>
+<a href="#594" id="594">594</a>
+<a href="#595" id="595">595</a>
+<a href="#596" id="596">596</a>
+<a href="#597" id="597">597</a>
+<a href="#598" id="598">598</a>
+<a href="#599" id="599">599</a>
+<a href="#600" id="600">600</a>
+<a href="#601" id="601">601</a>
+<a href="#602" id="602">602</a>
+<a href="#603" id="603">603</a>
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::iter::TopOps;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="kw">crate</span>::op_set::OpSetMetadata;
 <span class="kw">use crate</span>::{
     clock::Clock,
-    query::{<span class="self">self</span>, ChangeVisibility, QueryResult, TreeQuery},
+    query::{<span class="self">self</span>, ChangeVisibility, Index, QueryResult, TreeQuery},
+    Automerge, OpObserver,
 };
 <span class="kw">use crate</span>::{
-    types::{ObjId, Op, OpId},
-    ObjType,
+    types::{Key, ListEncoding, ObjId, ObjMeta, Op, OpId, Prop},
+    ObjType, OpType,
 };
-<span class="kw">use </span>std::collections::HashSet;
+<span class="kw">use </span>std::cmp::Ordering;
+<span class="kw">use </span>std::{fmt::Debug, mem};
 
 <span class="kw">mod </span>iter;
 <span class="kw">mod </span>node;
@@ -403,7 +634,15 @@
     /// inserted into the op_set - this allows us to
     /// short circuit the query if the follow op is another
     /// insert or delete at the same spot
-    </span><span class="kw">pub</span>(<span class="kw">crate</span>) last_insert: <span class="prelude-ty">Option</span>&lt;(usize, usize)&gt;,
+    </span><span class="kw">pub</span>(<span class="kw">crate</span>) last_insert: <span class="prelude-ty">Option</span>&lt;LastInsert&gt;,
+}
+
+<span class="attr">#[derive(Debug, Clone, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>LastInsert {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) pos: usize,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) index: usize,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) width: usize,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) key: Key,
 }
 
 <span class="kw">impl </span>OpTree {
@@ -422,6 +661,109 @@
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
         <span class="self">self</span>.internal.len()
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>index(<span class="kw-2">&amp;</span><span class="self">self</span>, encoding: ListEncoding) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Index&gt; {
+        <span class="kw">let </span>node = <span class="self">self</span>.internal.root_node.as_ref()<span class="question-mark">?</span>;
+        <span class="kw">if </span>encoding == ListEncoding::List || node.index.has_never_seen_puts() {
+            <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>node.index)
+        } <span class="kw">else </span>{
+            <span class="prelude-val">None
+        </span>}
+    }
+}
+
+<span class="attr">#[derive(Default, Clone, Debug)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>FoundOpWithoutObserver {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) succ: Vec&lt;usize&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) pos: usize,
+}
+
+<span class="attr">#[derive(Default, Clone, Debug)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>FoundOpWithObserver&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) before: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) num_before: usize,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) overwritten: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) after: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) succ: Vec&lt;usize&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) pos: usize,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) index: usize,
+}
+
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; FoundOpWithObserver&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>observe&lt;Obs: OpObserver&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: <span class="kw-2">&amp;</span>ObjMeta,
+        op: <span class="kw-2">&amp;</span>Op,
+        doc: <span class="kw-2">&amp;</span>Automerge,
+        observer: <span class="kw-2">&amp;mut </span>Obs,
+    ) {
+        <span class="kw">let </span>ex_obj = doc.ops().id_to_exid(obj.id.<span class="number">0</span>);
+
+        <span class="kw">if </span>op.insert {
+            <span class="kw">if </span>op.is_mark() {
+                <span class="kw">if let </span>OpType::MarkEnd(<span class="kw">_</span>) = op.action {
+                    <span class="kw">let </span>q = doc.ops().search(
+                        <span class="kw-2">&amp;</span>obj.id,
+                        query::SeekMark::new(op.id.prev(), <span class="self">self</span>.pos, obj.encoding),
+                    );
+                    observer.mark(doc, ex_obj, q.marks.into_iter());
+                }
+            } <span class="kw">else if </span>obj.typ == ObjType::Text {
+                observer.splice_text(doc, ex_obj, <span class="self">self</span>.index, op.to_str());
+            } <span class="kw">else </span>{
+                <span class="kw">let </span>value = (op.value(), doc.ops().id_to_exid(op.id));
+                observer.insert(doc, ex_obj, <span class="self">self</span>.index, value, <span class="bool-val">false</span>);
+            }
+            <span class="kw">return</span>;
+        }
+
+        <span class="kw">let </span>key: Prop = <span class="kw">match </span>op.key {
+            Key::Map(i) =&gt; doc.ops().m.props[i].clone().into(),
+            Key::Seq(<span class="kw">_</span>) =&gt; <span class="self">self</span>.index.into(),
+        };
+
+        <span class="kw">if </span>op.is_delete() {
+            <span class="kw">match </span>(<span class="self">self</span>.before, <span class="self">self</span>.overwritten, <span class="self">self</span>.after) {
+                (<span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(over), <span class="prelude-val">None</span>) =&gt; <span class="kw">match </span>key {
+                    Prop::Map(k) =&gt; observer.delete_map(doc, ex_obj, <span class="kw-2">&amp;</span>k),
+                    Prop::Seq(index) =&gt; {
+                        observer.delete_seq(doc, ex_obj, index, over.width(obj.encoding))
+                    }
+                },
+                (<span class="prelude-val">Some</span>(before), <span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="prelude-val">None</span>) =&gt; {
+                    <span class="kw">let </span>value = (before.value(), doc.ops().id_to_exid(before.id));
+                    <span class="kw">let </span>conflict = <span class="self">self</span>.num_before &gt; <span class="number">1</span>;
+                    observer.expose(doc, ex_obj, key, value, conflict);
+                }
+                <span class="kw">_ </span>=&gt; { <span class="comment">/* do nothing */ </span>}
+            }
+        } <span class="kw">else if let </span><span class="prelude-val">Some</span>(value) = op.get_increment_value() {
+            <span class="comment">// only observe this increment if the counter is visible, i.e. the counter&#39;s
+            </span><span class="kw">if </span><span class="self">self</span>.after.is_none() {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(counter) = <span class="self">self</span>.overwritten {
+                    <span class="kw">if </span>op.overwrites(counter) {
+                        observer.increment(doc, ex_obj, key, (value, doc.ops().id_to_exid(op.id)));
+                    }
+                }
+            }
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>conflict = <span class="self">self</span>.before.is_some();
+            <span class="kw">let </span>value = (op.value(), doc.ops().id_to_exid(op.id));
+            <span class="kw">if </span>op.is_list_op()
+                &amp;&amp; <span class="self">self</span>.overwritten.is_none()
+                &amp;&amp; <span class="self">self</span>.before.is_none()
+                &amp;&amp; <span class="self">self</span>.after.is_none()
+            {
+                observer.insert(doc, ex_obj, <span class="self">self</span>.index, value, conflict);
+            } <span class="kw">else if </span><span class="self">self</span>.after.is_some() {
+                <span class="kw">if </span><span class="self">self</span>.before.is_none() {
+                    observer.flag_conflict(doc, ex_obj, key);
+                }
+            } <span class="kw">else </span>{
+                observer.put(doc, ex_obj, key, value, conflict);
+            }
+        }
     }
 }
 
@@ -445,68 +787,191 @@
         <span class="self">self</span>.root_node.as_ref().map_or(<span class="number">0</span>, |n| n.len())
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>keys(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;query::Keys&lt;<span class="lifetime">&#39;_</span>&gt;&gt; {
-        <span class="kw">if </span><span class="self">self</span>.root_node.is_some() {
-            <span class="prelude-val">Some</span>(query::Keys::new(<span class="self">self</span>))
-        } <span class="kw">else </span>{
-            <span class="prelude-val">None
-        </span>}
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>top_ops(<span class="kw-2">&amp;</span><span class="self">self</span>, clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;) -&gt; TopOps&lt;<span class="lifetime">&#39;_</span>&gt; {
+        TopOps::new(OpTreeIter::new(<span class="self">self</span>), clock)
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>keys_at(<span class="kw-2">&amp;</span><span class="self">self</span>, clock: Clock) -&gt; <span class="prelude-ty">Option</span>&lt;query::KeysAt&lt;<span class="lifetime">&#39;_</span>&gt;&gt; {
-        <span class="kw">if </span><span class="self">self</span>.root_node.is_some() {
-            <span class="prelude-val">Some</span>(query::KeysAt::new(<span class="self">self</span>, clock))
-        } <span class="kw">else </span>{
-            <span class="prelude-val">None
-        </span>}
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>map_range&lt;<span class="lifetime">&#39;a</span>, R: RangeBounds&lt;String&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
-        range: R,
-        meta: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetMetadata,
-    ) -&gt; <span class="prelude-ty">Option</span>&lt;query::MapRange&lt;<span class="lifetime">&#39;a</span>, R&gt;&gt; {
-        <span class="kw">if </span><span class="self">self</span>.root_node.is_some() {
-            <span class="prelude-val">Some</span>(query::MapRange::new(range, <span class="self">self</span>, meta))
-        } <span class="kw">else </span>{
-            <span class="prelude-val">None
-        </span>}
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>map_range_at&lt;<span class="lifetime">&#39;a</span>, R: RangeBounds&lt;String&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
-        range: R,
-        meta: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpSetMetadata,
-        clock: Clock,
-    ) -&gt; <span class="prelude-ty">Option</span>&lt;query::MapRangeAt&lt;<span class="lifetime">&#39;a</span>, R&gt;&gt; {
-        <span class="kw">if </span><span class="self">self</span>.root_node.is_some() {
-            <span class="prelude-val">Some</span>(query::MapRangeAt::new(range, <span class="self">self</span>, meta, clock))
-        } <span class="kw">else </span>{
-            <span class="prelude-val">None
-        </span>}
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>list_range&lt;R: RangeBounds&lt;usize&gt;&gt;(
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>found_op_without_observer(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
-        range: R,
-    ) -&gt; <span class="prelude-ty">Option</span>&lt;query::ListRange&lt;<span class="lifetime">&#39;_</span>, R&gt;&gt; {
-        <span class="kw">if </span><span class="self">self</span>.root_node.is_some() {
-            <span class="prelude-val">Some</span>(query::ListRange::new(range, <span class="self">self</span>))
-        } <span class="kw">else </span>{
-            <span class="prelude-val">None
-        </span>}
+        meta: <span class="kw-2">&amp;</span>OpSetMetadata,
+        op: <span class="kw-2">&amp;</span>Op,
+        <span class="kw-2">mut </span>pos: usize,
+    ) -&gt; FoundOpWithoutObserver {
+        <span class="kw">let </span><span class="kw-2">mut </span>iter = <span class="self">self</span>.iter();
+        <span class="kw">let </span><span class="kw-2">mut </span>succ = <span class="macro">vec!</span>[];
+        <span class="kw">let </span><span class="kw-2">mut </span>next = iter.nth(pos);
+        <span class="kw">while let </span><span class="prelude-val">Some</span>(e) = next {
+            <span class="kw">if </span>e.elemid_or_key() != op.elemid_or_key() {
+                <span class="kw">break</span>;
+            }
+
+            <span class="kw">if </span>meta.lamport_cmp(e.id, op.id) == Ordering::Greater {
+                <span class="kw">break</span>;
+            }
+
+            <span class="kw">if </span>op.overwrites(e) {
+                succ.push(pos);
+            }
+
+            pos += <span class="number">1</span>;
+            next = iter.next();
+        }
+
+        FoundOpWithoutObserver { pos, succ }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>list_range_at&lt;R: RangeBounds&lt;usize&gt;&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        range: R,
-        clock: Clock,
-    ) -&gt; <span class="prelude-ty">Option</span>&lt;query::ListRangeAt&lt;<span class="lifetime">&#39;_</span>, R&gt;&gt; {
-        <span class="kw">if </span><span class="self">self</span>.root_node.is_some() {
-            <span class="prelude-val">Some</span>(query::ListRangeAt::new(range, clock, <span class="self">self</span>))
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>found_op_with_observer&lt;<span class="lifetime">&#39;a</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
+        meta: <span class="kw-2">&amp;</span>OpSetMetadata,
+        op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
+        <span class="kw-2">mut </span>pos: usize,
+        index: usize,
+    ) -&gt; FoundOpWithObserver&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>iter = <span class="self">self</span>.iter();
+        <span class="kw">let </span><span class="kw-2">mut </span>found = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>before = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>num_before = <span class="number">0</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>overwritten = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>after = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>succ = <span class="macro">vec!</span>[];
+        <span class="kw">let </span><span class="kw-2">mut </span>next = iter.nth(pos);
+        <span class="kw">while let </span><span class="prelude-val">Some</span>(e) = next {
+            <span class="kw">if </span>e.elemid_or_key() != op.elemid_or_key() {
+                <span class="kw">break</span>;
+            }
+
+            <span class="kw">if </span>found.is_none() &amp;&amp; meta.lamport_cmp(e.id, op.id) == Ordering::Greater {
+                found = <span class="prelude-val">Some</span>(pos);
+            }
+
+            <span class="kw">if </span>op.overwrites(e) {
+                succ.push(pos);
+
+                <span class="kw">if </span>e.visible() {
+                    overwritten = <span class="prelude-val">Some</span>(e);
+                }
+            } <span class="kw">else if </span>e.visible() {
+                <span class="kw">if </span>found.is_none() &amp;&amp; overwritten.is_none() {
+                    before = <span class="prelude-val">Some</span>(e);
+                    num_before += <span class="number">1</span>;
+                } <span class="kw">else </span>{
+                    after = <span class="prelude-val">Some</span>(e);
+                }
+            }
+
+            pos += <span class="number">1</span>;
+            next = iter.next();
+        }
+
+        pos = found.unwrap_or(pos);
+
+        FoundOpWithObserver {
+            before,
+            num_before,
+            after,
+            overwritten,
+            succ,
+            pos,
+            index,
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>seek_opid&lt;<span class="lifetime">&#39;a</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
+        opid: OpId,
+        encoding: ListEncoding,
+        clock: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Clock&gt;,
+        meta: <span class="kw-2">&amp;</span>OpSetMetadata,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op, usize, bool)&gt; {
+        <span class="kw">let </span>query = <span class="self">self</span>.search(query::OpIdSearch::opid(opid, encoding, clock), meta);
+        <span class="kw">let </span>pos = query.found()<span class="question-mark">?</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>iter = <span class="self">self</span>.iter();
+        <span class="kw">let </span>op = iter.nth(pos)<span class="question-mark">?</span>;
+        <span class="kw">let </span>index = query.index_for(op);
+        <span class="kw">for </span>e <span class="kw">in </span>iter {
+            <span class="kw">if </span>e.elemid_or_key() != op.elemid_or_key() {
+                <span class="kw">break</span>;
+            }
+
+            <span class="kw">if </span>e.visible() {
+                <span class="kw">return </span><span class="prelude-val">Some</span>((op, index, <span class="bool-val">false</span>));
+            }
+        }
+        <span class="prelude-val">Some</span>((op, index, op.visible()))
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>find_op_with_observer&lt;<span class="lifetime">&#39;a</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
+        op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
+        encoding: ListEncoding,
+        meta: <span class="kw-2">&amp;</span>OpSetMetadata,
+    ) -&gt; FoundOpWithObserver&lt;<span class="lifetime">&#39;a</span>&gt; {
+        <span class="kw">if let </span>Key::Seq(<span class="kw">_</span>) = op.key {
+            <span class="kw">let </span>query = <span class="self">self</span>.search(query::OpIdSearch::op(op, encoding), meta);
+            <span class="kw">let </span>pos = query.pos();
+            <span class="kw">let </span>index = query.index();
+            <span class="self">self</span>.found_op_with_observer(meta, op, pos, index)
         } <span class="kw">else </span>{
-            <span class="prelude-val">None
-        </span>}
+            <span class="kw">let </span>pos = <span class="self">self</span>.binary_search_by(|o| meta.key_cmp(<span class="kw-2">&amp;</span>o.key, <span class="kw-2">&amp;</span>op.key));
+            <span class="self">self</span>.found_op_with_observer(meta, op, pos, <span class="number">0</span>)
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>find_op_without_observer(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        op: <span class="kw-2">&amp;</span>Op,
+        meta: <span class="kw-2">&amp;</span>OpSetMetadata,
+    ) -&gt; FoundOpWithoutObserver {
+        <span class="kw">if let </span>Key::Seq(<span class="kw">_</span>) = op.key {
+            <span class="kw">let </span>query = <span class="self">self</span>.search(query::SimpleOpIdSearch::op(op), meta);
+            <span class="kw">let </span>pos = query.pos;
+            <span class="self">self</span>.found_op_without_observer(meta, op, pos)
+        } <span class="kw">else </span>{
+            <span class="kw">let </span>pos = <span class="self">self</span>.binary_search_by(|o| meta.key_cmp(<span class="kw-2">&amp;</span>o.key, <span class="kw-2">&amp;</span>op.key));
+            <span class="self">self</span>.found_op_without_observer(meta, op, pos)
+        }
+    }
+
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>seek_ops_by_prop&lt;<span class="lifetime">&#39;a</span>&gt;(
+        <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
+        meta: <span class="kw-2">&amp;</span>OpSetMetadata,
+        prop: Prop,
+        encoding: ListEncoding,
+        clock: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Clock&gt;,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;OpsFound&lt;<span class="lifetime">&#39;a</span>&gt;&gt; {
+        <span class="kw">match </span>prop {
+            Prop::Map(key_name) =&gt; {
+                <span class="kw">let </span>key = Key::Map(meta.props.lookup(<span class="kw-2">&amp;</span>key_name)<span class="question-mark">?</span>);
+                <span class="kw">let </span>pos = <span class="self">self</span>.binary_search_by(|op| meta.key_cmp(<span class="kw-2">&amp;</span>op.key, <span class="kw-2">&amp;</span>key));
+                <span class="prelude-val">Some</span>(OpsFound::new(pos, <span class="self">self</span>.iter(), key, clock))
+            }
+            Prop::Seq(index) =&gt; {
+                <span class="kw">let </span>query = <span class="self">self</span>.search(query::Nth::new(index, encoding, clock.cloned()), meta);
+                <span class="kw">let </span>end_pos = query.pos();
+                <span class="prelude-val">Some</span>(OpsFound {
+                    ops: query.ops,
+                    ops_pos: query.ops_pos,
+                    end_pos,
+                })
+            }
+        }
+    }
+
+    <span class="kw">fn </span>binary_search_by&lt;F&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, f: F) -&gt; usize
+    <span class="kw">where
+        </span>F: Fn(<span class="kw-2">&amp;</span>Op) -&gt; Ordering,
+    {
+        <span class="kw">let </span><span class="kw-2">mut </span>right = <span class="self">self</span>.len();
+        <span class="kw">let </span><span class="kw-2">mut </span>left = <span class="number">0</span>;
+        <span class="kw">while </span>left &lt; right {
+            <span class="kw">let </span>seq = (left + right) / <span class="number">2</span>;
+            <span class="kw">if </span>f(<span class="self">self</span>.get(seq).unwrap()) == Ordering::Less {
+                left = seq + <span class="number">1</span>;
+            } <span class="kw">else </span>{
+                right = seq;
+            }
+        }
+        left
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>search&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>: <span class="lifetime">&#39;a</span>, Q&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span><span class="self">self</span>, <span class="kw-2">mut </span>query: Q, m: <span class="kw-2">&amp;</span>OpSetMetadata) -&gt; Q
@@ -515,8 +980,7 @@
     {
         <span class="self">self</span>.root_node.as_ref().map(|root| {
             <span class="kw">match </span>query.query_node_with_metadata(root, m, <span class="kw-2">&amp;</span><span class="self">self</span>.ops) {
-                QueryResult::Descend =&gt; root.search(<span class="kw-2">&amp;mut </span>query, m, <span class="kw-2">&amp;</span><span class="self">self</span>.ops, <span class="prelude-val">None</span>),
-                QueryResult::Skip(skip) =&gt; root.search(<span class="kw-2">&amp;mut </span>query, m, <span class="kw-2">&amp;</span><span class="self">self</span>.ops, <span class="prelude-val">Some</span>(skip)),
+                QueryResult::Descend =&gt; root.search(<span class="kw-2">&amp;mut </span>query, m, <span class="kw-2">&amp;</span><span class="self">self</span>.ops),
                 <span class="kw">_ </span>=&gt; <span class="bool-val">true</span>,
             }
         });
@@ -652,44 +1116,40 @@
     }
 }
 
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; IntoIterator <span class="kw">for </span><span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeInternal {
-    <span class="kw">type </span>Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op;
+<span class="attr">#[derive(Default, Debug, Clone, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>OpsFound&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) ops: Vec&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) ops_pos: Vec&lt;usize&gt;,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) end_pos: usize,
+}
 
-    <span class="kw">type </span>IntoIter = Iter&lt;<span class="lifetime">&#39;a</span>&gt;;
-
-    <span class="kw">fn </span>into_iter(<span class="self">self</span>) -&gt; <span class="self">Self</span>::IntoIter {
-        Iter {
-            inner: <span class="self">self</span>,
-            index: <span class="number">0</span>,
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; OpsFound&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>new&lt;T: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;&gt;(
+        start_pos: usize,
+        <span class="kw-2">mut </span>iter: T,
+        key: Key,
+        clock: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Clock&gt;,
+    ) -&gt; <span class="self">Self </span>{
+        <span class="kw">let </span><span class="kw-2">mut </span>found = <span class="self">Self </span>{
+            end_pos: start_pos,
+            ops: <span class="macro">vec!</span>[],
+            ops_pos: <span class="macro">vec!</span>[],
+        };
+        <span class="kw">let </span><span class="kw-2">mut </span>next = iter.nth(start_pos);
+        <span class="kw">while let </span><span class="prelude-val">Some</span>(op) = next {
+            <span class="kw">if </span>op.elemid_or_key() == key {
+                <span class="kw">if </span>op.visible_at(clock) {
+                    found.ops.push(op);
+                    found.ops_pos.push(found.end_pos);
+                }
+                found.end_pos += <span class="number">1</span>;
+            } <span class="kw">else </span>{
+                <span class="kw">break</span>;
+            }
+            next = iter.next();
         }
+        found
     }
-}
-
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>Iter&lt;<span class="lifetime">&#39;a</span>&gt; {
-    inner: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>OpTreeInternal,
-    index: usize,
-}
-
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>Iter&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">type </span>Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op;
-
-    <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
-        <span class="self">self</span>.index += <span class="number">1</span>;
-        <span class="self">self</span>.inner.get(<span class="self">self</span>.index - <span class="number">1</span>)
-    }
-
-    <span class="kw">fn </span>nth(<span class="kw-2">&amp;mut </span><span class="self">self</span>, n: usize) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
-        <span class="self">self</span>.index += n + <span class="number">1</span>;
-        <span class="self">self</span>.inner.get(<span class="self">self</span>.index - <span class="number">1</span>)
-    }
-}
-
-<span class="attr">#[derive(Debug, Clone, PartialEq)]
-</span><span class="kw">struct </span>CounterData {
-    pos: usize,
-    val: i64,
-    succ: HashSet&lt;OpId&gt;,
-    op: Op,
 }
 
 <span class="attr">#[cfg(test)]

@@ -177,6 +177,8 @@
 <a href="#176" id="176">176</a>
 <a href="#177" id="177">177</a>
 <a href="#178" id="178">178</a>
+<a href="#179" id="179">179</a>
+<a href="#180" id="180">180</a>
 </pre><pre class="rust"><code><span class="attr">#![allow(dead_code)]
 
 </span><span class="kw">use </span><span class="kw">crate</span>::ChangeHash;
@@ -331,12 +333,6 @@
         }
     }
 
-    <span class="kw">fn </span>unmark&lt;R: ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, doc: <span class="kw-2">&amp;</span>R, obj: ObjId, name: <span class="kw-2">&amp;</span>str, start: usize, end: usize) {
-        <span class="kw">if </span><span class="self">self</span>.enabled {
-            <span class="self">self</span>.observer.unmark(doc, obj, name, start, end)
-        }
-    }
-
     <span class="kw">fn </span>text_as_seq(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
         <span class="self">self</span>.observer.get_text_rep() == TextRepresentation::Array
     }
@@ -352,6 +348,14 @@
             observer: <span class="self">self</span>.observer.branch(),
             last_heads: <span class="prelude-val">None</span>,
             enabled: <span class="self">self</span>.enabled,
+        }
+    }
+
+    <span class="kw">fn </span>explicit_branch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
+        ToggleObserver {
+            observer: <span class="self">self</span>.observer.explicit_branch(),
+            last_heads: <span class="prelude-val">None</span>,
+            enabled: <span class="bool-val">true</span>,
         }
     }
 }

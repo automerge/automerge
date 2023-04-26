@@ -111,22 +111,10 @@
 <a href="#110" id="110">110</a>
 <a href="#111" id="111">111</a>
 <a href="#112" id="112">112</a>
-<a href="#113" id="113">113</a>
-<a href="#114" id="114">114</a>
-<a href="#115" id="115">115</a>
-<a href="#116" id="116">116</a>
-<a href="#117" id="117">117</a>
-<a href="#118" id="118">118</a>
-<a href="#119" id="119">119</a>
-<a href="#120" id="120">120</a>
-<a href="#121" id="121">121</a>
-<a href="#122" id="122">122</a>
-<a href="#123" id="123">123</a>
-<a href="#124" id="124">124</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::marks::Mark;
 <span class="kw">use </span><span class="kw">crate</span>::op_tree::OpSetMetadata;
-<span class="kw">use </span><span class="kw">crate</span>::query::{QueryResult, TreeQuery};
-<span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, Op, OpId, OpType};
+<span class="kw">use </span><span class="kw">crate</span>::query::{ListState, OpTreeNode, QueryResult, TreeQuery};
+<span class="kw">use </span><span class="kw">crate</span>::types::{ListEncoding, Op, OpId, OpType};
 <span class="kw">use </span>std::cmp::Ordering;
 <span class="kw">use </span>std::collections::HashMap;
 <span class="kw">use </span>std::fmt::Debug;
@@ -134,15 +122,12 @@
 <span class="attr">#[derive(Debug, Clone, PartialEq)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>SeekMark&lt;<span class="lifetime">&#39;a</span>&gt; {
     <span class="doccomment">/// the mark we are looking for
-    </span>id: OpId,
+    </span>idx: ListState,
+    id: OpId,
     end: usize,
-    encoding: ListEncoding,
     found: bool,
     mark_name: smol_str::SmolStr,
     next_mark: <span class="prelude-ty">Option</span>&lt;Mark&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
-    pos: usize,
-    seen: usize,
-    last_seen: <span class="prelude-ty">Option</span>&lt;Key&gt;,
     super_marks: HashMap&lt;OpId, smol_str::SmolStr&gt;,
     <span class="kw">pub</span>(<span class="kw">crate</span>) marks: Vec&lt;Mark&lt;<span class="lifetime">&#39;a</span>&gt;&gt;,
 }
@@ -150,32 +135,24 @@
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; SeekMark&lt;<span class="lifetime">&#39;a</span>&gt; {
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(id: OpId, end: usize, encoding: ListEncoding) -&gt; <span class="self">Self </span>{
         SeekMark {
+            idx: ListState::new(encoding, usize::MAX),
             id,
-            encoding,
             end,
             found: <span class="bool-val">false</span>,
             next_mark: <span class="prelude-val">None</span>,
             mark_name: <span class="string">&quot;&quot;</span>.into(),
-            pos: <span class="number">0</span>,
-            seen: <span class="number">0</span>,
-            last_seen: <span class="prelude-val">None</span>,
             super_marks: Default::default(),
             marks: Default::default(),
-        }
-    }
-
-    <span class="kw">fn </span>count_visible(<span class="kw-2">&amp;mut </span><span class="self">self</span>, e: <span class="kw-2">&amp;</span>Op) {
-        <span class="kw">if </span>e.insert {
-            <span class="self">self</span>.last_seen = <span class="prelude-val">None
-        </span>}
-        <span class="kw">if </span>e.visible() &amp;&amp; <span class="self">self</span>.last_seen.is_none() {
-            <span class="self">self</span>.seen += e.width(<span class="self">self</span>.encoding);
-            <span class="self">self</span>.last_seen = <span class="prelude-val">Some</span>(e.elemid_or_key())
         }
     }
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; TreeQuery&lt;<span class="lifetime">&#39;a</span>&gt; <span class="kw">for </span>SeekMark&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">fn </span>query_node(<span class="kw-2">&amp;mut </span><span class="self">self</span>, child: <span class="kw-2">&amp;</span>OpTreeNode, _ops: <span class="kw-2">&amp;</span>[Op]) -&gt; QueryResult {
+        <span class="self">self</span>.idx.check_if_node_is_clean(child);
+        QueryResult::Descend
+    }
+
     <span class="kw">fn </span>query_element_with_metadata(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op, m: <span class="kw-2">&amp;</span>OpSetMetadata) -&gt; QueryResult {
         <span class="kw">match </span><span class="kw-2">&amp;</span>op.action {
             OpType::MarkBegin(<span class="kw">_</span>, data) <span class="kw">if </span>op.id == <span class="self">self</span>.id =&gt; {
@@ -185,7 +162,7 @@
                 <span class="self">self</span>.found = <span class="bool-val">true</span>;
                 <span class="self">self</span>.mark_name = data.name.clone();
                 <span class="comment">// retain the name and the value
-                </span><span class="self">self</span>.next_mark = <span class="prelude-val">Some</span>(Mark::from_data(<span class="self">self</span>.seen, <span class="self">self</span>.seen, data));
+                </span><span class="self">self</span>.next_mark = <span class="prelude-val">Some</span>(Mark::from_data(<span class="self">self</span>.idx.index(), <span class="self">self</span>.idx.index(), data));
                 <span class="comment">// change id to the end id
                 </span><span class="self">self</span>.id = <span class="self">self</span>.id.next();
                 <span class="comment">// remove all marks that dont match
@@ -199,7 +176,7 @@
                             <span class="self">self</span>.super_marks.insert(op.id.next(), mark.name.clone());
                             <span class="kw">if </span><span class="self">self</span>.super_marks.len() == <span class="number">1 </span>{
                                 <span class="comment">// complete a mark
-                                </span>next_mark.end = <span class="self">self</span>.seen;
+                                </span>next_mark.end = <span class="self">self</span>.idx.index();
                                 <span class="self">self</span>.marks.push(next_mark.clone());
                             }
                         }
@@ -209,11 +186,11 @@
                     }
                 }
             }
-            OpType::MarkEnd(<span class="kw">_</span>) <span class="kw">if </span><span class="self">self</span>.end == <span class="self">self</span>.pos =&gt; {
+            OpType::MarkEnd(<span class="kw">_</span>) <span class="kw">if </span><span class="self">self</span>.end == <span class="self">self</span>.idx.pos() =&gt; {
                 <span class="kw">if </span><span class="self">self</span>.super_marks.is_empty() {
                     <span class="comment">// complete a mark
                     </span><span class="kw">if let </span><span class="prelude-val">Some</span>(next_mark) = <span class="kw-2">&amp;mut </span><span class="self">self</span>.next_mark {
-                        next_mark.end = <span class="self">self</span>.seen;
+                        next_mark.end = <span class="self">self</span>.idx.index();
                         <span class="self">self</span>.marks.push(next_mark.clone());
                     }
                 }
@@ -224,26 +201,25 @@
                 <span class="kw">if let </span><span class="prelude-val">Some</span>(next_mark) = <span class="kw-2">&amp;mut </span><span class="self">self</span>.next_mark {
                     <span class="kw">if </span><span class="self">self</span>.super_marks.is_empty() {
                         <span class="comment">// begin a new mark
-                        </span>next_mark.start = <span class="self">self</span>.seen;
+                        </span>next_mark.start = <span class="self">self</span>.idx.index();
                     }
                 }
             }
             <span class="kw">_ </span>=&gt; {}
         }
         <span class="comment">// the end op hasn&#39;t been inserted yet so we need to work off the position
-        </span><span class="kw">if </span><span class="self">self</span>.end == <span class="self">self</span>.pos {
+        </span><span class="kw">if </span><span class="self">self</span>.end == <span class="self">self</span>.idx.pos() {
             <span class="kw">if </span><span class="self">self</span>.super_marks.is_empty() {
                 <span class="comment">// complete a mark
                 </span><span class="kw">if let </span><span class="prelude-val">Some</span>(next_mark) = <span class="kw-2">&amp;mut </span><span class="self">self</span>.next_mark {
-                    next_mark.end = <span class="self">self</span>.seen;
+                    next_mark.end = <span class="self">self</span>.idx.index();
                     <span class="self">self</span>.marks.push(next_mark.clone());
                 }
             }
             <span class="kw">return </span>QueryResult::Finish;
         }
 
-        <span class="self">self</span>.pos += <span class="number">1</span>;
-        <span class="self">self</span>.count_visible(op);
+        <span class="self">self</span>.idx.process_op(op, op.elemid_or_key(), op.visible());
         QueryResult::Next
     }
 }
