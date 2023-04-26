@@ -152,12 +152,6 @@ impl<T: OpObserver + HasPatches> OpObserver for ToggleObserver<T> {
         }
     }
 
-    fn unmark<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, name: &str, start: usize, end: usize) {
-        if self.enabled {
-            self.observer.unmark(doc, obj, name, start, end)
-        }
-    }
-
     fn text_as_seq(&self) -> bool {
         self.observer.get_text_rep() == TextRepresentation::Array
     }

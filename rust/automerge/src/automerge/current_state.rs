@@ -440,16 +440,6 @@ mod tests {
             _mark: M,
         ) {
         }
-
-        fn unmark<R: ReadDoc>(
-            &mut self,
-            _doc: &R,
-            _objid: crate::ObjId,
-            _name: &str,
-            _start: usize,
-            _end: usize,
-        ) {
-        }
     }
 
     #[test]

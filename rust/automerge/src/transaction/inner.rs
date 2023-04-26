@@ -691,11 +691,7 @@ impl TransactionInner {
                 mark.end,
                 OpType::MarkEnd(expand.after()),
             )?;
-            if mark.value().is_null() {
-                obs.unmark(doc, ex_obj.clone(), mark.name(), mark.start, mark.end);
-            } else {
-                obs.mark(doc, ex_obj.clone(), Some(mark).into_iter())
-            }
+            obs.mark(doc, ex_obj.clone(), Some(mark).into_iter());
         } else {
             let action = OpType::MarkBegin(expand.before(), mark.data.into_owned());
             self.do_insert::<Obs>(doc, None, obj.id, mark.start, action)?;
