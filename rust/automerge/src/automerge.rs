@@ -7,10 +7,11 @@ use itertools::Itertools;
 
 use crate::change_graph::ChangeGraph;
 use crate::columnar::Key as EncodedKey;
+use crate::error::DiffError;
 use crate::exid::ExId;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{Mark, MarkStateMachine};
-use crate::op_observer::{BranchableObserver, OpObserver};
+use crate::op_observer::{BranchableObserver, HasPatches, OpObserver, TextRepresentation};
 use crate::op_set::OpSet;
 use crate::parents::Parents;
 use crate::storage::{self, load, CompressConfig, VerificationMode};
@@ -21,7 +22,9 @@ use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, MarkData, ObjId, ObjMeta, Op,
     OpId, OpType, TextEncoding, Value,
 };
-use crate::{AutomergeError, Change, ObjType, Prop, ReadDoc};
+use crate::{
+    AutomergeError, Change, ObjType, Patch, Prop, ReadDoc, VecOpObserver, VecOpObserver16,
+};
 
 mod current_state;
 mod diff;
@@ -1071,6 +1074,68 @@ impl Automerge {
     ) -> Result<(), AutomergeError> {
         diff::observe_diff(self, before, after, observer);
         Ok(())
+    }
+
+    /// A set of [`Patch`](crate::op_observer::Patch)es that will transform the documen from the state in
+    /// `before` to `after`
+    ///
+    /// Note that this will throw an error if the document is not using `TextEncoding::Utf16`. See
+    /// [`Self::with_encoding`] for details.
+    ///
+    /// # Arguments
+    /// - text_rep - How text should represented in the patches
+    /// - before - the heads of the document before the changes you want patches for
+    /// - after - the heads of the document after the changes you want patches for
+    ///
+    /// # Errors
+    ///
+    /// If the document is using `TextEncoding::Utf8`.
+    pub fn diff_utf16(
+        &self,
+        text_rep: TextRepresentation,
+        before: &[ChangeHash],
+        after: &[ChangeHash],
+    ) -> Result<Vec<Patch<u16>>, DiffError> {
+        if *self.ops.text_encoding() != TextEncoding::Utf16 {
+            return Err(DiffError::MismatchedTextEncoding {
+                observer: TextEncoding::Utf16,
+                opset: *self.ops.text_encoding(),
+            });
+        }
+        let mut observer = VecOpObserver16::default().with_text_rep(text_rep);
+        diff::observe_diff(self, before, after, &mut observer);
+        Ok(observer.take_patches())
+    }
+
+    /// A set of [`Patch`](crate::op_observer::Patch)es that will transform the documen from the state in
+    /// `before` to `after`
+    ///
+    /// Note that this will throw an error if the document is not using `TextEncoding::Utf8`. See
+    /// [`Self::with_encoding`] for details.
+    ///
+    /// # Arguments
+    /// - text_rep - How text should represented in the patches
+    /// - before - the heads of the document before the changes you want patches for
+    /// - after - the heads of the document after the changes you want patches for
+    ///
+    /// # Errors
+    ///
+    /// If the document is using `TextEncoding::Utf16`.
+    pub fn diff_utf8(
+        &self,
+        text_rep: TextRepresentation,
+        before: &[ChangeHash],
+        after: &[ChangeHash],
+    ) -> Result<Vec<Patch<char>>, DiffError> {
+        if *self.ops.text_encoding() != TextEncoding::Utf8 {
+            return Err(DiffError::MismatchedTextEncoding {
+                observer: TextEncoding::Utf8,
+                opset: *self.ops.text_encoding(),
+            });
+        }
+        let mut observer = VecOpObserver::default().with_text_rep(text_rep);
+        diff::observe_diff(self, before, after, &mut observer);
+        Ok(observer.take_patches())
     }
 
     /// Get the heads of this document.

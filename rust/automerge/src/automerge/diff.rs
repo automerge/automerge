@@ -635,9 +635,9 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
 mod tests {
 
     use crate::{
-        marks::Mark, op_observer::HasPatches, transaction::Observed, transaction::Transactable,
-        types::MarkData, AutoCommitWithObs, ObjType, Patch, PatchAction, Prop, ScalarValue, Value,
-        VecOpObserver, ROOT,
+        marks::Mark, op_observer::TextRepresentation, transaction::Observed,
+        transaction::Transactable, types::MarkData, AutoCommitWithObs, ObjType, Patch, PatchAction,
+        Prop, ScalarValue, Value, VecOpObserver, ROOT,
     };
     use itertools::Itertools;
 
@@ -773,7 +773,9 @@ mod tests {
         doc.put(ROOT, "key", "value2c").unwrap();
         let heads2 = doc.get_heads();
         doc.put(ROOT, "key", "value3").unwrap();
-        let patches = doc.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc
+            .diff_utf8(TextRepresentation::String, &heads1, &heads2)
+            .unwrap();
 
         assert_eq!(
             exp(patches),
@@ -805,7 +807,9 @@ mod tests {
 
         let heads2 = doc1.get_heads();
         doc1.put(ROOT, "key", "value3").unwrap();
-        let patches = doc1.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc1
+            .diff_utf8(TextRepresentation::String, &heads1, &heads2)
+            .unwrap();
 
         assert_eq!(
             exp(patches),
@@ -838,7 +842,9 @@ mod tests {
 
         let heads2 = doc1.get_heads();
         doc1.put(ROOT, "key", "value3").unwrap();
-        let patches = doc1.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc1
+            .diff_utf8(TextRepresentation::String, &heads1, &heads2)
+            .unwrap();
 
         assert_eq!(
             exp(patches),
@@ -880,7 +886,9 @@ mod tests {
 
         let heads2 = doc1.get_heads();
         doc1.put(ROOT, "key", "value3").unwrap();
-        let patches = doc1.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc1
+            .diff_utf8(TextRepresentation::String, &heads1, &heads2)
+            .unwrap();
 
         assert_eq!(
             exp(patches),
@@ -914,7 +922,9 @@ mod tests {
 
         let heads2 = doc1.get_heads();
         doc1.put(ROOT, "key", "value3").unwrap();
-        let patches = doc1.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc1
+            .diff_utf8(TextRepresentation::String, &heads1, &heads2)
+            .unwrap();
 
         assert_eq!(exp(patches), vec![],);
     }
@@ -927,7 +937,9 @@ mod tests {
         doc.delete(ROOT, "key").unwrap();
         let heads2 = doc.get_heads();
         doc.put(ROOT, "key", "value3").unwrap();
-        let patches = doc.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc
+            .diff_utf8(TextRepresentation::String, &heads1, &heads2)
+            .unwrap();
 
         assert_eq!(
             exp(patches),
@@ -948,7 +960,9 @@ mod tests {
         doc.delete(ROOT, "key").unwrap();
         let heads2 = doc.get_heads();
         doc.put(ROOT, "key", "value3").unwrap();
-        let patches = doc.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc
+            .diff_utf8(TextRepresentation::String, &heads1, &heads2)
+            .unwrap();
 
         assert_eq!(
             exp(patches),
@@ -970,7 +984,9 @@ mod tests {
         doc.put(ROOT, "key", "value2c").unwrap();
         let heads2 = doc.get_heads();
         doc.put(ROOT, "key", "value3").unwrap();
-        let patches = doc.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc
+            .diff_utf8(TextRepresentation::String, &heads1, &heads2)
+            .unwrap();
 
         assert_eq!(
             exp(patches),
@@ -994,7 +1010,9 @@ mod tests {
         doc.increment(ROOT, "key", 5).unwrap();
         let heads2 = doc.get_heads();
         doc.put(ROOT, "key", "overwrite").unwrap();
-        let patches = doc.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc
+            .diff_utf8(TextRepresentation::String, &heads1, &heads2)
+            .unwrap();
 
         assert_eq!(
             exp(patches),
@@ -1015,7 +1033,9 @@ mod tests {
         let heads2 = doc.get_heads();
         doc.increment(ROOT, "key", 5).unwrap();
         doc.put(ROOT, "key", "overwrite").unwrap();
-        let patches = doc.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc
+            .diff_utf8(TextRepresentation::String, &heads1, &heads2)
+            .unwrap();
 
         assert_eq!(
             exp(patches),
@@ -1042,7 +1062,9 @@ mod tests {
         doc.insert(&list, 3, 35).unwrap();
         doc.delete(&list, 0).unwrap();
         let heads2 = doc.get_heads();
-        let patches = doc.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc
+            .diff_utf8(TextRepresentation::String, &heads1, &heads2)
+            .unwrap();
         assert_eq!(
             exp(patches),
             vec![
@@ -1082,7 +1104,9 @@ mod tests {
         doc.insert(&list, 1, 27).unwrap();
         doc.insert(&list, 1, 28).unwrap();
         let heads2 = doc.get_heads();
-        let patches = doc.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc
+            .diff_utf8(TextRepresentation::String, &heads1, &heads2)
+            .unwrap();
         assert_eq!(
             exp(patches),
             vec![ObservedPatch {
@@ -1122,7 +1146,9 @@ mod tests {
 
         let heads2 = doc1.get_heads();
 
-        let patches = doc1.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc1
+            .diff_utf8(TextRepresentation::String, &heads1, &heads2)
+            .unwrap();
 
         assert_eq!(
             exp(patches),
@@ -1211,7 +1237,9 @@ mod tests {
         doc1.put(&list, 2, 0).unwrap();
         doc1.put(&list, 3, 0).unwrap();
 
-        let patches = doc1.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc1
+            .diff_utf8(TextRepresentation::String, &heads1, &heads2)
+            .unwrap();
 
         let exp = exp(patches);
         assert_eq!(
@@ -1285,7 +1313,9 @@ mod tests {
 
         let heads2 = doc1.get_heads();
 
-        let patches = doc1.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches = doc1
+            .diff_utf8(TextRepresentation::String, &heads1, &heads2)
+            .unwrap();
         let exp1 = exp(patches);
         assert_eq!(
             exp1.get(0),
@@ -1310,7 +1340,9 @@ mod tests {
             .as_ref()
         );
 
-        let patches = doc1.diff(&heads1a, &heads2).unwrap().take_patches();
+        let patches = doc1
+            .diff_utf8(TextRepresentation::String, &heads1a, &heads2)
+            .unwrap();
         let exp2 = exp(patches);
         assert_eq!(
             exp2.get(0),
@@ -1324,7 +1356,9 @@ mod tests {
             .as_ref()
         );
 
-        let patches = doc1.diff(&heads1b, &heads2).unwrap().take_patches();
+        let patches = doc1
+            .diff_utf8(TextRepresentation::String, &heads1b, &heads2)
+            .unwrap();
         let exp3 = exp(patches);
         assert_eq!(
             exp3.get(0),
@@ -1374,7 +1408,9 @@ mod tests {
 
         let heads2b = doc1.get_heads();
 
-        let patches = doc1.diff(&heads1, &heads2a).unwrap().take_patches();
+        let patches = doc1
+            .diff_utf8(TextRepresentation::String, &heads1, &heads2a)
+            .unwrap();
         let exp1 = exp(patches);
         assert_eq!(
             exp1.get(0),
@@ -1388,7 +1424,9 @@ mod tests {
             .as_ref()
         );
 
-        let patches = doc1.diff(&heads2a, &heads2b).unwrap().take_patches();
+        let patches = doc1
+            .diff_utf8(TextRepresentation::String, &heads2a, &heads2b)
+            .unwrap();
         let exp1 = exp(patches);
         assert_eq!(
             exp1.get(0),
@@ -1418,7 +1456,9 @@ mod tests {
         .unwrap();
 
         let heads2 = doc1.get_heads();
-        let patches12 = doc1.diff(&heads1, &heads2).unwrap().take_patches();
+        let patches12 = doc1
+            .diff_utf8(TextRepresentation::String, &heads1, &heads2)
+            .unwrap();
         let exp1 = exp(patches12);
         assert_eq!(
             exp1,
@@ -1433,7 +1473,9 @@ mod tests {
             }]
         );
 
-        let patches21 = doc1.diff(&heads2, &heads1).unwrap().take_patches();
+        let patches21 = doc1
+            .diff_utf8(TextRepresentation::String, &heads2, &heads1)
+            .unwrap();
         let exp2 = exp(patches21);
         assert_eq!(
             exp2,

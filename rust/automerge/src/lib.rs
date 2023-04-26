@@ -248,7 +248,7 @@ mod change_graph;
 mod clock;
 mod columnar;
 mod convert;
-mod error;
+pub mod error;
 mod exid;
 mod indexed_cache;
 pub mod iter;

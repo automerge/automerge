@@ -1,12 +1,13 @@
 use std::ops::RangeBounds;
 
+use crate::error::DiffError;
 use crate::exid::ExId;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{ExpandMark, Mark};
-use crate::op_observer::{BranchableObserver, OpObserver};
+use crate::op_observer::{BranchableObserver, OpObserver, TextRepresentation};
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
-use crate::{sync, ObjType, Parents, ReadDoc, ScalarValue};
+use crate::{sync, ObjType, Parents, Patch, ReadDoc, ScalarValue};
 use crate::{
     transaction::{Observation, Observed, TransactionInner, UnObserved},
     ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop, TextEncoding, Value,
@@ -95,18 +96,19 @@ impl<Obs: OpObserver + BranchableObserver> AutoCommitWithObs<Observed<Obs>> {
         self.ensure_transaction_closed();
         self.observation.observer()
     }
+}
 
-    pub fn diff(
+impl<Obs: OpObserver + BranchableObserver> AutoCommitWithObs<Observed<Obs>> {
+    pub fn observe_diff<Obs2: OpObserver>(
         &mut self,
+        observer: &mut Obs2,
         before: &[ChangeHash],
         after: &[ChangeHash],
-    ) -> Result<Obs, AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
 
-        let observer = self.observation.observer();
-        let mut branch = observer.explicit_branch();
-        self.doc.observe_diff(before, after, &mut branch)?;
-        Ok(branch)
+        self.doc.observe_diff(before, after, observer)?;
+        Ok(())
     }
 }
 
@@ -390,6 +392,54 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
     pub fn sync(&mut self) -> impl SyncDoc + '_ {
         self.ensure_transaction_closed();
         SyncWrapper { inner: self }
+    }
+
+    /// A set of [`Patch`](crate::op_observer::Patch)es that will transform the documen from the state in
+    /// `before` to `after`
+    ///
+    /// Note that this will throw an error if the document is not using `TextEncoding::Utf8`. See
+    /// [`Self::with_encoding`] for details.
+    ///
+    /// # Arguments
+    /// - text_rep - How text should represented in the patches
+    /// - before - the heads of the document before the changes you want patches for
+    /// - after - the heads of the document after the changes you want patches for
+    ///
+    /// # Errors
+    ///
+    /// If the document is using `TextEncoding::Utf16`.
+    pub fn diff_utf8(
+        &mut self,
+        text_rep: TextRepresentation,
+        before: &[ChangeHash],
+        after: &[ChangeHash],
+    ) -> Result<Vec<Patch<char>>, DiffError> {
+        self.ensure_transaction_closed();
+        self.doc.diff_utf8(text_rep, before, after)
+    }
+
+    /// A set of [`Patch`](crate::op_observer::Patch)es that will transform the documen from the state in
+    /// `before` to `after`
+    ///
+    /// Note that this will throw an error if the document is not using `TextEncoding::Utf16`. See
+    /// [`Self::with_encoding`] for details.
+    ///
+    /// # Arguments
+    /// - text_rep - How text should represented in the patches
+    /// - before - the heads of the document before the changes you want patches for
+    /// - after - the heads of the document after the changes you want patches for
+    ///
+    /// # Errors
+    ///
+    /// If the document is using `TextEncoding::Utf8`.
+    pub fn diff_utf16(
+        &mut self,
+        text_rep: TextRepresentation,
+        before: &[ChangeHash],
+        after: &[ChangeHash],
+    ) -> Result<Vec<Patch<u16>>, DiffError> {
+        self.ensure_transaction_closed();
+        self.doc.diff_utf16(text_rep, before, after)
     }
 }
 

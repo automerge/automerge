@@ -646,7 +646,7 @@ impl Automerge {
         let before = get_heads(Some(before))?.unwrap();
         let after = get_heads(Some(after))?.unwrap();
 
-        let patches = self.doc.diff(&before, &after)?.take_patches(vec![]).0;
+        let patches = self.doc.diff_utf16(self.text_rep.into(), &before, &after)?;
         Ok(interop::JsPatches(patches).try_into()?)
     }
 
@@ -1194,6 +1194,8 @@ pub mod error {
         Heads(#[from] interop::error::BadChangeHashes),
         #[error(transparent)]
         Automerge(#[from] AutomergeError),
+        #[error(transparent)]
+        Diff(#[from] automerge::error::DiffError),
     }
 
     impl From<Diff> for JsValue {

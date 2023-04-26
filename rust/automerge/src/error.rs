@@ -2,7 +2,7 @@ use crate::change::LoadError as LoadChangeError;
 use crate::storage::load::Error as LoadError;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
-use crate::{ChangeHash, ObjType};
+use crate::{ChangeHash, ObjType, TextEncoding};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -104,4 +104,15 @@ pub enum InvalidOpType {
     UnknownAction(u64),
     #[error("non numeric argument for inc op")]
     NonNumericInc,
+}
+
+#[derive(Error, Debug)]
+pub enum DiffError {
+    #[error(
+        "attempted to generate a diff with text encoding {observer:?} but opset is using {opset:?}"
+    )]
+    MismatchedTextEncoding {
+        observer: TextEncoding,
+        opset: TextEncoding,
+    },
 }

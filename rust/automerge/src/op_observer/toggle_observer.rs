@@ -175,12 +175,4 @@ impl<T: BranchableObserver> BranchableObserver for ToggleObserver<T> {
             enabled: self.enabled,
         }
     }
-
-    fn explicit_branch(&self) -> Self {
-        ToggleObserver {
-            observer: self.observer.explicit_branch(),
-            last_heads: None,
-            enabled: true,
-        }
-    }
 }
