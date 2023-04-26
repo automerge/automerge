@@ -752,9 +752,6 @@ mod tests {
                     ),
                     path: format!("/{}", path.clone().join("/")),
                 },
-                PatchAction::Unmark { .. } => {
-                    todo!()
-                }
             }
         }
     }

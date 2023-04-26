@@ -37,11 +37,16 @@ describe("Automerge", () => {
 
       assert.deepStrictEqual(callbacks[2], [
         {
-          action: "unmark",
+          action: "mark",
           path: ["x"],
-          name: "font-weight",
-          start: 7,
-          end: 9,
+          marks: [
+            {
+              name: "font-weight",
+              start: 7,
+              end: 9,
+              value: null,
+            },
+          ],
         },
       ])
 

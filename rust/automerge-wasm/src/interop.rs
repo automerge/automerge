@@ -872,7 +872,7 @@ impl Automerge {
                     }
                 }
             }
-            PatchAction::Mark { .. } | PatchAction::Unmark { .. } => Ok(result.into()),
+            PatchAction::Mark { .. } => Ok(result.into()),
         }
     }
 
@@ -932,9 +932,7 @@ impl Automerge {
             //PatchAction::SpliceText { .. } => Err(to_js_err("cannot Splice into map")),
             PatchAction::SpliceText { .. } => Err(error::ApplyPatch::SpliceTextInMap),
             PatchAction::PutSeq { .. } => Err(error::ApplyPatch::PutIdxInMap),
-            PatchAction::Mark { .. } | PatchAction::Unmark { .. } => {
-                Err(error::ApplyPatch::MarkInMap)
-            }
+            PatchAction::Mark { .. } => Err(error::ApplyPatch::MarkInMap),
         }
     }
 
@@ -1390,16 +1388,6 @@ impl TryFrom<JsPatch> for JsValue {
                     marks_array.push(&mark);
                 }
                 js_set(&result, "marks", marks_array)?;
-                Ok(result.into())
-            }
-            PatchAction::Unmark {
-                name, start, end, ..
-            } => {
-                js_set(&result, "action", "unmark")?;
-                js_set(&result, "path", export_just_path(path.as_slice()))?;
-                js_set(&result, "name", name)?;
-                js_set(&result, "start", start as i32)?;
-                js_set(&result, "end", end as i32)?;
                 Ok(result.into())
             }
         }
