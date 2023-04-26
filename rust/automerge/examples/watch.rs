@@ -85,10 +85,6 @@ fn get_changes(_doc: &Automerge, patches: Vec<Patch<char>>) {
             PatchAction::Mark { marks } => {
                 println!("mark {:?} in obj {:?}, object path {:?}", marks, obj, path,)
             }
-            PatchAction::Unmark { name, start, end } => println!(
-                "unmark {:?} from {} to {} in obj {:?}, object path {:?}",
-                name, start, end, obj, path,
-            ),
         }
     }
 }

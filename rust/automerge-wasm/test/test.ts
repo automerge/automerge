@@ -688,7 +688,6 @@ describe('Automerge', () => {
       assert.deepEqual(doc2.getWithType('_root', 'bird'), ['str', 'Goldfinch'])
       assert.deepEqual(doc2.getAll('_root', 'bird'), [['str', 'Goldfinch', '2@aaaa']])
       assert.deepEqual(doc1.popPatches(), [
-        { action: 'put', path: ['bird'], value: 'Goldfinch' }
       ])
       assert.deepEqual(doc2.popPatches(), [
         { action: 'put', path: ['bird'], value: 'Goldfinch' }
@@ -751,7 +750,6 @@ describe('Automerge', () => {
       assert.deepEqual(doc4.popPatches(), [
         { action: 'put', path: ['birds',0], value: 'Ring-necked parakeet' },
         { action: 'put', path: ['birds',2], value: 'Redwing' },
-        { action: 'put', path: ['birds',0], value: 'Ring-necked parakeet' },
       ])
     })
 

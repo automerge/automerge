@@ -66,7 +66,7 @@ fn observe_text<'a, I: Iterator<Item = &'a Op>, O: OpObserver>(
     let state = ops_by_key
         .into_iter()
         .fold(state, |mut state, (_key, key_ops)| {
-            if let Some(o) = key_ops.filter(|o| o.visible_or_mark()).last() {
+            if let Some(o) = key_ops.filter(|o| o.visible_or_mark(None)).last() {
                 match &o.action {
                     OpType::Make(_) | OpType::Put(_) => {
                         state.text.push_str(o.to_str());
@@ -106,7 +106,7 @@ fn observe_list<'a, I: Iterator<Item = &'a Op>, O: OpObserver>(
         .into_iter()
         .filter_map(|(_key, key_ops)| {
             key_ops
-                .filter(|o| o.visible_or_mark())
+                .filter(|o| o.visible_or_mark(None))
                 .filter_map(|o| match &o.action {
                     OpType::Make(obj_type) => Some((Value::Object(*obj_type), o.id)),
                     OpType::Put(value) => Some((Value::Scalar(Cow::Borrowed(value)), o.id)),
@@ -438,16 +438,6 @@ mod tests {
             _doc: &R,
             _objid: crate::ObjId,
             _mark: M,
-        ) {
-        }
-
-        fn unmark<R: ReadDoc>(
-            &mut self,
-            _doc: &R,
-            _objid: crate::ObjId,
-            _name: &str,
-            _start: usize,
-            _end: usize,
         ) {
         }
     }

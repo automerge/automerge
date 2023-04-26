@@ -7,6 +7,12 @@ use super::{OpTreeInternal, OpTreeNode};
 #[derive(Clone)]
 pub(crate) struct OpTreeIter<'a>(Inner<'a>);
 
+impl<'a> Default for OpTreeIter<'a> {
+    fn default() -> Self {
+        OpTreeIter(Inner::Empty)
+    }
+}
+
 impl<'a> OpTreeIter<'a> {
     pub(crate) fn new(tree: &'a OpTreeInternal) -> OpTreeIter<'a> {
         Self(

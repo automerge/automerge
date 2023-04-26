@@ -127,8 +127,6 @@ pub trait OpObserver {
         mark: M,
     );
 
-    fn unmark<R: ReadDoc>(&mut self, doc: &R, objid: ExId, name: &str, start: usize, end: usize);
-
     /// Whether to call sequence methods or `splice_text` when encountering changes in text
     ///
     /// Returns `false` by default
@@ -148,6 +146,14 @@ pub trait BranchableObserver {
     /// Called when creating a new transaction.  Observer branch will be merged on `commit()` or
     /// thrown away on `rollback()`
     fn branch(&self) -> Self;
+
+    /// Branch used by diff to communicate that patches are explicitly being asked for
+    fn explicit_branch(&self) -> Self
+    where
+        Self: Sized,
+    {
+        self.branch()
+    }
 
     /// Merge observed information from a transaction.
     ///
@@ -204,16 +210,6 @@ impl OpObserver for () {
         _doc: &'a R,
         _objid: ExId,
         _mark: M,
-    ) {
-    }
-
-    fn unmark<R: ReadDoc>(
-        &mut self,
-        _doc: &R,
-        _objid: ExId,
-        _name: &str,
-        _start: usize,
-        _end: usize,
     ) {
     }
 

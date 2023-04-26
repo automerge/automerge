@@ -4,7 +4,8 @@ use automerge::op_tree::B;
 use automerge::transaction::Transactable;
 use automerge::{
     ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjId, ObjType, Patch,
-    PatchAction, Prop, ReadDoc, ScalarValue, SequenceTree, Value, VecOpObserver, ROOT,
+    PatchAction, Prop, ReadDoc, ScalarValue, SequenceTree, TextEncoding, Value, VecOpObserver,
+    ROOT,
 };
 use std::fs;
 
@@ -1724,4 +1725,33 @@ fn marks() {
     assert_eq!(marks[1].end, 14);
     assert_eq!(marks[1].name(), "bold");
     assert_eq!(marks[1].value(), &ScalarValue::from(true));
+}
+
+#[test]
+fn conflicting_unicode_text_with_different_widths() -> Result<(), AutomergeError> {
+    let mut doc1 = AutoCommit::new().with_encoding(TextEncoding::Utf16);
+    let txt = doc1.put_object(&ROOT, "text", ObjType::Text).unwrap();
+    doc1.splice_text(&txt, 0, 0, "abc")?;
+
+    let mut doc2 = doc1.fork();
+
+    doc1.put(&txt, 1, "B")?;
+    doc2.put(&txt, 1, "🐻")?;
+
+    assert_eq!(doc1.length(&txt), 3);
+    assert_eq!(doc2.length(&txt), 4);
+
+    doc1.merge(&mut doc2)?;
+    doc2.merge(&mut doc1)?;
+
+    let length = doc1.length(&txt);
+    let last_value = doc1.get(&txt, length - 1)?;
+    for n in 0..length {
+        assert_eq!(doc1.get(&txt, n), doc2.get(&txt, n));
+    }
+    assert_eq!(last_value.unwrap().0, Value::from("c"));
+
+    println!("list.len() == {:?}", length);
+    assert_eq!(doc1.length(&txt), doc2.length(&txt));
+    Ok(())
 }

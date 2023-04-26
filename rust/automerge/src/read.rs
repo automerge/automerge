@@ -1,7 +1,10 @@
 use crate::{
-    error::AutomergeError, exid::ExId, keys::Keys, keys_at::KeysAt, list_range::ListRange,
-    list_range_at::ListRangeAt, map_range::MapRange, map_range_at::MapRangeAt, marks::Mark,
-    parents::Parents, values::Values, Change, ChangeHash, ObjType, Prop, Value,
+    error::AutomergeError,
+    exid::ExId,
+    iter::{Keys, ListRange, MapRange, Values},
+    marks::Mark,
+    parents::Parents,
+    Change, ChangeHash, ObjType, Prop, Value,
 };
 
 use std::ops::RangeBounds;
@@ -28,26 +31,25 @@ pub trait ReadDoc {
     /// value.
     fn parents<O: AsRef<ExId>>(&self, obj: O) -> Result<Parents<'_>, AutomergeError>;
 
-    /// Get the path to an object
+    /// Get the parents of the object `obj` as at `heads`
     ///
-    /// "path" here means the sequence of `(object Id, key)` pairs which leads
-    /// to the object in question.
-    ///
-    /// ### Errors
-    ///
-    /// * If the object ID `obj` is not in the document
-    fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<(ExId, Prop)>, AutomergeError>;
+    /// See [`Self::parents`]
+    fn parents_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Parents<'_>, AutomergeError>;
 
     /// Get the keys of the object `obj`.
     ///
     /// For a map this returns the keys of the map.
     /// For a list this returns the element ids (opids) encoded as strings.
-    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_, '_>;
+    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_>;
 
     /// Get the keys of the object `obj` as at `heads`
     ///
     /// See [`Self::keys`]
-    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt<'_, '_>;
+    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_>;
 
     /// Iterate over the keys and values of the map `obj` in the given range.
     ///
@@ -55,11 +57,11 @@ pub trait ReadDoc {
     ///
     /// The returned iterator yields `(key, value, exid)` tuples, where the
     /// third element is the ID of the operation which created the value.
-    fn map_range<O: AsRef<ExId>, R: RangeBounds<String>>(
-        &self,
+    fn map_range<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
+        &'a self,
         obj: O,
         range: R,
-    ) -> MapRange<'_, R>;
+    ) -> MapRange<'a, R>;
 
     /// Iterate over the keys and values of the map `obj` in the given range as
     /// at `heads`
@@ -70,12 +72,12 @@ pub trait ReadDoc {
     /// third element is the ID of the operation which created the value.
     ///
     /// See [`Self::map_range`]
-    fn map_range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
-        &self,
+    fn map_range_at<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
+        &'a self,
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> MapRangeAt<'_, R>;
+    ) -> MapRange<'a, R>;
 
     /// Iterate over the indexes and values of the list or text `obj` in the given range.
     ///
@@ -98,7 +100,7 @@ pub trait ReadDoc {
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> ListRangeAt<'_, R>;
+    ) -> ListRange<'_, R>;
 
     /// Iterate over the values in a map, list, or text object
     ///

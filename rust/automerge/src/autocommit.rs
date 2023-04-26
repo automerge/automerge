@@ -1,17 +1,15 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
+use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{ExpandMark, Mark};
 use crate::op_observer::{BranchableObserver, OpObserver};
 use crate::sync::SyncDoc;
 use crate::transaction::{CommitOptions, Transactable};
-use crate::{
-    sync, Keys, KeysAt, ListRange, ListRangeAt, MapRange, MapRangeAt, ObjType, Parents, ReadDoc,
-    ScalarValue,
-};
+use crate::{sync, ObjType, Parents, ReadDoc, ScalarValue};
 use crate::{
     transaction::{Observation, Observed, TransactionInner, UnObserved},
-    ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop, TextEncoding, Value, Values,
+    ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop, TextEncoding, Value,
 };
 
 /// An automerge document that automatically manages transactions.
@@ -96,6 +94,19 @@ impl<Obs: OpObserver + BranchableObserver> AutoCommitWithObs<Observed<Obs>> {
     pub fn observer(&mut self) -> &mut Obs {
         self.ensure_transaction_closed();
         self.observation.observer()
+    }
+
+    pub fn diff(
+        &mut self,
+        before: &[ChangeHash],
+        after: &[ChangeHash],
+    ) -> Result<Obs, AutomergeError> {
+        self.ensure_transaction_closed();
+
+        let observer = self.observation.observer();
+        let mut branch = observer.explicit_branch();
+        self.doc.observe_diff(before, after, &mut branch)?;
+        Ok(branch)
     }
 }
 
@@ -387,32 +398,36 @@ impl<Obs: Observation> ReadDoc for AutoCommitWithObs<Obs> {
         self.doc.parents(obj)
     }
 
-    fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<(ExId, Prop)>, AutomergeError> {
-        self.doc.path_to_object(obj)
+    fn parents_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Parents<'_>, AutomergeError> {
+        self.doc.parents_at(obj, heads)
     }
 
-    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_, '_> {
+    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
         self.doc.keys(obj)
     }
 
-    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt<'_, '_> {
+    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_> {
         self.doc.keys_at(obj, heads)
     }
 
-    fn map_range<O: AsRef<ExId>, R: RangeBounds<String>>(
-        &self,
+    fn map_range<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
+        &'a self,
         obj: O,
         range: R,
-    ) -> MapRange<'_, R> {
+    ) -> MapRange<'a, R> {
         self.doc.map_range(obj, range)
     }
 
-    fn map_range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
-        &self,
+    fn map_range_at<'a, O: AsRef<ExId>, R: RangeBounds<String> + 'a>(
+        &'a self,
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> MapRangeAt<'_, R> {
+    ) -> MapRange<'a, R> {
         self.doc.map_range_at(obj, range, heads)
     }
 
@@ -429,7 +444,7 @@ impl<Obs: Observation> ReadDoc for AutoCommitWithObs<Obs> {
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> ListRangeAt<'_, R> {
+    ) -> ListRange<'_, R> {
         self.doc.list_range_at(obj, range, heads)
     }
 

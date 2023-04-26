@@ -89,10 +89,6 @@ impl OpIds {
         self.0.iter()
     }
 
-    pub(crate) fn contains(&self, op: &OpId) -> bool {
-        self.0.contains(op)
-    }
-
     pub(crate) fn get(&self, idx: usize) -> Option<&OpId> {
         self.0.get(idx)
     }

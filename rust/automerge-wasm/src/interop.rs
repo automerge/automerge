@@ -872,7 +872,7 @@ impl Automerge {
                     }
                 }
             }
-            PatchAction::Mark { .. } | PatchAction::Unmark { .. } => Ok(result.into()),
+            PatchAction::Mark { .. } => Ok(result.into()),
         }
     }
 
@@ -932,9 +932,7 @@ impl Automerge {
             //PatchAction::SpliceText { .. } => Err(to_js_err("cannot Splice into map")),
             PatchAction::SpliceText { .. } => Err(error::ApplyPatch::SpliceTextInMap),
             PatchAction::PutSeq { .. } => Err(error::ApplyPatch::PutIdxInMap),
-            PatchAction::Mark { .. } | PatchAction::Unmark { .. } => {
-                Err(error::ApplyPatch::MarkInMap)
-            }
+            PatchAction::Mark { .. } => Err(error::ApplyPatch::MarkInMap),
         }
     }
 
@@ -1197,7 +1195,8 @@ impl Automerge {
                 // only valid obj's should make it to this point ...
                 let path: Vec<_> = self
                     .doc
-                    .path_to_object(&obj)?
+                    .parents(&obj)?
+                    .path()
                     .iter()
                     .map(|p| prop_to_js(&p.1))
                     .collect();
@@ -1263,6 +1262,7 @@ fn set_hidden_value<V: Into<JsValue>>(
 }
 
 pub(crate) struct JsPatch(pub(crate) Patch<u16>);
+pub(crate) struct JsPatches(pub(crate) Vec<Patch<u16>>);
 
 fn export_path(path: &[(ObjId, Prop)], end: &Prop) -> Array {
     let result = Array::new();
@@ -1390,17 +1390,19 @@ impl TryFrom<JsPatch> for JsValue {
                 js_set(&result, "marks", marks_array)?;
                 Ok(result.into())
             }
-            PatchAction::Unmark {
-                name, start, end, ..
-            } => {
-                js_set(&result, "action", "unmark")?;
-                js_set(&result, "path", export_just_path(path.as_slice()))?;
-                js_set(&result, "name", name)?;
-                js_set(&result, "start", start as i32)?;
-                js_set(&result, "end", end as i32)?;
-                Ok(result.into())
-            }
         }
+    }
+}
+
+impl TryFrom<JsPatches> for Array {
+    type Error = error::Export;
+
+    fn try_from(patches: JsPatches) -> Result<Self, Self::Error> {
+        let result = Array::new();
+        for p in patches.0 {
+            result.push(&JsPatch(p).try_into()?);
+        }
+        Ok(result)
     }
 }
 

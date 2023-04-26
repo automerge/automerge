@@ -38,6 +38,10 @@ impl<'a> Mark<'a> {
         }
     }
 
+    pub(crate) fn is_null(&self) -> bool {
+        self.data.value.is_null()
+    }
+
     pub(crate) fn from_data(start: usize, end: usize, data: &MarkData) -> Mark<'_> {
         Mark {
             data: Cow::Borrowed(data),
@@ -74,7 +78,23 @@ impl<'a> MarkStateMachine<'a> {
         id: OpId,
         pos: usize,
         data: &'a MarkData,
-        doc: &Automerge,
+        doc: &'a Automerge,
+    ) -> Option<Mark<'a>> {
+        self.mark_or_unmark_begin(id, pos, data, doc).and_then(|m| {
+            if m.is_null() {
+                None
+            } else {
+                Some(m)
+            }
+        })
+    }
+
+    pub(crate) fn mark_or_unmark_begin(
+        &mut self,
+        id: OpId,
+        pos: usize,
+        data: &'a MarkData,
+        doc: &'a Automerge,
     ) -> Option<Mark<'a>> {
         let mut result = None;
         let index = self.find(id, doc).err()?;
@@ -91,9 +111,7 @@ impl<'a> MarkStateMachine<'a> {
             } else {
                 let mut m = below.clone();
                 m.end = pos;
-                if !m.value().is_null() {
-                    result = Some(m);
-                }
+                result = Some(m);
             }
         }
 
@@ -102,7 +120,22 @@ impl<'a> MarkStateMachine<'a> {
         result
     }
 
-    pub(crate) fn mark_end(&mut self, id: OpId, pos: usize, doc: &Automerge) -> Option<Mark<'a>> {
+    pub(crate) fn mark_end(
+        &mut self,
+        id: OpId,
+        pos: usize,
+        doc: &'a Automerge,
+    ) -> Option<Mark<'a>> {
+        self.mark_or_unmark_end(id, pos, doc)
+            .and_then(|m| if m.is_null() { None } else { Some(m) })
+    }
+
+    pub(crate) fn mark_or_unmark_end(
+        &mut self,
+        id: OpId,
+        pos: usize,
+        doc: &'a Automerge,
+    ) -> Option<Mark<'a>> {
         let mut result = None;
         let index = self.find(id.prev(), doc).ok()?;
 
@@ -114,14 +147,10 @@ impl<'a> MarkStateMachine<'a> {
                 Some(below) if below.value() == mark.value() => {}
                 Some(below) => {
                     below.start = pos;
-                    if !mark.value().is_null() {
-                        result = Some(mark.clone());
-                    }
+                    result = Some(mark.clone());
                 }
                 None => {
-                    if !mark.value().is_null() {
-                        result = Some(mark.clone());
-                    }
+                    result = Some(mark.clone());
                 }
             }
         }
