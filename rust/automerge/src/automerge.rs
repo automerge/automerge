@@ -1328,13 +1328,19 @@ impl ReadDoc for Automerge {
     ) -> Result<Vec<(Value<'_>, ExId)>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
         let clock = None;
-        Ok(self
+        let values = self
             .ops
             .seek_ops_by_prop(&obj.id, prop.into(), obj.encoding, clock)
             .ops
             .into_iter()
             .map(|op| self.export_value(op, clock))
-            .collect())
+            .collect::<Vec<_>>();
+        // this is a test to make sure opid and exid are always sorting the same way
+        assert_eq!(
+            values.iter().map(|v| &v.1).collect::<Vec<_>>(),
+            values.iter().map(|v| &v.1).sorted().collect::<Vec<_>>()
+        );
+        Ok(values)
     }
 
     fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
@@ -1346,13 +1352,19 @@ impl ReadDoc for Automerge {
         let prop = prop.into();
         let obj = self.exid_to_obj(obj.as_ref())?;
         let clock = Some(self.clock_at(heads));
-        Ok(self
+        let values = self
             .ops
             .seek_ops_by_prop(&obj.id, prop, obj.encoding, clock.as_ref())
             .ops
             .into_iter()
             .map(|op| self.export_value(op, clock.as_ref()))
-            .collect())
+            .collect::<Vec<_>>();
+        // this is a test to make sure opid and exid are always sorting the same way
+        assert_eq!(
+            values.iter().map(|v| &v.1).collect::<Vec<_>>(),
+            values.iter().map(|v| &v.1).sorted().collect::<Vec<_>>()
+        );
+        Ok(values)
     }
 
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
