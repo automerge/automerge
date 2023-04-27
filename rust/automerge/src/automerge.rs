@@ -397,14 +397,14 @@ impl Automerge {
         Ok(f)
     }
 
-    pub(crate) fn exid_to_obj(&self, id: &ExId) -> Result<(ObjId, ObjType), AutomergeError> {
+    pub(crate) fn exid_to_opid(&self, id: &ExId) -> Result<OpId, AutomergeError> {
         match id {
-            ExId::Root => Ok((ObjId::root(), ObjType::Map)),
+            ExId::Root => Ok(OpId::new(0, 0)),
             ExId::Id(ctr, actor, idx) => {
                 // do a direct get here b/c this could be foriegn and not be within the array
                 // bounds
-                let obj = if self.ops.m.actors.cache.get(*idx) == Some(actor) {
-                    ObjId(OpId::new(*ctr, *idx))
+                let opid = if self.ops.m.actors.cache.get(*idx) == Some(actor) {
+                    OpId::new(*ctr, *idx)
                 } else {
                     // FIXME - make a real error
                     let idx = self
@@ -413,14 +413,20 @@ impl Automerge {
                         .actors
                         .lookup(actor)
                         .ok_or(AutomergeError::Fail)?;
-                    ObjId(OpId::new(*ctr, idx))
+                    OpId::new(*ctr, idx)
                 };
-                if let Some(obj_type) = self.ops.object_type(&obj) {
-                    Ok((obj, obj_type))
-                } else {
-                    Err(AutomergeError::NotAnObject)
-                }
+                Ok(opid)
             }
+        }
+    }
+
+    pub(crate) fn exid_to_obj(&self, id: &ExId) -> Result<(ObjId, ObjType), AutomergeError> {
+        let opid = self.exid_to_opid(id)?;
+        let obj = ObjId(opid);
+        if let Some(obj_type) = self.ops.object_type(&obj) {
+            Ok((obj, obj_type))
+        } else {
+            Err(AutomergeError::NotAnObject)
         }
     }
 
@@ -1137,11 +1143,11 @@ impl Automerge {
     }
 
     /// Get the hash of the change that contains the given opid.
-    pub fn hash_for_opid(&self, opid: &ExId) -> Option<ChangeHash> {
-        match opid {
+    pub fn hash_for_opid(&self, exid: &ExId) -> Option<ChangeHash> {
+        match exid {
             ExId::Root => None,
             ExId::Id(..) => {
-                let opid = self.exid_to_obj(opid).ok()?.0 .0;
+                let opid = self.exid_to_opid(exid).ok()?;
                 let actor_indices = self.states.get(&opid.actor())?;
                 let change_index_index = actor_indices
                     .binary_search_by(|change_index| {
