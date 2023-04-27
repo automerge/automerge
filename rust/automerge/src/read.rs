@@ -152,6 +152,13 @@ pub trait ReadDoc {
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError>;
 
+    /// Obtain the stable address (Cursor) for a `usize` position in a Sequence (either `Self::List` or `Self::Text`).
+    ///
+    /// Example use cases:
+    /// 1. User cursor tracking, to maintain contextual position while merging remote changes.
+    /// 2. Indexing sentences in a text field.
+    ///
+    /// To reverse the operation, see [`Self::get_cursor_position`].
     fn get_cursor<O: AsRef<ExId>>(
         &self,
         obj: O,
@@ -159,6 +166,11 @@ pub trait ReadDoc {
         at: Option<&[ChangeHash]>,
     ) -> Result<Cursor, AutomergeError>;
 
+    /// Translate Cursor in a Sequence into an absolute position of type `usize`.
+    ///
+    /// Applicable only for Sequences (either `Self::List` or `Self::Text`).
+    ///
+    /// To reverse the operation, see [`Self::get_cursor`].
     fn get_cursor_position<O: AsRef<ExId>>(
         &self,
         obj: O,

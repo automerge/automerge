@@ -4,6 +4,13 @@ use crate::types::OpId;
 use crate::{ActorId, AutomergeError};
 use std::fmt;
 
+/// An identifier of a position in a Sequence (either Self::List or Self::Text).
+///
+/// Every element in an Automerge Sequence can be internally identified with an operation ID.
+/// While ExId is our default external representation of the Operation ID, it can be quite heavy.
+/// Therefore, we use this lightweight specialized structure.
+///
+/// This can be persisted using to_bytes and TryFrom<&[u8]>.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Cursor {
     ctr: u64,
@@ -40,7 +47,7 @@ impl Cursor {
         // .----------------------------------------------------------------.
         // | version   | actorId len     | actorId bytes | counter          |
         // +----------------------------------------------------------------+
-        // |  1 byte  | unsigned leb128 | variable      | unsigned leb128  |
+        // |  1 byte   | unsigned leb128 | variable      | unsigned leb128  |
         // '----------------------------------------------------------------'
         //
         // Version is currently always `0`
