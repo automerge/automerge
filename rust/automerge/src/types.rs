@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cmp::Eq;
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
@@ -14,6 +15,7 @@ mod opids;
 pub(crate) use opids::OpIds;
 
 pub(crate) use crate::clock::Clock;
+pub(crate) use crate::marks::MarkData;
 pub(crate) use crate::value::{Counter, ScalarValue, Value};
 
 pub(crate) const HEAD: ElemId = ElemId(OpId(0, 0));
@@ -198,6 +200,8 @@ pub enum OpType {
     Delete,
     Increment(i64),
     Put(ScalarValue),
+    MarkBegin(bool, MarkData),
+    MarkEnd(bool),
 }
 
 impl OpType {
@@ -213,6 +217,7 @@ impl OpType {
             Self::Make(ObjType::Text) => 4,
             Self::Increment(_) => 5,
             Self::Make(ObjType::Table) => 6,
+            Self::MarkBegin(_, _) | Self::MarkEnd(_) => 7,
         }
     }
 
@@ -227,11 +232,17 @@ impl OpType {
                 _ => Err(error::InvalidOpType::NonNumericInc),
             },
             6 => Ok(()),
+            7 => Ok(()),
             _ => Err(error::InvalidOpType::UnknownAction(action)),
         }
     }
 
-    pub(crate) fn from_action_and_value(action: u64, value: ScalarValue) -> OpType {
+    pub(crate) fn from_action_and_value(
+        action: u64,
+        value: ScalarValue,
+        mark_name: Option<smol_str::SmolStr>,
+        expand: bool,
+    ) -> OpType {
         match action {
             0 => Self::Make(ObjType::Map),
             1 => Self::Put(value),
@@ -244,8 +255,26 @@ impl OpType {
                 _ => unreachable!("validate_action_and_value returned NonNumericInc"),
             },
             6 => Self::Make(ObjType::Table),
+            7 => match mark_name {
+                Some(name) => Self::MarkBegin(expand, MarkData { name, value }),
+                None => Self::MarkEnd(expand),
+            },
             _ => unreachable!("validate_action_and_value returned UnknownAction"),
         }
+    }
+
+    pub(crate) fn to_str(&self) -> &str {
+        if let OpType::Put(ScalarValue::Str(s)) = &self {
+            s
+        } else if self.is_mark() {
+            ""
+        } else {
+            "\u{fffc}"
+        }
+    }
+
+    pub(crate) fn is_mark(&self) -> bool {
+        matches!(&self, OpType::MarkBegin(_, _) | OpType::MarkEnd(_))
     }
 }
 
@@ -426,6 +455,13 @@ impl Display for Prop {
 }
 
 impl Key {
+    pub(crate) fn prop_index(&self) -> Option<usize> {
+        match self {
+            Key::Map(n) => Some(*n),
+            Key::Seq(_) => None,
+        }
+    }
+
     pub(crate) fn elemid(&self) -> Option<ElemId> {
         match self {
             Key::Map(_) => None,
@@ -458,6 +494,16 @@ impl OpId {
             .cmp(&other.0)
             .then_with(|| actors[self.1 as usize].cmp(&actors[other.1 as usize]))
     }
+
+    #[inline]
+    pub(crate) fn prev(&self) -> OpId {
+        OpId(self.0 - 1, self.1)
+    }
+
+    #[inline]
+    pub(crate) fn next(&self) -> OpId {
+        OpId(self.0 + 1, self.1)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
@@ -474,6 +520,23 @@ impl ObjId {
 
     pub(crate) fn opid(&self) -> &OpId {
         &self.0
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ObjMeta {
+    pub(crate) id: ObjId,
+    pub(crate) typ: ObjType,
+    pub(crate) encoding: ListEncoding,
+}
+
+impl ObjMeta {
+    pub(crate) fn root() -> Self {
+        Self {
+            id: ObjId::root(),
+            typ: ObjType::Map,
+            encoding: ListEncoding::List,
+        }
     }
 }
 
@@ -542,19 +605,54 @@ pub(crate) struct Op {
     pub(crate) insert: bool,
 }
 
+pub(crate) enum SuccIter<'a> {
+    Counter(HashSet<&'a OpId>, std::slice::Iter<'a, OpId>),
+    NonCounter(std::slice::Iter<'a, OpId>),
+}
+
+impl<'a> Iterator for SuccIter<'a> {
+    type Item = &'a OpId;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Counter(set, iter) => {
+                for i in iter {
+                    if !set.contains(i) {
+                        return Some(i);
+                    }
+                }
+                None
+            }
+            Self::NonCounter(iter) => iter.next(),
+        }
+    }
+}
+
 impl Op {
     pub(crate) fn add_succ<F: Fn(&OpId, &OpId) -> std::cmp::Ordering>(&mut self, op: &Op, cmp: F) {
         self.succ.add(op.id, cmp);
-        if let OpType::Put(ScalarValue::Counter(Counter {
-            current,
-            increments,
-            ..
-        })) = &mut self.action
-        {
-            if let OpType::Increment(n) = &op.action {
-                *current += *n;
-                *increments += 1;
-            }
+        if let OpType::Increment(n) = &op.action {
+            self.increment(*n, op.id);
+        }
+    }
+
+    pub(crate) fn succ_iter(&self) -> SuccIter<'_> {
+        if let OpType::Put(ScalarValue::Counter(c)) = &self.action {
+            let set = c
+                .increments
+                .iter()
+                .map(|(id, _)| id)
+                .collect::<HashSet<_>>();
+            SuccIter::Counter(set, self.succ.iter())
+        } else {
+            SuccIter::NonCounter(self.succ.iter())
+        }
+    }
+
+    pub(crate) fn increment(&mut self, n: i64, id: OpId) {
+        if let OpType::Put(ScalarValue::Counter(c)) = &mut self.action {
+            c.current += n;
+            c.increments.push((id, n));
         }
     }
 
@@ -568,7 +666,7 @@ impl Op {
         {
             if let OpType::Increment(n) = &op.action {
                 *current -= *n;
-                *increments -= 1;
+                increments.retain(|(id, _)| id != &op.id);
             }
         }
     }
@@ -582,16 +680,36 @@ impl Op {
     }
 
     pub(crate) fn to_str(&self) -> &str {
-        if let OpType::Put(ScalarValue::Str(s)) = &self.action {
-            s
-        } else {
-            "\u{fffc}"
-        }
+        self.action.to_str()
     }
 
     pub(crate) fn visible(&self) -> bool {
+        if self.is_inc() || self.is_mark() {
+            false
+        } else if self.is_counter() {
+            self.succ.len() <= self.incs()
+        } else {
+            self.succ.is_empty()
+        }
+    }
+
+    pub(crate) fn visible_at(&self, clock: Option<&Clock>) -> bool {
+        if let Some(clock) = clock {
+            if self.is_inc() || self.is_mark() {
+                false
+            } else {
+                clock.covers(&self.id) && !self.succ_iter().any(|i| clock.covers(i))
+            }
+        } else {
+            self.visible()
+        }
+    }
+
+    pub(crate) fn visible_or_mark(&self, clock: Option<&Clock>) -> bool {
         if self.is_inc() {
             false
+        } else if let Some(clock) = clock {
+            clock.covers(&self.id) && !self.succ_iter().any(|i| clock.covers(i))
         } else if self.is_counter() {
             self.succ.len() <= self.incs()
         } else {
@@ -601,7 +719,7 @@ impl Op {
 
     pub(crate) fn incs(&self) -> usize {
         if let OpType::Put(ScalarValue::Counter(Counter { increments, .. })) = &self.action {
-            *increments
+            increments.len()
         } else {
             0
         }
@@ -619,6 +737,18 @@ impl Op {
         matches!(&self.action, OpType::Put(ScalarValue::Counter(_)))
     }
 
+    pub(crate) fn is_mark(&self) -> bool {
+        self.action.is_mark()
+    }
+
+    pub(crate) fn valid_mark_anchor(&self) -> bool {
+        self.succ.is_empty()
+            && matches!(
+                &self.action,
+                OpType::MarkBegin(true, _) | OpType::MarkEnd(false)
+            )
+    }
+
     pub(crate) fn is_noop(&self, action: &OpType) -> bool {
         matches!((&self.action, action), (OpType::Put(n), OpType::Put(m)) if n == m)
     }
@@ -632,7 +762,13 @@ impl Op {
     }
 
     pub(crate) fn elemid(&self) -> Option<ElemId> {
-        self.elemid_or_key().elemid()
+        if self.insert {
+            Some(ElemId(self.id))
+        } else if let Key::Seq(e) = self.key {
+            Some(e)
+        } else {
+            None
+        }
     }
 
     pub(crate) fn elemid_or_key(&self) -> Key {
@@ -651,18 +787,30 @@ impl Op {
         }
     }
 
+    pub(crate) fn value_at(&self, clock: Option<&Clock>) -> Value<'_> {
+        if let Some(clock) = clock {
+            if let OpType::Put(ScalarValue::Counter(c)) = &self.action {
+                return Value::counter(c.value_at(clock));
+            }
+        }
+        self.value()
+    }
+
+    pub(crate) fn scalar_value(&self) -> Option<&ScalarValue> {
+        match &self.action {
+            OpType::Put(scalar) => Some(scalar),
+            _ => None,
+        }
+    }
+
     pub(crate) fn value(&self) -> Value<'_> {
         match &self.action {
             OpType::Make(obj_type) => Value::Object(*obj_type),
             OpType::Put(scalar) => Value::Scalar(Cow::Borrowed(scalar)),
-            _ => panic!("cant convert op into a value - {:?}", self),
-        }
-    }
-
-    pub(crate) fn clone_value(&self) -> Value<'static> {
-        match &self.action {
-            OpType::Make(obj_type) => Value::Object(*obj_type),
-            OpType::Put(scalar) => Value::Scalar(Cow::Owned(scalar.clone())),
+            OpType::MarkBegin(_, mark) => {
+                Value::Scalar(Cow::Owned(format!("markBegin={}", mark.value).into()))
+            }
+            OpType::MarkEnd(_) => Value::Scalar(Cow::Owned("markEnd".into())),
             _ => panic!("cant convert op into a value - {:?}", self),
         }
     }
@@ -675,7 +823,17 @@ impl Op {
             OpType::Make(obj) => format!("make{}", obj),
             OpType::Increment(val) => format!("inc:{}", val),
             OpType::Delete => "del".to_string(),
+            OpType::MarkBegin(_, _) => "markBegin".to_string(),
+            OpType::MarkEnd(_) => "markEnd".to_string(),
         }
+    }
+
+    pub(crate) fn was_deleted_before(&self, clock: &Clock) -> bool {
+        self.succ_iter().any(|i| clock.covers(i))
+    }
+
+    pub(crate) fn predates(&self, clock: &Clock) -> bool {
+        clock.covers(&self.id)
     }
 }
 

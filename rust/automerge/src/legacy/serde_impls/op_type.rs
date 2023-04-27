@@ -1,7 +1,7 @@
 use serde::{Serialize, Serializer};
 
 use super::op::RawOpType;
-use crate::{ObjType, OpType};
+use crate::{legacy::OpType, ObjType};
 
 impl Serialize for OpType {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -18,6 +18,8 @@ impl Serialize for OpType {
             OpType::Delete => RawOpType::Del,
             OpType::Increment(_) => RawOpType::Inc,
             OpType::Put(_) => RawOpType::Set,
+            OpType::MarkBegin(_) => RawOpType::MarkBegin,
+            OpType::MarkEnd(_) => RawOpType::MarkEnd,
         };
         raw_type.serialize(serializer)
     }

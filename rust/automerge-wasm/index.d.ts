@@ -94,13 +94,33 @@ export type Op = {
   pred: string[],
 }
 
-export type Patch =  PutPatch | DelPatch | SpliceTextPatch | IncPatch | InsertPatch;
+export type Patch =  PutPatch | DelPatch | SpliceTextPatch | IncPatch | InsertPatch | MarkPatch | UnmarkPatch;
 
 export type PutPatch = {
   action: 'put'
   path: Prop[],
   value: Value
   conflict: boolean
+}
+
+export type MarkPatch = {
+  action: 'mark'
+  path: Prop[],
+  marks: Mark[]
+}
+
+export type MarkRange = {
+  expand?: 'before' | 'after' | 'both' | 'none'
+  start: number,
+  end: number,
+}
+
+export type UnmarkPatch = {
+  action: 'unmark'
+  path: Prop[],
+  name: string,
+  start: number,
+  end: number
 }
 
 export type IncPatch = {
@@ -125,6 +145,13 @@ export type InsertPatch = {
   action: 'insert'
   path: Prop[],
   values: Value[],
+}
+
+export type Mark = {
+  name: string,
+  value: Value,
+  start: number,
+  end: number,
 }
 
 export function encodeChange(change: ChangeToEncode): Change;
@@ -165,6 +192,13 @@ export class Automerge {
   increment(obj: ObjID, prop: Prop, value: number): void;
   delete(obj: ObjID, prop: Prop): void;
 
+  // marks
+  mark(obj: ObjID, range: MarkRange, name: string, value: Value, datatype?: Datatype): void;
+  unmark(obj: ObjID, range: MarkRange, name: string): void;
+  marks(obj: ObjID, heads?: Heads): Mark[];
+
+  diff(before: Heads, after: Heads): Patch[];
+
   // returns a single value - if there is a conflict return the winner
   get(obj: ObjID, prop: Prop, heads?: Heads): Value | undefined;
   getWithType(obj: ObjID, prop: Prop, heads?: Heads): FullValue | null;
@@ -192,6 +226,8 @@ export class Automerge {
 
   // save and load to local store
   save(): Uint8Array;
+  saveNoCompress(): Uint8Array;
+  saveAndVerify(): Uint8Array;
   saveIncremental(): Uint8Array;
   loadIncremental(data: Uint8Array): number;
 
@@ -217,7 +253,14 @@ export class Automerge {
   dump(): void;
 
   // experimental api can go here
-  applyPatches<Doc>(obj: Doc, meta?: unknown, callback?: (patch: Array<Patch>, before: Doc, after: Doc) => void): Doc;
+  applyPatches<Doc>(obj: Doc, meta?: unknown, callback?: (patch: Array<Patch>, info: PatchInfo<Doc>) => void): Doc;
+}
+
+export interface PatchInfo<T> {
+  before: T,
+  after: T,
+  from: Heads,
+  to: Heads,
 }
 
 export interface JsSyncState {
@@ -236,3 +279,4 @@ export class SyncState {
   sentHashes: Heads;
   readonly sharedHeads: Heads;
 }
+

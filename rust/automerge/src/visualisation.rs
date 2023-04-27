@@ -246,9 +246,12 @@ impl OpTableRow {
     ) -> Self {
         let op_description = match &op.action {
             crate::OpType::Delete => "del".to_string(),
+            crate::OpType::Put(crate::ScalarValue::F64(v)) => format!("set {:.2}", v),
             crate::OpType::Put(v) => format!("set {}", v),
             crate::OpType::Make(obj) => format!("make {}", obj),
             crate::OpType::Increment(v) => format!("inc {}", v),
+            crate::OpType::MarkBegin(_, m) => format!("markEnd {}", m),
+            crate::OpType::MarkEnd(m) => format!("markEnd {}", m),
         };
         let prop = match op.key {
             crate::types::Key::Map(k) => metadata.props[k].clone(),

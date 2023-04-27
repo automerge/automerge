@@ -4,8 +4,8 @@ export { Counter } from "./counter"
 export { Int, Uint, Float64 } from "./numbers"
 
 import { Counter } from "./counter"
-import type { Patch } from "@automerge/automerge-wasm"
-export type { Patch } from "@automerge/automerge-wasm"
+import type { Patch, PatchInfo, MarkRange } from "@automerge/automerge-wasm"
+export type { Patch, Mark, MarkRange } from "@automerge/automerge-wasm"
 
 export type AutomergeValue =
   | ScalarValue
@@ -23,6 +23,8 @@ export type ScalarValue =
   | Counter
   | Uint8Array
 
+export type MarkValue = string | number | null | boolean | Date | Uint8Array
+
 /**
  * An automerge document.
  * @typeParam T - The type of the value contained in this document
@@ -36,11 +38,9 @@ export type Doc<T> = { readonly [P in keyof T]: T[P] }
  * Callback which is called by various methods in this library to notify the
  * user of what changes have been made.
  * @param patch - A description of the changes made
- * @param before - The document before the change was made
- * @param after - The document after the change was made
+ * @param info - An object that has the "before" and "after" document state, and the "from" and "to" heads
  */
 export type PatchCallback<T> = (
   patches: Array<Patch>,
-  before: Doc<T>,
-  after: Doc<T>
+  info: PatchInfo<T>
 ) => void

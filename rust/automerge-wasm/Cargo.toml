@@ -2,7 +2,7 @@
 [package]
 name = "automerge-wasm"
 description = "An js/wasm wrapper for the rust implementation of automerge-backend"
-repository = "https://github.com/automerge/automerge-rs"
+repository = "https://github.com/automerge/automerge"
 version = "0.1.0"
 authors = ["Alex Good <alex@memoryandthought.me>","Orion Henry <orion@inkandswitch.com>", "Martin Kleppmann"]
 categories = ["wasm"]
@@ -32,12 +32,11 @@ uuid = { version = "^1.2.1", features=["v4", "js", "serde"] }
 serde-wasm-bindgen = "0.4.3"
 serde_bytes = "0.11.5"
 hex = "^0.4.3"
-regex = "^1.5"
 itertools = "^0.10.3"
 thiserror = "^1.0.16"
 
 [dependencies.wasm-bindgen]
-version = "^0.2.83"
+version = "^0.2.84"
 #features = ["std"]
 features = ["serde-serialize", "std"]
 

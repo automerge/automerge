@@ -5,7 +5,7 @@ use crate::{
     convert,
     op_set::OpSetMetadata,
     storage::AsChangeOp,
-    types::{ActorId, Key, ObjId, Op, OpId, OpType, ScalarValue},
+    types::{ActorId, Key, MarkData, ObjId, Op, OpId, OpType, ScalarValue},
 };
 
 /// Wrap an op in an implementation of `AsChangeOp` which represents actor IDs using a reference to
@@ -93,9 +93,12 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
 
     fn val(&self) -> Cow<'a, ScalarValue> {
         match &self.op.action {
-            OpType::Make(..) | OpType::Delete => Cow::Owned(ScalarValue::Null),
+            OpType::Make(..) | OpType::Delete | OpType::MarkEnd(..) => {
+                Cow::Owned(ScalarValue::Null)
+            }
             OpType::Increment(i) => Cow::Owned(ScalarValue::Int(*i)),
             OpType::Put(s) => Cow::Borrowed(s),
+            OpType::MarkBegin(_, MarkData { value, .. }) => Cow::Borrowed(value),
         }
     }
 
@@ -123,6 +126,21 @@ impl<'a> AsChangeOp<'a> for OpWithMetadata<'a> {
             Key::Map(idx) => convert::Key::Prop(Cow::Owned(self.metadata.props.get(*idx).into())),
             Key::Seq(e) if e.is_head() => convert::Key::Elem(convert::ElemId::Head),
             Key::Seq(e) => convert::Key::Elem(convert::ElemId::Op(self.wrap(&e.0))),
+        }
+    }
+
+    fn expand(&self) -> bool {
+        matches!(
+            self.op.action,
+            OpType::MarkBegin(true, _) | OpType::MarkEnd(true)
+        )
+    }
+
+    fn mark_name(&self) -> Option<Cow<'a, smol_str::SmolStr>> {
+        if let OpType::MarkBegin(_, MarkData { name, .. }) = &self.op.action {
+            Some(Cow::Owned(name.clone()))
+        } else {
+            None
         }
     }
 }

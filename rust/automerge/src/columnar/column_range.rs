@@ -3,7 +3,7 @@ pub(crate) use rle::RleRange;
 mod delta;
 pub(crate) use delta::DeltaRange;
 mod boolean;
-pub(crate) use boolean::BooleanRange;
+pub(crate) use boolean::{BooleanRange, MaybeBooleanRange};
 mod raw;
 pub(crate) use raw::RawRange;
 mod opid;

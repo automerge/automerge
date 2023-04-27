@@ -3,7 +3,7 @@ mod utility_impls;
 
 use std::num::NonZeroU64;
 
-pub(crate) use crate::types::{ActorId, ChangeHash, ObjType, OpType, ScalarValue};
+pub(crate) use crate::types::{ActorId, ChangeHash, ObjType, ScalarValue};
 pub(crate) use crate::value::DataType;
 
 use serde::{Deserialize, Serialize};
@@ -204,6 +204,96 @@ where
     }
 }
 
+pub(crate) struct OpTypeParts {
+    pub(crate) action: u64,
+    pub(crate) value: ScalarValue,
+    pub(crate) expand: bool,
+    pub(crate) mark_name: Option<smol_str::SmolStr>,
+}
+
+// Like `types::OpType` except using a String for mark names
+#[derive(PartialEq, Debug, Clone)]
+pub enum OpType {
+    Make(ObjType),
+    Delete,
+    Increment(i64),
+    Put(ScalarValue),
+    MarkBegin(MarkData),
+    MarkEnd(bool),
+}
+
+impl OpType {
+    /// Create a new legacy OpType
+    ///
+    /// This is really only meant to be used to convert from a crate::Change to a
+    /// crate::legacy::Change, so the arguments should all have been validated. Consequently it
+    /// does not return an error and instead panics on the following conditions
+    ///
+    /// # Panics
+    ///
+    /// * If The action index is unrecognized
+    /// * If the action index indicates that the value should be numeric but the value is not a
+    ///   number
+    pub(crate) fn from_parts(
+        OpTypeParts {
+            action,
+            value,
+            expand,
+            mark_name,
+        }: OpTypeParts,
+    ) -> Self {
+        match action {
+            0 => Self::Make(ObjType::Map),
+            1 => Self::Put(value),
+            2 => Self::Make(ObjType::List),
+            3 => Self::Delete,
+            4 => Self::Make(ObjType::Text),
+            5 => match value {
+                ScalarValue::Int(i) => Self::Increment(i),
+                ScalarValue::Uint(i) => Self::Increment(i as i64),
+                _ => panic!("non numeric value for integer action"),
+            },
+            6 => Self::Make(ObjType::Table),
+            7 => match mark_name {
+                Some(name) => Self::MarkBegin(MarkData {
+                    name,
+                    value,
+                    expand,
+                }),
+                None => Self::MarkEnd(expand),
+            },
+            other => panic!("unknown action type {}", other),
+        }
+    }
+
+    pub(crate) fn action_index(&self) -> u64 {
+        match self {
+            Self::Make(ObjType::Map) => 0,
+            Self::Put(_) => 1,
+            Self::Make(ObjType::List) => 2,
+            Self::Delete => 3,
+            Self::Make(ObjType::Text) => 4,
+            Self::Increment(_) => 5,
+            Self::Make(ObjType::Table) => 6,
+            Self::MarkBegin(_) | Self::MarkEnd(_) => 7,
+        }
+    }
+
+    pub(crate) fn expand(&self) -> bool {
+        matches!(
+            self,
+            Self::MarkBegin(MarkData { expand: true, .. }) | Self::MarkEnd(true)
+        )
+    }
+}
+
+#[derive(PartialEq, Debug, Clone)]
+pub struct MarkData {
+    pub name: smol_str::SmolStr,
+    pub value: ScalarValue,
+    pub expand: bool,
+}
+
 #[derive(PartialEq, Debug, Clone)]
 pub struct Op {
     pub action: OpType,
@@ -217,6 +307,7 @@ impl Op {
     pub fn primitive_value(&self) -> Option<ScalarValue> {
         match &self.action {
             OpType::Put(v) => Some(v.clone()),
+            OpType::MarkBegin(MarkData { value, .. }) => Some(value.clone()),
             OpType::Increment(i) => Some(ScalarValue::Int(*i)),
             _ => None,
         }

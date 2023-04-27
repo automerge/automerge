@@ -7,7 +7,7 @@ use std::{
 pub(crate) use crate::op_set::OpSetMetadata;
 use crate::query::{ChangeVisibility, Index, QueryResult, TreeQuery};
 use crate::types::Op;
-pub(crate) const B: usize = 16;
+pub const B: usize = 16;
 
 #[derive(Clone, Debug)]
 pub(crate) struct OpTreeNode {
@@ -50,13 +50,12 @@ impl OpTreeNode {
         query: &mut Q,
         m: &OpSetMetadata,
         ops: &'a [Op],
-        mut skip: Option<usize>,
     ) -> bool
     where
         Q: TreeQuery<'a>,
     {
         if self.is_leaf() {
-            for e in self.elements.iter().skip(skip.unwrap_or(0)) {
+            for e in self.elements.iter() {
                 if query.query_element_with_metadata(&ops[*e], m) == QueryResult::Finish {
                     return true;
                 }
@@ -64,41 +63,18 @@ impl OpTreeNode {
             false
         } else {
             for (child_index, child) in self.children.iter().enumerate() {
-                match skip {
-                    Some(n) if n > child.len() => {
-                        skip = Some(n - child.len() - 1);
-                    }
-                    Some(n) if n == child.len() => {
-                        skip = Some(0); // important to not be None so we never call query_node again
-                        if self.search_element(query, m, ops, child_index) {
+                // descend and try find it
+                match query.query_node_with_metadata(child, m, ops) {
+                    QueryResult::Descend => {
+                        if child.search(query, m, ops) {
                             return true;
                         }
                     }
-                    Some(n) => {
-                        if child.search(query, m, ops, Some(n)) {
-                            return true;
-                        }
-                        skip = Some(0); // important to not be None so we never call query_node again
-                        if self.search_element(query, m, ops, child_index) {
-                            return true;
-                        }
-                    }
-                    None => {
-                        // descend and try find it
-                        match query.query_node_with_metadata(child, m, ops) {
-                            QueryResult::Descend => {
-                                if child.search(query, m, ops, None) {
-                                    return true;
-                                }
-                            }
-                            QueryResult::Finish => return true,
-                            QueryResult::Next => (),
-                            QueryResult::Skip(_) => panic!("had skip from non-root node"),
-                        }
-                        if self.search_element(query, m, ops, child_index) {
-                            return true;
-                        }
-                    }
+                    QueryResult::Finish => return true,
+                    QueryResult::Next => (),
+                }
+                if self.search_element(query, m, ops, child_index) {
+                    return true;
                 }
             }
             false

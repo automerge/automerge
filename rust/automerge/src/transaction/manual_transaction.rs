@@ -1,12 +1,11 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
+use crate::iter::{Keys, ListRange, MapRange, Values};
+use crate::marks::{ExpandMark, Mark};
 use crate::op_observer::BranchableObserver;
-use crate::{
-    Automerge, ChangeHash, KeysAt, ObjType, OpObserver, Prop, ReadDoc, ScalarValue, Value, Values,
-};
-use crate::{AutomergeError, Keys};
-use crate::{ListRange, ListRangeAt, MapRange, MapRangeAt};
+use crate::AutomergeError;
+use crate::{Automerge, ChangeHash, ObjType, OpObserver, Prop, ReadDoc, ScalarValue, Value};
 
 use super::{observation, CommitOptions, Transactable, TransactionArgs, TransactionInner};
 
@@ -120,28 +119,28 @@ impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
 }
 
 impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
-    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_, '_> {
+    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
         self.doc.keys(obj)
     }
 
-    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt<'_, '_> {
+    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> Keys<'_> {
         self.doc.keys_at(obj, heads)
     }
 
-    fn map_range<O: AsRef<ExId>, R: RangeBounds<String>>(
-        &self,
+    fn map_range<'b, O: AsRef<ExId>, R: RangeBounds<String> + 'b>(
+        &'b self,
         obj: O,
         range: R,
-    ) -> MapRange<'_, R> {
+    ) -> MapRange<'b, R> {
         self.doc.map_range(obj, range)
     }
 
-    fn map_range_at<O: AsRef<ExId>, R: RangeBounds<String>>(
-        &self,
+    fn map_range_at<'b, O: AsRef<ExId>, R: RangeBounds<String> + 'b>(
+        &'b self,
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> MapRangeAt<'_, R> {
+    ) -> MapRange<'b, R> {
         self.doc.map_range_at(obj, range, heads)
     }
 
@@ -158,7 +157,7 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
         obj: O,
         range: R,
         heads: &[ChangeHash],
-    ) -> ListRangeAt<'_, R> {
+    ) -> ListRange<'_, R> {
         self.doc.list_range_at(obj, range, heads)
     }
 
@@ -192,6 +191,18 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError> {
         self.doc.text_at(obj, heads)
+    }
+
+    fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
+        self.doc.marks(obj)
+    }
+
+    fn marks_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<Mark<'_>>, AutomergeError> {
+        self.doc.marks_at(obj, heads)
     }
 
     fn get<O: AsRef<ExId>, P: Into<Prop>>(
@@ -232,8 +243,12 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
         self.doc.parents(obj)
     }
 
-    fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<(ExId, Prop)>, AutomergeError> {
-        self.doc.path_to_object(obj)
+    fn parents_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<crate::Parents<'_>, AutomergeError> {
+        self.doc.parents_at(obj, heads)
     }
 
     fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
@@ -332,6 +347,26 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
         text: &str,
     ) -> Result<(), AutomergeError> {
         self.do_tx(|tx, doc, obs| tx.splice_text(doc, obs, obj.as_ref(), pos, del, text))
+    }
+
+    fn mark<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        mark: Mark<'_>,
+        expand: ExpandMark,
+    ) -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, obs| tx.mark(doc, obs, obj.as_ref(), mark, expand))
+    }
+
+    fn unmark<O: AsRef<ExId>>(
+        &mut self,
+        obj: O,
+        name: &str,
+        start: usize,
+        end: usize,
+        expand: ExpandMark,
+    ) -> Result<(), AutomergeError> {
+        self.do_tx(|tx, doc, obs| tx.unmark(doc, obs, obj.as_ref(), name, start, end, expand))
     }
 
     fn base_heads(&self) -> Vec<ChangeHash> {

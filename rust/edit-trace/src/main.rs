@@ -34,6 +34,10 @@ fn main() -> Result<(), AutomergeError> {
     let bytes = doc.save();
     println!("Saved in {} ms", save.elapsed().as_millis());
 
+    let fork = Instant::now();
+    let _other = doc.fork_at(&doc.get_heads());
+    println!("ForkAt in {} ms", fork.elapsed().as_millis());
+
     let load = Instant::now();
     let _ = Automerge::load(&bytes).unwrap();
     println!("Loaded in {} ms", load.elapsed().as_millis());

@@ -242,6 +242,7 @@ export function clone<T>(
   // `change` uses the presence of state.heads to determine if we are in a view
   // set it to undefined to indicate that this is a full fat document
   const { heads: _oldHeads, ...stateSansHeads } = state
+  stateSansHeads.patchCallback = opts.patchCallback
   return handle.applyPatches(doc, { ...stateSansHeads, handle })
 }
 
@@ -515,6 +516,30 @@ export function loadIncremental<T>(
   const heads = state.handle.getHeads()
   state.handle.loadIncremental(data)
   return progressDocument(doc, heads, opts.patchCallback || state.patchCallback)
+}
+
+/**
+ * Create binary save data to be appended to a save file or fed into {@link loadIncremental}
+ *
+ * @typeParam T - The type of the value which is contained in the document.
+ *                Note that no validation is done to make sure this type is in
+ *                fact the type of the contained value so be a bit careful
+ *
+ * This function is useful for incrementally saving state.  The data can be appended to a
+ * automerge save file, or passed to a document replicating its state.
+ *
+ */
+export function saveIncremental<T>(doc: Doc<T>): Uint8Array {
+  const state = _state(doc)
+  if (state.heads) {
+    throw new RangeError(
+      "Attempting to change an out of date document - set at: " + _trace(doc)
+    )
+  }
+  if (_is_proxy(doc)) {
+    throw new RangeError("Calls to Automerge.change cannot be nested")
+  }
+  return state.handle.saveIncremental()
 }
 
 /**

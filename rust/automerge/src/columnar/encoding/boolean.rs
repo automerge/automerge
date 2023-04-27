@@ -100,6 +100,72 @@ impl<'a> Iterator for BooleanDecoder<'a> {
     }
 }
 
+/// Like a `BooleanEncoder` but if all the values in the column are `false` then will return an
+/// empty range rather than a range with `count` false values.
+pub(crate) struct MaybeBooleanEncoder<S> {
+    encoder: BooleanEncoder<S>,
+    all_false: bool,
+}
+
+impl MaybeBooleanEncoder<Vec<u8>> {
+    pub(crate) fn new() -> MaybeBooleanEncoder<Vec<u8>> {
+        MaybeBooleanEncoder::from_sink(Vec::new())
+    }
+}
+
+impl<S: Sink> MaybeBooleanEncoder<S> {
+    pub(crate) fn from_sink(buf: S) -> MaybeBooleanEncoder<S> {
+        MaybeBooleanEncoder {
+            encoder: BooleanEncoder::from_sink(buf),
+            all_false: true,
+        }
+    }
+
+    pub(crate) fn append(&mut self, value: bool) {
+        if value {
+            self.all_false = false;
+        }
+        self.encoder.append(value);
+    }
+
+    pub(crate) fn finish(self) -> (S, usize) {
+        if self.all_false {
+            (self.encoder.buf, 0)
+        } else {
+            self.encoder.finish()
+        }
+    }
+}
+
+/// Like a `BooleanDecoder` but if the underlying range is empty then just returns an infinite
+/// sequence of `None`
+#[derive(Clone, Debug)]
+pub(crate) struct MaybeBooleanDecoder<'a>(BooleanDecoder<'a>);
+
+impl<'a> From<Cow<'a, [u8]>> for MaybeBooleanDecoder<'a> {
+    fn from(bytes: Cow<'a, [u8]>) -> Self {
+        MaybeBooleanDecoder(BooleanDecoder::from(bytes))
+    }
+}
+
+impl<'a> From<&'a [u8]> for MaybeBooleanDecoder<'a> {
+    fn from(d: &'a [u8]) -> Self {
+        Cow::Borrowed(d).into()
+    }
+}
+
+impl<'a> Iterator for MaybeBooleanDecoder<'a> {
+    type Item = Result<Option<bool>, raw::Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.0.decoder.is_empty() {
+            None
+        } else {
+            self.0.next().transpose().map(Some).transpose()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

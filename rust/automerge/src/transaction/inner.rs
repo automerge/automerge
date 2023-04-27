@@ -1,6 +1,7 @@
 use std::num::NonZeroU64;
 
 use crate::exid::ExId;
+use crate::marks::{ExpandMark, Mark};
 use crate::query::{self, OpIdSearch};
 use crate::storage::Change as StoredChange;
 use crate::types::{Key, ListEncoding, ObjId, OpId, OpIds, TextEncoding};
@@ -150,13 +151,22 @@ impl TransactionInner {
     pub(crate) fn rollback(self, doc: &mut Automerge) -> usize {
         let num = self.pending_ops();
         // remove in reverse order so sets are removed before makes etc...
+        let encoding = ListEncoding::List; // encoding doesnt matter here - we dont care what the index is
         for (obj, op) in self.operations.into_iter().rev() {
             for pred_id in &op.pred {
-                if let Some(p) = doc.ops().search(&obj, OpIdSearch::new(*pred_id)).index() {
+                if let Some(p) = doc
+                    .ops()
+                    .search(&obj, OpIdSearch::opid(*pred_id, encoding, None))
+                    .found()
+                {
                     doc.ops_mut().change_vis(&obj, p, |o| o.remove_succ(&op));
                 }
             }
-            if let Some(pos) = doc.ops().search(&obj, OpIdSearch::new(op.id)).index() {
+            if let Some(pos) = doc
+                .ops()
+                .search(&obj, OpIdSearch::opid(op.id, encoding, None))
+                .found()
+            {
                 doc.ops_mut().remove(&obj, pos);
             }
         }
@@ -187,16 +197,16 @@ impl TransactionInner {
         prop: P,
         value: V,
     ) -> Result<(), AutomergeError> {
-        let (obj, obj_type) = doc.exid_to_obj(ex_obj)?;
+        let obj = doc.exid_to_obj(ex_obj)?;
         let value = value.into();
         let prop = prop.into();
-        match (&prop, obj_type) {
+        match (&prop, obj.typ) {
             (Prop::Map(_), ObjType::Map) => Ok(()),
             (Prop::Seq(_), ObjType::List) => Ok(()),
             (Prop::Seq(_), ObjType::Text) => Ok(()),
-            _ => Err(AutomergeError::InvalidOp(obj_type)),
+            _ => Err(AutomergeError::InvalidOp(obj.typ)),
         }?;
-        self.local_op(doc, op_observer, obj, prop, value.into())?;
+        self.local_op(doc, op_observer, obj.id, prop, value.into())?;
         Ok(())
     }
 
@@ -221,15 +231,15 @@ impl TransactionInner {
         prop: P,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
-        let (obj, obj_type) = doc.exid_to_obj(ex_obj)?;
+        let obj = doc.exid_to_obj(ex_obj)?;
         let prop = prop.into();
-        match (&prop, obj_type) {
+        match (&prop, obj.typ) {
             (Prop::Map(_), ObjType::Map) => Ok(()),
             (Prop::Seq(_), ObjType::List) => Ok(()),
-            _ => Err(AutomergeError::InvalidOp(obj_type)),
+            _ => Err(AutomergeError::InvalidOp(obj.typ)),
         }?;
         let id = self
-            .local_op(doc, op_observer, obj, prop, value.into())?
+            .local_op(doc, op_observer, obj.id, prop, value.into())?
             .unwrap();
         let id = doc.id_to_exid(id);
         Ok(id)
@@ -289,13 +299,13 @@ impl TransactionInner {
         index: usize,
         value: V,
     ) -> Result<(), AutomergeError> {
-        let (obj, obj_type) = doc.exid_to_obj(ex_obj)?;
-        if !matches!(obj_type, ObjType::List | ObjType::Text) {
-            return Err(AutomergeError::InvalidOp(obj_type));
+        let obj = doc.exid_to_obj(ex_obj)?;
+        if !matches!(obj.typ, ObjType::List | ObjType::Text) {
+            return Err(AutomergeError::InvalidOp(obj.typ));
         }
         let value = value.into();
         tracing::trace!(obj=?obj, value=?value, "inserting value");
-        self.do_insert(doc, op_observer, obj, index, value.into())?;
+        self.do_insert(doc, op_observer, obj.id, index, value.into())?;
         Ok(())
     }
 
@@ -307,11 +317,11 @@ impl TransactionInner {
         index: usize,
         value: ObjType,
     ) -> Result<ExId, AutomergeError> {
-        let (obj, obj_type) = doc.exid_to_obj(ex_obj)?;
-        if !matches!(obj_type, ObjType::List | ObjType::Text) {
-            return Err(AutomergeError::InvalidOp(obj_type));
+        let obj = doc.exid_to_obj(ex_obj)?;
+        if !matches!(obj.typ, ObjType::List | ObjType::Text) {
+            return Err(AutomergeError::InvalidOp(obj.typ));
         }
-        let id = self.do_insert(doc, op_observer, obj, index, value.into())?;
+        let id = self.do_insert(doc, op_observer, obj.id, index, value.into())?;
         let id = doc.id_to_exid(id);
         Ok(id)
     }
@@ -376,37 +386,42 @@ impl TransactionInner {
 
         let id = self.next_id();
         let prop_index = doc.ops_mut().m.props.cache(prop.clone());
-        let query = doc.ops().search(&obj, query::Prop::new(prop_index));
+        let key = Key::Map(prop_index);
+        let prop: Prop = prop.into();
+        let query = doc
+            .ops()
+            .seek_ops_by_prop(&obj, prop.clone(), ListEncoding::List, None);
+        let ops = query.ops;
+        let ops_pos = query.ops_pos;
 
         // no key present to delete
-        if query.ops.is_empty() && action == OpType::Delete {
+        if ops.is_empty() && action == OpType::Delete {
             return Ok(None);
         }
 
-        if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
+        if ops.len() == 1 && ops[0].is_noop(&action) {
             return Ok(None);
         }
 
         // increment operations are only valid against counter values.
         // if there are multiple values (from conflicts) then we just need one of them to be a counter.
-        if matches!(action, OpType::Increment(_)) && query.ops.iter().all(|op| !op.is_counter()) {
+        if matches!(action, OpType::Increment(_)) && ops.iter().all(|op| !op.is_counter()) {
             return Err(AutomergeError::MissingCounter);
         }
 
-        let pred = doc.ops().m.sorted_opids(query.ops.iter().map(|o| o.id));
+        let pred = doc.ops().m.sorted_opids(ops.iter().map(|o| o.id));
 
         let op = Op {
             id,
             action,
-            key: Key::Map(prop_index),
+            key,
             succ: Default::default(),
             pred,
             insert: false,
         };
 
-        let pos = query.pos;
-        let ops_pos = query.ops_pos;
-        self.insert_local_op(doc, op_observer, Prop::Map(prop), op, pos, obj, &ops_pos);
+        let pos = query.end_pos;
+        self.insert_local_op(doc, op_observer, prop, op, pos, obj, &ops_pos);
 
         Ok(Some(id))
     }
@@ -421,7 +436,7 @@ impl TransactionInner {
     ) -> Result<Option<OpId>, AutomergeError> {
         let query = doc
             .ops()
-            .search(&obj, query::Nth::new(index, ListEncoding::List));
+            .search(&obj, query::Nth::new(index, ListEncoding::List, None));
 
         let id = self.next_id();
         let pred = doc.ops().m.sorted_opids(query.ops.iter().map(|o| o.id));
@@ -446,7 +461,7 @@ impl TransactionInner {
             insert: false,
         };
 
-        let pos = query.pos;
+        let pos = query.pos();
         let ops_pos = query.ops_pos;
         self.insert_local_op(doc, op_observer, Prop::Seq(index), op, pos, obj, &ops_pos);
 
@@ -461,8 +476,14 @@ impl TransactionInner {
         prop: P,
         value: i64,
     ) -> Result<(), AutomergeError> {
-        let obj = doc.exid_to_obj(obj)?.0;
-        self.local_op(doc, op_observer, obj, prop.into(), OpType::Increment(value))?;
+        let obj = doc.exid_to_obj(obj)?;
+        self.local_op(
+            doc,
+            op_observer,
+            obj.id,
+            prop.into(),
+            OpType::Increment(value),
+        )?;
         Ok(())
     }
 
@@ -473,15 +494,15 @@ impl TransactionInner {
         ex_obj: &ExId,
         prop: P,
     ) -> Result<(), AutomergeError> {
-        let (obj, obj_type) = doc.exid_to_obj(ex_obj)?;
+        let obj = doc.exid_to_obj(ex_obj)?;
         let prop = prop.into();
-        if obj_type == ObjType::Text {
-            let index = prop.to_index().ok_or(AutomergeError::InvalidOp(obj_type))?;
+        if obj.typ == ObjType::Text {
+            let index = prop.to_index().ok_or(AutomergeError::InvalidOp(obj.typ))?;
             self.inner_splice(
                 doc,
                 op_observer,
                 SpliceArgs {
-                    obj,
+                    obj: obj.id,
                     index,
                     del: 1,
                     values: vec![],
@@ -489,7 +510,7 @@ impl TransactionInner {
                 },
             )?;
         } else {
-            self.local_op(doc, op_observer, obj, prop, OpType::Delete)?;
+            self.local_op(doc, op_observer, obj.id, prop, OpType::Delete)?;
         }
         Ok(())
     }
@@ -505,16 +526,16 @@ impl TransactionInner {
         del: usize,
         vals: impl IntoIterator<Item = ScalarValue>,
     ) -> Result<(), AutomergeError> {
-        let (obj, obj_type) = doc.exid_to_obj(ex_obj)?;
-        if !matches!(obj_type, ObjType::List | ObjType::Text) {
-            return Err(AutomergeError::InvalidOp(obj_type));
+        let obj = doc.exid_to_obj(ex_obj)?;
+        if !matches!(obj.typ, ObjType::List | ObjType::Text) {
+            return Err(AutomergeError::InvalidOp(obj.typ));
         }
         let values = vals.into_iter().collect();
         self.inner_splice(
             doc,
             op_observer,
             SpliceArgs {
-                obj,
+                obj: obj.id,
                 index,
                 del,
                 values,
@@ -533,16 +554,16 @@ impl TransactionInner {
         del: usize,
         text: &str,
     ) -> Result<(), AutomergeError> {
-        let (obj, obj_type) = doc.exid_to_obj(ex_obj)?;
-        if obj_type != ObjType::Text {
-            return Err(AutomergeError::InvalidOp(obj_type));
+        let obj = doc.exid_to_obj(ex_obj)?;
+        if obj.typ != ObjType::Text {
+            return Err(AutomergeError::InvalidOp(obj.typ));
         }
         let values = text.chars().map(ScalarValue::from).collect();
         self.inner_splice(
             doc,
             op_observer,
             SpliceArgs {
-                obj,
+                obj: obj.id,
                 index,
                 del,
                 values,
@@ -569,7 +590,9 @@ impl TransactionInner {
         let mut deleted = 0;
         while deleted < del {
             // TODO: could do this with a single custom query
-            let query = doc.ops().search(&obj, query::Nth::new(index, encoding));
+            let query = doc
+                .ops()
+                .search(&obj, query::Nth::new(index, encoding, None));
 
             // if we delete in the middle of a multi-character
             // move cursor back to the beginning and expand the del width
@@ -625,7 +648,8 @@ impl TransactionInner {
                 self.operations.push((obj, op));
             }
 
-            doc.ops_mut().hint(&obj, cursor - width, pos - 1);
+            doc.ops_mut()
+                .hint(&obj, cursor - width, pos - 1, width, key);
 
             // handle the observer
             if let Some(obs) = op_observer.as_mut() {
@@ -638,7 +662,7 @@ impl TransactionInner {
                         for (offset, v) in values.iter().enumerate() {
                             let op = &self.operations[start + offset].1;
                             let value = (v.clone().into(), doc.ops().id_to_exid(op.id));
-                            obs.insert(doc, ex_obj.clone(), index + offset, value)
+                            obs.insert(doc, ex_obj.clone(), index + offset, value, false)
                         }
                     }
                 }
@@ -646,6 +670,49 @@ impl TransactionInner {
         }
 
         Ok(())
+    }
+
+    pub(crate) fn mark<Obs: OpObserver>(
+        &mut self,
+        doc: &mut Automerge,
+        op_observer: Option<&mut Obs>,
+        ex_obj: &ExId,
+        mark: Mark<'_>,
+        expand: ExpandMark,
+    ) -> Result<(), AutomergeError> {
+        let obj = doc.exid_to_obj(ex_obj)?;
+        if let Some(obs) = op_observer {
+            let action = OpType::MarkBegin(expand.before(), mark.data.clone().into_owned());
+            self.do_insert(doc, Some(obs), obj.id, mark.start, action)?;
+            self.do_insert(
+                doc,
+                Some(obs),
+                obj.id,
+                mark.end,
+                OpType::MarkEnd(expand.after()),
+            )?;
+            obs.mark(doc, ex_obj.clone(), Some(mark).into_iter());
+        } else {
+            let action = OpType::MarkBegin(expand.before(), mark.data.into_owned());
+            self.do_insert::<Obs>(doc, None, obj.id, mark.start, action)?;
+            self.do_insert::<Obs>(doc, None, obj.id, mark.end, OpType::MarkEnd(expand.after()))?;
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn unmark<Obs: OpObserver>(
+        &mut self,
+        doc: &mut Automerge,
+        op_observer: Option<&mut Obs>,
+        ex_obj: &ExId,
+        name: &str,
+        start: usize,
+        end: usize,
+        expand: ExpandMark,
+    ) -> Result<(), AutomergeError> {
+        let mark = Mark::new(name.to_string(), ScalarValue::Null, start, end);
+        self.mark(doc, op_observer, ex_obj, mark, expand)
     }
 
     fn finalize_op<Obs: OpObserver>(
@@ -660,23 +727,24 @@ impl TransactionInner {
         if let Some(op_observer) = op_observer {
             let ex_obj = doc.ops().id_to_exid(obj.0);
             if op.insert {
-                let obj_type = doc.ops().object_type(&obj);
-                assert!(obj_type.unwrap().is_sequence());
-                match (obj_type, prop) {
-                    (Some(ObjType::List), Prop::Seq(index)) => {
-                        let value = (op.value(), doc.ops().id_to_exid(op.id));
-                        op_observer.insert(doc, ex_obj, index, value)
-                    }
-                    (Some(ObjType::Text), Prop::Seq(index)) => {
-                        // FIXME
-                        if op_observer.text_as_seq() {
+                if !op.is_mark() {
+                    let obj_type = doc.ops().object_type(&obj);
+                    assert!(obj_type.unwrap().is_sequence());
+                    match (obj_type, prop) {
+                        (Some(ObjType::List), Prop::Seq(index)) => {
                             let value = (op.value(), doc.ops().id_to_exid(op.id));
-                            op_observer.insert(doc, ex_obj, index, value)
-                        } else {
-                            op_observer.splice_text(doc, ex_obj, index, op.to_str())
+                            op_observer.insert(doc, ex_obj, index, value, false)
                         }
+                        (Some(ObjType::Text), Prop::Seq(index)) => {
+                            if op_observer.text_as_seq() {
+                                let value = (op.value(), doc.ops().id_to_exid(op.id));
+                                op_observer.insert(doc, ex_obj, index, value, false)
+                            } else {
+                                op_observer.splice_text(doc, ex_obj, index, op.to_str())
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             } else if op.is_delete() {
                 op_observer.delete(doc, ex_obj, prop);

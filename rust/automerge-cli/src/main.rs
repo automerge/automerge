@@ -28,9 +28,9 @@ enum ExportFormat {
 }
 
 #[derive(Copy, Clone, Default, Debug)]
-pub(crate) struct SkipVerifyFlag(bool);
+pub(crate) struct VerifyFlag(bool);
 
-impl SkipVerifyFlag {
+impl VerifyFlag {
     fn load(&self, buf: &[u8]) -> Result<automerge::Automerge, automerge::AutomergeError> {
         if self.0 {
             automerge::Automerge::load(buf)
@@ -41,17 +41,17 @@ impl SkipVerifyFlag {
 }
 
 #[derive(Clone)]
-struct SkipVerifyFlagParser;
-impl ValueParserFactory for SkipVerifyFlag {
-    type Parser = SkipVerifyFlagParser;
+struct VerifyFlagParser;
+impl ValueParserFactory for VerifyFlag {
+    type Parser = VerifyFlagParser;
 
     fn value_parser() -> Self::Parser {
-        SkipVerifyFlagParser
+        VerifyFlagParser
     }
 }
 
-impl TypedValueParser for SkipVerifyFlagParser {
-    type Value = SkipVerifyFlag;
+impl TypedValueParser for VerifyFlagParser {
+    type Value = VerifyFlag;
 
     fn parse_ref(
         &self,
@@ -61,7 +61,7 @@ impl TypedValueParser for SkipVerifyFlagParser {
     ) -> Result<Self::Value, clap::Error> {
         BoolishValueParser::new()
             .parse_ref(cmd, arg, value)
-            .map(SkipVerifyFlag)
+            .map(VerifyFlag)
     }
 }
 
@@ -94,7 +94,7 @@ enum Command {
 
         /// Whether to verify the head hashes of a compressed document
         #[clap(long, action = clap::ArgAction::SetFalse)]
-        skip_verifying_heads: SkipVerifyFlag,
+        skip_verifying_heads: VerifyFlag,
     },
 
     Import {
@@ -112,7 +112,10 @@ enum Command {
     /// Read an automerge document and print a JSON representation of the changes in it to stdout
     Examine {
         input_file: Option<PathBuf>,
-        skip_verifying_heads: SkipVerifyFlag,
+
+        /// Whether to verify the head hashes of a compressed document
+        #[clap(long, action = clap::ArgAction::SetFalse)]
+        skip_verifying_heads: VerifyFlag,
     },
 
     /// Read an automerge sync messaage and print a JSON representation of it

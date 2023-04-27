@@ -9,10 +9,11 @@ use js_sys::{Array, Function, JsString, Object, Reflect, Symbol, Uint8Array};
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashSet};
 use std::fmt::Display;
+use std::ops::Deref;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use crate::{observer::Patch, ObjId, Value};
+use am::{marks::ExpandMark, ObjId, Patch, PatchAction, Value};
 
 const RAW_DATA_SYMBOL: &str = "_am_raw_value_";
 const DATATYPE_SYMBOL: &str = "_am_datatype_";
@@ -22,9 +23,23 @@ const META_SYMBOL: &str = "_am_meta";
 pub(crate) struct JS(pub(crate) JsValue);
 pub(crate) struct AR(pub(crate) Array);
 
+impl Deref for JS {
+    type Target = JsValue;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl From<AR> for JsValue {
     fn from(ar: AR) -> Self {
         ar.0.into()
+    }
+}
+
+impl From<AR> for Array {
+    fn from(ar: AR) -> Self {
+        ar.0
     }
 }
 
@@ -99,6 +114,35 @@ impl From<Option<Vec<ChangeHash>>> for JS {
             JS(v.into())
         } else {
             JS(JsValue::null())
+        }
+    }
+}
+
+impl TryFrom<JS> for usize {
+    type Error = error::BadNumber;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        value.as_f64().map(|n| n as usize).ok_or(error::BadNumber)
+    }
+}
+
+impl TryFrom<JS> for ExpandMark {
+    type Error = error::BadExpand;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        if value.is_undefined() {
+            Ok(ExpandMark::default())
+        } else {
+            value
+                .as_string()
+                .and_then(|s| match s.as_str() {
+                    "before" => Some(ExpandMark::Before),
+                    "after" => Some(ExpandMark::After),
+                    "both" => Some(ExpandMark::Both),
+                    "none" => Some(ExpandMark::None),
+                    _ => None,
+                })
+                .ok_or(error::BadExpand)
         }
     }
 }
@@ -334,11 +378,20 @@ impl TryFrom<JS> for am::sync::Message {
     }
 }
 
+impl From<Vec<ChangeHash>> for AR {
+    fn from(values: Vec<ChangeHash>) -> Self {
+        AR(values
+            .iter()
+            .map(|h| JsValue::from_str(&h.to_string()))
+            .collect())
+    }
+}
+
 impl From<&[ChangeHash]> for AR {
     fn from(value: &[ChangeHash]) -> Self {
         AR(value
             .iter()
-            .map(|h| JsValue::from_str(&hex::encode(h.0)))
+            .map(|h| JsValue::from_str(&h.to_string()))
             .collect())
     }
 }
@@ -746,13 +799,13 @@ impl Automerge {
     pub(crate) fn apply_patch_to_array(
         &self,
         array: &Object,
-        patch: &Patch,
+        patch: &Patch<u16>,
         meta: &JsValue,
         exposed: &mut HashSet<ObjId>,
     ) -> Result<Object, error::ApplyPatch> {
         let result = Array::from(array); // shallow copy
-        match patch {
-            Patch::PutSeq {
+        match &patch.action {
+            PatchAction::PutSeq {
                 index,
                 value,
                 expose,
@@ -768,13 +821,13 @@ impl Automerge {
                 }
                 Ok(result.into())
             }
-            Patch::DeleteSeq { index, length, .. } => {
+            PatchAction::DeleteSeq { index, length, .. } => {
                 Ok(self.sub_splice(result, *index, *length, vec![], meta)?)
             }
-            Patch::Insert { index, values, .. } => {
+            PatchAction::Insert { index, values, .. } => {
                 Ok(self.sub_splice(result, *index, 0, values, meta)?)
             }
-            Patch::Increment { prop, value, .. } => {
+            PatchAction::Increment { prop, value, .. } => {
                 if let Prop::Seq(index) = prop {
                     let index = *index as f64;
                     let old_val = js_get(&result, index)?.0;
@@ -795,9 +848,9 @@ impl Automerge {
                     Err(error::ApplyPatch::IncrementKeyInSeq)
                 }
             }
-            Patch::DeleteMap { .. } => Err(error::ApplyPatch::DeleteKeyFromSeq),
-            Patch::PutMap { .. } => Err(error::ApplyPatch::PutKeyInSeq),
-            Patch::SpliceText { index, value, .. } => {
+            PatchAction::DeleteMap { .. } => Err(error::ApplyPatch::DeleteKeyFromSeq),
+            PatchAction::PutMap { .. } => Err(error::ApplyPatch::PutKeyInSeq),
+            PatchAction::SpliceText { index, value, .. } => {
                 match self.text_rep {
                     TextRepresentation::String => Err(error::ApplyPatch::SpliceTextInSeq),
                     TextRepresentation::Array => {
@@ -819,19 +872,20 @@ impl Automerge {
                     }
                 }
             }
+            PatchAction::Mark { .. } => Ok(result.into()),
         }
     }
 
     pub(crate) fn apply_patch_to_map(
         &self,
         map: &Object,
-        patch: &Patch,
+        patch: &Patch<u16>,
         meta: &JsValue,
         exposed: &mut HashSet<ObjId>,
     ) -> Result<Object, error::ApplyPatch> {
         let result = Object::assign(&Object::new(), map); // shallow copy
-        match patch {
-            Patch::PutMap {
+        match &patch.action {
+            PatchAction::PutMap {
                 key, value, expose, ..
             } => {
                 if *expose && value.0.is_object() {
@@ -844,7 +898,7 @@ impl Automerge {
                 }
                 Ok(result)
             }
-            Patch::DeleteMap { key, .. } => {
+            PatchAction::DeleteMap { key, .. } => {
                 Reflect::delete_property(&result, &key.into()).map_err(|e| {
                     error::Export::Delete {
                         prop: key.to_string(),
@@ -853,7 +907,7 @@ impl Automerge {
                 })?;
                 Ok(result)
             }
-            Patch::Increment { prop, value, .. } => {
+            PatchAction::Increment { prop, value, .. } => {
                 if let Prop::Map(key) = prop {
                     let old_val = js_get(&result, key)?.0;
                     let old_val = self.unwrap_scalar(old_val)?;
@@ -873,27 +927,28 @@ impl Automerge {
                     Err(error::ApplyPatch::IncrementIndexInMap)
                 }
             }
-            Patch::Insert { .. } => Err(error::ApplyPatch::InsertInMap),
-            Patch::DeleteSeq { .. } => Err(error::ApplyPatch::SpliceInMap),
-            //Patch::SpliceText { .. } => Err(to_js_err("cannot Splice into map")),
-            Patch::SpliceText { .. } => Err(error::ApplyPatch::SpliceTextInMap),
-            Patch::PutSeq { .. } => Err(error::ApplyPatch::PutIdxInMap),
+            PatchAction::Insert { .. } => Err(error::ApplyPatch::InsertInMap),
+            PatchAction::DeleteSeq { .. } => Err(error::ApplyPatch::SpliceInMap),
+            //PatchAction::SpliceText { .. } => Err(to_js_err("cannot Splice into map")),
+            PatchAction::SpliceText { .. } => Err(error::ApplyPatch::SpliceTextInMap),
+            PatchAction::PutSeq { .. } => Err(error::ApplyPatch::PutIdxInMap),
+            PatchAction::Mark { .. } => Err(error::ApplyPatch::MarkInMap),
         }
     }
 
     pub(crate) fn apply_patch(
         &self,
         obj: Object,
-        patch: &Patch,
+        patch: &Patch<u16>,
         depth: usize,
         meta: &JsValue,
         exposed: &mut HashSet<ObjId>,
     ) -> Result<Object, error::ApplyPatch> {
         let (inner, datatype, id) = self.unwrap_object(&obj)?;
-        let prop = patch.path().get(depth).map(|p| prop_to_js(&p.1));
+        let prop = patch.path.get(depth).map(|p| prop_to_js(&p.1));
         let result = if let Some(prop) = prop {
             let subval = js_get(&inner, &prop)?.0;
-            if subval.is_string() && patch.path().len() - 1 == depth {
+            if subval.is_string() && patch.path.len() - 1 == depth {
                 if let Ok(s) = subval.dyn_into::<JsString>() {
                     let new_value = self.apply_patch_to_text(&s, patch)?;
                     let result = shallow_copy(&inner);
@@ -914,12 +969,12 @@ impl Automerge {
                 return Ok(obj);
             }
         } else if Array::is_array(&inner) {
-            if &id == patch.obj() {
+            if id == patch.obj {
                 self.apply_patch_to_array(&inner, patch, meta, exposed)
             } else {
                 Ok(Array::from(&inner).into())
             }
-        } else if &id == patch.obj() {
+        } else if id == patch.obj {
             self.apply_patch_to_map(&inner, patch, meta, exposed)
         } else {
             Ok(Object::assign(&Object::new(), &inner))
@@ -932,17 +987,17 @@ impl Automerge {
     fn apply_patch_to_text(
         &self,
         string: &JsString,
-        patch: &Patch,
+        patch: &Patch<u16>,
     ) -> Result<JsValue, error::ApplyPatch> {
-        match patch {
-            Patch::DeleteSeq { index, length, .. } => {
+        match &patch.action {
+            PatchAction::DeleteSeq { index, length, .. } => {
                 let index = *index as u32;
                 let before = string.slice(0, index);
                 let after = string.slice(index + *length as u32, string.length());
                 let result = before.concat(&after);
                 Ok(result.into())
             }
-            Patch::SpliceText { index, value, .. } => {
+            PatchAction::SpliceText { index, value, .. } => {
                 let index = *index as u32;
                 let length = string.length();
                 let before = string.slice(0, index);
@@ -1140,7 +1195,8 @@ impl Automerge {
                 // only valid obj's should make it to this point ...
                 let path: Vec<_> = self
                     .doc
-                    .path_to_object(&obj)?
+                    .parents(&obj)?
+                    .path()
                     .iter()
                     .map(|p| prop_to_js(&p.1))
                     .collect();
@@ -1203,6 +1259,151 @@ fn set_hidden_value<V: Into<JsValue>>(
         .map_err(|_| error::Export::SetHidden("configurable"))?;
     Object::define_property(o, &key.into(), &definition);
     Ok(())
+}
+
+pub(crate) struct JsPatch(pub(crate) Patch<u16>);
+pub(crate) struct JsPatches(pub(crate) Vec<Patch<u16>>);
+
+fn export_path(path: &[(ObjId, Prop)], end: &Prop) -> Array {
+    let result = Array::new();
+    for p in path {
+        result.push(&prop_to_js(&p.1));
+    }
+    result.push(&prop_to_js(end));
+    result
+}
+
+fn export_just_path(path: &[(ObjId, Prop)]) -> Array {
+    let result = Array::new();
+    for p in path {
+        result.push(&prop_to_js(&p.1));
+    }
+    result
+}
+
+impl TryFrom<JsPatch> for JsValue {
+    type Error = error::Export;
+
+    fn try_from(p: JsPatch) -> Result<Self, Self::Error> {
+        let result = Object::new();
+        let path = &p.0.path;
+        match p.0.action {
+            PatchAction::PutMap { key, value, .. } => {
+                js_set(&result, "action", "put")?;
+                js_set(
+                    &result,
+                    "path",
+                    export_path(path.as_slice(), &Prop::Map(key)),
+                )?;
+                js_set(
+                    &result,
+                    "value",
+                    alloc(&value.0, TextRepresentation::String).1,
+                )?;
+                Ok(result.into())
+            }
+            PatchAction::PutSeq { index, value, .. } => {
+                js_set(&result, "action", "put")?;
+                js_set(
+                    &result,
+                    "path",
+                    export_path(path.as_slice(), &Prop::Seq(index)),
+                )?;
+                js_set(
+                    &result,
+                    "value",
+                    alloc(&value.0, TextRepresentation::String).1,
+                )?;
+                Ok(result.into())
+            }
+            PatchAction::Insert { index, values, .. } => {
+                js_set(&result, "action", "insert")?;
+                js_set(
+                    &result,
+                    "path",
+                    export_path(path.as_slice(), &Prop::Seq(index)),
+                )?;
+                js_set(
+                    &result,
+                    "values",
+                    values
+                        .iter()
+                        .map(|v| alloc(&v.0, TextRepresentation::String).1)
+                        .collect::<Array>(),
+                )?;
+                Ok(result.into())
+            }
+            PatchAction::SpliceText { index, value, .. } => {
+                js_set(&result, "action", "splice")?;
+                js_set(
+                    &result,
+                    "path",
+                    export_path(path.as_slice(), &Prop::Seq(index)),
+                )?;
+                let bytes: Vec<u16> = value.iter().cloned().collect();
+                js_set(&result, "value", String::from_utf16_lossy(bytes.as_slice()))?;
+                Ok(result.into())
+            }
+            PatchAction::Increment { prop, value, .. } => {
+                js_set(&result, "action", "inc")?;
+                js_set(&result, "path", export_path(path.as_slice(), &prop))?;
+                js_set(&result, "value", &JsValue::from_f64(value as f64))?;
+                Ok(result.into())
+            }
+            PatchAction::DeleteMap { key, .. } => {
+                js_set(&result, "action", "del")?;
+                js_set(
+                    &result,
+                    "path",
+                    export_path(path.as_slice(), &Prop::Map(key)),
+                )?;
+                Ok(result.into())
+            }
+            PatchAction::DeleteSeq { index, length, .. } => {
+                js_set(&result, "action", "del")?;
+                js_set(
+                    &result,
+                    "path",
+                    export_path(path.as_slice(), &Prop::Seq(index)),
+                )?;
+                if length > 1 {
+                    js_set(&result, "length", length)?;
+                }
+                Ok(result.into())
+            }
+            PatchAction::Mark { marks, .. } => {
+                js_set(&result, "action", "mark")?;
+                js_set(&result, "path", export_just_path(path.as_slice()))?;
+                let marks_array = Array::new();
+                for m in marks.iter() {
+                    let mark = Object::new();
+                    js_set(&mark, "name", m.name())?;
+                    js_set(
+                        &mark,
+                        "value",
+                        &alloc(&m.value().into(), TextRepresentation::String).1,
+                    )?;
+                    js_set(&mark, "start", m.start as i32)?;
+                    js_set(&mark, "end", m.end as i32)?;
+                    marks_array.push(&mark);
+                }
+                js_set(&result, "marks", marks_array)?;
+                Ok(result.into())
+            }
+        }
+    }
+}
+
+impl TryFrom<JsPatches> for Array {
+    type Error = error::Export;
+
+    fn try_from(patches: JsPatches) -> Result<Self, Self::Error> {
+        let result = Array::new();
+        for p in patches.0 {
+            result.push(&JsPatch(p).try_into()?);
+        }
+        Ok(result)
+    }
 }
 
 fn shallow_copy(obj: &Object) -> Object {
@@ -1406,6 +1607,8 @@ pub(crate) mod error {
         SpliceTextInMap,
         #[error("cannot put a seq index in a map")]
         PutIdxInMap,
+        #[error("cannot mark a span in a map")]
+        MarkInMap,
         #[error(transparent)]
         GetProp(#[from] GetProp),
         #[error(transparent)]
@@ -1467,6 +1670,14 @@ pub(crate) mod error {
         #[error("path did not refer to an object")]
         NotAnObject,
     }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("expand must be 'left', 'right', 'both', or 'none' - is 'right' by default")]
+    pub struct BadExpand;
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("argument must be a number")]
+    pub struct BadNumber;
 
     #[derive(Debug, thiserror::Error)]
     #[error("given property was not a string or integer")]

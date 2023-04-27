@@ -688,7 +688,6 @@ describe('Automerge', () => {
       assert.deepEqual(doc2.getWithType('_root', 'bird'), ['str', 'Goldfinch'])
       assert.deepEqual(doc2.getAll('_root', 'bird'), [['str', 'Goldfinch', '2@aaaa']])
       assert.deepEqual(doc1.popPatches(), [
-        { action: 'put', path: ['bird'], value: 'Goldfinch' }
       ])
       assert.deepEqual(doc2.popPatches(), [
         { action: 'put', path: ['bird'], value: 'Goldfinch' }
@@ -751,7 +750,6 @@ describe('Automerge', () => {
       assert.deepEqual(doc4.popPatches(), [
         { action: 'put', path: ['birds',0], value: 'Ring-necked parakeet' },
         { action: 'put', path: ['birds',2], value: 'Redwing' },
-        { action: 'put', path: ['birds',0], value: 'Ring-necked parakeet' },
       ])
     })
 
@@ -1941,6 +1939,40 @@ describe('Automerge', () => {
       assert.deepEqual(mat.text, "ab011ij")
     })
 
+    it('propogates exceptions thrown in patch callback', () => {
+      const doc = create(true)
+      doc.enablePatches(true)
+      let mat : any = doc.materialize("/")
+      doc.putObject("/", "text", "abcdefghij")
+      assert.throws(() => {
+        doc.applyPatches(mat, {}, (patches, info) => {
+          throw new RangeError("hello world")
+        })
+      }, /RangeError: hello world/)
+    })
+
+    it('patch callback has correct patch info', () => {
+      const doc = create(true)
+      let mat : any = doc.materialize("/")
+      doc.putObject("/", "text", "abcdefghij")
+
+      let before = doc.materialize("/")
+      let from = doc.getHeads()
+
+      doc.enablePatches(true)
+      doc.splice("/text", 2, 2, "00")
+
+      let after = doc.materialize("/")
+      let to = doc.getHeads()
+
+      doc.applyPatches(mat, {}, (patches, info) => {
+        assert.deepEqual(info.before, before);
+        assert.deepEqual(info.after, after);
+        assert.deepEqual(info.from, from);
+        assert.deepEqual(info.to, to);
+      })
+    })
+
     it('can handle utf16 text', () => {
       const doc = create(true)
       doc.enablePatches(true)
@@ -2167,6 +2199,19 @@ describe('Automerge', () => {
         doc.put("/", "key", "value")
         mat = doc.applyPatches(mat)
         assert.deepStrictEqual(mat.key, new RawString("value"))
+    })
+
+    it("has a method to save without compression and to do a full verification on save", () => {
+        let doc1 = create(false);
+        doc1.enablePatches(true)
+        doc1.put("/", "key", "value")
+        let doc2 = load(doc1.saveNoCompress(), true) // big!
+        let doc3 = load(doc1.saveAndVerify(), true) // slow!
+        let mat1: any = doc1.materialize()
+        let mat2: any = doc2.materialize()
+        let mat3: any = doc3.materialize()
+        assert.deepStrictEqual(mat1, mat2)
+        assert.deepStrictEqual(mat2, mat3)
     })
 
   })

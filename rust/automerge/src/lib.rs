@@ -186,8 +186,8 @@
 //!
 
 #![doc(
-    html_logo_url = "https://raw.githubusercontent.com/automerge/automerge-rs/main/img/brandmark.svg",
-    html_favicon_url = "https:///raw.githubusercontent.com/automerge/automerge-rs/main/img/favicon.ico"
+    html_logo_url = "https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg",
+    html_favicon_url = "https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"
 )]
 #![warn(
     missing_debug_implementations,
@@ -251,25 +251,21 @@ mod convert;
 mod error;
 mod exid;
 mod indexed_cache;
-mod keys;
-mod keys_at;
+pub mod iter;
 mod legacy;
-mod list_range;
-mod list_range_at;
-mod map_range;
-mod map_range_at;
+pub mod marks;
 pub mod op_observer;
 mod op_set;
-mod op_tree;
+pub mod op_tree;
 mod parents;
 mod query;
 mod read;
+mod sequence_tree;
 mod storage;
 pub mod sync;
 pub mod transaction;
 mod types;
 mod value;
-mod values;
 #[cfg(feature = "optree-visualisation")]
 mod visualisation;
 
@@ -281,21 +277,15 @@ pub use error::AutomergeError;
 pub use error::InvalidActorId;
 pub use error::InvalidChangeHashSlice;
 pub use exid::{ExId as ObjId, ObjIdFromBytesError};
-pub use keys::Keys;
-pub use keys_at::KeysAt;
 pub use legacy::Change as ExpandedChange;
-pub use list_range::ListRange;
-pub use list_range_at::ListRangeAt;
-pub use map_range::MapRange;
-pub use map_range_at::MapRangeAt;
-pub use op_observer::OpObserver;
-pub use op_observer::Patch;
-pub use op_observer::VecOpObserver;
+pub use op_observer::{
+    OpObserver, Patch, PatchAction, ToggleObserver, VecOpObserver, VecOpObserver16,
+};
 pub use parents::{Parent, Parents};
 pub use read::ReadDoc;
+pub use sequence_tree::SequenceTree;
 pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, TextEncoding};
 pub use value::{ScalarValue, Value};
-pub use values::Values;
 
 /// The object ID for the root map of a document
 pub const ROOT: ObjId = ObjId::Root;

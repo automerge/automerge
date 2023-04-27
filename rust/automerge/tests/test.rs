@@ -1,12 +1,16 @@
+use automerge::marks::{ExpandMark, Mark};
+use automerge::op_observer::HasPatches;
+use automerge::op_tree::B;
 use automerge::transaction::Transactable;
 use automerge::{
-    ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjType, ReadDoc,
-    ScalarValue, VecOpObserver, ROOT,
+    ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjId, ObjType, Patch,
+    PatchAction, Prop, ReadDoc, ScalarValue, SequenceTree, TextEncoding, Value, VecOpObserver,
+    ROOT,
 };
 use std::fs;
 
 // set up logging for all the tests
-//use test_log::test;
+use test_log::test;
 
 #[allow(unused_imports)]
 use automerge_test::{
@@ -1496,4 +1500,258 @@ fn bad_change_on_optree_node_boundary() {
     doc2.apply_changes(change.into_iter().cloned().collect::<Vec<_>>())
         .unwrap();
     Automerge::load(doc2.save().as_slice()).unwrap();
+}
+
+#[test]
+fn regression_nth_miscount() {
+    let mut doc = Automerge::new();
+    doc.transact::<_, _, AutomergeError>(|d| {
+        let list_id = d.put_object(ROOT, "listval", ObjType::List).unwrap();
+        for i in 0..30 {
+            d.insert(&list_id, i, ScalarValue::Null).unwrap();
+            let map = d.put_object(&list_id, i, ObjType::Map).unwrap();
+            d.put(map, "test", ScalarValue::Int(i.try_into().unwrap()))
+                .unwrap();
+        }
+        Ok(())
+    })
+    .unwrap();
+    for i in 0..30 {
+        let (obj_type, list_id) = doc.get(ROOT, "listval").unwrap().unwrap();
+        assert_eq!(obj_type, Value::Object(ObjType::List));
+        let (obj_type, map_id) = doc.get(&list_id, i).unwrap().unwrap();
+        assert_eq!(obj_type, Value::Object(ObjType::Map));
+        let (obj_type, _) = doc.get(map_id, "test").unwrap().unwrap();
+        assert_eq!(
+            obj_type,
+            Value::Scalar(std::borrow::Cow::Borrowed(&ScalarValue::Int(
+                i.try_into().unwrap()
+            )))
+        )
+    }
+}
+
+#[test]
+fn regression_nth_miscount_smaller() {
+    let mut doc = Automerge::new();
+    doc.transact::<_, _, AutomergeError>(|d| {
+        let list_id = d.put_object(ROOT, "listval", ObjType::List).unwrap();
+        for i in 0..B * 4 {
+            d.insert(&list_id, i, ScalarValue::Null).unwrap();
+            d.put(&list_id, i, ScalarValue::Int(i.try_into().unwrap()))
+                .unwrap();
+        }
+        Ok(())
+    })
+    .unwrap();
+    for i in 0..B * 4 {
+        let (obj_type, list_id) = doc.get(ROOT, "listval").unwrap().unwrap();
+        assert_eq!(obj_type, Value::Object(ObjType::List));
+        let (obj_type, _) = doc.get(list_id, i).unwrap().unwrap();
+        assert_eq!(
+            obj_type,
+            Value::Scalar(std::borrow::Cow::Borrowed(&ScalarValue::Int(
+                i.try_into().unwrap()
+            )))
+        )
+    }
+}
+
+#[test]
+fn regression_insert_opid() {
+    let mut doc = Automerge::new();
+    let mut tx = doc.transaction();
+    let list_id = tx
+        .put_object(&automerge::ROOT, "list", ObjType::List)
+        .unwrap();
+    tx.commit();
+
+    let change1 = doc.get_last_local_change().unwrap().clone();
+    let mut tx = doc.transaction();
+
+    const N: usize = 30;
+    for i in 0..=N {
+        tx.insert(&list_id, i, ScalarValue::Null).unwrap();
+        tx.put(&list_id, i, ScalarValue::Int(i as i64)).unwrap();
+    }
+    tx.commit();
+
+    let change2 = doc.get_last_local_change().unwrap().clone();
+    let mut new_doc = Automerge::new();
+    let mut obs = VecOpObserver::default();
+    new_doc
+        .apply_changes_with(vec![change1], Some(&mut obs))
+        .unwrap();
+    new_doc
+        .apply_changes_with(vec![change2], Some(&mut obs))
+        .unwrap();
+
+    for i in 0..=N {
+        let (doc_val, _) = doc.get(&list_id, i).unwrap().unwrap();
+        let (new_doc_val, _) = new_doc.get(&list_id, i).unwrap().unwrap();
+
+        assert_eq!(
+            doc_val,
+            Value::Scalar(std::borrow::Cow::Owned(ScalarValue::Int(i as i64)))
+        );
+        assert_eq!(
+            new_doc_val,
+            Value::Scalar(std::borrow::Cow::Owned(ScalarValue::Int(i as i64)))
+        );
+    }
+
+    let patches = obs.take_patches();
+
+    let mut expected_patches = Vec::new();
+    expected_patches.push(Patch {
+        obj: ROOT,
+        path: vec![],
+        action: PatchAction::PutMap {
+            key: "list".to_string(),
+            expose: false,
+            value: (
+                Value::Object(ObjType::List),
+                ObjId::Id(1, doc.get_actor().clone(), 0),
+            ),
+            conflict: false,
+        },
+    });
+    for i in 0..=N {
+        let mut seq_tree = SequenceTree::new();
+        seq_tree.push((
+            Value::Scalar(std::borrow::Cow::Owned(ScalarValue::Null)),
+            ObjId::Id(2 * (i + 1) as u64, doc.get_actor().clone(), 0),
+        ));
+        expected_patches.push(Patch {
+            obj: ObjId::Id(1, doc.get_actor().clone(), 0),
+            path: vec![(ROOT, Prop::Map("list".into()))],
+            action: PatchAction::Insert {
+                index: i,
+                values: seq_tree,
+                conflict: false,
+            },
+        });
+        expected_patches.push(Patch {
+            obj: ObjId::Id(1, doc.get_actor().clone(), 0),
+            path: vec![(ROOT, Prop::Map("list".into()))],
+            action: PatchAction::PutSeq {
+                index: i,
+                value: (
+                    Value::Scalar(std::borrow::Cow::Owned(ScalarValue::Int(i as i64))),
+                    ObjId::Id((2 * (i + 1) + 1) as u64, doc.get_actor().clone(), 0),
+                ),
+                conflict: false,
+                expose: false,
+            },
+        });
+    }
+    assert_eq!(patches, expected_patches);
+}
+
+#[test]
+fn big_list() {
+    let mut doc = Automerge::new();
+    let mut tx = doc.transaction();
+    let list_id = tx.put_object(&ROOT, "list", ObjType::List).unwrap();
+    tx.commit();
+
+    let change1 = doc.get_last_local_change().unwrap().clone();
+    let mut tx = doc.transaction();
+
+    const N: usize = B;
+    for i in 0..=N {
+        tx.insert(&list_id, i, ScalarValue::Null).unwrap();
+    }
+    for i in 0..=N {
+        tx.put_object(&list_id, i, ObjType::Map).unwrap();
+    }
+    tx.commit();
+
+    let change2 = doc.get_last_local_change().unwrap().clone();
+    let mut new_doc = Automerge::new();
+    let mut obs = VecOpObserver::default();
+    new_doc
+        .apply_changes_with(vec![change1], Some(&mut obs))
+        .unwrap();
+    new_doc
+        .apply_changes_with(vec![change2], Some(&mut obs))
+        .unwrap();
+
+    let patches = obs.take_patches();
+    let matches = matches!(
+        patches.last().unwrap(),
+        Patch {
+            action: PatchAction::PutSeq { index: N, .. },
+            ..
+        }
+    );
+    assert!(matches);
+}
+
+#[test]
+fn marks() {
+    let mut doc = Automerge::new();
+    let mut tx = doc.transaction();
+
+    let text_id = tx.put_object(&ROOT, "text", ObjType::Text).unwrap();
+
+    tx.splice_text(&text_id, 0, 0, "hello world").unwrap();
+
+    let mark = Mark::new("bold".to_string(), true, 0, "hello".len());
+    tx.mark(&text_id, mark, ExpandMark::Both).unwrap();
+
+    // add " cool" (it will be bold because ExpandMark::Both)
+    tx.splice_text(&text_id, "hello".len(), 0, " cool").unwrap();
+
+    // unbold "hello"
+    tx.unmark(&text_id, "bold", 0, "hello".len(), ExpandMark::Before)
+        .unwrap();
+
+    // insert "why " before hello.
+    tx.splice_text(&text_id, 0, 0, "why ").unwrap();
+
+    let marks = tx.marks(&text_id).unwrap();
+
+    // should empty marks be returned?
+    // probably not in this case (where they can never grow)
+    // but not sure how to detect that case reliably.
+    assert_eq!(marks.len(), 2);
+    assert_eq!(marks[0].start, 0);
+    assert_eq!(marks[0].end, 0);
+    assert_eq!(marks[0].name(), "bold");
+    assert_eq!(marks[0].value(), &ScalarValue::from(true));
+
+    assert_eq!(marks[1].start, 9);
+    assert_eq!(marks[1].end, 14);
+    assert_eq!(marks[1].name(), "bold");
+    assert_eq!(marks[1].value(), &ScalarValue::from(true));
+}
+
+#[test]
+fn conflicting_unicode_text_with_different_widths() -> Result<(), AutomergeError> {
+    let mut doc1 = AutoCommit::new().with_encoding(TextEncoding::Utf16);
+    let txt = doc1.put_object(&ROOT, "text", ObjType::Text).unwrap();
+    doc1.splice_text(&txt, 0, 0, "abc")?;
+
+    let mut doc2 = doc1.fork();
+
+    doc1.put(&txt, 1, "B")?;
+    doc2.put(&txt, 1, "🐻")?;
+
+    assert_eq!(doc1.length(&txt), 3);
+    assert_eq!(doc2.length(&txt), 4);
+
+    doc1.merge(&mut doc2)?;
+    doc2.merge(&mut doc1)?;
+
+    let length = doc1.length(&txt);
+    let last_value = doc1.get(&txt, length - 1)?;
+    for n in 0..length {
+        assert_eq!(doc1.get(&txt, n), doc2.get(&txt, n));
+    }
+    assert_eq!(last_value.unwrap().0, Value::from("c"));
+
+    println!("list.len() == {:?}", length);
+    assert_eq!(doc1.length(&txt), doc2.length(&txt));
+    Ok(())
 }

@@ -4,7 +4,9 @@ pub(crate) use raw::{RawDecoder, RawEncoder};
 mod rle;
 pub(crate) use rle::{RleDecoder, RleEncoder};
 mod boolean;
-pub(crate) use boolean::{BooleanDecoder, BooleanEncoder};
+pub(crate) use boolean::{
+    BooleanDecoder, BooleanEncoder, MaybeBooleanDecoder, MaybeBooleanEncoder,
+};
 mod delta;
 pub(crate) use delta::{DeltaDecoder, DeltaEncoder};
 pub(crate) mod leb128;

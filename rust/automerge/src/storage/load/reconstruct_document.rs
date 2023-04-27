@@ -17,8 +17,6 @@ pub(crate) enum Error {
     OpsOutOfOrder,
     #[error("error reading operation: {0:?}")]
     ReadOp(Box<dyn std::error::Error + Send + Sync + 'static>),
-    #[error("an operation contained an invalid action")]
-    InvalidAction,
     #[error("an operation referenced a missing actor id")]
     MissingActor,
     #[error("invalid changes: {0}")]
@@ -29,6 +27,8 @@ pub(crate) enum Error {
     MissingOps,
     #[error("succ out of order")]
     SuccOutOfOrder,
+    #[error(transparent)]
+    InvalidOp(#[from] crate::error::InvalidOpType),
 }
 
 pub(crate) struct MismatchedHeads {
@@ -300,8 +300,13 @@ impl LoadingObject {
                 op.pred = meta.sorted_opids(preds.into_iter());
             }
             if let OpType::Put(ScalarValue::Counter(c)) = &mut op.action {
-                let inc_ops = op.succ.iter().filter_map(|s| self.inc_ops.get(s).copied());
-                c.increment(inc_ops);
+                for (inc, id) in op
+                    .succ
+                    .iter()
+                    .filter_map(|s| self.inc_ops.get(s).map(|inc| (inc, s)))
+                {
+                    c.increment(*inc, *id);
+                }
             }
             collector.collect(self.id, op.clone())?;
             ops.push(op)
@@ -345,9 +350,10 @@ fn import_op(m: &mut OpSetMetadata, op: DocOp) -> Result<Op, Error> {
             return Err(Error::MissingActor);
         }
     }
+    let action = OpType::from_action_and_value(op.action, op.value, op.mark_name, op.expand);
     Ok(Op {
         id: check_opid(m, op.id)?,
-        action: parse_optype(op.action, op.value)?,
+        action,
         key,
         succ: m.try_sorted_opids(op.succ).ok_or(Error::SuccOutOfOrder)?,
         pred: OpIds::empty(),
@@ -364,28 +370,6 @@ fn check_opid(m: &OpSetMetadata, opid: OpId) -> Result<OpId, Error> {
         None => {
             tracing::error!("missing actor");
             Err(Error::MissingActor)
-        }
-    }
-}
-
-fn parse_optype(action_index: usize, value: ScalarValue) -> Result<OpType, Error> {
-    match action_index {
-        0 => Ok(OpType::Make(ObjType::Map)),
-        1 => Ok(OpType::Put(value)),
-        2 => Ok(OpType::Make(ObjType::List)),
-        3 => Ok(OpType::Delete),
-        4 => Ok(OpType::Make(ObjType::Text)),
-        5 => match value {
-            ScalarValue::Int(i) => Ok(OpType::Increment(i)),
-            _ => {
-                tracing::error!(?value, "invalid value for counter op");
-                Err(Error::InvalidAction)
-            }
-        },
-        6 => Ok(OpType::Make(ObjType::Table)),
-        other => {
-            tracing::error!(action = other, "unknown action type");
-            Err(Error::InvalidAction)
         }
     }
 }

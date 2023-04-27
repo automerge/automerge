@@ -44,11 +44,16 @@ export {
   Float64,
   type Patch,
   type PatchCallback,
+  type Mark,
+  type MarkRange,
+  type MarkValue,
   type AutomergeValue,
   type ScalarValue,
 } from "./unstable_types"
 
-import type { PatchCallback } from "./stable"
+import type { Mark, MarkRange, MarkValue } from "./unstable_types"
+
+import type { ScalarValue, PatchCallback } from "./stable"
 
 import { type UnstableConflicts as Conflicts } from "./conflicts"
 import { unstableConflictAt } from "./conflicts"
@@ -197,7 +202,11 @@ export function load<T>(
 ): Doc<T> {
   const opts = importOpts(_opts)
   opts.enableTextV2 = true
-  return stable.load(data, opts)
+  if (opts.patchCallback) {
+    return stable.loadIncremental(stable.init(opts), data)
+  } else {
+    return stable.load(data, opts)
+  }
 }
 
 function importOpts<T>(
@@ -230,6 +239,65 @@ export function splice<T>(
     return state.handle.splice(value, index, del, newText)
   } catch (e) {
     throw new RangeError(`Cannot splice: ${e}`)
+  }
+}
+
+export function mark<T>(
+  doc: Doc<T>,
+  prop: stable.Prop,
+  range: MarkRange,
+  name: string,
+  value: MarkValue
+) {
+  if (!_is_proxy(doc)) {
+    throw new RangeError("object cannot be modified outside of a change block")
+  }
+  const state = _state(doc, false)
+  const objectId = _obj(doc)
+  if (!objectId) {
+    throw new RangeError("invalid object for mark")
+  }
+  const obj = `${objectId}/${prop}`
+  try {
+    return state.handle.mark(obj, range, name, value)
+  } catch (e) {
+    throw new RangeError(`Cannot mark: ${e}`)
+  }
+}
+
+export function unmark<T>(
+  doc: Doc<T>,
+  prop: stable.Prop,
+  range: MarkRange,
+  name: string
+) {
+  if (!_is_proxy(doc)) {
+    throw new RangeError("object cannot be modified outside of a change block")
+  }
+  const state = _state(doc, false)
+  const objectId = _obj(doc)
+  if (!objectId) {
+    throw new RangeError("invalid object for unmark")
+  }
+  const obj = `${objectId}/${prop}`
+  try {
+    return state.handle.unmark(obj, range, name)
+  } catch (e) {
+    throw new RangeError(`Cannot unmark: ${e}`)
+  }
+}
+
+export function marks<T>(doc: Doc<T>, prop: stable.Prop): Mark[] {
+  const state = _state(doc, false)
+  const objectId = _obj(doc)
+  if (!objectId) {
+    throw new RangeError("invalid object for unmark")
+  }
+  const obj = `${objectId}/${prop}`
+  try {
+    return state.handle.marks(obj)
+  } catch (e) {
+    throw new RangeError(`Cannot call marks(): ${e}`)
   }
 }
 

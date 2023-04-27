@@ -3,9 +3,10 @@
 <img src='./img/sign.svg' width='500' alt='Automerge logo' />
 
 [![homepage](https://img.shields.io/badge/homepage-published-informational)](https://automerge.org/)
-[![main docs](https://img.shields.io/badge/docs-main-informational)](https://automerge.org/automerge-rs/automerge/)
-[![ci](https://github.com/automerge/automerge-rs/actions/workflows/ci.yaml/badge.svg)](https://github.com/automerge/automerge-rs/actions/workflows/ci.yaml)
-[![docs](https://github.com/automerge/automerge-rs/actions/workflows/docs.yaml/badge.svg)](https://github.com/automerge/automerge-rs/actions/workflows/docs.yaml)
+[![main docs](https://img.shields.io/badge/docs-main-informational)](https://automerge.org/automerge/automerge/)
+[![latest docs](https://img.shields.io/badge/docs-latest-informational)](https://docs.rs/automerge/latest/automerge)
+[![ci](https://github.com/automerge/automerge/actions/workflows/ci.yaml/badge.svg)](https://github.com/automerge/automerge/actions/workflows/ci.yaml)
+[![docs](https://github.com/automerge/automerge/actions/workflows/docs.yaml/badge.svg)](https://github.com/automerge/automerge/actions/workflows/docs.yaml)
 
 Automerge is a library which provides fast implementations of several different
 CRDTs, a compact compression format for these CRDTs, and a sync protocol for
@@ -31,7 +32,7 @@ Slack](https://join.slack.com/t/automerge/shared_invite/zt-e4p3760n-kKh7r3KRH1Yw
 
 This project is formed of a core Rust implementation which is exposed via FFI in
 javascript+WASM, C, and soon other languages. Alex
-([@alexjg](https://github.com/alexjg/)]) is working full time on maintaining
+([@alexjg](https://github.com/alexjg/)) is working full time on maintaining
 automerge, other members of Ink and Switch are also contributing time and there
 are several other maintainers. The focus is currently on shipping the new JS
 package. We expect to be iterating the API and adding new features over the next
@@ -97,8 +98,8 @@ Nov 29th 2022.
 
 ```bash
 # clone the repo
-git clone https://github.com/automerge/automerge-rs
-cd automerge-rs
+git clone https://github.com/automerge/automerge
+cd automerge
 
 # install rustup
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -145,3 +146,39 @@ change one subsystem at a time and add good commit messages which describe what
 the change is and why you're making it (err on the side of longer commit
 messages). `git blame` should give future maintainers a good idea of why
 something is the way it is.
+
+### Releasing
+
+There are four artefacts in this repository which need releasing:
+
+* The `@automerge/automerge` NPM package
+* The `@automerge/automerge-wasm` NPM package
+* The automerge deno crate
+* The `automerge` rust crate
+
+#### JS Packages
+
+The NPM and Deno packages are all released automatically by CI tooling whenever
+the version number in the respective `package.json` changes. This means that
+the process for releasing a new JS version is:
+
+1. Bump the version in the `rust/automerge-wasm/package.json` (skip this if there
+   are no new changes to the WASM)
+2. Bump the version of `@automerge/automerge-wasm` we depend on in `javascript/package.json`
+3. Bump the version in `@automerge/automerge` also in `javascript/package.json`
+
+Put all of these bumps in a PR and wait for a clean CI run. Then merge the PR.
+The CI tooling will pick up a push to `main` with a new version and publish it
+to NPM. This does depend on an access token available as `NPM_TOKEN` in the 
+actions environment, this token is generated with a 30 day expiry date so needs
+(manually) refreshing every so often.
+
+#### Rust Package
+
+This is much easier, but less automatic. The steps to release are:
+
+1. Bump the version in `automerge/Cargo.toml`
+2. Push a PR and merge once clean
+3. Tag the release as `rust/automerge@<version>`
+4. Push the tag to the repository
+5. Publish the release with `cargo publish`
