@@ -1135,6 +1135,36 @@ impl Automerge {
             .filter_map(|h| other.get_change_by_hash(&h))
             .collect()
     }
+
+    /// Get the hash of the change that contains the given opid.
+    pub fn hash_for_opid(&self, opid: &ExId) -> Option<ChangeHash> {
+        match opid {
+            ExId::Root => None,
+            ExId::Id(..) => {
+                let opid = self.exid_to_obj(opid).ok()?.0 .0;
+                let actor_indices = self.states.get(&opid.actor())?;
+                let change_index_index = actor_indices
+                    .binary_search_by(|change_index| {
+                        let change = self
+                            .history
+                            .get(*change_index)
+                            .expect("State index should refer to a valid change");
+                        let start = change.start_op().get();
+                        let len = change.len() as u64;
+                        if opid.counter() < start {
+                            Ordering::Greater
+                        } else if start + len <= opid.counter() {
+                            Ordering::Less
+                        } else {
+                            Ordering::Equal
+                        }
+                    })
+                    .ok()?;
+                let change_index = actor_indices.get(change_index_index).unwrap();
+                Some(self.history.get(*change_index).unwrap().hash())
+            }
+        }
+    }
 }
 
 impl ReadDoc for Automerge {
@@ -1431,34 +1461,6 @@ impl ReadDoc for Automerge {
         self.history_index
             .get(hash)
             .and_then(|index| self.history.get(*index))
-    }
-
-    fn hash_for_opid(&self, opid: &ExId) -> Option<ChangeHash> {
-        match opid {
-            ExId::Root => None,
-            ExId::Id(op_index, _actor_id, actor_index) => {
-                let actor_indices = self.states.get(actor_index)?;
-                let change_index_index = actor_indices
-                    .binary_search_by(|change_index| {
-                        let change = self
-                            .history
-                            .get(*change_index)
-                            .expect("State index should refer to a valid change");
-                        let start = change.start_op().get();
-                        let len = change.len() as u64;
-                        if *op_index < start {
-                            Ordering::Greater
-                        } else if start + len <= *op_index {
-                            Ordering::Less
-                        } else {
-                            Ordering::Equal
-                        }
-                    })
-                    .ok()?;
-                let change_index = actor_indices.get(change_index_index).unwrap();
-                Some(self.history.get(*change_index).unwrap().hash())
-            }
-        }
     }
 }
 
