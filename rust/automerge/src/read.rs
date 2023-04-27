@@ -4,7 +4,7 @@ use crate::{
     iter::{Keys, ListRange, MapRange, Values},
     marks::Mark,
     parents::Parents,
-    Change, ChangeHash, ObjType, Prop, Value,
+    Change, ChangeHash, Cursor, ObjType, Prop, Value,
 };
 
 use std::ops::RangeBounds;
@@ -152,16 +152,18 @@ pub trait ReadDoc {
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError>;
 
-    fn text_position_to_address<O: AsRef<ExId>>(
+    fn get_cursor<O: AsRef<ExId>>(
         &self,
         obj: O,
         position: usize,
-    ) -> Result<ExId, AutomergeError>;
+        at: Option<&[ChangeHash]>,
+    ) -> Result<Cursor, AutomergeError>;
 
-    fn text_address_to_position<O: AsRef<ExId>>(
+    fn get_cursor_position<O: AsRef<ExId>>(
         &self,
         obj: O,
-        address: &ExId,
+        cursor: &Cursor,
+        at: Option<&[ChangeHash]>,
     ) -> Result<usize, AutomergeError>;
 
     /// Get a value out of the document.

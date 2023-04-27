@@ -9,7 +9,7 @@ use crate::transaction::{CommitOptions, Transactable};
 use crate::{sync, ObjType, Parents, ReadDoc, ScalarValue};
 use crate::{
     transaction::{Observation, Observed, TransactionInner, UnObserved},
-    ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop, TextEncoding, Value,
+    ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor, Prop, TextEncoding, Value,
 };
 
 /// An automerge document that automatically manages transactions.
@@ -492,20 +492,22 @@ impl<Obs: Observation> ReadDoc for AutoCommitWithObs<Obs> {
         self.doc.text_at(obj, heads)
     }
 
-    fn text_position_to_address<O: AsRef<ExId>>(
+    fn get_cursor<O: AsRef<ExId>>(
         &self,
         obj: O,
         position: usize,
-    ) -> Result<ExId, AutomergeError> {
-        self.doc.text_position_to_address(obj, position)
+        at: Option<&[ChangeHash]>,
+    ) -> Result<Cursor, AutomergeError> {
+        self.doc.get_cursor(obj, position, at)
     }
 
-    fn text_address_to_position<O: AsRef<ExId>>(
+    fn get_cursor_position<O: AsRef<ExId>>(
         &self,
         obj: O,
-        address: &ExId,
+        address: &Cursor,
+        at: Option<&[ChangeHash]>,
     ) -> Result<usize, AutomergeError> {
-        self.doc.text_address_to_position(obj, address)
+        self.doc.get_cursor_position(obj, address, at)
     }
 
     fn get<O: AsRef<ExId>, P: Into<Prop>>(

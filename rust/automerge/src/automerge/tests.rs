@@ -164,7 +164,7 @@ fn test_save_text() -> Result<(), AutomergeError> {
 }
 
 #[test]
-fn test_text_position_api() -> Result<(), AutomergeError> {
+fn test_cursors() -> Result<(), AutomergeError> {
     let mut doc = Automerge::new();
     let mut tx = doc.transaction();
     let text = tx.put_object(ROOT, "text", ObjType::Text)?;
@@ -176,12 +176,66 @@ fn test_text_position_api() -> Result<(), AutomergeError> {
     tx.splice_text(&text, 6, 0, "big bad ")?;
     tx.commit();
 
-    let address0 = doc.text_position_to_address(&text, 0).unwrap();
-    let pos0 = doc.text_address_to_position(&text, &address0).unwrap();
-    assert!(pos0 == 0);
-    let address1 = doc.text_position_to_address(&text, 6).unwrap();
-    let pos1 = doc.text_address_to_position(&text, &address1).unwrap();
-    assert!(pos1 == 6);
+    // simple cursor test + serialization
+    let cursor0 = doc.get_cursor(&text, 0, None).unwrap();
+    let cursor0_str = cursor0.to_string();
+    let cursor0_bytes = cursor0.to_bytes();
+    let pos0 = doc.get_cursor_position(&text, &cursor0, None).unwrap();
+    assert_eq!(pos0, 0);
+    assert_eq!(Cursor::try_from(cursor0_str).unwrap(), cursor0);
+    assert_eq!(Cursor::try_from(cursor0_bytes).unwrap(), cursor0);
+
+    // simple cursor test + serialization
+    let cursor1 = doc.get_cursor(&text, 6, None).unwrap();
+    let cursor1_str = cursor1.to_string();
+    let cursor1_bytes = cursor1.to_bytes();
+    let pos1 = doc.get_cursor_position(&text, &cursor1, None).unwrap();
+    assert_eq!(pos1, 6);
+    assert_eq!(Cursor::try_from(cursor1_str).unwrap(), cursor1);
+    assert_eq!(Cursor::try_from(cursor1_bytes).unwrap(), cursor1);
+
+    let heads0 = doc.get_heads();
+
+    let mut tx = doc.transaction();
+    tx.splice_text(&text, 3, 6, " new text ")?;
+    tx.commit();
+
+    // confirm the cursor changed position after an edit
+    let pos2 = doc.get_cursor_position(&text, &cursor1, None).unwrap();
+    assert_eq!(pos2, 13); // -3 deleted & +10 inserted before cursor
+
+    // confirm the cursor can still be read at the old position
+    let pos3 = doc
+        .get_cursor_position(&text, &cursor1, Some(&heads0))
+        .unwrap();
+    assert_eq!(pos3, 6); // back to the old heads
+
+    // confirm cursor load errors
+    assert_eq!(
+        Cursor::try_from(vec![0u8, 3u8, 10u8].as_slice()),
+        Err(AutomergeError::InvalidCursorFormat)
+    );
+    assert_eq!(
+        Cursor::try_from("notacursor"),
+        Err(AutomergeError::InvalidCursorFormat)
+    );
+
+    // confirm behavior of a invalid cursor
+    let bad_cursor = Cursor::try_from("10@aabbcc00").unwrap();
+    assert_eq!(
+        doc.get_cursor_position(&text, &bad_cursor, None),
+        Err(AutomergeError::InvalidCursor(bad_cursor))
+    );
+
+    // cursors created after heads are invalid
+    let cursor3 = doc.get_cursor(&text, 6, None).unwrap();
+    let pos4 = doc.get_cursor_position(&text, &cursor3, None).unwrap();
+    assert_eq!(pos4, 6);
+    assert_eq!(
+        doc.get_cursor_position(&text, &cursor3, Some(&heads0)),
+        Err(AutomergeError::InvalidCursor(cursor3))
+    );
+
     Ok(())
 }
 

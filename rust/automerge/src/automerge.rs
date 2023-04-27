@@ -21,7 +21,7 @@ use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, MarkData, ObjId, ObjMeta, Op,
     OpId, OpType, TextEncoding, Value,
 };
-use crate::{AutomergeError, Change, ObjType, Prop, ReadDoc};
+use crate::{AutomergeError, Change, Cursor, ObjType, Prop, ReadDoc};
 
 mod current_state;
 mod diff;
@@ -403,6 +403,25 @@ impl Automerge {
             Err(AutomergeError::NotAnObject)
         }
     }
+
+    pub(crate) fn cursor_to_opid(
+        &self,
+        cursor: &Cursor,
+        clock: Option<&Clock>,
+    ) -> Result<OpId, AutomergeError> {
+        if let Some(idx) = self.ops.m.actors.lookup(cursor.actor()) {
+            let opid = OpId::new(cursor.ctr(), idx);
+            match clock {
+                Some(clock) if !clock.covers(&opid) => {
+                    Err(AutomergeError::InvalidCursor(cursor.clone()))
+                }
+                _ => Ok(opid),
+            }
+        } else {
+            Err(AutomergeError::InvalidCursor(cursor.clone()))
+        }
+    }
+
     pub(crate) fn exid_to_obj(&self, id: &ExId) -> Result<ObjMeta, AutomergeError> {
         let obj = match id {
             ExId::Root => ObjId::root(),
@@ -1266,35 +1285,42 @@ impl ReadDoc for Automerge {
         Ok(self.ops.text(&obj.id, None))
     }
 
-    fn text_position_to_address<O: AsRef<ExId>>(
+    fn get_cursor<O: AsRef<ExId>>(
         &self,
         obj: O,
         position: usize,
-    ) -> Result<ExId, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?.0;
-        let query = self.ops.search(&obj, query::ListVals::new());
-        if position < query.ops.len() {
-            let q = query.ops.get(position).unwrap();
-            Ok(self.id_to_exid(q.id))
+        at: Option<&[ChangeHash]>,
+    ) -> Result<Cursor, AutomergeError> {
+        let obj = self.exid_to_obj(obj.as_ref())?;
+        let clock = at.map(|heads| self.clock_at(heads));
+        if !obj.typ.is_sequence() {
+            Err(AutomergeError::InvalidOp(obj.typ))
         } else {
-            Err(AutomergeError::InvalidIndex(position))
+            let found =
+                self.ops
+                    .seek_ops_by_prop(&obj.id, position.into(), obj.encoding, clock.as_ref());
+            if let Some(op) = found.ops.last() {
+                Ok(Cursor::new(op.id, &self.ops.m))
+            } else {
+                Err(AutomergeError::InvalidIndex(position))
+            }
         }
     }
 
-    fn text_address_to_position<O: AsRef<ExId>>(
+    fn get_cursor_position<O: AsRef<ExId>>(
         &self,
         obj: O,
-        address: &ExId,
+        cursor: &Cursor,
+        at: Option<&[ChangeHash]>,
     ) -> Result<usize, AutomergeError> {
-        let obj = self.exid_to_obj(obj.as_ref())?.0;
-        let query = self.ops.search(&obj, query::ListVals::new());
-        let internal_address = self.exid_to_opid(address).unwrap();
-        for (position, q) in query.ops.iter().enumerate() {
-            if q.id == internal_address {
-                return Ok(position);
-            }
-        }
-        Err(AutomergeError::InvalidObjId(address.to_string()))
+        let obj = self.exid_to_obj(obj.as_ref())?;
+        let clock = at.map(|heads| self.clock_at(heads));
+        let opid = self.cursor_to_opid(cursor, clock.as_ref())?;
+        let found = self
+            .ops
+            .seek_opid(&obj.id, opid, clock.as_ref())
+            .ok_or_else(|| AutomergeError::InvalidCursor(cursor.clone()))?;
+        Ok(found.index)
     }
 
     fn text_at<O: AsRef<ExId>>(
