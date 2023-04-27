@@ -163,10 +163,9 @@ fn test_save_text() -> Result<(), AutomergeError> {
     Ok(())
 }
 
-
 #[test]
 fn test_text_position_api() -> Result<(), AutomergeError> {
-        let mut doc = Automerge::new();
+    let mut doc = Automerge::new();
     let mut tx = doc.transaction();
     let text = tx.put_object(ROOT, "text", ObjType::Text)?;
     tx.commit();
@@ -185,7 +184,6 @@ fn test_text_position_api() -> Result<(), AutomergeError> {
     assert!(pos1 == 6);
     Ok(())
 }
-
 
 #[test]
 fn test_props_vals_at() -> Result<(), AutomergeError> {

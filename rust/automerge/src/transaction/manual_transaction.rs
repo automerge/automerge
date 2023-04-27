@@ -192,7 +192,7 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
     fn text_position_to_address<O: AsRef<ExId>>(
         &self,
         obj: O,
-        position: usize
+        position: usize,
     ) -> Result<ExId, AutomergeError> {
         self.doc.text_position_to_address(obj, position)
     }
@@ -200,11 +200,10 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
     fn text_address_to_position<O: AsRef<ExId>>(
         &self,
         obj: O,
-        address: &ExId
+        address: &ExId,
     ) -> Result<usize, AutomergeError> {
         self.doc.text_address_to_position(obj, address)
     }
-
 
     fn marks<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<Mark<'_>>, AutomergeError> {
         self.doc.marks(obj)
