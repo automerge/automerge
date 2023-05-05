@@ -382,6 +382,26 @@
 <a href="#381" id="381">381</a>
 <a href="#382" id="382">382</a>
 <a href="#383" id="383">383</a>
+<a href="#384" id="384">384</a>
+<a href="#385" id="385">385</a>
+<a href="#386" id="386">386</a>
+<a href="#387" id="387">387</a>
+<a href="#388" id="388">388</a>
+<a href="#389" id="389">389</a>
+<a href="#390" id="390">390</a>
+<a href="#391" id="391">391</a>
+<a href="#392" id="392">392</a>
+<a href="#393" id="393">393</a>
+<a href="#394" id="394">394</a>
+<a href="#395" id="395">395</a>
+<a href="#396" id="396">396</a>
+<a href="#397" id="397">397</a>
+<a href="#398" id="398">398</a>
+<a href="#399" id="399">399</a>
+<a href="#400" id="400">400</a>
+<a href="#401" id="401">401</a>
+<a href="#402" id="402">402</a>
+<a href="#403" id="403">403</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
@@ -389,7 +409,9 @@
 <span class="kw">use </span><span class="kw">crate</span>::marks::{ExpandMark, Mark};
 <span class="kw">use </span><span class="kw">crate</span>::op_observer::BranchableObserver;
 <span class="kw">use </span><span class="kw">crate</span>::AutomergeError;
-<span class="kw">use crate</span>::{Automerge, ChangeHash, ObjType, OpObserver, Prop, ReadDoc, ScalarValue, Value};
+<span class="kw">use crate</span>::{
+    Automerge, ChangeHash, Cursor, ObjType, OpObserver, Prop, ReadDoc, ScalarValue, Value,
+};
 
 <span class="kw">use super</span>::{observation, CommitOptions, Transactable, TransactionArgs, TransactionInner};
 
@@ -571,6 +593,24 @@
         heads: <span class="kw-2">&amp;</span>[ChangeHash],
     ) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt; {
         <span class="self">self</span>.doc.text_at(obj, heads)
+    }
+
+    <span class="kw">fn </span>get_cursor&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        position: usize,
+        at: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[ChangeHash]&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Cursor, AutomergeError&gt; {
+        <span class="self">self</span>.doc.get_cursor(obj, position, at)
+    }
+
+    <span class="kw">fn </span>get_cursor_position&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        address: <span class="kw-2">&amp;</span>Cursor,
+        at: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[ChangeHash]&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;usize, AutomergeError&gt; {
+        <span class="self">self</span>.doc.get_cursor_position(obj, address, at)
     }
 
     <span class="kw">fn </span>marks&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;Mark&lt;<span class="lifetime">&#39;_</span>&gt;&gt;, AutomergeError&gt; {

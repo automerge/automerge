@@ -602,6 +602,21 @@
 <a href="#601" id="601">601</a>
 <a href="#602" id="602">602</a>
 <a href="#603" id="603">603</a>
+<a href="#604" id="604">604</a>
+<a href="#605" id="605">605</a>
+<a href="#606" id="606">606</a>
+<a href="#607" id="607">607</a>
+<a href="#608" id="608">608</a>
+<a href="#609" id="609">609</a>
+<a href="#610" id="610">610</a>
+<a href="#611" id="611">611</a>
+<a href="#612" id="612">612</a>
+<a href="#613" id="613">613</a>
+<a href="#614" id="614">614</a>
+<a href="#615" id="615">615</a>
+<a href="#616" id="616">616</a>
+<a href="#617" id="617">617</a>
+<a href="#618" id="618">618</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::iter::TopOps;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="kw">crate</span>::op_set::OpSetMetadata;
 <span class="kw">use crate</span>::{
@@ -882,7 +897,7 @@
         encoding: ListEncoding,
         clock: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Clock&gt;,
         meta: <span class="kw-2">&amp;</span>OpSetMetadata,
-    ) -&gt; <span class="prelude-ty">Option</span>&lt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op, usize, bool)&gt; {
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;FoundOpId&lt;<span class="lifetime">&#39;a</span>&gt;&gt; {
         <span class="kw">let </span>query = <span class="self">self</span>.search(query::OpIdSearch::opid(opid, encoding, clock), meta);
         <span class="kw">let </span>pos = query.found()<span class="question-mark">?</span>;
         <span class="kw">let </span><span class="kw-2">mut </span>iter = <span class="self">self</span>.iter();
@@ -894,10 +909,18 @@
             }
 
             <span class="kw">if </span>e.visible() {
-                <span class="kw">return </span><span class="prelude-val">Some</span>((op, index, <span class="bool-val">false</span>));
+                <span class="kw">return </span><span class="prelude-val">Some</span>(FoundOpId {
+                    op,
+                    index,
+                    visible: <span class="bool-val">false</span>,
+                });
             }
         }
-        <span class="prelude-val">Some</span>((op, index, op.visible()))
+        <span class="prelude-val">Some</span>(FoundOpId {
+            op,
+            index,
+            visible: op.visible(),
+        })
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>find_op_with_observer&lt;<span class="lifetime">&#39;a</span>&gt;(
@@ -1121,6 +1144,13 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) ops: Vec&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;,
     <span class="kw">pub</span>(<span class="kw">crate</span>) ops_pos: Vec&lt;usize&gt;,
     <span class="kw">pub</span>(<span class="kw">crate</span>) end_pos: usize,
+}
+
+<span class="attr">#[derive(Debug, Clone, PartialEq)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>FoundOpId&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) index: usize,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) visible: bool,
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; OpsFound&lt;<span class="lifetime">&#39;a</span>&gt; {

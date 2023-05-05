@@ -593,13 +593,20 @@
 <a href="#592" id="592">592</a>
 <a href="#593" id="593">593</a>
 <a href="#594" id="594">594</a>
+<a href="#595" id="595">595</a>
+<a href="#596" id="596">596</a>
+<a href="#597" id="597">597</a>
+<a href="#598" id="598">598</a>
+<a href="#599" id="599">599</a>
+<a href="#600" id="600">600</a>
+<a href="#601" id="601">601</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::clock::Clock;
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 <span class="kw">use </span><span class="kw">crate</span>::indexed_cache::IndexedCache;
 <span class="kw">use </span><span class="kw">crate</span>::iter::{Keys, ListRange, MapRange, TopOps};
 <span class="kw">use </span><span class="kw">crate</span>::op_tree::OpTreeIter;
 <span class="kw">use </span><span class="kw">crate</span>::op_tree::{
-    <span class="self">self</span>, FoundOpWithObserver, FoundOpWithoutObserver, LastInsert, OpTree, OpsFound,
+    <span class="self">self</span>, FoundOpId, FoundOpWithObserver, FoundOpWithoutObserver, LastInsert, OpTree, OpsFound,
 };
 <span class="kw">use </span><span class="kw">crate</span>::parents::Parents;
 <span class="kw">use </span><span class="kw">crate</span>::query::TreeQuery;
@@ -701,22 +708,29 @@
         }
     }
 
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>seek_opid(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: <span class="kw-2">&amp;</span>ObjId,
+        id: OpId,
+        clock: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Clock&gt;,
+    ) -&gt; <span class="prelude-ty">Option</span>&lt;FoundOpId&lt;<span class="lifetime">&#39;_</span>&gt;&gt; {
+        <span class="kw">let </span>(_typ, encoding) = <span class="self">self</span>.type_and_encoding(obj)<span class="question-mark">?</span>;
+        <span class="self">self</span>.trees
+            .get(obj)
+            .and_then(|tree| tree.internal.seek_opid(id, encoding, clock, <span class="kw-2">&amp;</span><span class="self">self</span>.m))
+    }
+
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>parent_object(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>ObjId, clock: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Clock&gt;) -&gt; <span class="prelude-ty">Option</span>&lt;Parent&gt; {
         <span class="kw">let </span>parent = <span class="self">self</span>.trees.get(obj)<span class="question-mark">?</span>.parent<span class="question-mark">?</span>;
-        <span class="kw">let </span>(_typ, encoding) = <span class="self">self</span>.type_and_encoding(<span class="kw-2">&amp;</span>parent)<span class="question-mark">?</span>;
-        <span class="kw">let </span>(op, index, visible) = <span class="self">self
-            </span>.trees
-            .get(<span class="kw-2">&amp;</span>parent)
-            .and_then(|tree| tree.internal.seek_opid(obj.<span class="number">0</span>, encoding, clock, <span class="kw-2">&amp;</span><span class="self">self</span>.m))
-            .unwrap();
-        <span class="kw">let </span>prop = <span class="kw">match </span>op.elemid_or_key() {
+        <span class="kw">let </span>found = <span class="self">self</span>.seek_opid(<span class="kw-2">&amp;</span>parent, obj.<span class="number">0</span>, clock)<span class="question-mark">?</span>;
+        <span class="kw">let </span>prop = <span class="kw">match </span>found.op.elemid_or_key() {
             Key::Map(m) =&gt; <span class="self">self</span>.m.props.safe_get(m).map(|s| Prop::Map(s.to_string()))<span class="question-mark">?</span>,
-            Key::Seq(<span class="kw">_</span>) =&gt; Prop::Seq(index),
+            Key::Seq(<span class="kw">_</span>) =&gt; Prop::Seq(found.index),
         };
         <span class="prelude-val">Some</span>(Parent {
             obj: parent,
             prop,
-            visible,
+            visible: found.visible,
         })
     }
 

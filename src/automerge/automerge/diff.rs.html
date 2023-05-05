@@ -1447,6 +1447,24 @@
 <a href="#1446" id="1446">1446</a>
 <a href="#1447" id="1447">1447</a>
 <a href="#1448" id="1448">1448</a>
+<a href="#1449" id="1449">1449</a>
+<a href="#1450" id="1450">1450</a>
+<a href="#1451" id="1451">1451</a>
+<a href="#1452" id="1452">1452</a>
+<a href="#1453" id="1453">1453</a>
+<a href="#1454" id="1454">1454</a>
+<a href="#1455" id="1455">1455</a>
+<a href="#1456" id="1456">1456</a>
+<a href="#1457" id="1457">1457</a>
+<a href="#1458" id="1458">1458</a>
+<a href="#1459" id="1459">1459</a>
+<a href="#1460" id="1460">1460</a>
+<a href="#1461" id="1461">1461</a>
+<a href="#1462" id="1462">1462</a>
+<a href="#1463" id="1463">1463</a>
+<a href="#1464" id="1464">1464</a>
+<a href="#1465" id="1465">1465</a>
+<a href="#1466" id="1466">1466</a>
 </pre><pre class="rust"><code><span class="kw">use </span>itertools::Itertools;
 <span class="kw">use </span>std::borrow::Cow;
 <span class="kw">use </span>std::collections::BTreeMap;
@@ -1459,7 +1477,7 @@
     marks::{Mark, MarkStateMachine},
     types::{Clock, ListEncoding, MarkData, ObjId, Op, Prop, ScalarValue},
     value::Value,
-    Automerge, AutomergeError, ChangeHash, ObjType, OpObserver, OpType, ReadDoc,
+    Automerge, AutomergeError, ChangeHash, Cursor, ObjType, OpObserver, OpType, ReadDoc,
 };
 
 <span class="attr">#[derive(Clone, Debug)]
@@ -2023,6 +2041,24 @@
         heads: <span class="kw-2">&amp;</span>[ChangeHash],
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;Mark&lt;<span class="lifetime">&#39;_</span>&gt;&gt;, AutomergeError&gt; {
         <span class="self">self</span>.doc.marks_at(obj, heads)
+    }
+
+    <span class="kw">fn </span>get_cursor&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        position: usize,
+        at: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[ChangeHash]&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Cursor, AutomergeError&gt; {
+        <span class="self">self</span>.doc.get_cursor(obj, position, at)
+    }
+
+    <span class="kw">fn </span>get_cursor_position&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        cursor: <span class="kw-2">&amp;</span>Cursor,
+        at: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[ChangeHash]&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;usize, AutomergeError&gt; {
+        <span class="self">self</span>.doc.get_cursor_position(obj, cursor, at)
     }
 
     <span class="kw">fn </span>get&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(

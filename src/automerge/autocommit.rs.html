@@ -748,6 +748,24 @@
 <a href="#747" id="747">747</a>
 <a href="#748" id="748">748</a>
 <a href="#749" id="749">749</a>
+<a href="#750" id="750">750</a>
+<a href="#751" id="751">751</a>
+<a href="#752" id="752">752</a>
+<a href="#753" id="753">753</a>
+<a href="#754" id="754">754</a>
+<a href="#755" id="755">755</a>
+<a href="#756" id="756">756</a>
+<a href="#757" id="757">757</a>
+<a href="#758" id="758">758</a>
+<a href="#759" id="759">759</a>
+<a href="#760" id="760">760</a>
+<a href="#761" id="761">761</a>
+<a href="#762" id="762">762</a>
+<a href="#763" id="763">763</a>
+<a href="#764" id="764">764</a>
+<a href="#765" id="765">765</a>
+<a href="#766" id="766">766</a>
+<a href="#767" id="767">767</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
@@ -759,7 +777,7 @@
 <span class="kw">use crate</span>::{sync, ObjType, Parents, ReadDoc, ScalarValue};
 <span class="kw">use crate</span>::{
     transaction::{Observation, Observed, TransactionInner, UnObserved},
-    ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop, TextEncoding, Value,
+    ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor, Prop, TextEncoding, Value,
 };
 
 <span class="doccomment">/// An automerge document that automatically manages transactions.
@@ -1240,6 +1258,24 @@
         heads: <span class="kw-2">&amp;</span>[ChangeHash],
     ) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt; {
         <span class="self">self</span>.doc.text_at(obj, heads)
+    }
+
+    <span class="kw">fn </span>get_cursor&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        position: usize,
+        at: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[ChangeHash]&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Cursor, AutomergeError&gt; {
+        <span class="self">self</span>.doc.get_cursor(obj, position, at)
+    }
+
+    <span class="kw">fn </span>get_cursor_position&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        address: <span class="kw-2">&amp;</span>Cursor,
+        at: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[ChangeHash]&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;usize, AutomergeError&gt; {
+        <span class="self">self</span>.doc.get_cursor_position(obj, address, at)
     }
 
     <span class="kw">fn </span>get&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(

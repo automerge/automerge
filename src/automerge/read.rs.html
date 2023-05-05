@@ -210,13 +210,39 @@
 <a href="#209" id="209">209</a>
 <a href="#210" id="210">210</a>
 <a href="#211" id="211">211</a>
+<a href="#212" id="212">212</a>
+<a href="#213" id="213">213</a>
+<a href="#214" id="214">214</a>
+<a href="#215" id="215">215</a>
+<a href="#216" id="216">216</a>
+<a href="#217" id="217">217</a>
+<a href="#218" id="218">218</a>
+<a href="#219" id="219">219</a>
+<a href="#220" id="220">220</a>
+<a href="#221" id="221">221</a>
+<a href="#222" id="222">222</a>
+<a href="#223" id="223">223</a>
+<a href="#224" id="224">224</a>
+<a href="#225" id="225">225</a>
+<a href="#226" id="226">226</a>
+<a href="#227" id="227">227</a>
+<a href="#228" id="228">228</a>
+<a href="#229" id="229">229</a>
+<a href="#230" id="230">230</a>
+<a href="#231" id="231">231</a>
+<a href="#232" id="232">232</a>
+<a href="#233" id="233">233</a>
+<a href="#234" id="234">234</a>
+<a href="#235" id="235">235</a>
+<a href="#236" id="236">236</a>
+<a href="#237" id="237">237</a>
 </pre><pre class="rust"><code><span class="kw">use crate</span>::{
     error::AutomergeError,
     exid::ExId,
     iter::{Keys, ListRange, MapRange, Values},
     marks::Mark,
     parents::Parents,
-    Change, ChangeHash, ObjType, Prop, Value,
+    Change, ChangeHash, Cursor, ObjType, Prop, Value,
 };
 
 <span class="kw">use </span>std::ops::RangeBounds;
@@ -363,6 +389,32 @@
         obj: O,
         heads: <span class="kw-2">&amp;</span>[ChangeHash],
     ) -&gt; <span class="prelude-ty">Result</span>&lt;String, AutomergeError&gt;;
+
+    <span class="doccomment">/// Obtain the stable address (Cursor) for a `usize` position in a Sequence (either `Self::List` or `Self::Text`).
+    ///
+    /// Example use cases:
+    /// 1. User cursor tracking, to maintain contextual position while merging remote changes.
+    /// 2. Indexing sentences in a text field.
+    ///
+    /// To reverse the operation, see [`Self::get_cursor_position`].
+    </span><span class="kw">fn </span>get_cursor&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        position: usize,
+        at: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[ChangeHash]&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;Cursor, AutomergeError&gt;;
+
+    <span class="doccomment">/// Translate Cursor in a Sequence into an absolute position of type `usize`.
+    ///
+    /// Applicable only for Sequences (either `Self::List` or `Self::Text`).
+    ///
+    /// To reverse the operation, see [`Self::get_cursor`].
+    </span><span class="kw">fn </span>get_cursor_position&lt;O: AsRef&lt;ExId&gt;&gt;(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: O,
+        cursor: <span class="kw-2">&amp;</span>Cursor,
+        at: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[ChangeHash]&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;usize, AutomergeError&gt;;
 
     <span class="doccomment">/// Get a value out of the document.
     ///

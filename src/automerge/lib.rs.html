@@ -290,6 +290,8 @@
 <a href="#289" id="289">289</a>
 <a href="#290" id="290">290</a>
 <a href="#291" id="291">291</a>
+<a href="#292" id="292">292</a>
+<a href="#293" id="293">293</a>
 </pre><pre class="rust"><code><span class="doccomment">//! # Automerge
 //!
 //! Automerge is a library of data structures for building collaborative,
@@ -540,6 +542,7 @@
 <span class="kw">mod </span>clock;
 <span class="kw">mod </span>columnar;
 <span class="kw">mod </span>convert;
+<span class="kw">mod </span>cursor;
 <span class="kw">mod </span>error;
 <span class="kw">mod </span>exid;
 <span class="kw">mod </span>indexed_cache;
@@ -565,6 +568,7 @@
 <span class="kw">pub use </span>autocommit::{AutoCommit, AutoCommitWithObs};
 <span class="kw">pub use </span>autoserde::AutoSerde;
 <span class="kw">pub use </span>change::{Change, LoadError <span class="kw">as </span>LoadChangeError};
+<span class="kw">pub use </span>cursor::Cursor;
 <span class="kw">pub use </span>error::AutomergeError;
 <span class="kw">pub use </span>error::InvalidActorId;
 <span class="kw">pub use </span>error::InvalidChangeHashSlice;
