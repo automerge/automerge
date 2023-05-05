@@ -4,7 +4,7 @@ use crate::indexed_cache::IndexedCache;
 use crate::iter::{Keys, ListRange, MapRange, TopOps};
 use crate::op_tree::OpTreeIter;
 use crate::op_tree::{
-    self, FoundOpWithObserver, FoundOpWithoutObserver, LastInsert, OpTree, OpsFound,
+    self, FoundOpId, FoundOpWithObserver, FoundOpWithoutObserver, LastInsert, OpTree, OpsFound,
 };
 use crate::parents::Parents;
 use crate::query::TreeQuery;
@@ -106,22 +106,29 @@ impl OpSetInternal {
         }
     }
 
+    pub(crate) fn seek_opid(
+        &self,
+        obj: &ObjId,
+        id: OpId,
+        clock: Option<&Clock>,
+    ) -> Option<FoundOpId<'_>> {
+        let (_typ, encoding) = self.type_and_encoding(obj)?;
+        self.trees
+            .get(obj)
+            .and_then(|tree| tree.internal.seek_opid(id, encoding, clock, &self.m))
+    }
+
     pub(crate) fn parent_object(&self, obj: &ObjId, clock: Option<&Clock>) -> Option<Parent> {
         let parent = self.trees.get(obj)?.parent?;
-        let (_typ, encoding) = self.type_and_encoding(&parent)?;
-        let (op, index, visible) = self
-            .trees
-            .get(&parent)
-            .and_then(|tree| tree.internal.seek_opid(obj.0, encoding, clock, &self.m))
-            .unwrap();
-        let prop = match op.elemid_or_key() {
+        let found = self.seek_opid(&parent, obj.0, clock)?;
+        let prop = match found.op.elemid_or_key() {
             Key::Map(m) => self.m.props.safe_get(m).map(|s| Prop::Map(s.to_string()))?,
-            Key::Seq(_) => Prop::Seq(index),
+            Key::Seq(_) => Prop::Seq(found.index),
         };
         Some(Parent {
             obj: parent,
             prop,
-            visible,
+            visible: found.visible,
         })
     }
 

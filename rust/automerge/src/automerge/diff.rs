@@ -10,7 +10,7 @@ use crate::{
     marks::{Mark, MarkStateMachine},
     types::{Clock, ListEncoding, MarkData, ObjId, Op, Prop, ScalarValue},
     value::Value,
-    Automerge, AutomergeError, ChangeHash, ObjType, OpObserver, OpType, ReadDoc,
+    Automerge, AutomergeError, ChangeHash, Cursor, ObjType, OpObserver, OpType, ReadDoc,
 };
 
 #[derive(Clone, Debug)]
@@ -574,6 +574,24 @@ impl<'a, 'b> ReadDoc for ReadDocAt<'a, 'b> {
         heads: &[ChangeHash],
     ) -> Result<Vec<Mark<'_>>, AutomergeError> {
         self.doc.marks_at(obj, heads)
+    }
+
+    fn get_cursor<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        position: usize,
+        at: Option<&[ChangeHash]>,
+    ) -> Result<Cursor, AutomergeError> {
+        self.doc.get_cursor(obj, position, at)
+    }
+
+    fn get_cursor_position<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        cursor: &Cursor,
+        at: Option<&[ChangeHash]>,
+    ) -> Result<usize, AutomergeError> {
+        self.doc.get_cursor_position(obj, cursor, at)
     }
 
     fn get<O: AsRef<ExId>, P: Into<Prop>>(

@@ -278,7 +278,7 @@ impl OpTreeInternal {
         encoding: ListEncoding,
         clock: Option<&Clock>,
         meta: &OpSetMetadata,
-    ) -> Option<(&'a Op, usize, bool)> {
+    ) -> Option<FoundOpId<'a>> {
         let query = self.search(query::OpIdSearch::opid(opid, encoding, clock), meta);
         let pos = query.found()?;
         let mut iter = self.iter();
@@ -290,10 +290,18 @@ impl OpTreeInternal {
             }
 
             if e.visible() {
-                return Some((op, index, false));
+                return Some(FoundOpId {
+                    op,
+                    index,
+                    visible: false,
+                });
             }
         }
-        Some((op, index, op.visible()))
+        Some(FoundOpId {
+            op,
+            index,
+            visible: op.visible(),
+        })
     }
 
     pub(crate) fn find_op_with_observer<'a>(
@@ -517,6 +525,13 @@ pub(crate) struct OpsFound<'a> {
     pub(crate) ops: Vec<&'a Op>,
     pub(crate) ops_pos: Vec<usize>,
     pub(crate) end_pos: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FoundOpId<'a> {
+    pub(crate) op: &'a Op,
+    pub(crate) index: usize,
+    pub(crate) visible: bool,
 }
 
 impl<'a> OpsFound<'a> {
