@@ -4,7 +4,7 @@ export { Counter } from "./counter"
 export { Int, Uint, Float64 } from "./numbers"
 
 import { Counter } from "./counter"
-import type { Patch, PatchInfo, MarkRange } from "@automerge/automerge-wasm"
+import type { Patch, MarkRange } from "@automerge/automerge-wasm"
 export type { Patch, Mark, MarkRange } from "@automerge/automerge-wasm"
 
 export type AutomergeValue =
@@ -33,6 +33,11 @@ export type MarkValue = string | number | null | boolean | Date | Uint8Array
  * modify the value use {@link change}
  */
 export type Doc<T> = { readonly [P in keyof T]: T[P] }
+
+export type PatchInfo<T> = {
+  before: Doc<T>
+  after: Doc<T>
+}
 
 /**
  * Callback which is called by various methods in this library to notify the

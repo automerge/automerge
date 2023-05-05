@@ -253,14 +253,8 @@ export class Automerge {
   dump(): void;
 
   // experimental api can go here
-  applyPatches<Doc>(obj: Doc, meta?: unknown, callback?: (patch: Array<Patch>, info: PatchInfo<Doc>) => void): Doc;
-}
-
-export interface PatchInfo<T> {
-  before: T,
-  after: T,
-  from: Heads,
-  to: Heads,
+  applyPatches<Doc>(obj: Doc, meta?: unknown): Doc;
+  applyAndReturnPatches<Doc>(obj: Doc, meta?: unknown): {value: Doc, patches: Patch[]};
 }
 
 export interface JsSyncState {
