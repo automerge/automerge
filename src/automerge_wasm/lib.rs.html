@@ -1295,6 +1295,11 @@
 <a href="#1294" id="1294">1294</a>
 <a href="#1295" id="1295">1295</a>
 <a href="#1296" id="1296">1296</a>
+<a href="#1297" id="1297">1297</a>
+<a href="#1298" id="1298">1298</a>
+<a href="#1299" id="1299">1299</a>
+<a href="#1300" id="1300">1300</a>
+<a href="#1301" id="1301">1301</a>
 </pre><pre class="rust"><code><span class="attr">#![doc(
     html_logo_url = <span class="string">&quot;https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg&quot;</span>,
     html_favicon_url = <span class="string">&quot;https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico&quot;
@@ -1874,18 +1879,41 @@
     }
 
     <span class="attr">#[wasm_bindgen(js_name = applyPatches)]
-    </span><span class="kw">pub fn </span>apply_patches(
+    </span><span class="kw">pub fn </span>apply_patches(<span class="kw-2">&amp;mut </span><span class="self">self</span>, object: JsValue, meta: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, JsValue&gt; {
+        <span class="kw">let </span>(value, _patches) = <span class="self">self</span>.apply_patches_impl(object, meta)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(value)
+    }
+
+    <span class="attr">#[wasm_bindgen(js_name = applyAndReturnPatches)]
+    </span><span class="kw">pub fn </span>apply_and_return_patches(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         object: JsValue,
         meta: JsValue,
-        callback: JsValue,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, JsValue&gt; {
+        <span class="kw">let </span>(value, patches) = <span class="self">self</span>.apply_patches_impl(object, meta)<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>patches: Array = patches
+            .into_iter()
+            .map(interop::JsPatch)
+            .map(JsValue::try_from)
+            .collect::&lt;<span class="prelude-ty">Result</span>&lt;<span class="kw">_</span>, <span class="kw">_</span>&gt;&gt;()<span class="question-mark">?</span>;
+
+        <span class="kw">let </span>result = Object::new();
+        js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;value&quot;</span>, value)<span class="question-mark">?</span>;
+        js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;patches&quot;</span>, patches)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(result.into())
+    }
+
+    <span class="kw">fn </span>apply_patches_impl(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        object: JsValue,
+        meta: JsValue,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(JsValue, Vec&lt;automerge::Patch&lt;u16&gt;&gt;), JsValue&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>object = object
             .dyn_into::&lt;Object&gt;()
             .map_err(|<span class="kw">_</span>| error::ApplyPatch::NotObjectd)<span class="question-mark">?</span>;
         <span class="kw">let </span>end_heads = <span class="self">self</span>.doc.get_heads();
-        <span class="kw">let </span>(patches, begin_heads) = <span class="self">self</span>.doc.observer().take_patches(end_heads.clone());
-        <span class="kw">let </span>callback = callback.dyn_into::&lt;Function&gt;().ok();
+        <span class="kw">let </span>(patches, _begin_heads) = <span class="self">self</span>.doc.observer().take_patches(end_heads);
 
         <span class="comment">// even if there are no patches we may need to update the meta object
         // which requires that we update the object too
@@ -1897,31 +1925,13 @@
 
         <span class="kw">let </span><span class="kw-2">mut </span>exposed = HashSet::default();
 
-        <span class="kw">let </span>before = object.clone();
-
         <span class="kw">for </span>p <span class="kw">in </span><span class="kw-2">&amp;</span>patches {
             object = <span class="self">self</span>.apply_patch(object, p, <span class="number">0</span>, <span class="kw-2">&amp;</span>meta, <span class="kw-2">&amp;mut </span>exposed)<span class="question-mark">?</span>;
         }
 
         <span class="self">self</span>.finalize_exposed(<span class="kw-2">&amp;</span>object, exposed, <span class="kw-2">&amp;</span>meta)<span class="question-mark">?</span>;
 
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(c) = <span class="kw-2">&amp;</span>callback {
-            <span class="kw">if </span>!patches.is_empty() {
-                <span class="kw">let </span>patches: Array = patches
-                    .into_iter()
-                    .map(interop::JsPatch)
-                    .map(JsValue::try_from)
-                    .collect::&lt;<span class="prelude-ty">Result</span>&lt;<span class="kw">_</span>, <span class="kw">_</span>&gt;&gt;()<span class="question-mark">?</span>;
-                <span class="kw">let </span>info = Object::new();
-                js_set(<span class="kw-2">&amp;</span>info, <span class="string">&quot;before&quot;</span>, <span class="kw-2">&amp;</span>before)<span class="question-mark">?</span>;
-                js_set(<span class="kw-2">&amp;</span>info, <span class="string">&quot;after&quot;</span>, <span class="kw-2">&amp;</span>object)<span class="question-mark">?</span>;
-                js_set(<span class="kw-2">&amp;</span>info, <span class="string">&quot;from&quot;</span>, AR::from(begin_heads))<span class="question-mark">?</span>;
-                js_set(<span class="kw-2">&amp;</span>info, <span class="string">&quot;to&quot;</span>, AR::from(end_heads))<span class="question-mark">?</span>;
-                c.call2(<span class="kw-2">&amp;</span>JsValue::undefined(), <span class="kw-2">&amp;</span>patches.into(), <span class="kw-2">&amp;</span>info)<span class="question-mark">?</span>;
-            }
-        }
-
-        <span class="prelude-val">Ok</span>(object.into())
+        <span class="prelude-val">Ok</span>((object.into(), patches))
     }
 
     <span class="attr">#[wasm_bindgen(js_name = popPatches)]
