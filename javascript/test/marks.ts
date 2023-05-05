@@ -6,11 +6,11 @@ describe("Automerge", () => {
   describe("marks", () => {
     it("should allow marks that can be seen in patches", () => {
       let value = "bold"
-      let callbacks = []
-      let doc1 = Automerge.init({
+      let callbacks: Automerge.Patch[][] = []
+      let doc1 = Automerge.init<{ x: string }>({
         patchCallback: (patches, info) => callbacks.push(patches),
       })
-      doc1 = Automerge.change(doc1, d => {
+      doc1 = Automerge.change<{ x: string }>(doc1, d => {
         d.x = "the quick fox jumps over the lazy dog"
       })
       doc1 = Automerge.change(doc1, d => {

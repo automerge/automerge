@@ -340,7 +340,12 @@ describe("Automerge", () => {
         const s2 = Automerge.change(
           s1,
           {
-            patchCallback: (patches, info) => callbacks.push({ patches, info }),
+            patchCallback: (patches, info) =>
+              callbacks.push({
+                patches,
+                before: info.before,
+                after: info.after,
+              }),
           },
           doc => {
             doc.birds = ["Goldfinch"]
@@ -362,8 +367,8 @@ describe("Automerge", () => {
           path: ["birds", 0, 0],
           value: "Goldfinch",
         })
-        assert.strictEqual(callbacks[0].info.before, s1)
-        assert.strictEqual(callbacks[0].info.after, s2)
+        assert.deepStrictEqual(callbacks[0].before, s1)
+        assert.deepStrictEqual(callbacks[0].after, s2)
       })
 
       it("should call a patchCallback set up on document initialisation", () => {
@@ -373,7 +378,8 @@ describe("Automerge", () => {
           after: Automerge.Doc<any>
         }> = []
         s1 = Automerge.init({
-          patchCallback: (patches, info) => callbacks.push({ patches, info }),
+          patchCallback: (patches, info) =>
+            callbacks.push({ patches, before: info.before, after: info.after }),
         })
         const s2 = Automerge.change(s1, doc => (doc.bird = "Goldfinch"))
         assert.strictEqual(callbacks.length, 1)
@@ -387,8 +393,8 @@ describe("Automerge", () => {
           path: ["bird", 0],
           value: "Goldfinch",
         })
-        assert.strictEqual(callbacks[0].info.before, s1)
-        assert.strictEqual(callbacks[0].info.after, s2)
+        assert.deepStrictEqual(callbacks[0].before, s1)
+        assert.deepStrictEqual(callbacks[0].after, s2)
       })
     })
 
@@ -1783,14 +1789,18 @@ describe("Automerge", () => {
         Automerge.init<any>(),
         doc => (doc.birds = ["Goldfinch"])
       )
-      const callbacks: Array<any> = []
+      const callbacks: Array<{
+        patch: Automerge.Patch[]
+        before: Automerge.Doc<any>
+        after: Automerge.Doc<any>
+      }> = []
       const before = Automerge.init()
       const [after] = Automerge.applyChanges(
         before,
         Automerge.getAllChanges(s1),
         {
           patchCallback(patch, info) {
-            callbacks.push({ patch, info })
+            callbacks.push({ patch, before: info.before, after: info.after })
           },
         }
       )
@@ -1810,8 +1820,8 @@ describe("Automerge", () => {
         path: ["birds", 0, 0],
         value: "Goldfinch",
       })
-      assert.strictEqual(callbacks[0].info.before, before)
-      assert.strictEqual(callbacks[0].info.after, after)
+      assert.deepStrictEqual(callbacks[0].before, before)
+      assert.deepStrictEqual(callbacks[0].after, after)
     })
 
     it("should merge multiple applied changes into one patch", () => {

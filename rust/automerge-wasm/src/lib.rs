@@ -577,18 +577,41 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = applyPatches)]
-    pub fn apply_patches(
+    pub fn apply_patches(&mut self, object: JsValue, meta: JsValue) -> Result<JsValue, JsValue> {
+        let (value, _patches) = self.apply_patches_impl(object, meta)?;
+        Ok(value)
+    }
+
+    #[wasm_bindgen(js_name = applyAndReturnPatches)]
+    pub fn apply_and_return_patches(
         &mut self,
         object: JsValue,
         meta: JsValue,
-        callback: JsValue,
     ) -> Result<JsValue, JsValue> {
+        let (value, patches) = self.apply_patches_impl(object, meta)?;
+
+        let patches: Array = patches
+            .into_iter()
+            .map(interop::JsPatch)
+            .map(JsValue::try_from)
+            .collect::<Result<_, _>>()?;
+
+        let result = Object::new();
+        js_set(&result, "value", value)?;
+        js_set(&result, "patches", patches)?;
+        Ok(result.into())
+    }
+
+    fn apply_patches_impl(
+        &mut self,
+        object: JsValue,
+        meta: JsValue,
+    ) -> Result<(JsValue, Vec<automerge::Patch<u16>>), JsValue> {
         let mut object = object
             .dyn_into::<Object>()
             .map_err(|_| error::ApplyPatch::NotObjectd)?;
         let end_heads = self.doc.get_heads();
-        let (patches, begin_heads) = self.doc.observer().take_patches(end_heads.clone());
-        let callback = callback.dyn_into::<Function>().ok();
+        let (patches, _begin_heads) = self.doc.observer().take_patches(end_heads);
 
         // even if there are no patches we may need to update the meta object
         // which requires that we update the object too
@@ -600,31 +623,13 @@ impl Automerge {
 
         let mut exposed = HashSet::default();
 
-        let before = object.clone();
-
         for p in &patches {
             object = self.apply_patch(object, p, 0, &meta, &mut exposed)?;
         }
 
         self.finalize_exposed(&object, exposed, &meta)?;
 
-        if let Some(c) = &callback {
-            if !patches.is_empty() {
-                let patches: Array = patches
-                    .into_iter()
-                    .map(interop::JsPatch)
-                    .map(JsValue::try_from)
-                    .collect::<Result<_, _>>()?;
-                let info = Object::new();
-                js_set(&info, "before", &before)?;
-                js_set(&info, "after", &object)?;
-                js_set(&info, "from", AR::from(begin_heads))?;
-                js_set(&info, "to", AR::from(end_heads))?;
-                c.call2(&JsValue::undefined(), &patches.into(), &info)?;
-            }
-        }
-
-        Ok(object.into())
+        Ok((object.into(), patches))
     }
 
     #[wasm_bindgen(js_name = popPatches)]
