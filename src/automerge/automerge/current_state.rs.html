@@ -851,7 +851,7 @@
 ) {
     <span class="kw">let </span>exid = doc.id_to_exid(obj.<span class="number">0</span>);
     <span class="kw">let </span>ops_by_key = ops.group_by(|o| o.elemid_or_key());
-    <span class="kw">let </span>encoding = ListEncoding::Text(doc.text_encoding());
+    <span class="kw">let </span>encoding = ListEncoding::Text;
     <span class="kw">let </span>state = TextState::default();
     <span class="kw">let </span>state = ops_by_key
         .into_iter()

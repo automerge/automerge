@@ -589,17 +589,6 @@
 <a href="#588" id="588">588</a>
 <a href="#589" id="589">589</a>
 <a href="#590" id="590">590</a>
-<a href="#591" id="591">591</a>
-<a href="#592" id="592">592</a>
-<a href="#593" id="593">593</a>
-<a href="#594" id="594">594</a>
-<a href="#595" id="595">595</a>
-<a href="#596" id="596">596</a>
-<a href="#597" id="597">597</a>
-<a href="#598" id="598">598</a>
-<a href="#599" id="599">599</a>
-<a href="#600" id="600">600</a>
-<a href="#601" id="601">601</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::clock::Clock;
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 <span class="kw">use </span><span class="kw">crate</span>::indexed_cache::IndexedCache;
@@ -612,7 +601,7 @@
 <span class="kw">use </span><span class="kw">crate</span>::query::TreeQuery;
 <span class="kw">use </span><span class="kw">crate</span>::types::{
     <span class="self">self</span>, ActorId, Export, Exportable, Key, ListEncoding, ObjId, ObjMeta, Op, OpId, OpIds, OpType,
-    Prop, TextEncoding,
+    Prop,
 };
 <span class="kw">use </span><span class="kw">crate</span>::ObjType;
 <span class="kw">use </span>fxhash::FxBuildHasher;
@@ -632,21 +621,11 @@
     </span>trees: HashMap&lt;ObjId, OpTree, FxBuildHasher&gt;,
     <span class="doccomment">/// The number of operations in the opset.
     </span>length: usize,
-    <span class="doccomment">/// UTF8 or UTF16 text encoding
-    </span>text_encoding: TextEncoding,
     <span class="doccomment">/// Metadata about the operations in this opset.
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) m: OpSetMetadata,
 }
 
 <span class="kw">impl </span>OpSetInternal {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>text_encoding(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>TextEncoding {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.text_encoding
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>set_text_encoding(<span class="kw-2">&amp;mut </span><span class="self">self</span>, encoding: TextEncoding) {
-        <span class="self">self</span>.text_encoding = encoding;
-    }
-
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>builder() -&gt; OpSetBuilder {
         OpSetBuilder::new()
     }
@@ -661,7 +640,6 @@
                 actors: IndexedCache::new(),
                 props: IndexedCache::new(),
             },
-            text_encoding: Default::default(),
         }
     }
 
@@ -871,7 +849,7 @@
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>type_and_encoding(<span class="kw-2">&amp;</span><span class="self">self</span>, id: <span class="kw-2">&amp;</span>ObjId) -&gt; <span class="prelude-ty">Option</span>&lt;(ObjType, ListEncoding)&gt; {
         <span class="kw">let </span>objtype = <span class="self">self</span>.trees.get(id).map(|tree| tree.objtype)<span class="question-mark">?</span>;
-        <span class="kw">let </span>encoding = ListEncoding::new(objtype, <span class="self">self</span>.text_encoding);
+        <span class="kw">let </span>encoding = objtype.into();
         <span class="prelude-val">Some</span>((objtype, encoding))
     }
 

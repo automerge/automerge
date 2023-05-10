@@ -1448,20 +1448,6 @@
 <a href="#1447" id="1447">1447</a>
 <a href="#1448" id="1448">1448</a>
 <a href="#1449" id="1449">1449</a>
-<a href="#1450" id="1450">1450</a>
-<a href="#1451" id="1451">1451</a>
-<a href="#1452" id="1452">1452</a>
-<a href="#1453" id="1453">1453</a>
-<a href="#1454" id="1454">1454</a>
-<a href="#1455" id="1455">1455</a>
-<a href="#1456" id="1456">1456</a>
-<a href="#1457" id="1457">1457</a>
-<a href="#1458" id="1458">1458</a>
-<a href="#1459" id="1459">1459</a>
-<a href="#1460" id="1460">1460</a>
-<a href="#1461" id="1461">1461</a>
-<a href="#1462" id="1462">1462</a>
-<a href="#1463" id="1463">1463</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::collections::{BTreeSet, HashMap, HashSet};
 <span class="kw">use </span>std::fmt::Debug;
 <span class="kw">use </span>std::num::NonZeroU64;
@@ -1483,7 +1469,7 @@
 };
 <span class="kw">use </span><span class="kw">crate</span>::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, MarkData, ObjId, ObjMeta, Op,
-    OpId, OpType, TextEncoding, Value,
+    OpId, OpType, Value,
 };
 <span class="kw">use crate</span>::{AutomergeError, Change, Cursor, ObjType, Prop, ReadDoc};
 
@@ -1621,18 +1607,6 @@
             }
         }
     }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>text_encoding(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; TextEncoding {
-        <span class="kw-2">*</span><span class="self">self</span>.ops.text_encoding()
-    }
-
-    <span class="doccomment">/// Change the text encoding of this view of the document
-    ///
-    /// This is a cheap operation, it just changes the way indexes are calculated
-    </span><span class="kw">pub fn </span>with_encoding(<span class="kw-2">mut </span><span class="self">self</span>, encoding: TextEncoding) -&gt; <span class="self">Self </span>{
-        <span class="self">self</span>.ops.set_text_encoding(encoding);
-        <span class="self">self
-    </span>}
 
     <span class="doccomment">/// Set the actor id for this document.
     </span><span class="kw">pub fn </span>with_actor(<span class="kw-2">mut </span><span class="self">self</span>, actor: ActorId) -&gt; <span class="self">Self </span>{
@@ -2042,9 +2016,7 @@
         <span class="kw">if </span><span class="self">self</span>.is_empty() {
             <span class="kw">let </span><span class="kw-2">mut </span>doc =
                 <span class="self">Self</span>::load_with::&lt;()&gt;(data, OnPartialLoad::Ignore, VerificationMode::Check, <span class="prelude-val">None</span>)<span class="question-mark">?</span>;
-            doc = doc
-                .with_encoding(<span class="kw-2">*</span><span class="self">self</span>.ops.text_encoding())
-                .with_actor(<span class="self">self</span>.actor_id());
+            doc = doc.with_actor(<span class="self">self</span>.actor_id());
             <span class="kw">if let </span><span class="prelude-val">Some</span>(obs) = op_observer {
                 current_state::observe_current_state(<span class="kw-2">&amp;</span>doc, obs);
             }

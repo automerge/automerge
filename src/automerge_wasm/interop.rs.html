@@ -1683,11 +1683,6 @@
 <a href="#1682" id="1682">1682</a>
 <a href="#1683" id="1683">1683</a>
 <a href="#1684" id="1684">1684</a>
-<a href="#1685" id="1685">1685</a>
-<a href="#1686" id="1686">1686</a>
-<a href="#1687" id="1687">1687</a>
-<a href="#1688" id="1688">1688</a>
-<a href="#1689" id="1689">1689</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error::InsertObject;
 <span class="kw">use </span><span class="kw">crate</span>::value::Datatype;
 <span class="kw">use crate</span>::{Automerge, TextRepresentation};
@@ -2489,7 +2484,7 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>apply_patch_to_array(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         array: <span class="kw-2">&amp;</span>Object,
-        patch: <span class="kw-2">&amp;</span>Patch&lt;u16&gt;,
+        patch: <span class="kw-2">&amp;</span>Patch,
         meta: <span class="kw-2">&amp;</span>JsValue,
         exposed: <span class="kw-2">&amp;mut </span>HashSet&lt;ObjId&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, error::ApplyPatch&gt; {
@@ -2544,8 +2539,7 @@
                 <span class="kw">match </span><span class="self">self</span>.text_rep {
                     TextRepresentation::String =&gt; <span class="prelude-val">Err</span>(error::ApplyPatch::SpliceTextInSeq),
                     TextRepresentation::Array =&gt; {
-                        <span class="kw">let </span>bytes: Vec&lt;u16&gt; = value.iter().cloned().collect();
-                        <span class="kw">let </span>val = String::from_utf16_lossy(bytes.as_slice());
+                        <span class="kw">let </span>val = String::from(value);
                         <span class="kw">let </span>elems = val
                             .chars()
                             .map(|c| {
@@ -2569,7 +2563,7 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>apply_patch_to_map(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         map: <span class="kw-2">&amp;</span>Object,
-        patch: <span class="kw-2">&amp;</span>Patch&lt;u16&gt;,
+        patch: <span class="kw-2">&amp;</span>Patch,
         meta: <span class="kw-2">&amp;</span>JsValue,
         exposed: <span class="kw-2">&amp;mut </span>HashSet&lt;ObjId&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, error::ApplyPatch&gt; {
@@ -2629,7 +2623,7 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>apply_patch(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         obj: Object,
-        patch: <span class="kw-2">&amp;</span>Patch&lt;u16&gt;,
+        patch: <span class="kw-2">&amp;</span>Patch,
         depth: usize,
         meta: <span class="kw-2">&amp;</span>JsValue,
         exposed: <span class="kw-2">&amp;mut </span>HashSet&lt;ObjId&gt;,
@@ -2677,7 +2671,7 @@
     <span class="kw">fn </span>apply_patch_to_text(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         string: <span class="kw-2">&amp;</span>JsString,
-        patch: <span class="kw-2">&amp;</span>Patch&lt;u16&gt;,
+        patch: <span class="kw-2">&amp;</span>Patch,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, error::ApplyPatch&gt; {
         <span class="kw">match </span><span class="kw-2">&amp;</span>patch.action {
             PatchAction::DeleteSeq { index, length, .. } =&gt; {
@@ -2692,10 +2686,7 @@
                 <span class="kw">let </span>length = string.length();
                 <span class="kw">let </span>before = string.slice(<span class="number">0</span>, index);
                 <span class="kw">let </span>after = string.slice(index, length);
-                <span class="kw">let </span>bytes: Vec&lt;u16&gt; = value.iter().cloned().collect();
-                <span class="kw">let </span>result = before
-                    .concat(<span class="kw-2">&amp;</span>String::from_utf16_lossy(bytes.as_slice()).into())
-                    .concat(<span class="kw-2">&amp;</span>after);
+                <span class="kw">let </span>result = before.concat(<span class="kw-2">&amp;</span>String::from(value).into()).concat(<span class="kw-2">&amp;</span>after);
                 <span class="prelude-val">Ok</span>(result.into())
             }
             <span class="kw">_ </span>=&gt; <span class="prelude-val">Ok</span>(string.into()),
@@ -2951,8 +2942,8 @@
     <span class="prelude-val">Ok</span>(())
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>JsPatch(<span class="kw">pub</span>(<span class="kw">crate</span>) Patch&lt;u16&gt;);
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>JsPatches(<span class="kw">pub</span>(<span class="kw">crate</span>) Vec&lt;Patch&lt;u16&gt;&gt;);
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>JsPatch(<span class="kw">pub</span>(<span class="kw">crate</span>) Patch);
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>JsPatches(<span class="kw">pub</span>(<span class="kw">crate</span>) Vec&lt;Patch&gt;);
 
 <span class="kw">fn </span>export_path(path: <span class="kw-2">&amp;</span>[(ObjId, Prop)], end: <span class="kw-2">&amp;</span>Prop) -&gt; Array {
     <span class="kw">let </span>result = Array::new();
@@ -3030,8 +3021,7 @@
                     <span class="string">&quot;path&quot;</span>,
                     export_path(path.as_slice(), <span class="kw-2">&amp;</span>Prop::Seq(index)),
                 )<span class="question-mark">?</span>;
-                <span class="kw">let </span>bytes: Vec&lt;u16&gt; = value.iter().cloned().collect();
-                js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;value&quot;</span>, String::from_utf16_lossy(bytes.as_slice()))<span class="question-mark">?</span>;
+                js_set(<span class="kw-2">&amp;</span>result, <span class="string">&quot;value&quot;</span>, String::from(<span class="kw-2">&amp;</span>value))<span class="question-mark">?</span>;
                 <span class="prelude-val">Ok</span>(result.into())
             }
             PatchAction::Increment { prop, value, .. } =&gt; {

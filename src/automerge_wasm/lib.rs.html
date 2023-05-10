@@ -1298,8 +1298,6 @@
 <a href="#1297" id="1297">1297</a>
 <a href="#1298" id="1298">1298</a>
 <a href="#1299" id="1299">1299</a>
-<a href="#1300" id="1300">1300</a>
-<a href="#1301" id="1301">1301</a>
 </pre><pre class="rust"><code><span class="attr">#![doc(
     html_logo_url = <span class="string">&quot;https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg&quot;</span>,
     html_favicon_url = <span class="string">&quot;https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico&quot;
@@ -1332,8 +1330,8 @@
 <span class="kw">use </span>am::transaction::{Observed, Transactable, UnObserved};
 <span class="kw">use </span>am::ScalarValue;
 <span class="kw">use </span>automerge <span class="kw">as </span>am;
-<span class="kw">use </span>automerge::{sync::SyncDoc, Change, Prop, ReadDoc, TextEncoding, Value, ROOT};
-<span class="kw">use </span>automerge::{ToggleObserver, VecOpObserver16};
+<span class="kw">use </span>automerge::ToggleObserver;
+<span class="kw">use </span>automerge::{sync::SyncDoc, Change, Prop, ReadDoc, Value, VecOpObserver, ROOT};
 <span class="kw">use </span>js_sys::{Array, Function, Object, Uint8Array};
 <span class="kw">use </span>serde::ser::Serialize;
 <span class="kw">use </span>std::borrow::Cow;
@@ -1360,7 +1358,7 @@
     };
 }
 
-<span class="kw">type </span>AutoCommit = am::AutoCommitWithObs&lt;Observed&lt;ToggleObserver&lt;VecOpObserver16&gt;&gt;&gt;;
+<span class="kw">type </span>AutoCommit = am::AutoCommitWithObs&lt;Observed&lt;ToggleObserver&lt;VecOpObserver&gt;&gt;&gt;;
 
 <span class="attr">#[cfg(feature = <span class="string">&quot;wee_alloc&quot;</span>)]
 #[global_allocator]
@@ -1407,8 +1405,7 @@
         text_rep: TextRepresentation,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Automerge, error::BadActorId&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>doc = AutoCommit::default()
-            .with_observer(ToggleObserver::default().with_text_rep(text_rep.into()))
-            .with_encoding(TextEncoding::Utf16);
+            .with_observer(ToggleObserver::default().with_text_rep(text_rep.into()));
         doc.observer().set_text_rep(text_rep.into());
         <span class="kw">if let </span><span class="prelude-val">Some</span>(a) = actor {
             <span class="kw">let </span>a = automerge::ActorId::from(hex::decode(a)<span class="question-mark">?</span>.to_vec());
@@ -1908,7 +1905,7 @@
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         object: JsValue,
         meta: JsValue,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;(JsValue, Vec&lt;automerge::Patch&lt;u16&gt;&gt;), JsValue&gt; {
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;(JsValue, Vec&lt;automerge::Patch&gt;), JsValue&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>object = object
             .dyn_into::&lt;Object&gt;()
             .map_err(|<span class="kw">_</span>| error::ApplyPatch::NotObjectd)<span class="question-mark">?</span>;
@@ -2218,8 +2215,7 @@
         TextRepresentation::Array
     };
     <span class="kw">let </span><span class="kw-2">mut </span>doc = am::AutoCommitWithObs::&lt;UnObserved&gt;::load(<span class="kw-2">&amp;</span>data)<span class="question-mark">?
-        </span>.with_observer(ToggleObserver::default().with_text_rep(text_rep.into()))
-        .with_encoding(TextEncoding::Utf16);
+        </span>.with_observer(ToggleObserver::default().with_text_rep(text_rep.into()));
     <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = actor {
         <span class="kw">let </span>actor =
             automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)<span class="question-mark">?</span>.to_vec());

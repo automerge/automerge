@@ -1682,7 +1682,7 @@
 ) {
     <span class="kw">let </span><span class="kw-2">mut </span>marks = MarkDiff::default();
     <span class="kw">let </span>exid = doc.as_ref().id_to_exid(obj.<span class="number">0</span>);
-    <span class="kw">let </span>encoding = ListEncoding::Text(doc.doc.text_encoding());
+    <span class="kw">let </span>encoding = ListEncoding::Text;
     patches.fold(<span class="number">0</span>, |index, patch| <span class="kw">match </span><span class="kw-2">&amp;</span>patch {
         Patch::Mark(op, mark_type) =&gt; {
             marks.process(index, <span class="kw-2">*</span>mark_type, op.op, doc.as_ref());
@@ -2165,8 +2165,8 @@
         <span class="macro">format!</span>(<span class="string">&quot;/{}&quot;</span>, props.chain(<span class="prelude-val">Some</span>(val.into())).join(<span class="string">&quot;/&quot;</span>))
     }
 
-    <span class="kw">impl </span>From&lt;<span class="kw-2">&amp;</span>Patch&lt;char&gt;&gt; <span class="kw">for </span>ObservedPatch {
-        <span class="kw">fn </span>from(patch: <span class="kw-2">&amp;</span>Patch&lt;char&gt;) -&gt; <span class="self">Self </span>{
+    <span class="kw">impl </span>From&lt;<span class="kw-2">&amp;</span>Patch&gt; <span class="kw">for </span>ObservedPatch {
+        <span class="kw">fn </span>from(patch: <span class="kw-2">&amp;</span>Patch) -&gt; <span class="self">Self </span>{
             <span class="kw">let </span>path = patch.path.iter().map(|(<span class="kw">_</span>, prop)| prop).cloned();
             <span class="kw">match </span>patch.action.clone() {
                 PatchAction::PutMap {
@@ -2217,7 +2217,7 @@
                     path: ex_path_and(path, index),
                 },
                 PatchAction::SpliceText { index, value } =&gt; ObservedPatch {
-                    action: ObservedAction::SpliceText(value.into_iter().collect::&lt;String&gt;()),
+                    action: ObservedAction::SpliceText(value.make_string()),
                     path: ex_path_and(path, index),
                 },
                 PatchAction::Mark { marks } =&gt; ObservedPatch {
@@ -2241,7 +2241,7 @@
         }
     }
 
-    <span class="kw">fn </span>exp(patches: Vec&lt;Patch&lt;char&gt;&gt;) -&gt; Vec&lt;ObservedPatch&gt; {
+    <span class="kw">fn </span>exp(patches: Vec&lt;Patch&gt;) -&gt; Vec&lt;ObservedPatch&gt; {
         patches.iter().map(|p| p.into()).collect()
     }
 

@@ -990,19 +990,9 @@
 <a href="#989" id="989">989</a>
 <a href="#990" id="990">990</a>
 <a href="#991" id="991">991</a>
-<a href="#992" id="992">992</a>
-<a href="#993" id="993">993</a>
-<a href="#994" id="994">994</a>
-<a href="#995" id="995">995</a>
-<a href="#996" id="996">996</a>
-<a href="#997" id="997">997</a>
-<a href="#998" id="998">998</a>
-<a href="#999" id="999">999</a>
-<a href="#1000" id="1000">1000</a>
-<a href="#1001" id="1001">1001</a>
-<a href="#1002" id="1002">1002</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error;
 <span class="kw">use </span><span class="kw">crate</span>::legacy <span class="kw">as </span>amp;
+<span class="kw">use </span><span class="kw">crate</span>::text_value::TextValue;
 <span class="kw">use </span>serde::{Deserialize, Serialize};
 <span class="kw">use </span>std::borrow::Cow;
 <span class="kw">use </span>std::cmp::Eq;
@@ -1012,9 +1002,8 @@
 <span class="kw">use </span>std::fmt::Display;
 <span class="kw">use </span>std::str::FromStr;
 <span class="kw">use </span>tinyvec::{ArrayVec, TinyVec};
-<span class="comment">//use crate::indexed_cache::IndexedCache;
 
-</span><span class="kw">mod </span>opids;
+<span class="kw">mod </span>opids;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>opids::OpIds;
 
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="kw">crate</span>::clock::Clock;
@@ -1543,24 +1532,10 @@
     }
 }
 
-<span class="doccomment">/// How indexes into text sequeces are calculated
-///
-/// Automerge text objects are internally sequences of utf8 characters. This
-/// means that in environments (such as javascript) which use a different
-/// encoding the indexes into the text sequence will be different. This enum
-/// represents the different ways indexes can be calculated.
-</span><span class="attr">#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-</span><span class="kw">pub enum </span>TextEncoding {
-    <span class="doccomment">/// The indexes are calculated using the utf8 encoding
-    </span>Utf8,
-    <span class="doccomment">/// The indexes are calculated using the utf16 encoding
-    </span>Utf16,
-}
-
 <span class="attr">#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">enum </span>ListEncoding {
     List,
-    Text(TextEncoding),
+    Text,
 }
 
 <span class="kw">impl </span>Default <span class="kw">for </span>ListEncoding {
@@ -1569,16 +1544,20 @@
     }
 }
 
-<span class="kw">impl </span>Default <span class="kw">for </span>TextEncoding {
-    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
-        TextEncoding::Utf8
+<span class="kw">impl </span>From&lt;<span class="prelude-ty">Option</span>&lt;ObjType&gt;&gt; <span class="kw">for </span>ListEncoding {
+    <span class="kw">fn </span>from(obj: <span class="prelude-ty">Option</span>&lt;ObjType&gt;) -&gt; <span class="self">Self </span>{
+        <span class="kw">if </span>obj == <span class="prelude-val">Some</span>(ObjType::Text) {
+            ListEncoding::Text
+        } <span class="kw">else </span>{
+            ListEncoding::List
+        }
     }
 }
 
-<span class="kw">impl </span>ListEncoding {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(obj: ObjType, text_encoding: TextEncoding) -&gt; <span class="self">Self </span>{
+<span class="kw">impl </span>From&lt;ObjType&gt; <span class="kw">for </span>ListEncoding {
+    <span class="kw">fn </span>from(obj: ObjType) -&gt; <span class="self">Self </span>{
         <span class="kw">if </span>obj == ObjType::Text {
-            ListEncoding::Text(text_encoding)
+            ListEncoding::Text
         } <span class="kw">else </span>{
             ListEncoding::List
         }
@@ -1677,8 +1656,7 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>width(<span class="kw-2">&amp;</span><span class="self">self</span>, encoding: ListEncoding) -&gt; usize {
         <span class="kw">match </span>encoding {
             ListEncoding::List =&gt; <span class="number">1</span>,
-            ListEncoding::Text(TextEncoding::Utf8) =&gt; <span class="self">self</span>.to_str().chars().count(),
-            ListEncoding::Text(TextEncoding::Utf16) =&gt; <span class="self">self</span>.to_str().encode_utf16().count(),
+            ListEncoding::Text =&gt; TextValue::width(<span class="self">self</span>.to_str()),
         }
     }
 

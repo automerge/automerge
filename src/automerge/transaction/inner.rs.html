@@ -804,7 +804,7 @@
 <span class="kw">use </span><span class="kw">crate</span>::marks::{ExpandMark, Mark};
 <span class="kw">use </span><span class="kw">crate</span>::query::{<span class="self">self</span>, OpIdSearch};
 <span class="kw">use </span><span class="kw">crate</span>::storage::Change <span class="kw">as </span>StoredChange;
-<span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, ObjId, OpId, OpIds, TextEncoding};
+<span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, ObjId, OpId, OpIds};
 <span class="kw">use crate</span>::{op_tree::OpSetMetadata, types::Op, Automerge, Change, ChangeHash, OpObserver, Prop};
 <span class="kw">use crate</span>::{AutomergeError, ObjType, OpType, ScalarValue};
 
@@ -1306,7 +1306,7 @@
                     index,
                     del: <span class="number">1</span>,
                     values: <span class="macro">vec!</span>[],
-                    splice_type: SpliceType::Text(<span class="string">&quot;&quot;</span>, doc.text_encoding()),
+                    splice_type: SpliceType::Text(<span class="string">&quot;&quot;</span>),
                 },
             )<span class="question-mark">?</span>;
         } <span class="kw">else </span>{
@@ -1367,7 +1367,7 @@
                 index,
                 del,
                 values,
-                splice_type: SpliceType::Text(text, doc.text_encoding()),
+                splice_type: SpliceType::Text(text),
             },
         )
     }
@@ -1454,7 +1454,7 @@
             <span class="comment">// handle the observer
             </span><span class="kw">if let </span><span class="prelude-val">Some</span>(obs) = op_observer.as_mut() {
                 <span class="kw">match </span>splice_type {
-                    SpliceType::Text(text, <span class="kw">_</span>) <span class="kw">if </span>!obs.text_as_seq() =&gt; {
+                    SpliceType::Text(text) <span class="kw">if </span>!obs.text_as_seq() =&gt; {
                         obs.splice_text(doc, ex_obj, index, text)
                     }
                     SpliceType::List | SpliceType::Text(..) =&gt; {
@@ -1561,14 +1561,14 @@
 
 <span class="kw">enum </span>SpliceType&lt;<span class="lifetime">&#39;a</span>&gt; {
     List,
-    Text(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>str, TextEncoding),
+    Text(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>str),
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; SpliceType&lt;<span class="lifetime">&#39;a</span>&gt; {
     <span class="kw">fn </span>encoding(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; ListEncoding {
         <span class="kw">match </span><span class="self">self </span>{
             SpliceType::List =&gt; ListEncoding::List,
-            SpliceType::Text(<span class="kw">_</span>, encoding) =&gt; ListEncoding::Text(<span class="kw-2">*</span>encoding),
+            SpliceType::Text(<span class="kw">_</span>) =&gt; ListEncoding::Text,
         }
     }
 }

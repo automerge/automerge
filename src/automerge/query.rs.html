@@ -240,17 +240,8 @@
 <a href="#239" id="239">239</a>
 <a href="#240" id="240">240</a>
 <a href="#241" id="241">241</a>
-<a href="#242" id="242">242</a>
-<a href="#243" id="243">243</a>
-<a href="#244" id="244">244</a>
-<a href="#245" id="245">245</a>
-<a href="#246" id="246">246</a>
-<a href="#247" id="247">247</a>
-<a href="#248" id="248">248</a>
-<a href="#249" id="249">249</a>
-<a href="#250" id="250">250</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::{OpSetMetadata, OpTree, OpTreeNode};
-<span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, Op, OpId, TextEncoding};
+<span class="kw">use </span><span class="kw">crate</span>::types::{Key, ListEncoding, Op, OpId};
 <span class="kw">use </span>fxhash::FxBuildHasher;
 <span class="kw">use </span>std::collections::{HashMap, HashSet};
 <span class="kw">use </span>std::fmt::Debug;
@@ -325,14 +316,12 @@
 
 <span class="attr">#[derive(Clone, Debug, PartialEq)]
 </span><span class="kw">struct </span>TextWidth {
-    utf8: usize,
-    utf16: usize,
+    width: usize,
 }
 
 <span class="kw">impl </span>TextWidth {
     <span class="kw">fn </span>add_op(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: <span class="kw-2">&amp;</span>Op) {
-        <span class="self">self</span>.utf8 += op.width(ListEncoding::Text(TextEncoding::Utf8));
-        <span class="self">self</span>.utf16 += op.width(ListEncoding::Text(TextEncoding::Utf16));
+        <span class="self">self</span>.width += op.width(ListEncoding::Text);
     }
 
     <span class="kw">fn </span>remove_op(<span class="kw-2">&amp;mut </span><span class="self">self</span>, op: <span class="kw-2">&amp;</span>Op) {
@@ -363,17 +352,11 @@
         //
         // Really this is a sign that we should be tracking the type of the Index (List or Text) at
         // the type level, but for now we just look the other way.
-        </span><span class="self">self</span>.utf8 = <span class="self">self
-            </span>.utf8
-            .saturating_sub(op.width(ListEncoding::Text(TextEncoding::Utf8)));
-        <span class="self">self</span>.utf16 = <span class="self">self
-            </span>.utf16
-            .saturating_sub(op.width(ListEncoding::Text(TextEncoding::Utf16)));
+        </span><span class="self">self</span>.width = <span class="self">self</span>.width.saturating_sub(op.width(ListEncoding::Text));
     }
 
     <span class="kw">fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;</span>TextWidth) {
-        <span class="self">self</span>.utf8 += other.utf8;
-        <span class="self">self</span>.utf16 += other.utf16;
+        <span class="self">self</span>.width += other.width;
     }
 }
 
@@ -395,7 +378,7 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new() -&gt; <span class="self">Self </span>{
         Index {
             visible: Default::default(),
-            visible_text: TextWidth { utf8: <span class="number">0</span>, utf16: <span class="number">0 </span>},
+            visible_text: TextWidth { width: <span class="number">0 </span>},
             ops: Default::default(),
             never_seen_puts: <span class="bool-val">true</span>,
         }
@@ -405,8 +388,7 @@
     </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>visible_len(<span class="kw-2">&amp;</span><span class="self">self</span>, encoding: ListEncoding) -&gt; usize {
         <span class="kw">match </span>encoding {
             ListEncoding::List =&gt; <span class="self">self</span>.visible.len(),
-            ListEncoding::Text(TextEncoding::Utf8) =&gt; <span class="self">self</span>.visible_text.utf8,
-            ListEncoding::Text(TextEncoding::Utf16) =&gt; <span class="self">self</span>.visible_text.utf16,
+            ListEncoding::Text =&gt; <span class="self">self</span>.visible_text.width,
         }
     }
 

@@ -51,22 +51,24 @@
 <a href="#50" id="50">50</a>
 <a href="#51" id="51">51</a>
 <a href="#52" id="52">52</a>
+<a href="#53" id="53">53</a>
 </pre><pre class="rust"><code><span class="attr">#![allow(dead_code)]
 
 </span><span class="kw">use crate</span>::{marks::Mark, ObjId, Prop, Value};
 <span class="kw">use </span>core::fmt::Debug;
 
 <span class="kw">use </span><span class="kw">crate</span>::sequence_tree::SequenceTree;
+<span class="kw">use </span><span class="kw">crate</span>::text_value::TextValue;
 
 <span class="attr">#[derive(Debug, Clone, PartialEq)]
-</span><span class="kw">pub struct </span>Patch&lt;T: PartialEq + Clone + Debug&gt; {
+</span><span class="kw">pub struct </span>Patch {
     <span class="kw">pub </span>obj: ObjId,
     <span class="kw">pub </span>path: Vec&lt;(ObjId, Prop)&gt;,
-    <span class="kw">pub </span>action: PatchAction&lt;T&gt;,
+    <span class="kw">pub </span>action: PatchAction,
 }
 
 <span class="attr">#[derive(Debug, Clone, PartialEq)]
-</span><span class="kw">pub enum </span>PatchAction&lt;T: PartialEq + Clone + Debug&gt; {
+</span><span class="kw">pub enum </span>PatchAction {
     PutMap {
         key: String,
         value: (Value&lt;<span class="lifetime">&#39;static</span>&gt;, ObjId),
@@ -86,7 +88,7 @@
     },
     SpliceText {
         index: usize,
-        value: SequenceTree&lt;T&gt;,
+        value: TextValue,
     },
     Increment {
         prop: Prop,

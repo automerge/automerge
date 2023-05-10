@@ -758,14 +758,6 @@
 <a href="#757" id="757">757</a>
 <a href="#758" id="758">758</a>
 <a href="#759" id="759">759</a>
-<a href="#760" id="760">760</a>
-<a href="#761" id="761">761</a>
-<a href="#762" id="762">762</a>
-<a href="#763" id="763">763</a>
-<a href="#764" id="764">764</a>
-<a href="#765" id="765">765</a>
-<a href="#766" id="766">766</a>
-<a href="#767" id="767">767</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
@@ -777,7 +769,7 @@
 <span class="kw">use crate</span>::{sync, ObjType, Parents, ReadDoc, ScalarValue};
 <span class="kw">use crate</span>::{
     transaction::{Observation, Observed, TransactionInner, UnObserved},
-    ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor, Prop, TextEncoding, Value,
+    ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor, Prop, Value,
 };
 
 <span class="doccomment">/// An automerge document that automatically manages transactions.
@@ -934,14 +926,6 @@
     <span class="kw">pub fn </span>get_actor(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>ActorId {
         <span class="self">self</span>.doc.get_actor()
     }
-
-    <span class="doccomment">/// Change the text encoding of this view of the document
-    ///
-    /// This is a cheap operation, it just changes the way indexes are calculated
-    </span><span class="kw">pub fn </span>with_encoding(<span class="kw-2">mut </span><span class="self">self</span>, encoding: TextEncoding) -&gt; <span class="self">Self </span>{
-        <span class="self">self</span>.doc = <span class="self">self</span>.doc.with_encoding(encoding);
-        <span class="self">self
-    </span>}
 
     <span class="kw">fn </span>ensure_transaction_open(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
         <span class="kw">if </span><span class="self">self</span>.transaction.is_none() {

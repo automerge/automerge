@@ -287,11 +287,6 @@
 <a href="#286" id="286">286</a>
 <a href="#287" id="287">287</a>
 <a href="#288" id="288">288</a>
-<a href="#289" id="289">289</a>
-<a href="#290" id="290">290</a>
-<a href="#291" id="291">291</a>
-<a href="#292" id="292">292</a>
-<a href="#293" id="293">293</a>
 </pre><pre class="rust"><code><span class="doccomment">//! # Automerge
 //!
 //! Automerge is a library of data structures for building collaborative,
@@ -377,11 +372,7 @@
 //!
 //! ### Text Encoding
 //!
-//! Both [`Automerge`] and [`AutoCommit`] provide a `with_encoding` method which
-//! allows you to specify the [`crate::TextEncoding`] which is used for
-//! interpreting the indexes passed to methods like [`ReadDoc::list_range`] or
-//! [`transaction::Transactable::splice`]. The default encoding is UTF-8, but
-//! you can switch to UTF-16.
+//! Text is encoded in utf8 by default but uses Utf16 when using the wasm target.
 //!
 //! ## Sync Protocol
 //!
@@ -558,6 +549,7 @@
 <span class="kw">mod </span>sequence_tree;
 <span class="kw">mod </span>storage;
 <span class="kw">pub mod </span>sync;
+<span class="kw">mod </span>text_value;
 <span class="kw">pub mod </span>transaction;
 <span class="kw">mod </span>types;
 <span class="kw">mod </span>value;
@@ -574,13 +566,11 @@
 <span class="kw">pub use </span>error::InvalidChangeHashSlice;
 <span class="kw">pub use </span>exid::{ExId <span class="kw">as </span>ObjId, ObjIdFromBytesError};
 <span class="kw">pub use </span>legacy::Change <span class="kw">as </span>ExpandedChange;
-<span class="kw">pub use </span>op_observer::{
-    OpObserver, Patch, PatchAction, ToggleObserver, VecOpObserver, VecOpObserver16,
-};
+<span class="kw">pub use </span>op_observer::{OpObserver, Patch, PatchAction, ToggleObserver, VecOpObserver};
 <span class="kw">pub use </span>parents::{Parent, Parents};
 <span class="kw">pub use </span>read::ReadDoc;
 <span class="kw">pub use </span>sequence_tree::SequenceTree;
-<span class="kw">pub use </span>types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, TextEncoding};
+<span class="kw">pub use </span>types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop};
 <span class="kw">pub use </span>value::{ScalarValue, Value};
 
 <span class="doccomment">/// The object ID for the root map of a document
