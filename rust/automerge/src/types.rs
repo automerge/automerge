@@ -1,5 +1,6 @@
 use crate::error;
 use crate::legacy as amp;
+use crate::text_value::TextValue;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cmp::Eq;
@@ -9,7 +10,6 @@ use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
 use tinyvec::{ArrayVec, TinyVec};
-//use crate::indexed_cache::IndexedCache;
 
 mod opids;
 pub(crate) use opids::OpIds;
@@ -540,24 +540,10 @@ impl ObjMeta {
     }
 }
 
-/// How indexes into text sequeces are calculated
-///
-/// Automerge text objects are internally sequences of utf8 characters. This
-/// means that in environments (such as javascript) which use a different
-/// encoding the indexes into the text sequence will be different. This enum
-/// represents the different ways indexes can be calculated.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum TextEncoding {
-    /// The indexes are calculated using the utf8 encoding
-    Utf8,
-    /// The indexes are calculated using the utf16 encoding
-    Utf16,
-}
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub(crate) enum ListEncoding {
     List,
-    Text(TextEncoding),
+    Text,
 }
 
 impl Default for ListEncoding {
@@ -566,16 +552,20 @@ impl Default for ListEncoding {
     }
 }
 
-impl Default for TextEncoding {
-    fn default() -> Self {
-        TextEncoding::Utf8
+impl From<Option<ObjType>> for ListEncoding {
+    fn from(obj: Option<ObjType>) -> Self {
+        if obj == Some(ObjType::Text) {
+            ListEncoding::Text
+        } else {
+            ListEncoding::List
+        }
     }
 }
 
-impl ListEncoding {
-    pub(crate) fn new(obj: ObjType, text_encoding: TextEncoding) -> Self {
+impl From<ObjType> for ListEncoding {
+    fn from(obj: ObjType) -> Self {
         if obj == ObjType::Text {
-            ListEncoding::Text(text_encoding)
+            ListEncoding::Text
         } else {
             ListEncoding::List
         }
@@ -674,8 +664,7 @@ impl Op {
     pub(crate) fn width(&self, encoding: ListEncoding) -> usize {
         match encoding {
             ListEncoding::List => 1,
-            ListEncoding::Text(TextEncoding::Utf8) => self.to_str().chars().count(),
-            ListEncoding::Text(TextEncoding::Utf16) => self.to_str().encode_utf16().count(),
+            ListEncoding::Text => TextValue::width(self.to_str()),
         }
     }
 

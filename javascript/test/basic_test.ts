@@ -289,8 +289,10 @@ describe("Automerge", () => {
     })
 
     it("allows access to the backend", () => {
-      let doc = Automerge.init()
-      assert.deepEqual(Object.keys(Automerge.getBackend(doc)), ["ptr"])
+      let doc = Automerge.from({ hello: "world" })
+      assert.deepEqual(Automerge.getBackend(doc).materialize(), {
+        hello: "world",
+      })
     })
 
     it("lists and text have indexof", () => {

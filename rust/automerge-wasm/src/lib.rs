@@ -30,8 +30,8 @@ use am::transaction::CommitOptions;
 use am::transaction::{Observed, Transactable, UnObserved};
 use am::ScalarValue;
 use automerge as am;
-use automerge::{sync::SyncDoc, Change, Prop, ReadDoc, TextEncoding, Value, ROOT};
-use automerge::{ToggleObserver, VecOpObserver16};
+use automerge::ToggleObserver;
+use automerge::{sync::SyncDoc, Change, Prop, ReadDoc, Value, VecOpObserver, ROOT};
 use js_sys::{Array, Function, Object, Uint8Array};
 use serde::ser::Serialize;
 use std::borrow::Cow;
@@ -58,7 +58,7 @@ macro_rules! log {
     };
 }
 
-type AutoCommit = am::AutoCommitWithObs<Observed<ToggleObserver<VecOpObserver16>>>;
+type AutoCommit = am::AutoCommitWithObs<Observed<ToggleObserver<VecOpObserver>>>;
 
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
@@ -105,8 +105,7 @@ impl Automerge {
         text_rep: TextRepresentation,
     ) -> Result<Automerge, error::BadActorId> {
         let mut doc = AutoCommit::default()
-            .with_observer(ToggleObserver::default().with_text_rep(text_rep.into()))
-            .with_encoding(TextEncoding::Utf16);
+            .with_observer(ToggleObserver::default().with_text_rep(text_rep.into()));
         doc.observer().set_text_rep(text_rep.into());
         if let Some(a) = actor {
             let a = automerge::ActorId::from(hex::decode(a)?.to_vec());
@@ -606,7 +605,7 @@ impl Automerge {
         &mut self,
         object: JsValue,
         meta: JsValue,
-    ) -> Result<(JsValue, Vec<automerge::Patch<u16>>), JsValue> {
+    ) -> Result<(JsValue, Vec<automerge::Patch>), JsValue> {
         let mut object = object
             .dyn_into::<Object>()
             .map_err(|_| error::ApplyPatch::NotObjectd)?;
@@ -916,8 +915,7 @@ pub fn load(
         TextRepresentation::Array
     };
     let mut doc = am::AutoCommitWithObs::<UnObserved>::load(&data)?
-        .with_observer(ToggleObserver::default().with_text_rep(text_rep.into()))
-        .with_encoding(TextEncoding::Utf16);
+        .with_observer(ToggleObserver::default().with_text_rep(text_rep.into()));
     if let Some(s) = actor {
         let actor =
             automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());

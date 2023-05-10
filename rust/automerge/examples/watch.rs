@@ -42,7 +42,7 @@ fn main() {
     get_changes(&doc, patches);
 }
 
-fn get_changes(_doc: &Automerge, patches: Vec<Patch<char>>) {
+fn get_changes(_doc: &Automerge, patches: Vec<Patch>) {
     for Patch { obj, path, action } in patches {
         match action {
             PatchAction::PutMap { key, value, .. } => {

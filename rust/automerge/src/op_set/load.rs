@@ -47,7 +47,6 @@ impl DocObserver for OpSetBuilder {
             trees: self.completed_objects,
             length: len,
             m: metadata,
-            text_encoding: Default::default(),
         }
     }
 }

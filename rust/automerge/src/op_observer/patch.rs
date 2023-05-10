@@ -4,16 +4,17 @@ use crate::{marks::Mark, ObjId, Prop, Value};
 use core::fmt::Debug;
 
 use crate::sequence_tree::SequenceTree;
+use crate::text_value::TextValue;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Patch<T: PartialEq + Clone + Debug> {
+pub struct Patch {
     pub obj: ObjId,
     pub path: Vec<(ObjId, Prop)>,
-    pub action: PatchAction<T>,
+    pub action: PatchAction,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum PatchAction<T: PartialEq + Clone + Debug> {
+pub enum PatchAction {
     PutMap {
         key: String,
         value: (Value<'static>, ObjId),
@@ -33,7 +34,7 @@ pub enum PatchAction<T: PartialEq + Clone + Debug> {
     },
     SpliceText {
         index: usize,
-        value: SequenceTree<T>,
+        value: TextValue,
     },
     Increment {
         prop: Prop,

@@ -215,7 +215,7 @@ fn observe_text_diff<'a, I: Iterator<Item = Patch<'a>>, O: OpObserver>(
 ) {
     let mut marks = MarkDiff::default();
     let exid = doc.as_ref().id_to_exid(obj.0);
-    let encoding = ListEncoding::Text(doc.doc.text_encoding());
+    let encoding = ListEncoding::Text;
     patches.fold(0, |index, patch| match &patch {
         Patch::Mark(op, mark_type) => {
             marks.process(index, *mark_type, op.op, doc.as_ref());
@@ -698,8 +698,8 @@ mod tests {
         format!("/{}", props.chain(Some(val.into())).join("/"))
     }
 
-    impl From<&Patch<char>> for ObservedPatch {
-        fn from(patch: &Patch<char>) -> Self {
+    impl From<&Patch> for ObservedPatch {
+        fn from(patch: &Patch) -> Self {
             let path = patch.path.iter().map(|(_, prop)| prop).cloned();
             match patch.action.clone() {
                 PatchAction::PutMap {
@@ -750,7 +750,7 @@ mod tests {
                     path: ex_path_and(path, index),
                 },
                 PatchAction::SpliceText { index, value } => ObservedPatch {
-                    action: ObservedAction::SpliceText(value.into_iter().collect::<String>()),
+                    action: ObservedAction::SpliceText(value.make_string()),
                     path: ex_path_and(path, index),
                 },
                 PatchAction::Mark { marks } => ObservedPatch {
@@ -774,7 +774,7 @@ mod tests {
         }
     }
 
-    fn exp(patches: Vec<Patch<char>>) -> Vec<ObservedPatch> {
+    fn exp(patches: Vec<Patch>) -> Vec<ObservedPatch> {
         patches.iter().map(|p| p.into()).collect()
     }
 

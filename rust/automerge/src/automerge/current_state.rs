@@ -61,7 +61,7 @@ fn observe_text<'a, I: Iterator<Item = &'a Op>, O: OpObserver>(
 ) {
     let exid = doc.id_to_exid(obj.0);
     let ops_by_key = ops.group_by(|o| o.elemid_or_key());
-    let encoding = ListEncoding::Text(doc.text_encoding());
+    let encoding = ListEncoding::Text;
     let state = TextState::default();
     let state = ops_by_key
         .into_iter()

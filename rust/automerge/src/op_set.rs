@@ -10,7 +10,7 @@ use crate::parents::Parents;
 use crate::query::TreeQuery;
 use crate::types::{
     self, ActorId, Export, Exportable, Key, ListEncoding, ObjId, ObjMeta, Op, OpId, OpIds, OpType,
-    Prop, TextEncoding,
+    Prop,
 };
 use crate::ObjType;
 use fxhash::FxBuildHasher;
@@ -30,21 +30,11 @@ pub(crate) struct OpSetInternal {
     trees: HashMap<ObjId, OpTree, FxBuildHasher>,
     /// The number of operations in the opset.
     length: usize,
-    /// UTF8 or UTF16 text encoding
-    text_encoding: TextEncoding,
     /// Metadata about the operations in this opset.
     pub(crate) m: OpSetMetadata,
 }
 
 impl OpSetInternal {
-    pub(crate) fn text_encoding(&self) -> &TextEncoding {
-        &self.text_encoding
-    }
-
-    pub(crate) fn set_text_encoding(&mut self, encoding: TextEncoding) {
-        self.text_encoding = encoding;
-    }
-
     pub(crate) fn builder() -> OpSetBuilder {
         OpSetBuilder::new()
     }
@@ -59,7 +49,6 @@ impl OpSetInternal {
                 actors: IndexedCache::new(),
                 props: IndexedCache::new(),
             },
-            text_encoding: Default::default(),
         }
     }
 
@@ -269,7 +258,7 @@ impl OpSetInternal {
 
     pub(crate) fn type_and_encoding(&self, id: &ObjId) -> Option<(ObjType, ListEncoding)> {
         let objtype = self.trees.get(id).map(|tree| tree.objtype)?;
-        let encoding = ListEncoding::new(objtype, self.text_encoding);
+        let encoding = objtype.into();
         Some((objtype, encoding))
     }
 
