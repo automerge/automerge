@@ -145,7 +145,11 @@
 <a href="#144" id="144">144</a>
 <a href="#145" id="145">145</a>
 <a href="#146" id="146">146</a>
-</pre><pre class="rust"><code><span class="kw">use </span>std::{borrow::Cow, collections::BTreeMap, iter::Iterator};
+<a href="#147" id="147">147</a>
+<a href="#148" id="148">148</a>
+</pre><pre class="rust"><code><span class="kw">use </span>std::{borrow::Cow, collections::HashMap, iter::Iterator};
+
+<span class="kw">use </span>fxhash::FxBuildHasher;
 
 <span class="kw">use crate</span>::{
     indexed_cache::IndexedCache,
@@ -197,7 +201,7 @@
 }
 
 <span class="kw">struct </span>HashGraph {
-    index_by_hash: BTreeMap&lt;ChangeHash, usize&gt;,
+    index_by_hash: HashMap&lt;ChangeHash, usize, FxBuildHasher&gt;,
 }
 
 <span class="kw">impl </span>HashGraph {
@@ -205,7 +209,7 @@
     </span><span class="kw">where
         </span>I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Change&gt;,
     {
-        <span class="kw">let </span><span class="kw-2">mut </span>index_by_hash = BTreeMap::new();
+        <span class="kw">let </span><span class="kw-2">mut </span>index_by_hash: HashMap&lt;<span class="kw">_</span>, <span class="kw">_</span>, <span class="kw">_</span>&gt; = Default::default();
         <span class="kw">for </span>(index, change) <span class="kw">in </span>changes.enumerate() {
             index_by_hash.insert(change.hash(), index);
         }
