@@ -485,9 +485,11 @@ impl Automerge {
         }
 
         let mut change: Option<Change> = None;
+        let mut first_chunk_was_doc = false;
         let mut am = match first_chunk {
             storage::Chunk::Document(d) => {
                 tracing::trace!("first chunk is document chunk, inflating");
+                first_chunk_was_doc = true;
                 let storage::load::Reconstructed {
                     max_op,
                     result: op_set,
@@ -545,6 +547,11 @@ impl Automerge {
         match load::load_changes(remaining.reset()) {
             load::LoadedChanges::Complete(c) => {
                 am.apply_changes(change.into_iter().chain(c))?;
+                // Only allow missing deps if the first chunk was a document chunk
+                // See https://github.com/automerge/automerge/pull/599#issuecomment-1549667472
+                if !am.queue.is_empty() && !first_chunk_was_doc {
+                    return Err(AutomergeError::MissingDeps);
+                }
             }
             load::LoadedChanges::Partial { error, .. } => {
                 if on_error == OnPartialLoad::Error {

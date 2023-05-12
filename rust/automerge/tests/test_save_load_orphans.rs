@@ -67,3 +67,18 @@ fn discard_orphans() {
         Value::from("value2")
     );
 }
+
+#[test]
+fn load_incremental_change_without_deps_throws() {
+    let mut doc = AutoCommit::new();
+    doc.put(&ROOT, "key", "value").unwrap();
+    let _ = doc.save_incremental();
+
+    doc.put(&ROOT, "key", "value2").unwrap();
+    let orphan = doc.save_incremental();
+    if let Err(e) = AutoCommit::load(&orphan) {
+        assert_eq!(e, automerge::AutomergeError::MissingDeps);
+    } else {
+        panic!("loading an orphan change without a document chunk as first chunk should fail");
+    }
+}
