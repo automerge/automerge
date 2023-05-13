@@ -12,7 +12,7 @@ mod vec_observer;
 pub use compose::compose;
 pub use patch::{Patch, PatchAction};
 pub use toggle_observer::ToggleObserver;
-pub use vec_observer::{HasPatches, TextRepresentation, VecOpObserver, VecOpObserver16};
+pub use vec_observer::{HasPatches, TextRepresentation, VecOpObserver};
 
 /// An observer of operations applied to the document.
 pub trait OpObserver {

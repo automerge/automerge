@@ -350,7 +350,18 @@ function progressDocument<T>(
   }
   const state = _state(doc)
   const nextState = { ...state, heads: undefined }
-  const nextDoc = state.handle.applyPatches(doc, nextState, callback)
+  let nextDoc
+  if (callback != null) {
+    let headsBefore = state.heads
+    let { value, patches } = state.handle.applyAndReturnPatches(doc, nextState)
+    if (patches.length > 0) {
+      let before = view(doc, headsBefore || [])
+      callback(patches, { before, after: value })
+    }
+    nextDoc = value
+  } else {
+    nextDoc = state.handle.applyPatches(doc, nextState)
+  }
   state.heads = heads
   return nextDoc
 }

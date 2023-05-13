@@ -20,9 +20,9 @@ use crate::transaction::{
 };
 use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, MarkData, ObjId, ObjMeta, Op,
-    OpId, OpType, TextEncoding, Value,
+    OpId, OpType, Value,
 };
-use crate::{AutomergeError, Change, ObjType, Prop, ReadDoc};
+use crate::{AutomergeError, Change, Cursor, ObjType, Prop, ReadDoc};
 
 mod current_state;
 mod diff;
@@ -157,18 +157,6 @@ impl Automerge {
                 self.actor = Actor::Unused(actor);
             }
         }
-    }
-
-    pub(crate) fn text_encoding(&self) -> TextEncoding {
-        *self.ops.text_encoding()
-    }
-
-    /// Change the text encoding of this view of the document
-    ///
-    /// This is a cheap operation, it just changes the way indexes are calculated
-    pub fn with_encoding(mut self, encoding: TextEncoding) -> Self {
-        self.ops.set_text_encoding(encoding);
-        self
     }
 
     /// Set the actor id for this document.
@@ -421,6 +409,24 @@ impl Automerge {
         }
     }
 
+    pub(crate) fn cursor_to_opid(
+        &self,
+        cursor: &Cursor,
+        clock: Option<&Clock>,
+    ) -> Result<OpId, AutomergeError> {
+        if let Some(idx) = self.ops.m.actors.lookup(cursor.actor()) {
+            let opid = OpId::new(cursor.ctr(), idx);
+            match clock {
+                Some(clock) if !clock.covers(&opid) => {
+                    Err(AutomergeError::InvalidCursor(cursor.clone()))
+                }
+                _ => Ok(opid),
+            }
+        } else {
+            Err(AutomergeError::InvalidCursor(cursor.clone()))
+        }
+    }
+
     pub(crate) fn exid_to_obj(&self, id: &ExId) -> Result<ObjMeta, AutomergeError> {
         let opid = self.exid_to_opid(id)?;
         let obj = ObjId(opid);
@@ -567,9 +573,7 @@ impl Automerge {
         if self.is_empty() {
             let mut doc =
                 Self::load_with::<()>(data, OnPartialLoad::Ignore, VerificationMode::Check, None)?;
-            doc = doc
-                .with_encoding(*self.ops.text_encoding())
-                .with_actor(self.actor_id());
+            doc = doc.with_actor(self.actor_id());
             if let Some(obs) = op_observer {
                 current_state::observe_current_state(&doc, obs);
             }
@@ -1306,6 +1310,44 @@ impl ReadDoc for Automerge {
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
         Ok(self.ops.text(&obj.id, None))
+    }
+
+    fn get_cursor<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        position: usize,
+        at: Option<&[ChangeHash]>,
+    ) -> Result<Cursor, AutomergeError> {
+        let obj = self.exid_to_obj(obj.as_ref())?;
+        let clock = at.map(|heads| self.clock_at(heads));
+        if !obj.typ.is_sequence() {
+            Err(AutomergeError::InvalidOp(obj.typ))
+        } else {
+            let found =
+                self.ops
+                    .seek_ops_by_prop(&obj.id, position.into(), obj.encoding, clock.as_ref());
+            if let Some(op) = found.ops.last() {
+                Ok(Cursor::new(op.id, &self.ops.m))
+            } else {
+                Err(AutomergeError::InvalidIndex(position))
+            }
+        }
+    }
+
+    fn get_cursor_position<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        cursor: &Cursor,
+        at: Option<&[ChangeHash]>,
+    ) -> Result<usize, AutomergeError> {
+        let obj = self.exid_to_obj(obj.as_ref())?;
+        let clock = at.map(|heads| self.clock_at(heads));
+        let opid = self.cursor_to_opid(cursor, clock.as_ref())?;
+        let found = self
+            .ops
+            .seek_opid(&obj.id, opid, clock.as_ref())
+            .ok_or_else(|| AutomergeError::InvalidCursor(cursor.clone()))?;
+        Ok(found.index)
     }
 
     fn text_at<O: AsRef<ExId>>(

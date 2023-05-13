@@ -4,7 +4,7 @@ use crate::{
     iter::{Keys, ListRange, MapRange, Values},
     marks::Mark,
     parents::Parents,
-    Change, ChangeHash, ObjType, Prop, Value,
+    Change, ChangeHash, Cursor, ObjType, Prop, Value,
 };
 
 use std::ops::RangeBounds;
@@ -151,6 +151,32 @@ pub trait ReadDoc {
         obj: O,
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError>;
+
+    /// Obtain the stable address (Cursor) for a `usize` position in a Sequence (either `Self::List` or `Self::Text`).
+    ///
+    /// Example use cases:
+    /// 1. User cursor tracking, to maintain contextual position while merging remote changes.
+    /// 2. Indexing sentences in a text field.
+    ///
+    /// To reverse the operation, see [`Self::get_cursor_position`].
+    fn get_cursor<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        position: usize,
+        at: Option<&[ChangeHash]>,
+    ) -> Result<Cursor, AutomergeError>;
+
+    /// Translate Cursor in a Sequence into an absolute position of type `usize`.
+    ///
+    /// Applicable only for Sequences (either `Self::List` or `Self::Text`).
+    ///
+    /// To reverse the operation, see [`Self::get_cursor`].
+    fn get_cursor_position<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        cursor: &Cursor,
+        at: Option<&[ChangeHash]>,
+    ) -> Result<usize, AutomergeError>;
 
     /// Get a value out of the document.
     ///

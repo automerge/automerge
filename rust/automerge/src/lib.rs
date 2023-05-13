@@ -83,11 +83,7 @@
 //!
 //! ### Text Encoding
 //!
-//! Both [`Automerge`] and [`AutoCommit`] provide a `with_encoding` method which
-//! allows you to specify the [`crate::TextEncoding`] which is used for
-//! interpreting the indexes passed to methods like [`ReadDoc::list_range`] or
-//! [`transaction::Transactable::splice`]. The default encoding is UTF-8, but
-//! you can switch to UTF-16.
+//! Text is encoded in utf8 by default but uses Utf16 when using the wasm target.
 //!
 //! ## Sync Protocol
 //!
@@ -248,6 +244,7 @@ mod change_graph;
 mod clock;
 mod columnar;
 mod convert;
+mod cursor;
 mod error;
 mod exid;
 mod indexed_cache;
@@ -263,6 +260,7 @@ mod read;
 mod sequence_tree;
 mod storage;
 pub mod sync;
+mod text_value;
 pub mod transaction;
 mod types;
 mod value;
@@ -273,18 +271,17 @@ pub use crate::automerge::{Automerge, OnPartialLoad};
 pub use autocommit::{AutoCommit, AutoCommitWithObs};
 pub use autoserde::AutoSerde;
 pub use change::{Change, LoadError as LoadChangeError};
+pub use cursor::Cursor;
 pub use error::AutomergeError;
 pub use error::InvalidActorId;
 pub use error::InvalidChangeHashSlice;
 pub use exid::{ExId as ObjId, ObjIdFromBytesError};
 pub use legacy::Change as ExpandedChange;
-pub use op_observer::{
-    OpObserver, Patch, PatchAction, ToggleObserver, VecOpObserver, VecOpObserver16,
-};
+pub use op_observer::{OpObserver, Patch, PatchAction, ToggleObserver, VecOpObserver};
 pub use parents::{Parent, Parents};
 pub use read::ReadDoc;
 pub use sequence_tree::SequenceTree;
-pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop, TextEncoding};
+pub use types::{ActorId, ChangeHash, ObjType, OpType, ParseChangeHashError, Prop};
 pub use value::{ScalarValue, Value};
 
 /// The object ID for the root map of a document

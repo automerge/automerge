@@ -4,13 +4,13 @@ use crate::indexed_cache::IndexedCache;
 use crate::iter::{Keys, ListRange, MapRange, TopOps};
 use crate::op_tree::OpTreeIter;
 use crate::op_tree::{
-    self, FoundOpWithObserver, FoundOpWithoutObserver, LastInsert, OpTree, OpsFound,
+    self, FoundOpId, FoundOpWithObserver, FoundOpWithoutObserver, LastInsert, OpTree, OpsFound,
 };
 use crate::parents::Parents;
 use crate::query::TreeQuery;
 use crate::types::{
     self, ActorId, Export, Exportable, Key, ListEncoding, ObjId, ObjMeta, Op, OpId, OpIds, OpType,
-    Prop, TextEncoding,
+    Prop,
 };
 use crate::ObjType;
 use fxhash::FxBuildHasher;
@@ -30,21 +30,11 @@ pub(crate) struct OpSetInternal {
     trees: HashMap<ObjId, OpTree, FxBuildHasher>,
     /// The number of operations in the opset.
     length: usize,
-    /// UTF8 or UTF16 text encoding
-    text_encoding: TextEncoding,
     /// Metadata about the operations in this opset.
     pub(crate) m: OpSetMetadata,
 }
 
 impl OpSetInternal {
-    pub(crate) fn text_encoding(&self) -> &TextEncoding {
-        &self.text_encoding
-    }
-
-    pub(crate) fn set_text_encoding(&mut self, encoding: TextEncoding) {
-        self.text_encoding = encoding;
-    }
-
     pub(crate) fn builder() -> OpSetBuilder {
         OpSetBuilder::new()
     }
@@ -59,7 +49,6 @@ impl OpSetInternal {
                 actors: IndexedCache::new(),
                 props: IndexedCache::new(),
             },
-            text_encoding: Default::default(),
         }
     }
 
@@ -106,22 +95,29 @@ impl OpSetInternal {
         }
     }
 
+    pub(crate) fn seek_opid(
+        &self,
+        obj: &ObjId,
+        id: OpId,
+        clock: Option<&Clock>,
+    ) -> Option<FoundOpId<'_>> {
+        let (_typ, encoding) = self.type_and_encoding(obj)?;
+        self.trees
+            .get(obj)
+            .and_then(|tree| tree.internal.seek_opid(id, encoding, clock, &self.m))
+    }
+
     pub(crate) fn parent_object(&self, obj: &ObjId, clock: Option<&Clock>) -> Option<Parent> {
         let parent = self.trees.get(obj)?.parent?;
-        let (_typ, encoding) = self.type_and_encoding(&parent)?;
-        let (op, index, visible) = self
-            .trees
-            .get(&parent)
-            .and_then(|tree| tree.internal.seek_opid(obj.0, encoding, clock, &self.m))
-            .unwrap();
-        let prop = match op.elemid_or_key() {
+        let found = self.seek_opid(&parent, obj.0, clock)?;
+        let prop = match found.op.elemid_or_key() {
             Key::Map(m) => self.m.props.safe_get(m).map(|s| Prop::Map(s.to_string()))?,
-            Key::Seq(_) => Prop::Seq(index),
+            Key::Seq(_) => Prop::Seq(found.index),
         };
         Some(Parent {
             obj: parent,
             prop,
-            visible,
+            visible: found.visible,
         })
     }
 
@@ -262,7 +258,7 @@ impl OpSetInternal {
 
     pub(crate) fn type_and_encoding(&self, id: &ObjId) -> Option<(ObjType, ListEncoding)> {
         let objtype = self.trees.get(id).map(|tree| tree.objtype)?;
-        let encoding = ListEncoding::new(objtype, self.text_encoding);
+        let encoding = objtype.into();
         Some((objtype, encoding))
     }
 

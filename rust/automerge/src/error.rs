@@ -2,7 +2,7 @@ use crate::change::LoadError as LoadChangeError;
 use crate::storage::load::Error as LoadError;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
-use crate::{ChangeHash, ObjType};
+use crate::{ChangeHash, Cursor, ObjType};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -35,6 +35,10 @@ pub enum AutomergeError {
     InvalidOp(ObjType),
     #[error("seq {0} is out of bounds")]
     InvalidSeq(u64),
+    #[error("cursor {0} is invalid")]
+    InvalidCursor(Cursor),
+    #[error("cursor format is invalid")]
+    InvalidCursorFormat,
     #[error("invalid type of value, expected `{expected}` but received `{unexpected}`")]
     InvalidValueType {
         expected: String,

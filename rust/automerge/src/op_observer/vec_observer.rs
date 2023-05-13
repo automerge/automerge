@@ -31,47 +31,10 @@ impl std::default::Default for TextRepresentation {
     }
 }
 
-pub(crate) trait TextIndex {
-    type Item: Debug + PartialEq + Clone;
-    type Iter<'a>: Iterator<Item = Self::Item>;
-
-    fn chars(text: &str) -> Self::Iter<'_>;
-}
-
 #[derive(Debug, Clone, Default)]
-struct VecOpObserverInner<T: TextIndex> {
-    pub(crate) patches: Vec<Patch<T::Item>>,
+pub struct VecOpObserver {
+    pub(crate) patches: Vec<Patch>,
     pub(crate) text_rep: TextRepresentation,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct VecOpObserver(VecOpObserverInner<Utf8TextIndex>);
-
-#[derive(Debug, Clone, Default)]
-pub struct VecOpObserver16(VecOpObserverInner<Utf16TextIndex>);
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct Utf16TextIndex;
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct Utf8TextIndex;
-
-impl TextIndex for Utf8TextIndex {
-    type Item = char;
-    type Iter<'a> = std::str::Chars<'a>;
-
-    fn chars(text: &str) -> Self::Iter<'_> {
-        text.chars()
-    }
-}
-
-impl TextIndex for Utf16TextIndex {
-    type Item = u16;
-    type Iter<'a> = std::str::EncodeUtf16<'a>;
-
-    fn chars(text: &str) -> Self::Iter<'_> {
-        text.encode_utf16()
-    }
 }
 
 pub trait HasPatches {
@@ -84,48 +47,27 @@ pub trait HasPatches {
 }
 
 impl HasPatches for VecOpObserver {
-    type Patches = Vec<Patch<char>>;
+    type Patches = Vec<Patch>;
 
     fn take_patches(&mut self) -> Self::Patches {
-        std::mem::take(&mut self.0.patches)
+        std::mem::take(&mut self.patches)
     }
 
     fn with_text_rep(mut self, text_rep: TextRepresentation) -> Self {
-        self.0.text_rep = text_rep;
+        self.text_rep = text_rep;
         self
     }
 
     fn set_text_rep(&mut self, text_rep: TextRepresentation) {
-        self.0.text_rep = text_rep;
+        self.text_rep = text_rep;
     }
 
     fn get_text_rep(&self) -> TextRepresentation {
-        self.0.text_rep
+        self.text_rep
     }
 }
 
-impl HasPatches for VecOpObserver16 {
-    type Patches = Vec<Patch<u16>>;
-
-    fn take_patches(&mut self) -> Self::Patches {
-        std::mem::take(&mut self.0.patches)
-    }
-
-    fn with_text_rep(mut self, text_rep: TextRepresentation) -> Self {
-        self.0.text_rep = text_rep;
-        self
-    }
-
-    fn set_text_rep(&mut self, text_rep: TextRepresentation) {
-        self.0.text_rep = text_rep;
-    }
-
-    fn get_text_rep(&self) -> TextRepresentation {
-        self.0.text_rep
-    }
-}
-
-impl<T: TextIndex> VecOpObserverInner<T> {
+impl VecOpObserver {
     fn get_path<R: ReadDoc>(&mut self, doc: &R, obj: &ObjId) -> Option<Vec<(ObjId, Prop)>> {
         match doc.parents(obj) {
             Ok(parents) => parents.visible_path(),
@@ -136,7 +78,7 @@ impl<T: TextIndex> VecOpObserverInner<T> {
         }
     }
 
-    fn maybe_append(&mut self, obj: &ObjId) -> Option<&mut PatchAction<T::Item>> {
+    fn maybe_append(&mut self, obj: &ObjId) -> Option<&mut PatchAction> {
         match self.patches.last_mut() {
             Some(Patch {
                 obj: tail_obj,
@@ -148,7 +90,7 @@ impl<T: TextIndex> VecOpObserverInner<T> {
     }
 }
 
-impl<T: TextIndex> OpObserver for VecOpObserverInner<T> {
+impl OpObserver for VecOpObserver {
     fn insert<R: ReadDoc>(
         &mut self,
         doc: &R,
@@ -199,18 +141,15 @@ impl<T: TextIndex> OpObserver for VecOpObserverInner<T> {
             let range = *tail_index..=*tail_index + prev_value.len();
             if range.contains(&index) {
                 let i = index - *tail_index;
-                for (n, ch) in T::chars(value).enumerate() {
-                    prev_value.insert(i + n, ch)
-                }
+                prev_value.splice(i, value);
                 return;
             }
         }
         if let Some(path) = self.get_path(doc, &obj) {
-            let mut v = SequenceTree::new();
-            for ch in T::chars(value) {
-                v.push(ch)
-            }
-            let action = PatchAction::SpliceText { index, value: v };
+            let action = PatchAction::SpliceText {
+                index,
+                value: value.into(),
+            };
             self.patches.push(Patch { obj, path, action });
         }
     }
@@ -368,175 +307,15 @@ impl<T: TextIndex> OpObserver for VecOpObserverInner<T> {
     }
 }
 
-impl<T: TextIndex> BranchableObserver for VecOpObserverInner<T> {
+impl BranchableObserver for VecOpObserver {
     fn merge(&mut self, other: &Self) {
         self.patches.extend_from_slice(other.patches.as_slice())
     }
 
     fn branch(&self) -> Self {
-        VecOpObserverInner {
+        VecOpObserver {
             patches: vec![],
             text_rep: self.text_rep,
         }
-    }
-}
-
-impl OpObserver for VecOpObserver {
-    fn insert<R: ReadDoc>(
-        &mut self,
-        doc: &R,
-        obj: ObjId,
-        index: usize,
-        tagged_value: (Value<'_>, ObjId),
-        conflict: bool,
-    ) {
-        self.0.insert(doc, obj, index, tagged_value, conflict)
-    }
-
-    fn splice_text<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, index: usize, value: &str) {
-        self.0.splice_text(doc, obj, index, value)
-    }
-
-    fn delete_seq<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, index: usize, length: usize) {
-        self.0.delete_seq(doc, obj, index, length)
-    }
-
-    fn delete_map<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, key: &str) {
-        self.0.delete_map(doc, obj, key)
-    }
-
-    fn put<R: ReadDoc>(
-        &mut self,
-        doc: &R,
-        obj: ObjId,
-        prop: Prop,
-        tagged_value: (Value<'_>, ObjId),
-        conflict: bool,
-    ) {
-        self.0.put(doc, obj, prop, tagged_value, conflict)
-    }
-
-    fn expose<R: ReadDoc>(
-        &mut self,
-        doc: &R,
-        obj: ObjId,
-        prop: Prop,
-        tagged_value: (Value<'_>, ObjId),
-        conflict: bool,
-    ) {
-        self.0.expose(doc, obj, prop, tagged_value, conflict)
-    }
-
-    fn increment<R: ReadDoc>(
-        &mut self,
-        doc: &R,
-        obj: ObjId,
-        prop: Prop,
-        tagged_value: (i64, ObjId),
-    ) {
-        self.0.increment(doc, obj, prop, tagged_value)
-    }
-
-    fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(
-        &mut self,
-        doc: &'a R,
-        obj: ObjId,
-        mark: M,
-    ) {
-        self.0.mark(doc, obj, mark)
-    }
-
-    fn text_as_seq(&self) -> bool {
-        self.0.text_as_seq()
-    }
-}
-
-impl OpObserver for VecOpObserver16 {
-    fn insert<R: ReadDoc>(
-        &mut self,
-        doc: &R,
-        obj: ObjId,
-        index: usize,
-        tagged_value: (Value<'_>, ObjId),
-        conflict: bool,
-    ) {
-        self.0.insert(doc, obj, index, tagged_value, conflict)
-    }
-
-    fn splice_text<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, index: usize, value: &str) {
-        self.0.splice_text(doc, obj, index, value)
-    }
-
-    fn delete_seq<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, index: usize, length: usize) {
-        self.0.delete_seq(doc, obj, index, length)
-    }
-
-    fn delete_map<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, key: &str) {
-        self.0.delete_map(doc, obj, key)
-    }
-
-    fn put<R: ReadDoc>(
-        &mut self,
-        doc: &R,
-        obj: ObjId,
-        prop: Prop,
-        tagged_value: (Value<'_>, ObjId),
-        conflict: bool,
-    ) {
-        self.0.put(doc, obj, prop, tagged_value, conflict)
-    }
-
-    fn expose<R: ReadDoc>(
-        &mut self,
-        doc: &R,
-        obj: ObjId,
-        prop: Prop,
-        tagged_value: (Value<'_>, ObjId),
-        conflict: bool,
-    ) {
-        self.0.expose(doc, obj, prop, tagged_value, conflict)
-    }
-
-    fn increment<R: ReadDoc>(
-        &mut self,
-        doc: &R,
-        obj: ObjId,
-        prop: Prop,
-        tagged_value: (i64, ObjId),
-    ) {
-        self.0.increment(doc, obj, prop, tagged_value)
-    }
-
-    fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(
-        &mut self,
-        doc: &'a R,
-        obj: ObjId,
-        mark: M,
-    ) {
-        self.0.mark(doc, obj, mark)
-    }
-
-    fn text_as_seq(&self) -> bool {
-        self.0.text_as_seq()
-    }
-}
-
-impl BranchableObserver for VecOpObserver {
-    fn merge(&mut self, other: &Self) {
-        self.0.merge(&other.0)
-    }
-
-    fn branch(&self) -> Self {
-        VecOpObserver(self.0.branch())
-    }
-}
-
-impl BranchableObserver for VecOpObserver16 {
-    fn merge(&mut self, other: &Self) {
-        self.0.merge(&other.0)
-    }
-
-    fn branch(&self) -> Self {
-        VecOpObserver16(self.0.branch())
     }
 }
