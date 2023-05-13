@@ -109,7 +109,7 @@ impl<'a, O1: OpObserver, O2: OpObserver> OpObserver for ComposeObservers<'a, O1,
         index: usize,
         num: usize,
     ) {
-        self.obs2.delete_seq(doc, objid.clone(), index, num);
+        self.obs1.delete_seq(doc, objid.clone(), index, num);
         self.obs2.delete_seq(doc, objid, index, num);
     }
 }
