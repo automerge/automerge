@@ -40,6 +40,12 @@ impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
         }
     }
 
+    /// Get the hash of the change that contains the given opid.
+    ///
+    /// Returns none if the opid:
+    /// - is the root object id
+    /// - does not exist in this document
+    /// - is for an operation in this transaction
     pub fn hash_for_opid(&self, opid: &ExId) -> Option<ChangeHash> {
         self.doc.hash_for_opid(opid)
     }

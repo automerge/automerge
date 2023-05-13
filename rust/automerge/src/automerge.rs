@@ -1119,6 +1119,10 @@ impl Automerge {
     }
 
     /// Get the hash of the change that contains the given opid.
+    ///
+    /// Returns none if the opid:
+    /// - is the root object id
+    /// - does not exist in this document
     pub fn hash_for_opid(&self, exid: &ExId) -> Option<ChangeHash> {
         match exid {
             ExId::Root => None,

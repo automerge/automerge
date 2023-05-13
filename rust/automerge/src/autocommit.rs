@@ -88,10 +88,6 @@ impl AutoCommit {
             observation: UnObserved,
         })
     }
-
-    pub fn hash_for_opid(&self, opid: &ExId) -> Option<ChangeHash> {
-        self.doc.hash_for_opid(opid)
-    }
 }
 
 impl<Obs: OpObserver + BranchableObserver> AutoCommitWithObs<Observed<Obs>> {
@@ -394,6 +390,16 @@ impl<Obs: Observation> AutoCommitWithObs<Obs> {
     pub fn sync(&mut self) -> impl SyncDoc + '_ {
         self.ensure_transaction_closed();
         SyncWrapper { inner: self }
+    }
+
+    /// Get the hash of the change that contains the given opid.
+    ///
+    /// Returns none if the opid:
+    /// - is the root object id
+    /// - does not exist in this document
+    /// - is for an operation in a transaction
+    pub fn hash_for_opid(&self, opid: &ExId) -> Option<ChangeHash> {
+        self.doc.hash_for_opid(opid)
     }
 }
 
