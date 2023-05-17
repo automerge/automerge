@@ -88,13 +88,7 @@ pub(crate) struct FoundOpWithObserver<'a> {
 }
 
 impl<'a> FoundOpWithObserver<'a> {
-    pub(crate) fn observe(
-        &self,
-        obj: &ObjMeta,
-        op: &Op,
-        doc: &Automerge,
-        history: &mut History,
-    ) {
+    pub(crate) fn observe(&self, obj: &ObjMeta, op: &Op, doc: &Automerge, history: &mut History) {
         if op.insert {
             if op.is_mark() {
                 if let OpType::MarkEnd(_) = op.action {
@@ -121,9 +115,7 @@ impl<'a> FoundOpWithObserver<'a> {
             match (self.before, self.overwritten, self.after) {
                 (None, Some(over), None) => match key {
                     Prop::Map(k) => history.delete_map(obj.id, &k),
-                    Prop::Seq(index) => {
-                        history.delete_seq(obj.id, index, over.width(obj.encoding))
-                    }
+                    Prop::Seq(index) => history.delete_seq(obj.id, index, over.width(obj.encoding)),
                 },
                 (Some(before), Some(_), None) => {
                     let conflict = self.num_before > 1;

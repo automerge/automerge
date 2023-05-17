@@ -1,6 +1,6 @@
 use automerge::ObjType;
 use automerge::ReadDoc;
-use automerge::{transaction::Transactable, VecOpObserver, AutoCommit, AutomergeError, ROOT};
+use automerge::{transaction::Transactable, AutoCommit, AutomergeError, VecOpObserver, ROOT};
 use std::time::Instant;
 
 fn main() -> Result<(), AutomergeError> {
