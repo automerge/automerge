@@ -1,4 +1,6 @@
-use std::{borrow::Cow, collections::BTreeMap, iter::Iterator};
+use std::{borrow::Cow, collections::HashMap, iter::Iterator};
+
+use fxhash::FxBuildHasher;
 
 use crate::{
     indexed_cache::IndexedCache,
@@ -50,7 +52,7 @@ where
 }
 
 struct HashGraph {
-    index_by_hash: BTreeMap<ChangeHash, usize>,
+    index_by_hash: HashMap<ChangeHash, usize, FxBuildHasher>,
 }
 
 impl HashGraph {
@@ -58,7 +60,7 @@ impl HashGraph {
     where
         I: Iterator<Item = &'a Change>,
     {
-        let mut index_by_hash = BTreeMap::new();
+        let mut index_by_hash: HashMap<_, _, _> = Default::default();
         for (index, change) in changes.enumerate() {
             index_by_hash.insert(change.hash(), index);
         }
