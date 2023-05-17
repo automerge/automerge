@@ -287,6 +287,8 @@
 <a href="#286" id="286">286</a>
 <a href="#287" id="287">287</a>
 <a href="#288" id="288">288</a>
+<a href="#289" id="289">289</a>
+<a href="#290" id="290">290</a>
 </pre><pre class="rust"><code><span class="doccomment">//! # Automerge
 //!
 //! Automerge is a library of data structures for building collaborative,
@@ -536,6 +538,8 @@
 <span class="kw">mod </span>cursor;
 <span class="kw">mod </span>error;
 <span class="kw">mod </span>exid;
+<span class="kw">mod </span>history;
+<span class="kw">pub mod </span>hydrate;
 <span class="kw">mod </span>indexed_cache;
 <span class="kw">pub mod </span>iter;
 <span class="kw">mod </span>legacy;
@@ -557,7 +561,7 @@
 </span><span class="kw">mod </span>visualisation;
 
 <span class="kw">pub use </span><span class="kw">crate</span>::automerge::{Automerge, OnPartialLoad};
-<span class="kw">pub use </span>autocommit::{AutoCommit, AutoCommitWithObs};
+<span class="kw">pub use </span>autocommit::AutoCommit;
 <span class="kw">pub use </span>autoserde::AutoSerde;
 <span class="kw">pub use </span>change::{Change, LoadError <span class="kw">as </span>LoadChangeError};
 <span class="kw">pub use </span>cursor::Cursor;
@@ -566,7 +570,7 @@
 <span class="kw">pub use </span>error::InvalidChangeHashSlice;
 <span class="kw">pub use </span>exid::{ExId <span class="kw">as </span>ObjId, ObjIdFromBytesError};
 <span class="kw">pub use </span>legacy::Change <span class="kw">as </span>ExpandedChange;
-<span class="kw">pub use </span>op_observer::{OpObserver, Patch, PatchAction, ToggleObserver, VecOpObserver};
+<span class="kw">pub use </span>op_observer::{OpObserver, Patch, PatchAction, VecOpObserver};
 <span class="kw">pub use </span>parents::{Parent, Parents};
 <span class="kw">pub use </span>read::ReadDoc;
 <span class="kw">pub use </span>sequence_tree::SequenceTree;

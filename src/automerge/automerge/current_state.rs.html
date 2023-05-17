@@ -788,14 +788,25 @@
 <a href="#787" id="787">787</a>
 <a href="#788" id="788">788</a>
 <a href="#789" id="789">789</a>
+<a href="#790" id="790">790</a>
+<a href="#791" id="791">791</a>
+<a href="#792" id="792">792</a>
+<a href="#793" id="793">793</a>
+<a href="#794" id="794">794</a>
+<a href="#795" id="795">795</a>
+<a href="#796" id="796">796</a>
+<a href="#797" id="797">797</a>
+<a href="#798" id="798">798</a>
+<a href="#799" id="799">799</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::borrow::Cow;
 
 <span class="kw">use </span>itertools::Itertools;
 
 <span class="kw">use crate</span>::{
+    history::History,
     marks::{Mark, MarkStateMachine},
-    types::{Key, ListEncoding, ObjId, Op, OpId, Prop},
-    Automerge, ObjType, OpObserver, OpType, Value,
+    types::{Key, ListEncoding, ObjId, Op, OpId},
+    Automerge, ObjType, OpType, Value,
 };
 
 <span class="attr">#[derive(Debug, Default)]
@@ -823,7 +834,7 @@
 /// Due to only notifying of visible operations the observer will only be called with `put`,
 /// `insert`, and `splice`, operations.
 
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>observe_current_state&lt;O: OpObserver&gt;(doc: <span class="kw-2">&amp;</span>Automerge, observer: <span class="kw-2">&amp;mut </span>O) {
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>observe_current_state(doc: <span class="kw-2">&amp;</span>Automerge, history: <span class="kw-2">&amp;mut </span>History) {
     <span class="comment">// The OpSet already exposes operations in the order they appear in the document.
     // `OpSet::iter_objs` iterates over the objects in causal order, this means that parent objects
     // will always appear before their children. Furthermore, the operations within each object are
@@ -833,24 +844,25 @@
     // key and for each key find the visible operations for that key. Then we notify the observer
     // for each of those visible operations.
     </span><span class="kw">for </span>(obj, typ, ops) <span class="kw">in </span>doc.ops().iter_objs() {
-        <span class="kw">if </span>typ == ObjType::Text &amp;&amp; !observer.text_as_seq() {
-            observe_text(doc, observer, obj, ops)
+        <span class="kw">if </span>typ == ObjType::Text &amp;&amp; !doc.text_as_seq() {
+            observe_text(doc, history, obj, ops)
         } <span class="kw">else if </span>typ.is_sequence() {
-            observe_list(doc, observer, obj, ops);
+            observe_list(doc, history, obj, ops);
         } <span class="kw">else </span>{
-            observe_map(doc, observer, obj, ops);
+            observe_map(doc, history, obj, ops);
         }
     }
 }
 
-<span class="kw">fn </span>observe_text&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;, O: OpObserver&gt;(
+<span class="kw">fn </span>observe_text&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;&gt;(
     doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
-    observer: <span class="kw-2">&amp;mut </span>O,
+    <span class="comment">//observer: &amp;mut O,
+    </span>history: <span class="kw-2">&amp;mut </span>History,
     obj: <span class="kw-2">&amp;</span>ObjId,
     ops: I,
 ) {
-    <span class="kw">let </span>exid = doc.id_to_exid(obj.<span class="number">0</span>);
-    <span class="kw">let </span>ops_by_key = ops.group_by(|o| o.elemid_or_key());
+    <span class="comment">//let exid = doc.id_to_exid(obj.0);
+    </span><span class="kw">let </span>ops_by_key = ops.group_by(|o| o.elemid_or_key());
     <span class="kw">let </span>encoding = ListEncoding::Text;
     <span class="kw">let </span>state = TextState::default();
     <span class="kw">let </span>state = ops_by_key
@@ -877,18 +889,21 @@
             }
             state
         });
-    observer.splice_text(doc, exid.clone(), <span class="number">0</span>, state.text.as_str());
-    observer.mark(doc, exid, state.finished.into_iter());
-}
+    history.splice(<span class="kw-2">*</span>obj, <span class="number">0</span>, state.text.as_str());
+    history.mark(<span class="kw-2">*</span>obj, <span class="kw-2">&amp;</span>state.finished);
+    <span class="comment">//observer.splice_text(doc, exid.clone(), 0, state.text.as_str());
+    //observer.mark(doc, exid, state.finished.into_iter());
+</span>}
 
-<span class="kw">fn </span>observe_list&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;, O: OpObserver&gt;(
+<span class="kw">fn </span>observe_list&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;&gt;(
     doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
-    observer: <span class="kw-2">&amp;mut </span>O,
+    <span class="comment">//observer: &amp;mut O,
+    </span>history: <span class="kw-2">&amp;mut </span>History,
     obj: <span class="kw-2">&amp;</span>ObjId,
     ops: I,
 ) {
-    <span class="kw">let </span>exid = doc.id_to_exid(obj.<span class="number">0</span>);
-    <span class="kw">let </span><span class="kw-2">mut </span>marks = MarkStateMachine::default();
+    <span class="comment">//let exid = doc.id_to_exid(obj.0);
+    </span><span class="kw">let </span><span class="kw-2">mut </span>marks = MarkStateMachine::default();
     <span class="kw">let </span>ops_by_key = ops.group_by(|o| o.elemid_or_key());
     <span class="kw">let </span><span class="kw-2">mut </span>len = <span class="number">0</span>;
     <span class="kw">let </span><span class="kw-2">mut </span>finished = Vec::new();
@@ -925,12 +940,14 @@
                 })
         })
         .for_each(|(index, (val_enum, (value, opid)))| {
-            <span class="kw">let </span>tagged_value = (value, doc.id_to_exid(opid));
             <span class="kw">let </span>conflict = val_enum &gt; <span class="number">0</span>;
-            observer.insert(doc, exid.clone(), index, tagged_value, conflict);
-        });
-    observer.mark(doc, exid, finished.into_iter());
-}
+            history.insert(<span class="kw-2">*</span>obj, index, value.clone().into(), opid, conflict);
+            <span class="comment">//let tagged_value = (value, doc.id_to_exid(opid));
+            //observer.insert(doc, exid.clone(), index, tagged_value, conflict);
+        </span>});
+    history.mark(<span class="kw-2">*</span>obj, <span class="kw-2">&amp;</span>finished);
+    <span class="comment">////observer.mark(doc, exid, finished.into_iter());
+</span>}
 
 <span class="kw">fn </span>observe_map_key&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;&gt;(
     (key, key_ops): (Key, I),
@@ -960,40 +977,42 @@
         .last()
 }
 
-<span class="kw">fn </span>observe_map&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;, O: OpObserver&gt;(
+<span class="kw">fn </span>observe_map&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;&gt;(
     doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
-    observer: <span class="kw-2">&amp;mut </span>O,
+    <span class="comment">//observer: &amp;mut O,
+    </span>history: <span class="kw-2">&amp;mut </span>History,
     obj: <span class="kw-2">&amp;</span>ObjId,
     ops: I,
 ) {
-    <span class="kw">let </span>exid = doc.id_to_exid(obj.<span class="number">0</span>);
-    <span class="kw">let </span>ops_by_key = ops.group_by(|o| o.key);
+    <span class="comment">//let exid = doc.id_to_exid(obj.0);
+    </span><span class="kw">let </span>ops_by_key = ops.group_by(|o| o.key);
     ops_by_key
         .into_iter()
         .filter_map(observe_map_key)
-        .filter_map(|(i, put)| {
-            <span class="kw">let </span>tagged_value = (put.value, doc.id_to_exid(put.id));
-            <span class="kw">let </span>prop = doc
-                .ops()
-                .m
-                .props
-                .safe_get(put.key.prop_index()<span class="question-mark">?</span>)
-                .map(|s| Prop::Map(s.to_string()))<span class="question-mark">?</span>;
-            <span class="kw">let </span>conflict = i &gt; <span class="number">0</span>;
-            <span class="prelude-val">Some</span>((tagged_value, prop, conflict))
-        })
-        .for_each(|(tagged_value, prop, conflict)| {
-            observer.put(doc, exid.clone(), prop, tagged_value, conflict);
-        });
-}
+        <span class="comment">//.filter_map(|(i, put)| {
+        </span>.for_each(|(i, put)| {
+            <span class="comment">//let tagged_value = (put.value.clone(), doc.id_to_exid(put.id));
+            </span><span class="kw">if let </span><span class="prelude-val">Some</span>(prop_index) = put.key.prop_index() {
+                <span class="kw">if let </span><span class="prelude-val">Some</span>(key) = doc.ops().m.props.safe_get(prop_index) {
+                    <span class="kw">let </span>conflict = i &gt; <span class="number">0</span>;
+                    history.put_map(<span class="kw-2">*</span>obj, key, put.value.into(), put.id, conflict, <span class="bool-val">false</span>);
+                }
+            }
+            <span class="comment">//let prop = Prop::Map(key.to_string());
+            //Some((tagged_value, prop, conflict))
+        </span>});
+    <span class="comment">//.for_each(|(tagged_value, prop, conflict)| {
+    //observer.put(doc, exid.clone(), prop, tagged_value, conflict);
+    //});
+</span>}
 
 <span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>tests {
     <span class="kw">use </span>std::{borrow::Cow, fs};
 
     <span class="kw">use crate</span>::{
-        marks::Mark, transaction::Transactable, Automerge, ObjType, OpObserver, Prop, ReadDoc,
-        Value,
+        marks::Mark, op_observer::TextRepresentation, transaction::Transactable, Automerge,
+        ObjType, OpObserver, Prop, ReadDoc, Value,
     };
     <span class="comment">//use crate::{transaction::Transactable, Automerge, ObjType, OpObserver, Prop, ReadDoc, Value};
 
@@ -1119,24 +1138,21 @@
 
     <span class="kw">struct </span>ObserverStub {
         ops: Vec&lt;ObserverCall&gt;,
-        text_as_seq: bool,
     }
 
     <span class="kw">impl </span>ObserverStub {
         <span class="kw">fn </span>new() -&gt; <span class="self">Self </span>{
-            <span class="self">Self </span>{
-                ops: Vec::new(),
-                text_as_seq: <span class="bool-val">true</span>,
-            }
+            <span class="self">Self </span>{ ops: Vec::new() }
         }
 
-        <span class="kw">fn </span>new_text_v2() -&gt; <span class="self">Self </span>{
-            <span class="self">Self </span>{
-                ops: Vec::new(),
-                text_as_seq: <span class="bool-val">false</span>,
-            }
-        }
-    }
+        <span class="comment">/*
+                fn new_text_v2() -&gt; Self {
+                    Self {
+                        ops: Vec::new(),
+                    }
+                }
+        */
+    </span>}
 
     <span class="kw">impl </span>OpObserver <span class="kw">for </span>ObserverStub {
         <span class="kw">fn </span>insert&lt;R: ReadDoc&gt;(
@@ -1219,10 +1235,6 @@
             <span class="macro">panic!</span>(<span class="string">&quot;delete not expected&quot;</span>);
         }
 
-        <span class="kw">fn </span>text_as_seq(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
-            <span class="self">self</span>.text_as_seq
-        }
-
         <span class="kw">fn </span>mark&lt;<span class="lifetime">&#39;a</span>, R: ReadDoc, M: Iterator&lt;Item = Mark&lt;<span class="lifetime">&#39;a</span>&gt;&gt;&gt;(
             <span class="kw-2">&amp;mut </span><span class="self">self</span>,
             _doc: <span class="kw-2">&amp;</span>R,
@@ -1244,7 +1256,7 @@
         doc.insert(<span class="kw-2">&amp;</span>text, <span class="number">0</span>, <span class="string">&quot;a&quot;</span>).unwrap();
 
         <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new();
-        <span class="kw">super</span>::observe_current_state(doc.document(), <span class="kw-2">&amp;mut </span>obs);
+        doc.document().observe_current_state(<span class="kw-2">&amp;mut </span>obs);
 
         <span class="macro">assert_eq!</span>(
             Calls(obs.ops),
@@ -1319,7 +1331,7 @@
         doc.delete(<span class="kw">crate</span>::ROOT, <span class="string">&quot;deleted_text&quot;</span>).unwrap();
 
         <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new();
-        <span class="kw">super</span>::observe_current_state(doc.document(), <span class="kw-2">&amp;mut </span>obs);
+        doc.document().observe_current_state(<span class="kw-2">&amp;mut </span>obs);
 
         <span class="macro">assert_eq!</span>(
             Calls(obs.ops),
@@ -1354,8 +1366,9 @@
         doc.splice_text(<span class="kw-2">&amp;</span>text, <span class="number">1</span>, <span class="number">0</span>, <span class="string">&quot;bcdef&quot;</span>).unwrap();
         doc.splice_text(<span class="kw-2">&amp;</span>text, <span class="number">2</span>, <span class="number">2</span>, <span class="string">&quot;g&quot;</span>).unwrap();
 
-        <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new_text_v2();
-        <span class="kw">super</span>::observe_current_state(doc.document(), <span class="kw-2">&amp;mut </span>obs);
+        <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new();
+        doc.set_text_rep(TextRepresentation::String);
+        doc.document().observe_current_state(<span class="kw-2">&amp;mut </span>obs);
 
         <span class="macro">assert_eq!</span>(
             Calls(obs.ops),
@@ -1391,8 +1404,9 @@
 
         doc.merge(<span class="kw-2">&amp;mut </span>doc2).unwrap();
 
-        <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new_text_v2();
-        <span class="kw">super</span>::observe_current_state(doc.document(), <span class="kw-2">&amp;mut </span>obs);
+        <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new();
+        doc.set_text_rep(TextRepresentation::String);
+        doc.document().observe_current_state(<span class="kw-2">&amp;mut </span>obs);
 
         <span class="macro">assert_eq!</span>(
             Calls(obs.ops),
@@ -1415,8 +1429,9 @@
         doc.insert(<span class="kw-2">&amp;</span>list, <span class="number">0</span>, <span class="number">1</span>).unwrap();
         doc.insert(<span class="kw-2">&amp;</span>list, <span class="number">1</span>, <span class="number">2</span>).unwrap();
 
-        <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new_text_v2();
-        <span class="kw">super</span>::observe_current_state(doc.document(), <span class="kw-2">&amp;mut </span>obs);
+        <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new();
+        doc.set_text_rep(TextRepresentation::String);
+        doc.document().observe_current_state(<span class="kw-2">&amp;mut </span>obs);
 
         <span class="macro">assert_eq!</span>(
             Calls(obs.ops),
@@ -1453,8 +1468,9 @@
         doc2.insert(<span class="kw-2">&amp;</span>list, <span class="number">0</span>, <span class="number">2</span>).unwrap();
         doc.merge(<span class="kw-2">&amp;mut </span>doc2).unwrap();
 
-        <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new_text_v2();
-        <span class="kw">super</span>::observe_current_state(doc.document(), <span class="kw-2">&amp;mut </span>obs);
+        <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new();
+        doc.set_text_rep(TextRepresentation::String);
+        doc.document().observe_current_state(<span class="kw-2">&amp;mut </span>obs);
 
         <span class="macro">assert_eq!</span>(
             Calls(obs.ops),
@@ -1488,8 +1504,9 @@
         <span class="kw">let </span>map = doc.insert_object(<span class="kw-2">&amp;</span>list, <span class="number">0</span>, ObjType::Map).unwrap();
         doc.put(<span class="kw-2">&amp;</span>map, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value&quot;</span>).unwrap();
 
-        <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new_text_v2();
-        <span class="kw">super</span>::observe_current_state(doc.document(), <span class="kw-2">&amp;mut </span>obs);
+        <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new();
+        doc.set_text_rep(TextRepresentation::String);
+        doc.document().observe_current_state(<span class="kw-2">&amp;mut </span>obs);
 
         <span class="macro">assert_eq!</span>(
             Calls(obs.ops),
@@ -1526,8 +1543,10 @@
         doc.put(<span class="kw-2">&amp;</span>list, <span class="number">0</span>, <span class="string">&quot;three&quot;</span>).unwrap();
         doc.put(<span class="kw-2">&amp;</span>list, <span class="number">1</span>, <span class="string">&quot;four&quot;</span>).unwrap();
 
-        <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new_text_v2();
-        <span class="kw">super</span>::observe_current_state(doc.document(), <span class="kw-2">&amp;mut </span>obs);
+        doc.set_text_rep(TextRepresentation::String);
+
+        <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new();
+        doc.document().observe_current_state(<span class="kw-2">&amp;mut </span>obs);
 
         <span class="macro">assert_eq!</span>(
             Calls(obs.ops),
@@ -1564,6 +1583,7 @@
             <span class="kw">crate</span>::OnPartialLoad::Error,
             <span class="kw">crate</span>::storage::VerificationMode::Check,
             <span class="prelude-val">Some</span>(<span class="kw-2">&amp;mut </span>obs),
+            TextRepresentation::default(),
         );
 
         <span class="macro">assert_eq!</span>(

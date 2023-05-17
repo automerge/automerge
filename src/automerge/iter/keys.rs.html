@@ -50,7 +50,7 @@
     <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
         <span class="self">self</span>.iter
             .as_mut()
-            .and_then(|(i, op_set)| i.next().map(|op| op_set.to_string(op.elemid_or_key())))
+            .and_then(|(i, op_set)| i.next().map(|top| op_set.to_string(top.op.elemid_or_key())))
     }
 }
 </code></pre></div>

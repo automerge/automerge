@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["PatchAction","TextRepresentation"],"fn":["compose"],"struct":["Patch","ToggleObserver","VecOpObserver"],"trait":["BranchableObserver","HasPatches","OpObserver"]};
+window.SIDEBAR_ITEMS = {"enum":["PatchAction","TextRepresentation"],"struct":["Patch","VecOpObserver"],"trait":["OpObserver"]};

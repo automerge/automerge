@@ -1,0 +1,3 @@
+(function() {var implementors = {
+"automerge":[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.69.0/core/convert/trait.AsMut.html\" title=\"trait core::convert::AsMut\">AsMut</a>&lt;<a class=\"struct\" href=\"automerge/op_observer/struct.VecOpObserver.html\" title=\"struct automerge::op_observer::VecOpObserver\">VecOpObserver</a>&gt; for <a class=\"struct\" href=\"automerge/op_observer/struct.VecOpObserver.html\" title=\"struct automerge::op_observer::VecOpObserver\">VecOpObserver</a>"]]
+};if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

@@ -676,12 +676,12 @@
                 op.pred = meta.sorted_opids(preds.into_iter());
             }
             <span class="kw">if let </span>OpType::Put(ScalarValue::Counter(c)) = <span class="kw-2">&amp;mut </span>op.action {
-                <span class="kw">for </span>(inc, id) <span class="kw">in </span>op
+                <span class="kw">for </span>(id, inc) <span class="kw">in </span>op
                     .succ
                     .iter()
-                    .filter_map(|s| <span class="self">self</span>.inc_ops.get(s).map(|inc| (inc, s)))
+                    .filter_map(|s| <span class="self">self</span>.inc_ops.get(s).map(|inc| (<span class="kw-2">*</span>s, <span class="kw-2">*</span>inc)))
                 {
-                    c.increment(<span class="kw-2">*</span>inc, <span class="kw-2">*</span>id);
+                    c.increment(inc, id);
                 }
             }
             collector.collect(<span class="self">self</span>.id, op.clone())<span class="question-mark">?</span>;

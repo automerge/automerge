@@ -62,49 +62,29 @@
 <a href="#61" id="61">61</a>
 <a href="#62" id="62">62</a>
 <a href="#63" id="63">63</a>
-<a href="#64" id="64">64</a>
-<a href="#65" id="65">65</a>
-<a href="#66" id="66">66</a>
-<a href="#67" id="67">67</a>
-<a href="#68" id="68">68</a>
-<a href="#69" id="69">69</a>
-<a href="#70" id="70">70</a>
-<a href="#71" id="71">71</a>
-<a href="#72" id="72">72</a>
-<a href="#73" id="73">73</a>
-<a href="#74" id="74">74</a>
-<a href="#75" id="75">75</a>
-<a href="#76" id="76">76</a>
-<a href="#77" id="77">77</a>
-<a href="#78" id="78">78</a>
-<a href="#79" id="79">79</a>
-<a href="#80" id="80">80</a>
 </pre><pre class="rust"><code><span class="doccomment">//! This module is essentially a type level Option. It is used in sitations where we know at
 //! compile time whether an `OpObserver` is available to track changes in a transaction.
-</span><span class="kw">use crate</span>::{op_observer::BranchableObserver, ChangeHash, OpObserver};
+</span><span class="kw">use crate</span>::{ChangeHash, OpObserver};
 
 <span class="kw">mod </span>private {
-    <span class="kw">use </span><span class="kw">crate</span>::op_observer::BranchableObserver;
 
     <span class="kw">pub trait </span>Sealed {}
-    <span class="kw">impl</span>&lt;O: <span class="kw">super</span>::OpObserver + BranchableObserver&gt; Sealed <span class="kw">for </span><span class="kw">super</span>::Observed&lt;O&gt; {}
+    <span class="kw">impl</span>&lt;O: <span class="kw">super</span>::OpObserver&gt; Sealed <span class="kw">for </span><span class="kw">super</span>::Observed&lt;O&gt; {}
     <span class="kw">impl </span>Sealed <span class="kw">for </span><span class="kw">super</span>::UnObserved {}
 }
 
 <span class="kw">pub trait </span>Observation: private::Sealed {
-    <span class="kw">type </span>Obs: OpObserver + BranchableObserver;
+    <span class="kw">type </span>Obs: OpObserver;
     <span class="kw">type </span>CommitResult;
 
     <span class="kw">fn </span>observer(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span><span class="self">Self</span>::Obs&gt;;
     <span class="kw">fn </span>make_result(<span class="self">self</span>, hash: <span class="prelude-ty">Option</span>&lt;ChangeHash&gt;) -&gt; <span class="self">Self</span>::CommitResult;
-    <span class="kw">fn </span>branch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self</span>;
-    <span class="kw">fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>);
 }
 
 <span class="attr">#[derive(Clone, Debug)]
-</span><span class="kw">pub struct </span>Observed&lt;Obs: OpObserver + BranchableObserver&gt;(Obs);
+</span><span class="kw">pub struct </span>Observed&lt;Obs: OpObserver&gt;(Obs);
 
-<span class="kw">impl</span>&lt;O: OpObserver + BranchableObserver&gt; Observed&lt;O&gt; {
+<span class="kw">impl</span>&lt;O: OpObserver&gt; Observed&lt;O&gt; {
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(o: O) -&gt; <span class="self">Self </span>{
         <span class="self">Self</span>(o)
     }
@@ -114,7 +94,7 @@
     </span>}
 }
 
-<span class="kw">impl</span>&lt;Obs: OpObserver + BranchableObserver&gt; Observation <span class="kw">for </span>Observed&lt;Obs&gt; {
+<span class="kw">impl</span>&lt;Obs: OpObserver&gt; Observation <span class="kw">for </span>Observed&lt;Obs&gt; {
     <span class="kw">type </span>Obs = Obs;
     <span class="kw">type </span>CommitResult = (Obs, <span class="prelude-ty">Option</span>&lt;ChangeHash&gt;);
     <span class="kw">fn </span>observer(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span><span class="self">Self</span>::Obs&gt; {
@@ -123,14 +103,6 @@
 
     <span class="kw">fn </span>make_result(<span class="self">self</span>, hash: <span class="prelude-ty">Option</span>&lt;ChangeHash&gt;) -&gt; <span class="self">Self</span>::CommitResult {
         (<span class="self">self</span>.<span class="number">0</span>, hash)
-    }
-
-    <span class="kw">fn </span>branch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
-        <span class="self">Self</span>(<span class="self">self</span>.<span class="number">0</span>.branch())
-    }
-
-    <span class="kw">fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>) {
-        <span class="self">self</span>.<span class="number">0</span>.merge(<span class="kw-2">&amp;</span>other.<span class="number">0</span>)
     }
 }
 
@@ -152,12 +124,6 @@
     <span class="kw">fn </span>make_result(<span class="self">self</span>, hash: <span class="prelude-ty">Option</span>&lt;ChangeHash&gt;) -&gt; <span class="self">Self</span>::CommitResult {
         hash
     }
-
-    <span class="kw">fn </span>branch(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
-        <span class="self">Self
-    </span>}
-
-    <span class="kw">fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _other: <span class="kw-2">&amp;</span><span class="self">Self</span>) {}
 }
 </code></pre></div>
 </section></main><div id="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.69.0 (84c898d65 2023-04-16)" data-search-js="search-8a59a8356673ec1f.js" data-settings-js="settings-f0c5c39777a9a2f6.js" data-settings-css="settings-0bcba95ff279c1db.css" ></div></body></html>

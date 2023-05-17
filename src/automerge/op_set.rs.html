@@ -589,6 +589,9 @@
 <a href="#588" id="588">588</a>
 <a href="#589" id="589">589</a>
 <a href="#590" id="590">590</a>
+<a href="#591" id="591">591</a>
+<a href="#592" id="592">592</a>
+<a href="#593" id="593">593</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::clock::Clock;
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 <span class="kw">use </span><span class="kw">crate</span>::indexed_cache::IndexedCache;
@@ -888,7 +891,7 @@
                 <span class="comment">// do it the hard way - walk each op
                 </span><span class="kw">_ </span>=&gt; <span class="self">self
                     </span>.top_ops(obj, clock)
-                    .fold(<span class="number">0</span>, |acc, op| acc + op.width(encoding)),
+                    .fold(<span class="number">0</span>, |acc, top| acc + top.op.width(encoding)),
             }
         } <span class="kw">else </span>{
             <span class="number">0
@@ -896,7 +899,9 @@
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>text(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>ObjId, clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;) -&gt; String {
-        <span class="self">self</span>.top_ops(obj, clock).map(|op| op.to_str()).collect()
+        <span class="self">self</span>.top_ops(obj, clock)
+            .map(|top| top.op.to_str())
+            .collect()
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>keys&lt;<span class="lifetime">&#39;a</span>&gt;(<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>ObjId, clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;) -&gt; Keys&lt;<span class="lifetime">&#39;a</span>&gt; {
@@ -1037,8 +1042,9 @@
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>lamport_cmp(<span class="kw-2">&amp;</span><span class="self">self</span>, left: OpId, right: OpId) -&gt; Ordering {
-        left.lamport_cmp(<span class="kw-2">&amp;</span>right, <span class="kw-2">&amp;</span><span class="self">self</span>.actors.cache)
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>lamport_cmp&lt;O: AsRef&lt;OpId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, left: O, right: O) -&gt; Ordering {
+        left.as_ref()
+            .lamport_cmp(right.as_ref(), <span class="kw-2">&amp;</span><span class="self">self</span>.actors.cache)
     }
 
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>sorted_opids&lt;I: Iterator&lt;Item = OpId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, opids: I) -&gt; OpIds {

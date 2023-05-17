@@ -120,14 +120,14 @@
 
     <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
         <span class="self">self</span>.iter.as_mut().and_then(|inner| {
-            <span class="kw">for </span>op <span class="kw">in </span>inner.iter.by_ref() {
-                <span class="kw">if let </span>Key::Map(n) = <span class="kw-2">&amp;</span>op.key {
+            <span class="kw">for </span>top <span class="kw">in </span>inner.iter.by_ref() {
+                <span class="kw">if let </span>Key::Map(n) = <span class="kw-2">&amp;</span>top.op.key {
                     <span class="kw">if let </span><span class="prelude-val">Some</span>(prop) = inner.op_set.m.props.safe_get(<span class="kw-2">*</span>n) {
                         <span class="kw">if </span>inner.range.contains(prop) {
                             <span class="kw">return </span><span class="prelude-val">Some</span>((
                                 prop.as_str(),
-                                op.value_at(inner.clock.as_ref()),
-                                inner.op_set.id_to_exid(op.id),
+                                top.op.value_at(inner.clock.as_ref()),
+                                inner.op_set.id_to_exid(top.op.id),
                             ));
                         }
                     }

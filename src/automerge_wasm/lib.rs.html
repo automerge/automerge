@@ -1294,10 +1294,6 @@
 <a href="#1293" id="1293">1293</a>
 <a href="#1294" id="1294">1294</a>
 <a href="#1295" id="1295">1295</a>
-<a href="#1296" id="1296">1296</a>
-<a href="#1297" id="1297">1297</a>
-<a href="#1298" id="1298">1298</a>
-<a href="#1299" id="1299">1299</a>
 </pre><pre class="rust"><code><span class="attr">#![doc(
     html_logo_url = <span class="string">&quot;https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg&quot;</span>,
     html_favicon_url = <span class="string">&quot;https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico&quot;
@@ -1327,11 +1323,10 @@
 #![allow(clippy::unused_unit)]
 </span><span class="kw">use </span>am::marks::Mark;
 <span class="kw">use </span>am::transaction::CommitOptions;
-<span class="kw">use </span>am::transaction::{Observed, Transactable, UnObserved};
+<span class="kw">use </span>am::transaction::Transactable;
 <span class="kw">use </span>am::ScalarValue;
 <span class="kw">use </span>automerge <span class="kw">as </span>am;
-<span class="kw">use </span>automerge::ToggleObserver;
-<span class="kw">use </span>automerge::{sync::SyncDoc, Change, Prop, ReadDoc, Value, VecOpObserver, ROOT};
+<span class="kw">use </span>automerge::{sync::SyncDoc, AutoCommit, Change, Prop, ReadDoc, Value, VecOpObserver, ROOT};
 <span class="kw">use </span>js_sys::{Array, Function, Object, Uint8Array};
 <span class="kw">use </span>serde::ser::Serialize;
 <span class="kw">use </span>std::borrow::Cow;
@@ -1357,8 +1352,6 @@
           web_sys::console::log_1(<span class="kw-2">&amp;</span><span class="macro">format!</span>( $( <span class="macro-nonterminal">$t </span>)* ).into());
     };
 }
-
-<span class="kw">type </span>AutoCommit = am::AutoCommitWithObs&lt;Observed&lt;ToggleObserver&lt;VecOpObserver&gt;&gt;&gt;;
 
 <span class="attr">#[cfg(feature = <span class="string">&quot;wee_alloc&quot;</span>)]
 #[global_allocator]
@@ -1404,9 +1397,7 @@
         actor: <span class="prelude-ty">Option</span>&lt;String&gt;,
         text_rep: TextRepresentation,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Automerge, error::BadActorId&gt; {
-        <span class="kw">let </span><span class="kw-2">mut </span>doc = AutoCommit::default()
-            .with_observer(ToggleObserver::default().with_text_rep(text_rep.into()));
-        doc.observer().set_text_rep(text_rep.into());
+        <span class="kw">let </span><span class="kw-2">mut </span>doc = AutoCommit::default().with_text_rep(text_rep.into());
         <span class="kw">if let </span><span class="prelude-val">Some</span>(a) = actor {
             <span class="kw">let </span>a = automerge::ActorId::from(hex::decode(a)<span class="question-mark">?</span>.to_vec());
             doc.set_actor(a);
@@ -1849,17 +1840,6 @@
         <span class="prelude-val">Ok</span>(old_freeze.into())
     }
 
-    <span class="attr">#[wasm_bindgen(js_name = enablePatches)]
-    </span><span class="kw">pub fn </span>enable_patches(<span class="kw-2">&amp;mut </span><span class="self">self</span>, enable: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, JsValue&gt; {
-        <span class="kw">let </span>enable = enable
-            .as_bool()
-            .ok_or_else(|| to_js_err(<span class="string">&quot;must pass a bool to enablePatches&quot;</span>))<span class="question-mark">?</span>;
-        <span class="kw">let </span>heads = <span class="self">self</span>.doc.get_heads();
-        <span class="kw">let </span>old_enabled = <span class="self">self</span>.doc.observer().enable(enable, heads);
-        <span class="self">self</span>.doc.observer().set_text_rep(<span class="self">self</span>.text_rep.into());
-        <span class="prelude-val">Ok</span>(old_enabled.into())
-    }
-
     <span class="attr">#[wasm_bindgen(js_name = registerDatatype)]
     </span><span class="kw">pub fn </span>register_datatype(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
@@ -1909,8 +1889,8 @@
         <span class="kw">let </span><span class="kw-2">mut </span>object = object
             .dyn_into::&lt;Object&gt;()
             .map_err(|<span class="kw">_</span>| error::ApplyPatch::NotObjectd)<span class="question-mark">?</span>;
-        <span class="kw">let </span>end_heads = <span class="self">self</span>.doc.get_heads();
-        <span class="kw">let </span>(patches, _begin_heads) = <span class="self">self</span>.doc.observer().take_patches(end_heads);
+
+        <span class="kw">let </span>patches = <span class="self">self</span>.doc.diff_incremental::&lt;VecOpObserver&gt;().take_patches();
 
         <span class="comment">// even if there are no patches we may need to update the meta object
         // which requires that we update the object too
@@ -1937,8 +1917,7 @@
         // committed.
         // If we pop the patches then we won&#39;t be able to revert them.
 
-        </span><span class="kw">let </span>heads = <span class="self">self</span>.doc.get_heads();
-        <span class="kw">let </span>(patches, _heads) = <span class="self">self</span>.doc.observer().take_patches(heads);
+        </span><span class="kw">let </span>patches = <span class="self">self</span>.doc.diff_incremental::&lt;VecOpObserver&gt;().take_patches();
         <span class="kw">let </span>result = Array::new();
         <span class="kw">for </span>p <span class="kw">in </span>patches {
             result.push(<span class="kw-2">&amp;</span>interop::JsPatch(p).try_into()<span class="question-mark">?</span>);
@@ -1946,11 +1925,26 @@
         <span class="prelude-val">Ok</span>(result)
     }
 
+    <span class="attr">#[wasm_bindgen(js_name = truncatePatches)]
+    </span><span class="kw">pub fn </span>truncate_patches(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <span class="comment">// FIXME - im using different names / analogies here
+        </span><span class="self">self</span>.doc.update_diff_cursor();
+    }
+
+    <span class="attr">#[wasm_bindgen(js_name = resetPatches)]
+    </span><span class="kw">pub fn </span>reset_patches(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <span class="comment">// FIXME - im using different names / analogies here
+        </span><span class="self">self</span>.doc.reset_diff_cursor();
+    }
+
     <span class="kw">pub fn </span>diff(<span class="kw-2">&amp;mut </span><span class="self">self</span>, before: Array, after: Array) -&gt; <span class="prelude-ty">Result</span>&lt;Array, error::Diff&gt; {
         <span class="kw">let </span>before = get_heads(<span class="prelude-val">Some</span>(before))<span class="question-mark">?</span>.unwrap();
         <span class="kw">let </span>after = get_heads(<span class="prelude-val">Some</span>(after))<span class="question-mark">?</span>.unwrap();
 
-        <span class="kw">let </span>patches = <span class="self">self</span>.doc.diff(<span class="kw-2">&amp;</span>before, <span class="kw-2">&amp;</span>after)<span class="question-mark">?</span>.take_patches(<span class="macro">vec!</span>[]).<span class="number">0</span>;
+        <span class="kw">let </span>patches = <span class="self">self
+            </span>.doc
+            .diff(<span class="kw-2">&amp;</span>before, <span class="kw-2">&amp;</span>after, VecOpObserver::default())
+            .take_patches();
         <span class="prelude-val">Ok</span>(interop::JsPatches(patches).try_into()<span class="question-mark">?</span>)
     }
 
@@ -2112,9 +2106,8 @@
     ) -&gt; <span class="prelude-ty">Result</span>&lt;JsValue, error::Materialize&gt; {
         <span class="kw">let </span>(obj, obj_type) = <span class="self">self</span>.import(obj).unwrap_or((ROOT, am::ObjType::Map));
         <span class="kw">let </span>heads = get_heads(heads)<span class="question-mark">?</span>;
-        <span class="kw">let </span>current_heads = <span class="self">self</span>.doc.get_heads();
-        <span class="kw">let </span>_patches = <span class="self">self</span>.doc.observer().take_patches(current_heads); <span class="comment">// throw away patches
-        </span><span class="prelude-val">Ok</span>(<span class="self">self</span>.export_object(<span class="kw-2">&amp;</span>obj, obj_type.into(), heads.as_ref(), <span class="kw-2">&amp;</span>meta)<span class="question-mark">?</span>)
+        <span class="self">self</span>.doc.update_diff_cursor();
+        <span class="prelude-val">Ok</span>(<span class="self">self</span>.export_object(<span class="kw-2">&amp;</span>obj, obj_type.into(), heads.as_ref(), <span class="kw-2">&amp;</span>meta)<span class="question-mark">?</span>)
     }
 
     <span class="attr">#[wasm_bindgen(js_name = emptyChange)]
@@ -2214,8 +2207,7 @@
     } <span class="kw">else </span>{
         TextRepresentation::Array
     };
-    <span class="kw">let </span><span class="kw-2">mut </span>doc = am::AutoCommitWithObs::&lt;UnObserved&gt;::load(<span class="kw-2">&amp;</span>data)<span class="question-mark">?
-        </span>.with_observer(ToggleObserver::default().with_text_rep(text_rep.into()));
+    <span class="kw">let </span><span class="kw-2">mut </span>doc = am::AutoCommit::load(<span class="kw-2">&amp;</span>data)<span class="question-mark">?</span>.with_text_rep(text_rep.into());
     <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = actor {
         <span class="kw">let </span>actor =
             automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)<span class="question-mark">?</span>.to_vec());

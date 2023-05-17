@@ -1682,7 +1682,6 @@
 <a href="#1681" id="1681">1681</a>
 <a href="#1682" id="1682">1682</a>
 <a href="#1683" id="1683">1683</a>
-<a href="#1684" id="1684">1684</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error::InsertObject;
 <span class="kw">use </span><span class="kw">crate</span>::value::Datatype;
 <span class="kw">use crate</span>::{Automerge, TextRepresentation};
@@ -2101,8 +2100,7 @@
                     .iter()
                     .map(|h| JsValue::from_str(<span class="kw-2">&amp;</span>hex::encode(h.<span class="number">0</span>)))
                     .collect();
-                <span class="comment">// FIXME - the clone and the unwrap here shouldnt be needed - look at into_bytes()
-                </span><span class="kw">let </span>bloom = Uint8Array::from(have.bloom.to_bytes().as_slice());
+                <span class="kw">let </span>bloom = Uint8Array::from(have.bloom.to_bytes().as_slice());
                 <span class="kw">let </span>obj: JsValue = Object::new().into();
                 <span class="comment">// we can unwrap here b/c we created the object and know its not frozen
                 </span>Reflect::set(<span class="kw-2">&amp;</span>obj, <span class="kw-2">&amp;</span><span class="string">&quot;lastSync&quot;</span>.into(), <span class="kw-2">&amp;</span>last_sync.into()).unwrap();

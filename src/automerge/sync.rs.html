@@ -962,6 +962,11 @@
 <a href="#961" id="961">961</a>
 <a href="#962" id="962">962</a>
 <a href="#963" id="963">963</a>
+<a href="#964" id="964">964</a>
+<a href="#965" id="965">965</a>
+<a href="#966" id="966">966</a>
+<a href="#967" id="967">967</a>
+<a href="#968" id="968">968</a>
 </pre><pre class="rust"><code><span class="doccomment">//! # Sync Protocol
 //!
 //! The sync protocol is based on this paper:
@@ -1036,6 +1041,7 @@
 <span class="kw">use </span>std::collections::{HashMap, HashSet};
 
 <span class="kw">use crate</span>::{
+    history::History,
     storage::{parse, Change <span class="kw">as </span>StoredChange, ReadChangeOpError},
     Automerge, AutomergeError, Change, ChangeHash, OpObserver, ReadDoc,
 };
@@ -1172,7 +1178,8 @@
         sync_state: <span class="kw-2">&amp;mut </span>State,
         message: Message,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
-        <span class="self">self</span>.do_receive_sync_message::&lt;()&gt;(sync_state, message, <span class="prelude-val">None</span>)
+        <span class="kw">let </span><span class="kw-2">mut </span>history = History::innactive();
+        <span class="self">self</span>.receive_sync_message_inner(sync_state, message, <span class="kw-2">&amp;mut </span>history)
     }
 
     <span class="kw">fn </span>receive_sync_message_with&lt;Obs: OpObserver&gt;(
@@ -1181,7 +1188,10 @@
         message: Message,
         op_observer: <span class="kw-2">&amp;mut </span>Obs,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
-        <span class="self">self</span>.do_receive_sync_message(sync_state, message, <span class="prelude-val">Some</span>(op_observer))
+        <span class="kw">let </span><span class="kw-2">mut </span>history = History::new(!<span class="self">self</span>.is_empty());
+        <span class="self">self</span>.receive_sync_message_inner(sync_state, message, <span class="kw-2">&amp;mut </span>history)<span class="question-mark">?</span>;
+        <span class="self">self</span>.observe_history(<span class="prelude-val">Some</span>(op_observer), history);
+        <span class="prelude-val">Ok</span>(())
     }
 }
 
@@ -1268,11 +1278,11 @@
         }
     }
 
-    <span class="kw">fn </span>do_receive_sync_message&lt;Obs: OpObserver&gt;(
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>receive_sync_message_inner(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         sync_state: <span class="kw-2">&amp;mut </span>State,
         message: Message,
-        op_observer: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span>Obs&gt;,
+        history: <span class="kw-2">&amp;mut </span>History,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="kw">let </span>before_heads = <span class="self">self</span>.get_heads();
 
@@ -1285,7 +1295,7 @@
 
         <span class="kw">let </span>changes_is_empty = message_changes.is_empty();
         <span class="kw">if </span>!changes_is_empty {
-            <span class="self">self</span>.apply_changes_with(message_changes, op_observer)<span class="question-mark">?</span>;
+            <span class="self">self</span>.apply_changes_inner(message_changes, history)<span class="question-mark">?</span>;
             sync_state.shared_heads = advance_heads(
                 <span class="kw-2">&amp;</span>before_heads.iter().collect(),
                 <span class="kw-2">&amp;</span><span class="self">self</span>.get_heads().into_iter().collect(),

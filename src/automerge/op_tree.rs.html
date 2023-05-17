@@ -612,17 +612,13 @@
 <a href="#611" id="611">611</a>
 <a href="#612" id="612">612</a>
 <a href="#613" id="613">613</a>
-<a href="#614" id="614">614</a>
-<a href="#615" id="615">615</a>
-<a href="#616" id="616">616</a>
-<a href="#617" id="617">617</a>
-<a href="#618" id="618">618</a>
-</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::iter::TopOps;
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::history::History;
+<span class="kw">use </span><span class="kw">crate</span>::iter::TopOps;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="kw">crate</span>::op_set::OpSetMetadata;
 <span class="kw">use crate</span>::{
     clock::Clock,
     query::{<span class="self">self</span>, ChangeVisibility, Index, QueryResult, TreeQuery},
-    Automerge, OpObserver,
+    Automerge,
 };
 <span class="kw">use crate</span>::{
     types::{Key, ListEncoding, ObjId, ObjMeta, Op, OpId, Prop},
@@ -706,15 +702,7 @@
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; FoundOpWithObserver&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>observe&lt;Obs: OpObserver&gt;(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        obj: <span class="kw-2">&amp;</span>ObjMeta,
-        op: <span class="kw-2">&amp;</span>Op,
-        doc: <span class="kw-2">&amp;</span>Automerge,
-        observer: <span class="kw-2">&amp;mut </span>Obs,
-    ) {
-        <span class="kw">let </span>ex_obj = doc.ops().id_to_exid(obj.id.<span class="number">0</span>);
-
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>observe(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>ObjMeta, op: <span class="kw-2">&amp;</span>Op, doc: <span class="kw-2">&amp;</span>Automerge, history: <span class="kw-2">&amp;mut </span>History) {
         <span class="kw">if </span>op.insert {
             <span class="kw">if </span>op.is_mark() {
                 <span class="kw">if let </span>OpType::MarkEnd(<span class="kw">_</span>) = op.action {
@@ -722,13 +710,12 @@
                         <span class="kw-2">&amp;</span>obj.id,
                         query::SeekMark::new(op.id.prev(), <span class="self">self</span>.pos, obj.encoding),
                     );
-                    observer.mark(doc, ex_obj, q.marks.into_iter());
+                    history.mark(obj.id, <span class="kw-2">&amp;</span>q.marks);
                 }
             } <span class="kw">else if </span>obj.typ == ObjType::Text {
-                observer.splice_text(doc, ex_obj, <span class="self">self</span>.index, op.to_str());
+                history.splice(obj.id, <span class="self">self</span>.index, op.to_str());
             } <span class="kw">else </span>{
-                <span class="kw">let </span>value = (op.value(), doc.ops().id_to_exid(op.id));
-                observer.insert(doc, ex_obj, <span class="self">self</span>.index, value, <span class="bool-val">false</span>);
+                history.insert(obj.id, <span class="self">self</span>.index, op.value().into(), op.id, <span class="bool-val">false</span>);
             }
             <span class="kw">return</span>;
         }
@@ -741,42 +728,45 @@
         <span class="kw">if </span>op.is_delete() {
             <span class="kw">match </span>(<span class="self">self</span>.before, <span class="self">self</span>.overwritten, <span class="self">self</span>.after) {
                 (<span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(over), <span class="prelude-val">None</span>) =&gt; <span class="kw">match </span>key {
-                    Prop::Map(k) =&gt; observer.delete_map(doc, ex_obj, <span class="kw-2">&amp;</span>k),
-                    Prop::Seq(index) =&gt; {
-                        observer.delete_seq(doc, ex_obj, index, over.width(obj.encoding))
-                    }
+                    Prop::Map(k) =&gt; history.delete_map(obj.id, <span class="kw-2">&amp;</span>k),
+                    Prop::Seq(index) =&gt; history.delete_seq(obj.id, index, over.width(obj.encoding)),
                 },
                 (<span class="prelude-val">Some</span>(before), <span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="prelude-val">None</span>) =&gt; {
-                    <span class="kw">let </span>value = (before.value(), doc.ops().id_to_exid(before.id));
                     <span class="kw">let </span>conflict = <span class="self">self</span>.num_before &gt; <span class="number">1</span>;
-                    observer.expose(doc, ex_obj, key, value, conflict);
+                    history.put(
+                        obj.id,
+                        <span class="kw-2">&amp;</span>key,
+                        before.value().into(),
+                        before.id,
+                        conflict,
+                        <span class="bool-val">true</span>,
+                    );
                 }
                 <span class="kw">_ </span>=&gt; { <span class="comment">/* do nothing */ </span>}
             }
         } <span class="kw">else if let </span><span class="prelude-val">Some</span>(value) = op.get_increment_value() {
-            <span class="comment">// only observe this increment if the counter is visible, i.e. the counter&#39;s
-            </span><span class="kw">if </span><span class="self">self</span>.after.is_none() {
+            <span class="kw">if </span><span class="self">self</span>.after.is_none() {
                 <span class="kw">if let </span><span class="prelude-val">Some</span>(counter) = <span class="self">self</span>.overwritten {
                     <span class="kw">if </span>op.overwrites(counter) {
-                        observer.increment(doc, ex_obj, key, (value, doc.ops().id_to_exid(op.id)));
+                        history.increment(obj.id, <span class="kw-2">&amp;</span>key, value, op.id);
                     }
                 }
             }
         } <span class="kw">else </span>{
             <span class="kw">let </span>conflict = <span class="self">self</span>.before.is_some();
-            <span class="kw">let </span>value = (op.value(), doc.ops().id_to_exid(op.id));
-            <span class="kw">if </span>op.is_list_op()
+            <span class="comment">//let value = (op.value(), doc.ops().id_to_exid(op.id));
+            </span><span class="kw">if </span>op.is_list_op()
                 &amp;&amp; <span class="self">self</span>.overwritten.is_none()
                 &amp;&amp; <span class="self">self</span>.before.is_none()
                 &amp;&amp; <span class="self">self</span>.after.is_none()
             {
-                observer.insert(doc, ex_obj, <span class="self">self</span>.index, value, conflict);
+                history.insert(obj.id, <span class="self">self</span>.index, op.value().into(), op.id, conflict);
             } <span class="kw">else if </span><span class="self">self</span>.after.is_some() {
                 <span class="kw">if </span><span class="self">self</span>.before.is_none() {
-                    observer.flag_conflict(doc, ex_obj, key);
+                    history.flag_conflict(obj.id, <span class="kw-2">&amp;</span>key);
                 }
             } <span class="kw">else </span>{
-                observer.put(doc, ex_obj, key, value, conflict);
+                history.put(obj.id, <span class="kw-2">&amp;</span>key, op.value().into(), op.id, conflict, <span class="bool-val">false</span>);
             }
         }
     }

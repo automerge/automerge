@@ -73,6 +73,14 @@
 <a href="#72" id="72">72</a>
 <a href="#73" id="73">73</a>
 <a href="#74" id="74">74</a>
+<a href="#75" id="75">75</a>
+<a href="#76" id="76">76</a>
+<a href="#77" id="77">77</a>
+<a href="#78" id="78">78</a>
+<a href="#79" id="79">79</a>
+<a href="#80" id="80">80</a>
+<a href="#81" id="81">81</a>
+<a href="#82" id="82">82</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::OpTreeIter;
 <span class="kw">use </span><span class="kw">crate</span>::types::{Clock, Key, Op};
 
@@ -85,6 +93,11 @@
     clock: <span class="prelude-ty">Option</span>&lt;Clock&gt;,
     key: <span class="prelude-ty">Option</span>&lt;Key&gt;,
     last_op: <span class="prelude-ty">Option</span>&lt;(usize, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op)&gt;,
+}
+
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>TopOp&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) conflict: bool,
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; TopOps&lt;<span class="lifetime">&#39;a</span>&gt; {
@@ -102,10 +115,10 @@
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; Iterator <span class="kw">for </span>TopOps&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">type </span>Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op;
+    <span class="kw">type </span>Item = TopOp&lt;<span class="lifetime">&#39;a</span>&gt;;
 
     <span class="kw">fn </span>next(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>::Item&gt; {
-        <span class="kw">let </span><span class="kw-2">mut </span>result = <span class="prelude-val">None</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>result_op = <span class="prelude-val">None</span>;
         <span class="kw">loop </span>{
             <span class="kw">if let </span><span class="prelude-val">Some</span>(op) = <span class="self">self</span>.iter.next() {
                 <span class="kw">let </span>key = op.elemid_or_key();
@@ -118,7 +131,7 @@
                         <span class="self">self</span>.num_ops += <span class="number">1</span>;
                     }
                     <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; {
-                        result = <span class="self">self</span>.last_op.take().map(|(_op_pos, op)| op);
+                        result_op = <span class="self">self</span>.last_op.take().map(|(_op_pos, op)| op);
                         <span class="kw">if </span>visible {
                             <span class="self">self</span>.last_op = <span class="prelude-val">Some</span>((<span class="self">self</span>.pos, op));
                         }
@@ -136,15 +149,18 @@
                     }
                 }
                 <span class="self">self</span>.pos += <span class="number">1</span>;
-                <span class="kw">if </span>result.is_some() {
+                <span class="kw">if </span>result_op.is_some() {
                     <span class="kw">break</span>;
                 }
             } <span class="kw">else </span>{
-                result = <span class="self">self</span>.last_op.take().map(|(_op_pos, op)| op);
+                result_op = <span class="self">self</span>.last_op.take().map(|(_op_pos, op)| op);
                 <span class="kw">break</span>;
             }
         }
-        result
+        result_op.map(|op| TopOp {
+            op,
+            conflict: <span class="self">self</span>.num_ops &gt; <span class="number">1</span>,
+        })
     }
 }
 </code></pre></div>

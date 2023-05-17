@@ -110,11 +110,33 @@
 <a href="#109" id="109">109</a>
 <a href="#110" id="110">110</a>
 <a href="#111" id="111">111</a>
-</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::change::LoadError <span class="kw">as </span>LoadChangeError;
-<span class="kw">use </span><span class="kw">crate</span>::storage::load::Error <span class="kw">as </span>LoadError;
+<a href="#112" id="112">112</a>
+<a href="#113" id="113">113</a>
+<a href="#114" id="114">114</a>
+<a href="#115" id="115">115</a>
+<a href="#116" id="116">116</a>
+<a href="#117" id="117">117</a>
+<a href="#118" id="118">118</a>
+<a href="#119" id="119">119</a>
+<a href="#120" id="120">120</a>
+<a href="#121" id="121">121</a>
+<a href="#122" id="122">122</a>
+<a href="#123" id="123">123</a>
+<a href="#124" id="124">124</a>
+<a href="#125" id="125">125</a>
+<a href="#126" id="126">126</a>
+<a href="#127" id="127">127</a>
+<a href="#128" id="128">128</a>
+<a href="#129" id="129">129</a>
+<a href="#130" id="130">130</a>
+<a href="#131" id="131">131</a>
+<a href="#132" id="132">132</a>
+<a href="#133" id="133">133</a>
+<a href="#134" id="134">134</a>
+</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::storage::load::Error <span class="kw">as </span>LoadError;
 <span class="kw">use </span><span class="kw">crate</span>::types::{ActorId, ScalarValue};
 <span class="kw">use </span><span class="kw">crate</span>::value::DataType;
-<span class="kw">use crate</span>::{ChangeHash, Cursor, ObjType};
+<span class="kw">use crate</span>::{ChangeHash, Cursor, LoadChangeError, ObjType, PatchAction};
 <span class="kw">use </span>thiserror::Error;
 
 <span class="attr">#[derive(Error, Debug)]
@@ -170,6 +192,8 @@
     </span>NonChangeCompressed,
     <span class="attr">#[error(<span class="string">&quot;id was not an object id&quot;</span>)]
     </span>NotAnObject,
+    <span class="attr">#[error(transparent)]
+    </span>HydrateError(<span class="attr">#[from] </span>HydrateError),
 }
 
 <span class="kw">impl </span>PartialEq <span class="kw">for </span>AutomergeError {
@@ -220,6 +244,28 @@
     </span>UnknownAction(u64),
     <span class="attr">#[error(<span class="string">&quot;non numeric argument for inc op&quot;</span>)]
     </span>NonNumericInc,
+}
+
+<span class="attr">#[derive(Error, Debug)]
+</span><span class="kw">pub enum </span>HydrateError {
+    <span class="comment">//#[error(transparent)]
+    //ChangeGraph(#[from] crate::change_graph::MissingDep),
+    </span><span class="attr">#[error(<span class="string">&quot;general failure&quot;</span>)]
+    </span>Fail,
+    <span class="attr">#[error(<span class="string">&quot;invalid index {0} for sequence&quot;</span>)]
+    </span>InvalidIndex(usize),
+    <span class="attr">#[error(<span class="string">&quot;invalid key {0} for map&quot;</span>)]
+    </span>InvalidKey(String),
+    <span class="attr">#[error(<span class="string">&quot;increment of a non-counter&quot;</span>)]
+    </span>BadIncrement,
+    <span class="attr">#[error(<span class="string">&quot;invalid op applied to map&quot;</span>)]
+    </span>InvalidMapOp,
+    <span class="attr">#[error(<span class="string">&quot;invalid op appied to list&quot;</span>)]
+    </span>InvalidListOp,
+    <span class="attr">#[error(<span class="string">&quot;invalid op applied to map: {0}&quot;</span>)]
+    </span>InvalidTextOp(PatchAction),
+    <span class="attr">#[error(<span class="string">&quot;invalid prop in patch: {0}&quot;</span>)]
+    </span>ApplyInvalidProp(PatchAction),
 }
 </code></pre></div>
 </section></main><div id="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.69.0 (84c898d65 2023-04-16)" data-search-js="search-8a59a8356673ec1f.js" data-settings-js="settings-f0c5c39777a9a2f6.js" data-settings-css="settings-0bcba95ff279c1db.css" ></div></body></html>

@@ -758,18 +758,45 @@
 <a href="#757" id="757">757</a>
 <a href="#758" id="758">758</a>
 <a href="#759" id="759">759</a>
+<a href="#760" id="760">760</a>
+<a href="#761" id="761">761</a>
+<a href="#762" id="762">762</a>
+<a href="#763" id="763">763</a>
+<a href="#764" id="764">764</a>
+<a href="#765" id="765">765</a>
+<a href="#766" id="766">766</a>
+<a href="#767" id="767">767</a>
+<a href="#768" id="768">768</a>
+<a href="#769" id="769">769</a>
+<a href="#770" id="770">770</a>
+<a href="#771" id="771">771</a>
+<a href="#772" id="772">772</a>
+<a href="#773" id="773">773</a>
+<a href="#774" id="774">774</a>
+<a href="#775" id="775">775</a>
+<a href="#776" id="776">776</a>
+<a href="#777" id="777">777</a>
+<a href="#778" id="778">778</a>
+<a href="#779" id="779">779</a>
+<a href="#780" id="780">780</a>
+<a href="#781" id="781">781</a>
+<a href="#782" id="782">782</a>
+<a href="#783" id="783">783</a>
+<a href="#784" id="784">784</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
+<span class="kw">use </span><span class="kw">crate</span>::history::History;
+<span class="kw">use </span><span class="kw">crate</span>::hydrate;
 <span class="kw">use </span><span class="kw">crate</span>::iter::{Keys, ListRange, MapRange, Values};
 <span class="kw">use </span><span class="kw">crate</span>::marks::{ExpandMark, Mark};
-<span class="kw">use </span><span class="kw">crate</span>::op_observer::{BranchableObserver, OpObserver};
+<span class="kw">use </span><span class="kw">crate</span>::op_observer::{OpObserver, TextRepresentation};
 <span class="kw">use </span><span class="kw">crate</span>::sync::SyncDoc;
 <span class="kw">use </span><span class="kw">crate</span>::transaction::{CommitOptions, Transactable};
 <span class="kw">use crate</span>::{sync, ObjType, Parents, ReadDoc, ScalarValue};
 <span class="kw">use crate</span>::{
-    transaction::{Observation, Observed, TransactionInner, UnObserved},
-    ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor, Prop, Value,
+    transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor,
+    Prop, Value,
 };
 
 <span class="doccomment">/// An automerge document that automatically manages transactions.
@@ -802,42 +829,31 @@
 ///
 /// To synchronise call [`Self::sync`] which returns an implementation of [`SyncDoc`]
 ///
-/// ## Observers
-///
-/// An `AutoCommit` can optionally manage an [`OpObserver`]. [`Self::new`] will return a document
-/// with no observer but you can set an observer using [`Self::with_observer`]. The observer must
-/// implement both [`OpObserver`] and [`BranchableObserver`]. If you have an observed autocommit
-/// then you can obtain a mutable reference to the observer with [`Self::observer`]
 </span><span class="attr">#[derive(Debug, Clone)]
-</span><span class="kw">pub struct </span>AutoCommitWithObs&lt;Obs: Observation&gt; {
-    doc: Automerge,
-    transaction: <span class="prelude-ty">Option</span>&lt;(Obs, TransactionInner)&gt;,
-    observation: Obs,
+</span><span class="kw">pub struct </span>AutoCommit {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) doc: Automerge,
+    transaction: <span class="prelude-ty">Option</span>&lt;(History, TransactionInner)&gt;,
+    history: History,
+    diff_cursor: Vec&lt;ChangeHash&gt;,
 }
 
 <span class="doccomment">/// An autocommit document with no observer
 ///
-/// See [`AutoCommitWithObs`]
-</span><span class="kw">pub type </span>AutoCommit = AutoCommitWithObs&lt;UnObserved&gt;;
-
-<span class="kw">impl</span>&lt;O: OpObserver + BranchableObserver + Default&gt; Default <span class="kw">for </span>AutoCommitWithObs&lt;Observed&lt;O&gt;&gt; {
+/// See [`AutoCommit`]
+</span><span class="kw">impl </span>Default <span class="kw">for </span>AutoCommit {
     <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
-        <span class="kw">let </span>op_observer = O::default();
-        AutoCommitWithObs {
+        AutoCommit {
             doc: Automerge::new(),
             transaction: <span class="prelude-val">None</span>,
-            observation: Observed::new(op_observer),
+            history: History::innactive(),
+            diff_cursor: Vec::new(),
         }
     }
 }
 
 <span class="kw">impl </span>AutoCommit {
     <span class="kw">pub fn </span>new() -&gt; AutoCommit {
-        AutoCommitWithObs {
-            doc: Automerge::new(),
-            transaction: <span class="prelude-val">None</span>,
-            observation: UnObserved,
-        }
+        AutoCommit::default()
     }
 
     <span class="kw">pub fn </span>load(data: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, AutomergeError&gt; {
@@ -845,38 +861,122 @@
         <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
             doc,
             transaction: <span class="prelude-val">None</span>,
-            observation: UnObserved,
+            history: History::innactive(),
+            diff_cursor: Vec::new(),
         })
     }
-}
 
-<span class="kw">impl</span>&lt;Obs: OpObserver + BranchableObserver&gt; AutoCommitWithObs&lt;Observed&lt;Obs&gt;&gt; {
-    <span class="kw">pub fn </span>observer(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;mut </span>Obs {
+    <span class="doccomment">/// Erases the diff cursor created by [`Self::update_diff_cursor`] and no
+    /// longer indexes changes to the document.
+    </span><span class="kw">pub fn </span>reset_diff_cursor(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
         <span class="self">self</span>.ensure_transaction_closed();
-        <span class="self">self</span>.observation.observer()
+        <span class="self">self</span>.history = History::innactive();
+        <span class="self">self</span>.diff_cursor = Vec::new();
     }
 
-    <span class="kw">pub fn </span>diff(
+    <span class="doccomment">/// Sets the [`Self::diff_cursor`] to current heads of the document and will begin
+    /// building an index with every change moving forward.
+    ///
+    /// If [`Self::diff`] is called with [`Self::diff_cursor`] as `before` and
+    /// [`Self::get_heads`] as `after` - the index will be used
+    ///
+    /// If the cursor is no longer needed it can be reset with
+    /// [`Self::reset_diff_cursor`]
+    </span><span class="kw">pub fn </span>update_diff_cursor(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <span class="self">self</span>.ensure_transaction_closed();
+        <span class="self">self</span>.history.set_active(<span class="bool-val">true</span>);
+        <span class="self">self</span>.history.truncate();
+        <span class="self">self</span>.diff_cursor = <span class="self">self</span>.doc.get_heads();
+    }
+
+    <span class="doccomment">/// Returns the cursor set by [`Self::update_diff_cursor`]
+    </span><span class="kw">pub fn </span>diff_cursor(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;ChangeHash&gt; {
+        <span class="self">self</span>.diff_cursor.clone()
+    }
+
+    <span class="doccomment">/// Generates a diff from `before` to `after` for the given observer.
+    ///
+    /// By default the diff requires a sequental scan of all the ops in the doc.
+    ///
+    /// To do a fast indexed diff `before` must equal [`Self::diff_cursor`] and
+    /// `after` must equal [`Self::get_heads`]. The diff cursor is managed with
+    /// [`Self::update_diff_cursor`] and [`Self::reset_diff_cursor`]
+    ///
+    /// Managing the diff index has a small but non-zero overhead.  It should be
+    /// disabled if no longer needed.  If a signifigantly large change is applied
+    /// to the document it may be faster to reset the index before applying it,
+    /// doing an unindxed diff afterwards and then reenable the index.
+    ///
+    /// # Arguments
+    ///
+    /// * `before` - heads from [`Self::get_heads()`] at beginning point in the documents history
+    /// * `after` - heads from [`Self::get_heads()`] at ending point in the documents history.
+    /// #           If `None` is passed the current heads will be used.
+    /// * `obs` - An [`OpObserver`] to observe the changes from before to after.
+    ///
+    /// This function returns the observer passed in for convience
+    ///
+    /// Note: `before` and `after` do not have to be chronological.  Document state can move backward.
+    /// Normal use might look like:
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use automerge::{ AutoCommit, VecOpObserver };
+    ///
+    /// let mut doc = AutoCommit::new(); // or AutoCommit::load(data)
+    /// // make some changes - use and update the index
+    /// let heads = doc.get_heads();
+    /// let diff_cursor = doc.diff_cursor();
+    /// let patches = doc.diff(&amp;diff_cursor, &amp;heads, VecOpObserver::default()).take_patches();
+    /// doc.update_diff_cursor();
+    /// ```
+    ///
+    /// See [`Self::diff_incremental`] for encapsulating this pattern.
+    </span><span class="kw">pub fn </span>diff&lt;Obs: OpObserver, As: AsMut&lt;Obs&gt;&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         before: <span class="kw-2">&amp;</span>[ChangeHash],
         after: <span class="kw-2">&amp;</span>[ChangeHash],
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;Obs, AutomergeError&gt; {
+        <span class="kw-2">mut </span>obs: As,
+    ) -&gt; As {
         <span class="self">self</span>.ensure_transaction_closed();
-
-        <span class="kw">let </span>observer = <span class="self">self</span>.observation.observer();
-        <span class="kw">let </span><span class="kw-2">mut </span>branch = observer.explicit_branch();
-        <span class="self">self</span>.doc.observe_diff(before, after, <span class="kw-2">&amp;mut </span>branch)<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(branch)
+        <span class="kw">let </span>heads = <span class="self">self</span>.doc.get_heads();
+        <span class="kw">if </span>after == heads &amp;&amp; before == <span class="self">self</span>.diff_cursor &amp;&amp; <span class="self">self</span>.history.is_active() {
+            <span class="self">self</span>.history.observe(obs.as_mut(), <span class="kw-2">&amp;</span><span class="self">self</span>.doc, <span class="prelude-val">None</span>);
+        } <span class="kw">else if </span>before.is_empty() &amp;&amp; after == heads {
+            <span class="self">self</span>.doc.observe_current_state(obs.as_mut());
+        } <span class="kw">else </span>{
+            <span class="self">self</span>.doc.observe_diff(before, after, obs.as_mut());
+        }
+        obs
     }
-}
 
-<span class="kw">impl</span>&lt;Obs: Observation + Clone&gt; AutoCommitWithObs&lt;Obs&gt; {
+    <span class="doccomment">/// This is a convience function that encapsulates the following common pattern
+    /// ```
+    /// use automerge::{AutoCommit, VecOpObserver};
+    /// let mut doc = AutoCommit::new();
+    /// // make some changes
+    /// let heads = doc.get_heads();
+    /// let diff_cursor = doc.diff_cursor();
+    /// let observer = doc.diff(&amp;diff_cursor, &amp;heads, VecOpObserver::default());
+    /// doc.update_diff_cursor();
+    /// ```
+    </span><span class="kw">pub fn </span>diff_incremental&lt;Obs: OpObserver + Default + AsMut&lt;Obs&gt;&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Obs {
+        <span class="self">self</span>.ensure_transaction_closed();
+        <span class="kw">let </span>heads = <span class="self">self</span>.doc.get_heads();
+        <span class="kw">let </span>diff_cursor = <span class="self">self</span>.diff_cursor();
+        <span class="kw">let </span>observer = <span class="self">self</span>.diff(<span class="kw-2">&amp;</span>diff_cursor, <span class="kw-2">&amp;</span>heads, Obs::default());
+        <span class="self">self</span>.update_diff_cursor();
+        observer
+    }
+
     <span class="kw">pub fn </span>fork(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
         <span class="self">self</span>.ensure_transaction_closed();
         <span class="self">Self </span>{
             doc: <span class="self">self</span>.doc.fork(),
             transaction: <span class="self">self</span>.transaction.clone(),
-            observation: <span class="self">self</span>.observation.clone(),
+            history: <span class="self">self</span>.history.clone(),
+            diff_cursor: <span class="self">self</span>.diff_cursor.clone(),
         }
     }
 
@@ -885,23 +985,9 @@
         <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
             doc: <span class="self">self</span>.doc.fork_at(heads)<span class="question-mark">?</span>,
             transaction: <span class="self">self</span>.transaction.clone(),
-            observation: <span class="self">self</span>.observation.clone(),
+            history: <span class="self">self</span>.history.clone(),
+            diff_cursor: <span class="self">self</span>.diff_cursor.clone(),
         })
-    }
-}
-
-<span class="kw">impl</span>&lt;Obs: Observation&gt; AutoCommitWithObs&lt;Obs&gt; {
-    <span class="kw">pub fn </span>with_observer&lt;Obs2: OpObserver + BranchableObserver&gt;(
-        <span class="self">self</span>,
-        op_observer: Obs2,
-    ) -&gt; AutoCommitWithObs&lt;Observed&lt;Obs2&gt;&gt; {
-        AutoCommitWithObs {
-            doc: <span class="self">self</span>.doc,
-            transaction: <span class="self">self
-                </span>.transaction
-                .map(|(<span class="kw">_</span>, t)| (Observed::new(op_observer.branch()), t)),
-            observation: Observed::new(op_observer),
-        }
     }
 
     <span class="doccomment">/// Get the inner document.
@@ -931,13 +1017,13 @@
         <span class="kw">if </span><span class="self">self</span>.transaction.is_none() {
             <span class="kw">let </span>args = <span class="self">self</span>.doc.transaction_args();
             <span class="kw">let </span>inner = TransactionInner::new(args);
-            <span class="self">self</span>.transaction = <span class="prelude-val">Some</span>((<span class="self">self</span>.observation.branch(), inner))
+            <span class="self">self</span>.transaction = <span class="prelude-val">Some</span>((<span class="self">self</span>.history.branch(), inner))
         }
     }
 
     <span class="kw">fn </span>ensure_transaction_closed(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
-        <span class="kw">if let </span><span class="prelude-val">Some</span>((current, tx)) = <span class="self">self</span>.transaction.take() {
-            <span class="self">self</span>.observation.merge(<span class="kw-2">&amp;</span>current);
+        <span class="kw">if let </span><span class="prelude-val">Some</span>((history, tx)) = <span class="self">self</span>.transaction.take() {
+            <span class="self">self</span>.history.merge(history);
             tx.commit(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>);
         }
     }
@@ -951,12 +1037,7 @@
     /// change in future.
     </span><span class="kw">pub fn </span>load_incremental(<span class="kw-2">&amp;mut </span><span class="self">self</span>, data: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;usize, AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_closed();
-        <span class="comment">// TODO - would be nice to pass None here instead of &amp;mut ()
-        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(observer) = <span class="self">self</span>.observation.observer() {
-            <span class="self">self</span>.doc.load_incremental_with(data, <span class="prelude-val">Some</span>(observer))
-        } <span class="kw">else </span>{
-            <span class="self">self</span>.doc.load_incremental(data)
-        }
+        <span class="self">self</span>.doc.load_incremental_inner(data, <span class="kw-2">&amp;mut </span><span class="self">self</span>.history)
     }
 
     <span class="kw">pub fn </span>apply_changes(
@@ -964,25 +1045,14 @@
         changes: <span class="kw">impl </span>IntoIterator&lt;Item = Change&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_closed();
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(observer) = <span class="self">self</span>.observation.observer() {
-            <span class="self">self</span>.doc.apply_changes_with(changes, <span class="prelude-val">Some</span>(observer))
-        } <span class="kw">else </span>{
-            <span class="self">self</span>.doc.apply_changes(changes)
-        }
+        <span class="self">self</span>.doc.apply_changes_inner(changes, <span class="kw-2">&amp;mut </span><span class="self">self</span>.history)
     }
 
     <span class="doccomment">/// Takes all the changes in `other` which are not in `self` and applies them
-    </span><span class="kw">pub fn </span>merge&lt;Obs2: Observation&gt;(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        other: <span class="kw-2">&amp;mut </span>AutoCommitWithObs&lt;Obs2&gt;,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;ChangeHash&gt;, AutomergeError&gt; {
+    </span><span class="kw">pub fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;mut </span>AutoCommit) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;ChangeHash&gt;, AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_closed();
         other.ensure_transaction_closed();
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(observer) = <span class="self">self</span>.observation.observer() {
-            <span class="self">self</span>.doc.merge_with(<span class="kw-2">&amp;mut </span>other.doc, <span class="prelude-val">Some</span>(observer))
-        } <span class="kw">else </span>{
-            <span class="self">self</span>.doc.merge(<span class="kw-2">&amp;mut </span>other.doc)
-        }
+        <span class="self">self</span>.doc.merge_inner(<span class="kw-2">&amp;mut </span>other.doc, <span class="kw-2">&amp;mut </span><span class="self">self</span>.history)
     }
 
     <span class="doccomment">/// Save the entirety of this document in a compact form.
@@ -1080,6 +1150,19 @@
         <span class="self">self</span>.doc.get_heads()
     }
 
+    <span class="kw">pub fn </span>set_text_rep(<span class="kw-2">&amp;mut </span><span class="self">self</span>, text_rep: TextRepresentation) {
+        <span class="self">self</span>.doc.set_text_rep(text_rep)
+    }
+
+    <span class="kw">pub fn </span>get_text_rep(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; TextRepresentation {
+        <span class="self">self</span>.doc.get_text_rep()
+    }
+
+    <span class="kw">pub fn </span>with_text_rep(<span class="kw-2">mut </span><span class="self">self</span>, text_rep: TextRepresentation) -&gt; <span class="self">Self </span>{
+        <span class="self">self</span>.doc.set_text_rep(text_rep);
+        <span class="self">self
+    </span>}
+
     <span class="doccomment">/// Commit any uncommitted changes
     ///
     /// Returns `None` if there were no operations to commit
@@ -1107,8 +1190,8 @@
     </span><span class="kw">pub fn </span>commit_with(<span class="kw-2">&amp;mut </span><span class="self">self</span>, options: CommitOptions) -&gt; <span class="prelude-ty">Option</span>&lt;ChangeHash&gt; {
         <span class="comment">// ensure that even no changes triggers a change
         </span><span class="self">self</span>.ensure_transaction_open();
-        <span class="kw">let </span>(current, tx) = <span class="self">self</span>.transaction.take().unwrap();
-        <span class="self">self</span>.observation.merge(<span class="kw-2">&amp;</span>current);
+        <span class="kw">let </span>(history, tx) = <span class="self">self</span>.transaction.take().unwrap();
+        <span class="self">self</span>.history.merge(history);
         tx.commit(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, options.message, options.time)
     }
 
@@ -1143,9 +1226,13 @@
         <span class="self">self</span>.ensure_transaction_closed();
         SyncWrapper { inner: <span class="self">self </span>}
     }
+
+    <span class="kw">pub fn </span>hydrate(<span class="kw-2">&amp;</span><span class="self">self</span>, heads: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[ChangeHash]&gt;) -&gt; hydrate::Value {
+        <span class="self">self</span>.doc.hydrate(heads)
+    }
 }
 
-<span class="kw">impl</span>&lt;Obs: Observation&gt; ReadDoc <span class="kw">for </span>AutoCommitWithObs&lt;Obs&gt; {
+<span class="kw">impl </span>ReadDoc <span class="kw">for </span>AutoCommit {
     <span class="kw">fn </span>parents&lt;O: AsRef&lt;ExId&gt;&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: O) -&gt; <span class="prelude-ty">Result</span>&lt;Parents&lt;<span class="lifetime">&#39;_</span>&gt;, AutomergeError&gt; {
         <span class="self">self</span>.doc.parents(obj)
     }
@@ -1305,7 +1392,7 @@
     }
 }
 
-<span class="kw">impl</span>&lt;Obs: Observation&gt; Transactable <span class="kw">for </span>AutoCommitWithObs&lt;Obs&gt; {
+<span class="kw">impl </span>Transactable <span class="kw">for </span>AutoCommit {
     <span class="kw">fn </span>pending_ops(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
         <span class="self">self</span>.transaction
             .as_ref()
@@ -1320,8 +1407,8 @@
         value: V,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();
-        <span class="kw">let </span>(current, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
-        tx.put(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, current.observer(), obj.as_ref(), prop, value)
+        <span class="kw">let </span>(history, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
+        tx.put(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, history, obj.as_ref(), prop, value)
     }
 
     <span class="kw">fn </span>put_object&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
@@ -1331,8 +1418,8 @@
         value: ObjType,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;ExId, AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();
-        <span class="kw">let </span>(current, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
-        tx.put_object(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, current.observer(), obj.as_ref(), prop, value)
+        <span class="kw">let </span>(history, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
+        tx.put_object(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, history, obj.as_ref(), prop, value)
     }
 
     <span class="kw">fn </span>insert&lt;O: AsRef&lt;ExId&gt;, V: Into&lt;ScalarValue&gt;&gt;(
@@ -1342,14 +1429,8 @@
         value: V,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();
-        <span class="kw">let </span>(current, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
-        tx.insert(
-            <span class="kw-2">&amp;mut </span><span class="self">self</span>.doc,
-            current.observer(),
-            obj.as_ref(),
-            index,
-            value,
-        )
+        <span class="kw">let </span>(history, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
+        tx.insert(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, history, obj.as_ref(), index, value)
     }
 
     <span class="kw">fn </span>insert_object&lt;O: AsRef&lt;ExId&gt;&gt;(
@@ -1359,14 +1440,8 @@
         value: ObjType,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;ExId, AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();
-        <span class="kw">let </span>(current, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
-        tx.insert_object(
-            <span class="kw-2">&amp;mut </span><span class="self">self</span>.doc,
-            current.observer(),
-            obj.as_ref(),
-            index,
-            value,
-        )
+        <span class="kw">let </span>(history, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
+        tx.insert_object(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, history, obj.as_ref(), index, value)
     }
 
     <span class="kw">fn </span>increment&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
@@ -1376,8 +1451,8 @@
         value: i64,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();
-        <span class="kw">let </span>(current, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
-        tx.increment(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, current.observer(), obj.as_ref(), prop, value)
+        <span class="kw">let </span>(history, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
+        tx.increment(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, history, obj.as_ref(), prop, value)
     }
 
     <span class="kw">fn </span>delete&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
@@ -1386,8 +1461,8 @@
         prop: P,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();
-        <span class="kw">let </span>(current, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
-        tx.delete(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, current.observer(), obj.as_ref(), prop)
+        <span class="kw">let </span>(history, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
+        tx.delete(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, history, obj.as_ref(), prop)
     }
 
     <span class="doccomment">/// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
@@ -1400,15 +1475,8 @@
         vals: V,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();
-        <span class="kw">let </span>(current, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
-        tx.splice(
-            <span class="kw-2">&amp;mut </span><span class="self">self</span>.doc,
-            current.observer(),
-            obj.as_ref(),
-            pos,
-            del,
-            vals,
-        )
+        <span class="kw">let </span>(history, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
+        tx.splice(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, history, obj.as_ref(), pos, del, vals)
     }
 
     <span class="kw">fn </span>splice_text&lt;O: AsRef&lt;ExId&gt;&gt;(
@@ -1419,15 +1487,8 @@
         text: <span class="kw-2">&amp;</span>str,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();
-        <span class="kw">let </span>(current, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
-        tx.splice_text(
-            <span class="kw-2">&amp;mut </span><span class="self">self</span>.doc,
-            current.observer(),
-            obj.as_ref(),
-            pos,
-            del,
-            text,
-        )
+        <span class="kw">let </span>(history, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
+        tx.splice_text(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, history, obj.as_ref(), pos, del, text)
     }
 
     <span class="kw">fn </span>mark&lt;O: AsRef&lt;ExId&gt;&gt;(
@@ -1437,14 +1498,8 @@
         expand: ExpandMark,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();
-        <span class="kw">let </span>(current, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
-        tx.mark(
-            <span class="kw-2">&amp;mut </span><span class="self">self</span>.doc,
-            current.observer(),
-            obj.as_ref(),
-            mark,
-            expand,
-        )
+        <span class="kw">let </span>(history, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
+        tx.mark(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, history, obj.as_ref(), mark, expand)
     }
 
     <span class="kw">fn </span>unmark&lt;O: AsRef&lt;ExId&gt;&gt;(
@@ -1456,10 +1511,10 @@
         expand: ExpandMark,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();
-        <span class="kw">let </span>(current, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
+        <span class="kw">let </span>(history, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
         tx.unmark(
             <span class="kw-2">&amp;mut </span><span class="self">self</span>.doc,
-            current.observer(),
+            history,
             obj.as_ref(),
             key,
             start,
@@ -1475,11 +1530,11 @@
 
 <span class="comment">// A wrapper we return from `AutoCommit::sync` to ensure that transactions are closed before we
 // start syncing
-</span><span class="kw">struct </span>SyncWrapper&lt;<span class="lifetime">&#39;a</span>, Obs: Observation&gt; {
-    inner: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>AutoCommitWithObs&lt;Obs&gt;,
+</span><span class="kw">struct </span>SyncWrapper&lt;<span class="lifetime">&#39;a</span>&gt; {
+    inner: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="kw-2">mut </span>AutoCommit,
 }
 
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, Obs: Observation&gt; SyncDoc <span class="kw">for </span>SyncWrapper&lt;<span class="lifetime">&#39;a</span>, Obs&gt; {
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; SyncDoc <span class="kw">for </span>SyncWrapper&lt;<span class="lifetime">&#39;a</span>&gt; {
     <span class="kw">fn </span>generate_sync_message(<span class="kw-2">&amp;</span><span class="self">self</span>, sync_state: <span class="kw-2">&amp;mut </span>sync::State) -&gt; <span class="prelude-ty">Option</span>&lt;sync::Message&gt; {
         <span class="self">self</span>.inner.doc.generate_sync_message(sync_state)
     }
@@ -1490,31 +1545,26 @@
         message: sync::Message,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.inner.ensure_transaction_closed();
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(observer) = <span class="self">self</span>.inner.observation.observer() {
-            <span class="self">self</span>.inner
-                .doc
-                .receive_sync_message_with(sync_state, message, observer)
-        } <span class="kw">else </span>{
-            <span class="self">self</span>.inner.doc.receive_sync_message(sync_state, message)
-        }
+        <span class="self">self</span>.inner
+            .doc
+            .receive_sync_message_inner(sync_state, message, <span class="kw-2">&amp;mut </span><span class="self">self</span>.inner.history)
     }
 
-    <span class="kw">fn </span>receive_sync_message_with&lt;Obs2: OpObserver&gt;(
+    <span class="kw">fn </span>receive_sync_message_with&lt;Obs: OpObserver&gt;(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         sync_state: <span class="kw-2">&amp;mut </span>sync::State,
         message: sync::Message,
-        op_observer: <span class="kw-2">&amp;mut </span>Obs2,
+        op_observer: <span class="kw-2">&amp;mut </span>Obs,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(our_observer) = <span class="self">self</span>.inner.observation.observer() {
-            <span class="kw">let </span><span class="kw-2">mut </span>composed = <span class="kw">crate</span>::op_observer::compose(our_observer, op_observer);
-            <span class="self">self</span>.inner
-                .doc
-                .receive_sync_message_with(sync_state, message, <span class="kw-2">&amp;mut </span>composed)
-        } <span class="kw">else </span>{
-            <span class="self">self</span>.inner
-                .doc
-                .receive_sync_message_with(sync_state, message, op_observer)
+        <span class="kw">let </span><span class="kw-2">mut </span>history = History::active();
+        <span class="self">self</span>.inner
+            .doc
+            .receive_sync_message_inner(sync_state, message, <span class="kw-2">&amp;mut </span>history)<span class="question-mark">?</span>;
+        <span class="kw">if </span><span class="self">self</span>.inner.history.is_active() {
+            <span class="self">self</span>.inner.history.merge(history.clone());
         }
+        history.observe(op_observer, <span class="kw-2">&amp;</span><span class="self">self</span>.inner.doc, <span class="prelude-val">None</span>);
+        <span class="prelude-val">Ok</span>(())
     }
 }
 </code></pre></div>

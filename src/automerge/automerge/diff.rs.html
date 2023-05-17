@@ -1465,6 +1465,98 @@
 <a href="#1464" id="1464">1464</a>
 <a href="#1465" id="1465">1465</a>
 <a href="#1466" id="1466">1466</a>
+<a href="#1467" id="1467">1467</a>
+<a href="#1468" id="1468">1468</a>
+<a href="#1469" id="1469">1469</a>
+<a href="#1470" id="1470">1470</a>
+<a href="#1471" id="1471">1471</a>
+<a href="#1472" id="1472">1472</a>
+<a href="#1473" id="1473">1473</a>
+<a href="#1474" id="1474">1474</a>
+<a href="#1475" id="1475">1475</a>
+<a href="#1476" id="1476">1476</a>
+<a href="#1477" id="1477">1477</a>
+<a href="#1478" id="1478">1478</a>
+<a href="#1479" id="1479">1479</a>
+<a href="#1480" id="1480">1480</a>
+<a href="#1481" id="1481">1481</a>
+<a href="#1482" id="1482">1482</a>
+<a href="#1483" id="1483">1483</a>
+<a href="#1484" id="1484">1484</a>
+<a href="#1485" id="1485">1485</a>
+<a href="#1486" id="1486">1486</a>
+<a href="#1487" id="1487">1487</a>
+<a href="#1488" id="1488">1488</a>
+<a href="#1489" id="1489">1489</a>
+<a href="#1490" id="1490">1490</a>
+<a href="#1491" id="1491">1491</a>
+<a href="#1492" id="1492">1492</a>
+<a href="#1493" id="1493">1493</a>
+<a href="#1494" id="1494">1494</a>
+<a href="#1495" id="1495">1495</a>
+<a href="#1496" id="1496">1496</a>
+<a href="#1497" id="1497">1497</a>
+<a href="#1498" id="1498">1498</a>
+<a href="#1499" id="1499">1499</a>
+<a href="#1500" id="1500">1500</a>
+<a href="#1501" id="1501">1501</a>
+<a href="#1502" id="1502">1502</a>
+<a href="#1503" id="1503">1503</a>
+<a href="#1504" id="1504">1504</a>
+<a href="#1505" id="1505">1505</a>
+<a href="#1506" id="1506">1506</a>
+<a href="#1507" id="1507">1507</a>
+<a href="#1508" id="1508">1508</a>
+<a href="#1509" id="1509">1509</a>
+<a href="#1510" id="1510">1510</a>
+<a href="#1511" id="1511">1511</a>
+<a href="#1512" id="1512">1512</a>
+<a href="#1513" id="1513">1513</a>
+<a href="#1514" id="1514">1514</a>
+<a href="#1515" id="1515">1515</a>
+<a href="#1516" id="1516">1516</a>
+<a href="#1517" id="1517">1517</a>
+<a href="#1518" id="1518">1518</a>
+<a href="#1519" id="1519">1519</a>
+<a href="#1520" id="1520">1520</a>
+<a href="#1521" id="1521">1521</a>
+<a href="#1522" id="1522">1522</a>
+<a href="#1523" id="1523">1523</a>
+<a href="#1524" id="1524">1524</a>
+<a href="#1525" id="1525">1525</a>
+<a href="#1526" id="1526">1526</a>
+<a href="#1527" id="1527">1527</a>
+<a href="#1528" id="1528">1528</a>
+<a href="#1529" id="1529">1529</a>
+<a href="#1530" id="1530">1530</a>
+<a href="#1531" id="1531">1531</a>
+<a href="#1532" id="1532">1532</a>
+<a href="#1533" id="1533">1533</a>
+<a href="#1534" id="1534">1534</a>
+<a href="#1535" id="1535">1535</a>
+<a href="#1536" id="1536">1536</a>
+<a href="#1537" id="1537">1537</a>
+<a href="#1538" id="1538">1538</a>
+<a href="#1539" id="1539">1539</a>
+<a href="#1540" id="1540">1540</a>
+<a href="#1541" id="1541">1541</a>
+<a href="#1542" id="1542">1542</a>
+<a href="#1543" id="1543">1543</a>
+<a href="#1544" id="1544">1544</a>
+<a href="#1545" id="1545">1545</a>
+<a href="#1546" id="1546">1546</a>
+<a href="#1547" id="1547">1547</a>
+<a href="#1548" id="1548">1548</a>
+<a href="#1549" id="1549">1549</a>
+<a href="#1550" id="1550">1550</a>
+<a href="#1551" id="1551">1551</a>
+<a href="#1552" id="1552">1552</a>
+<a href="#1553" id="1553">1553</a>
+<a href="#1554" id="1554">1554</a>
+<a href="#1555" id="1555">1555</a>
+<a href="#1556" id="1556">1556</a>
+<a href="#1557" id="1557">1557</a>
+<a href="#1558" id="1558">1558</a>
 </pre><pre class="rust"><code><span class="kw">use </span>itertools::Itertools;
 <span class="kw">use </span>std::borrow::Cow;
 <span class="kw">use </span>std::collections::BTreeMap;
@@ -1473,11 +1565,12 @@
 
 <span class="kw">use crate</span>::{
     exid::ExId,
+    history::History,
     iter::{Keys, ListRange, MapRange, Values},
     marks::{Mark, MarkStateMachine},
     types::{Clock, ListEncoding, MarkData, ObjId, Op, Prop, ScalarValue},
     value::Value,
-    Automerge, AutomergeError, ChangeHash, Cursor, ObjType, OpObserver, OpType, ReadDoc,
+    Automerge, AutomergeError, ChangeHash, Cursor, ObjType, OpType, ReadDoc,
 };
 
 <span class="attr">#[derive(Clone, Debug)]
@@ -1584,172 +1677,222 @@
     }
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>observe_diff&lt;O: OpObserver&gt;(
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>observe_diff(
     doc: <span class="kw-2">&amp;</span>Automerge,
-    before_heads: <span class="kw-2">&amp;</span>[ChangeHash],
-    after_heads: <span class="kw-2">&amp;</span>[ChangeHash],
-    observer: <span class="kw-2">&amp;mut </span>O,
+    <span class="comment">//before_heads: &amp;[ChangeHash],
+    //after_heads: &amp;[ChangeHash],
+    </span>before: <span class="kw-2">&amp;</span>Clock,
+    after: <span class="kw-2">&amp;</span>Clock,
+    <span class="comment">//observer: &amp;mut O,
+    </span>history: <span class="kw-2">&amp;mut </span>History,
 ) {
-    <span class="kw">let </span>before = doc.clock_at(before_heads);
-    <span class="kw">let </span>after = doc.clock_at(after_heads);
-    <span class="comment">// FIXME - this fork is expensive
+    <span class="comment">//let before = doc.clock_at(before_heads);
+    //let after = doc.clock_at(after_heads);
+    // FIXME - this fork is expensive
     // we really need a Doc::At object to make this cheap and easy
     // this is critical to keep paths accurate when rendering patches
-    </span><span class="kw">let </span>doc_at_after = ReadDocAt {
-        doc,
-        heads: after_heads,
-    }; <span class="comment">//doc.fork_at(after_heads).unwrap();
+    /*
+        let doc_at_after = ReadDocAt {
+            doc,
+            heads: after_heads,
+        }; //doc.fork_at(after_heads).unwrap();
+    */
     </span><span class="kw">for </span>(obj, typ, ops) <span class="kw">in </span>doc.ops().iter_objs() {
         <span class="kw">let </span>ops_by_key = ops.group_by(|o| o.elemid_or_key());
         <span class="kw">let </span>diffs = ops_by_key
             .into_iter()
-            .filter_map(|(_key, key_ops)| process(key_ops, <span class="kw-2">&amp;</span>before, <span class="kw-2">&amp;</span>after));
+            .filter_map(|(_key, key_ops)| process(key_ops, before, after));
 
-        <span class="kw">if </span>typ == ObjType::Text &amp;&amp; !observer.text_as_seq() {
-            observe_text_diff(doc_at_after, observer, obj, diffs)
+        <span class="kw">if </span>typ == ObjType::Text &amp;&amp; !doc.text_as_seq() {
+            observe_text_diff(doc, history, obj, diffs)
         } <span class="kw">else if </span>typ.is_sequence() {
-            observe_list_diff(doc_at_after, observer, obj, diffs);
+            observe_list_diff(doc, history, obj, diffs);
         } <span class="kw">else </span>{
-            observe_map_diff(doc_at_after, observer, obj, diffs);
+            observe_map_diff(doc, history, obj, diffs);
         }
     }
 }
 
-<span class="kw">fn </span>observe_list_diff&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = Patch&lt;<span class="lifetime">&#39;a</span>&gt;&gt;, O: OpObserver&gt;(
-    doc: ReadDocAt&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt;,
-    observer: <span class="kw-2">&amp;mut </span>O,
+<span class="kw">fn </span>observe_list_diff&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = Patch&lt;<span class="lifetime">&#39;a</span>&gt;&gt;&gt;(
+    <span class="comment">//doc: ReadDocAt&lt;&#39;_, &#39;_&gt;,
+    </span>doc: <span class="kw-2">&amp;</span>Automerge,
+    <span class="comment">//observer: &amp;mut O,
+    </span>history: <span class="kw-2">&amp;mut </span>History,
     obj: <span class="kw-2">&amp;</span>ObjId,
     patches: I,
 ) {
     <span class="kw">let </span><span class="kw-2">mut </span>marks = MarkDiff::default();
-    <span class="kw">let </span>exid = doc.as_ref().id_to_exid(obj.<span class="number">0</span>);
-    patches.fold(<span class="number">0</span>, |index, patch| <span class="kw">match </span>patch {
+    <span class="comment">//let exid = doc.as_ref().id_to_exid(obj.0);
+    </span>patches.fold(<span class="number">0</span>, |index, patch| <span class="kw">match </span>patch {
         Patch::Mark(op, mark_type) =&gt; {
-            marks.process(index, mark_type, op.op, doc.as_ref());
+            <span class="comment">//marks.process(index, mark_type, op.op, doc.as_ref());
+            </span>marks.process(index, mark_type, op.op, doc);
             index
         }
         Patch::New(op) =&gt; {
-            observer.insert(
-                <span class="kw-2">&amp;</span>doc,
-                exid.clone(),
-                index,
-                doc.as_ref().export_value(<span class="kw-2">&amp;</span>op, <span class="prelude-val">Some</span>(op.clock)),
-                op.conflict,
-            );
+            <span class="comment">/*
+                        observer.insert(
+                            &amp;doc,
+                            exid.clone(),
+                            index,
+                            doc.as_ref().export_value(&amp;op, Some(op.clock)),
+                            op.conflict,
+                        );
+            */
+            </span><span class="kw">let </span>value = op.value_at(<span class="prelude-val">Some</span>(op.clock)).into();
+            history.insert(<span class="kw-2">*</span>obj, index, value, op.id, op.conflict);
             index + <span class="number">1
         </span>}
         Patch::Update { before, after } =&gt; {
-            <span class="kw">let </span>exid = exid.clone();
-            <span class="kw">let </span>prop = index.into();
-            <span class="kw">let </span>value = doc.as_ref().export_value(<span class="kw-2">&amp;</span>after, <span class="prelude-val">Some</span>(after.clock));
-            <span class="kw">let </span>conflict = !before.conflict &amp;&amp; after.conflict;
+            <span class="comment">//let exid = exid.clone();
+            //let prop = index.into();
+            //let value = doc.as_ref().export_value(&amp;after, Some(after.clock));
+            </span><span class="kw">let </span>conflict = !before.conflict &amp;&amp; after.conflict;
             <span class="kw">if </span>after.cross_visible {
-                observer.expose(<span class="kw-2">&amp;</span>doc, exid, prop, value, conflict);
+                <span class="comment">//observer.expose(&amp;doc, exid, prop, value, conflict);
+                </span><span class="kw">let </span>value = after.value_at(<span class="prelude-val">Some</span>(after.clock)).into();
+                history.put_seq(<span class="kw-2">*</span>obj, index, value, after.id, conflict, <span class="bool-val">true</span>)
             } <span class="kw">else </span>{
-                observer.put(<span class="kw-2">&amp;</span>doc, exid, prop, value, conflict);
+                <span class="comment">//observer.put(&amp;doc, exid, prop, value, conflict);
+                </span><span class="kw">let </span>value = after.value_at(<span class="prelude-val">Some</span>(after.clock)).into();
+                history.put_seq(<span class="kw-2">*</span>obj, index, value, after.id, conflict, <span class="bool-val">false</span>)
             }
             index + <span class="number">1
         </span>}
         Patch::Old { before, after } =&gt; {
             <span class="kw">if </span>!before.conflict &amp;&amp; after.conflict {
-                observer.flag_conflict(<span class="kw-2">&amp;</span>doc, exid.clone(), index.into());
+                <span class="comment">//observer.flag_conflict(&amp;doc, exid.clone(), index.into());
+                </span>history.flag_conflict_seq(<span class="kw-2">*</span>obj, index);
             }
             <span class="kw">if let </span><span class="prelude-val">Some</span>(n) = get_inc(<span class="kw-2">&amp;</span>before, <span class="kw-2">&amp;</span>after) {
-                observer.increment(
-                    <span class="kw-2">&amp;</span>doc,
-                    exid.clone(),
-                    index.into(),
-                    (n, doc.as_ref().id_to_exid(after.id)),
-                );
+                <span class="comment">/*
+                                observer.increment(
+                                    &amp;doc,
+                                    exid.clone(),
+                                    index.into(),
+                                    (n, doc.as_ref().id_to_exid(after.id)),
+                                );
+                */
+                </span>history.increment_seq(<span class="kw-2">*</span>obj, index, n, after.id);
             }
             index + <span class="number">1
         </span>}
         Patch::Delete(<span class="kw">_</span>) =&gt; {
-            observer.delete_seq(<span class="kw-2">&amp;</span>doc, exid.clone(), index, <span class="number">1</span>);
+            <span class="comment">//observer.delete_seq(&amp;doc, exid.clone(), index, 1);
+            </span>history.delete_seq(<span class="kw-2">*</span>obj, index, <span class="number">1</span>);
             index
         }
     });
     <span class="kw">if let </span><span class="prelude-val">Some</span>(m) = marks.finish() {
-        observer.mark(<span class="kw-2">&amp;</span>doc, exid, m.into_iter());
-    }
+        history.mark(<span class="kw-2">*</span>obj, <span class="kw-2">&amp;</span>m);
+        <span class="comment">//observer.mark(&amp;doc, exid, m.into_iter());
+    </span>}
 }
 
-<span class="kw">fn </span>observe_text_diff&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = Patch&lt;<span class="lifetime">&#39;a</span>&gt;&gt;, O: OpObserver&gt;(
-    doc: ReadDocAt&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt;,
-    observer: <span class="kw-2">&amp;mut </span>O,
+<span class="kw">fn </span>observe_text_diff&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = Patch&lt;<span class="lifetime">&#39;a</span>&gt;&gt;&gt;(
+    <span class="comment">//doc: ReadDocAt&lt;&#39;_, &#39;_&gt;,
+    </span>doc: <span class="kw-2">&amp;</span>Automerge,
+    <span class="comment">//observer: &amp;mut O,
+    </span>history: <span class="kw-2">&amp;mut </span>History,
     obj: <span class="kw-2">&amp;</span>ObjId,
     patches: I,
 ) {
     <span class="kw">let </span><span class="kw-2">mut </span>marks = MarkDiff::default();
-    <span class="kw">let </span>exid = doc.as_ref().id_to_exid(obj.<span class="number">0</span>);
-    <span class="kw">let </span>encoding = ListEncoding::Text;
+    <span class="comment">//let exid = doc.as_ref().id_to_exid(obj.0);
+    </span><span class="kw">let </span>encoding = ListEncoding::Text;
     patches.fold(<span class="number">0</span>, |index, patch| <span class="kw">match </span><span class="kw-2">&amp;</span>patch {
         Patch::Mark(op, mark_type) =&gt; {
-            marks.process(index, <span class="kw-2">*</span>mark_type, op.op, doc.as_ref());
+            <span class="comment">//marks.process(index, *mark_type, op.op, doc.as_ref());
+            </span>marks.process(index, <span class="kw-2">*</span>mark_type, op.op, doc);
             index
         }
         Patch::New(op) =&gt; {
-            observer.splice_text(<span class="kw-2">&amp;</span>doc, exid.clone(), index, op.to_str());
+            <span class="comment">//observer.splice_text(&amp;doc, exid.clone(), index, op.to_str());
+            </span>history.splice(<span class="kw-2">*</span>obj, index, op.to_str());
             index + op.width(encoding)
         }
         Patch::Update { before, after } =&gt; {
-            observer.delete_seq(<span class="kw-2">&amp;</span>doc, exid.clone(), index, before.width(encoding));
-            observer.splice_text(<span class="kw-2">&amp;</span>doc, exid.clone(), index, after.to_str());
+            <span class="comment">//observer.delete_seq(&amp;doc, exid.clone(), index, before.width(encoding));
+            //observer.splice_text(&amp;doc, exid.clone(), index, after.to_str());
+            </span>history.delete_seq(<span class="kw-2">*</span>obj, index, before.width(encoding));
+            history.splice(<span class="kw-2">*</span>obj, index, after.to_str());
             index + after.width(encoding)
         }
         Patch::Old { after, .. } =&gt; index + after.width(encoding),
         Patch::Delete(before) =&gt; {
-            observer.delete_seq(<span class="kw-2">&amp;</span>doc, exid.clone(), index, before.width(encoding));
+            <span class="comment">//observer.delete_seq(&amp;doc, exid.clone(), index, before.width(encoding));
+            </span>history.delete_seq(<span class="kw-2">*</span>obj, index, before.width(encoding));
             index
         }
     });
     <span class="kw">if let </span><span class="prelude-val">Some</span>(m) = marks.finish() {
-        observer.mark(<span class="kw-2">&amp;</span>doc, exid, m.into_iter());
+        <span class="comment">//observer.mark(&amp;doc, exid, m.into_iter());
+        </span>history.mark(<span class="kw-2">*</span>obj, <span class="kw-2">&amp;</span>m);
     }
 }
 
-<span class="kw">fn </span>observe_map_diff&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = Patch&lt;<span class="lifetime">&#39;a</span>&gt;&gt;, O: OpObserver&gt;(
-    doc: ReadDocAt&lt;<span class="lifetime">&#39;_</span>, <span class="lifetime">&#39;_</span>&gt;,
-    observer: <span class="kw-2">&amp;mut </span>O,
+<span class="kw">fn </span>observe_map_diff&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = Patch&lt;<span class="lifetime">&#39;a</span>&gt;&gt;&gt;(
+    <span class="comment">//doc: ReadDocAt&lt;&#39;_, &#39;_&gt;,
+    </span>doc: <span class="kw-2">&amp;</span>Automerge,
+    <span class="comment">//observer: &amp;mut O,
+    </span>history: <span class="kw-2">&amp;mut </span>History,
     obj: <span class="kw-2">&amp;</span>ObjId,
     diffs: I,
 ) {
-    <span class="kw">let </span>exid = doc.as_ref().id_to_exid(obj.<span class="number">0</span>);
-    diffs
-        .filter_map(|patch| <span class="prelude-val">Some</span>((get_prop(doc.doc, patch.op())<span class="question-mark">?</span>, patch)))
-        .for_each(|(prop, patch)| <span class="kw">match </span>patch {
-            Patch::New(op) =&gt; observer.put(
-                <span class="kw-2">&amp;</span>doc,
-                exid.clone(),
-                prop.into(),
-                doc.as_ref().export_value(<span class="kw-2">&amp;</span>op, <span class="prelude-val">Some</span>(op.clock)),
-                op.conflict,
-            ),
+    <span class="comment">//let exid = doc.as_ref().id_to_exid(obj.0);
+    </span>diffs
+        <span class="comment">//.filter_map(|patch| Some((get_prop(doc.doc, patch.op())?, patch)))
+        </span>.filter_map(|patch| <span class="prelude-val">Some</span>((get_prop(doc, patch.op())<span class="question-mark">?</span>, patch)))
+        .for_each(|(key, patch)| <span class="kw">match </span>patch {
+            Patch::New(op) =&gt; {
+                <span class="comment">/*
+                                observer.put(
+                                    &amp;doc,
+                                    exid.clone(),
+                                    key.clone().into(),
+                                    doc.as_ref().export_value(&amp;op, Some(op.clock)),
+                                    op.conflict,
+                                );
+                */
+                </span><span class="kw">let </span>value = op.value_at(<span class="prelude-val">Some</span>(op.clock)).into();
+                history.put_map(<span class="kw-2">*</span>obj, key, value, op.id, op.conflict, <span class="bool-val">false</span>)
+            }
             Patch::Update { before, after } =&gt; {
-                <span class="kw">let </span>exid = exid.clone();
-                <span class="kw">let </span>prop = prop.into();
-                <span class="kw">let </span>value = doc.as_ref().export_value(<span class="kw-2">&amp;</span>after, <span class="prelude-val">Some</span>(after.clock));
-                <span class="kw">let </span>conflict = !before.conflict &amp;&amp; after.conflict;
+                <span class="comment">//let exid = exid.clone();
+                //let prop = key.clone().into();
+                //let value = doc.as_ref().export_value(&amp;after, Some(after.clock));
+                </span><span class="kw">let </span>conflict = !before.conflict &amp;&amp; after.conflict;
                 <span class="kw">if </span>after.cross_visible {
-                    observer.expose(<span class="kw-2">&amp;</span>doc, exid, prop, value, conflict);
+                    <span class="comment">//observer.expose(&amp;doc, exid, prop, value, conflict);
+                    </span><span class="kw">let </span>value = after.value_at(<span class="prelude-val">Some</span>(after.clock)).into();
+                    history.put_map(<span class="kw-2">*</span>obj, key, value, after.id, conflict, <span class="bool-val">true</span>)
                 } <span class="kw">else </span>{
-                    observer.put(<span class="kw-2">&amp;</span>doc, exid, prop, value, conflict);
+                    <span class="comment">//observer.put(&amp;doc, exid, prop, value, conflict);
+                    </span><span class="kw">let </span>value = after.value_at(<span class="prelude-val">Some</span>(after.clock)).into();
+                    history.put_map(<span class="kw-2">*</span>obj, key, value, after.id, conflict, <span class="bool-val">false</span>)
                 }
             }
             Patch::Old { before, after } =&gt; {
                 <span class="kw">if </span>!before.conflict &amp;&amp; after.conflict {
-                    observer.flag_conflict(<span class="kw-2">&amp;</span>doc, exid.clone(), prop.into());
+                    <span class="comment">//observer.flag_conflict(&amp;doc, exid.clone(), key.into());
+                    </span>history.flag_conflict_map(<span class="kw-2">*</span>obj, key);
                 }
                 <span class="kw">if let </span><span class="prelude-val">Some</span>(n) = get_inc(<span class="kw-2">&amp;</span>before, <span class="kw-2">&amp;</span>after) {
-                    observer.increment(
-                        <span class="kw-2">&amp;</span>doc,
-                        exid.clone(),
-                        prop.into(),
-                        (n, doc.as_ref().id_to_exid(after.id)),
-                    );
+                    <span class="comment">/*
+                                        observer.increment(
+                                            &amp;doc,
+                                            exid.clone(),
+                                            key.into(),
+                                            (n, doc.as_ref().id_to_exid(after.id)),
+                                        );
+                    */
+                    </span>history.increment_map(<span class="kw-2">*</span>obj, key, n, after.id);
                 }
             }
-            Patch::Delete(<span class="kw">_</span>) =&gt; observer.delete_map(<span class="kw-2">&amp;</span>doc, exid.clone(), prop),
+            Patch::Delete(<span class="kw">_</span>) =&gt; {
+                <span class="comment">//observer.delete_map(&amp;doc, exid.clone(), key);
+                </span>history.delete_map(<span class="kw-2">*</span>obj, key)
+            }
             Patch::Mark(<span class="kw">_</span>, <span class="kw">_</span>) =&gt; {}
         });
 }
@@ -1945,9 +2088,9 @@
 }
 
 <span class="attr">#[derive(Debug, Clone, Copy)]
-</span><span class="kw">struct </span>ReadDocAt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>&gt; {
-    doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
-    heads: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span>[ChangeHash],
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>ReadDocAt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
+    <span class="kw">pub</span>(<span class="kw">crate</span>) heads: <span class="kw-2">&amp;</span><span class="lifetime">&#39;b </span>[ChangeHash],
 }
 
 <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>&gt; AsRef&lt;Automerge&gt; <span class="kw">for </span>ReadDocAt&lt;<span class="lifetime">&#39;a</span>, <span class="lifetime">&#39;b</span>&gt; {
@@ -2120,9 +2263,8 @@
 </span><span class="kw">mod </span>tests {
 
     <span class="kw">use crate</span>::{
-        marks::Mark, op_observer::HasPatches, transaction::Observed, transaction::Transactable,
-        types::MarkData, AutoCommitWithObs, ObjType, Patch, PatchAction, Prop, ScalarValue, Value,
-        VecOpObserver, ROOT,
+        marks::Mark, transaction::Transactable, types::MarkData, AutoCommit, ObjType, Patch,
+        PatchAction, Prop, ScalarValue, Value, VecOpObserver, ROOT,
     };
     <span class="kw">use </span>itertools::Itertools;
 
@@ -2247,7 +2389,7 @@
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>basic_diff_map_put1() {
-        <span class="kw">let </span><span class="kw-2">mut </span>doc = AutoCommitWithObs::&lt;Observed&lt;VecOpObserver&gt;&gt;::default();
+        <span class="kw">let </span><span class="kw-2">mut </span>doc = AutoCommit::default();
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value1&quot;</span>).unwrap();
         <span class="kw">let </span>heads1 = doc.get_heads();
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value2a&quot;</span>).unwrap();
@@ -2255,7 +2397,9 @@
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value2c&quot;</span>).unwrap();
         <span class="kw">let </span>heads2 = doc.get_heads();
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value3&quot;</span>).unwrap();
-        <span class="kw">let </span>patches = doc.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2).unwrap().take_patches();
+        <span class="kw">let </span>patches = doc
+            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
+            .take_patches();
 
         <span class="macro">assert_eq!</span>(
             exp(patches),
@@ -2271,7 +2415,7 @@
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>basic_diff_map_put_conflict() {
-        <span class="kw">let </span><span class="kw-2">mut </span>doc1 = AutoCommitWithObs::&lt;Observed&lt;VecOpObserver&gt;&gt;::default();
+        <span class="kw">let </span><span class="kw-2">mut </span>doc1 = AutoCommit::default();
         doc1.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value1&quot;</span>).unwrap();
         <span class="kw">let </span>heads1 = doc1.get_heads();
 
@@ -2287,7 +2431,9 @@
 
         <span class="kw">let </span>heads2 = doc1.get_heads();
         doc1.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value3&quot;</span>).unwrap();
-        <span class="kw">let </span>patches = doc1.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2).unwrap().take_patches();
+        <span class="kw">let </span>patches = doc1
+            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
+            .take_patches();
 
         <span class="macro">assert_eq!</span>(
             exp(patches),
@@ -2303,7 +2449,7 @@
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>basic_diff_map_put_conflict_with_del() {
-        <span class="kw">let </span><span class="kw-2">mut </span>doc1 = AutoCommitWithObs::&lt;Observed&lt;VecOpObserver&gt;&gt;::default();
+        <span class="kw">let </span><span class="kw-2">mut </span>doc1 = AutoCommit::default();
         doc1.put(ROOT, <span class="string">&quot;key1&quot;</span>, <span class="string">&quot;value1&quot;</span>).unwrap();
         doc1.put(ROOT, <span class="string">&quot;key2&quot;</span>, <span class="string">&quot;value2&quot;</span>).unwrap();
         <span class="kw">let </span>heads1 = doc1.get_heads();
@@ -2320,7 +2466,9 @@
 
         <span class="kw">let </span>heads2 = doc1.get_heads();
         doc1.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value3&quot;</span>).unwrap();
-        <span class="kw">let </span>patches = doc1.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2).unwrap().take_patches();
+        <span class="kw">let </span>patches = doc1
+            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
+            .take_patches();
 
         <span class="macro">assert_eq!</span>(
             exp(patches),
@@ -2345,7 +2493,7 @@
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>basic_diff_map_put_conflict_old_value() {
-        <span class="kw">let </span><span class="kw-2">mut </span>doc1 = AutoCommitWithObs::&lt;Observed&lt;VecOpObserver&gt;&gt;::default();
+        <span class="kw">let </span><span class="kw-2">mut </span>doc1 = AutoCommit::default();
         doc1.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value1&quot;</span>).unwrap();
 
         <span class="kw">let </span><span class="kw-2">mut </span>doc2 = doc1.fork();
@@ -2362,7 +2510,9 @@
 
         <span class="kw">let </span>heads2 = doc1.get_heads();
         doc1.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value3&quot;</span>).unwrap();
-        <span class="kw">let </span>patches = doc1.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2).unwrap().take_patches();
+        <span class="kw">let </span>patches = doc1
+            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
+            .take_patches();
 
         <span class="macro">assert_eq!</span>(
             exp(patches),
@@ -2378,7 +2528,7 @@
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>basic_diff_map_put_conflict_old_value_and_del() {
-        <span class="kw">let </span><span class="kw-2">mut </span>doc1 = AutoCommitWithObs::&lt;Observed&lt;VecOpObserver&gt;&gt;::default();
+        <span class="kw">let </span><span class="kw-2">mut </span>doc1 = AutoCommit::default();
         doc1.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value1&quot;</span>).unwrap();
 
         <span class="kw">let </span><span class="kw-2">mut </span>doc2 = doc1.fork();
@@ -2396,20 +2546,24 @@
 
         <span class="kw">let </span>heads2 = doc1.get_heads();
         doc1.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value3&quot;</span>).unwrap();
-        <span class="kw">let </span>patches = doc1.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2).unwrap().take_patches();
+        <span class="kw">let </span>patches = doc1
+            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
+            .take_patches();
 
         <span class="macro">assert_eq!</span>(exp(patches), <span class="macro">vec!</span>[],);
     }
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>basic_diff_map_del1() {
-        <span class="kw">let </span><span class="kw-2">mut </span>doc = AutoCommitWithObs::&lt;Observed&lt;VecOpObserver&gt;&gt;::default();
+        <span class="kw">let </span><span class="kw-2">mut </span>doc = AutoCommit::default();
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value1&quot;</span>).unwrap();
         <span class="kw">let </span>heads1 = doc.get_heads();
         doc.delete(ROOT, <span class="string">&quot;key&quot;</span>).unwrap();
         <span class="kw">let </span>heads2 = doc.get_heads();
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value3&quot;</span>).unwrap();
-        <span class="kw">let </span>patches = doc.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2).unwrap().take_patches();
+        <span class="kw">let </span>patches = doc
+            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
+            .take_patches();
 
         <span class="macro">assert_eq!</span>(
             exp(patches),
@@ -2422,7 +2576,7 @@
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>basic_diff_map_del2() {
-        <span class="kw">let </span><span class="kw-2">mut </span>doc = AutoCommitWithObs::&lt;Observed&lt;VecOpObserver&gt;&gt;::default();
+        <span class="kw">let </span><span class="kw-2">mut </span>doc = AutoCommit::default();
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value1&quot;</span>).unwrap();
         <span class="kw">let </span>heads1 = doc.get_heads();
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value2a&quot;</span>).unwrap();
@@ -2430,7 +2584,9 @@
         doc.delete(ROOT, <span class="string">&quot;key&quot;</span>).unwrap();
         <span class="kw">let </span>heads2 = doc.get_heads();
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value3&quot;</span>).unwrap();
-        <span class="kw">let </span>patches = doc.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2).unwrap().take_patches();
+        <span class="kw">let </span>patches = doc
+            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
+            .take_patches();
 
         <span class="macro">assert_eq!</span>(
             exp(patches),
@@ -2443,7 +2599,7 @@
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>basic_diff_map_del3() {
-        <span class="kw">let </span><span class="kw-2">mut </span>doc = AutoCommitWithObs::&lt;Observed&lt;VecOpObserver&gt;&gt;::default();
+        <span class="kw">let </span><span class="kw-2">mut </span>doc = AutoCommit::default();
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value1&quot;</span>).unwrap();
         <span class="kw">let </span>heads1 = doc.get_heads();
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value2a&quot;</span>).unwrap();
@@ -2452,7 +2608,9 @@
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value2c&quot;</span>).unwrap();
         <span class="kw">let </span>heads2 = doc.get_heads();
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value3&quot;</span>).unwrap();
-        <span class="kw">let </span>patches = doc.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2).unwrap().take_patches();
+        <span class="kw">let </span>patches = doc
+            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
+            .take_patches();
 
         <span class="macro">assert_eq!</span>(
             exp(patches),
@@ -2468,7 +2626,7 @@
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>basic_diff_map_counter1() {
-        <span class="kw">let </span><span class="kw-2">mut </span>doc = AutoCommitWithObs::&lt;Observed&lt;VecOpObserver&gt;&gt;::default();
+        <span class="kw">let </span><span class="kw-2">mut </span>doc = AutoCommit::default();
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, ScalarValue::counter(<span class="number">10</span>)).unwrap();
         <span class="kw">let </span>heads1 = doc.get_heads();
         doc.increment(ROOT, <span class="string">&quot;key&quot;</span>, <span class="number">3</span>).unwrap();
@@ -2476,7 +2634,9 @@
         doc.increment(ROOT, <span class="string">&quot;key&quot;</span>, <span class="number">5</span>).unwrap();
         <span class="kw">let </span>heads2 = doc.get_heads();
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;overwrite&quot;</span>).unwrap();
-        <span class="kw">let </span>patches = doc.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2).unwrap().take_patches();
+        <span class="kw">let </span>patches = doc
+            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
+            .take_patches();
 
         <span class="macro">assert_eq!</span>(
             exp(patches),
@@ -2489,7 +2649,7 @@
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>basic_diff_map_counter2() {
-        <span class="kw">let </span><span class="kw-2">mut </span>doc = AutoCommitWithObs::&lt;Observed&lt;VecOpObserver&gt;&gt;::default();
+        <span class="kw">let </span><span class="kw-2">mut </span>doc = AutoCommit::default();
         <span class="kw">let </span>heads1 = doc.get_heads();
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, ScalarValue::counter(<span class="number">10</span>)).unwrap();
         doc.increment(ROOT, <span class="string">&quot;key&quot;</span>, <span class="number">3</span>).unwrap();
@@ -2497,7 +2657,9 @@
         <span class="kw">let </span>heads2 = doc.get_heads();
         doc.increment(ROOT, <span class="string">&quot;key&quot;</span>, <span class="number">5</span>).unwrap();
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;overwrite&quot;</span>).unwrap();
-        <span class="kw">let </span>patches = doc.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2).unwrap().take_patches();
+        <span class="kw">let </span>patches = doc
+            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
+            .take_patches();
 
         <span class="macro">assert_eq!</span>(
             exp(patches),
@@ -2513,7 +2675,7 @@
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>basic_diff_list_insert1() {
-        <span class="kw">let </span><span class="kw-2">mut </span>doc = AutoCommitWithObs::&lt;Observed&lt;VecOpObserver&gt;&gt;::default();
+        <span class="kw">let </span><span class="kw-2">mut </span>doc = AutoCommit::default();
         <span class="kw">let </span>list = doc.put_object(ROOT, <span class="string">&quot;list&quot;</span>, ObjType::List).unwrap();
         doc.insert(<span class="kw-2">&amp;</span>list, <span class="number">0</span>, <span class="number">10</span>).unwrap();
         doc.insert(<span class="kw-2">&amp;</span>list, <span class="number">1</span>, <span class="number">20</span>).unwrap();
@@ -2524,7 +2686,9 @@
         doc.insert(<span class="kw-2">&amp;</span>list, <span class="number">3</span>, <span class="number">35</span>).unwrap();
         doc.delete(<span class="kw-2">&amp;</span>list, <span class="number">0</span>).unwrap();
         <span class="kw">let </span>heads2 = doc.get_heads();
-        <span class="kw">let </span>patches = doc.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2).unwrap().take_patches();
+        <span class="kw">let </span>patches = doc
+            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
+            .take_patches();
         <span class="macro">assert_eq!</span>(
             exp(patches),
             <span class="macro">vec!</span>[
@@ -2552,7 +2716,7 @@
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>basic_diff_list_insert2() {
-        <span class="kw">let </span><span class="kw-2">mut </span>doc = AutoCommitWithObs::&lt;Observed&lt;VecOpObserver&gt;&gt;::default();
+        <span class="kw">let </span><span class="kw-2">mut </span>doc = AutoCommit::default();
         <span class="kw">let </span>list = doc.put_object(ROOT, <span class="string">&quot;list&quot;</span>, ObjType::List).unwrap();
         doc.insert(<span class="kw-2">&amp;</span>list, <span class="number">0</span>, <span class="number">10</span>).unwrap();
         doc.insert(<span class="kw-2">&amp;</span>list, <span class="number">1</span>, <span class="number">20</span>).unwrap();
@@ -2564,7 +2728,9 @@
         doc.insert(<span class="kw-2">&amp;</span>list, <span class="number">1</span>, <span class="number">27</span>).unwrap();
         doc.insert(<span class="kw-2">&amp;</span>list, <span class="number">1</span>, <span class="number">28</span>).unwrap();
         <span class="kw">let </span>heads2 = doc.get_heads();
-        <span class="kw">let </span>patches = doc.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2).unwrap().take_patches();
+        <span class="kw">let </span>patches = doc
+            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
+            .take_patches();
         <span class="macro">assert_eq!</span>(
             exp(patches),
             <span class="macro">vec!</span>[ObservedPatch {
@@ -2579,7 +2745,7 @@
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>diff_list_concurrent_update() {
-        <span class="kw">let </span><span class="kw-2">mut </span>doc1 = AutoCommitWithObs::&lt;Observed&lt;VecOpObserver&gt;&gt;::default();
+        <span class="kw">let </span><span class="kw-2">mut </span>doc1 = AutoCommit::default();
         <span class="kw">let </span>list = doc1.put_object(ROOT, <span class="string">&quot;list&quot;</span>, ObjType::List).unwrap();
 
         doc1.insert(<span class="kw-2">&amp;</span>list, <span class="number">0</span>, <span class="number">10</span>).unwrap();
@@ -2604,7 +2770,9 @@
 
         <span class="kw">let </span>heads2 = doc1.get_heads();
 
-        <span class="kw">let </span>patches = doc1.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2).unwrap().take_patches();
+        <span class="kw">let </span>patches = doc1
+            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
+            .take_patches();
 
         <span class="macro">assert_eq!</span>(
             exp(patches),
@@ -2629,7 +2797,7 @@
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>diff_list_interleaved_concurrent_counters() {
-        <span class="kw">let </span><span class="kw-2">mut </span>doc1 = AutoCommitWithObs::&lt;Observed&lt;VecOpObserver&gt;&gt;::default();
+        <span class="kw">let </span><span class="kw-2">mut </span>doc1 = AutoCommit::default();
         <span class="kw">let </span>list = doc1.put_object(ROOT, <span class="string">&quot;list&quot;</span>, ObjType::List).unwrap();
 
         doc1.insert(<span class="kw-2">&amp;</span>list, <span class="number">0</span>, <span class="number">10</span>).unwrap();
@@ -2693,7 +2861,9 @@
         doc1.put(<span class="kw-2">&amp;</span>list, <span class="number">2</span>, <span class="number">0</span>).unwrap();
         doc1.put(<span class="kw-2">&amp;</span>list, <span class="number">3</span>, <span class="number">0</span>).unwrap();
 
-        <span class="kw">let </span>patches = doc1.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2).unwrap().take_patches();
+        <span class="kw">let </span>patches = doc1
+            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
+            .take_patches();
 
         <span class="kw">let </span>exp = exp(patches);
         <span class="macro">assert_eq!</span>(
@@ -2731,7 +2901,7 @@
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>diff_of_lists_with_concurrent_deletes_and_puts() {
-        <span class="kw">let </span><span class="kw-2">mut </span>doc1 = AutoCommitWithObs::&lt;Observed&lt;VecOpObserver&gt;&gt;::default();
+        <span class="kw">let </span><span class="kw-2">mut </span>doc1 = AutoCommit::default();
         <span class="kw">let </span>list = doc1.put_object(ROOT, <span class="string">&quot;list&quot;</span>, ObjType::List).unwrap();
 
         doc1.insert(<span class="kw-2">&amp;</span>list, <span class="number">0</span>, <span class="number">10</span>).unwrap();
@@ -2767,7 +2937,9 @@
 
         <span class="kw">let </span>heads2 = doc1.get_heads();
 
-        <span class="kw">let </span>patches = doc1.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2).unwrap().take_patches();
+        <span class="kw">let </span>patches = doc1
+            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
+            .take_patches();
         <span class="kw">let </span>exp1 = exp(patches);
         <span class="macro">assert_eq!</span>(
             exp1.get(<span class="number">0</span>),
@@ -2792,7 +2964,9 @@
             .as_ref()
         );
 
-        <span class="kw">let </span>patches = doc1.diff(<span class="kw-2">&amp;</span>heads1a, <span class="kw-2">&amp;</span>heads2).unwrap().take_patches();
+        <span class="kw">let </span>patches = doc1
+            .diff(<span class="kw-2">&amp;</span>heads1a, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
+            .take_patches();
         <span class="kw">let </span>exp2 = exp(patches);
         <span class="macro">assert_eq!</span>(
             exp2.get(<span class="number">0</span>),
@@ -2806,7 +2980,9 @@
             .as_ref()
         );
 
-        <span class="kw">let </span>patches = doc1.diff(<span class="kw-2">&amp;</span>heads1b, <span class="kw-2">&amp;</span>heads2).unwrap().take_patches();
+        <span class="kw">let </span>patches = doc1
+            .diff(<span class="kw-2">&amp;</span>heads1b, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
+            .take_patches();
         <span class="kw">let </span>exp3 = exp(patches);
         <span class="macro">assert_eq!</span>(
             exp3.get(<span class="number">0</span>),
@@ -2823,7 +2999,7 @@
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>diff_counter_exposed() {
-        <span class="kw">let </span><span class="kw-2">mut </span>doc1 = AutoCommitWithObs::&lt;Observed&lt;VecOpObserver&gt;&gt;::default();
+        <span class="kw">let </span><span class="kw-2">mut </span>doc1 = AutoCommit::default();
         doc1.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;x&quot;</span>).unwrap();
 
         <span class="kw">let </span><span class="kw-2">mut </span>doc2 = doc1.fork();
@@ -2856,7 +3032,9 @@
 
         <span class="kw">let </span>heads2b = doc1.get_heads();
 
-        <span class="kw">let </span>patches = doc1.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2a).unwrap().take_patches();
+        <span class="kw">let </span>patches = doc1
+            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2a, VecOpObserver::default())
+            .take_patches();
         <span class="kw">let </span>exp1 = exp(patches);
         <span class="macro">assert_eq!</span>(
             exp1.get(<span class="number">0</span>),
@@ -2870,7 +3048,9 @@
             .as_ref()
         );
 
-        <span class="kw">let </span>patches = doc1.diff(<span class="kw-2">&amp;</span>heads2a, <span class="kw-2">&amp;</span>heads2b).unwrap().take_patches();
+        <span class="kw">let </span>patches = doc1
+            .diff(<span class="kw-2">&amp;</span>heads2a, <span class="kw-2">&amp;</span>heads2b, VecOpObserver::default())
+            .take_patches();
         <span class="kw">let </span>exp1 = exp(patches);
         <span class="macro">assert_eq!</span>(
             exp1.get(<span class="number">0</span>),
@@ -2887,7 +3067,7 @@
 
     <span class="attr">#[test]
     </span><span class="kw">fn </span>simple_marks() {
-        <span class="kw">let </span><span class="kw-2">mut </span>doc1 = AutoCommitWithObs::&lt;Observed&lt;VecOpObserver&gt;&gt;::default();
+        <span class="kw">let </span><span class="kw-2">mut </span>doc1 = AutoCommit::default();
         <span class="kw">let </span>text = doc1.put_object(ROOT, <span class="string">&quot;text&quot;</span>, ObjType::Text).unwrap();
         doc1.splice_text(<span class="kw-2">&amp;</span>text, <span class="number">0</span>, <span class="number">0</span>, <span class="string">&quot;the quick fox jumps over the lazy dog&quot;</span>)
             .unwrap();
@@ -2900,7 +3080,9 @@
         .unwrap();
 
         <span class="kw">let </span>heads2 = doc1.get_heads();
-        <span class="kw">let </span>patches12 = doc1.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2).unwrap().take_patches();
+        <span class="kw">let </span>patches12 = doc1
+            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
+            .take_patches();
         <span class="kw">let </span>exp1 = exp(patches12);
         <span class="macro">assert_eq!</span>(
             exp1,
@@ -2915,7 +3097,9 @@
             }]
         );
 
-        <span class="kw">let </span>patches21 = doc1.diff(<span class="kw-2">&amp;</span>heads2, <span class="kw-2">&amp;</span>heads1).unwrap().take_patches();
+        <span class="kw">let </span>patches21 = doc1
+            .diff(<span class="kw-2">&amp;</span>heads2, <span class="kw-2">&amp;</span>heads1, VecOpObserver::default())
+            .take_patches();
         <span class="kw">let </span>exp2 = exp(patches21);
         <span class="macro">assert_eq!</span>(
             exp2,
