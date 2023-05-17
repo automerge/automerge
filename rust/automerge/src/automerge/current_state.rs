@@ -3,9 +3,10 @@ use std::borrow::Cow;
 use itertools::Itertools;
 
 use crate::{
+    history::History,
     marks::{Mark, MarkStateMachine},
-    types::{Key, ListEncoding, ObjId, Op, OpId, Prop},
-    Automerge, ObjType, OpObserver, OpType, Value,
+    types::{Key, ListEncoding, ObjId, Op, OpId},
+    Automerge, ObjType, OpType, Value,
 };
 
 #[derive(Debug, Default)]
@@ -33,7 +34,7 @@ struct Put<'a> {
 /// Due to only notifying of visible operations the observer will only be called with `put`,
 /// `insert`, and `splice`, operations.
 
-pub(crate) fn observe_current_state<O: OpObserver>(doc: &Automerge, observer: &mut O) {
+pub(crate) fn observe_current_state(doc: &Automerge, history: &mut History) {
     // The OpSet already exposes operations in the order they appear in the document.
     // `OpSet::iter_objs` iterates over the objects in causal order, this means that parent objects
     // will always appear before their children. Furthermore, the operations within each object are
@@ -43,23 +44,24 @@ pub(crate) fn observe_current_state<O: OpObserver>(doc: &Automerge, observer: &m
     // key and for each key find the visible operations for that key. Then we notify the observer
     // for each of those visible operations.
     for (obj, typ, ops) in doc.ops().iter_objs() {
-        if typ == ObjType::Text && !observer.text_as_seq() {
-            observe_text(doc, observer, obj, ops)
+        if typ == ObjType::Text && !doc.text_as_seq() {
+            observe_text(doc, history, obj, ops)
         } else if typ.is_sequence() {
-            observe_list(doc, observer, obj, ops);
+            observe_list(doc, history, obj, ops);
         } else {
-            observe_map(doc, observer, obj, ops);
+            observe_map(doc, history, obj, ops);
         }
     }
 }
 
-fn observe_text<'a, I: Iterator<Item = &'a Op>, O: OpObserver>(
+fn observe_text<'a, I: Iterator<Item = &'a Op>>(
     doc: &'a Automerge,
-    observer: &mut O,
+    //observer: &mut O,
+    history: &mut History,
     obj: &ObjId,
     ops: I,
 ) {
-    let exid = doc.id_to_exid(obj.0);
+    //let exid = doc.id_to_exid(obj.0);
     let ops_by_key = ops.group_by(|o| o.elemid_or_key());
     let encoding = ListEncoding::Text;
     let state = TextState::default();
@@ -87,17 +89,20 @@ fn observe_text<'a, I: Iterator<Item = &'a Op>, O: OpObserver>(
             }
             state
         });
-    observer.splice_text(doc, exid.clone(), 0, state.text.as_str());
-    observer.mark(doc, exid, state.finished.into_iter());
+    history.splice(*obj, 0, state.text.as_str());
+    history.mark(*obj, &state.finished);
+    //observer.splice_text(doc, exid.clone(), 0, state.text.as_str());
+    //observer.mark(doc, exid, state.finished.into_iter());
 }
 
-fn observe_list<'a, I: Iterator<Item = &'a Op>, O: OpObserver>(
+fn observe_list<'a, I: Iterator<Item = &'a Op>>(
     doc: &'a Automerge,
-    observer: &mut O,
+    //observer: &mut O,
+    history: &mut History,
     obj: &ObjId,
     ops: I,
 ) {
-    let exid = doc.id_to_exid(obj.0);
+    //let exid = doc.id_to_exid(obj.0);
     let mut marks = MarkStateMachine::default();
     let ops_by_key = ops.group_by(|o| o.elemid_or_key());
     let mut len = 0;
@@ -135,11 +140,13 @@ fn observe_list<'a, I: Iterator<Item = &'a Op>, O: OpObserver>(
                 })
         })
         .for_each(|(index, (val_enum, (value, opid)))| {
-            let tagged_value = (value, doc.id_to_exid(opid));
             let conflict = val_enum > 0;
-            observer.insert(doc, exid.clone(), index, tagged_value, conflict);
+            history.insert(*obj, index, value.clone().into(), opid, conflict);
+            //let tagged_value = (value, doc.id_to_exid(opid));
+            //observer.insert(doc, exid.clone(), index, tagged_value, conflict);
         });
-    observer.mark(doc, exid, finished.into_iter());
+    history.mark(*obj, &finished);
+    ////observer.mark(doc, exid, finished.into_iter());
 }
 
 fn observe_map_key<'a, I: Iterator<Item = &'a Op>>(
@@ -170,31 +177,33 @@ fn observe_map_key<'a, I: Iterator<Item = &'a Op>>(
         .last()
 }
 
-fn observe_map<'a, I: Iterator<Item = &'a Op>, O: OpObserver>(
+fn observe_map<'a, I: Iterator<Item = &'a Op>>(
     doc: &'a Automerge,
-    observer: &mut O,
+    //observer: &mut O,
+    history: &mut History,
     obj: &ObjId,
     ops: I,
 ) {
-    let exid = doc.id_to_exid(obj.0);
+    //let exid = doc.id_to_exid(obj.0);
     let ops_by_key = ops.group_by(|o| o.key);
     ops_by_key
         .into_iter()
         .filter_map(observe_map_key)
-        .filter_map(|(i, put)| {
-            let tagged_value = (put.value, doc.id_to_exid(put.id));
-            let prop = doc
-                .ops()
-                .m
-                .props
-                .safe_get(put.key.prop_index()?)
-                .map(|s| Prop::Map(s.to_string()))?;
-            let conflict = i > 0;
-            Some((tagged_value, prop, conflict))
-        })
-        .for_each(|(tagged_value, prop, conflict)| {
-            observer.put(doc, exid.clone(), prop, tagged_value, conflict);
+        //.filter_map(|(i, put)| {
+        .for_each(|(i, put)| {
+            //let tagged_value = (put.value.clone(), doc.id_to_exid(put.id));
+            if let Some(prop_index) = put.key.prop_index() {
+                if let Some(key) = doc.ops().m.props.safe_get(prop_index) {
+                    let conflict = i > 0;
+                    history.put_map(*obj, key, put.value.into(), put.id, conflict, false);
+                }
+            }
+            //let prop = Prop::Map(key.to_string());
+            //Some((tagged_value, prop, conflict))
         });
+    //.for_each(|(tagged_value, prop, conflict)| {
+    //observer.put(doc, exid.clone(), prop, tagged_value, conflict);
+    //});
 }
 
 #[cfg(test)]
@@ -202,8 +211,8 @@ mod tests {
     use std::{borrow::Cow, fs};
 
     use crate::{
-        marks::Mark, transaction::Transactable, Automerge, ObjType, OpObserver, Prop, ReadDoc,
-        Value,
+        marks::Mark, op_observer::TextRepresentation, transaction::Transactable, Automerge,
+        ObjType, OpObserver, Prop, ReadDoc, Value,
     };
     //use crate::{transaction::Transactable, Automerge, ObjType, OpObserver, Prop, ReadDoc, Value};
 
@@ -329,23 +338,20 @@ mod tests {
 
     struct ObserverStub {
         ops: Vec<ObserverCall>,
-        text_as_seq: bool,
     }
 
     impl ObserverStub {
         fn new() -> Self {
-            Self {
-                ops: Vec::new(),
-                text_as_seq: true,
-            }
+            Self { ops: Vec::new() }
         }
 
-        fn new_text_v2() -> Self {
-            Self {
-                ops: Vec::new(),
-                text_as_seq: false,
-            }
-        }
+        /*
+                fn new_text_v2() -> Self {
+                    Self {
+                        ops: Vec::new(),
+                    }
+                }
+        */
     }
 
     impl OpObserver for ObserverStub {
@@ -429,10 +435,6 @@ mod tests {
             panic!("delete not expected");
         }
 
-        fn text_as_seq(&self) -> bool {
-            self.text_as_seq
-        }
-
         fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(
             &mut self,
             _doc: &R,
@@ -454,7 +456,7 @@ mod tests {
         doc.insert(&text, 0, "a").unwrap();
 
         let mut obs = ObserverStub::new();
-        super::observe_current_state(doc.document(), &mut obs);
+        doc.document().observe_current_state(&mut obs);
 
         assert_eq!(
             Calls(obs.ops),
@@ -529,7 +531,7 @@ mod tests {
         doc.delete(crate::ROOT, "deleted_text").unwrap();
 
         let mut obs = ObserverStub::new();
-        super::observe_current_state(doc.document(), &mut obs);
+        doc.document().observe_current_state(&mut obs);
 
         assert_eq!(
             Calls(obs.ops),
@@ -564,8 +566,9 @@ mod tests {
         doc.splice_text(&text, 1, 0, "bcdef").unwrap();
         doc.splice_text(&text, 2, 2, "g").unwrap();
 
-        let mut obs = ObserverStub::new_text_v2();
-        super::observe_current_state(doc.document(), &mut obs);
+        let mut obs = ObserverStub::new();
+        doc.set_text_rep(TextRepresentation::String);
+        doc.document().observe_current_state(&mut obs);
 
         assert_eq!(
             Calls(obs.ops),
@@ -601,8 +604,9 @@ mod tests {
 
         doc.merge(&mut doc2).unwrap();
 
-        let mut obs = ObserverStub::new_text_v2();
-        super::observe_current_state(doc.document(), &mut obs);
+        let mut obs = ObserverStub::new();
+        doc.set_text_rep(TextRepresentation::String);
+        doc.document().observe_current_state(&mut obs);
 
         assert_eq!(
             Calls(obs.ops),
@@ -625,8 +629,9 @@ mod tests {
         doc.insert(&list, 0, 1).unwrap();
         doc.insert(&list, 1, 2).unwrap();
 
-        let mut obs = ObserverStub::new_text_v2();
-        super::observe_current_state(doc.document(), &mut obs);
+        let mut obs = ObserverStub::new();
+        doc.set_text_rep(TextRepresentation::String);
+        doc.document().observe_current_state(&mut obs);
 
         assert_eq!(
             Calls(obs.ops),
@@ -663,8 +668,9 @@ mod tests {
         doc2.insert(&list, 0, 2).unwrap();
         doc.merge(&mut doc2).unwrap();
 
-        let mut obs = ObserverStub::new_text_v2();
-        super::observe_current_state(doc.document(), &mut obs);
+        let mut obs = ObserverStub::new();
+        doc.set_text_rep(TextRepresentation::String);
+        doc.document().observe_current_state(&mut obs);
 
         assert_eq!(
             Calls(obs.ops),
@@ -698,8 +704,9 @@ mod tests {
         let map = doc.insert_object(&list, 0, ObjType::Map).unwrap();
         doc.put(&map, "key", "value").unwrap();
 
-        let mut obs = ObserverStub::new_text_v2();
-        super::observe_current_state(doc.document(), &mut obs);
+        let mut obs = ObserverStub::new();
+        doc.set_text_rep(TextRepresentation::String);
+        doc.document().observe_current_state(&mut obs);
 
         assert_eq!(
             Calls(obs.ops),
@@ -736,8 +743,10 @@ mod tests {
         doc.put(&list, 0, "three").unwrap();
         doc.put(&list, 1, "four").unwrap();
 
-        let mut obs = ObserverStub::new_text_v2();
-        super::observe_current_state(doc.document(), &mut obs);
+        doc.set_text_rep(TextRepresentation::String);
+
+        let mut obs = ObserverStub::new();
+        doc.document().observe_current_state(&mut obs);
 
         assert_eq!(
             Calls(obs.ops),
@@ -774,6 +783,7 @@ mod tests {
             crate::OnPartialLoad::Error,
             crate::storage::VerificationMode::Check,
             Some(&mut obs),
+            TextRepresentation::default(),
         );
 
         assert_eq!(

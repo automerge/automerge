@@ -1,29 +1,26 @@
 //! This module is essentially a type level Option. It is used in sitations where we know at
 //! compile time whether an `OpObserver` is available to track changes in a transaction.
-use crate::{op_observer::BranchableObserver, ChangeHash, OpObserver};
+use crate::{ChangeHash, OpObserver};
 
 mod private {
-    use crate::op_observer::BranchableObserver;
 
     pub trait Sealed {}
-    impl<O: super::OpObserver + BranchableObserver> Sealed for super::Observed<O> {}
+    impl<O: super::OpObserver> Sealed for super::Observed<O> {}
     impl Sealed for super::UnObserved {}
 }
 
 pub trait Observation: private::Sealed {
-    type Obs: OpObserver + BranchableObserver;
+    type Obs: OpObserver;
     type CommitResult;
 
     fn observer(&mut self) -> Option<&mut Self::Obs>;
     fn make_result(self, hash: Option<ChangeHash>) -> Self::CommitResult;
-    fn branch(&self) -> Self;
-    fn merge(&mut self, other: &Self);
 }
 
 #[derive(Clone, Debug)]
-pub struct Observed<Obs: OpObserver + BranchableObserver>(Obs);
+pub struct Observed<Obs: OpObserver>(Obs);
 
-impl<O: OpObserver + BranchableObserver> Observed<O> {
+impl<O: OpObserver> Observed<O> {
     pub(crate) fn new(o: O) -> Self {
         Self(o)
     }
@@ -33,7 +30,7 @@ impl<O: OpObserver + BranchableObserver> Observed<O> {
     }
 }
 
-impl<Obs: OpObserver + BranchableObserver> Observation for Observed<Obs> {
+impl<Obs: OpObserver> Observation for Observed<Obs> {
     type Obs = Obs;
     type CommitResult = (Obs, Option<ChangeHash>);
     fn observer(&mut self) -> Option<&mut Self::Obs> {
@@ -42,14 +39,6 @@ impl<Obs: OpObserver + BranchableObserver> Observation for Observed<Obs> {
 
     fn make_result(self, hash: Option<ChangeHash>) -> Self::CommitResult {
         (self.0, hash)
-    }
-
-    fn branch(&self) -> Self {
-        Self(self.0.branch())
-    }
-
-    fn merge(&mut self, other: &Self) {
-        self.0.merge(&other.0)
     }
 }
 
@@ -71,10 +60,4 @@ impl Observation for UnObserved {
     fn make_result(self, hash: Option<ChangeHash>) -> Self::CommitResult {
         hash
     }
-
-    fn branch(&self) -> Self {
-        Self
-    }
-
-    fn merge(&mut self, _other: &Self) {}
 }

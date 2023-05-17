@@ -216,7 +216,6 @@ describe('Automerge', () => {
 
     it('generates patches for marks made locally', () => {
       let doc : Automerge = create(true, "aabbcc")
-      doc.enablePatches(true)
       let list = doc.putObject("_root", "list", "")
       doc.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
       let h1 = doc.getHeads()
@@ -237,9 +236,9 @@ describe('Automerge', () => {
         {
           action: 'mark', path: [ 'list' ],
           marks: [
-            { name: 'bold', value: true, start: 0, end: 37  },
+            { name: `comment:${id}`, value: 'foxes are my favorite animal!', start: 10, end: 13 },
             { name: 'itallic', value: true, start: 4, end: 19 },
-            { name: `comment:${id}`, value: 'foxes are my favorite animal!', start: 10, end: 13 }
+            { name: 'bold', value: true, start: 0, end: 37  },
           ]
         }
       ]);
@@ -254,7 +253,6 @@ describe('Automerge', () => {
       let doc2 = load(doc1.save(),true);
 
       let doc3 = load(doc1.save(),true);
-      doc3.enablePatches(true)
 
       doc1.put("/","foo", "bar"); // make a change to our op counter is higher than doc2
       doc1.mark(list, { start: 0, end: 5 }, "x", "a")
@@ -262,6 +260,7 @@ describe('Automerge', () => {
 
       doc2.mark(list, { start: 4, end: 13 }, "x", "c");
 
+      doc3.truncatePatches();
       doc3.merge(doc1)
       doc3.merge(doc2)
 
@@ -285,7 +284,6 @@ describe('Automerge', () => {
   describe('loading marks', () => {
     it('a mark will appear on load', () => {
       let doc1 : Automerge = create(true, "aabbcc")
-      doc1.enablePatches(true)
 
       let list = doc1.putObject("_root", "list", "")
       doc1.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
@@ -298,10 +296,10 @@ describe('Automerge', () => {
       }]);
 
       let doc2 : Automerge = create(true);
-      doc2.enablePatches(true)
       doc2.loadIncremental(doc1.save())
 
       let patches2 = doc2.popPatches().filter((p:any) => p.action == "mark")
+      //let patches2 = doc2.popPatches();
 
       assert.deepEqual(patches2, [{
         action: 'mark', path: ['list'], marks: [ { name: 'xxx', value: 'aaa', start: 5, end: 10}],
@@ -310,7 +308,6 @@ describe('Automerge', () => {
 
     it('a overlapping marks will coalesse on load', () => {
       let doc1 : Automerge = create(true, "aabbcc")
-      doc1.enablePatches(true)
 
       let list = doc1.putObject("_root", "list", "")
       doc1.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
@@ -322,14 +319,11 @@ describe('Automerge', () => {
 
       assert.deepEqual(patches1, [
         { action: 'mark', path: [ 'list' ], marks: [
-          { name: 'xxx', value: 'aaa', start: 5, end: 15 },
-          { name: 'xxx', value: 'aaa', start: 10, end: 20 },
-          { name: 'xxx', value: 'aaa', start: 15, end: 25 },
+          { name: 'xxx', value: 'aaa', start: 5, end: 25 },
         ] },
       ]);
 
       let doc2 : Automerge = create(true);
-      doc2.enablePatches(true)
       doc2.loadIncremental(doc1.save())
 
       let patches2 = doc2.popPatches().filter((p:any) => p.action == "mark")
@@ -341,7 +335,6 @@ describe('Automerge', () => {
 
     it('coalesse handles different values', () => {
       let doc1 : Automerge = create(true, "aabbcc")
-      doc1.enablePatches(true)
 
       let list = doc1.putObject("_root", "list", "")
       doc1.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
@@ -353,14 +346,13 @@ describe('Automerge', () => {
 
       assert.deepEqual(patches1, [
         { action: 'mark', path: [ 'list' ], marks: [
-          { name: 'xxx', value: 'aaa', start: 5, end: 15 },
-          { name: 'xxx', value: 'bbb', start: 10, end: 20 },
+          { name: 'xxx', value: 'aaa', start: 5, end: 10 },
+          { name: 'xxx', value: 'bbb', start: 10, end: 15 },
           { name: 'xxx', value: 'aaa', start: 15, end: 25 },
         ]}
       ]);
 
       let doc2 : Automerge = create(true);
-      doc2.enablePatches(true)
       doc2.loadIncremental(doc1.save())
 
       let patches2 = doc2.popPatches().filter((p:any) => p.action == "mark")
@@ -376,7 +368,6 @@ describe('Automerge', () => {
 
     it('wont coalesse handles different names', () => {
       let doc1 : Automerge = create(true, "aabbcc")
-      doc1.enablePatches(true)
 
       let list = doc1.putObject("_root", "list", "")
       doc1.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
@@ -395,7 +386,6 @@ describe('Automerge', () => {
       ]);
 
       let doc2 : Automerge = create(true);
-      doc2.enablePatches(true)
       doc2.loadIncremental(doc1.save())
 
       let patches2 = doc2.popPatches().filter((p:any) => p.action == "mark")
@@ -411,7 +401,6 @@ describe('Automerge', () => {
 
     it('coalesse handles async merge', () => {
       let doc1 : Automerge = create(true, "aabbcc")
-      doc1.enablePatches(true)
 
       let list = doc1.putObject("_root", "list", "")
       doc1.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
@@ -431,16 +420,14 @@ describe('Automerge', () => {
 
       assert.deepEqual(patches1, [
         { action: 'mark', path: [ 'list' ], marks: [
-            { name: 'xxx', value: 'aaa', start: 10, end: 20 },
-            { name: 'xxx', value: 'aaa', start: 15, end: 25 },
             { name: 'xxx', value: 'bbb', start: 5, end: 10 },
+            { name: 'xxx', value: 'aaa', start: 10, end: 25 },
             { name: 'xxx', value: 'bbb', start: 25, end: 30 },
           ]
         },
       ]);
 
       let doc3 : Automerge = create(true);
-      doc3.enablePatches(true)
       doc3.loadIncremental(doc1.save())
 
       let patches2 = doc3.popPatches().filter((p:any) => p.action == "mark")
@@ -458,7 +445,6 @@ describe('Automerge', () => {
 
     it('does not show marks hidden in merge', () => {
       let doc1 : Automerge = create(true, "aabbcc")
-      doc1.enablePatches(true)
 
       let list = doc1.putObject("_root", "list", "")
       doc1.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
@@ -478,14 +464,12 @@ describe('Automerge', () => {
 
       assert.deepEqual(patches1, [
         { action: 'mark', path: [ 'list' ], marks: [
-            { name: 'xxx', value: 'aaa', start: 10, end: 20 },
-            { name: 'xxx', value: 'aaa', start: 15, end: 25 },
+            { name: 'xxx', value: 'aaa', start: 10, end: 25 },
           ]
         },
       ]);
 
       let doc3 : Automerge = create(true);
-      doc3.enablePatches(true)
       doc3.loadIncremental(doc1.save())
 
       let patches2 = doc3.popPatches().filter((p:any) => p.action == "mark")
@@ -499,7 +483,6 @@ describe('Automerge', () => {
 
     it('coalesse disconnected marks with async merge', () => {
       let doc1 : Automerge = create(true, "aabbcc")
-      doc1.enablePatches(true)
 
       let list = doc1.putObject("_root", "list", "")
       doc1.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
@@ -519,15 +502,12 @@ describe('Automerge', () => {
 
       assert.deepEqual(patches1, [
         { action: 'mark', path: [ 'list' ], marks: [
-            { name: 'xxx', value: 'aaa', start: 5, end: 11 },
-            { name: 'xxx', value: 'aaa', start: 19, end: 25 },
-            { name: 'xxx', value: 'aaa', start: 11, end: 19 },
+            { name: 'xxx', value: 'aaa', start: 5, end: 25 },
           ]
         },
       ]);
 
       let doc3 : Automerge = create(true);
-      doc3.enablePatches(true)
       doc3.loadIncremental(doc1.save())
 
       let patches2 = doc3.popPatches().filter((p:any) => p.action == "mark")
@@ -540,7 +520,6 @@ describe('Automerge', () => {
     })
     it('can get marks at a given heads', () => {
       let doc1 : Automerge = create(true, "aabbcc")
-      doc1.enablePatches(true)
 
       let list = doc1.putObject("_root", "list", "")
       doc1.splice(list, 0, 0, "the quick fox jumps over the lazy dog")

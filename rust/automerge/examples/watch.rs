@@ -1,4 +1,3 @@
-use automerge::op_observer::HasPatches;
 use automerge::transaction::CommitOptions;
 use automerge::transaction::Transactable;
 use automerge::Automerge;

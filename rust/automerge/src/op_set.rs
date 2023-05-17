@@ -297,7 +297,7 @@ impl OpSetInternal {
                 // do it the hard way - walk each op
                 _ => self
                     .top_ops(obj, clock)
-                    .fold(0, |acc, op| acc + op.width(encoding)),
+                    .fold(0, |acc, top| acc + top.op.width(encoding)),
             }
         } else {
             0
@@ -305,7 +305,9 @@ impl OpSetInternal {
     }
 
     pub(crate) fn text(&self, obj: &ObjId, clock: Option<Clock>) -> String {
-        self.top_ops(obj, clock).map(|op| op.to_str()).collect()
+        self.top_ops(obj, clock)
+            .map(|top| top.op.to_str())
+            .collect()
     }
 
     pub(crate) fn keys<'a>(&'a self, obj: &ObjId, clock: Option<Clock>) -> Keys<'a> {
@@ -446,8 +448,9 @@ impl OpSetMetadata {
         }
     }
 
-    pub(crate) fn lamport_cmp(&self, left: OpId, right: OpId) -> Ordering {
-        left.lamport_cmp(&right, &self.actors.cache)
+    pub(crate) fn lamport_cmp<O: AsRef<OpId>>(&self, left: O, right: O) -> Ordering {
+        left.as_ref()
+            .lamport_cmp(right.as_ref(), &self.actors.cache)
     }
 
     pub(crate) fn sorted_opids<I: Iterator<Item = OpId>>(&self, opids: I) -> OpIds {

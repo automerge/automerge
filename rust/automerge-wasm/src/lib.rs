@@ -27,11 +27,10 @@
 #![allow(clippy::unused_unit)]
 use am::marks::Mark;
 use am::transaction::CommitOptions;
-use am::transaction::{Observed, Transactable, UnObserved};
+use am::transaction::Transactable;
 use am::ScalarValue;
 use automerge as am;
-use automerge::ToggleObserver;
-use automerge::{sync::SyncDoc, Change, Prop, ReadDoc, Value, VecOpObserver, ROOT};
+use automerge::{sync::SyncDoc, AutoCommit, Change, Prop, ReadDoc, Value, VecOpObserver, ROOT};
 use js_sys::{Array, Function, Object, Uint8Array};
 use serde::ser::Serialize;
 use std::borrow::Cow;
@@ -57,8 +56,6 @@ macro_rules! log {
           web_sys::console::log_1(&format!( $( $t )* ).into());
     };
 }
-
-type AutoCommit = am::AutoCommitWithObs<Observed<ToggleObserver<VecOpObserver>>>;
 
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
@@ -104,9 +101,7 @@ impl Automerge {
         actor: Option<String>,
         text_rep: TextRepresentation,
     ) -> Result<Automerge, error::BadActorId> {
-        let mut doc = AutoCommit::default()
-            .with_observer(ToggleObserver::default().with_text_rep(text_rep.into()));
-        doc.observer().set_text_rep(text_rep.into());
+        let mut doc = AutoCommit::default().with_text_rep(text_rep.into());
         if let Some(a) = actor {
             let a = automerge::ActorId::from(hex::decode(a)?.to_vec());
             doc.set_actor(a);
@@ -549,17 +544,6 @@ impl Automerge {
         Ok(old_freeze.into())
     }
 
-    #[wasm_bindgen(js_name = enablePatches)]
-    pub fn enable_patches(&mut self, enable: JsValue) -> Result<JsValue, JsValue> {
-        let enable = enable
-            .as_bool()
-            .ok_or_else(|| to_js_err("must pass a bool to enablePatches"))?;
-        let heads = self.doc.get_heads();
-        let old_enabled = self.doc.observer().enable(enable, heads);
-        self.doc.observer().set_text_rep(self.text_rep.into());
-        Ok(old_enabled.into())
-    }
-
     #[wasm_bindgen(js_name = registerDatatype)]
     pub fn register_datatype(
         &mut self,
@@ -609,8 +593,8 @@ impl Automerge {
         let mut object = object
             .dyn_into::<Object>()
             .map_err(|_| error::ApplyPatch::NotObjectd)?;
-        let end_heads = self.doc.get_heads();
-        let (patches, _begin_heads) = self.doc.observer().take_patches(end_heads);
+
+        let patches = self.doc.diff_incremental::<VecOpObserver>().take_patches();
 
         // even if there are no patches we may need to update the meta object
         // which requires that we update the object too
@@ -637,8 +621,7 @@ impl Automerge {
         // committed.
         // If we pop the patches then we won't be able to revert them.
 
-        let heads = self.doc.get_heads();
-        let (patches, _heads) = self.doc.observer().take_patches(heads);
+        let patches = self.doc.diff_incremental::<VecOpObserver>().take_patches();
         let result = Array::new();
         for p in patches {
             result.push(&interop::JsPatch(p).try_into()?);
@@ -646,11 +629,26 @@ impl Automerge {
         Ok(result)
     }
 
+    #[wasm_bindgen(js_name = truncatePatches)]
+    pub fn truncate_patches(&mut self) {
+        // FIXME - im using different names / analogies here
+        self.doc.update_diff_cursor();
+    }
+
+    #[wasm_bindgen(js_name = resetPatches)]
+    pub fn reset_patches(&mut self) {
+        // FIXME - im using different names / analogies here
+        self.doc.reset_diff_cursor();
+    }
+
     pub fn diff(&mut self, before: Array, after: Array) -> Result<Array, error::Diff> {
         let before = get_heads(Some(before))?.unwrap();
         let after = get_heads(Some(after))?.unwrap();
 
-        let patches = self.doc.diff(&before, &after)?.take_patches(vec![]).0;
+        let patches = self
+            .doc
+            .diff(&before, &after, VecOpObserver::default())
+            .take_patches();
         Ok(interop::JsPatches(patches).try_into()?)
     }
 
@@ -812,8 +810,7 @@ impl Automerge {
     ) -> Result<JsValue, error::Materialize> {
         let (obj, obj_type) = self.import(obj).unwrap_or((ROOT, am::ObjType::Map));
         let heads = get_heads(heads)?;
-        let current_heads = self.doc.get_heads();
-        let _patches = self.doc.observer().take_patches(current_heads); // throw away patches
+        self.doc.update_diff_cursor();
         Ok(self.export_object(&obj, obj_type.into(), heads.as_ref(), &meta)?)
     }
 
@@ -914,8 +911,7 @@ pub fn load(
     } else {
         TextRepresentation::Array
     };
-    let mut doc = am::AutoCommitWithObs::<UnObserved>::load(&data)?
-        .with_observer(ToggleObserver::default().with_text_rep(text_rep.into()));
+    let mut doc = am::AutoCommit::load(&data)?.with_text_rep(text_rep.into());
     if let Some(s) = actor {
         let actor =
             automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());

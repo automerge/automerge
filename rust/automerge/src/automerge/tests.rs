@@ -7,7 +7,6 @@ use crate::transaction::Transactable;
 use crate::*;
 use std::convert::TryInto;
 
-use crate::op_observer::HasPatches;
 use test_log::test;
 
 #[test]
@@ -1555,11 +1554,11 @@ fn observe_counter_change_application_overwrite() {
     doc1.increment(ROOT, "counter", 5).unwrap();
     doc1.commit();
 
-    let mut doc3 = doc1.fork().with_observer(VecOpObserver::default());
+    let mut doc3 = doc1.fork();
     doc3.merge(&mut doc2).unwrap();
 
     assert_eq!(
-        doc3.observer().take_patches(),
+        doc3.diff_incremental::<VecOpObserver>().take_patches(),
         vec![Patch {
             obj: ExId::Root,
             path: vec![],
@@ -1575,11 +1574,15 @@ fn observe_counter_change_application_overwrite() {
         }]
     );
 
-    let mut doc4 = doc2.clone().with_observer(VecOpObserver::default());
+    let mut doc4 = doc2.clone();
+    doc4.update_diff_cursor();
     doc4.merge(&mut doc1).unwrap();
 
     // no patches as the increments operate on an invisible counter
-    assert_eq!(doc4.observer().take_patches(), vec![]);
+    assert_eq!(
+        doc4.diff_incremental::<VecOpObserver>().take_patches(),
+        vec![]
+    );
 }
 
 #[test]
@@ -1590,16 +1593,16 @@ fn observe_counter_change_application() {
     doc.increment(ROOT, "counter", 5).unwrap();
     let changes = doc.get_changes(&[]).unwrap().into_iter().cloned();
 
-    let mut new_doc = AutoCommit::new().with_observer(VecOpObserver::default());
+    let mut new_doc = AutoCommit::new();
     // make a new change to the doc to stop the empty doc logic from skipping the intermediate
     // patches. The is probably not really necessary, we could update this test to just test that
     // the correct final state is emitted. For now though, we leave it as is.
     new_doc.put(ROOT, "foo", "bar").unwrap();
-    new_doc.observer().take_patches();
+    new_doc.update_diff_cursor();
     new_doc.apply_changes(changes).unwrap();
     assert_eq!(
         new_doc
-            .observer()
+            .diff_incremental::<VecOpObserver>()
             .take_patches()
             .into_iter()
             .map(|p| p.action)

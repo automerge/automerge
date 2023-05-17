@@ -61,14 +61,14 @@ impl<'a, R: RangeBounds<usize>> Iterator for ListRange<'a, R> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.as_mut().and_then(|inner| {
-            for op in inner.iter.by_ref() {
+            for top in inner.iter.by_ref() {
                 let index = inner.state;
-                inner.state += op.width(inner.encoding);
+                inner.state += top.op.width(inner.encoding);
                 if inner.range.contains(&index) {
                     return Some((
                         index,
-                        op.value_at(inner.clock.as_ref()),
-                        inner.op_set.id_to_exid(op.id),
+                        top.op.value_at(inner.clock.as_ref()),
+                        inner.op_set.id_to_exid(top.op.id),
                     ));
                 }
             }

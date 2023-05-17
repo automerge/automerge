@@ -72,6 +72,7 @@ use serde::ser::SerializeMap;
 use std::collections::{HashMap, HashSet};
 
 use crate::{
+    history::History,
     storage::{parse, Change as StoredChange, ReadChangeOpError},
     Automerge, AutomergeError, Change, ChangeHash, OpObserver, ReadDoc,
 };
@@ -208,7 +209,8 @@ impl SyncDoc for Automerge {
         sync_state: &mut State,
         message: Message,
     ) -> Result<(), AutomergeError> {
-        self.do_receive_sync_message::<()>(sync_state, message, None)
+        let mut history = History::innactive();
+        self.receive_sync_message_inner(sync_state, message, &mut history)
     }
 
     fn receive_sync_message_with<Obs: OpObserver>(
@@ -217,7 +219,10 @@ impl SyncDoc for Automerge {
         message: Message,
         op_observer: &mut Obs,
     ) -> Result<(), AutomergeError> {
-        self.do_receive_sync_message(sync_state, message, Some(op_observer))
+        let mut history = History::new(!self.is_empty());
+        self.receive_sync_message_inner(sync_state, message, &mut history)?;
+        self.observe_history(Some(op_observer), history);
+        Ok(())
     }
 }
 
@@ -304,11 +309,11 @@ impl Automerge {
         }
     }
 
-    fn do_receive_sync_message<Obs: OpObserver>(
+    pub(crate) fn receive_sync_message_inner(
         &mut self,
         sync_state: &mut State,
         message: Message,
-        op_observer: Option<&mut Obs>,
+        history: &mut History,
     ) -> Result<(), AutomergeError> {
         let before_heads = self.get_heads();
 
@@ -321,7 +326,7 @@ impl Automerge {
 
         let changes_is_empty = message_changes.is_empty();
         if !changes_is_empty {
-            self.apply_changes_with(message_changes, op_observer)?;
+            self.apply_changes_inner(message_changes, history)?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
                 &self.get_heads().into_iter().collect(),

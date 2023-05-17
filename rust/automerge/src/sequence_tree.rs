@@ -99,6 +99,11 @@ where
         self.root_node.as_ref().and_then(|n| n.get(index))
     }
 
+    /// Get the mut ref for the `element` at `index` in the sequence.
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        self.root_node.as_mut().and_then(|n| n.get_mut(index))
+    }
+
     /// Removes the element at `index` from the sequence.
     ///
     /// # Panics
@@ -426,6 +431,26 @@ where
                     Ordering::Equal => return self.elements.get(child_index),
                     Ordering::Greater => {
                         return child.get(index - cumulative_len);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        if self.is_leaf() {
+            return self.elements.get_mut(index);
+        } else {
+            let mut cumulative_len = 0;
+            for (child_index, child) in self.children.iter_mut().enumerate() {
+                match (cumulative_len + child.len()).cmp(&index) {
+                    Ordering::Less => {
+                        cumulative_len += child.len() + 1;
+                    }
+                    Ordering::Equal => return self.elements.get_mut(child_index),
+                    Ordering::Greater => {
+                        return child.get_mut(index - cumulative_len);
                     }
                 }
             }

@@ -1,8 +1,7 @@
-use crate::change::LoadError as LoadChangeError;
 use crate::storage::load::Error as LoadError;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
-use crate::{ChangeHash, Cursor, ObjType};
+use crate::{ChangeHash, Cursor, LoadChangeError, ObjType, PatchAction};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -58,6 +57,8 @@ pub enum AutomergeError {
     NonChangeCompressed,
     #[error("id was not an object id")]
     NotAnObject,
+    #[error(transparent)]
+    HydrateError(#[from] HydrateError),
 }
 
 impl PartialEq for AutomergeError {
@@ -108,4 +109,26 @@ pub enum InvalidOpType {
     UnknownAction(u64),
     #[error("non numeric argument for inc op")]
     NonNumericInc,
+}
+
+#[derive(Error, Debug)]
+pub enum HydrateError {
+    //#[error(transparent)]
+    //ChangeGraph(#[from] crate::change_graph::MissingDep),
+    #[error("general failure")]
+    Fail,
+    #[error("invalid index {0} for sequence")]
+    InvalidIndex(usize),
+    #[error("invalid key {0} for map")]
+    InvalidKey(String),
+    #[error("increment of a non-counter")]
+    BadIncrement,
+    #[error("invalid op applied to map")]
+    InvalidMapOp,
+    #[error("invalid op appied to list")]
+    InvalidListOp,
+    #[error("invalid op applied to map: {0}")]
+    InvalidTextOp(PatchAction),
+    #[error("invalid prop in patch: {0}")]
+    ApplyInvalidProp(PatchAction),
 }
