@@ -783,8 +783,14 @@
 <a href="#782" id="782">782</a>
 <a href="#783" id="783">783</a>
 <a href="#784" id="784">784</a>
+<a href="#785" id="785">785</a>
+<a href="#786" id="786">786</a>
+<a href="#787" id="787">787</a>
+<a href="#788" id="788">788</a>
+<a href="#789" id="789">789</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
+<span class="kw">use </span><span class="kw">crate</span>::automerge::SaveOptions;
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
 <span class="kw">use </span><span class="kw">crate</span>::history::History;
 <span class="kw">use </span><span class="kw">crate</span>::hydrate;
@@ -1061,7 +1067,11 @@
         <span class="self">self</span>.doc.save()
     }
 
-    <span class="doccomment">/// Save this document, but don&#39;t run it through DEFLATE afterwards
+    <span class="kw">pub fn </span>save_with_options(<span class="kw-2">&amp;mut </span><span class="self">self</span>, options: SaveOptions) -&gt; Vec&lt;u8&gt; {
+        <span class="self">self</span>.doc.save_with_options(options)
+    }
+
+    <span class="doccomment">/// Save the document and attempt to load it before returning - slow!
     </span><span class="kw">pub fn </span>save_and_verify(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;u8&gt;, AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_closed();
         <span class="self">self</span>.doc.save_and_verify()
