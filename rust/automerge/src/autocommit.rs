@@ -1,5 +1,6 @@
 use std::ops::RangeBounds;
 
+use crate::automerge::SaveOptions;
 use crate::exid::ExId;
 use crate::history::History;
 use crate::hydrate;
@@ -276,7 +277,11 @@ impl AutoCommit {
         self.doc.save()
     }
 
-    /// Save this document, but don't run it through DEFLATE afterwards
+    pub fn save_with_options(&mut self, options: SaveOptions) -> Vec<u8> {
+        self.doc.save_with_options(options)
+    }
+
+    /// Save the document and attempt to load it before returning - slow!
     pub fn save_and_verify(&mut self) -> Result<Vec<u8>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.save_and_verify()

@@ -545,9 +545,6 @@ impl Automerge {
         match load::load_changes(remaining.reset()) {
             load::LoadedChanges::Complete(c) => {
                 am.apply_changes(change.into_iter().chain(c))?;
-                if !am.queue.is_empty() {
-                    return Err(AutomergeError::MissingDeps);
-                }
             }
             load::LoadedChanges::Partial { error, .. } => {
                 if on_error == OnPartialLoad::Error {
@@ -827,19 +824,38 @@ impl Automerge {
     /// This takes a mutable reference to self because it saves the heads of the last save so that
     /// `save_incremental` can be used to produce only the changes since the last `save`. This API
     /// will be changing in future.
-    pub fn save(&mut self) -> Vec<u8> {
+    pub fn save_with_options(&mut self, options: SaveOptions) -> Vec<u8> {
         let heads = self.get_heads();
         let c = self.history.iter();
-        let bytes = crate::storage::save::save_document(
+        let compress = if options.deflate {
+            None
+        } else {
+            Some(CompressConfig::None)
+        };
+        let mut bytes = crate::storage::save::save_document(
             c,
             self.ops.iter().map(|(objid, _, op)| (objid, op)),
             &self.ops.m.actors,
             &self.ops.m.props,
             &heads,
-            None,
+            compress,
         );
         self.saved = self.get_heads();
+        if options.retain_orphans {
+            for orphaned in self.queue.drain(..) {
+                bytes.extend(orphaned.raw_bytes());
+            }
+        }
         bytes
+    }
+
+    /// Save the entirety of this document in a compact form.
+    ///
+    /// This takes a mutable reference to self because it saves the heads of the last save so that
+    /// `save_incremental` can be used to produce only the changes since the last `save`. This API
+    /// will be changing in future.
+    pub fn save(&mut self) -> Vec<u8> {
+        self.save_with_options(SaveOptions::default())
     }
 
     /// Save the document and attempt to load it before returning - slow!
@@ -851,18 +867,10 @@ impl Automerge {
 
     /// Save this document, but don't run it through DEFLATE afterwards
     pub fn save_nocompress(&mut self) -> Vec<u8> {
-        let heads = self.get_heads();
-        let c = self.history.iter();
-        let bytes = crate::storage::save::save_document(
-            c,
-            self.ops.iter().map(|(objid, _, op)| (objid, op)),
-            &self.ops.m.actors,
-            &self.ops.m.props,
-            &heads,
-            Some(CompressConfig::None),
-        );
-        self.saved = self.get_heads();
-        bytes
+        self.save_with_options(SaveOptions {
+            deflate: false,
+            ..Default::default()
+        })
     }
 
     /// Save the changes since the last call to [Self::save`]
@@ -1529,5 +1537,23 @@ impl ReadDoc for Automerge {
 impl Default for Automerge {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Options to pass to `[Automerge::save_with_options]` and [`crate::AutoCommit::save_with_options`]
+#[derive(Debug)]
+pub struct SaveOptions {
+    /// Whether to apply DEFLATE compression to the RLE encoded columns in the document
+    pub deflate: bool,
+    /// Whether to save changes which we do not have the dependencies for
+    pub retain_orphans: bool,
+}
+
+impl std::default::Default for SaveOptions {
+    fn default() -> Self {
+        Self {
+            deflate: true,
+            retain_orphans: true,
+        }
     }
 }
