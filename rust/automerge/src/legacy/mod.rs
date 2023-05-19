@@ -2,6 +2,8 @@ mod serde_impls;
 mod utility_impls;
 
 use std::num::NonZeroU64;
+use crate::exid::ExId;
+use crate::error;
 
 pub(crate) use crate::types::{ActorId, ChangeHash, ObjType, ScalarValue};
 pub(crate) use crate::value::DataType;
@@ -159,6 +161,17 @@ impl<T> SortedVec<T> {
 
     pub fn iter(&self) -> std::slice::Iter<'_, T> {
         self.0.iter()
+    }
+}
+
+impl TryFrom<&ExId> for OpId {
+    type Error = error::InvalidOpId;
+
+    fn try_from(id: &ExId) -> Result<Self,Self::Error> {
+      match id {
+        ExId::Root => Err(error::InvalidOpId(id.to_string())),
+        ExId::Id(ctr, actor, _) => Ok(OpId( *ctr, actor.clone() )),
+      }
     }
 }
 

@@ -58,7 +58,7 @@ pub enum AutomergeError {
     #[error("id was not an object id")]
     NotAnObject,
     #[error(transparent)]
-    HydrateError(#[from] HydrateError),
+    HydrateError(#[from] HydrateError)
 }
 
 impl PartialEq for AutomergeError {
@@ -109,6 +109,14 @@ pub enum InvalidOpType {
     UnknownAction(u64),
     #[error("non numeric argument for inc op")]
     NonNumericInc,
+}
+
+#[derive(Error, Debug)]
+pub enum RepairError {
+    #[error("unknown load error: {0}")]
+    UnknownError(AutomergeError),
+    #[error("repair failed: {0}")]
+    RepairFailed(AutomergeError),
 }
 
 #[derive(Error, Debug)]

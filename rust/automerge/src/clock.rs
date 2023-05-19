@@ -47,6 +47,10 @@ impl Clock {
         Clock(Default::default())
     }
 
+    pub(crate) fn maximize(&mut self, actor_index: usize) {
+      self.include(actor_index, ClockData { max_op: u64::MAX, seq: u64::MAX })
+    }
+
     pub(crate) fn include(&mut self, actor_index: usize, data: ClockData) {
         self.0
             .entry(actor_index)

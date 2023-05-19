@@ -1,7 +1,7 @@
 use crate::op_set::OpSetMetadata;
 use crate::storage::parse;
 use crate::types::OpId;
-use crate::{ActorId, AutomergeError};
+use crate::{ActorId, AutomergeError, legacy};
 use std::fmt;
 
 /// An identifier of a position in a Sequence (either Self::List or Self::Text).
@@ -41,6 +41,7 @@ impl Cursor {
         let actor = s[(n + 1)..].try_into().ok()?;
         Some(Cursor { ctr, actor })
     }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         // The serialized format is
         //
@@ -112,5 +113,14 @@ impl TryFrom<Vec<u8>> for Cursor {
 
     fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
         Self::try_from(value.as_slice())
+    }
+}
+
+impl From<&legacy::ElementId> for Option<Cursor> {
+    fn from(e: &legacy::ElementId) -> Self {
+      match e {
+        legacy::ElementId::Head => None,
+        legacy::ElementId::Id(legacy::OpId(ctr, actor)) => Some(Cursor { ctr: *ctr, actor: actor.clone() }),
+      }
     }
 }

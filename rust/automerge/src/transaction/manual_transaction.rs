@@ -120,6 +120,10 @@ impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
         let tx = self.inner.as_mut().unwrap();
         f(tx, self.doc, &mut self.history)
     }
+
+    pub(crate) fn doc(&mut self) -> &mut Automerge {
+      self.doc
+    }
 }
 
 impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {

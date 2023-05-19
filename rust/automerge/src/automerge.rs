@@ -366,6 +366,11 @@ impl Automerge {
     pub fn fork_at(&self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
         let mut seen = heads.iter().cloned().collect::<HashSet<_>>();
         let mut heads = heads.to_vec();
+        if self.get_heads() == heads {
+            let mut f = self.clone();
+            f.set_actor(ActorId::random());
+            return Ok(f)
+        }
         let mut changes = vec![];
         while let Some(hash) = heads.pop() {
             if let Some(idx) = self.history_index.get(&hash) {
@@ -690,6 +695,7 @@ impl Automerge {
                 if self.is_causally_ready(&c) {
                     self.apply_change(c, history)?;
                 } else {
+                    log!(" change out of order {:?}",c);
                     self.queue.push(c);
                 }
             }
@@ -1520,9 +1526,19 @@ impl ReadDoc for Automerge {
     }
 
     fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&Change> {
-        self.history_index
-            .get(hash)
-            .and_then(|index| self.history.get(*index))
+        use std::str::FromStr;
+        let odd_hash = ChangeHash::from_str("1a3282b6672aeae8bf52582ac62f26bd83aa12160a0ca3d0c8704d53df1689a2").unwrap();
+        if &odd_hash == hash {
+          let tmp = self.history_index.get(hash);
+          log!(" get_hash1={:?}", tmp);
+          let tmp2 = self.history.get(*tmp?);
+          log!(" get_hash2={:?}", tmp2);
+          tmp2
+        } else {
+          self.history_index
+              .get(hash)
+              .and_then(|index| self.history.get(*index))
+        }
     }
 }
 
