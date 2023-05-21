@@ -17,6 +17,7 @@ pub trait OpObserver {
     /// - `index`: the index the new value has been inserted at.
     /// - `tagged_value`: the value that has been inserted and the id of the operation that did the
     /// insert.
+    /// - `conflict`: whether this put conflicts with other operations.
     fn insert<R: ReadDoc>(
         &mut self,
         doc: &R,
