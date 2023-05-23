@@ -6,13 +6,13 @@ import { create, load, initSyncState } from '..'
 describe('Automerge', () => {
   describe('Readme Examples', () => {
     it('Using the Library and Creating a Document', () => {
-      const doc = create(true)
+      const doc = create()
       const sync = initSyncState()
       doc.free()
       sync.free()
     })
     it('Automerge Scalar Types (1)', () => {
-      const doc = create(true)
+      const doc = create()
       doc.put("/", "prop1", 100)  // int
       doc.put("/", "prop2", 3.14) // f64
       doc.put("/", "prop3", "hello world")
@@ -32,7 +32,7 @@ describe('Automerge', () => {
       })
     })
     it('Automerge Scalar Types (2)', () => {
-      const doc = create(true)
+      const doc = create()
       doc.put("/", "prop1", 100, "int")
       doc.put("/", "prop2", 100, "uint")
       doc.put("/", "prop3", 100.5, "f64")
@@ -45,7 +45,7 @@ describe('Automerge', () => {
       doc.put("/", "prop10", null, "null")
     })
     it('Automerge Object Types (1)', () => {
-      const doc = create(true)
+      const doc = create()
 
       // you can create an object by passing in the inital state - if blank pass in `{}`
       // the return value is the Object Id
@@ -64,7 +64,7 @@ describe('Automerge', () => {
       const notes = doc.putObject("/", "notes", "Hello world!")
     })
     it('Automerge Object Types (2)', () => {
-      const doc = create(true)
+      const doc = create()
 
       const config = doc.putObject("/", "config", { align: "left", archived: false, cycles: [10, 19, 21] })
 
@@ -85,7 +85,7 @@ describe('Automerge', () => {
       })
     })
     it('Maps (1)', () => {
-      const doc = create(true)
+      const doc = create()
       const mymap = doc.putObject("_root", "mymap", { foo: "bar"})
                                 // make a new map with the foo key
 
@@ -99,7 +99,7 @@ describe('Automerge', () => {
       assert.deepEqual(doc.materialize("_root"), { mymap: { bytes: new Uint8Array([1,2,3]), foo: "bar", sub: {} }})
     })
     it('Lists (1)', () => {
-      const doc = create(true)
+      const doc = create()
       const items = doc.putObject("_root", "items", [10,"box"])
                                                     // init a new list with two elements
       doc.push(items, true)                         // push `true` to the end of the list
@@ -113,14 +113,14 @@ describe('Automerge', () => {
       assert.deepEqual(doc.length(items),6)
     })
     it('Text (1)', () => {
-      const doc = create(true, "aaaaaa")
+      const doc = create({ actor: "aaaaaa"})
       const notes = doc.putObject("_root", "notes", "Hello world")
       doc.splice(notes, 6, 5, "everyone")
 
       assert.deepEqual(doc.text(notes), "Hello everyone")
     })
     it('Querying Data (1)', () => {
-      const doc1 = create(true, "aabbcc")
+      const doc1 = create({ actor: "aabbcc" })
       doc1.put("_root", "key1", "val1")
       const key2 = doc1.putObject("_root", "key2", [])
 
@@ -140,7 +140,7 @@ describe('Automerge', () => {
       assert.deepEqual(doc1.getAll("_root","key3"),[[ "str", "doc1val", "3@aabbcc"], ["str", "doc2val", "3@ffaaff"]])
     })
     it('Counters (1)', () => {
-      const doc1 = create(true, "aaaaaa")
+      const doc1 = create({ actor: "aaaaaa" })
       doc1.put("_root", "number", 0)
       doc1.put("_root", "total", 0, "counter")
 
@@ -156,7 +156,7 @@ describe('Automerge', () => {
       assert.deepEqual(doc1.materialize("_root"), { number: 10, total: 33 })
     })
     it('Transactions (1)', () => {
-      const doc = create(true)
+      const doc = create()
 
       doc.put("_root", "key", "val1")
 
@@ -178,7 +178,7 @@ describe('Automerge', () => {
       assert.deepEqual(doc.pendingOps(),0)
     })
     it('Viewing Old Versions of the Document (1)', () => {
-      const doc = create(true)
+      const doc = create()
 
       doc.put("_root", "key", "val1")
       const heads1 = doc.getHeads()
@@ -194,7 +194,7 @@ describe('Automerge', () => {
       assert.deepEqual(doc.get("_root","key",[]), undefined)
     })
     it('Forking And Merging (1)', () => {
-      const doc1 = create(true)
+      const doc1 = create()
       doc1.put("_root", "key1", "val1")
 
       const doc2 = doc1.fork()
@@ -208,13 +208,13 @@ describe('Automerge', () => {
       assert.deepEqual(doc2.materialize("_root"), { key1: "val1", key3: "val3" })
     })
     it('Saving And Loading (1)', () => {
-      const doc1 = create(true)
+      const doc1 = create()
 
       doc1.put("_root", "key1", "value1")
 
       const save1 = doc1.save()
 
-      const doc2 = load(save1, true)
+      const doc2 = load(save1)
 
       doc2.materialize("_root")  // returns { key1: "value1" }
 
@@ -230,9 +230,9 @@ describe('Automerge', () => {
 
       doc2.loadIncremental(saveIncremental)
 
-      const doc3 = load(save2, true)
+      const doc3 = load(save2)
 
-      const doc4 = load(save3, true)
+      const doc4 = load(save3)
 
       assert.deepEqual(doc1.materialize("_root"), { key1: "value1", key2: "value2" })
       assert.deepEqual(doc2.materialize("_root"), { key1: "value1", key2: "value2" })

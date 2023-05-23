@@ -889,29 +889,43 @@ impl Automerge {
 }
 
 #[wasm_bindgen(js_name = create)]
-pub fn init(text_v2: bool, actor: Option<String>) -> Result<Automerge, error::BadActorId> {
+pub fn init(options: JsValue) -> Result<Automerge, error::BadActorId> {
     console_error_panic_hook::set_once();
-    let text_rep = if text_v2 {
-        TextRepresentation::String
-    } else {
+    let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
+    let text_v1 = js_get(&options, "text_v1")
+        .ok()
+        .and_then(|v1| v1.as_bool())
+        .unwrap_or(false);
+    let text_rep = if text_v1 {
         TextRepresentation::Array
+    } else {
+        TextRepresentation::String
     };
     Automerge::new(actor, text_rep)
 }
 
 #[wasm_bindgen(js_name = load)]
-pub fn load(
-    data: Uint8Array,
-    text_v2: bool,
-    actor: Option<String>,
-) -> Result<Automerge, error::Load> {
+pub fn load(data: Uint8Array, options: JsValue) -> Result<Automerge, error::Load> {
     let data = data.to_vec();
-    let text_rep = if text_v2 {
-        TextRepresentation::String
-    } else {
+    let actor = js_get(&options, "actor").ok().and_then(|a| a.as_string());
+    let text_v1 = js_get(&options, "text_v1")
+        .ok()
+        .and_then(|v1| v1.as_bool())
+        .unwrap_or(false);
+    let unchecked = js_get(&options, "unchecked")
+        .ok()
+        .and_then(|v1| v1.as_bool())
+        .unwrap_or(false);
+    let text_rep = if text_v1 {
         TextRepresentation::Array
+    } else {
+        TextRepresentation::String
     };
-    let mut doc = am::AutoCommit::load(&data)?.with_text_rep(text_rep.into());
+    let mut doc = if unchecked {
+        am::AutoCommit::load_unverified_heads(&data)?.with_text_rep(text_rep.into())
+    } else {
+        am::AutoCommit::load(&data)?.with_text_rep(text_rep.into())
+    };
     if let Some(s) = actor {
         let actor =
             automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)?.to_vec());

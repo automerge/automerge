@@ -1,6 +1,7 @@
 import * as assert from "assert"
 import { unstable as Automerge } from "../src"
 import * as WASM from "@automerge/automerge-wasm"
+import { mismatched_heads } from "./helpers"
 
 describe("Automerge", () => {
   describe("basics", () => {
@@ -537,6 +538,15 @@ describe("Automerge", () => {
       assert.equal(Automerge.getObjectId(s1.text), null)
       assert.notEqual(Automerge.getObjectId(s1.list), null)
       assert.notEqual(Automerge.getObjectId(s1.map), null)
+    })
+  })
+  describe("load", () => {
+    it("can load a doc without checking the heads", () => {
+      assert.throws(() => {
+        Automerge.load(mismatched_heads)
+      }, /mismatching heads/)
+      let doc = Automerge.load(mismatched_heads, { unchecked: true })
+      assert.deepEqual(doc, { count: 260 })
     })
   })
 })

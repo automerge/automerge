@@ -9,6 +9,8 @@ import {
   type JsSyncState,
   type DecodedSyncMessage,
   type ChangeToEncode,
+  type LoadOptions,
+  type InitOptions,
 } from "@automerge/automerge-wasm"
 export type { ChangeToEncode } from "@automerge/automerge-wasm"
 
@@ -21,10 +23,10 @@ export function UseApi(api: API) {
 
 /* eslint-disable */
 export const ApiHandler: API = {
-  create(textV2: boolean, actor?: Actor): Automerge {
+  create(options?: InitOptions): Automerge {
     throw new RangeError("Automerge.use() not called")
   },
-  load(data: Uint8Array, textV2: boolean, actor?: Actor): Automerge {
+  load(data: Uint8Array, options?: LoadOptions): Automerge {
     throw new RangeError("Automerge.use() not called (load)")
   },
   encodeChange(change: ChangeToEncode): Change {
