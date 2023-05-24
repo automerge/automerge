@@ -99,7 +99,7 @@ impl From<am::iter::ListRange<'static, Range<usize>>> for AMresult {
     fn from(list_range: am::iter::ListRange<'static, Range<usize>>) -> Self {
         Self::items(
             list_range
-                .map(|(i, v, o)| AMitem::indexed(AMindex::Pos(i), o, v.into()))
+                .map(|(i, v, o, _)| AMitem::indexed(AMindex::Pos(i), o, v.into()))
                 .collect(),
         )
     }
@@ -109,7 +109,7 @@ impl From<am::iter::MapRange<'static, Range<String>>> for AMresult {
     fn from(map_range: am::iter::MapRange<'static, Range<String>>) -> Self {
         Self::items(
             map_range
-                .map(|(k, v, o)| AMitem::indexed(AMindex::Key(k.into()), o, v.into()))
+                .map(|(k, v, o, _)| AMitem::indexed(AMindex::Key(k.into()), o, v.into()))
                 .collect(),
         )
     }
@@ -119,7 +119,7 @@ impl From<am::iter::MapRange<'static, RangeFrom<String>>> for AMresult {
     fn from(map_range: am::iter::MapRange<'static, RangeFrom<String>>) -> Self {
         Self::items(
             map_range
-                .map(|(k, v, o)| AMitem::indexed(AMindex::Key(k.into()), o, v.into()))
+                .map(|(k, v, o, _)| AMitem::indexed(AMindex::Key(k.into()), o, v.into()))
                 .collect(),
         )
     }
@@ -129,7 +129,7 @@ impl From<am::iter::MapRange<'static, RangeFull>> for AMresult {
     fn from(map_range: am::iter::MapRange<'static, RangeFull>) -> Self {
         Self::items(
             map_range
-                .map(|(k, v, o)| AMitem::indexed(AMindex::Key(k.into()), o, v.into()))
+                .map(|(k, v, o, _)| AMitem::indexed(AMindex::Key(k.into()), o, v.into()))
                 .collect(),
         )
     }
@@ -139,7 +139,7 @@ impl From<am::iter::MapRange<'static, RangeTo<String>>> for AMresult {
     fn from(map_range: am::iter::MapRange<'static, RangeTo<String>>) -> Self {
         Self::items(
             map_range
-                .map(|(k, v, o)| AMitem::indexed(AMindex::Key(k.into()), o, v.into()))
+                .map(|(k, v, o, _)| AMitem::indexed(AMindex::Key(k.into()), o, v.into()))
                 .collect(),
         )
     }

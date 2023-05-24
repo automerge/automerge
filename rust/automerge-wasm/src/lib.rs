@@ -35,7 +35,6 @@ use js_sys::{Array, Function, Object, Uint8Array};
 use serde::ser::Serialize;
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::convert::TryInto;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -604,13 +603,9 @@ impl Automerge {
             object = self.wrap_object(object, datatype, &id, &meta)?;
         }
 
-        let mut exposed = HashSet::default();
-
         for p in &patches {
-            object = self.apply_patch(object, p, 0, &meta, &mut exposed)?;
+            object = self.apply_patch(object, p, 0, &meta)?;
         }
-
-        self.finalize_exposed(&object, exposed, &meta)?;
 
         Ok((object.into(), patches))
     }

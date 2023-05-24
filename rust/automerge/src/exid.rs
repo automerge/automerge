@@ -1,4 +1,5 @@
 use crate::storage::parse;
+use crate::types::{ObjId, OpId};
 use crate::ActorId;
 use serde::Serialize;
 use serde::Serializer;
@@ -64,6 +65,13 @@ impl ExId {
                 leb128::write::unsigned(&mut bytes, *id).unwrap();
                 bytes
             }
+        }
+    }
+
+    pub(crate) fn to_internal_obj(&self) -> ObjId {
+        match self {
+            ExId::Root => ObjId::root(),
+            ExId::Id(ctr, _, actor) => ObjId(OpId::new(*ctr, *actor)),
         }
     }
 }

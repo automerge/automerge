@@ -400,16 +400,18 @@ mod tests {
             });
         }
 
-        fn expose<R: ReadDoc>(
-            &mut self,
-            _doc: &R,
-            _objid: crate::ObjId,
-            _prop: crate::Prop,
-            _tagged_value: (crate::Value<'_>, crate::ObjId),
-            _conflict: bool,
-        ) {
-            panic!("expose not expected");
-        }
+        /*
+                fn expose<R: ReadDoc>(
+                    &mut self,
+                    _doc: &R,
+                    _objid: crate::ObjId,
+                    _prop: crate::Prop,
+                    _tagged_value: (crate::Value<'_>, crate::ObjId),
+                    _conflict: bool,
+                ) {
+                    panic!("expose not expected");
+                }
+        */
 
         fn increment<R: ReadDoc>(
             &mut self,

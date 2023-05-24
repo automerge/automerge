@@ -1,8 +1,10 @@
-//use crate::clock::Clock;
+use crate::automerge::diff::ReadDocAt;
+use crate::exid::ExId;
 use crate::hydrate::Value;
 use crate::marks::Mark;
-use crate::types::{ObjId, OpId, Prop};
+use crate::types::{ObjId, ObjType, OpId, Prop};
 use crate::{Automerge, ChangeHash, OpObserver, ReadDoc};
+use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct History {
@@ -253,7 +255,7 @@ impl History {
         if let Some(observer) = observer.into() {
             self.events.sort_by(|a, b| doc.ops().m.lamport_cmp(a, b));
             if let Some(heads) = heads {
-                let read_doc = crate::automerge::diff::ReadDocAt { doc, heads };
+                let read_doc = ReadDocAt { doc, heads };
                 self.observe_inner(observer, doc, &read_doc);
             } else {
                 self.observe_inner(observer, doc, doc);
@@ -266,11 +268,19 @@ impl History {
         observer: &mut O,
         doc: &Automerge,
         read_doc: &R,
-        //_clock: Option<&Clock>,
-        //heads: Option<&[ChangeHash]>,
     ) {
+        let mut expose_queue = ExposeQueue::default();
         for (obj, event) in self.events.drain(..) {
             let exid = doc.id_to_exid(obj.0);
+            // ignore events on objects in the expose queue
+            // incremental updates are ignored and a observation
+            // of the final state is used b/c observers did not see
+            // past state changes
+            if expose_queue.should_skip(&exid) {
+                continue;
+            }
+            // any objects exposed BEFORE exid get observed here
+            expose_queue.pump_queue(&exid, observer, doc, read_doc);
             match event {
                 Event::PutMap {
                     key,
@@ -280,11 +290,10 @@ impl History {
                     expose,
                 } => {
                     let opid = doc.id_to_exid(id);
-                    if expose {
-                        observer.expose(read_doc, exid, key.into(), (value.into(), opid), conflict);
-                    } else {
-                        observer.put(read_doc, exid, key.into(), (value.into(), opid), conflict);
+                    if expose && value.is_object() {
+                        expose_queue.insert(opid.clone());
                     }
+                    observer.put(read_doc, exid, key.into(), (value.into(), opid), conflict);
                 }
                 Event::DeleteMap { key } => {
                     observer.delete_map(read_doc, exid, &key);
@@ -304,17 +313,10 @@ impl History {
                     expose,
                 } => {
                     let opid = doc.id_to_exid(id);
-                    if expose {
-                        observer.expose(
-                            read_doc,
-                            exid,
-                            index.into(),
-                            (value.into(), opid),
-                            conflict,
-                        );
-                    } else {
-                        observer.put(read_doc, exid, index.into(), (value.into(), opid), conflict);
+                    if expose && value.is_object() {
+                        expose_queue.insert(opid.clone());
                     }
+                    observer.put(read_doc, exid, index.into(), (value.into(), opid), conflict);
                 }
                 Event::Insert {
                     index,
@@ -341,6 +343,8 @@ impl History {
                 Event::Mark { mark } => observer.mark(read_doc, exid, mark.into_iter()),
             }
         }
+        // any objects exposed AFTER all other events get exposed here
+        expose_queue.flush_queue(observer, doc, read_doc);
     }
 
     pub(crate) fn truncate(&mut self) {
@@ -363,5 +367,85 @@ impl History {
 impl AsRef<OpId> for &(ObjId, Event) {
     fn as_ref(&self) -> &OpId {
         &self.0 .0
+    }
+}
+
+#[derive(Clone, Default)]
+struct ExposeQueue(BTreeSet<ExId>);
+
+impl ExposeQueue {
+    fn should_skip(&self, obj: &ExId) -> bool {
+        if let Some(exposed) = self.0.first() {
+            exposed == obj
+        } else {
+            false
+        }
+    }
+
+    fn pump_queue<O: OpObserver, R: ReadDoc>(
+        &mut self,
+        obj: &ExId,
+        observer: &mut O,
+        doc: &Automerge,
+        read_doc: &R,
+    ) {
+        while let Some(exposed) = self.0.first() {
+            if exposed < obj {
+                self.flush_obj(exposed.clone(), observer, doc, read_doc);
+            }
+        }
+    }
+
+    fn flush_queue<O: OpObserver, R: ReadDoc>(
+        &mut self,
+        observer: &mut O,
+        doc: &Automerge,
+        read_doc: &R,
+    ) {
+        while let Some(exposed) = self.0.first() {
+            self.flush_obj(exposed.clone(), observer, doc, read_doc);
+        }
+    }
+
+    fn insert(&mut self, obj: ExId) -> bool {
+        self.0.insert(obj)
+    }
+
+    fn remove(&mut self, obj: &ExId) -> bool {
+        self.0.remove(obj)
+    }
+
+    fn flush_obj<O: OpObserver, R: ReadDoc>(
+        &mut self,
+        exid: ExId,
+        observer: &mut O,
+        doc: &Automerge,
+        read_doc: &R,
+    ) -> Option<()> {
+        let id = exid.to_internal_obj();
+        self.remove(&exid);
+        match doc.ops().object_type(&id)? {
+            ObjType::Text if doc.text_as_seq() => {
+                let text = read_doc.text(&exid).ok()?;
+                observer.splice_text(read_doc, exid, 0, &text);
+            }
+            ObjType::List | ObjType::Text => {
+                for (index, value, id, conflict) in read_doc.list_range(&exid, ..) {
+                    if value.is_object() {
+                        self.insert(id.clone());
+                    }
+                    observer.insert(read_doc, exid.clone(), index, (value, id), conflict);
+                }
+            }
+            ObjType::Map | ObjType::Table => {
+                for (key, value, id, conflict) in read_doc.map_range(&exid, ..) {
+                    if value.is_object() {
+                        self.insert(id.clone());
+                    }
+                    observer.put(read_doc, exid.clone(), key.into(), (value, id), conflict);
+                }
+            }
+        }
+        Some(())
     }
 }

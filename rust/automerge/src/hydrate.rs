@@ -23,6 +23,14 @@ pub enum Value {
 }
 
 impl Value {
+    pub fn is_scalar(&self) -> bool {
+        matches!(self, Value::Scalar(_))
+    }
+
+    pub fn is_object(&self) -> bool {
+        !self.is_scalar()
+    }
+
     pub fn apply_patches<P: IntoIterator<Item = Patch>>(
         &mut self,
         patches: P,

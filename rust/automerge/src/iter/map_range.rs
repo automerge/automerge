@@ -46,7 +46,7 @@ impl<'a, R: RangeBounds<String>> fmt::Debug for MapRange<'a, R> {
 }
 
 impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
-    type Item = (&'a str, Value<'a>, ExId);
+    type Item = (&'a str, Value<'a>, ExId, bool);
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.as_mut().and_then(|inner| {
@@ -58,6 +58,7 @@ impl<'a, R: RangeBounds<String>> Iterator for MapRange<'a, R> {
                                 prop.as_str(),
                                 top.op.value_at(inner.clock.as_ref()),
                                 inner.op_set.id_to_exid(top.op.id),
+                                top.conflict,
                             ));
                         }
                     }

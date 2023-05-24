@@ -12,6 +12,7 @@ pub(crate) struct TopOps<'a> {
     last_op: Option<(usize, &'a Op)>,
 }
 
+#[derive(Debug)]
 pub(crate) struct TopOp<'a> {
     pub(crate) op: &'a Op,
     pub(crate) conflict: bool,
@@ -44,24 +45,28 @@ impl<'a> Iterator for TopOps<'a> {
                     Some(k) if k == &key => {
                         if visible {
                             self.last_op = Some((self.pos, op));
+                            self.num_ops += 1;
                         }
-                        self.num_ops += 1;
                     }
                     Some(_) => {
                         result_op = self.last_op.take().map(|(_op_pos, op)| op);
                         if visible {
                             self.last_op = Some((self.pos, op));
+                            self.num_ops = 1;
+                        } else {
+                            self.num_ops = 0;
                         }
                         self.key = Some(key);
                         self.start_pos = self.pos;
-                        self.num_ops = 1;
                     }
                     None => {
                         self.key = Some(key);
                         self.start_pos = self.pos;
-                        self.num_ops = 1;
                         if visible {
                             self.last_op = Some((self.pos, op));
+                            self.num_ops = 1;
+                        } else {
+                            self.num_ops = 0;
                         }
                     }
                 }

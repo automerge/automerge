@@ -512,41 +512,41 @@ fn range_iter_map() {
     let mut range = doc.map_range(ROOT, "b".to_owned().."d".into());
     assert_eq!(
         range.next(),
-        Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0)))
+        Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0), false))
     );
     assert_eq!(
         range.next(),
-        Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0)))
+        Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0), false))
     );
     assert_eq!(range.next(), None);
 
     let mut range = doc.map_range(ROOT, "b".to_owned()..="d".into());
     assert_eq!(
         range.next(),
-        Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0)))
+        Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0), false))
     );
     assert_eq!(
         range.next(),
-        Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0)))
+        Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0), false))
     );
     assert_eq!(
         range.next(),
-        Some(("d", 9.into(), ExId::Id(7, actor.clone(), 0)))
+        Some(("d", 9.into(), ExId::Id(7, actor.clone(), 0), false))
     );
     assert_eq!(range.next(), None);
 
     let mut range = doc.map_range(ROOT, ..="c".to_owned());
     assert_eq!(
         range.next(),
-        Some(("a", 8.into(), ExId::Id(6, actor.clone(), 0)))
+        Some(("a", 8.into(), ExId::Id(6, actor.clone(), 0), false))
     );
     assert_eq!(
         range.next(),
-        Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0)))
+        Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0), false))
     );
     assert_eq!(
         range.next(),
-        Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0)))
+        Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0), false))
     );
     assert_eq!(range.next(), None);
 
@@ -554,10 +554,10 @@ fn range_iter_map() {
     assert_eq!(
         range.collect::<Vec<_>>(),
         vec![
-            ("a", 8.into(), ExId::Id(6, actor.clone(), 0)),
-            ("b", 4.into(), ExId::Id(2, actor.clone(), 0)),
-            ("c", 5.into(), ExId::Id(3, actor.clone(), 0)),
-            ("d", 9.into(), ExId::Id(7, actor.clone(), 0)),
+            ("a", 8.into(), ExId::Id(6, actor.clone(), 0), false),
+            ("b", 4.into(), ExId::Id(2, actor.clone(), 0), false),
+            ("c", 5.into(), ExId::Id(3, actor.clone(), 0), false),
+            ("d", 9.into(), ExId::Id(7, actor.clone(), 0), false),
         ]
     );
 }
@@ -934,7 +934,7 @@ fn get_list_values() -> Result<(), AutomergeError> {
 
     assert_eq!(doc1.list_range(&list, ..).count(), 8);
 
-    for (i, val1, id) in doc1.list_range(&list, ..) {
+    for (i, val1, id, _) in doc1.list_range(&list, ..) {
         let val2 = doc1.get(&list, i)?;
         assert_eq!(Some((val1, id)), val2);
     }
@@ -943,13 +943,13 @@ fn get_list_values() -> Result<(), AutomergeError> {
     assert_eq!(doc1.list_range(&list, 3..6).next().unwrap().0, 3);
     assert_eq!(doc1.list_range(&list, 3..6).last().unwrap().0, 5);
 
-    for (i, val1, id) in doc1.list_range(&list, 3..6) {
+    for (i, val1, id, _) in doc1.list_range(&list, 3..6) {
         let val2 = doc1.get(&list, i)?;
         assert_eq!(Some((val1, id)), val2);
     }
 
     assert_eq!(doc1.list_range_at(&list, .., &v1).count(), 8);
-    for (i, val1, id) in doc1.list_range_at(&list, .., &v1) {
+    for (i, val1, id, _) in doc1.list_range_at(&list, .., &v1) {
         let val2 = doc1.get_at(&list, i, &v1)?;
         assert_eq!(Some((val1, id)), val2);
     }
@@ -958,14 +958,14 @@ fn get_list_values() -> Result<(), AutomergeError> {
     assert_eq!(doc1.list_range_at(&list, 3..6, &v1).next().unwrap().0, 3);
     assert_eq!(doc1.list_range_at(&list, 3..6, &v1).last().unwrap().0, 5);
 
-    for (i, val1, id) in doc1.list_range_at(&list, 3..6, &v1) {
+    for (i, val1, id, _) in doc1.list_range_at(&list, 3..6, &v1) {
         let val2 = doc1.get_at(&list, i, &v1)?;
         assert_eq!(Some((val1, id)), val2);
     }
 
     let range: Vec<_> = doc1
         .list_range(&list, ..)
-        .map(|(_, val, id)| (val, id))
+        .map(|(_, val, id, _)| (val, id))
         .collect();
     let values = doc1.values(&list);
     let values: Vec<_> = values.collect();
@@ -973,7 +973,7 @@ fn get_list_values() -> Result<(), AutomergeError> {
 
     let range: Vec<_> = doc1
         .list_range_at(&list, .., &v1)
-        .map(|(_, val, id)| (val, id))
+        .map(|(_, val, id, _)| (val, id))
         .collect();
     let values: Vec<_> = doc1.values_at(&list, &v1).collect();
     assert_eq!(range, values);
@@ -1008,28 +1008,28 @@ fn get_range_values() -> Result<(), AutomergeError> {
 
     assert_eq!(doc1.map_range(ROOT, range.clone()).count(), 2);
 
-    for (key, val1, id) in doc1.map_range(ROOT, range.clone()) {
+    for (key, val1, id, _) in doc1.map_range(ROOT, range.clone()) {
         let val2 = doc1.get(ROOT, key)?;
         assert_eq!(Some((val1, id)), val2);
     }
 
     assert_eq!(doc1.map_range_at(ROOT, range.clone(), &v1).count(), 2);
 
-    for (key, val1, id) in doc1.map_range_at(ROOT, range, &v1) {
+    for (key, val1, id, _) in doc1.map_range_at(ROOT, range, &v1) {
         let val2 = doc1.get_at(ROOT, key, &v1)?;
         assert_eq!(Some((val1, id)), val2);
     }
 
     let range: Vec<_> = doc1
         .map_range(ROOT, ..)
-        .map(|(_, val, id)| (val, id))
+        .map(|(_, val, id, _)| (val, id))
         .collect();
     let values: Vec<_> = doc1.values(ROOT).collect();
     assert_eq!(range, values);
 
     let range: Vec<_> = doc1
         .map_range_at(ROOT, .., &v1)
-        .map(|(_, val, id)| (val, id))
+        .map(|(_, val, id, _)| (val, id))
         .collect();
     let values: Vec<_> = doc1.values_at(ROOT, &v1).collect();
     assert_eq!(range, values);
@@ -1053,47 +1053,48 @@ fn range_iter_map_rev() {
     tx.put(ROOT, "a", 8).unwrap();
     tx.put(ROOT, "d", 9).unwrap();
     tx.commit();
+    doc.dump();
     let actor = doc.get_actor();
     assert_eq!(doc.map_range(ROOT, ..).count(), 4);
 
     let mut range = doc.map_range(ROOT, "b".to_owned().."d".into());
     assert_eq!(
         range.next(),
-        Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0)))
+        Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0), false))
     );
     assert_eq!(
         range.next(),
-        Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0)))
+        Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0), false))
     );
     assert_eq!(range.next(), None);
 
     let mut range = doc.map_range(ROOT, "b".to_owned()..="d".into());
     assert_eq!(
         range.next(),
-        Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0)))
+        Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0), false))
     );
     assert_eq!(
         range.next(),
-        Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0)))
+        Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0), false))
     );
     assert_eq!(
         range.next(),
-        Some(("d", 9.into(), ExId::Id(7, actor.clone(), 0)))
+        Some(("d", 9.into(), ExId::Id(7, actor.clone(), 0), false))
     );
     assert_eq!(range.next(), None);
 
     let mut range = doc.map_range(ROOT, ..="c".to_owned());
     assert_eq!(
         range.next(),
-        Some(("a", 8.into(), ExId::Id(6, actor.clone(), 0)))
+        Some(("a", 8.into(), ExId::Id(6, actor.clone(), 0), false))
     );
     assert_eq!(
         range.next(),
-        Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0)))
+        Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0), false))
     );
     assert_eq!(
         range.next(),
-        Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0)))
+        Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0), false))
     );
     assert_eq!(range.next(), None);
 
@@ -1101,10 +1102,10 @@ fn range_iter_map_rev() {
     assert_eq!(
         range.collect::<Vec<_>>(),
         vec![
-            ("a", 8.into(), ExId::Id(6, actor.clone(), 0)),
-            ("b", 4.into(), ExId::Id(2, actor.clone(), 0)),
-            ("c", 5.into(), ExId::Id(3, actor.clone(), 0)),
-            ("d", 9.into(), ExId::Id(7, actor.clone(), 0)),
+            ("a", 8.into(), ExId::Id(6, actor.clone(), 0), false),
+            ("b", 4.into(), ExId::Id(2, actor.clone(), 0), false),
+            ("c", 5.into(), ExId::Id(3, actor.clone(), 0), false),
+            ("d", 9.into(), ExId::Id(7, actor.clone(), 0), false),
         ]
     );
 }
@@ -1569,7 +1570,6 @@ fn observe_counter_change_application_overwrite() {
                     ExId::Id(2, doc2.get_actor().clone(), 1)
                 ),
                 conflict: false,
-                expose: false
             }
         }]
     );
@@ -1615,7 +1615,6 @@ fn observe_counter_change_application() {
                     ExId::Id(1, doc.get_actor().clone(), 0)
                 ),
                 conflict: false,
-                expose: false,
             },
             PatchAction::Increment {
                 prop: Prop::Map("counter".into()),

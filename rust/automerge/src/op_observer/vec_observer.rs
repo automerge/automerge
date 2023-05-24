@@ -180,49 +180,17 @@ impl OpObserver for VecOpObserver {
         tagged_value: (Value<'_>, ObjId),
         conflict: bool,
     ) {
-        let expose = false;
         if let Some(path) = self.get_path(doc, &obj) {
             let value = (tagged_value.0.to_owned(), tagged_value.1);
             let action = match prop {
                 Prop::Map(key) => PatchAction::PutMap {
                     key,
                     value,
-                    expose,
                     conflict,
                 },
                 Prop::Seq(index) => PatchAction::PutSeq {
                     index,
                     value,
-                    expose,
-                    conflict,
-                },
-            };
-            self.patches.push(Patch { obj, path, action })
-        }
-    }
-
-    fn expose<R: ReadDoc>(
-        &mut self,
-        doc: &R,
-        obj: ObjId,
-        prop: Prop,
-        tagged_value: (Value<'_>, ObjId),
-        conflict: bool,
-    ) {
-        let expose = true;
-        if let Some(path) = self.get_path(doc, &obj) {
-            let value = (tagged_value.0.to_owned(), tagged_value.1);
-            let action = match prop {
-                Prop::Map(key) => PatchAction::PutMap {
-                    key,
-                    value,
-                    expose,
-                    conflict,
-                },
-                Prop::Seq(index) => PatchAction::PutSeq {
-                    index,
-                    value,
-                    expose,
                     conflict,
                 },
             };

@@ -26,7 +26,6 @@ impl Map {
             PatchAction::PutMap {
                 key,
                 value,
-                expose: _,
                 conflict,
             } => {
                 self.0

@@ -155,46 +155,28 @@ pub(crate) fn observe_diff(
 }
 
 fn observe_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
-    //doc: ReadDocAt<'_, '_>,
     doc: &Automerge,
-    //observer: &mut O,
     history: &mut History,
     obj: &ObjId,
     patches: I,
 ) {
     let mut marks = MarkDiff::default();
-    //let exid = doc.as_ref().id_to_exid(obj.0);
     patches.fold(0, |index, patch| match patch {
         Patch::Mark(op, mark_type) => {
-            //marks.process(index, mark_type, op.op, doc.as_ref());
             marks.process(index, mark_type, op.op, doc);
             index
         }
         Patch::New(op) => {
-            /*
-                        observer.insert(
-                            &doc,
-                            exid.clone(),
-                            index,
-                            doc.as_ref().export_value(&op, Some(op.clock)),
-                            op.conflict,
-                        );
-            */
             let value = op.value_at(Some(op.clock)).into();
             history.insert(*obj, index, value, op.id, op.conflict);
             index + 1
         }
         Patch::Update { before, after } => {
-            //let exid = exid.clone();
-            //let prop = index.into();
-            //let value = doc.as_ref().export_value(&after, Some(after.clock));
             let conflict = !before.conflict && after.conflict;
             if after.cross_visible {
-                //observer.expose(&doc, exid, prop, value, conflict);
                 let value = after.value_at(Some(after.clock)).into();
                 history.put_seq(*obj, index, value, after.id, conflict, true)
             } else {
-                //observer.put(&doc, exid, prop, value, conflict);
                 let value = after.value_at(Some(after.clock)).into();
                 history.put_seq(*obj, index, value, after.id, conflict, false)
             }
@@ -202,31 +184,20 @@ fn observe_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
         }
         Patch::Old { before, after } => {
             if !before.conflict && after.conflict {
-                //observer.flag_conflict(&doc, exid.clone(), index.into());
                 history.flag_conflict_seq(*obj, index);
             }
             if let Some(n) = get_inc(&before, &after) {
-                /*
-                                observer.increment(
-                                    &doc,
-                                    exid.clone(),
-                                    index.into(),
-                                    (n, doc.as_ref().id_to_exid(after.id)),
-                                );
-                */
                 history.increment_seq(*obj, index, n, after.id);
             }
             index + 1
         }
         Patch::Delete(_) => {
-            //observer.delete_seq(&doc, exid.clone(), index, 1);
             history.delete_seq(*obj, index, 1);
             index
         }
     });
     if let Some(m) = marks.finish() {
         history.mark(*obj, &m);
-        //observer.mark(&doc, exid, m.into_iter());
     }
 }
 

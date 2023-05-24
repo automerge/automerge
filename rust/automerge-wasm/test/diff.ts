@@ -142,5 +142,77 @@ describe('Automerge', () => {
           ] },
         ])
     })
+
+    it('it should be able to handle exposing objects in maps', () => {
+      let doc1 = create({ actor: "aaaa" })
+      let map = doc1.putObject("/", "map", { foo: "bar" });
+      let doc2 = doc1.fork("bbbb")
+      doc1.truncatePatches()
+      doc1.putObject("/map", "foo", { from: "doc1", other: 1 })
+      let patches1 = doc1.popPatches();
+      let heads1 = doc1.getHeads()
+      assert.deepStrictEqual(patches1, [
+        { action: 'put', path: [ 'map', 'foo' ], value: {} },
+        { action: 'put', path: [ 'map', 'foo', 'from' ], value: 'doc1' },
+        { action: 'put', path: [ 'map', 'foo', 'other' ], value: 1 }
+      ])
+      doc2.putObject("/map", "foo", { from: "doc2", something: 2 })
+      doc1.put("/map/foo", "other", 10);
+      doc1.merge(doc2)
+      let patches2 = doc1.popPatches();
+      let heads2 = doc1.getHeads()
+      assert.deepStrictEqual(patches2, [
+        { action: 'put', path: [ 'map', 'foo' ], value: {} },
+        { action: 'put', path: [ 'map', 'foo', 'from' ], value: 'doc2' },
+        { action: 'put', path: [ 'map', 'foo', 'something' ], value: 2 }
+      ])
+      doc2.delete("/map", "foo")
+      doc1.merge(doc2)
+      let patches3 = doc1.popPatches();
+      let heads3 = doc1.getHeads()
+      assert.deepStrictEqual(patches3, [
+        { action: 'put', path: [ 'map', 'foo' ], value: {} },
+        { action: 'put', path: [ 'map', 'foo', 'from' ], value: 'doc1' },
+        { action: 'put', path: [ 'map', 'foo', 'other' ], value: 10 }
+      ])
+      assert.deepStrictEqual(doc1.diff(heads3, heads2), patches2)
+      assert.deepStrictEqual(doc1.diff(heads2, heads3), patches3)
+    })
+
+    it('it should be able to handle exposing objects in lists', () => {
+      let doc1 = create({ actor: "aaaa" })
+      let list = doc1.putObject("/", "list", [ 0 ,1, 2 ]);
+      let doc2 = doc1.fork("bbbb")
+      doc1.truncatePatches()
+      let heads1 = doc1.getHeads()
+      doc1.putObject("/list", 1, { from: "doc1", other: 1 })
+      let patches1 = doc1.popPatches();
+      assert.deepStrictEqual(patches1, [
+        { action: 'put', path: [ 'list', 1 ], value: {} },
+        { action: 'put', path: [ 'list', 1, 'from' ], value: 'doc1' },
+        { action: 'put', path: [ 'list', 1, 'other' ], value: 1 }
+      ])
+      doc2.putObject("/list", 1, { from: "doc2", something: 2 })
+      doc1.put("/list/1", "other", 10);
+      doc1.merge(doc2)
+      let patches2 = doc1.popPatches();
+      let heads2 = doc1.getHeads()
+      assert.deepStrictEqual(patches2, [
+        { action: 'put', path: [ 'list', 1 ], value: {} },
+        { action: 'put', path: [ 'list', 1, 'from' ], value: 'doc2' },
+        { action: 'put', path: [ 'list', 1, 'something' ], value: 2 }
+      ])
+      doc2.delete("/list", 1)
+      doc1.merge(doc2)
+      let patches3 = doc1.popPatches();
+      let heads3 = doc1.getHeads()
+      assert.deepStrictEqual(patches3, [
+        { action: 'put', path: [ 'list', 1 ], value: {} },
+        { action: 'put', path: [ 'list', 1, 'from' ], value: 'doc1' },
+        { action: 'put', path: [ 'list', 1, 'other' ], value: 10 }
+      ])
+      assert.deepStrictEqual(doc1.diff(heads3, heads2), patches2)
+      assert.deepStrictEqual(doc1.diff(heads2, heads3), patches3)
+    })
   })
 })
