@@ -82,6 +82,16 @@ impl AutoCommit {
         })
     }
 
+    pub fn load_unverified_heads(data: &[u8]) -> Result<Self, AutomergeError> {
+        let doc = Automerge::load_unverified_heads(data)?;
+        Ok(Self {
+            doc,
+            transaction: None,
+            history: History::innactive(),
+            diff_cursor: Vec::new(),
+        })
+    }
+
     /// Erases the diff cursor created by [`Self::update_diff_cursor`] and no
     /// longer indexes changes to the document.
     pub fn reset_diff_cursor(&mut self) {

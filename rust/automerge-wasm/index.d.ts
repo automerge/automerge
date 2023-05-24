@@ -155,8 +155,8 @@ export type Mark = {
 }
 
 export function encodeChange(change: ChangeToEncode): Change;
-export function create(text_v2: boolean, actor?: Actor): Automerge;
-export function load(data: Uint8Array, text_v2: boolean, actor?: Actor): Automerge;
+export function create(options?: InitOptions): Automerge;
+export function load(data: Uint8Array, options?: LoadOptions): Automerge;
 export function decodeChange(change: Change): DecodedChange;
 export function initSyncState(): SyncState;
 export function encodeSyncMessage(message: DecodedSyncMessage): SyncMessage;
@@ -167,8 +167,8 @@ export function exportSyncState(state: SyncState): JsSyncState;
 export function importSyncState(state: JsSyncState): SyncState;
 
 export interface API {
-  create(text_v2: boolean, actor?: Actor): Automerge;
-  load(data: Uint8Array, text_v2: boolean, actor?: Actor): Automerge;
+  create(options?: InitOptions): Automerge;
+  load(data: Uint8Array, options?: LoadOptions): Automerge;
   encodeChange(change: ChangeToEncode): Change;
   decodeChange(change: Change): DecodedChange;
   initSyncState(): SyncState;
@@ -275,3 +275,13 @@ export class SyncState {
   readonly sharedHeads: Heads;
 }
 
+export type LoadOptions = {
+  actor?: Actor,
+  text_v1?: boolean,
+  unchecked?: boolean,
+}
+
+export type InitOptions = {
+  actor?: Actor,
+  text_v1?: boolean,
+}

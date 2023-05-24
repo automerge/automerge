@@ -141,6 +141,8 @@ export type InitOptions<T> = {
   patchCallback?: PatchCallback<T>
   /** @hidden */
   enableTextV2?: boolean
+  /** @hidden */
+  unchecked?: boolean
 }
 
 /** @hidden */
@@ -169,7 +171,9 @@ export function init<T>(_opts?: ActorId | InitOptions<T>): Doc<T> {
   const opts = importOpts(_opts)
   const freeze = !!opts.freeze
   const patchCallback = opts.patchCallback
-  const handle = ApiHandler.create(opts.enableTextV2 || false, opts.actor)
+  const text_v1 = !(opts.enableTextV2 || false)
+  const actor = opts.actor
+  const handle = ApiHandler.create({ actor, text_v1 })
   handle.enableFreeze(!!opts.freeze)
   handle.registerDatatype("counter", (n: number) => new Counter(n))
   const textV2 = opts.enableTextV2 || false
@@ -470,7 +474,9 @@ export function load<T>(
   const opts = importOpts(_opts)
   const actor = opts.actor
   const patchCallback = opts.patchCallback
-  const handle = ApiHandler.load(data, opts.enableTextV2 || false, actor)
+  const text_v1 = !(opts.enableTextV2 || false)
+  const unchecked = opts.unchecked || false
+  const handle = ApiHandler.load(data, { text_v1, actor, unchecked })
   handle.enableFreeze(!!opts.freeze)
   handle.registerDatatype("counter", (n: number) => new Counter(n))
   const textV2 = opts.enableTextV2 || false
