@@ -1294,6 +1294,20 @@
 <a href="#1293" id="1293">1293</a>
 <a href="#1294" id="1294">1294</a>
 <a href="#1295" id="1295">1295</a>
+<a href="#1296" id="1296">1296</a>
+<a href="#1297" id="1297">1297</a>
+<a href="#1298" id="1298">1298</a>
+<a href="#1299" id="1299">1299</a>
+<a href="#1300" id="1300">1300</a>
+<a href="#1301" id="1301">1301</a>
+<a href="#1302" id="1302">1302</a>
+<a href="#1303" id="1303">1303</a>
+<a href="#1304" id="1304">1304</a>
+<a href="#1305" id="1305">1305</a>
+<a href="#1306" id="1306">1306</a>
+<a href="#1307" id="1307">1307</a>
+<a href="#1308" id="1308">1308</a>
+<a href="#1309" id="1309">1309</a>
 </pre><pre class="rust"><code><span class="attr">#![doc(
     html_logo_url = <span class="string">&quot;https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg&quot;</span>,
     html_favicon_url = <span class="string">&quot;https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico&quot;
@@ -2185,29 +2199,43 @@
 }
 
 <span class="attr">#[wasm_bindgen(js_name = create)]
-</span><span class="kw">pub fn </span>init(text_v2: bool, actor: <span class="prelude-ty">Option</span>&lt;String&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;Automerge, error::BadActorId&gt; {
+</span><span class="kw">pub fn </span>init(options: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;Automerge, error::BadActorId&gt; {
     console_error_panic_hook::set_once();
-    <span class="kw">let </span>text_rep = <span class="kw">if </span>text_v2 {
-        TextRepresentation::String
-    } <span class="kw">else </span>{
+    <span class="kw">let </span>actor = js_get(<span class="kw-2">&amp;</span>options, <span class="string">&quot;actor&quot;</span>).ok().and_then(|a| a.as_string());
+    <span class="kw">let </span>text_v1 = js_get(<span class="kw-2">&amp;</span>options, <span class="string">&quot;text_v1&quot;</span>)
+        .ok()
+        .and_then(|v1| v1.as_bool())
+        .unwrap_or(<span class="bool-val">false</span>);
+    <span class="kw">let </span>text_rep = <span class="kw">if </span>text_v1 {
         TextRepresentation::Array
+    } <span class="kw">else </span>{
+        TextRepresentation::String
     };
     Automerge::new(actor, text_rep)
 }
 
 <span class="attr">#[wasm_bindgen(js_name = load)]
-</span><span class="kw">pub fn </span>load(
-    data: Uint8Array,
-    text_v2: bool,
-    actor: <span class="prelude-ty">Option</span>&lt;String&gt;,
-) -&gt; <span class="prelude-ty">Result</span>&lt;Automerge, error::Load&gt; {
+</span><span class="kw">pub fn </span>load(data: Uint8Array, options: JsValue) -&gt; <span class="prelude-ty">Result</span>&lt;Automerge, error::Load&gt; {
     <span class="kw">let </span>data = data.to_vec();
-    <span class="kw">let </span>text_rep = <span class="kw">if </span>text_v2 {
-        TextRepresentation::String
-    } <span class="kw">else </span>{
+    <span class="kw">let </span>actor = js_get(<span class="kw-2">&amp;</span>options, <span class="string">&quot;actor&quot;</span>).ok().and_then(|a| a.as_string());
+    <span class="kw">let </span>text_v1 = js_get(<span class="kw-2">&amp;</span>options, <span class="string">&quot;text_v1&quot;</span>)
+        .ok()
+        .and_then(|v1| v1.as_bool())
+        .unwrap_or(<span class="bool-val">false</span>);
+    <span class="kw">let </span>unchecked = js_get(<span class="kw-2">&amp;</span>options, <span class="string">&quot;unchecked&quot;</span>)
+        .ok()
+        .and_then(|v1| v1.as_bool())
+        .unwrap_or(<span class="bool-val">false</span>);
+    <span class="kw">let </span>text_rep = <span class="kw">if </span>text_v1 {
         TextRepresentation::Array
+    } <span class="kw">else </span>{
+        TextRepresentation::String
     };
-    <span class="kw">let </span><span class="kw-2">mut </span>doc = am::AutoCommit::load(<span class="kw-2">&amp;</span>data)<span class="question-mark">?</span>.with_text_rep(text_rep.into());
+    <span class="kw">let </span><span class="kw-2">mut </span>doc = <span class="kw">if </span>unchecked {
+        am::AutoCommit::load_unverified_heads(<span class="kw-2">&amp;</span>data)<span class="question-mark">?</span>.with_text_rep(text_rep.into())
+    } <span class="kw">else </span>{
+        am::AutoCommit::load(<span class="kw-2">&amp;</span>data)<span class="question-mark">?</span>.with_text_rep(text_rep.into())
+    };
     <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = actor {
         <span class="kw">let </span>actor =
             automerge::ActorId::from(hex::decode(s).map_err(error::BadActorId::from)<span class="question-mark">?</span>.to_vec());

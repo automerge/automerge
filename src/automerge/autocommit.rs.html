@@ -788,6 +788,16 @@
 <a href="#787" id="787">787</a>
 <a href="#788" id="788">788</a>
 <a href="#789" id="789">789</a>
+<a href="#790" id="790">790</a>
+<a href="#791" id="791">791</a>
+<a href="#792" id="792">792</a>
+<a href="#793" id="793">793</a>
+<a href="#794" id="794">794</a>
+<a href="#795" id="795">795</a>
+<a href="#796" id="796">796</a>
+<a href="#797" id="797">797</a>
+<a href="#798" id="798">798</a>
+<a href="#799" id="799">799</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::automerge::SaveOptions;
@@ -864,6 +874,16 @@
 
     <span class="kw">pub fn </span>load(data: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, AutomergeError&gt; {
         <span class="kw">let </span>doc = Automerge::load(data)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
+            doc,
+            transaction: <span class="prelude-val">None</span>,
+            history: History::innactive(),
+            diff_cursor: Vec::new(),
+        })
+    }
+
+    <span class="kw">pub fn </span>load_unverified_heads(data: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>, AutomergeError&gt; {
+        <span class="kw">let </span>doc = Automerge::load_unverified_heads(data)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
             doc,
             transaction: <span class="prelude-val">None</span>,
