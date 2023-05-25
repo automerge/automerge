@@ -5,10 +5,12 @@ use crate::marks::Mark;
 use crate::types::{ObjId, ObjType, OpId, Prop};
 use crate::{Automerge, ChangeHash, OpObserver, ReadDoc};
 use std::collections::BTreeSet;
+use std::collections::HashSet;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct History {
     events: Vec<(ObjId, Event)>,
+    expose: HashSet<OpId>,
     active: bool,
 }
 
@@ -19,14 +21,12 @@ pub(crate) enum Event {
         value: Value,
         id: OpId,
         conflict: bool,
-        expose: bool,
     },
     PutSeq {
         index: usize,
         value: Value,
         id: OpId,
         conflict: bool,
-        expose: bool,
     },
     DeleteSeq {
         index: usize,
@@ -70,6 +70,7 @@ impl History {
     pub(crate) fn new(active: bool) -> Self {
         History {
             active,
+            expose: HashSet::default(),
             events: vec![],
         }
     }
@@ -77,6 +78,7 @@ impl History {
     pub(crate) fn innactive() -> Self {
         History {
             active: false,
+            expose: HashSet::default(),
             events: vec![],
         }
     }
@@ -84,6 +86,7 @@ impl History {
     pub(crate) fn active() -> Self {
         History {
             active: true,
+            expose: HashSet::default(),
             events: vec![],
         }
     }
@@ -175,6 +178,9 @@ impl History {
         conflict: bool,
         expose: bool,
     ) {
+        if expose && value.is_object() {
+            self.expose.insert(id);
+        }
         self.events.push((
             obj,
             Event::PutMap {
@@ -182,7 +188,6 @@ impl History {
                 value,
                 id,
                 conflict,
-                expose,
             },
         ))
     }
@@ -196,6 +201,9 @@ impl History {
         conflict: bool,
         expose: bool,
     ) {
+        if expose && value.is_object() {
+            self.expose.insert(id);
+        }
         self.events.push((
             obj,
             Event::PutSeq {
@@ -203,7 +211,6 @@ impl History {
                 value,
                 id,
                 conflict,
-                expose,
             },
         ))
     }
@@ -263,13 +270,20 @@ impl History {
         }
     }
 
+    fn take_exposed(&mut self, doc: &Automerge) -> ExposeQueue {
+        let mut alt_set = HashSet::new();
+        std::mem::swap(&mut alt_set, &mut self.expose);
+        ExposeQueue(alt_set.into_iter().map(|id| doc.id_to_exid(id)).collect())
+    }
+
     fn observe_inner<O: OpObserver, R: ReadDoc>(
         &mut self,
         observer: &mut O,
         doc: &Automerge,
         read_doc: &R,
     ) {
-        let mut expose_queue = ExposeQueue::default();
+        let mut expose_queue = self.take_exposed(doc);
+        //let mut expose_queue = ExposeQueue::default();
         for (obj, event) in self.events.drain(..) {
             let exid = doc.id_to_exid(obj.0);
             // ignore events on objects in the expose queue
@@ -287,12 +301,8 @@ impl History {
                     value,
                     id,
                     conflict,
-                    expose,
                 } => {
                     let opid = doc.id_to_exid(id);
-                    if expose && value.is_object() {
-                        expose_queue.insert(opid.clone());
-                    }
                     observer.put(read_doc, exid, key.into(), (value.into(), opid), conflict);
                 }
                 Event::DeleteMap { key } => {
@@ -310,12 +320,8 @@ impl History {
                     value,
                     id,
                     conflict,
-                    expose,
                 } => {
                     let opid = doc.id_to_exid(id);
-                    if expose && value.is_object() {
-                        expose_queue.insert(opid.clone());
-                    }
                     observer.put(read_doc, exid, index.into(), (value.into(), opid), conflict);
                 }
                 Event::Insert {
@@ -355,6 +361,7 @@ impl History {
     pub(crate) fn branch(&mut self) -> Self {
         Self {
             active: self.active,
+            expose: HashSet::new(),
             events: Default::default(),
         }
     }
@@ -370,7 +377,7 @@ impl AsRef<OpId> for &(ObjId, Event) {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq, Debug)]
 struct ExposeQueue(BTreeSet<ExId>);
 
 impl ExposeQueue {
@@ -390,9 +397,10 @@ impl ExposeQueue {
         read_doc: &R,
     ) {
         while let Some(exposed) = self.0.first() {
-            if exposed < obj {
-                self.flush_obj(exposed.clone(), observer, doc, read_doc);
+            if exposed >= obj {
+                break;
             }
+            self.flush_obj(exposed.clone(), observer, doc, read_doc);
         }
     }
 
