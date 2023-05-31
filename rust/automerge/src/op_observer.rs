@@ -1,153 +1,262 @@
-use crate::exid::ExId;
-
 use crate::marks::Mark;
-use crate::{Prop, ReadDoc, Value};
+use core::fmt::Debug;
+
+use crate::{ObjId, Prop, ReadDoc, Value};
+
+use crate::sequence_tree::SequenceTree;
 
 mod patch;
-mod vec_observer;
 pub use patch::{Patch, PatchAction};
-pub use vec_observer::{TextRepresentation, VecOpObserver};
 
-/// An observer of operations applied to the document.
-pub trait OpObserver {
-    /// A new value has been inserted into the given object.
-    ///
-    /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
-    /// - `objid`: the object that has been inserted into.
-    /// - `index`: the index the new value has been inserted at.
-    /// - `tagged_value`: the value that has been inserted and the id of the operation that did the
-    /// insert.
-    fn insert<R: ReadDoc>(
-        &mut self,
-        doc: &R,
-        objid: ExId,
-        index: usize,
-        tagged_value: (Value<'_>, ExId),
-        conflict: bool,
-    );
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum TextRepresentation {
+    Array,
+    String,
+}
 
-    /// Some text has been spliced into a text object
-    fn splice_text<R: ReadDoc>(&mut self, _doc: &R, _objid: ExId, _index: usize, _value: &str);
-
-    /// A new value has been put into the given object.
-    ///
-    /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
-    /// - `objid`: the object that has been put into.
-    /// - `prop`: the prop that the value as been put at.
-    /// - `tagged_value`: the value that has been put into the object and the id of the operation
-    /// that did the put.
-    /// - `conflict`: whether this put conflicts with other operations.
-    fn put<R: ReadDoc>(
-        &mut self,
-        doc: &R,
-        objid: ExId,
-        prop: Prop,
-        tagged_value: (Value<'_>, ExId),
-        conflict: bool,
-    );
-
-    /// Flag a new conflict on a value without changing it
-    ///
-    /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
-    /// - `objid`: the object that has been put into.
-    /// - `prop`: the prop that the value as been put at.
-    fn flag_conflict<R: ReadDoc>(&mut self, _doc: &R, _objid: ExId, _prop: Prop) {}
-
-    /// A counter has been incremented.
-    ///
-    /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
-    /// - `objid`: the object that contains the counter.
-    /// - `prop`: they prop that the chounter is at.
-    /// - `tagged_value`: the amount the counter has been incremented by, and the the id of the
-    /// increment operation.
-    fn increment<R: ReadDoc>(
-        &mut self,
-        doc: &R,
-        objid: ExId,
-        prop: Prop,
-        tagged_value: (i64, ExId),
-    );
-
-    /// A map value has beeen deleted.
-    ///
-    /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
-    /// - `objid`: the object that has been deleted in.
-    /// - `prop`: the prop to be deleted
-    fn delete<R: ReadDoc>(&mut self, doc: &R, objid: ExId, prop: Prop) {
-        match prop {
-            Prop::Map(k) => self.delete_map(doc, objid, &k),
-            Prop::Seq(i) => self.delete_seq(doc, objid, i, 1),
-        }
+impl TextRepresentation {
+    pub fn is_array(&self) -> bool {
+        matches!(self, TextRepresentation::Array)
     }
 
-    /// A map value has beeen deleted.
-    ///
-    /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
-    /// - `objid`: the object that has been deleted in.
-    /// - `key`: the map key to be deleted
-    fn delete_map<R: ReadDoc>(&mut self, doc: &R, objid: ExId, key: &str);
-
-    /// A one or more list values have beeen deleted.
-    ///
-    /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
-    /// - `objid`: the object that has been deleted in.
-    /// - `index`: the index of the deletion
-    /// - `num`: the number of sequential elements deleted
-    fn delete_seq<R: ReadDoc>(&mut self, doc: &R, objid: ExId, index: usize, num: usize);
-
-    fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(
-        &mut self,
-        doc: &'a R,
-        objid: ExId,
-        mark: M,
-    );
-
-    fn compare(&self, _other: &Self) -> bool {
-        panic!("no implemented!")
+    pub fn is_string(&self) -> bool {
+        matches!(self, TextRepresentation::String)
     }
 }
 
-impl OpObserver for () {
-    fn insert<R: ReadDoc>(
+impl std::default::Default for TextRepresentation {
+    fn default() -> Self {
+        TextRepresentation::Array // FIXME
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct OpObserver {
+    pub(crate) patches: Vec<Patch>,
+}
+
+impl OpObserver {
+    pub(crate) fn get_path<R: ReadDoc>(
         &mut self,
-        _doc: &R,
-        _objid: ExId,
-        _index: usize,
-        _tagged_value: (Value<'_>, ExId),
-        _conflict: bool,
-    ) {
+        doc: &R,
+        obj: &ObjId,
+    ) -> Option<Vec<(ObjId, Prop)>> {
+        match doc.parents(obj) {
+            Ok(parents) => parents.visible_path(),
+            Err(e) => {
+                log!("error generating patch : {:?}", e);
+                None
+            }
+        }
     }
 
-    fn splice_text<R: ReadDoc>(&mut self, _doc: &R, _objid: ExId, _index: usize, _value: &str) {}
-
-    fn put<R: ReadDoc>(
-        &mut self,
-        _doc: &R,
-        _objid: ExId,
-        _prop: Prop,
-        _tagged_value: (Value<'_>, ExId),
-        _conflict: bool,
-    ) {
+    fn maybe_append(&mut self, obj: &ObjId) -> Option<&mut PatchAction> {
+        match self.patches.last_mut() {
+            Some(Patch {
+                obj: tail_obj,
+                action,
+                ..
+            }) if obj == tail_obj => Some(action),
+            _ => None,
+        }
     }
 
-    fn increment<R: ReadDoc>(
+    pub(crate) fn take_patches(&mut self) -> Vec<Patch> {
+        std::mem::take(&mut self.patches)
+    }
+}
+
+impl OpObserver {
+    pub(crate) fn insert<R: ReadDoc>(
         &mut self,
-        _doc: &R,
-        _objid: ExId,
-        _prop: Prop,
-        _tagged_value: (i64, ExId),
+        doc: &R,
+        obj: ObjId,
+        index: usize,
+        tagged_value: (Value<'_>, ObjId),
+        conflict: bool,
     ) {
+        let value = (tagged_value.0.to_owned(), tagged_value.1);
+        if let Some(PatchAction::Insert {
+            index: tail_index,
+            values,
+            ..
+        }) = self.maybe_append(&obj)
+        {
+            let range = *tail_index..=*tail_index + values.len();
+            if range.contains(&index) {
+                values.insert(index - *tail_index, value);
+                return;
+            }
+        }
+        if let Some(path) = self.get_path(doc, &obj) {
+            let mut values = SequenceTree::new();
+            values.push(value);
+            let action = PatchAction::Insert {
+                index,
+                values,
+                conflict,
+            };
+            self.patches.push(Patch { obj, path, action });
+        }
     }
 
-    fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(
+    pub(crate) fn splice_text<R: ReadDoc>(
         &mut self,
-        _doc: &'a R,
-        _objid: ExId,
-        _mark: M,
+        doc: &R,
+        obj: ObjId,
+        index: usize,
+        value: &str,
     ) {
+        if let Some(PatchAction::SpliceText {
+            index: tail_index,
+            value: prev_value,
+            ..
+        }) = self.maybe_append(&obj)
+        {
+            let range = *tail_index..=*tail_index + prev_value.len();
+            if range.contains(&index) {
+                let i = index - *tail_index;
+                prev_value.splice(i, value);
+                return;
+            }
+        }
+        if let Some(path) = self.get_path(doc, &obj) {
+            let action = PatchAction::SpliceText {
+                index,
+                value: value.into(),
+            };
+            self.patches.push(Patch { obj, path, action });
+        }
     }
 
-    fn delete_map<R: ReadDoc>(&mut self, _doc: &R, _objid: ExId, _key: &str) {}
+    pub(crate) fn delete_seq<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        obj: ObjId,
+        index: usize,
+        length: usize,
+    ) {
+        match self.maybe_append(&obj) {
+            Some(PatchAction::SpliceText {
+                index: tail_index,
+                value,
+                ..
+            }) => {
+                let range = *tail_index..*tail_index + value.len();
+                if range.contains(&index) && range.contains(&(index + length - 1)) {
+                    for _ in 0..length {
+                        value.remove(index - *tail_index);
+                    }
+                    return;
+                }
+            }
+            Some(PatchAction::Insert {
+                index: tail_index,
+                values,
+                ..
+            }) => {
+                let range = *tail_index..*tail_index + values.len();
+                if range.contains(&index) && range.contains(&(index + length - 1)) {
+                    for _ in 0..length {
+                        values.remove(index - *tail_index);
+                    }
+                    return;
+                }
+            }
+            Some(PatchAction::DeleteSeq {
+                index: tail_index,
+                length: tail_length,
+                ..
+            }) => {
+                if index == *tail_index {
+                    *tail_length += length;
+                    return;
+                }
+            }
+            _ => {}
+        }
+        if let Some(path) = self.get_path(doc, &obj) {
+            let action = PatchAction::DeleteSeq { index, length };
+            self.patches.push(Patch { obj, path, action })
+        }
+    }
 
-    fn delete_seq<R: ReadDoc>(&mut self, _doc: &R, _objid: ExId, _index: usize, _num: usize) {}
+    pub(crate) fn delete_map<R: ReadDoc>(&mut self, doc: &R, obj: ObjId, key: &str) {
+        if let Some(path) = self.get_path(doc, &obj) {
+            let action = PatchAction::DeleteMap {
+                key: key.to_owned(),
+            };
+            self.patches.push(Patch { obj, path, action })
+        }
+    }
+
+    pub(crate) fn put<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        obj: ObjId,
+        prop: Prop,
+        tagged_value: (Value<'_>, ObjId),
+        conflict: bool,
+    ) {
+        if let Some(path) = self.get_path(doc, &obj) {
+            let value = (tagged_value.0.to_owned(), tagged_value.1);
+            let action = match prop {
+                Prop::Map(key) => PatchAction::PutMap {
+                    key,
+                    value,
+                    conflict,
+                },
+                Prop::Seq(index) => PatchAction::PutSeq {
+                    index,
+                    value,
+                    conflict,
+                },
+            };
+            self.patches.push(Patch { obj, path, action })
+        }
+    }
+
+    pub(crate) fn increment<R: ReadDoc>(
+        &mut self,
+        doc: &R,
+        obj: ObjId,
+        prop: Prop,
+        tagged_value: (i64, ObjId),
+    ) {
+        if let Some(path) = self.get_path(doc, &obj) {
+            let value = tagged_value.0;
+            let action = PatchAction::Increment { prop, value };
+            self.patches.push(Patch { obj, path, action })
+        }
+    }
+
+    pub(crate) fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(
+        &mut self,
+        doc: &'a R,
+        obj: ObjId,
+        mark: M,
+    ) {
+        if let Some(PatchAction::Mark { marks, .. }) = self.maybe_append(&obj) {
+            for m in mark {
+                marks.push(m.into_owned())
+            }
+            return;
+        }
+        if let Some(path) = self.get_path(doc, &obj) {
+            let marks: Vec<_> = mark.map(|m| m.into_owned()).collect();
+            if !marks.is_empty() {
+                let action = PatchAction::Mark { marks };
+                self.patches.push(Patch { obj, path, action });
+            }
+        }
+    }
+
+    // FIXME
+    pub(crate) fn flag_conflict<R: ReadDoc>(&mut self, _doc: &R, _objid: ObjId, _prop: Prop) {}
+}
+
+impl AsMut<OpObserver> for OpObserver {
+    fn as_mut(&mut self) -> &mut Self {
+        self
+    }
 }

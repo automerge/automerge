@@ -74,7 +74,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     history::History,
     storage::{parse, Change as StoredChange, ReadChangeOpError},
-    Automerge, AutomergeError, Change, ChangeHash, OpObserver, ReadDoc,
+    Automerge, AutomergeError, Change, ChangeHash, ReadDoc,
 };
 
 mod bloom;
@@ -104,11 +104,11 @@ pub trait SyncDoc {
 
     /// Apply a received sync message to this document and `sync_state`, observing any changes with
     /// `op_observer`
-    fn receive_sync_message_with<Obs: OpObserver>(
+    fn receive_sync_message_with(
         &mut self,
         sync_state: &mut State,
         message: Message,
-        op_observer: &mut Obs,
+        history: &mut History,
     ) -> Result<(), AutomergeError>;
 }
 
@@ -213,24 +213,19 @@ impl SyncDoc for Automerge {
         self.receive_sync_message_inner(sync_state, message, &mut history)
     }
 
-    fn receive_sync_message_with<Obs: OpObserver>(
+    fn receive_sync_message_with(
         &mut self,
         sync_state: &mut State,
         message: Message,
-        op_observer: &mut Obs,
+        history: &mut History,
     ) -> Result<(), AutomergeError> {
-        let mut history = History::new(!self.is_empty());
-        self.receive_sync_message_inner(sync_state, message, &mut history)?;
-        self.observe_history(Some(op_observer), history);
-        Ok(())
+        self.receive_sync_message_inner(sync_state, message, history)
     }
 }
 
 impl Automerge {
     fn make_bloom_filter(&self, last_sync: Vec<ChangeHash>) -> Have {
-        let new_changes = self
-            .get_changes(&last_sync)
-            .expect("Should have only used hashes that are in the document");
+        let new_changes = self.get_changes(&last_sync);
         let hashes = new_changes.iter().map(|change| change.hash());
         Have {
             last_sync,
@@ -259,7 +254,7 @@ impl Automerge {
             }
             let last_sync_hashes = last_sync_hashes.into_iter().copied().collect::<Vec<_>>();
 
-            let changes = self.get_changes(&last_sync_hashes)?;
+            let changes = self.get_changes(&last_sync_hashes);
 
             let mut change_hashes = HashSet::with_capacity(changes.len());
             let mut dependents: HashMap<ChangeHash, Vec<ChangeHash>> = HashMap::new();
@@ -326,7 +321,7 @@ impl Automerge {
 
         let changes_is_empty = message_changes.is_empty();
         if !changes_is_empty {
-            self.apply_changes_inner(message_changes, history)?;
+            self.apply_changes_with(message_changes, history)?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
                 &self.get_heads().into_iter().collect(),

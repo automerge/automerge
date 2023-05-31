@@ -65,6 +65,7 @@ export type {
   InsertPatch,
   IncPatch,
   SyncMessage,
+  Heads,
 } from "@automerge/automerge-wasm"
 
 export type { ChangeOptions, ApplyOptions, ChangeFn } from "./stable"

@@ -35,12 +35,7 @@ pub(crate) fn examine(
     let doc = skip
         .load(&buf)
         .map_err(|e| ExamineError::ApplyingInitialChanges { source: e })?;
-    let uncompressed_changes: Vec<_> = doc
-        .get_changes(&[])
-        .map_err(|e| ExamineError::ApplyingInitialChanges { source: e })?
-        .iter()
-        .map(|c| c.decode())
-        .collect();
+    let uncompressed_changes: Vec<_> = doc.get_changes(&[]).iter().map(|c| c.decode()).collect();
     if is_tty {
         let json_changes = serde_json::to_value(uncompressed_changes).unwrap();
         print_colored_json(&json_changes).unwrap();

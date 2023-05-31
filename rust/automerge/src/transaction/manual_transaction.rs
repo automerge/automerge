@@ -5,11 +5,9 @@ use crate::history::History;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{ExpandMark, Mark};
 use crate::AutomergeError;
-use crate::{
-    Automerge, ChangeHash, Cursor, ObjType, OpObserver, Prop, ReadDoc, ScalarValue, Value,
-};
+use crate::{Automerge, ChangeHash, Cursor, ObjType, Prop, ReadDoc, ScalarValue, Value};
 
-use super::{observation, CommitOptions, Transactable, TransactionArgs, TransactionInner};
+use super::{CommitOptions, Transactable, TransactionArgs, TransactionInner};
 
 /// A transaction on a document.
 /// Transactions group operations into a single change so that no other operations can happen
@@ -24,33 +22,26 @@ use super::{observation, CommitOptions, Transactable, TransactionArgs, Transacti
 /// intermediate state.
 /// This is consistent with `?` error handling.
 #[derive(Debug)]
-pub struct Transaction<'a, Obs: observation::Observation> {
+pub struct Transaction<'a> {
     // this is an option so that we can take it during commit and rollback to prevent it being
     // rolled back during drop.
     inner: Option<TransactionInner>,
     // As with `inner` this is an `Option` so we can `take` it during `commit`
-    observation: Option<Obs>,
     history: History,
     doc: &'a mut Automerge,
 }
 
-impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
-    pub(crate) fn new(
-        doc: &'a mut Automerge,
-        args: TransactionArgs,
-        obs: Obs,
-        history: History,
-    ) -> Self {
+impl<'a> Transaction<'a> {
+    pub(crate) fn new(doc: &'a mut Automerge, args: TransactionArgs, history: History) -> Self {
         Self {
             inner: Some(TransactionInner::new(args)),
             doc,
             history,
-            observation: Some(obs),
         }
     }
 }
 
-impl<'a> Transaction<'a, observation::UnObserved> {
+impl<'a> Transaction<'a> {
     pub(crate) fn empty(
         doc: &'a mut Automerge,
         args: TransactionArgs,
@@ -60,13 +51,7 @@ impl<'a> Transaction<'a, observation::UnObserved> {
     }
 }
 
-impl<'a, Obs: OpObserver> Transaction<'a, observation::Observed<Obs>> {
-    pub fn observer(&mut self) -> &mut Obs {
-        self.observation.as_mut().unwrap().observer()
-    }
-}
-
-impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
+impl<'a> Transaction<'a> {
     /// Get the heads of the document before this transaction was started.
     pub fn get_heads(&self) -> Vec<ChangeHash> {
         self.doc.get_heads()
@@ -74,11 +59,11 @@ impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
 
     /// Commit the operations performed in this transaction, returning the hashes corresponding to
     /// the new heads.
-    pub fn commit(mut self) -> Obs::CommitResult {
+    pub fn commit(mut self) -> (Option<ChangeHash>, History) {
         let tx = self.inner.take().unwrap();
         let hash = tx.commit(self.doc, None, None);
-        let obs = self.observation.take().unwrap();
-        obs.make_result(hash)
+        // TODO - remove this clone
+        (hash, self.history.clone())
     }
 
     /// Commit the operations in this transaction with some options.
@@ -97,14 +82,11 @@ impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
     /// i64;
     /// tx.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
     /// ```
-    pub fn commit_with(mut self, options: CommitOptions) -> Obs::CommitResult {
+    pub fn commit_with(mut self, options: CommitOptions) -> (Option<ChangeHash>, History) {
         let tx = self.inner.take().unwrap();
         let hash = tx.commit(self.doc, options.message, options.time);
-        if let Some(obs) = self.observation.as_mut().and_then(|o| o.observer()) {
-            self.history.observe(obs, self.doc, None);
-        }
-        let obs = self.observation.take().unwrap();
-        obs.make_result(hash)
+        // TODO - remove this clone
+        (hash, self.history.clone())
     }
 
     /// Undo the operations added in this transaction, returning the number of cancelled
@@ -122,7 +104,7 @@ impl<'a, Obs: observation::Observation> Transaction<'a, Obs> {
     }
 }
 
-impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
+impl<'a> ReadDoc for Transaction<'a> {
     fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys<'_> {
         self.doc.keys(obj)
     }
@@ -282,7 +264,7 @@ impl<'a, Obs: observation::Observation> ReadDoc for Transaction<'a, Obs> {
     }
 }
 
-impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
+impl<'a> Transactable for Transaction<'a> {
     /// Get the number of pending operations in this transaction.
     fn pending_ops(&self) -> usize {
         self.inner.as_ref().unwrap().pending_ops()
@@ -400,7 +382,7 @@ impl<'a, Obs: observation::Observation> Transactable for Transaction<'a, Obs> {
 // intermediate state.
 // This defaults to rolling back the transaction to be compatible with `?` error returning before
 // reaching a call to `commit`.
-impl<'a, Obs: observation::Observation> Drop for Transaction<'a, Obs> {
+impl<'a> Drop for Transaction<'a> {
     fn drop(&mut self) {
         if let Some(txn) = self.inner.take() {
             txn.rollback(self.doc);

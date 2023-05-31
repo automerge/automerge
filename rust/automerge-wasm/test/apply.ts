@@ -98,7 +98,7 @@ describe('Automerge', () => {
     it('large inserts should make one splice patch', () => {
       const doc1 = create()
       doc1.putObject("/", "list", "abc");
-      const patches = doc1.popPatches()
+      const patches = doc1.diffIncremental()
       assert.deepEqual( patches, [
         { action: 'put', path: [ 'list' ], value: "" },
         { action: 'splice', path: [ 'list', 0 ], value: 'abc' }])

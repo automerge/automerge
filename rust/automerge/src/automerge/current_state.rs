@@ -211,10 +211,9 @@ mod tests {
     use std::{borrow::Cow, fs};
 
     use crate::{
-        marks::Mark, op_observer::TextRepresentation, transaction::Transactable, Automerge,
-        ObjType, OpObserver, Prop, ReadDoc, Value,
+        history::History, op_observer::TextRepresentation, transaction::Transactable, Automerge,
+        ObjType, Patch, PatchAction, Prop, Value,
     };
-    //use crate::{transaction::Transactable, Automerge, ObjType, OpObserver, Prop, ReadDoc, Value};
 
     // Observer ops often carry a "tagged value", which is a value and the OpID of the op which
     // created that value. For a lot of values (i.e. any scalar value) we don't care about the
@@ -281,6 +280,70 @@ mod tests {
     #[derive(Clone, PartialEq)]
     struct Calls(Vec<ObserverCall>);
 
+    impl From<Vec<Patch>> for Calls {
+        fn from(patches: Vec<Patch>) -> Self {
+            let oc = patches.into_iter().fold(Vec::new(), |mut acc, patch| {
+                match patch {
+                    Patch {
+                        obj,
+                        action: PatchAction::SpliceText { index, value },
+                        ..
+                    } => acc.push(ObserverCall::SpliceText {
+                        obj,
+                        index,
+                        chars: value.make_string(),
+                    }),
+                    Patch {
+                        obj,
+                        action:
+                            PatchAction::PutMap {
+                                key,
+                                value,
+                                conflict,
+                            },
+                        ..
+                    } => acc.push(ObserverCall::Put {
+                        obj,
+                        prop: key.into(),
+                        value: value.into(),
+                        conflict,
+                    }),
+                    Patch {
+                        obj,
+                        action:
+                            PatchAction::PutSeq {
+                                index,
+                                value,
+                                conflict,
+                            },
+                        ..
+                    } => acc.push(ObserverCall::Put {
+                        obj,
+                        prop: index.into(),
+                        value: value.into(),
+                        conflict,
+                    }),
+                    Patch {
+                        obj,
+                        action: PatchAction::Insert { index, values, .. },
+                        ..
+                    } => {
+                        for (i, v) in values.iter().enumerate() {
+                            acc.push(ObserverCall::Insert {
+                                obj: obj.clone(),
+                                index: index + i,
+                                value: v.clone().into(),
+                            })
+                        }
+                    }
+                    _ => (),
+                };
+                acc
+            });
+            Calls(oc)
+        }
+    }
+
     impl std::fmt::Debug for Calls {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             let mut table = prettytable::Table::new();
@@ -336,103 +399,6 @@ mod tests {
         }
     }
 
-    struct ObserverStub {
-        ops: Vec<ObserverCall>,
-    }
-
-    impl ObserverStub {
-        fn new() -> Self {
-            Self { ops: Vec::new() }
-        }
-
-        /*
-                fn new_text_v2() -> Self {
-                    Self {
-                        ops: Vec::new(),
-                    }
-                }
-        */
-    }
-
-    impl OpObserver for ObserverStub {
-        fn insert<R: ReadDoc>(
-            &mut self,
-            _doc: &R,
-            objid: crate::ObjId,
-            index: usize,
-            tagged_value: (crate::Value<'_>, crate::ObjId),
-            _conflict: bool,
-        ) {
-            self.ops.push(ObserverCall::Insert {
-                obj: objid,
-                index,
-                value: tagged_value.into(),
-            });
-        }
-
-        fn splice_text<R: ReadDoc>(
-            &mut self,
-            _doc: &R,
-            objid: crate::ObjId,
-            index: usize,
-            value: &str,
-        ) {
-            self.ops.push(ObserverCall::SpliceText {
-                obj: objid,
-                index,
-                chars: value.to_string(),
-            });
-        }
-
-        fn put<R: ReadDoc>(
-            &mut self,
-            _doc: &R,
-            objid: crate::ObjId,
-            prop: crate::Prop,
-            tagged_value: (crate::Value<'_>, crate::ObjId),
-            conflict: bool,
-        ) {
-            self.ops.push(ObserverCall::Put {
-                obj: objid,
-                prop,
-                value: tagged_value.into(),
-                conflict,
-            });
-        }
-
-        fn increment<R: ReadDoc>(
-            &mut self,
-            _doc: &R,
-            _objid: crate::ObjId,
-            _prop: crate::Prop,
-            _tagged_value: (i64, crate::ObjId),
-        ) {
-            panic!("increment not expected");
-        }
-
-        fn delete_map<R: ReadDoc>(&mut self, _doc: &R, _objid: crate::ObjId, _key: &str) {
-            panic!("delete not expected");
-        }
-
-        fn delete_seq<R: ReadDoc>(
-            &mut self,
-            _doc: &R,
-            _objid: crate::ObjId,
-            _index: usize,
-            _num: usize,
-        ) {
-            panic!("delete not expected");
-        }
-
-        fn mark<'a, R: ReadDoc, M: Iterator<Item = Mark<'a>>>(
-            &mut self,
-            _doc: &R,
-            _objid: crate::ObjId,
-            _mark: M,
-        ) {
-        }
-    }
-
     #[test]
     fn basic_test() {
         let mut doc = crate::AutoCommit::new();
@@ -444,11 +410,10 @@ mod tests {
         let text = doc.put_object(crate::ROOT, "text", ObjType::Text).unwrap();
         doc.insert(&text, 0, "a").unwrap();
 
-        let mut obs = ObserverStub::new();
-        doc.document().observe_current_state(&mut obs);
+        let p = doc.document().current_state();
 
         assert_eq!(
-            Calls(obs.ops),
+            Calls::from(p),
             Calls(vec![
                 ObserverCall::Put {
                     obj: crate::ROOT,
@@ -519,11 +484,10 @@ mod tests {
             .unwrap();
         doc.delete(crate::ROOT, "deleted_text").unwrap();
 
-        let mut obs = ObserverStub::new();
-        doc.document().observe_current_state(&mut obs);
+        let p = doc.document().current_state();
 
         assert_eq!(
-            Calls(obs.ops),
+            Calls::from(p),
             Calls(vec![
                 ObserverCall::Put {
                     obj: crate::ROOT,
@@ -555,12 +519,11 @@ mod tests {
         doc.splice_text(&text, 1, 0, "bcdef").unwrap();
         doc.splice_text(&text, 2, 2, "g").unwrap();
 
-        let mut obs = ObserverStub::new();
         doc.set_text_rep(TextRepresentation::String);
-        doc.document().observe_current_state(&mut obs);
+        let p = doc.document().current_state();
 
         assert_eq!(
-            Calls(obs.ops),
+            Calls::from(p),
             Calls(vec![
                 ObserverCall::Put {
                     obj: crate::ROOT,
@@ -593,12 +556,11 @@ mod tests {
 
         doc.merge(&mut doc2).unwrap();
 
-        let mut obs = ObserverStub::new();
         doc.set_text_rep(TextRepresentation::String);
-        doc.document().observe_current_state(&mut obs);
+        let p = doc.document().current_state();
 
         assert_eq!(
-            Calls(obs.ops),
+            Calls::from(p),
             Calls(vec![ObserverCall::Put {
                 obj: crate::ROOT,
                 prop: "key".into(),
@@ -618,12 +580,11 @@ mod tests {
         doc.insert(&list, 0, 1).unwrap();
         doc.insert(&list, 1, 2).unwrap();
 
-        let mut obs = ObserverStub::new();
         doc.set_text_rep(TextRepresentation::String);
-        doc.document().observe_current_state(&mut obs);
+        let p = doc.document().current_state();
 
         assert_eq!(
-            Calls(obs.ops),
+            Calls::from(p),
             Calls(vec![
                 ObserverCall::Put {
                     obj: crate::ROOT,
@@ -657,12 +618,11 @@ mod tests {
         doc2.insert(&list, 0, 2).unwrap();
         doc.merge(&mut doc2).unwrap();
 
-        let mut obs = ObserverStub::new();
         doc.set_text_rep(TextRepresentation::String);
-        doc.document().observe_current_state(&mut obs);
+        let p = doc.document().current_state();
 
         assert_eq!(
-            Calls(obs.ops),
+            Calls::from(p),
             Calls(vec![
                 ObserverCall::Put {
                     obj: crate::ROOT,
@@ -693,12 +653,11 @@ mod tests {
         let map = doc.insert_object(&list, 0, ObjType::Map).unwrap();
         doc.put(&map, "key", "value").unwrap();
 
-        let mut obs = ObserverStub::new();
         doc.set_text_rep(TextRepresentation::String);
-        doc.document().observe_current_state(&mut obs);
+        let patches = doc.document().current_state();
 
         assert_eq!(
-            Calls(obs.ops),
+            Calls::from(patches),
             Calls(vec![
                 ObserverCall::Put {
                     obj: crate::ROOT,
@@ -734,11 +693,10 @@ mod tests {
 
         doc.set_text_rep(TextRepresentation::String);
 
-        let mut obs = ObserverStub::new();
-        doc.document().observe_current_state(&mut obs);
+        let patches = doc.document().current_state();
 
         assert_eq!(
-            Calls(obs.ops),
+            Calls::from(patches),
             Calls(vec![
                 ObserverCall::Put {
                     obj: crate::ROOT,
@@ -766,23 +724,25 @@ mod tests {
             fs::read("./tests/fixtures/".to_owned() + name).unwrap()
         }
 
-        let mut obs = ObserverStub::new();
+        let mut history = History::active();
         let _doc = Automerge::load_with(
             &fixture("counter_value_is_ok.automerge"),
             crate::OnPartialLoad::Error,
             crate::storage::VerificationMode::Check,
-            Some(&mut obs),
+            &mut history,
             TextRepresentation::default(),
-        );
+        )
+        .unwrap();
+        let p = _doc.make_patches(&mut history);
 
         assert_eq!(
-            Calls(obs.ops),
+            Calls::from(p),
             Calls(vec![ObserverCall::Put {
                 obj: crate::ROOT,
                 prop: "a".into(),
                 value: ObservedValue::Untagged(crate::ScalarValue::Counter(2000.into()).into()),
                 conflict: false,
-            },])
+            }])
         );
     }
 }

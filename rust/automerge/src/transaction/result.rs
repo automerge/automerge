@@ -1,13 +1,14 @@
+use crate::history::History;
 use crate::ChangeHash;
 
 /// The result of a successful, and committed, transaction.
 #[derive(Debug)]
-pub struct Success<O, Obs> {
+pub struct Success<O> {
     /// The result of the transaction.
     pub result: O,
     /// The hash of the change, will be `None` if the transaction did not create any operations
     pub hash: Option<ChangeHash>,
-    pub op_observer: Obs,
+    pub history: History,
 }
 
 /// The result of a failed, and rolled back, transaction.
