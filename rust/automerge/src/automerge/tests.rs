@@ -2,6 +2,7 @@ use itertools::Itertools;
 use pretty_assertions::assert_eq;
 
 use super::*;
+use crate::iter::*;
 use crate::op_tree::B;
 use crate::transaction::Transactable;
 use crate::*;
@@ -512,41 +513,81 @@ fn range_iter_map() {
     let mut range = doc.map_range(ROOT, "b".to_owned().."d".into());
     assert_eq!(
         range.next(),
-        Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0), false))
+        Some(MapRangeItem::new(
+            "b",
+            4.into(),
+            ExId::Id(2, actor.clone(), 0),
+            false
+        ))
     );
     assert_eq!(
         range.next(),
-        Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0), false))
+        Some(MapRangeItem::new(
+            "c",
+            5.into(),
+            ExId::Id(3, actor.clone(), 0),
+            false
+        ))
     );
     assert_eq!(range.next(), None);
 
     let mut range = doc.map_range(ROOT, "b".to_owned()..="d".into());
     assert_eq!(
         range.next(),
-        Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0), false))
+        Some(MapRangeItem::new(
+            "b",
+            4.into(),
+            ExId::Id(2, actor.clone(), 0),
+            false
+        ))
     );
     assert_eq!(
         range.next(),
-        Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0), false))
+        Some(MapRangeItem::new(
+            "c",
+            5.into(),
+            ExId::Id(3, actor.clone(), 0),
+            false
+        ))
     );
     assert_eq!(
         range.next(),
-        Some(("d", 9.into(), ExId::Id(7, actor.clone(), 0), false))
+        Some(MapRangeItem::new(
+            "d",
+            9.into(),
+            ExId::Id(7, actor.clone(), 0),
+            false
+        ))
     );
     assert_eq!(range.next(), None);
 
     let mut range = doc.map_range(ROOT, ..="c".to_owned());
     assert_eq!(
         range.next(),
-        Some(("a", 8.into(), ExId::Id(6, actor.clone(), 0), false))
+        Some(MapRangeItem::new(
+            "a",
+            8.into(),
+            ExId::Id(6, actor.clone(), 0),
+            false
+        ))
     );
     assert_eq!(
         range.next(),
-        Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0), false))
+        Some(MapRangeItem::new(
+            "b",
+            4.into(),
+            ExId::Id(2, actor.clone(), 0),
+            false
+        ))
     );
     assert_eq!(
         range.next(),
-        Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0), false))
+        Some(MapRangeItem::new(
+            "c",
+            5.into(),
+            ExId::Id(3, actor.clone(), 0),
+            false
+        ))
     );
     assert_eq!(range.next(), None);
 
@@ -554,10 +595,10 @@ fn range_iter_map() {
     assert_eq!(
         range.collect::<Vec<_>>(),
         vec![
-            ("a", 8.into(), ExId::Id(6, actor.clone(), 0), false),
-            ("b", 4.into(), ExId::Id(2, actor.clone(), 0), false),
-            ("c", 5.into(), ExId::Id(3, actor.clone(), 0), false),
-            ("d", 9.into(), ExId::Id(7, actor.clone(), 0), false),
+            MapRangeItem::new("a", 8.into(), ExId::Id(6, actor.clone(), 0), false),
+            MapRangeItem::new("b", 4.into(), ExId::Id(2, actor.clone(), 0), false),
+            MapRangeItem::new("c", 5.into(), ExId::Id(3, actor.clone(), 0), false),
+            MapRangeItem::new("d", 9.into(), ExId::Id(7, actor.clone(), 0), false),
         ]
     );
 }
@@ -934,38 +975,44 @@ fn get_list_values() -> Result<(), AutomergeError> {
 
     assert_eq!(doc1.list_range(&list, ..).count(), 8);
 
-    for (i, val1, id, _) in doc1.list_range(&list, ..) {
-        let val2 = doc1.get(&list, i)?;
-        assert_eq!(Some((val1, id)), val2);
+    for item in doc1.list_range(&list, ..) {
+        let val2 = doc1.get(&list, item.index)?;
+        assert_eq!(Some((item.value, item.id)), val2);
     }
 
     assert_eq!(doc1.list_range(&list, 3..6).count(), 3);
-    assert_eq!(doc1.list_range(&list, 3..6).next().unwrap().0, 3);
-    assert_eq!(doc1.list_range(&list, 3..6).last().unwrap().0, 5);
+    assert_eq!(doc1.list_range(&list, 3..6).next().unwrap().index, 3);
+    assert_eq!(doc1.list_range(&list, 3..6).last().unwrap().index, 5);
 
-    for (i, val1, id, _) in doc1.list_range(&list, 3..6) {
-        let val2 = doc1.get(&list, i)?;
-        assert_eq!(Some((val1, id)), val2);
+    for item in doc1.list_range(&list, 3..6) {
+        let val2 = doc1.get(&list, item.index)?;
+        assert_eq!(Some((item.value, item.id)), val2);
     }
 
     assert_eq!(doc1.list_range_at(&list, .., &v1).count(), 8);
-    for (i, val1, id, _) in doc1.list_range_at(&list, .., &v1) {
-        let val2 = doc1.get_at(&list, i, &v1)?;
-        assert_eq!(Some((val1, id)), val2);
+    for item in doc1.list_range_at(&list, .., &v1) {
+        let val2 = doc1.get_at(&list, item.index, &v1)?;
+        assert_eq!(Some((item.value, item.id)), val2);
     }
 
     assert_eq!(doc1.list_range_at(&list, 3..6, &v1).count(), 3);
-    assert_eq!(doc1.list_range_at(&list, 3..6, &v1).next().unwrap().0, 3);
-    assert_eq!(doc1.list_range_at(&list, 3..6, &v1).last().unwrap().0, 5);
+    assert_eq!(
+        doc1.list_range_at(&list, 3..6, &v1).next().unwrap().index,
+        3
+    );
+    assert_eq!(
+        doc1.list_range_at(&list, 3..6, &v1).last().unwrap().index,
+        5
+    );
 
-    for (i, val1, id, _) in doc1.list_range_at(&list, 3..6, &v1) {
-        let val2 = doc1.get_at(&list, i, &v1)?;
-        assert_eq!(Some((val1, id)), val2);
+    for item in doc1.list_range_at(&list, 3..6, &v1) {
+        let val2 = doc1.get_at(&list, item.index, &v1)?;
+        assert_eq!(Some((item.value, item.id)), val2);
     }
 
     let range: Vec<_> = doc1
         .list_range(&list, ..)
-        .map(|(_, val, id, _)| (val, id))
+        .map(|item| (item.value, item.id))
         .collect();
     let values = doc1.values(&list);
     let values: Vec<_> = values.collect();
@@ -973,7 +1020,7 @@ fn get_list_values() -> Result<(), AutomergeError> {
 
     let range: Vec<_> = doc1
         .list_range_at(&list, .., &v1)
-        .map(|(_, val, id, _)| (val, id))
+        .map(|item| (item.value, item.id))
         .collect();
     let values: Vec<_> = doc1.values_at(&list, &v1).collect();
     assert_eq!(range, values);
@@ -1008,28 +1055,28 @@ fn get_range_values() -> Result<(), AutomergeError> {
 
     assert_eq!(doc1.map_range(ROOT, range.clone()).count(), 2);
 
-    for (key, val1, id, _) in doc1.map_range(ROOT, range.clone()) {
-        let val2 = doc1.get(ROOT, key)?;
-        assert_eq!(Some((val1, id)), val2);
+    for item in doc1.map_range(ROOT, range.clone()) {
+        let val2 = doc1.get(ROOT, item.key)?;
+        assert_eq!(Some((item.value, item.id)), val2);
     }
 
     assert_eq!(doc1.map_range_at(ROOT, range.clone(), &v1).count(), 2);
 
-    for (key, val1, id, _) in doc1.map_range_at(ROOT, range, &v1) {
-        let val2 = doc1.get_at(ROOT, key, &v1)?;
-        assert_eq!(Some((val1, id)), val2);
+    for item in doc1.map_range_at(ROOT, range, &v1) {
+        let val2 = doc1.get_at(ROOT, item.key, &v1)?;
+        assert_eq!(Some((item.value, item.id)), val2);
     }
 
     let range: Vec<_> = doc1
         .map_range(ROOT, ..)
-        .map(|(_, val, id, _)| (val, id))
+        .map(|item| (item.value, item.id))
         .collect();
     let values: Vec<_> = doc1.values(ROOT).collect();
     assert_eq!(range, values);
 
     let range: Vec<_> = doc1
         .map_range_at(ROOT, .., &v1)
-        .map(|(_, val, id, _)| (val, id))
+        .map(|item| (item.value, item.id))
         .collect();
     let values: Vec<_> = doc1.values_at(ROOT, &v1).collect();
     assert_eq!(range, values);
@@ -1060,41 +1107,81 @@ fn range_iter_map_rev() {
     let mut range = doc.map_range(ROOT, "b".to_owned().."d".into());
     assert_eq!(
         range.next(),
-        Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0), false))
+        Some(MapRangeItem::new(
+            "b",
+            4.into(),
+            ExId::Id(2, actor.clone(), 0),
+            false
+        ))
     );
     assert_eq!(
         range.next(),
-        Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0), false))
+        Some(MapRangeItem::new(
+            "c",
+            5.into(),
+            ExId::Id(3, actor.clone(), 0),
+            false
+        ))
     );
     assert_eq!(range.next(), None);
 
     let mut range = doc.map_range(ROOT, "b".to_owned()..="d".into());
     assert_eq!(
         range.next(),
-        Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0), false))
+        Some(MapRangeItem::new(
+            "b",
+            4.into(),
+            ExId::Id(2, actor.clone(), 0),
+            false
+        ))
     );
     assert_eq!(
         range.next(),
-        Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0), false))
+        Some(MapRangeItem::new(
+            "c",
+            5.into(),
+            ExId::Id(3, actor.clone(), 0),
+            false
+        ))
     );
     assert_eq!(
         range.next(),
-        Some(("d", 9.into(), ExId::Id(7, actor.clone(), 0), false))
+        Some(MapRangeItem::new(
+            "d",
+            9.into(),
+            ExId::Id(7, actor.clone(), 0),
+            false
+        ))
     );
     assert_eq!(range.next(), None);
 
     let mut range = doc.map_range(ROOT, ..="c".to_owned());
     assert_eq!(
         range.next(),
-        Some(("a", 8.into(), ExId::Id(6, actor.clone(), 0), false))
+        Some(MapRangeItem::new(
+            "a",
+            8.into(),
+            ExId::Id(6, actor.clone(), 0),
+            false
+        ))
     );
     assert_eq!(
         range.next(),
-        Some(("b", 4.into(), ExId::Id(2, actor.clone(), 0), false))
+        Some(MapRangeItem::new(
+            "b",
+            4.into(),
+            ExId::Id(2, actor.clone(), 0),
+            false
+        ))
     );
     assert_eq!(
         range.next(),
-        Some(("c", 5.into(), ExId::Id(3, actor.clone(), 0), false))
+        Some(MapRangeItem::new(
+            "c",
+            5.into(),
+            ExId::Id(3, actor.clone(), 0),
+            false
+        ))
     );
     assert_eq!(range.next(), None);
 
@@ -1102,10 +1189,10 @@ fn range_iter_map_rev() {
     assert_eq!(
         range.collect::<Vec<_>>(),
         vec![
-            ("a", 8.into(), ExId::Id(6, actor.clone(), 0), false),
-            ("b", 4.into(), ExId::Id(2, actor.clone(), 0), false),
-            ("c", 5.into(), ExId::Id(3, actor.clone(), 0), false),
-            ("d", 9.into(), ExId::Id(7, actor.clone(), 0), false),
+            MapRangeItem::new("a", 8.into(), ExId::Id(6, actor.clone(), 0), false),
+            MapRangeItem::new("b", 4.into(), ExId::Id(2, actor.clone(), 0), false),
+            MapRangeItem::new("c", 5.into(), ExId::Id(3, actor.clone(), 0), false),
+            MapRangeItem::new("d", 9.into(), ExId::Id(7, actor.clone(), 0), false),
         ]
     );
 }

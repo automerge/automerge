@@ -1,6 +1,7 @@
 use crate::automerge::diff::ReadDocAt;
 use crate::exid::ExId;
 use crate::hydrate::Value;
+use crate::iter::{ListRangeItem, MapRangeItem};
 use crate::marks::Mark;
 use crate::types::{ObjId, ObjType, OpId, Prop};
 use crate::{Automerge, ChangeHash, OpObserver, ReadDoc};
@@ -438,7 +439,13 @@ impl ExposeQueue {
                 observer.splice_text(read_doc, exid, 0, &text);
             }
             ObjType::List | ObjType::Text => {
-                for (index, value, id, conflict) in read_doc.list_range(&exid, ..) {
+                for ListRangeItem {
+                    index,
+                    value,
+                    id,
+                    conflict,
+                } in read_doc.list_range(&exid, ..)
+                {
                     if value.is_object() {
                         self.insert(id.clone());
                     }
@@ -446,7 +453,13 @@ impl ExposeQueue {
                 }
             }
             ObjType::Map | ObjType::Table => {
-                for (key, value, id, conflict) in read_doc.map_range(&exid, ..) {
+                for MapRangeItem {
+                    key,
+                    value,
+                    id,
+                    conflict,
+                } in read_doc.map_range(&exid, ..)
+                {
                     if value.is_object() {
                         self.insert(id.clone());
                     }
