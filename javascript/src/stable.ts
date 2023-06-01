@@ -9,6 +9,7 @@ import {
   Counter,
   type Doc,
   type PatchCallback,
+  type Patch,
 } from "./types"
 export {
   type AutomergeValue,
@@ -785,6 +786,16 @@ export function getHistory<T>(doc: Doc<T>): State<T>[] {
       return <T>state
     },
   }))
+}
+
+/**
+ * Create a set of patches representing the change from one set of heads to another
+ *
+ * If either of the heads are missing from the document the returned set of patches will be empty
+ */
+export function diff(doc: Doc<any>, before: Heads, after: Heads): Patch[] {
+  const state = _state(doc)
+  return state.handle.diff(before, after)
 }
 
 /** @hidden */
