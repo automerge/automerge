@@ -98,6 +98,7 @@ export {
   toJS,
   isAutomerge,
   getObjectId,
+  diff,
 } from "./stable"
 
 export type InitOptions<T> = {
