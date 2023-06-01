@@ -787,17 +787,6 @@
 <a href="#786" id="786">786</a>
 <a href="#787" id="787">787</a>
 <a href="#788" id="788">788</a>
-<a href="#789" id="789">789</a>
-<a href="#790" id="790">790</a>
-<a href="#791" id="791">791</a>
-<a href="#792" id="792">792</a>
-<a href="#793" id="793">793</a>
-<a href="#794" id="794">794</a>
-<a href="#795" id="795">795</a>
-<a href="#796" id="796">796</a>
-<a href="#797" id="797">797</a>
-<a href="#798" id="798">798</a>
-<a href="#799" id="799">799</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::borrow::Cow;
 
 <span class="kw">use </span>itertools::Itertools;
@@ -1198,17 +1187,6 @@
                 value: tagged_value.into(),
                 conflict,
             });
-        }
-
-        <span class="kw">fn </span>expose&lt;R: ReadDoc&gt;(
-            <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-            _doc: <span class="kw-2">&amp;</span>R,
-            _objid: <span class="kw">crate</span>::ObjId,
-            _prop: <span class="kw">crate</span>::Prop,
-            _tagged_value: (<span class="kw">crate</span>::Value&lt;<span class="lifetime">&#39;_</span>&gt;, <span class="kw">crate</span>::ObjId),
-            _conflict: bool,
-        ) {
-            <span class="macro">panic!</span>(<span class="string">&quot;expose not expected&quot;</span>);
         }
 
         <span class="kw">fn </span>increment&lt;R: ReadDoc&gt;(

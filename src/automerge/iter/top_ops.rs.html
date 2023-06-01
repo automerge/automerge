@@ -81,6 +81,11 @@
 <a href="#80" id="80">80</a>
 <a href="#81" id="81">81</a>
 <a href="#82" id="82">82</a>
+<a href="#83" id="83">83</a>
+<a href="#84" id="84">84</a>
+<a href="#85" id="85">85</a>
+<a href="#86" id="86">86</a>
+<a href="#87" id="87">87</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::op_tree::OpTreeIter;
 <span class="kw">use </span><span class="kw">crate</span>::types::{Clock, Key, Op};
 
@@ -95,7 +100,8 @@
     last_op: <span class="prelude-ty">Option</span>&lt;(usize, <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op)&gt;,
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>TopOp&lt;<span class="lifetime">&#39;a</span>&gt; {
+<span class="attr">#[derive(Debug)]
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>TopOp&lt;<span class="lifetime">&#39;a</span>&gt; {
     <span class="kw">pub</span>(<span class="kw">crate</span>) op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
     <span class="kw">pub</span>(<span class="kw">crate</span>) conflict: bool,
 }
@@ -127,24 +133,28 @@
                     <span class="prelude-val">Some</span>(k) <span class="kw">if </span>k == <span class="kw-2">&amp;</span>key =&gt; {
                         <span class="kw">if </span>visible {
                             <span class="self">self</span>.last_op = <span class="prelude-val">Some</span>((<span class="self">self</span>.pos, op));
+                            <span class="self">self</span>.num_ops += <span class="number">1</span>;
                         }
-                        <span class="self">self</span>.num_ops += <span class="number">1</span>;
                     }
                     <span class="prelude-val">Some</span>(<span class="kw">_</span>) =&gt; {
                         result_op = <span class="self">self</span>.last_op.take().map(|(_op_pos, op)| op);
                         <span class="kw">if </span>visible {
                             <span class="self">self</span>.last_op = <span class="prelude-val">Some</span>((<span class="self">self</span>.pos, op));
+                            <span class="self">self</span>.num_ops = <span class="number">1</span>;
+                        } <span class="kw">else </span>{
+                            <span class="self">self</span>.num_ops = <span class="number">0</span>;
                         }
                         <span class="self">self</span>.key = <span class="prelude-val">Some</span>(key);
                         <span class="self">self</span>.start_pos = <span class="self">self</span>.pos;
-                        <span class="self">self</span>.num_ops = <span class="number">1</span>;
                     }
                     <span class="prelude-val">None </span>=&gt; {
                         <span class="self">self</span>.key = <span class="prelude-val">Some</span>(key);
                         <span class="self">self</span>.start_pos = <span class="self">self</span>.pos;
-                        <span class="self">self</span>.num_ops = <span class="number">1</span>;
                         <span class="kw">if </span>visible {
                             <span class="self">self</span>.last_op = <span class="prelude-val">Some</span>((<span class="self">self</span>.pos, op));
+                            <span class="self">self</span>.num_ops = <span class="number">1</span>;
+                        } <span class="kw">else </span>{
+                            <span class="self">self</span>.num_ops = <span class="number">0</span>;
                         }
                     }
                 }

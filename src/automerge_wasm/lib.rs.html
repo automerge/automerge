@@ -1303,11 +1303,6 @@
 <a href="#1302" id="1302">1302</a>
 <a href="#1303" id="1303">1303</a>
 <a href="#1304" id="1304">1304</a>
-<a href="#1305" id="1305">1305</a>
-<a href="#1306" id="1306">1306</a>
-<a href="#1307" id="1307">1307</a>
-<a href="#1308" id="1308">1308</a>
-<a href="#1309" id="1309">1309</a>
 </pre><pre class="rust"><code><span class="attr">#![doc(
     html_logo_url = <span class="string">&quot;https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg&quot;</span>,
     html_favicon_url = <span class="string">&quot;https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico&quot;
@@ -1345,7 +1340,6 @@
 <span class="kw">use </span>serde::ser::Serialize;
 <span class="kw">use </span>std::borrow::Cow;
 <span class="kw">use </span>std::collections::HashMap;
-<span class="kw">use </span>std::collections::HashSet;
 <span class="kw">use </span>std::convert::TryInto;
 <span class="kw">use </span>wasm_bindgen::prelude::<span class="kw-2">*</span>;
 <span class="kw">use </span>wasm_bindgen::JsCast;
@@ -1914,13 +1908,9 @@
             object = <span class="self">self</span>.wrap_object(object, datatype, <span class="kw-2">&amp;</span>id, <span class="kw-2">&amp;</span>meta)<span class="question-mark">?</span>;
         }
 
-        <span class="kw">let </span><span class="kw-2">mut </span>exposed = HashSet::default();
-
         <span class="kw">for </span>p <span class="kw">in </span><span class="kw-2">&amp;</span>patches {
-            object = <span class="self">self</span>.apply_patch(object, p, <span class="number">0</span>, <span class="kw-2">&amp;</span>meta, <span class="kw-2">&amp;mut </span>exposed)<span class="question-mark">?</span>;
+            object = <span class="self">self</span>.apply_patch(object, p, <span class="number">0</span>, <span class="kw-2">&amp;</span>meta)<span class="question-mark">?</span>;
         }
-
-        <span class="self">self</span>.finalize_exposed(<span class="kw-2">&amp;</span>object, exposed, <span class="kw-2">&amp;</span>meta)<span class="question-mark">?</span>;
 
         <span class="prelude-val">Ok</span>((object.into(), patches))
     }

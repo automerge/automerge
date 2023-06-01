@@ -898,7 +898,7 @@
                 <span class="kw">break</span>;
             }
 
-            <span class="kw">if </span>e.visible() {
+            <span class="kw">if </span>e.visible_at(clock) {
                 <span class="kw">return </span><span class="prelude-val">Some</span>(FoundOpId {
                     op,
                     index,
@@ -909,7 +909,7 @@
         <span class="prelude-val">Some</span>(FoundOpId {
             op,
             index,
-            visible: op.visible(),
+            visible: op.visible_at(clock),
         })
     }
 

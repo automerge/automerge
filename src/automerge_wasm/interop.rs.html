@@ -1632,56 +1632,6 @@
 <a href="#1631" id="1631">1631</a>
 <a href="#1632" id="1632">1632</a>
 <a href="#1633" id="1633">1633</a>
-<a href="#1634" id="1634">1634</a>
-<a href="#1635" id="1635">1635</a>
-<a href="#1636" id="1636">1636</a>
-<a href="#1637" id="1637">1637</a>
-<a href="#1638" id="1638">1638</a>
-<a href="#1639" id="1639">1639</a>
-<a href="#1640" id="1640">1640</a>
-<a href="#1641" id="1641">1641</a>
-<a href="#1642" id="1642">1642</a>
-<a href="#1643" id="1643">1643</a>
-<a href="#1644" id="1644">1644</a>
-<a href="#1645" id="1645">1645</a>
-<a href="#1646" id="1646">1646</a>
-<a href="#1647" id="1647">1647</a>
-<a href="#1648" id="1648">1648</a>
-<a href="#1649" id="1649">1649</a>
-<a href="#1650" id="1650">1650</a>
-<a href="#1651" id="1651">1651</a>
-<a href="#1652" id="1652">1652</a>
-<a href="#1653" id="1653">1653</a>
-<a href="#1654" id="1654">1654</a>
-<a href="#1655" id="1655">1655</a>
-<a href="#1656" id="1656">1656</a>
-<a href="#1657" id="1657">1657</a>
-<a href="#1658" id="1658">1658</a>
-<a href="#1659" id="1659">1659</a>
-<a href="#1660" id="1660">1660</a>
-<a href="#1661" id="1661">1661</a>
-<a href="#1662" id="1662">1662</a>
-<a href="#1663" id="1663">1663</a>
-<a href="#1664" id="1664">1664</a>
-<a href="#1665" id="1665">1665</a>
-<a href="#1666" id="1666">1666</a>
-<a href="#1667" id="1667">1667</a>
-<a href="#1668" id="1668">1668</a>
-<a href="#1669" id="1669">1669</a>
-<a href="#1670" id="1670">1670</a>
-<a href="#1671" id="1671">1671</a>
-<a href="#1672" id="1672">1672</a>
-<a href="#1673" id="1673">1673</a>
-<a href="#1674" id="1674">1674</a>
-<a href="#1675" id="1675">1675</a>
-<a href="#1676" id="1676">1676</a>
-<a href="#1677" id="1677">1677</a>
-<a href="#1678" id="1678">1678</a>
-<a href="#1679" id="1679">1679</a>
-<a href="#1680" id="1680">1680</a>
-<a href="#1681" id="1681">1681</a>
-<a href="#1682" id="1682">1682</a>
-<a href="#1683" id="1683">1683</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::error::InsertObject;
 <span class="kw">use </span><span class="kw">crate</span>::value::Datatype;
 <span class="kw">use crate</span>::{Automerge, TextRepresentation};
@@ -2484,24 +2434,13 @@
         array: <span class="kw-2">&amp;</span>Object,
         patch: <span class="kw-2">&amp;</span>Patch,
         meta: <span class="kw-2">&amp;</span>JsValue,
-        exposed: <span class="kw-2">&amp;mut </span>HashSet&lt;ObjId&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, error::ApplyPatch&gt; {
         <span class="kw">let </span>result = Array::from(array); <span class="comment">// shallow copy
         </span><span class="kw">match </span><span class="kw-2">&amp;</span>patch.action {
-            PatchAction::PutSeq {
-                index,
-                value,
-                expose,
-                ..
-            } =&gt; {
-                <span class="kw">if </span><span class="kw-2">*</span>expose &amp;&amp; value.<span class="number">0</span>.is_object() {
-                    exposed.insert(value.<span class="number">1</span>.clone());
-                    js_set(<span class="kw-2">&amp;</span>result, <span class="kw-2">*</span>index <span class="kw">as </span>f64, <span class="kw-2">&amp;</span>JsValue::null())<span class="question-mark">?</span>;
-                } <span class="kw">else </span>{
-                    <span class="kw">let </span>sub_val =
-                        <span class="self">self</span>.maybe_wrap_object(alloc(<span class="kw-2">&amp;</span>value.<span class="number">0</span>, <span class="self">self</span>.text_rep), <span class="kw-2">&amp;</span>value.<span class="number">1</span>, meta)<span class="question-mark">?</span>;
-                    js_set(<span class="kw-2">&amp;</span>result, <span class="kw-2">*</span>index <span class="kw">as </span>f64, <span class="kw-2">&amp;</span>sub_val)<span class="question-mark">?</span>;
-                }
+            PatchAction::PutSeq { index, value, .. } =&gt; {
+                <span class="kw">let </span>sub_val =
+                    <span class="self">self</span>.maybe_wrap_object(alloc(<span class="kw-2">&amp;</span>value.<span class="number">0</span>, <span class="self">self</span>.text_rep), <span class="kw-2">&amp;</span>value.<span class="number">1</span>, meta)<span class="question-mark">?</span>;
+                js_set(<span class="kw-2">&amp;</span>result, <span class="kw-2">*</span>index <span class="kw">as </span>f64, <span class="kw-2">&amp;</span>sub_val)<span class="question-mark">?</span>;
                 <span class="prelude-val">Ok</span>(result.into())
             }
             PatchAction::DeleteSeq { index, length, .. } =&gt; {
@@ -2563,21 +2502,13 @@
         map: <span class="kw-2">&amp;</span>Object,
         patch: <span class="kw-2">&amp;</span>Patch,
         meta: <span class="kw-2">&amp;</span>JsValue,
-        exposed: <span class="kw-2">&amp;mut </span>HashSet&lt;ObjId&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, error::ApplyPatch&gt; {
         <span class="kw">let </span>result = Object::assign(<span class="kw-2">&amp;</span>Object::new(), map); <span class="comment">// shallow copy
         </span><span class="kw">match </span><span class="kw-2">&amp;</span>patch.action {
-            PatchAction::PutMap {
-                key, value, expose, ..
-            } =&gt; {
-                <span class="kw">if </span><span class="kw-2">*</span>expose &amp;&amp; value.<span class="number">0</span>.is_object() {
-                    exposed.insert(value.<span class="number">1</span>.clone());
-                    js_set(<span class="kw-2">&amp;</span>result, key, <span class="kw-2">&amp;</span>JsValue::null())<span class="question-mark">?</span>;
-                } <span class="kw">else </span>{
-                    <span class="kw">let </span>sub_val =
-                        <span class="self">self</span>.maybe_wrap_object(alloc(<span class="kw-2">&amp;</span>value.<span class="number">0</span>, <span class="self">self</span>.text_rep), <span class="kw-2">&amp;</span>value.<span class="number">1</span>, meta)<span class="question-mark">?</span>;
-                    js_set(<span class="kw-2">&amp;</span>result, key, <span class="kw-2">&amp;</span>sub_val)<span class="question-mark">?</span>;
-                }
+            PatchAction::PutMap { key, value, .. } =&gt; {
+                <span class="kw">let </span>sub_val =
+                    <span class="self">self</span>.maybe_wrap_object(alloc(<span class="kw-2">&amp;</span>value.<span class="number">0</span>, <span class="self">self</span>.text_rep), <span class="kw-2">&amp;</span>value.<span class="number">1</span>, meta)<span class="question-mark">?</span>;
+                js_set(<span class="kw-2">&amp;</span>result, key, <span class="kw-2">&amp;</span>sub_val)<span class="question-mark">?</span>;
                 <span class="prelude-val">Ok</span>(result)
             }
             PatchAction::DeleteMap { key, .. } =&gt; {
@@ -2624,7 +2555,6 @@
         patch: <span class="kw-2">&amp;</span>Patch,
         depth: usize,
         meta: <span class="kw-2">&amp;</span>JsValue,
-        exposed: <span class="kw-2">&amp;mut </span>HashSet&lt;ObjId&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;Object, error::ApplyPatch&gt; {
         <span class="kw">let </span>(inner, datatype, id) = <span class="self">self</span>.unwrap_object(<span class="kw-2">&amp;</span>obj)<span class="question-mark">?</span>;
         <span class="kw">let </span>prop = patch.path.get(depth).map(|p| prop_to_js(<span class="kw-2">&amp;</span>p.<span class="number">1</span>));
@@ -2641,7 +2571,7 @@
                     </span><span class="prelude-val">Ok</span>(obj)
                 }
             } <span class="kw">else if let </span><span class="prelude-val">Ok</span>(sub_obj) = js_get(<span class="kw-2">&amp;</span>inner, <span class="kw-2">&amp;</span>prop)<span class="question-mark">?</span>.<span class="number">0</span>.dyn_into::&lt;Object&gt;() {
-                <span class="kw">let </span>new_value = <span class="self">self</span>.apply_patch(sub_obj, patch, depth + <span class="number">1</span>, meta, exposed)<span class="question-mark">?</span>;
+                <span class="kw">let </span>new_value = <span class="self">self</span>.apply_patch(sub_obj, patch, depth + <span class="number">1</span>, meta)<span class="question-mark">?</span>;
                 <span class="kw">let </span>result = shallow_copy(<span class="kw-2">&amp;</span>inner);
                 js_set(<span class="kw-2">&amp;</span>result, <span class="kw-2">&amp;</span>prop, <span class="kw-2">&amp;</span>new_value)<span class="question-mark">?</span>;
                 <span class="prelude-val">Ok</span>(result)
@@ -2652,12 +2582,12 @@
             }
         } <span class="kw">else if </span>Array::is_array(<span class="kw-2">&amp;</span>inner) {
             <span class="kw">if </span>id == patch.obj {
-                <span class="self">self</span>.apply_patch_to_array(<span class="kw-2">&amp;</span>inner, patch, meta, exposed)
+                <span class="self">self</span>.apply_patch_to_array(<span class="kw-2">&amp;</span>inner, patch, meta)
             } <span class="kw">else </span>{
                 <span class="prelude-val">Ok</span>(Array::from(<span class="kw-2">&amp;</span>inner).into())
             }
         } <span class="kw">else if </span>id == patch.obj {
-            <span class="self">self</span>.apply_patch_to_map(<span class="kw-2">&amp;</span>inner, patch, meta, exposed)
+            <span class="self">self</span>.apply_patch_to_map(<span class="kw-2">&amp;</span>inner, patch, meta)
         } <span class="kw">else </span>{
             <span class="prelude-val">Ok</span>(Object::assign(<span class="kw-2">&amp;</span>Object::new(), <span class="kw-2">&amp;</span>inner))
         }<span class="question-mark">?</span>;
@@ -2860,36 +2790,6 @@
                 }
             }
         }
-    }
-
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>finalize_exposed(
-        <span class="kw-2">&amp;</span><span class="self">self</span>,
-        object: <span class="kw-2">&amp;</span>JsValue,
-        exposed: HashSet&lt;ObjId&gt;,
-        meta: <span class="kw-2">&amp;</span>JsValue,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), error::ApplyPatch&gt; {
-        <span class="kw">for </span>obj <span class="kw">in </span>exposed {
-            <span class="kw">let </span><span class="kw-2">mut </span>pointer = object.clone();
-            <span class="kw">if let </span><span class="prelude-val">Ok</span>(obj_type) = <span class="self">self</span>.doc.object_type(<span class="kw-2">&amp;</span>obj) {
-                <span class="comment">// only valid obj&#39;s should make it to this point ...
-                </span><span class="kw">let </span>path: Vec&lt;<span class="kw">_</span>&gt; = <span class="self">self
-                    </span>.doc
-                    .parents(<span class="kw-2">&amp;</span>obj)<span class="question-mark">?
-                    </span>.path()
-                    .iter()
-                    .map(|p| prop_to_js(<span class="kw-2">&amp;</span>p.<span class="number">1</span>))
-                    .collect();
-                <span class="kw">let </span>value = <span class="self">self</span>.export_object(<span class="kw-2">&amp;</span>obj, obj_type.into(), <span class="prelude-val">None</span>, meta)<span class="question-mark">?</span>;
-                <span class="kw">for </span>(i, prop) <span class="kw">in </span>path.iter().enumerate() {
-                    <span class="kw">if </span>i + <span class="number">1 </span>&lt; path.len() {
-                        pointer = js_get(<span class="kw-2">&amp;</span>pointer, prop)<span class="question-mark">?</span>.<span class="number">0</span>;
-                    } <span class="kw">else </span>{
-                        js_set(<span class="kw-2">&amp;</span>pointer, prop, <span class="kw-2">&amp;</span>value)<span class="question-mark">?</span>;
-                    }
-                }
-            }
-        }
-        <span class="prelude-val">Ok</span>(())
     }
 }
 

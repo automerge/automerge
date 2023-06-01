@@ -55,8 +55,6 @@
 <a href="#54" id="54">54</a>
 <a href="#55" id="55">55</a>
 <a href="#56" id="56">56</a>
-<a href="#57" id="57">57</a>
-<a href="#58" id="58">58</a>
 </pre><pre class="rust"><code><span class="kw">use crate</span>::{marks::Mark, ObjId, Prop, Value};
 <span class="kw">use </span>core::fmt::Debug;
 <span class="kw">use </span>std::fmt;
@@ -76,13 +74,11 @@
     PutMap {
         key: String,
         value: (Value&lt;<span class="lifetime">&#39;static</span>&gt;, ObjId),
-        expose: bool,
         conflict: bool,
     },
     PutSeq {
         index: usize,
         value: (Value&lt;<span class="lifetime">&#39;static</span>&gt;, ObjId),
-        expose: bool,
         conflict: bool,
     },
     Insert {
