@@ -22,7 +22,6 @@ impl List {
             PatchAction::PutSeq {
                 index,
                 value,
-                expose: _,
                 conflict,
             } => {
                 *self
@@ -62,8 +61,6 @@ impl List {
             PatchAction::Mark { marks: _ } => {
                 todo!()
             }
-            //PatchAction::PutMap { key, value, expose, conflict } =>  Err(HydrateError::MapPatchOnList),
-            //PatchAction::DeleteMap { key } => Err(HydrateError::MapPatchOnList)
             _ => Err(HydrateError::InvalidListOp),
         }
     }

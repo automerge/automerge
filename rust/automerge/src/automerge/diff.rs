@@ -118,26 +118,7 @@ impl<'a> Patch<'a> {
     }
 }
 
-pub(crate) fn observe_diff(
-    doc: &Automerge,
-    //before_heads: &[ChangeHash],
-    //after_heads: &[ChangeHash],
-    before: &Clock,
-    after: &Clock,
-    //observer: &mut O,
-    history: &mut History,
-) {
-    //let before = doc.clock_at(before_heads);
-    //let after = doc.clock_at(after_heads);
-    // FIXME - this fork is expensive
-    // we really need a Doc::At object to make this cheap and easy
-    // this is critical to keep paths accurate when rendering patches
-    /*
-        let doc_at_after = ReadDocAt {
-            doc,
-            heads: after_heads,
-        }; //doc.fork_at(after_heads).unwrap();
-    */
+pub(crate) fn observe_diff(doc: &Automerge, before: &Clock, after: &Clock, history: &mut History) {
     for (obj, typ, ops) in doc.ops().iter_objs() {
         let ops_by_key = ops.group_by(|o| o.elemid_or_key());
         let diffs = ops_by_key
@@ -155,46 +136,28 @@ pub(crate) fn observe_diff(
 }
 
 fn observe_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
-    //doc: ReadDocAt<'_, '_>,
     doc: &Automerge,
-    //observer: &mut O,
     history: &mut History,
     obj: &ObjId,
     patches: I,
 ) {
     let mut marks = MarkDiff::default();
-    //let exid = doc.as_ref().id_to_exid(obj.0);
     patches.fold(0, |index, patch| match patch {
         Patch::Mark(op, mark_type) => {
-            //marks.process(index, mark_type, op.op, doc.as_ref());
             marks.process(index, mark_type, op.op, doc);
             index
         }
         Patch::New(op) => {
-            /*
-                        observer.insert(
-                            &doc,
-                            exid.clone(),
-                            index,
-                            doc.as_ref().export_value(&op, Some(op.clock)),
-                            op.conflict,
-                        );
-            */
             let value = op.value_at(Some(op.clock)).into();
             history.insert(*obj, index, value, op.id, op.conflict);
             index + 1
         }
         Patch::Update { before, after } => {
-            //let exid = exid.clone();
-            //let prop = index.into();
-            //let value = doc.as_ref().export_value(&after, Some(after.clock));
             let conflict = !before.conflict && after.conflict;
             if after.cross_visible {
-                //observer.expose(&doc, exid, prop, value, conflict);
                 let value = after.value_at(Some(after.clock)).into();
                 history.put_seq(*obj, index, value, after.id, conflict, true)
             } else {
-                //observer.put(&doc, exid, prop, value, conflict);
                 let value = after.value_at(Some(after.clock)).into();
                 history.put_seq(*obj, index, value, after.id, conflict, false)
             }
@@ -202,138 +165,88 @@ fn observe_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
         }
         Patch::Old { before, after } => {
             if !before.conflict && after.conflict {
-                //observer.flag_conflict(&doc, exid.clone(), index.into());
                 history.flag_conflict_seq(*obj, index);
             }
             if let Some(n) = get_inc(&before, &after) {
-                /*
-                                observer.increment(
-                                    &doc,
-                                    exid.clone(),
-                                    index.into(),
-                                    (n, doc.as_ref().id_to_exid(after.id)),
-                                );
-                */
                 history.increment_seq(*obj, index, n, after.id);
             }
             index + 1
         }
         Patch::Delete(_) => {
-            //observer.delete_seq(&doc, exid.clone(), index, 1);
             history.delete_seq(*obj, index, 1);
             index
         }
     });
     if let Some(m) = marks.finish() {
         history.mark(*obj, &m);
-        //observer.mark(&doc, exid, m.into_iter());
     }
 }
 
 fn observe_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
-    //doc: ReadDocAt<'_, '_>,
     doc: &Automerge,
-    //observer: &mut O,
     history: &mut History,
     obj: &ObjId,
     patches: I,
 ) {
     let mut marks = MarkDiff::default();
-    //let exid = doc.as_ref().id_to_exid(obj.0);
     let encoding = ListEncoding::Text;
     patches.fold(0, |index, patch| match &patch {
         Patch::Mark(op, mark_type) => {
-            //marks.process(index, *mark_type, op.op, doc.as_ref());
             marks.process(index, *mark_type, op.op, doc);
             index
         }
         Patch::New(op) => {
-            //observer.splice_text(&doc, exid.clone(), index, op.to_str());
             history.splice(*obj, index, op.to_str());
             index + op.width(encoding)
         }
         Patch::Update { before, after } => {
-            //observer.delete_seq(&doc, exid.clone(), index, before.width(encoding));
-            //observer.splice_text(&doc, exid.clone(), index, after.to_str());
             history.delete_seq(*obj, index, before.width(encoding));
             history.splice(*obj, index, after.to_str());
             index + after.width(encoding)
         }
         Patch::Old { after, .. } => index + after.width(encoding),
         Patch::Delete(before) => {
-            //observer.delete_seq(&doc, exid.clone(), index, before.width(encoding));
             history.delete_seq(*obj, index, before.width(encoding));
             index
         }
     });
     if let Some(m) = marks.finish() {
-        //observer.mark(&doc, exid, m.into_iter());
         history.mark(*obj, &m);
     }
 }
 
 fn observe_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
-    //doc: ReadDocAt<'_, '_>,
     doc: &Automerge,
-    //observer: &mut O,
     history: &mut History,
     obj: &ObjId,
     diffs: I,
 ) {
-    //let exid = doc.as_ref().id_to_exid(obj.0);
     diffs
-        //.filter_map(|patch| Some((get_prop(doc.doc, patch.op())?, patch)))
         .filter_map(|patch| Some((get_prop(doc, patch.op())?, patch)))
         .for_each(|(key, patch)| match patch {
             Patch::New(op) => {
-                /*
-                                observer.put(
-                                    &doc,
-                                    exid.clone(),
-                                    key.clone().into(),
-                                    doc.as_ref().export_value(&op, Some(op.clock)),
-                                    op.conflict,
-                                );
-                */
                 let value = op.value_at(Some(op.clock)).into();
                 history.put_map(*obj, key, value, op.id, op.conflict, false)
             }
             Patch::Update { before, after } => {
-                //let exid = exid.clone();
-                //let prop = key.clone().into();
-                //let value = doc.as_ref().export_value(&after, Some(after.clock));
                 let conflict = !before.conflict && after.conflict;
                 if after.cross_visible {
-                    //observer.expose(&doc, exid, prop, value, conflict);
                     let value = after.value_at(Some(after.clock)).into();
                     history.put_map(*obj, key, value, after.id, conflict, true)
                 } else {
-                    //observer.put(&doc, exid, prop, value, conflict);
                     let value = after.value_at(Some(after.clock)).into();
                     history.put_map(*obj, key, value, after.id, conflict, false)
                 }
             }
             Patch::Old { before, after } => {
                 if !before.conflict && after.conflict {
-                    //observer.flag_conflict(&doc, exid.clone(), key.into());
                     history.flag_conflict_map(*obj, key);
                 }
                 if let Some(n) = get_inc(&before, &after) {
-                    /*
-                                        observer.increment(
-                                            &doc,
-                                            exid.clone(),
-                                            key.into(),
-                                            (n, doc.as_ref().id_to_exid(after.id)),
-                                        );
-                    */
                     history.increment_map(*obj, key, n, after.id);
                 }
             }
-            Patch::Delete(_) => {
-                //observer.delete_map(&doc, exid.clone(), key);
-                history.delete_map(*obj, key)
-            }
+            Patch::Delete(_) => history.delete_map(*obj, key),
             Patch::Mark(_, _) => {}
         });
 }

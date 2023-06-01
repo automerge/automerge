@@ -800,24 +800,13 @@ impl Automerge {
         array: &Object,
         patch: &Patch,
         meta: &JsValue,
-        exposed: &mut HashSet<ObjId>,
     ) -> Result<Object, error::ApplyPatch> {
         let result = Array::from(array); // shallow copy
         match &patch.action {
-            PatchAction::PutSeq {
-                index,
-                value,
-                expose,
-                ..
-            } => {
-                if *expose && value.0.is_object() {
-                    exposed.insert(value.1.clone());
-                    js_set(&result, *index as f64, &JsValue::null())?;
-                } else {
-                    let sub_val =
-                        self.maybe_wrap_object(alloc(&value.0, self.text_rep), &value.1, meta)?;
-                    js_set(&result, *index as f64, &sub_val)?;
-                }
+            PatchAction::PutSeq { index, value, .. } => {
+                let sub_val =
+                    self.maybe_wrap_object(alloc(&value.0, self.text_rep), &value.1, meta)?;
+                js_set(&result, *index as f64, &sub_val)?;
                 Ok(result.into())
             }
             PatchAction::DeleteSeq { index, length, .. } => {
@@ -879,21 +868,13 @@ impl Automerge {
         map: &Object,
         patch: &Patch,
         meta: &JsValue,
-        exposed: &mut HashSet<ObjId>,
     ) -> Result<Object, error::ApplyPatch> {
         let result = Object::assign(&Object::new(), map); // shallow copy
         match &patch.action {
-            PatchAction::PutMap {
-                key, value, expose, ..
-            } => {
-                if *expose && value.0.is_object() {
-                    exposed.insert(value.1.clone());
-                    js_set(&result, key, &JsValue::null())?;
-                } else {
-                    let sub_val =
-                        self.maybe_wrap_object(alloc(&value.0, self.text_rep), &value.1, meta)?;
-                    js_set(&result, key, &sub_val)?;
-                }
+            PatchAction::PutMap { key, value, .. } => {
+                let sub_val =
+                    self.maybe_wrap_object(alloc(&value.0, self.text_rep), &value.1, meta)?;
+                js_set(&result, key, &sub_val)?;
                 Ok(result)
             }
             PatchAction::DeleteMap { key, .. } => {
@@ -940,7 +921,6 @@ impl Automerge {
         patch: &Patch,
         depth: usize,
         meta: &JsValue,
-        exposed: &mut HashSet<ObjId>,
     ) -> Result<Object, error::ApplyPatch> {
         let (inner, datatype, id) = self.unwrap_object(&obj)?;
         let prop = patch.path.get(depth).map(|p| prop_to_js(&p.1));
@@ -957,7 +937,7 @@ impl Automerge {
                     Ok(obj)
                 }
             } else if let Ok(sub_obj) = js_get(&inner, &prop)?.0.dyn_into::<Object>() {
-                let new_value = self.apply_patch(sub_obj, patch, depth + 1, meta, exposed)?;
+                let new_value = self.apply_patch(sub_obj, patch, depth + 1, meta)?;
                 let result = shallow_copy(&inner);
                 js_set(&result, &prop, &new_value)?;
                 Ok(result)
@@ -968,12 +948,12 @@ impl Automerge {
             }
         } else if Array::is_array(&inner) {
             if id == patch.obj {
-                self.apply_patch_to_array(&inner, patch, meta, exposed)
+                self.apply_patch_to_array(&inner, patch, meta)
             } else {
                 Ok(Array::from(&inner).into())
             }
         } else if id == patch.obj {
-            self.apply_patch_to_map(&inner, patch, meta, exposed)
+            self.apply_patch_to_map(&inner, patch, meta)
         } else {
             Ok(Object::assign(&Object::new(), &inner))
         }?;
@@ -1176,36 +1156,6 @@ impl Automerge {
                 }
             }
         }
-    }
-
-    pub(crate) fn finalize_exposed(
-        &self,
-        object: &JsValue,
-        exposed: HashSet<ObjId>,
-        meta: &JsValue,
-    ) -> Result<(), error::ApplyPatch> {
-        for obj in exposed {
-            let mut pointer = object.clone();
-            if let Ok(obj_type) = self.doc.object_type(&obj) {
-                // only valid obj's should make it to this point ...
-                let path: Vec<_> = self
-                    .doc
-                    .parents(&obj)?
-                    .path()
-                    .iter()
-                    .map(|p| prop_to_js(&p.1))
-                    .collect();
-                let value = self.export_object(&obj, obj_type.into(), None, meta)?;
-                for (i, prop) in path.iter().enumerate() {
-                    if i + 1 < path.len() {
-                        pointer = js_get(&pointer, prop)?.0;
-                    } else {
-                        js_set(&pointer, prop, &value)?;
-                    }
-                }
-            }
-        }
-        Ok(())
     }
 }
 

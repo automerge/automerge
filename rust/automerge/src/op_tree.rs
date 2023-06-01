@@ -284,7 +284,7 @@ impl OpTreeInternal {
                 break;
             }
 
-            if e.visible() {
+            if e.visible_at(clock) {
                 return Some(FoundOpId {
                     op,
                     index,
@@ -295,7 +295,7 @@ impl OpTreeInternal {
         Some(FoundOpId {
             op,
             index,
-            visible: op.visible(),
+            visible: op.visible_at(clock),
         })
     }
 

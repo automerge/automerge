@@ -17,13 +17,11 @@ pub enum PatchAction {
     PutMap {
         key: String,
         value: (Value<'static>, ObjId),
-        expose: bool,
         conflict: bool,
     },
     PutSeq {
         index: usize,
         value: (Value<'static>, ObjId),
-        expose: bool,
         conflict: bool,
     },
     Insert {

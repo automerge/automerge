@@ -1606,7 +1606,6 @@ fn regression_insert_opid() {
         path: vec![],
         action: PatchAction::PutMap {
             key: "list".to_string(),
-            expose: false,
             value: (
                 Value::Object(ObjType::List),
                 ObjId::Id(1, doc.get_actor().clone(), 0),
@@ -1639,7 +1638,6 @@ fn regression_insert_opid() {
                     ObjId::Id((2 * (i + 1) + 1) as u64, doc.get_actor().clone(), 0),
                 ),
                 conflict: false,
-                expose: false,
             },
         });
     }

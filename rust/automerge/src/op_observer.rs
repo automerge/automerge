@@ -46,25 +46,6 @@ pub trait OpObserver {
         conflict: bool,
     );
 
-    /// When a delete op exposes a previously conflicted value
-    /// Similar to a put op - except for maps, lists and text, edits
-    /// may already exist and need to be queried
-    ///
-    /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
-    /// - `objid`: the object that has been put into.
-    /// - `prop`: the prop that the value as been put at.
-    /// - `tagged_value`: the value that has been put into the object and the id of the operation
-    /// that did the put.
-    /// - `conflict`: whether this put conflicts with other operations.
-    fn expose<R: ReadDoc>(
-        &mut self,
-        doc: &R,
-        objid: ExId,
-        prop: Prop,
-        tagged_value: (Value<'_>, ExId),
-        conflict: bool,
-    );
-
     /// Flag a new conflict on a value without changing it
     ///
     /// - `doc`: a handle to the doc after the op has been inserted, can be used to query information
@@ -140,16 +121,6 @@ impl OpObserver for () {
     fn splice_text<R: ReadDoc>(&mut self, _doc: &R, _objid: ExId, _index: usize, _value: &str) {}
 
     fn put<R: ReadDoc>(
-        &mut self,
-        _doc: &R,
-        _objid: ExId,
-        _prop: Prop,
-        _tagged_value: (Value<'_>, ExId),
-        _conflict: bool,
-    ) {
-    }
-
-    fn expose<R: ReadDoc>(
         &mut self,
         _doc: &R,
         _objid: ExId,
