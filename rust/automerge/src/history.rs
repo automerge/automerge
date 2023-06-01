@@ -284,7 +284,6 @@ impl History {
         read_doc: &R,
     ) {
         let mut expose_queue = self.take_exposed(doc);
-        //let mut expose_queue = ExposeQueue::default();
         for (obj, event) in self.events.drain(..) {
             let exid = doc.id_to_exid(obj.0);
             // ignore events on objects in the expose queue

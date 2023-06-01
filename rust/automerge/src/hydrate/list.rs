@@ -61,8 +61,6 @@ impl List {
             PatchAction::Mark { marks: _ } => {
                 todo!()
             }
-            //PatchAction::PutMap { key, value, conflict } =>  Err(HydrateError::MapPatchOnList),
-            //PatchAction::DeleteMap { key } => Err(HydrateError::MapPatchOnList)
             _ => Err(HydrateError::InvalidListOp),
         }
     }
