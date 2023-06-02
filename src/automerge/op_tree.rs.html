@@ -1,5 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/op_tree.rs`."><title>op_tree.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../static.files/rustdoc-c4dbdcde0fbd8430.css" id="mainThemeStyle"><link rel="stylesheet" id="themeStyle" href="../../static.files/light-db279b6232be9c13.css"><link rel="stylesheet" disabled href="../../static.files/dark-cf923f49f397b216.css"><link rel="stylesheet" disabled href="../../static.files/ayu-be46fdc453a55015.css"><script src="../../static.files/storage-3891ce972e3a2bf8.js"></script><script defer src="../../static.files/source-script-1b95b7cca98b26e5.js"></script><script defer src="../../source-files.js"></script><script defer src="../../static.files/main-98a684e84ae5b08b.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-13285aec31fa243e.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../automerge/index.html">
-                        <img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><pre class="src-line-numbers"><a href="#1" id="1">1</a>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/op_tree.rs`."><title>op_tree.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../static.files/rustdoc-ba5701c5741a7b69.css" id="mainThemeStyle"><div id="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.70.0 (90c541806 2023-05-31)" data-search-js="search-e077946657036a58.js" data-settings-js="settings-298e1ea74db45b39.js" data-settings-css="settings-7bfb4c59cc6bc502.css" data-theme-light-css="light-0f8c037637f9eb3e.css" data-theme-dark-css="dark-1097f8e92a01e3cf.css" data-theme-ayu-css="ayu-614652228113ac93.css" ></div><script src="../../static.files/storage-62ce34ea385b278a.js"></script><script defer src="../../static.files/source-script-905937fbbdc8e9ea.js"></script><script defer src="../../source-files.js"></script><script defer src="../../static.files/main-f61008743c98d196.js"></script><noscript><link rel="stylesheet" media="(prefers-color-scheme:light)" href="../../static.files/light-0f8c037637f9eb3e.css"><link rel="stylesheet" media="(prefers-color-scheme:dark)" href="../../static.files/dark-1097f8e92a01e3cf.css"><link rel="stylesheet" href="../../static.files/noscript-13285aec31fa243e.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../automerge/index.html"><img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
 <a href="#4" id="4">4</a>
@@ -612,9 +611,17 @@
 <a href="#611" id="611">611</a>
 <a href="#612" id="612">612</a>
 <a href="#613" id="613">613</a>
-</pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::history::History;
-<span class="kw">use </span><span class="kw">crate</span>::iter::TopOps;
+<a href="#614" id="614">614</a>
+<a href="#615" id="615">615</a>
+<a href="#616" id="616">616</a>
+<a href="#617" id="617">617</a>
+<a href="#618" id="618">618</a>
+<a href="#619" id="619">619</a>
+<a href="#620" id="620">620</a>
+<a href="#621" id="621">621</a>
+</pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::iter::TopOps;
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span><span class="kw">crate</span>::op_set::OpSetMetadata;
+<span class="kw">use </span><span class="kw">crate</span>::patches::PatchLog;
 <span class="kw">use crate</span>::{
     clock::Clock,
     query::{<span class="self">self</span>, ChangeVisibility, Index, QueryResult, TreeQuery},
@@ -685,13 +692,13 @@
 }
 
 <span class="attr">#[derive(Default, Clone, Debug)]
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>FoundOpWithoutObserver {
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>FoundOpWithoutPatchLog {
     <span class="kw">pub</span>(<span class="kw">crate</span>) succ: Vec&lt;usize&gt;,
     <span class="kw">pub</span>(<span class="kw">crate</span>) pos: usize,
 }
 
 <span class="attr">#[derive(Default, Clone, Debug)]
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>FoundOpWithObserver&lt;<span class="lifetime">&#39;a</span>&gt; {
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>FoundOpWithPatchLog&lt;<span class="lifetime">&#39;a</span>&gt; {
     <span class="kw">pub</span>(<span class="kw">crate</span>) before: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;,
     <span class="kw">pub</span>(<span class="kw">crate</span>) num_before: usize,
     <span class="kw">pub</span>(<span class="kw">crate</span>) overwritten: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;,
@@ -701,8 +708,14 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) index: usize,
 }
 
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; FoundOpWithObserver&lt;<span class="lifetime">&#39;a</span>&gt; {
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>observe(<span class="kw-2">&amp;</span><span class="self">self</span>, obj: <span class="kw-2">&amp;</span>ObjMeta, op: <span class="kw-2">&amp;</span>Op, doc: <span class="kw-2">&amp;</span>Automerge, history: <span class="kw-2">&amp;mut </span>History) {
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; FoundOpWithPatchLog&lt;<span class="lifetime">&#39;a</span>&gt; {
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>log_patches(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        obj: <span class="kw-2">&amp;</span>ObjMeta,
+        op: <span class="kw-2">&amp;</span>Op,
+        doc: <span class="kw-2">&amp;</span>Automerge,
+        patch_log: <span class="kw-2">&amp;mut </span>PatchLog,
+    ) {
         <span class="kw">if </span>op.insert {
             <span class="kw">if </span>op.is_mark() {
                 <span class="kw">if let </span>OpType::MarkEnd(<span class="kw">_</span>) = op.action {
@@ -710,12 +723,12 @@
                         <span class="kw-2">&amp;</span>obj.id,
                         query::SeekMark::new(op.id.prev(), <span class="self">self</span>.pos, obj.encoding),
                     );
-                    history.mark(obj.id, <span class="kw-2">&amp;</span>q.marks);
+                    patch_log.mark(obj.id, <span class="kw-2">&amp;</span>q.marks);
                 }
             } <span class="kw">else if </span>obj.typ == ObjType::Text {
-                history.splice(obj.id, <span class="self">self</span>.index, op.to_str());
+                patch_log.splice(obj.id, <span class="self">self</span>.index, op.to_str());
             } <span class="kw">else </span>{
-                history.insert(obj.id, <span class="self">self</span>.index, op.value().into(), op.id, <span class="bool-val">false</span>);
+                patch_log.insert(obj.id, <span class="self">self</span>.index, op.value().into(), op.id, <span class="bool-val">false</span>);
             }
             <span class="kw">return</span>;
         }
@@ -728,12 +741,14 @@
         <span class="kw">if </span>op.is_delete() {
             <span class="kw">match </span>(<span class="self">self</span>.before, <span class="self">self</span>.overwritten, <span class="self">self</span>.after) {
                 (<span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(over), <span class="prelude-val">None</span>) =&gt; <span class="kw">match </span>key {
-                    Prop::Map(k) =&gt; history.delete_map(obj.id, <span class="kw-2">&amp;</span>k),
-                    Prop::Seq(index) =&gt; history.delete_seq(obj.id, index, over.width(obj.encoding)),
+                    Prop::Map(k) =&gt; patch_log.delete_map(obj.id, <span class="kw-2">&amp;</span>k),
+                    Prop::Seq(index) =&gt; {
+                        patch_log.delete_seq(obj.id, index, over.width(obj.encoding))
+                    }
                 },
                 (<span class="prelude-val">Some</span>(before), <span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="prelude-val">None</span>) =&gt; {
                     <span class="kw">let </span>conflict = <span class="self">self</span>.num_before &gt; <span class="number">1</span>;
-                    history.put(
+                    patch_log.put(
                         obj.id,
                         <span class="kw-2">&amp;</span>key,
                         before.value().into(),
@@ -748,7 +763,7 @@
             <span class="kw">if </span><span class="self">self</span>.after.is_none() {
                 <span class="kw">if let </span><span class="prelude-val">Some</span>(counter) = <span class="self">self</span>.overwritten {
                     <span class="kw">if </span>op.overwrites(counter) {
-                        history.increment(obj.id, <span class="kw-2">&amp;</span>key, value, op.id);
+                        patch_log.increment(obj.id, <span class="kw-2">&amp;</span>key, value, op.id);
                     }
                 }
             }
@@ -760,13 +775,13 @@
                 &amp;&amp; <span class="self">self</span>.before.is_none()
                 &amp;&amp; <span class="self">self</span>.after.is_none()
             {
-                history.insert(obj.id, <span class="self">self</span>.index, op.value().into(), op.id, conflict);
+                patch_log.insert(obj.id, <span class="self">self</span>.index, op.value().into(), op.id, conflict);
             } <span class="kw">else if </span><span class="self">self</span>.after.is_some() {
                 <span class="kw">if </span><span class="self">self</span>.before.is_none() {
-                    history.flag_conflict(obj.id, <span class="kw-2">&amp;</span>key);
+                    patch_log.flag_conflict(obj.id, <span class="kw-2">&amp;</span>key);
                 }
             } <span class="kw">else </span>{
-                history.put(obj.id, <span class="kw-2">&amp;</span>key, op.value().into(), op.id, conflict, <span class="bool-val">false</span>);
+                patch_log.put(obj.id, <span class="kw-2">&amp;</span>key, op.value().into(), op.id, conflict, <span class="bool-val">false</span>);
             }
         }
     }
@@ -796,12 +811,12 @@
         TopOps::new(OpTreeIter::new(<span class="self">self</span>), clock)
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>found_op_without_observer(
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>found_op_without_patch_log(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         meta: <span class="kw-2">&amp;</span>OpSetMetadata,
         op: <span class="kw-2">&amp;</span>Op,
         <span class="kw-2">mut </span>pos: usize,
-    ) -&gt; FoundOpWithoutObserver {
+    ) -&gt; FoundOpWithoutPatchLog {
         <span class="kw">let </span><span class="kw-2">mut </span>iter = <span class="self">self</span>.iter();
         <span class="kw">let </span><span class="kw-2">mut </span>succ = <span class="macro">vec!</span>[];
         <span class="kw">let </span><span class="kw-2">mut </span>next = iter.nth(pos);
@@ -822,16 +837,16 @@
             next = iter.next();
         }
 
-        FoundOpWithoutObserver { pos, succ }
+        FoundOpWithoutPatchLog { pos, succ }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>found_op_with_observer&lt;<span class="lifetime">&#39;a</span>&gt;(
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>found_op_with_patch_log&lt;<span class="lifetime">&#39;a</span>&gt;(
         <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
         meta: <span class="kw-2">&amp;</span>OpSetMetadata,
         op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
         <span class="kw-2">mut </span>pos: usize,
         index: usize,
-    ) -&gt; FoundOpWithObserver&lt;<span class="lifetime">&#39;a</span>&gt; {
+    ) -&gt; FoundOpWithPatchLog&lt;<span class="lifetime">&#39;a</span>&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>iter = <span class="self">self</span>.iter();
         <span class="kw">let </span><span class="kw-2">mut </span>found = <span class="prelude-val">None</span>;
         <span class="kw">let </span><span class="kw-2">mut </span>before = <span class="prelude-val">None</span>;
@@ -870,7 +885,7 @@
 
         pos = found.unwrap_or(pos);
 
-        FoundOpWithObserver {
+        FoundOpWithPatchLog {
             before,
             num_before,
             after,
@@ -913,35 +928,35 @@
         })
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>find_op_with_observer&lt;<span class="lifetime">&#39;a</span>&gt;(
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>find_op_with_patch_log&lt;<span class="lifetime">&#39;a</span>&gt;(
         <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span><span class="self">self</span>,
         op: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op,
         encoding: ListEncoding,
         meta: <span class="kw-2">&amp;</span>OpSetMetadata,
-    ) -&gt; FoundOpWithObserver&lt;<span class="lifetime">&#39;a</span>&gt; {
+    ) -&gt; FoundOpWithPatchLog&lt;<span class="lifetime">&#39;a</span>&gt; {
         <span class="kw">if let </span>Key::Seq(<span class="kw">_</span>) = op.key {
             <span class="kw">let </span>query = <span class="self">self</span>.search(query::OpIdSearch::op(op, encoding), meta);
             <span class="kw">let </span>pos = query.pos();
             <span class="kw">let </span>index = query.index();
-            <span class="self">self</span>.found_op_with_observer(meta, op, pos, index)
+            <span class="self">self</span>.found_op_with_patch_log(meta, op, pos, index)
         } <span class="kw">else </span>{
             <span class="kw">let </span>pos = <span class="self">self</span>.binary_search_by(|o| meta.key_cmp(<span class="kw-2">&amp;</span>o.key, <span class="kw-2">&amp;</span>op.key));
-            <span class="self">self</span>.found_op_with_observer(meta, op, pos, <span class="number">0</span>)
+            <span class="self">self</span>.found_op_with_patch_log(meta, op, pos, <span class="number">0</span>)
         }
     }
 
-    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>find_op_without_observer(
+    <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>find_op_without_patch_log(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         op: <span class="kw-2">&amp;</span>Op,
         meta: <span class="kw-2">&amp;</span>OpSetMetadata,
-    ) -&gt; FoundOpWithoutObserver {
+    ) -&gt; FoundOpWithoutPatchLog {
         <span class="kw">if let </span>Key::Seq(<span class="kw">_</span>) = op.key {
             <span class="kw">let </span>query = <span class="self">self</span>.search(query::SimpleOpIdSearch::op(op), meta);
             <span class="kw">let </span>pos = query.pos;
-            <span class="self">self</span>.found_op_without_observer(meta, op, pos)
+            <span class="self">self</span>.found_op_without_patch_log(meta, op, pos)
         } <span class="kw">else </span>{
             <span class="kw">let </span>pos = <span class="self">self</span>.binary_search_by(|o| meta.key_cmp(<span class="kw-2">&amp;</span>o.key, <span class="kw-2">&amp;</span>op.key));
-            <span class="self">self</span>.found_op_without_observer(meta, op, pos)
+            <span class="self">self</span>.found_op_without_patch_log(meta, op, pos)
         }
     }
 
@@ -1225,5 +1240,4 @@
         }
     }
 }
-</code></pre></div>
-</section></main><div id="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.69.0 (84c898d65 2023-04-16)" data-search-js="search-8a59a8356673ec1f.js" data-settings-js="settings-f0c5c39777a9a2f6.js" data-settings-css="settings-0bcba95ff279c1db.css" ></div></body></html>
+</code></pre></div></section></main></body></html>

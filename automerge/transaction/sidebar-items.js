@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["CommitOptions","Failure","Observed","Success","Transaction","UnObserved"],"trait":["Observation","Transactable"],"type":["Result"]};
+window.SIDEBAR_ITEMS = {"struct":["CommitOptions","Failure","Success","Transaction"],"trait":["Transactable"],"type":["Result"]};

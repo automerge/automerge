@@ -1,5 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/autocommit.rs`."><title>autocommit.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../static.files/rustdoc-c4dbdcde0fbd8430.css" id="mainThemeStyle"><link rel="stylesheet" id="themeStyle" href="../../static.files/light-db279b6232be9c13.css"><link rel="stylesheet" disabled href="../../static.files/dark-cf923f49f397b216.css"><link rel="stylesheet" disabled href="../../static.files/ayu-be46fdc453a55015.css"><script src="../../static.files/storage-3891ce972e3a2bf8.js"></script><script defer src="../../static.files/source-script-1b95b7cca98b26e5.js"></script><script defer src="../../source-files.js"></script><script defer src="../../static.files/main-98a684e84ae5b08b.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-13285aec31fa243e.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../automerge/index.html">
-                        <img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><pre class="src-line-numbers"><a href="#1" id="1">1</a>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/autocommit.rs`."><title>autocommit.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../static.files/rustdoc-ba5701c5741a7b69.css" id="mainThemeStyle"><div id="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.70.0 (90c541806 2023-05-31)" data-search-js="search-e077946657036a58.js" data-settings-js="settings-298e1ea74db45b39.js" data-settings-css="settings-7bfb4c59cc6bc502.css" data-theme-light-css="light-0f8c037637f9eb3e.css" data-theme-dark-css="dark-1097f8e92a01e3cf.css" data-theme-ayu-css="ayu-614652228113ac93.css" ></div><script src="../../static.files/storage-62ce34ea385b278a.js"></script><script defer src="../../static.files/source-script-905937fbbdc8e9ea.js"></script><script defer src="../../source-files.js"></script><script defer src="../../static.files/main-f61008743c98d196.js"></script><noscript><link rel="stylesheet" media="(prefers-color-scheme:light)" href="../../static.files/light-0f8c037637f9eb3e.css"><link rel="stylesheet" media="(prefers-color-scheme:dark)" href="../../static.files/dark-1097f8e92a01e3cf.css"><link rel="stylesheet" href="../../static.files/noscript-13285aec31fa243e.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../automerge/index.html"><img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
 <a href="#4" id="4">4</a>
@@ -798,28 +797,52 @@
 <a href="#797" id="797">797</a>
 <a href="#798" id="798">798</a>
 <a href="#799" id="799">799</a>
-</pre><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
+<a href="#800" id="800">800</a>
+<a href="#801" id="801">801</a>
+<a href="#802" id="802">802</a>
+<a href="#803" id="803">803</a>
+<a href="#804" id="804">804</a>
+<a href="#805" id="805">805</a>
+<a href="#806" id="806">806</a>
+<a href="#807" id="807">807</a>
+<a href="#808" id="808">808</a>
+<a href="#809" id="809">809</a>
+<a href="#810" id="810">810</a>
+<a href="#811" id="811">811</a>
+<a href="#812" id="812">812</a>
+<a href="#813" id="813">813</a>
+<a href="#814" id="814">814</a>
+<a href="#815" id="815">815</a>
+<a href="#816" id="816">816</a>
+<a href="#817" id="817">817</a>
+<a href="#818" id="818">818</a>
+<a href="#819" id="819">819</a>
+<a href="#820" id="820">820</a>
+<a href="#821" id="821">821</a>
+<a href="#822" id="822">822</a>
+<a href="#823" id="823">823</a>
+<a href="#824" id="824">824</a>
+<a href="#825" id="825">825</a>
+<a href="#826" id="826">826</a>
+<a href="#827" id="827">827</a>
+</pre></div><pre class="rust"><code><span class="kw">use </span>std::ops::RangeBounds;
 
 <span class="kw">use </span><span class="kw">crate</span>::automerge::SaveOptions;
+<span class="kw">use </span><span class="kw">crate</span>::automerge::{current_state, diff};
 <span class="kw">use </span><span class="kw">crate</span>::exid::ExId;
-<span class="kw">use </span><span class="kw">crate</span>::history::History;
 <span class="kw">use </span><span class="kw">crate</span>::hydrate;
 <span class="kw">use </span><span class="kw">crate</span>::iter::{Keys, ListRange, MapRange, Values};
 <span class="kw">use </span><span class="kw">crate</span>::marks::{ExpandMark, Mark};
-<span class="kw">use </span><span class="kw">crate</span>::op_observer::{OpObserver, TextRepresentation};
+<span class="kw">use </span><span class="kw">crate</span>::patches::{PatchLog, TextRepresentation};
 <span class="kw">use </span><span class="kw">crate</span>::sync::SyncDoc;
 <span class="kw">use </span><span class="kw">crate</span>::transaction::{CommitOptions, Transactable};
-<span class="kw">use crate</span>::{sync, ObjType, Parents, ReadDoc, ScalarValue};
+<span class="kw">use crate</span>::{sync, ObjType, Parents, Patch, ReadDoc, ScalarValue};
 <span class="kw">use crate</span>::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Cursor,
     Prop, Value,
 };
 
 <span class="doccomment">/// An automerge document that automatically manages transactions.
-///
-/// An `AutoCommit` can optionally manage an [`OpObserver`]. This observer will be notified of all
-/// changes made by both remote and local changes. The type parameter `O` tracks whether this
-/// document is observed or not.
 ///
 /// ## Creating, loading, merging and forking documents
 ///
@@ -845,15 +868,24 @@
 ///
 /// To synchronise call [`Self::sync`] which returns an implementation of [`SyncDoc`]
 ///
+/// ## Patches, maintaining materialized views
+///
+/// [`AutoCommit`] allows you to generate [`Patch`]es representing changes to the current state of
+/// the document which you can use to maintain a materialized view of the current state. There are
+/// several ways to use this. See the documentation on `Self::diff` for more details, but the key
+/// point to remember is that [`AutoCommit`] manages an internal &quot;diff cursor&quot; for you. This is a
+/// representation of the heads of the document last time you called `diff_incremental` but you can
+/// also manage it directly using [`Self::update_diff_cursor`] and [`Self::reset_diff_cursor`].
 </span><span class="attr">#[derive(Debug, Clone)]
 </span><span class="kw">pub struct </span>AutoCommit {
     <span class="kw">pub</span>(<span class="kw">crate</span>) doc: Automerge,
-    transaction: <span class="prelude-ty">Option</span>&lt;(History, TransactionInner)&gt;,
-    history: History,
+    transaction: <span class="prelude-ty">Option</span>&lt;(PatchLog, TransactionInner)&gt;,
+    patch_log: PatchLog,
     diff_cursor: Vec&lt;ChangeHash&gt;,
+    save_cursor: Vec&lt;ChangeHash&gt;,
 }
 
-<span class="doccomment">/// An autocommit document with no observer
+<span class="doccomment">/// An autocommit document with an inactive [`PatchLog`]
 ///
 /// See [`AutoCommit`]
 </span><span class="kw">impl </span>Default <span class="kw">for </span>AutoCommit {
@@ -861,8 +893,9 @@
         AutoCommit {
             doc: Automerge::new(),
             transaction: <span class="prelude-val">None</span>,
-            history: History::innactive(),
+            patch_log: PatchLog::inactive(TextRepresentation::default()),
             diff_cursor: Vec::new(),
+            save_cursor: Vec::new(),
         }
     }
 }
@@ -877,8 +910,9 @@
         <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
             doc,
             transaction: <span class="prelude-val">None</span>,
-            history: History::innactive(),
+            patch_log: PatchLog::inactive(TextRepresentation::default()),
             diff_cursor: Vec::new(),
+            save_cursor: Vec::new(),
         })
     }
 
@@ -887,8 +921,9 @@
         <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
             doc,
             transaction: <span class="prelude-val">None</span>,
-            history: History::innactive(),
+            patch_log: PatchLog::inactive(TextRepresentation::default()),
             diff_cursor: Vec::new(),
+            save_cursor: Vec::new(),
         })
     }
 
@@ -896,7 +931,7 @@
     /// longer indexes changes to the document.
     </span><span class="kw">pub fn </span>reset_diff_cursor(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
         <span class="self">self</span>.ensure_transaction_closed();
-        <span class="self">self</span>.history = History::innactive();
+        <span class="self">self</span>.patch_log = PatchLog::inactive(TextRepresentation::default());
         <span class="self">self</span>.diff_cursor = Vec::new();
     }
 
@@ -910,8 +945,8 @@
     /// [`Self::reset_diff_cursor`]
     </span><span class="kw">pub fn </span>update_diff_cursor(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
         <span class="self">self</span>.ensure_transaction_closed();
-        <span class="self">self</span>.history.set_active(<span class="bool-val">true</span>);
-        <span class="self">self</span>.history.truncate();
+        <span class="self">self</span>.patch_log.set_active(<span class="bool-val">true</span>);
+        <span class="self">self</span>.patch_log.truncate();
         <span class="self">self</span>.diff_cursor = <span class="self">self</span>.doc.get_heads();
     }
 
@@ -920,7 +955,12 @@
         <span class="self">self</span>.diff_cursor.clone()
     }
 
-    <span class="doccomment">/// Generates a diff from `before` to `after` for the given observer.
+    <span class="doccomment">/// Generate the patches recorded in `patch_log`
+    </span><span class="kw">pub fn </span>make_patches(<span class="kw-2">&amp;</span><span class="self">self</span>, patch_log: <span class="kw-2">&amp;mut </span>PatchLog) -&gt; Vec&lt;Patch&gt; {
+        <span class="self">self</span>.doc.make_patches(patch_log)
+    }
+
+    <span class="doccomment">/// Generates a diff from `before` to `after`
     ///
     /// By default the diff requires a sequental scan of all the ops in the doc.
     ///
@@ -937,10 +977,6 @@
     ///
     /// * `before` - heads from [`Self::get_heads()`] at beginning point in the documents history
     /// * `after` - heads from [`Self::get_heads()`] at ending point in the documents history.
-    /// #           If `None` is passed the current heads will be used.
-    /// * `obs` - An [`OpObserver`] to observe the changes from before to after.
-    ///
-    /// This function returns the observer passed in for convience
     ///
     /// Note: `before` and `after` do not have to be chronological.  Document state can move backward.
     /// Normal use might look like:
@@ -948,52 +984,54 @@
     /// # Example
     ///
     /// ```
-    /// use automerge::{ AutoCommit, VecOpObserver };
+    /// use automerge::{ AutoCommit };
     ///
     /// let mut doc = AutoCommit::new(); // or AutoCommit::load(data)
     /// // make some changes - use and update the index
     /// let heads = doc.get_heads();
     /// let diff_cursor = doc.diff_cursor();
-    /// let patches = doc.diff(&amp;diff_cursor, &amp;heads, VecOpObserver::default()).take_patches();
+    /// let patches = doc.diff(&amp;diff_cursor, &amp;heads);
     /// doc.update_diff_cursor();
     /// ```
     ///
     /// See [`Self::diff_incremental`] for encapsulating this pattern.
-    </span><span class="kw">pub fn </span>diff&lt;Obs: OpObserver, As: AsMut&lt;Obs&gt;&gt;(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        before: <span class="kw-2">&amp;</span>[ChangeHash],
-        after: <span class="kw-2">&amp;</span>[ChangeHash],
-        <span class="kw-2">mut </span>obs: As,
-    ) -&gt; As {
+    </span><span class="kw">pub fn </span>diff(<span class="kw-2">&amp;mut </span><span class="self">self</span>, before: <span class="kw-2">&amp;</span>[ChangeHash], after: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; Vec&lt;Patch&gt; {
         <span class="self">self</span>.ensure_transaction_closed();
         <span class="kw">let </span>heads = <span class="self">self</span>.doc.get_heads();
-        <span class="kw">if </span>after == heads &amp;&amp; before == <span class="self">self</span>.diff_cursor &amp;&amp; <span class="self">self</span>.history.is_active() {
-            <span class="self">self</span>.history.observe(obs.as_mut(), <span class="kw-2">&amp;</span><span class="self">self</span>.doc, <span class="prelude-val">None</span>);
+        <span class="kw">if </span>after == heads &amp;&amp; before == <span class="self">self</span>.diff_cursor &amp;&amp; <span class="self">self</span>.patch_log.is_active() {
+            <span class="self">self</span>.patch_log.make_patches(<span class="kw-2">&amp;</span><span class="self">self</span>.doc)
         } <span class="kw">else if </span>before.is_empty() &amp;&amp; after == heads {
-            <span class="self">self</span>.doc.observe_current_state(obs.as_mut());
+            <span class="kw">let </span><span class="kw-2">mut </span>patch_log = PatchLog::active(<span class="self">self</span>.patch_log.text_rep());
+            patch_log.heads = <span class="prelude-val">Some</span>(after.to_vec());
+            current_state::log_current_state_patches(<span class="kw-2">&amp;</span><span class="self">self</span>.doc, <span class="kw-2">&amp;mut </span>patch_log);
+            patch_log.make_patches(<span class="kw-2">&amp;</span><span class="self">self</span>.doc)
         } <span class="kw">else </span>{
-            <span class="self">self</span>.doc.observe_diff(before, after, obs.as_mut());
+            <span class="kw">let </span>before_clock = <span class="self">self</span>.doc.clock_at(before);
+            <span class="kw">let </span>after_clock = <span class="self">self</span>.doc.clock_at(after);
+            <span class="kw">let </span><span class="kw-2">mut </span>patch_log = PatchLog::active(<span class="self">self</span>.patch_log.text_rep());
+            patch_log.heads = <span class="prelude-val">Some</span>(after.to_vec());
+            diff::log_diff(<span class="kw-2">&amp;</span><span class="self">self</span>.doc, <span class="kw-2">&amp;</span>before_clock, <span class="kw-2">&amp;</span>after_clock, <span class="kw-2">&amp;mut </span>patch_log);
+            patch_log.make_patches(<span class="kw-2">&amp;</span><span class="self">self</span>.doc)
         }
-        obs
     }
 
     <span class="doccomment">/// This is a convience function that encapsulates the following common pattern
     /// ```
-    /// use automerge::{AutoCommit, VecOpObserver};
+    /// use automerge::AutoCommit;
     /// let mut doc = AutoCommit::new();
     /// // make some changes
     /// let heads = doc.get_heads();
     /// let diff_cursor = doc.diff_cursor();
-    /// let observer = doc.diff(&amp;diff_cursor, &amp;heads, VecOpObserver::default());
+    /// let patches = doc.diff(&amp;diff_cursor, &amp;heads);
     /// doc.update_diff_cursor();
     /// ```
-    </span><span class="kw">pub fn </span>diff_incremental&lt;Obs: OpObserver + Default + AsMut&lt;Obs&gt;&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Obs {
+    </span><span class="kw">pub fn </span>diff_incremental(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Vec&lt;Patch&gt; {
         <span class="self">self</span>.ensure_transaction_closed();
         <span class="kw">let </span>heads = <span class="self">self</span>.doc.get_heads();
         <span class="kw">let </span>diff_cursor = <span class="self">self</span>.diff_cursor();
-        <span class="kw">let </span>observer = <span class="self">self</span>.diff(<span class="kw-2">&amp;</span>diff_cursor, <span class="kw-2">&amp;</span>heads, Obs::default());
+        <span class="kw">let </span>patches = <span class="self">self</span>.diff(<span class="kw-2">&amp;</span>diff_cursor, <span class="kw-2">&amp;</span>heads);
         <span class="self">self</span>.update_diff_cursor();
-        observer
+        patches
     }
 
     <span class="kw">pub fn </span>fork(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="self">Self </span>{
@@ -1001,8 +1039,9 @@
         <span class="self">Self </span>{
             doc: <span class="self">self</span>.doc.fork(),
             transaction: <span class="self">self</span>.transaction.clone(),
-            history: <span class="self">self</span>.history.clone(),
+            patch_log: <span class="self">self</span>.patch_log.clone(),
             diff_cursor: <span class="self">self</span>.diff_cursor.clone(),
+            save_cursor: <span class="self">self</span>.save_cursor.clone(),
         }
     }
 
@@ -1011,8 +1050,9 @@
         <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
             doc: <span class="self">self</span>.doc.fork_at(heads)<span class="question-mark">?</span>,
             transaction: <span class="self">self</span>.transaction.clone(),
-            history: <span class="self">self</span>.history.clone(),
+            patch_log: <span class="self">self</span>.patch_log.clone(),
             diff_cursor: <span class="self">self</span>.diff_cursor.clone(),
+            save_cursor: <span class="self">self</span>.save_cursor.clone(),
         })
     }
 
@@ -1043,13 +1083,13 @@
         <span class="kw">if </span><span class="self">self</span>.transaction.is_none() {
             <span class="kw">let </span>args = <span class="self">self</span>.doc.transaction_args();
             <span class="kw">let </span>inner = TransactionInner::new(args);
-            <span class="self">self</span>.transaction = <span class="prelude-val">Some</span>((<span class="self">self</span>.history.branch(), inner))
+            <span class="self">self</span>.transaction = <span class="prelude-val">Some</span>((<span class="self">self</span>.patch_log.branch(), inner))
         }
     }
 
     <span class="kw">fn </span>ensure_transaction_closed(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
-        <span class="kw">if let </span><span class="prelude-val">Some</span>((history, tx)) = <span class="self">self</span>.transaction.take() {
-            <span class="self">self</span>.history.merge(history);
+        <span class="kw">if let </span><span class="prelude-val">Some</span>((patch_log, tx)) = <span class="self">self</span>.transaction.take() {
+            <span class="self">self</span>.patch_log.merge(patch_log);
             tx.commit(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, <span class="prelude-val">None</span>, <span class="prelude-val">None</span>);
         }
     }
@@ -1063,7 +1103,8 @@
     /// change in future.
     </span><span class="kw">pub fn </span>load_incremental(<span class="kw-2">&amp;mut </span><span class="self">self</span>, data: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;usize, AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_closed();
-        <span class="self">self</span>.doc.load_incremental_inner(data, <span class="kw-2">&amp;mut </span><span class="self">self</span>.history)
+        <span class="self">self</span>.doc
+            .load_incremental_log_patches(data, <span class="kw-2">&amp;mut </span><span class="self">self</span>.patch_log)
     }
 
     <span class="kw">pub fn </span>apply_changes(
@@ -1071,36 +1112,45 @@
         changes: <span class="kw">impl </span>IntoIterator&lt;Item = Change&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_closed();
-        <span class="self">self</span>.doc.apply_changes_inner(changes, <span class="kw-2">&amp;mut </span><span class="self">self</span>.history)
+        <span class="self">self</span>.doc
+            .apply_changes_log_patches(changes, <span class="kw-2">&amp;mut </span><span class="self">self</span>.patch_log)
     }
 
     <span class="doccomment">/// Takes all the changes in `other` which are not in `self` and applies them
     </span><span class="kw">pub fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;mut </span>AutoCommit) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;ChangeHash&gt;, AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_closed();
         other.ensure_transaction_closed();
-        <span class="self">self</span>.doc.merge_inner(<span class="kw-2">&amp;mut </span>other.doc, <span class="kw-2">&amp;mut </span><span class="self">self</span>.history)
+        <span class="self">self</span>.doc
+            .merge_and_log_patches(<span class="kw-2">&amp;mut </span>other.doc, <span class="kw-2">&amp;mut </span><span class="self">self</span>.patch_log)
     }
 
     <span class="doccomment">/// Save the entirety of this document in a compact form.
     </span><span class="kw">pub fn </span>save(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Vec&lt;u8&gt; {
-        <span class="self">self</span>.ensure_transaction_closed();
-        <span class="self">self</span>.doc.save()
+        <span class="self">self</span>.save_with_options(SaveOptions::default())
     }
 
     <span class="kw">pub fn </span>save_with_options(<span class="kw-2">&amp;mut </span><span class="self">self</span>, options: SaveOptions) -&gt; Vec&lt;u8&gt; {
-        <span class="self">self</span>.doc.save_with_options(options)
+        <span class="self">self</span>.ensure_transaction_closed();
+        <span class="kw">let </span>bytes = <span class="self">self</span>.doc.save_with_options(options);
+        <span class="kw">if </span>!bytes.is_empty() {
+            <span class="self">self</span>.save_cursor = <span class="self">self</span>.get_heads()
+        }
+        bytes
     }
 
     <span class="doccomment">/// Save the document and attempt to load it before returning - slow!
     </span><span class="kw">pub fn </span>save_and_verify(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;u8&gt;, AutomergeError&gt; {
-        <span class="self">self</span>.ensure_transaction_closed();
-        <span class="self">self</span>.doc.save_and_verify()
+        <span class="kw">let </span>bytes = <span class="self">self</span>.save();
+        <span class="self">Self</span>::load(<span class="kw-2">&amp;</span>bytes)<span class="question-mark">?</span>;
+        <span class="prelude-val">Ok</span>(bytes)
     }
 
     <span class="doccomment">/// Save this document, but don&#39;t run it through DEFLATE afterwards
     </span><span class="kw">pub fn </span>save_nocompress(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Vec&lt;u8&gt; {
-        <span class="self">self</span>.ensure_transaction_closed();
-        <span class="self">self</span>.doc.save_nocompress()
+        <span class="self">self</span>.save_with_options(SaveOptions {
+            deflate: <span class="bool-val">false</span>,
+            ..Default::default()
+        })
     }
 
     <span class="doccomment">/// Save the changes since the last call to [Self::save`]
@@ -1111,7 +1161,11 @@
     /// text object).
     </span><span class="kw">pub fn </span>save_incremental(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; Vec&lt;u8&gt; {
         <span class="self">self</span>.ensure_transaction_closed();
-        <span class="self">self</span>.doc.save_incremental()
+        <span class="kw">let </span>bytes = <span class="self">self</span>.doc.save_after(<span class="kw-2">&amp;</span><span class="self">self</span>.save_cursor);
+        <span class="kw">if </span>!bytes.is_empty() {
+            <span class="self">self</span>.save_cursor = <span class="self">self</span>.get_heads()
+        }
+        bytes
     }
 
     <span class="kw">pub fn </span>get_missing_deps(<span class="kw-2">&amp;mut </span><span class="self">self</span>, heads: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; Vec&lt;ChangeHash&gt; {
@@ -1125,10 +1179,7 @@
         <span class="self">self</span>.doc.get_last_local_change()
     }
 
-    <span class="kw">pub fn </span>get_changes(
-        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-        have_deps: <span class="kw-2">&amp;</span>[ChangeHash],
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;<span class="kw-2">&amp;</span>Change&gt;, AutomergeError&gt; {
+    <span class="kw">pub fn </span>get_changes(<span class="kw-2">&amp;mut </span><span class="self">self</span>, have_deps: <span class="kw-2">&amp;</span>[ChangeHash]) -&gt; Vec&lt;<span class="kw-2">&amp;</span>Change&gt; {
         <span class="self">self</span>.ensure_transaction_closed();
         <span class="self">self</span>.doc.get_changes(have_deps)
     }
@@ -1181,15 +1232,15 @@
     }
 
     <span class="kw">pub fn </span>set_text_rep(<span class="kw-2">&amp;mut </span><span class="self">self</span>, text_rep: TextRepresentation) {
-        <span class="self">self</span>.doc.set_text_rep(text_rep)
+        <span class="self">self</span>.patch_log.set_text_rep(text_rep)
     }
 
     <span class="kw">pub fn </span>get_text_rep(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; TextRepresentation {
-        <span class="self">self</span>.doc.get_text_rep()
+        <span class="self">self</span>.patch_log.text_rep()
     }
 
     <span class="kw">pub fn </span>with_text_rep(<span class="kw-2">mut </span><span class="self">self</span>, text_rep: TextRepresentation) -&gt; <span class="self">Self </span>{
-        <span class="self">self</span>.doc.set_text_rep(text_rep);
+        <span class="self">self</span>.patch_log.set_text_rep(text_rep);
         <span class="self">self
     </span>}
 
@@ -1220,8 +1271,8 @@
     </span><span class="kw">pub fn </span>commit_with(<span class="kw-2">&amp;mut </span><span class="self">self</span>, options: CommitOptions) -&gt; <span class="prelude-ty">Option</span>&lt;ChangeHash&gt; {
         <span class="comment">// ensure that even no changes triggers a change
         </span><span class="self">self</span>.ensure_transaction_open();
-        <span class="kw">let </span>(history, tx) = <span class="self">self</span>.transaction.take().unwrap();
-        <span class="self">self</span>.history.merge(history);
+        <span class="kw">let </span>(patch_log, tx) = <span class="self">self</span>.transaction.take().unwrap();
+        <span class="self">self</span>.patch_log.merge(patch_log);
         tx.commit(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, options.message, options.time)
     }
 
@@ -1437,8 +1488,8 @@
         value: V,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();
-        <span class="kw">let </span>(history, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
-        tx.put(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, history, obj.as_ref(), prop, value)
+        <span class="kw">let </span>(patch_log, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
+        tx.put(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, patch_log, obj.as_ref(), prop, value)
     }
 
     <span class="kw">fn </span>put_object&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
@@ -1448,8 +1499,8 @@
         value: ObjType,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;ExId, AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();
-        <span class="kw">let </span>(history, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
-        tx.put_object(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, history, obj.as_ref(), prop, value)
+        <span class="kw">let </span>(patch_log, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
+        tx.put_object(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, patch_log, obj.as_ref(), prop, value)
     }
 
     <span class="kw">fn </span>insert&lt;O: AsRef&lt;ExId&gt;, V: Into&lt;ScalarValue&gt;&gt;(
@@ -1459,8 +1510,8 @@
         value: V,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();
-        <span class="kw">let </span>(history, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
-        tx.insert(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, history, obj.as_ref(), index, value)
+        <span class="kw">let </span>(patch_log, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
+        tx.insert(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, patch_log, obj.as_ref(), index, value)
     }
 
     <span class="kw">fn </span>insert_object&lt;O: AsRef&lt;ExId&gt;&gt;(
@@ -1470,8 +1521,8 @@
         value: ObjType,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;ExId, AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();
-        <span class="kw">let </span>(history, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
-        tx.insert_object(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, history, obj.as_ref(), index, value)
+        <span class="kw">let </span>(patch_log, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
+        tx.insert_object(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, patch_log, obj.as_ref(), index, value)
     }
 
     <span class="kw">fn </span>increment&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
@@ -1481,8 +1532,8 @@
         value: i64,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();
-        <span class="kw">let </span>(history, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
-        tx.increment(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, history, obj.as_ref(), prop, value)
+        <span class="kw">let </span>(patch_log, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
+        tx.increment(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, patch_log, obj.as_ref(), prop, value)
     }
 
     <span class="kw">fn </span>delete&lt;O: AsRef&lt;ExId&gt;, P: Into&lt;Prop&gt;&gt;(
@@ -1491,8 +1542,8 @@
         prop: P,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();
-        <span class="kw">let </span>(history, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
-        tx.delete(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, history, obj.as_ref(), prop)
+        <span class="kw">let </span>(patch_log, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
+        tx.delete(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, patch_log, obj.as_ref(), prop)
     }
 
     <span class="doccomment">/// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
@@ -1505,8 +1556,8 @@
         vals: V,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();
-        <span class="kw">let </span>(history, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
-        tx.splice(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, history, obj.as_ref(), pos, del, vals)
+        <span class="kw">let </span>(patch_log, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
+        tx.splice(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, patch_log, obj.as_ref(), pos, del, vals)
     }
 
     <span class="kw">fn </span>splice_text&lt;O: AsRef&lt;ExId&gt;&gt;(
@@ -1517,8 +1568,8 @@
         text: <span class="kw-2">&amp;</span>str,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();
-        <span class="kw">let </span>(history, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
-        tx.splice_text(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, history, obj.as_ref(), pos, del, text)
+        <span class="kw">let </span>(patch_log, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
+        tx.splice_text(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, patch_log, obj.as_ref(), pos, del, text)
     }
 
     <span class="kw">fn </span>mark&lt;O: AsRef&lt;ExId&gt;&gt;(
@@ -1528,8 +1579,8 @@
         expand: ExpandMark,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();
-        <span class="kw">let </span>(history, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
-        tx.mark(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, history, obj.as_ref(), mark, expand)
+        <span class="kw">let </span>(patch_log, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
+        tx.mark(<span class="kw-2">&amp;mut </span><span class="self">self</span>.doc, patch_log, obj.as_ref(), mark, expand)
     }
 
     <span class="kw">fn </span>unmark&lt;O: AsRef&lt;ExId&gt;&gt;(
@@ -1541,10 +1592,10 @@
         expand: ExpandMark,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.ensure_transaction_open();
-        <span class="kw">let </span>(history, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
+        <span class="kw">let </span>(patch_log, tx) = <span class="self">self</span>.transaction.as_mut().unwrap();
         tx.unmark(
             <span class="kw-2">&amp;mut </span><span class="self">self</span>.doc,
-            history,
+            patch_log,
             obj.as_ref(),
             key,
             start,
@@ -1575,27 +1626,30 @@
         message: sync::Message,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
         <span class="self">self</span>.inner.ensure_transaction_closed();
-        <span class="self">self</span>.inner
-            .doc
-            .receive_sync_message_inner(sync_state, message, <span class="kw-2">&amp;mut </span><span class="self">self</span>.inner.history)
+        <span class="self">self</span>.inner.doc.receive_sync_message_log_patches(
+            sync_state,
+            message,
+            <span class="kw-2">&amp;mut </span><span class="self">self</span>.inner.patch_log,
+        )
     }
 
-    <span class="kw">fn </span>receive_sync_message_with&lt;Obs: OpObserver&gt;(
+    <span class="kw">fn </span>receive_sync_message_log_patches(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         sync_state: <span class="kw-2">&amp;mut </span>sync::State,
         message: sync::Message,
-        op_observer: <span class="kw-2">&amp;mut </span>Obs,
+        patch_log: <span class="kw-2">&amp;mut </span>PatchLog,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;(), AutomergeError&gt; {
-        <span class="kw">let </span><span class="kw-2">mut </span>history = History::active();
+        <span class="kw">let </span><span class="kw-2">mut </span>new_patch_log = PatchLog::active(patch_log.text_rep());
         <span class="self">self</span>.inner
             .doc
-            .receive_sync_message_inner(sync_state, message, <span class="kw-2">&amp;mut </span>history)<span class="question-mark">?</span>;
-        <span class="kw">if </span><span class="self">self</span>.inner.history.is_active() {
-            <span class="self">self</span>.inner.history.merge(history.clone());
+            .receive_sync_message_log_patches(sync_state, message, <span class="kw-2">&amp;mut </span>new_patch_log)<span class="question-mark">?</span>;
+        <span class="kw">if </span><span class="self">self</span>.inner.patch_log.is_active() {
+            <span class="self">self</span>.inner.patch_log.merge(new_patch_log.clone());
         }
-        history.observe(op_observer, <span class="kw-2">&amp;</span><span class="self">self</span>.inner.doc, <span class="prelude-val">None</span>);
+        <span class="kw">if </span>patch_log.is_active() {
+            patch_log.merge(new_patch_log)
+        }
         <span class="prelude-val">Ok</span>(())
     }
 }
-</code></pre></div>
-</section></main><div id="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.69.0 (84c898d65 2023-04-16)" data-search-js="search-8a59a8356673ec1f.js" data-settings-js="settings-f0c5c39777a9a2f6.js" data-settings-css="settings-0bcba95ff279c1db.css" ></div></body></html>
+</code></pre></div></section></main></body></html>

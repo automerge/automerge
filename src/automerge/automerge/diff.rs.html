@@ -1,5 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/automerge/diff.rs`."><title>diff.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../static.files/rustdoc-c4dbdcde0fbd8430.css" id="mainThemeStyle"><link rel="stylesheet" id="themeStyle" href="../../../static.files/light-db279b6232be9c13.css"><link rel="stylesheet" disabled href="../../../static.files/dark-cf923f49f397b216.css"><link rel="stylesheet" disabled href="../../../static.files/ayu-be46fdc453a55015.css"><script src="../../../static.files/storage-3891ce972e3a2bf8.js"></script><script defer src="../../../static.files/source-script-1b95b7cca98b26e5.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../static.files/main-98a684e84ae5b08b.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-13285aec31fa243e.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../../automerge/index.html">
-                        <img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><pre class="src-line-numbers"><a href="#1" id="1">1</a>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/automerge/diff.rs`."><title>diff.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../static.files/rustdoc-ba5701c5741a7b69.css" id="mainThemeStyle"><div id="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.70.0 (90c541806 2023-05-31)" data-search-js="search-e077946657036a58.js" data-settings-js="settings-298e1ea74db45b39.js" data-settings-css="settings-7bfb4c59cc6bc502.css" data-theme-light-css="light-0f8c037637f9eb3e.css" data-theme-dark-css="dark-1097f8e92a01e3cf.css" data-theme-ayu-css="ayu-614652228113ac93.css" ></div><script src="../../../static.files/storage-62ce34ea385b278a.js"></script><script defer src="../../../static.files/source-script-905937fbbdc8e9ea.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../static.files/main-f61008743c98d196.js"></script><noscript><link rel="stylesheet" media="(prefers-color-scheme:light)" href="../../../static.files/light-0f8c037637f9eb3e.css"><link rel="stylesheet" media="(prefers-color-scheme:dark)" href="../../../static.files/dark-1097f8e92a01e3cf.css"><link rel="stylesheet" href="../../../static.files/noscript-13285aec31fa243e.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../../automerge/index.html"><img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
 <a href="#4" id="4">4</a>
@@ -1429,58 +1428,18 @@
 <a href="#1428" id="1428">1428</a>
 <a href="#1429" id="1429">1429</a>
 <a href="#1430" id="1430">1430</a>
-<a href="#1431" id="1431">1431</a>
-<a href="#1432" id="1432">1432</a>
-<a href="#1433" id="1433">1433</a>
-<a href="#1434" id="1434">1434</a>
-<a href="#1435" id="1435">1435</a>
-<a href="#1436" id="1436">1436</a>
-<a href="#1437" id="1437">1437</a>
-<a href="#1438" id="1438">1438</a>
-<a href="#1439" id="1439">1439</a>
-<a href="#1440" id="1440">1440</a>
-<a href="#1441" id="1441">1441</a>
-<a href="#1442" id="1442">1442</a>
-<a href="#1443" id="1443">1443</a>
-<a href="#1444" id="1444">1444</a>
-<a href="#1445" id="1445">1445</a>
-<a href="#1446" id="1446">1446</a>
-<a href="#1447" id="1447">1447</a>
-<a href="#1448" id="1448">1448</a>
-<a href="#1449" id="1449">1449</a>
-<a href="#1450" id="1450">1450</a>
-<a href="#1451" id="1451">1451</a>
-<a href="#1452" id="1452">1452</a>
-<a href="#1453" id="1453">1453</a>
-<a href="#1454" id="1454">1454</a>
-<a href="#1455" id="1455">1455</a>
-<a href="#1456" id="1456">1456</a>
-<a href="#1457" id="1457">1457</a>
-<a href="#1458" id="1458">1458</a>
-<a href="#1459" id="1459">1459</a>
-<a href="#1460" id="1460">1460</a>
-<a href="#1461" id="1461">1461</a>
-<a href="#1462" id="1462">1462</a>
-<a href="#1463" id="1463">1463</a>
-<a href="#1464" id="1464">1464</a>
-<a href="#1465" id="1465">1465</a>
-<a href="#1466" id="1466">1466</a>
-<a href="#1467" id="1467">1467</a>
-<a href="#1468" id="1468">1468</a>
-<a href="#1469" id="1469">1469</a>
-<a href="#1470" id="1470">1470</a>
-<a href="#1471" id="1471">1471</a>
-</pre><pre class="rust"><code><span class="kw">use </span>itertools::Itertools;
+</pre></div><pre class="rust"><code><span class="kw">use </span>itertools::Itertools;
 <span class="kw">use </span>std::borrow::Cow;
 <span class="kw">use </span>std::collections::BTreeMap;
 <span class="kw">use </span>std::ops::Deref;
 <span class="kw">use </span>std::ops::RangeBounds;
 
+<span class="kw">use </span><span class="kw">crate</span>::patches::TextRepresentation;
 <span class="kw">use crate</span>::{
     exid::ExId,
-    history::History,
     iter::{Keys, ListRange, MapRange, Values},
     marks::{Mark, MarkStateMachine},
+    patches::PatchLog,
     types::{Clock, ListEncoding, MarkData, ObjId, Op, Prop, ScalarValue},
     value::Value,
     Automerge, AutomergeError, ChangeHash, Cursor, ObjType, OpType, ReadDoc,
@@ -1590,26 +1549,26 @@
     }
 }
 
-<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>observe_diff(doc: <span class="kw-2">&amp;</span>Automerge, before: <span class="kw-2">&amp;</span>Clock, after: <span class="kw-2">&amp;</span>Clock, history: <span class="kw-2">&amp;mut </span>History) {
+<span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>log_diff(doc: <span class="kw-2">&amp;</span>Automerge, before: <span class="kw-2">&amp;</span>Clock, after: <span class="kw-2">&amp;</span>Clock, patch_log: <span class="kw-2">&amp;mut </span>PatchLog) {
     <span class="kw">for </span>(obj, typ, ops) <span class="kw">in </span>doc.ops().iter_objs() {
         <span class="kw">let </span>ops_by_key = ops.group_by(|o| o.elemid_or_key());
         <span class="kw">let </span>diffs = ops_by_key
             .into_iter()
             .filter_map(|(_key, key_ops)| process(key_ops, before, after));
 
-        <span class="kw">if </span>typ == ObjType::Text &amp;&amp; !doc.text_as_seq() {
-            observe_text_diff(doc, history, obj, diffs)
+        <span class="kw">if </span>typ == ObjType::Text &amp;&amp; <span class="macro">matches!</span>(patch_log.text_rep(), TextRepresentation::String) {
+            log_text_diff(doc, patch_log, obj, diffs)
         } <span class="kw">else if </span>typ.is_sequence() {
-            observe_list_diff(doc, history, obj, diffs);
+            log_list_diff(doc, patch_log, obj, diffs);
         } <span class="kw">else </span>{
-            observe_map_diff(doc, history, obj, diffs);
+            log_map_diff(doc, patch_log, obj, diffs);
         }
     }
 }
 
-<span class="kw">fn </span>observe_list_diff&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = Patch&lt;<span class="lifetime">&#39;a</span>&gt;&gt;&gt;(
+<span class="kw">fn </span>log_list_diff&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = Patch&lt;<span class="lifetime">&#39;a</span>&gt;&gt;&gt;(
     doc: <span class="kw-2">&amp;</span>Automerge,
-    history: <span class="kw-2">&amp;mut </span>History,
+    patch_log: <span class="kw-2">&amp;mut </span>PatchLog,
     obj: <span class="kw-2">&amp;</span>ObjId,
     patches: I,
 ) {
@@ -1621,42 +1580,42 @@
         }
         Patch::New(op) =&gt; {
             <span class="kw">let </span>value = op.value_at(<span class="prelude-val">Some</span>(op.clock)).into();
-            history.insert(<span class="kw-2">*</span>obj, index, value, op.id, op.conflict);
+            patch_log.insert(<span class="kw-2">*</span>obj, index, value, op.id, op.conflict);
             index + <span class="number">1
         </span>}
         Patch::Update { before, after } =&gt; {
             <span class="kw">let </span>conflict = !before.conflict &amp;&amp; after.conflict;
             <span class="kw">if </span>after.cross_visible {
                 <span class="kw">let </span>value = after.value_at(<span class="prelude-val">Some</span>(after.clock)).into();
-                history.put_seq(<span class="kw-2">*</span>obj, index, value, after.id, conflict, <span class="bool-val">true</span>)
+                patch_log.put_seq(<span class="kw-2">*</span>obj, index, value, after.id, conflict, <span class="bool-val">true</span>)
             } <span class="kw">else </span>{
                 <span class="kw">let </span>value = after.value_at(<span class="prelude-val">Some</span>(after.clock)).into();
-                history.put_seq(<span class="kw-2">*</span>obj, index, value, after.id, conflict, <span class="bool-val">false</span>)
+                patch_log.put_seq(<span class="kw-2">*</span>obj, index, value, after.id, conflict, <span class="bool-val">false</span>)
             }
             index + <span class="number">1
         </span>}
         Patch::Old { before, after } =&gt; {
             <span class="kw">if </span>!before.conflict &amp;&amp; after.conflict {
-                history.flag_conflict_seq(<span class="kw-2">*</span>obj, index);
+                patch_log.flag_conflict_seq(<span class="kw-2">*</span>obj, index);
             }
             <span class="kw">if let </span><span class="prelude-val">Some</span>(n) = get_inc(<span class="kw-2">&amp;</span>before, <span class="kw-2">&amp;</span>after) {
-                history.increment_seq(<span class="kw-2">*</span>obj, index, n, after.id);
+                patch_log.increment_seq(<span class="kw-2">*</span>obj, index, n, after.id);
             }
             index + <span class="number">1
         </span>}
         Patch::Delete(<span class="kw">_</span>) =&gt; {
-            history.delete_seq(<span class="kw-2">*</span>obj, index, <span class="number">1</span>);
+            patch_log.delete_seq(<span class="kw-2">*</span>obj, index, <span class="number">1</span>);
             index
         }
     });
     <span class="kw">if let </span><span class="prelude-val">Some</span>(m) = marks.finish() {
-        history.mark(<span class="kw-2">*</span>obj, <span class="kw-2">&amp;</span>m);
+        patch_log.mark(<span class="kw-2">*</span>obj, <span class="kw-2">&amp;</span>m);
     }
 }
 
-<span class="kw">fn </span>observe_text_diff&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = Patch&lt;<span class="lifetime">&#39;a</span>&gt;&gt;&gt;(
+<span class="kw">fn </span>log_text_diff&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = Patch&lt;<span class="lifetime">&#39;a</span>&gt;&gt;&gt;(
     doc: <span class="kw-2">&amp;</span>Automerge,
-    history: <span class="kw-2">&amp;mut </span>History,
+    patch_log: <span class="kw-2">&amp;mut </span>PatchLog,
     obj: <span class="kw-2">&amp;</span>ObjId,
     patches: I,
 ) {
@@ -1668,28 +1627,28 @@
             index
         }
         Patch::New(op) =&gt; {
-            history.splice(<span class="kw-2">*</span>obj, index, op.to_str());
+            patch_log.splice(<span class="kw-2">*</span>obj, index, op.to_str());
             index + op.width(encoding)
         }
         Patch::Update { before, after } =&gt; {
-            history.delete_seq(<span class="kw-2">*</span>obj, index, before.width(encoding));
-            history.splice(<span class="kw-2">*</span>obj, index, after.to_str());
+            patch_log.delete_seq(<span class="kw-2">*</span>obj, index, before.width(encoding));
+            patch_log.splice(<span class="kw-2">*</span>obj, index, after.to_str());
             index + after.width(encoding)
         }
         Patch::Old { after, .. } =&gt; index + after.width(encoding),
         Patch::Delete(before) =&gt; {
-            history.delete_seq(<span class="kw-2">*</span>obj, index, before.width(encoding));
+            patch_log.delete_seq(<span class="kw-2">*</span>obj, index, before.width(encoding));
             index
         }
     });
     <span class="kw">if let </span><span class="prelude-val">Some</span>(m) = marks.finish() {
-        history.mark(<span class="kw-2">*</span>obj, <span class="kw-2">&amp;</span>m);
+        patch_log.mark(<span class="kw-2">*</span>obj, <span class="kw-2">&amp;</span>m);
     }
 }
 
-<span class="kw">fn </span>observe_map_diff&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = Patch&lt;<span class="lifetime">&#39;a</span>&gt;&gt;&gt;(
+<span class="kw">fn </span>log_map_diff&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = Patch&lt;<span class="lifetime">&#39;a</span>&gt;&gt;&gt;(
     doc: <span class="kw-2">&amp;</span>Automerge,
-    history: <span class="kw-2">&amp;mut </span>History,
+    patch_log: <span class="kw-2">&amp;mut </span>PatchLog,
     obj: <span class="kw-2">&amp;</span>ObjId,
     diffs: I,
 ) {
@@ -1698,27 +1657,27 @@
         .for_each(|(key, patch)| <span class="kw">match </span>patch {
             Patch::New(op) =&gt; {
                 <span class="kw">let </span>value = op.value_at(<span class="prelude-val">Some</span>(op.clock)).into();
-                history.put_map(<span class="kw-2">*</span>obj, key, value, op.id, op.conflict, <span class="bool-val">false</span>)
+                patch_log.put_map(<span class="kw-2">*</span>obj, key, value, op.id, op.conflict, <span class="bool-val">false</span>)
             }
             Patch::Update { before, after } =&gt; {
                 <span class="kw">let </span>conflict = !before.conflict &amp;&amp; after.conflict;
                 <span class="kw">if </span>after.cross_visible {
                     <span class="kw">let </span>value = after.value_at(<span class="prelude-val">Some</span>(after.clock)).into();
-                    history.put_map(<span class="kw-2">*</span>obj, key, value, after.id, conflict, <span class="bool-val">true</span>)
+                    patch_log.put_map(<span class="kw-2">*</span>obj, key, value, after.id, conflict, <span class="bool-val">true</span>)
                 } <span class="kw">else </span>{
                     <span class="kw">let </span>value = after.value_at(<span class="prelude-val">Some</span>(after.clock)).into();
-                    history.put_map(<span class="kw-2">*</span>obj, key, value, after.id, conflict, <span class="bool-val">false</span>)
+                    patch_log.put_map(<span class="kw-2">*</span>obj, key, value, after.id, conflict, <span class="bool-val">false</span>)
                 }
             }
             Patch::Old { before, after } =&gt; {
                 <span class="kw">if </span>!before.conflict &amp;&amp; after.conflict {
-                    history.flag_conflict_map(<span class="kw-2">*</span>obj, key);
+                    patch_log.flag_conflict_map(<span class="kw-2">*</span>obj, key);
                 }
                 <span class="kw">if let </span><span class="prelude-val">Some</span>(n) = get_inc(<span class="kw-2">&amp;</span>before, <span class="kw-2">&amp;</span>after) {
-                    history.increment_map(<span class="kw-2">*</span>obj, key, n, after.id);
+                    patch_log.increment_map(<span class="kw-2">*</span>obj, key, n, after.id);
                 }
             }
-            Patch::Delete(<span class="kw">_</span>) =&gt; history.delete_map(<span class="kw-2">*</span>obj, key),
+            Patch::Delete(<span class="kw">_</span>) =&gt; patch_log.delete_map(<span class="kw-2">*</span>obj, key),
             Patch::Mark(<span class="kw">_</span>, <span class="kw">_</span>) =&gt; {}
         });
 }
@@ -2090,7 +2049,7 @@
 
     <span class="kw">use crate</span>::{
         marks::Mark, transaction::Transactable, types::MarkData, AutoCommit, ObjType, Patch,
-        PatchAction, Prop, ScalarValue, Value, VecOpObserver, ROOT,
+        PatchAction, Prop, ScalarValue, Value, ROOT,
     };
     <span class="kw">use </span>itertools::Itertools;
 
@@ -2223,9 +2182,7 @@
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value2c&quot;</span>).unwrap();
         <span class="kw">let </span>heads2 = doc.get_heads();
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value3&quot;</span>).unwrap();
-        <span class="kw">let </span>patches = doc
-            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
-            .take_patches();
+        <span class="kw">let </span>patches = doc.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2);
 
         <span class="macro">assert_eq!</span>(
             exp(patches),
@@ -2257,9 +2214,7 @@
 
         <span class="kw">let </span>heads2 = doc1.get_heads();
         doc1.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value3&quot;</span>).unwrap();
-        <span class="kw">let </span>patches = doc1
-            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
-            .take_patches();
+        <span class="kw">let </span>patches = doc1.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2);
 
         <span class="macro">assert_eq!</span>(
             exp(patches),
@@ -2292,9 +2247,7 @@
 
         <span class="kw">let </span>heads2 = doc1.get_heads();
         doc1.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value3&quot;</span>).unwrap();
-        <span class="kw">let </span>patches = doc1
-            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
-            .take_patches();
+        <span class="kw">let </span>patches = doc1.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2);
 
         <span class="macro">assert_eq!</span>(
             exp(patches),
@@ -2336,9 +2289,7 @@
 
         <span class="kw">let </span>heads2 = doc1.get_heads();
         doc1.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value3&quot;</span>).unwrap();
-        <span class="kw">let </span>patches = doc1
-            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
-            .take_patches();
+        <span class="kw">let </span>patches = doc1.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2);
 
         <span class="macro">assert_eq!</span>(
             exp(patches),
@@ -2372,9 +2323,7 @@
 
         <span class="kw">let </span>heads2 = doc1.get_heads();
         doc1.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value3&quot;</span>).unwrap();
-        <span class="kw">let </span>patches = doc1
-            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
-            .take_patches();
+        <span class="kw">let </span>patches = doc1.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2);
 
         <span class="macro">assert_eq!</span>(exp(patches), <span class="macro">vec!</span>[],);
     }
@@ -2387,9 +2336,7 @@
         doc.delete(ROOT, <span class="string">&quot;key&quot;</span>).unwrap();
         <span class="kw">let </span>heads2 = doc.get_heads();
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value3&quot;</span>).unwrap();
-        <span class="kw">let </span>patches = doc
-            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
-            .take_patches();
+        <span class="kw">let </span>patches = doc.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2);
 
         <span class="macro">assert_eq!</span>(
             exp(patches),
@@ -2410,9 +2357,7 @@
         doc.delete(ROOT, <span class="string">&quot;key&quot;</span>).unwrap();
         <span class="kw">let </span>heads2 = doc.get_heads();
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value3&quot;</span>).unwrap();
-        <span class="kw">let </span>patches = doc
-            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
-            .take_patches();
+        <span class="kw">let </span>patches = doc.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2);
 
         <span class="macro">assert_eq!</span>(
             exp(patches),
@@ -2434,9 +2379,7 @@
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value2c&quot;</span>).unwrap();
         <span class="kw">let </span>heads2 = doc.get_heads();
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value3&quot;</span>).unwrap();
-        <span class="kw">let </span>patches = doc
-            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
-            .take_patches();
+        <span class="kw">let </span>patches = doc.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2);
 
         <span class="macro">assert_eq!</span>(
             exp(patches),
@@ -2460,9 +2403,7 @@
         doc.increment(ROOT, <span class="string">&quot;key&quot;</span>, <span class="number">5</span>).unwrap();
         <span class="kw">let </span>heads2 = doc.get_heads();
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;overwrite&quot;</span>).unwrap();
-        <span class="kw">let </span>patches = doc
-            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
-            .take_patches();
+        <span class="kw">let </span>patches = doc.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2);
 
         <span class="macro">assert_eq!</span>(
             exp(patches),
@@ -2483,9 +2424,7 @@
         <span class="kw">let </span>heads2 = doc.get_heads();
         doc.increment(ROOT, <span class="string">&quot;key&quot;</span>, <span class="number">5</span>).unwrap();
         doc.put(ROOT, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;overwrite&quot;</span>).unwrap();
-        <span class="kw">let </span>patches = doc
-            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
-            .take_patches();
+        <span class="kw">let </span>patches = doc.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2);
 
         <span class="macro">assert_eq!</span>(
             exp(patches),
@@ -2512,9 +2451,7 @@
         doc.insert(<span class="kw-2">&amp;</span>list, <span class="number">3</span>, <span class="number">35</span>).unwrap();
         doc.delete(<span class="kw-2">&amp;</span>list, <span class="number">0</span>).unwrap();
         <span class="kw">let </span>heads2 = doc.get_heads();
-        <span class="kw">let </span>patches = doc
-            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
-            .take_patches();
+        <span class="kw">let </span>patches = doc.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2);
         <span class="macro">assert_eq!</span>(
             exp(patches),
             <span class="macro">vec!</span>[
@@ -2554,9 +2491,7 @@
         doc.insert(<span class="kw-2">&amp;</span>list, <span class="number">1</span>, <span class="number">27</span>).unwrap();
         doc.insert(<span class="kw-2">&amp;</span>list, <span class="number">1</span>, <span class="number">28</span>).unwrap();
         <span class="kw">let </span>heads2 = doc.get_heads();
-        <span class="kw">let </span>patches = doc
-            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
-            .take_patches();
+        <span class="kw">let </span>patches = doc.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2);
         <span class="macro">assert_eq!</span>(
             exp(patches),
             <span class="macro">vec!</span>[ObservedPatch {
@@ -2596,9 +2531,7 @@
 
         <span class="kw">let </span>heads2 = doc1.get_heads();
 
-        <span class="kw">let </span>patches = doc1
-            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
-            .take_patches();
+        <span class="kw">let </span>patches = doc1.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2);
 
         <span class="macro">assert_eq!</span>(
             exp(patches),
@@ -2687,9 +2620,7 @@
         doc1.put(<span class="kw-2">&amp;</span>list, <span class="number">2</span>, <span class="number">0</span>).unwrap();
         doc1.put(<span class="kw-2">&amp;</span>list, <span class="number">3</span>, <span class="number">0</span>).unwrap();
 
-        <span class="kw">let </span>patches = doc1
-            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
-            .take_patches();
+        <span class="kw">let </span>patches = doc1.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2);
 
         <span class="kw">let </span>exp = exp(patches);
         <span class="macro">assert_eq!</span>(
@@ -2763,9 +2694,7 @@
 
         <span class="kw">let </span>heads2 = doc1.get_heads();
 
-        <span class="kw">let </span>patches = doc1
-            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
-            .take_patches();
+        <span class="kw">let </span>patches = doc1.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2);
         <span class="kw">let </span>exp1 = exp(patches);
         <span class="macro">assert_eq!</span>(
             exp1.get(<span class="number">0</span>),
@@ -2790,9 +2719,7 @@
             .as_ref()
         );
 
-        <span class="kw">let </span>patches = doc1
-            .diff(<span class="kw-2">&amp;</span>heads1a, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
-            .take_patches();
+        <span class="kw">let </span>patches = doc1.diff(<span class="kw-2">&amp;</span>heads1a, <span class="kw-2">&amp;</span>heads2);
         <span class="kw">let </span>exp2 = exp(patches);
         <span class="macro">assert_eq!</span>(
             exp2.get(<span class="number">0</span>),
@@ -2806,9 +2733,7 @@
             .as_ref()
         );
 
-        <span class="kw">let </span>patches = doc1
-            .diff(<span class="kw-2">&amp;</span>heads1b, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
-            .take_patches();
+        <span class="kw">let </span>patches = doc1.diff(<span class="kw-2">&amp;</span>heads1b, <span class="kw-2">&amp;</span>heads2);
         <span class="kw">let </span>exp3 = exp(patches);
         <span class="macro">assert_eq!</span>(
             exp3.get(<span class="number">0</span>),
@@ -2858,9 +2783,7 @@
 
         <span class="kw">let </span>heads2b = doc1.get_heads();
 
-        <span class="kw">let </span>patches = doc1
-            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2a, VecOpObserver::default())
-            .take_patches();
+        <span class="kw">let </span>patches = doc1.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2a);
         <span class="kw">let </span>exp1 = exp(patches);
         <span class="macro">assert_eq!</span>(
             exp1.get(<span class="number">0</span>),
@@ -2874,9 +2797,7 @@
             .as_ref()
         );
 
-        <span class="kw">let </span>patches = doc1
-            .diff(<span class="kw-2">&amp;</span>heads2a, <span class="kw-2">&amp;</span>heads2b, VecOpObserver::default())
-            .take_patches();
+        <span class="kw">let </span>patches = doc1.diff(<span class="kw-2">&amp;</span>heads2a, <span class="kw-2">&amp;</span>heads2b);
         <span class="kw">let </span>exp1 = exp(patches);
         <span class="macro">assert_eq!</span>(
             exp1.get(<span class="number">0</span>),
@@ -2906,9 +2827,7 @@
         .unwrap();
 
         <span class="kw">let </span>heads2 = doc1.get_heads();
-        <span class="kw">let </span>patches12 = doc1
-            .diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2, VecOpObserver::default())
-            .take_patches();
+        <span class="kw">let </span>patches12 = doc1.diff(<span class="kw-2">&amp;</span>heads1, <span class="kw-2">&amp;</span>heads2);
         <span class="kw">let </span>exp1 = exp(patches12);
         <span class="macro">assert_eq!</span>(
             exp1,
@@ -2923,9 +2842,7 @@
             }]
         );
 
-        <span class="kw">let </span>patches21 = doc1
-            .diff(<span class="kw-2">&amp;</span>heads2, <span class="kw-2">&amp;</span>heads1, VecOpObserver::default())
-            .take_patches();
+        <span class="kw">let </span>patches21 = doc1.diff(<span class="kw-2">&amp;</span>heads2, <span class="kw-2">&amp;</span>heads1);
         <span class="kw">let </span>exp2 = exp(patches21);
         <span class="macro">assert_eq!</span>(
             exp2,
@@ -2941,5 +2858,4 @@
         );
     }
 }
-</code></pre></div>
-</section></main><div id="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.69.0 (84c898d65 2023-04-16)" data-search-js="search-8a59a8356673ec1f.js" data-settings-js="settings-f0c5c39777a9a2f6.js" data-settings-css="settings-0bcba95ff279c1db.css" ></div></body></html>
+</code></pre></div></section></main></body></html>

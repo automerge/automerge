@@ -1,5 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/automerge/current_state.rs`."><title>current_state.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../static.files/rustdoc-c4dbdcde0fbd8430.css" id="mainThemeStyle"><link rel="stylesheet" id="themeStyle" href="../../../static.files/light-db279b6232be9c13.css"><link rel="stylesheet" disabled href="../../../static.files/dark-cf923f49f397b216.css"><link rel="stylesheet" disabled href="../../../static.files/ayu-be46fdc453a55015.css"><script src="../../../static.files/storage-3891ce972e3a2bf8.js"></script><script defer src="../../../static.files/source-script-1b95b7cca98b26e5.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../static.files/main-98a684e84ae5b08b.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-13285aec31fa243e.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../../automerge/index.html">
-                        <img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><pre class="src-line-numbers"><a href="#1" id="1">1</a>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `automerge/src/automerge/current_state.rs`."><title>current_state.rs - source</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Regular-46f98efaafac5295.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Regular-018c141bf0843ffd.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/FiraSans-Medium-8f9a781e4970d388.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Regular-562dcc5011b6de7d.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceSerif4-Bold-a2c9cd1067f8b328.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/SourceCodePro-Semibold-d899c5a5c4aeb14a.ttf.woff2"><link rel="stylesheet" href="../../../static.files/normalize-76eba96aa4d2e634.css"><link rel="stylesheet" href="../../../static.files/rustdoc-ba5701c5741a7b69.css" id="mainThemeStyle"><div id="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.70.0 (90c541806 2023-05-31)" data-search-js="search-e077946657036a58.js" data-settings-js="settings-298e1ea74db45b39.js" data-settings-css="settings-7bfb4c59cc6bc502.css" data-theme-light-css="light-0f8c037637f9eb3e.css" data-theme-dark-css="dark-1097f8e92a01e3cf.css" data-theme-ayu-css="ayu-614652228113ac93.css" ></div><script src="../../../static.files/storage-62ce34ea385b278a.js"></script><script defer src="../../../static.files/source-script-905937fbbdc8e9ea.js"></script><script defer src="../../../source-files.js"></script><script defer src="../../../static.files/main-f61008743c98d196.js"></script><noscript><link rel="stylesheet" media="(prefers-color-scheme:light)" href="../../../static.files/light-0f8c037637f9eb3e.css"><link rel="stylesheet" media="(prefers-color-scheme:dark)" href="../../../static.files/dark-1097f8e92a01e3cf.css"><link rel="stylesheet" href="../../../static.files/noscript-13285aec31fa243e.css"></noscript><link rel="icon" href="https:///raw.githubusercontent.com/automerge/automerge/main/img/favicon.ico"></head><body class="rustdoc source"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"></nav><main><nav class="sub"><a class="sub-logo-container" href="../../../automerge/index.html"><img src="https://raw.githubusercontent.com/automerge/automerge/main/img/brandmark.svg" alt="logo"></a><form class="search-form"><span></span><input class="search-input" name="search" aria-label="Run search in the documentation" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><div id="help-button" title="help" tabindex="-1"><a href="../../../help.html">?</a></div><div id="settings-menu" tabindex="-1"><a href="../../../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../../../static.files/wheel-7b819b6101059cd0.svg"></a></div></form></nav><section id="main-content" class="content"><div class="example-wrap"><div data-nosnippet><pre class="src-line-numbers"><a href="#1" id="1">1</a>
 <a href="#2" id="2">2</a>
 <a href="#3" id="3">3</a>
 <a href="#4" id="4">4</a>
@@ -728,72 +727,13 @@
 <a href="#727" id="727">727</a>
 <a href="#728" id="728">728</a>
 <a href="#729" id="729">729</a>
-<a href="#730" id="730">730</a>
-<a href="#731" id="731">731</a>
-<a href="#732" id="732">732</a>
-<a href="#733" id="733">733</a>
-<a href="#734" id="734">734</a>
-<a href="#735" id="735">735</a>
-<a href="#736" id="736">736</a>
-<a href="#737" id="737">737</a>
-<a href="#738" id="738">738</a>
-<a href="#739" id="739">739</a>
-<a href="#740" id="740">740</a>
-<a href="#741" id="741">741</a>
-<a href="#742" id="742">742</a>
-<a href="#743" id="743">743</a>
-<a href="#744" id="744">744</a>
-<a href="#745" id="745">745</a>
-<a href="#746" id="746">746</a>
-<a href="#747" id="747">747</a>
-<a href="#748" id="748">748</a>
-<a href="#749" id="749">749</a>
-<a href="#750" id="750">750</a>
-<a href="#751" id="751">751</a>
-<a href="#752" id="752">752</a>
-<a href="#753" id="753">753</a>
-<a href="#754" id="754">754</a>
-<a href="#755" id="755">755</a>
-<a href="#756" id="756">756</a>
-<a href="#757" id="757">757</a>
-<a href="#758" id="758">758</a>
-<a href="#759" id="759">759</a>
-<a href="#760" id="760">760</a>
-<a href="#761" id="761">761</a>
-<a href="#762" id="762">762</a>
-<a href="#763" id="763">763</a>
-<a href="#764" id="764">764</a>
-<a href="#765" id="765">765</a>
-<a href="#766" id="766">766</a>
-<a href="#767" id="767">767</a>
-<a href="#768" id="768">768</a>
-<a href="#769" id="769">769</a>
-<a href="#770" id="770">770</a>
-<a href="#771" id="771">771</a>
-<a href="#772" id="772">772</a>
-<a href="#773" id="773">773</a>
-<a href="#774" id="774">774</a>
-<a href="#775" id="775">775</a>
-<a href="#776" id="776">776</a>
-<a href="#777" id="777">777</a>
-<a href="#778" id="778">778</a>
-<a href="#779" id="779">779</a>
-<a href="#780" id="780">780</a>
-<a href="#781" id="781">781</a>
-<a href="#782" id="782">782</a>
-<a href="#783" id="783">783</a>
-<a href="#784" id="784">784</a>
-<a href="#785" id="785">785</a>
-<a href="#786" id="786">786</a>
-<a href="#787" id="787">787</a>
-<a href="#788" id="788">788</a>
-</pre><pre class="rust"><code><span class="kw">use </span>std::borrow::Cow;
+</pre></div><pre class="rust"><code><span class="kw">use </span>std::borrow::Cow;
 
 <span class="kw">use </span>itertools::Itertools;
 
 <span class="kw">use crate</span>::{
-    history::History,
     marks::{Mark, MarkStateMachine},
+    patches::{PatchLog, TextRepresentation},
     types::{Key, ListEncoding, ObjId, Op, OpId},
     Automerge, ObjType, OpType, Value,
 };
@@ -812,41 +752,37 @@
     id: OpId,
 }
 
-<span class="doccomment">/// Traverse the &quot;current&quot; state of the document, notifying `observer`
+<span class="doccomment">/// Traverse the &quot;current&quot; state of the document, logging patches to `patch_log`.
 ///
 /// The &quot;current&quot; state of the document is the set of visible operations. This function will
-/// traverse that set of operations and call the corresponding methods on the `observer` as it
-/// encounters values. The `observer` methods will be called in the order in which they appear in
-/// the document. That is to say that the observer will be notified of parent objects before the
-/// objects they contain and elements of a sequence will be notified in the order they occur.
+/// traverse that set of operations and add corresponding patches to `patch_log` as it encounters
+/// values.
 ///
-/// Due to only notifying of visible operations the observer will only be called with `put`,
+/// Due to only notifying of visible operations the [`PatchLog`] will only be called with `put`,
 /// `insert`, and `splice`, operations.
-
-</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>observe_current_state(doc: <span class="kw-2">&amp;</span>Automerge, history: <span class="kw-2">&amp;mut </span>History) {
+</span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>log_current_state_patches(doc: <span class="kw-2">&amp;</span>Automerge, patch_log: <span class="kw-2">&amp;mut </span>PatchLog) {
     <span class="comment">// The OpSet already exposes operations in the order they appear in the document.
     // `OpSet::iter_objs` iterates over the objects in causal order, this means that parent objects
     // will always appear before their children. Furthermore, the operations within each object are
     // ordered by key (which means by their position in a sequence for sequences).
     //
     // Effectively then we iterate over each object, then we group the operations in the object by
-    // key and for each key find the visible operations for that key. Then we notify the observer
+    // key and for each key find the visible operations for that key. Then we notify the patch log
     // for each of those visible operations.
     </span><span class="kw">for </span>(obj, typ, ops) <span class="kw">in </span>doc.ops().iter_objs() {
-        <span class="kw">if </span>typ == ObjType::Text &amp;&amp; !doc.text_as_seq() {
-            observe_text(doc, history, obj, ops)
+        <span class="kw">if </span>typ == ObjType::Text &amp;&amp; <span class="macro">matches!</span>(patch_log.text_rep(), TextRepresentation::String) {
+            log_text_patches(doc, patch_log, obj, ops)
         } <span class="kw">else if </span>typ.is_sequence() {
-            observe_list(doc, history, obj, ops);
+            log_list_patches(doc, patch_log, obj, ops);
         } <span class="kw">else </span>{
-            observe_map(doc, history, obj, ops);
+            log_map_patches(doc, patch_log, obj, ops);
         }
     }
 }
 
-<span class="kw">fn </span>observe_text&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;&gt;(
+<span class="kw">fn </span>log_text_patches&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;&gt;(
     doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
-    <span class="comment">//observer: &amp;mut O,
-    </span>history: <span class="kw-2">&amp;mut </span>History,
+    patch_log: <span class="kw-2">&amp;mut </span>PatchLog,
     obj: <span class="kw-2">&amp;</span>ObjId,
     ops: I,
 ) {
@@ -878,16 +814,13 @@
             }
             state
         });
-    history.splice(<span class="kw-2">*</span>obj, <span class="number">0</span>, state.text.as_str());
-    history.mark(<span class="kw-2">*</span>obj, <span class="kw-2">&amp;</span>state.finished);
-    <span class="comment">//observer.splice_text(doc, exid.clone(), 0, state.text.as_str());
-    //observer.mark(doc, exid, state.finished.into_iter());
-</span>}
+    patch_log.splice(<span class="kw-2">*</span>obj, <span class="number">0</span>, state.text.as_str());
+    patch_log.mark(<span class="kw-2">*</span>obj, <span class="kw-2">&amp;</span>state.finished);
+}
 
-<span class="kw">fn </span>observe_list&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;&gt;(
+<span class="kw">fn </span>log_list_patches&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;&gt;(
     doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
-    <span class="comment">//observer: &amp;mut O,
-    </span>history: <span class="kw-2">&amp;mut </span>History,
+    patch_log: <span class="kw-2">&amp;mut </span>PatchLog,
     obj: <span class="kw-2">&amp;</span>ObjId,
     ops: I,
 ) {
@@ -930,15 +863,12 @@
         })
         .for_each(|(index, (val_enum, (value, opid)))| {
             <span class="kw">let </span>conflict = val_enum &gt; <span class="number">0</span>;
-            history.insert(<span class="kw-2">*</span>obj, index, value.clone().into(), opid, conflict);
-            <span class="comment">//let tagged_value = (value, doc.id_to_exid(opid));
-            //observer.insert(doc, exid.clone(), index, tagged_value, conflict);
-        </span>});
-    history.mark(<span class="kw-2">*</span>obj, <span class="kw-2">&amp;</span>finished);
-    <span class="comment">////observer.mark(doc, exid, finished.into_iter());
-</span>}
+            patch_log.insert(<span class="kw-2">*</span>obj, index, value.clone().into(), opid, conflict);
+        });
+    patch_log.mark(<span class="kw-2">*</span>obj, <span class="kw-2">&amp;</span>finished);
+}
 
-<span class="kw">fn </span>observe_map_key&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;&gt;(
+<span class="kw">fn </span>log_map_key_patches&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;&gt;(
     (key, key_ops): (Key, I),
 ) -&gt; <span class="prelude-ty">Option</span>&lt;(usize, Put&lt;<span class="lifetime">&#39;a</span>&gt;)&gt; {
     key_ops
@@ -966,63 +896,54 @@
         .last()
 }
 
-<span class="kw">fn </span>observe_map&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;&gt;(
+<span class="kw">fn </span>log_map_patches&lt;<span class="lifetime">&#39;a</span>, I: Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Op&gt;&gt;(
     doc: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Automerge,
-    <span class="comment">//observer: &amp;mut O,
-    </span>history: <span class="kw-2">&amp;mut </span>History,
+    patch_log: <span class="kw-2">&amp;mut </span>PatchLog,
     obj: <span class="kw-2">&amp;</span>ObjId,
     ops: I,
 ) {
-    <span class="comment">//let exid = doc.id_to_exid(obj.0);
-    </span><span class="kw">let </span>ops_by_key = ops.group_by(|o| o.key);
+    <span class="kw">let </span>ops_by_key = ops.group_by(|o| o.key);
     ops_by_key
         .into_iter()
-        .filter_map(observe_map_key)
-        <span class="comment">//.filter_map(|(i, put)| {
-        </span>.for_each(|(i, put)| {
-            <span class="comment">//let tagged_value = (put.value.clone(), doc.id_to_exid(put.id));
-            </span><span class="kw">if let </span><span class="prelude-val">Some</span>(prop_index) = put.key.prop_index() {
+        .filter_map(log_map_key_patches)
+        .for_each(|(i, put)| {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(prop_index) = put.key.prop_index() {
                 <span class="kw">if let </span><span class="prelude-val">Some</span>(key) = doc.ops().m.props.safe_get(prop_index) {
                     <span class="kw">let </span>conflict = i &gt; <span class="number">0</span>;
-                    history.put_map(<span class="kw-2">*</span>obj, key, put.value.into(), put.id, conflict, <span class="bool-val">false</span>);
+                    patch_log.put_map(<span class="kw-2">*</span>obj, key, put.value.into(), put.id, conflict, <span class="bool-val">false</span>);
                 }
             }
-            <span class="comment">//let prop = Prop::Map(key.to_string());
-            //Some((tagged_value, prop, conflict))
-        </span>});
-    <span class="comment">//.for_each(|(tagged_value, prop, conflict)| {
-    //observer.put(doc, exid.clone(), prop, tagged_value, conflict);
-    //});
-</span>}
+        });
+}
 
 <span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>tests {
     <span class="kw">use </span>std::{borrow::Cow, fs};
 
     <span class="kw">use crate</span>::{
-        marks::Mark, op_observer::TextRepresentation, transaction::Transactable, Automerge,
-        ObjType, OpObserver, Prop, ReadDoc, Value,
+        patches::{PatchLog, TextRepresentation},
+        transaction::Transactable,
+        Automerge, ObjType, Patch, PatchAction, Prop, Value,
     };
-    <span class="comment">//use crate::{transaction::Transactable, Automerge, ObjType, OpObserver, Prop, ReadDoc, Value};
 
-    // Observer ops often carry a &quot;tagged value&quot;, which is a value and the OpID of the op which
+    <span class="comment">// Patches often carry a &quot;tagged value&quot;, which is a value and the OpID of the op which
     // created that value. For a lot of values (i.e. any scalar value) we don&#39;t care about the
     // opid. This type implements `PartialEq` for the `Untagged` variant by ignoring the tag, which
     // allows us to express tests which don&#39;t care about the tag.
     </span><span class="attr">#[derive(Clone, Debug)]
-    </span><span class="kw">enum </span>ObservedValue {
+    </span><span class="kw">enum </span>PatchValue {
         Tagged(<span class="kw">crate</span>::Value&lt;<span class="lifetime">&#39;static</span>&gt;, <span class="kw">crate</span>::ObjId),
         Untagged(<span class="kw">crate</span>::Value&lt;<span class="lifetime">&#39;static</span>&gt;),
     }
 
-    <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;(Value&lt;<span class="lifetime">&#39;a</span>&gt;, <span class="kw">crate</span>::ObjId)&gt; <span class="kw">for </span>ObservedValue {
+    <span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; From&lt;(Value&lt;<span class="lifetime">&#39;a</span>&gt;, <span class="kw">crate</span>::ObjId)&gt; <span class="kw">for </span>PatchValue {
         <span class="kw">fn </span>from(value: (Value&lt;<span class="lifetime">&#39;a</span>&gt;, <span class="kw">crate</span>::ObjId)) -&gt; <span class="self">Self </span>{
             <span class="self">Self</span>::Tagged(value.<span class="number">0</span>.into_owned(), value.<span class="number">1</span>)
         }
     }
 
-    <span class="kw">impl </span>PartialEq&lt;ObservedValue&gt; <span class="kw">for </span>ObservedValue {
-        <span class="kw">fn </span>eq(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span>ObservedValue) -&gt; bool {
+    <span class="kw">impl </span>PartialEq&lt;PatchValue&gt; <span class="kw">for </span>PatchValue {
+        <span class="kw">fn </span>eq(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span>PatchValue) -&gt; bool {
             <span class="kw">match </span>(<span class="self">self</span>, other) {
                 (<span class="self">Self</span>::Tagged(v1, o1), <span class="self">Self</span>::Tagged(v2, o2)) =&gt; equal_vals(v1, v2) &amp;&amp; o1 == o2,
                 (<span class="self">Self</span>::Untagged(v1), <span class="self">Self</span>::Untagged(v2)) =&gt; equal_vals(v1, v2),
@@ -1046,17 +967,17 @@
     }
 
     <span class="attr">#[derive(Debug, Clone, PartialEq)]
-    </span><span class="kw">enum </span>ObserverCall {
+    </span><span class="kw">enum </span>ObservedPatch {
         Put {
             obj: <span class="kw">crate</span>::ObjId,
             prop: Prop,
-            value: ObservedValue,
+            value: PatchValue,
             conflict: bool,
         },
         Insert {
             obj: <span class="kw">crate</span>::ObjId,
             index: usize,
-            value: ObservedValue,
+            value: PatchValue,
         },
         SpliceText {
             obj: <span class="kw">crate</span>::ObjId,
@@ -1065,12 +986,76 @@
         },
     }
 
-    <span class="comment">// A Vec&lt;ObserverCall&gt; is pretty hard to look at in a test failure. This wrapper prints the
+    <span class="comment">// A Vec&lt;ObservedPatch&gt; is pretty hard to look at in a test failure. This wrapper prints the
     // calls out in a nice table so it&#39;s easier to see what&#39;s different
     </span><span class="attr">#[derive(Clone, PartialEq)]
-    </span><span class="kw">struct </span>Calls(Vec&lt;ObserverCall&gt;);
+    </span><span class="kw">struct </span>Patches(Vec&lt;ObservedPatch&gt;);
 
-    <span class="kw">impl </span>std::fmt::Debug <span class="kw">for </span>Calls {
+    <span class="kw">impl </span>From&lt;Vec&lt;Patch&gt;&gt; <span class="kw">for </span>Patches {
+        <span class="kw">fn </span>from(patches: Vec&lt;Patch&gt;) -&gt; <span class="self">Self </span>{
+            <span class="kw">let </span>oc = patches.into_iter().fold(Vec::new(), |<span class="kw-2">mut </span>acc, patch| {
+                <span class="kw">match </span>patch {
+                    Patch {
+                        obj,
+                        action: PatchAction::SpliceText { index, value },
+                        ..
+                    } =&gt; acc.push(ObservedPatch::SpliceText {
+                        obj,
+                        index,
+                        chars: value.make_string(),
+                    }),
+                    Patch {
+                        obj,
+                        action:
+                            PatchAction::PutMap {
+                                key,
+                                value,
+                                conflict,
+                            },
+                        ..
+                    } =&gt; acc.push(ObservedPatch::Put {
+                        obj,
+                        prop: key.into(),
+                        value: value.into(),
+                        conflict,
+                    }),
+                    Patch {
+                        obj,
+                        action:
+                            PatchAction::PutSeq {
+                                index,
+                                value,
+                                conflict,
+                            },
+                        ..
+                    } =&gt; acc.push(ObservedPatch::Put {
+                        obj,
+                        prop: index.into(),
+                        value: value.into(),
+                        conflict,
+                    }),
+                    Patch {
+                        obj,
+                        action: PatchAction::Insert { index, values, .. },
+                        ..
+                    } =&gt; {
+                        <span class="kw">for </span>(i, v) <span class="kw">in </span>values.iter().enumerate() {
+                            acc.push(ObservedPatch::Insert {
+                                obj: obj.clone(),
+                                index: index + i,
+                                value: v.clone().into(),
+                            })
+                        }
+                    }
+                    <span class="kw">_ </span>=&gt; <span class="macro">panic!</span>(<span class="string">&quot;Current state should only log put, splice, and insert ops&quot;</span>),
+                };
+                acc
+            });
+            Patches(oc)
+        }
+    }
+
+    <span class="kw">impl </span>std::fmt::Debug <span class="kw">for </span>Patches {
         <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; std::fmt::Result {
             <span class="kw">let </span><span class="kw-2">mut </span>table = prettytable::Table::new();
             table.set_format(<span class="kw-2">*</span>prettytable::format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
@@ -1079,7 +1064,7 @@
             </span>]);
             <span class="kw">for </span>call <span class="kw">in </span><span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0 </span>{
                 <span class="kw">match </span>call {
-                    ObserverCall::Put {
+                    ObservedPatch::Put {
                         obj,
                         prop,
                         value,
@@ -1090,25 +1075,25 @@
                             <span class="macro">format!</span>(<span class="string">&quot;{}&quot;</span>, obj),
                             prop,
                             <span class="kw">match </span>value {
-                                ObservedValue::Tagged(v, o) =&gt; <span class="macro">format!</span>(<span class="string">&quot;{} ({})&quot;</span>, v, o),
-                                ObservedValue::Untagged(v) =&gt; <span class="macro">format!</span>(<span class="string">&quot;{}&quot;</span>, v),
+                                PatchValue::Tagged(v, o) =&gt; <span class="macro">format!</span>(<span class="string">&quot;{} ({})&quot;</span>, v, o),
+                                PatchValue::Untagged(v) =&gt; <span class="macro">format!</span>(<span class="string">&quot;{}&quot;</span>, v),
                             },
                             conflict
                         ]);
                     }
-                    ObserverCall::Insert { obj, index, value } =&gt; {
+                    ObservedPatch::Insert { obj, index, value } =&gt; {
                         table.add_row(<span class="macro">prettytable::row!</span>[
                             <span class="string">&quot;Insert&quot;</span>,
                             <span class="macro">format!</span>(<span class="string">&quot;{}&quot;</span>, obj),
                             index,
                             <span class="kw">match </span>value {
-                                ObservedValue::Tagged(v, o) =&gt; <span class="macro">format!</span>(<span class="string">&quot;{} ({})&quot;</span>, v, o),
-                                ObservedValue::Untagged(v) =&gt; <span class="macro">format!</span>(<span class="string">&quot;{}&quot;</span>, v),
+                                PatchValue::Tagged(v, o) =&gt; <span class="macro">format!</span>(<span class="string">&quot;{} ({})&quot;</span>, v, o),
+                                PatchValue::Untagged(v) =&gt; <span class="macro">format!</span>(<span class="string">&quot;{}&quot;</span>, v),
                             },
                             <span class="string">&quot;&quot;
                         </span>]);
                     }
-                    ObserverCall::SpliceText { obj, index, chars } =&gt; {
+                    ObservedPatch::SpliceText { obj, index, chars } =&gt; {
                         table.add_row(<span class="macro">prettytable::row!</span>[
                             <span class="string">&quot;SpliceText&quot;</span>,
                             <span class="macro">format!</span>(<span class="string">&quot;{}&quot;</span>, obj),
@@ -1125,103 +1110,6 @@
         }
     }
 
-    <span class="kw">struct </span>ObserverStub {
-        ops: Vec&lt;ObserverCall&gt;,
-    }
-
-    <span class="kw">impl </span>ObserverStub {
-        <span class="kw">fn </span>new() -&gt; <span class="self">Self </span>{
-            <span class="self">Self </span>{ ops: Vec::new() }
-        }
-
-        <span class="comment">/*
-                fn new_text_v2() -&gt; Self {
-                    Self {
-                        ops: Vec::new(),
-                    }
-                }
-        */
-    </span>}
-
-    <span class="kw">impl </span>OpObserver <span class="kw">for </span>ObserverStub {
-        <span class="kw">fn </span>insert&lt;R: ReadDoc&gt;(
-            <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-            _doc: <span class="kw-2">&amp;</span>R,
-            objid: <span class="kw">crate</span>::ObjId,
-            index: usize,
-            tagged_value: (<span class="kw">crate</span>::Value&lt;<span class="lifetime">&#39;_</span>&gt;, <span class="kw">crate</span>::ObjId),
-            _conflict: bool,
-        ) {
-            <span class="self">self</span>.ops.push(ObserverCall::Insert {
-                obj: objid,
-                index,
-                value: tagged_value.into(),
-            });
-        }
-
-        <span class="kw">fn </span>splice_text&lt;R: ReadDoc&gt;(
-            <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-            _doc: <span class="kw-2">&amp;</span>R,
-            objid: <span class="kw">crate</span>::ObjId,
-            index: usize,
-            value: <span class="kw-2">&amp;</span>str,
-        ) {
-            <span class="self">self</span>.ops.push(ObserverCall::SpliceText {
-                obj: objid,
-                index,
-                chars: value.to_string(),
-            });
-        }
-
-        <span class="kw">fn </span>put&lt;R: ReadDoc&gt;(
-            <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-            _doc: <span class="kw-2">&amp;</span>R,
-            objid: <span class="kw">crate</span>::ObjId,
-            prop: <span class="kw">crate</span>::Prop,
-            tagged_value: (<span class="kw">crate</span>::Value&lt;<span class="lifetime">&#39;_</span>&gt;, <span class="kw">crate</span>::ObjId),
-            conflict: bool,
-        ) {
-            <span class="self">self</span>.ops.push(ObserverCall::Put {
-                obj: objid,
-                prop,
-                value: tagged_value.into(),
-                conflict,
-            });
-        }
-
-        <span class="kw">fn </span>increment&lt;R: ReadDoc&gt;(
-            <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-            _doc: <span class="kw-2">&amp;</span>R,
-            _objid: <span class="kw">crate</span>::ObjId,
-            _prop: <span class="kw">crate</span>::Prop,
-            _tagged_value: (i64, <span class="kw">crate</span>::ObjId),
-        ) {
-            <span class="macro">panic!</span>(<span class="string">&quot;increment not expected&quot;</span>);
-        }
-
-        <span class="kw">fn </span>delete_map&lt;R: ReadDoc&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, _doc: <span class="kw-2">&amp;</span>R, _objid: <span class="kw">crate</span>::ObjId, _key: <span class="kw-2">&amp;</span>str) {
-            <span class="macro">panic!</span>(<span class="string">&quot;delete not expected&quot;</span>);
-        }
-
-        <span class="kw">fn </span>delete_seq&lt;R: ReadDoc&gt;(
-            <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-            _doc: <span class="kw-2">&amp;</span>R,
-            _objid: <span class="kw">crate</span>::ObjId,
-            _index: usize,
-            _num: usize,
-        ) {
-            <span class="macro">panic!</span>(<span class="string">&quot;delete not expected&quot;</span>);
-        }
-
-        <span class="kw">fn </span>mark&lt;<span class="lifetime">&#39;a</span>, R: ReadDoc, M: Iterator&lt;Item = Mark&lt;<span class="lifetime">&#39;a</span>&gt;&gt;&gt;(
-            <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-            _doc: <span class="kw-2">&amp;</span>R,
-            _objid: <span class="kw">crate</span>::ObjId,
-            _mark: M,
-        ) {
-        }
-    }
-
     <span class="attr">#[test]
     </span><span class="kw">fn </span>basic_test() {
         <span class="kw">let </span><span class="kw-2">mut </span>doc = <span class="kw">crate</span>::AutoCommit::new();
@@ -1233,51 +1121,50 @@
         <span class="kw">let </span>text = doc.put_object(<span class="kw">crate</span>::ROOT, <span class="string">&quot;text&quot;</span>, ObjType::Text).unwrap();
         doc.insert(<span class="kw-2">&amp;</span>text, <span class="number">0</span>, <span class="string">&quot;a&quot;</span>).unwrap();
 
-        <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new();
-        doc.document().observe_current_state(<span class="kw-2">&amp;mut </span>obs);
+        <span class="kw">let </span>p = doc.document().current_state(TextRepresentation::default());
 
         <span class="macro">assert_eq!</span>(
-            Calls(obs.ops),
-            Calls(<span class="macro">vec!</span>[
-                ObserverCall::Put {
+            Patches::from(p),
+            Patches(<span class="macro">vec!</span>[
+                ObservedPatch::Put {
                     obj: <span class="kw">crate</span>::ROOT,
                     prop: <span class="string">&quot;key&quot;</span>.into(),
-                    value: ObservedValue::Untagged(<span class="string">&quot;value&quot;</span>.into()),
+                    value: PatchValue::Untagged(<span class="string">&quot;value&quot;</span>.into()),
                     conflict: <span class="bool-val">false</span>,
                 },
-                ObserverCall::Put {
+                ObservedPatch::Put {
                     obj: <span class="kw">crate</span>::ROOT,
                     prop: <span class="string">&quot;list&quot;</span>.into(),
-                    value: ObservedValue::Tagged(Value::Object(ObjType::List), list.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::List), list.clone()),
                     conflict: <span class="bool-val">false</span>,
                 },
-                ObserverCall::Put {
+                ObservedPatch::Put {
                     obj: <span class="kw">crate</span>::ROOT,
                     prop: <span class="string">&quot;map&quot;</span>.into(),
-                    value: ObservedValue::Tagged(Value::Object(ObjType::Map), map.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::Map), map.clone()),
                     conflict: <span class="bool-val">false</span>,
                 },
-                ObserverCall::Put {
+                ObservedPatch::Put {
                     obj: <span class="kw">crate</span>::ROOT,
                     prop: <span class="string">&quot;text&quot;</span>.into(),
-                    value: ObservedValue::Tagged(Value::Object(ObjType::Text), text.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::Text), text.clone()),
                     conflict: <span class="bool-val">false</span>,
                 },
-                ObserverCall::Put {
+                ObservedPatch::Put {
                     obj: map.clone(),
                     prop: <span class="string">&quot;nested_key&quot;</span>.into(),
-                    value: ObservedValue::Untagged(<span class="string">&quot;value&quot;</span>.into()),
+                    value: PatchValue::Untagged(<span class="string">&quot;value&quot;</span>.into()),
                     conflict: <span class="bool-val">false</span>,
                 },
-                ObserverCall::Insert {
+                ObservedPatch::Insert {
                     obj: list,
                     index: <span class="number">0</span>,
-                    value: ObservedValue::Untagged(<span class="string">&quot;value&quot;</span>.into()),
+                    value: PatchValue::Untagged(<span class="string">&quot;value&quot;</span>.into()),
                 },
-                ObserverCall::Insert {
+                ObservedPatch::Insert {
                     obj: text,
                     index: <span class="number">0</span>,
-                    value: ObservedValue::Untagged(<span class="string">&quot;a&quot;</span>.into()),
+                    value: PatchValue::Untagged(<span class="string">&quot;a&quot;</span>.into()),
                 },
             ])
         );
@@ -1308,28 +1195,27 @@
             .unwrap();
         doc.delete(<span class="kw">crate</span>::ROOT, <span class="string">&quot;deleted_text&quot;</span>).unwrap();
 
-        <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new();
-        doc.document().observe_current_state(<span class="kw-2">&amp;mut </span>obs);
+        <span class="kw">let </span>p = doc.document().current_state(TextRepresentation::default());
 
         <span class="macro">assert_eq!</span>(
-            Calls(obs.ops),
-            Calls(<span class="macro">vec!</span>[
-                ObserverCall::Put {
+            Patches::from(p),
+            Patches(<span class="macro">vec!</span>[
+                ObservedPatch::Put {
                     obj: <span class="kw">crate</span>::ROOT,
                     prop: <span class="string">&quot;list&quot;</span>.into(),
-                    value: ObservedValue::Tagged(Value::Object(ObjType::List), list.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::List), list.clone()),
                     conflict: <span class="bool-val">false</span>,
                 },
-                ObserverCall::Put {
+                ObservedPatch::Put {
                     obj: <span class="kw">crate</span>::ROOT,
                     prop: <span class="string">&quot;map&quot;</span>.into(),
-                    value: ObservedValue::Tagged(Value::Object(ObjType::Map), map.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::Map), map.clone()),
                     conflict: <span class="bool-val">false</span>,
                 },
-                ObserverCall::Put {
+                ObservedPatch::Put {
                     obj: <span class="kw">crate</span>::ROOT,
                     prop: <span class="string">&quot;text&quot;</span>.into(),
-                    value: ObservedValue::Tagged(Value::Object(ObjType::Text), text.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::Text), text.clone()),
                     conflict: <span class="bool-val">false</span>,
                 },
             ])
@@ -1344,20 +1230,19 @@
         doc.splice_text(<span class="kw-2">&amp;</span>text, <span class="number">1</span>, <span class="number">0</span>, <span class="string">&quot;bcdef&quot;</span>).unwrap();
         doc.splice_text(<span class="kw-2">&amp;</span>text, <span class="number">2</span>, <span class="number">2</span>, <span class="string">&quot;g&quot;</span>).unwrap();
 
-        <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new();
         doc.set_text_rep(TextRepresentation::String);
-        doc.document().observe_current_state(<span class="kw-2">&amp;mut </span>obs);
+        <span class="kw">let </span>p = doc.document().current_state(TextRepresentation::String);
 
         <span class="macro">assert_eq!</span>(
-            Calls(obs.ops),
-            Calls(<span class="macro">vec!</span>[
-                ObserverCall::Put {
+            Patches::from(p),
+            Patches(<span class="macro">vec!</span>[
+                ObservedPatch::Put {
                     obj: <span class="kw">crate</span>::ROOT,
                     prop: <span class="string">&quot;text&quot;</span>.into(),
-                    value: ObservedValue::Tagged(Value::Object(ObjType::Text), text.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::Text), text.clone()),
                     conflict: <span class="bool-val">false</span>,
                 },
-                ObserverCall::SpliceText {
+                ObservedPatch::SpliceText {
                     obj: text,
                     index: <span class="number">0</span>,
                     chars: <span class="string">&quot;abgef&quot;</span>.to_string()
@@ -1382,16 +1267,15 @@
 
         doc.merge(<span class="kw-2">&amp;mut </span>doc2).unwrap();
 
-        <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new();
         doc.set_text_rep(TextRepresentation::String);
-        doc.document().observe_current_state(<span class="kw-2">&amp;mut </span>obs);
+        <span class="kw">let </span>p = doc.document().current_state(TextRepresentation::String);
 
         <span class="macro">assert_eq!</span>(
-            Calls(obs.ops),
-            Calls(<span class="macro">vec!</span>[ObserverCall::Put {
+            Patches::from(p),
+            Patches(<span class="macro">vec!</span>[ObservedPatch::Put {
                 obj: <span class="kw">crate</span>::ROOT,
                 prop: <span class="string">&quot;key&quot;</span>.into(),
-                value: ObservedValue::Untagged(Value::Scalar(Cow::Owned(
+                value: PatchValue::Untagged(Value::Scalar(Cow::Owned(
                     <span class="kw">crate</span>::ScalarValue::Counter(<span class="number">6</span>.into())
                 ))),
                 conflict: <span class="bool-val">true</span>,
@@ -1407,28 +1291,27 @@
         doc.insert(<span class="kw-2">&amp;</span>list, <span class="number">0</span>, <span class="number">1</span>).unwrap();
         doc.insert(<span class="kw-2">&amp;</span>list, <span class="number">1</span>, <span class="number">2</span>).unwrap();
 
-        <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new();
         doc.set_text_rep(TextRepresentation::String);
-        doc.document().observe_current_state(<span class="kw-2">&amp;mut </span>obs);
+        <span class="kw">let </span>p = doc.document().current_state(TextRepresentation::String);
 
         <span class="macro">assert_eq!</span>(
-            Calls(obs.ops),
-            Calls(<span class="macro">vec!</span>[
-                ObserverCall::Put {
+            Patches::from(p),
+            Patches(<span class="macro">vec!</span>[
+                ObservedPatch::Put {
                     obj: <span class="kw">crate</span>::ROOT,
                     prop: <span class="string">&quot;list&quot;</span>.into(),
-                    value: ObservedValue::Tagged(Value::Object(ObjType::List), list.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::List), list.clone()),
                     conflict: <span class="bool-val">false</span>,
                 },
-                ObserverCall::Insert {
+                ObservedPatch::Insert {
                     obj: list.clone(),
                     index: <span class="number">0</span>,
-                    value: ObservedValue::Untagged(<span class="number">1</span>.into()),
+                    value: PatchValue::Untagged(<span class="number">1</span>.into()),
                 },
-                ObserverCall::Insert {
+                ObservedPatch::Insert {
                     obj: list,
                     index: <span class="number">1</span>,
-                    value: ObservedValue::Untagged(<span class="number">2</span>.into()),
+                    value: PatchValue::Untagged(<span class="number">2</span>.into()),
                 },
             ])
         );
@@ -1446,28 +1329,27 @@
         doc2.insert(<span class="kw-2">&amp;</span>list, <span class="number">0</span>, <span class="number">2</span>).unwrap();
         doc.merge(<span class="kw-2">&amp;mut </span>doc2).unwrap();
 
-        <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new();
         doc.set_text_rep(TextRepresentation::String);
-        doc.document().observe_current_state(<span class="kw-2">&amp;mut </span>obs);
+        <span class="kw">let </span>p = doc.document().current_state(TextRepresentation::String);
 
         <span class="macro">assert_eq!</span>(
-            Calls(obs.ops),
-            Calls(<span class="macro">vec!</span>[
-                ObserverCall::Put {
+            Patches::from(p),
+            Patches(<span class="macro">vec!</span>[
+                ObservedPatch::Put {
                     obj: <span class="kw">crate</span>::ROOT,
                     prop: <span class="string">&quot;list&quot;</span>.into(),
-                    value: ObservedValue::Tagged(Value::Object(ObjType::List), list.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::List), list.clone()),
                     conflict: <span class="bool-val">false</span>,
                 },
-                ObserverCall::Insert {
+                ObservedPatch::Insert {
                     obj: list.clone(),
                     index: <span class="number">0</span>,
-                    value: ObservedValue::Untagged(<span class="number">2</span>.into()),
+                    value: PatchValue::Untagged(<span class="number">2</span>.into()),
                 },
-                ObserverCall::Insert {
+                ObservedPatch::Insert {
                     obj: list,
                     index: <span class="number">1</span>,
-                    value: ObservedValue::Untagged(<span class="number">1</span>.into()),
+                    value: PatchValue::Untagged(<span class="number">1</span>.into()),
                 },
             ])
         );
@@ -1482,28 +1364,27 @@
         <span class="kw">let </span>map = doc.insert_object(<span class="kw-2">&amp;</span>list, <span class="number">0</span>, ObjType::Map).unwrap();
         doc.put(<span class="kw-2">&amp;</span>map, <span class="string">&quot;key&quot;</span>, <span class="string">&quot;value&quot;</span>).unwrap();
 
-        <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new();
         doc.set_text_rep(TextRepresentation::String);
-        doc.document().observe_current_state(<span class="kw-2">&amp;mut </span>obs);
+        <span class="kw">let </span>patches = doc.document().current_state(TextRepresentation::String);
 
         <span class="macro">assert_eq!</span>(
-            Calls(obs.ops),
-            Calls(<span class="macro">vec!</span>[
-                ObserverCall::Put {
+            Patches::from(patches),
+            Patches(<span class="macro">vec!</span>[
+                ObservedPatch::Put {
                     obj: <span class="kw">crate</span>::ROOT,
                     prop: <span class="string">&quot;list&quot;</span>.into(),
-                    value: ObservedValue::Tagged(Value::Object(ObjType::List), list.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::List), list.clone()),
                     conflict: <span class="bool-val">false</span>,
                 },
-                ObserverCall::Insert {
+                ObservedPatch::Insert {
                     obj: list.clone(),
                     index: <span class="number">0</span>,
-                    value: ObservedValue::Tagged(Value::Object(ObjType::Map), map.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::Map), map.clone()),
                 },
-                ObserverCall::Put {
+                ObservedPatch::Put {
                     obj: map,
                     prop: <span class="string">&quot;key&quot;</span>.into(),
-                    value: ObservedValue::Untagged(<span class="string">&quot;value&quot;</span>.into()),
+                    value: PatchValue::Untagged(<span class="string">&quot;value&quot;</span>.into()),
                     conflict: <span class="bool-val">false
                 </span>},
             ])
@@ -1523,27 +1404,26 @@
 
         doc.set_text_rep(TextRepresentation::String);
 
-        <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new();
-        doc.document().observe_current_state(<span class="kw-2">&amp;mut </span>obs);
+        <span class="kw">let </span>patches = doc.document().current_state(TextRepresentation::String);
 
         <span class="macro">assert_eq!</span>(
-            Calls(obs.ops),
-            Calls(<span class="macro">vec!</span>[
-                ObserverCall::Put {
+            Patches::from(patches),
+            Patches(<span class="macro">vec!</span>[
+                ObservedPatch::Put {
                     obj: <span class="kw">crate</span>::ROOT,
                     prop: <span class="string">&quot;list&quot;</span>.into(),
-                    value: ObservedValue::Tagged(Value::Object(ObjType::List), list.clone()),
+                    value: PatchValue::Tagged(Value::Object(ObjType::List), list.clone()),
                     conflict: <span class="bool-val">false</span>,
                 },
-                ObserverCall::Insert {
+                ObservedPatch::Insert {
                     obj: list.clone(),
                     index: <span class="number">0</span>,
-                    value: ObservedValue::Untagged(<span class="string">&quot;three&quot;</span>.into()),
+                    value: PatchValue::Untagged(<span class="string">&quot;three&quot;</span>.into()),
                 },
-                ObserverCall::Insert {
+                ObservedPatch::Insert {
                     obj: list.clone(),
                     index: <span class="number">1</span>,
-                    value: ObservedValue::Untagged(<span class="string">&quot;four&quot;</span>.into()),
+                    value: PatchValue::Untagged(<span class="string">&quot;four&quot;</span>.into()),
                 },
             ])
         );
@@ -1555,25 +1435,25 @@
             fs::read(<span class="string">&quot;./tests/fixtures/&quot;</span>.to_owned() + name).unwrap()
         }
 
-        <span class="kw">let </span><span class="kw-2">mut </span>obs = ObserverStub::new();
+        <span class="kw">let </span><span class="kw-2">mut </span>patch_log = PatchLog::active(TextRepresentation::String);
         <span class="kw">let </span>_doc = Automerge::load_with(
             <span class="kw-2">&amp;</span>fixture(<span class="string">&quot;counter_value_is_ok.automerge&quot;</span>),
             <span class="kw">crate</span>::OnPartialLoad::Error,
             <span class="kw">crate</span>::storage::VerificationMode::Check,
-            <span class="prelude-val">Some</span>(<span class="kw-2">&amp;mut </span>obs),
-            TextRepresentation::default(),
-        );
+            <span class="kw-2">&amp;mut </span>patch_log,
+        )
+        .unwrap();
+        <span class="kw">let </span>p = _doc.make_patches(<span class="kw-2">&amp;mut </span>patch_log);
 
         <span class="macro">assert_eq!</span>(
-            Calls(obs.ops),
-            Calls(<span class="macro">vec!</span>[ObserverCall::Put {
+            Patches::from(p),
+            Patches(<span class="macro">vec!</span>[ObservedPatch::Put {
                 obj: <span class="kw">crate</span>::ROOT,
                 prop: <span class="string">&quot;a&quot;</span>.into(),
-                value: ObservedValue::Untagged(<span class="kw">crate</span>::ScalarValue::Counter(<span class="number">2000</span>.into()).into()),
+                value: PatchValue::Untagged(<span class="kw">crate</span>::ScalarValue::Counter(<span class="number">2000</span>.into()).into()),
                 conflict: <span class="bool-val">false</span>,
-            },])
+            }])
         );
     }
 }
-</code></pre></div>
-</section></main><div id="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="automerge" data-themes="" data-resource-suffix="" data-rustdoc-version="1.69.0 (84c898d65 2023-04-16)" data-search-js="search-8a59a8356673ec1f.js" data-settings-js="settings-f0c5c39777a9a2f6.js" data-settings-css="settings-0bcba95ff279c1db.css" ></div></body></html>
+</code></pre></div></section></main></body></html>
