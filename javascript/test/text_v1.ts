@@ -280,7 +280,6 @@ describe("Automerge.Text", () => {
     assert.strictEqual(s1.text.toString(), "🐦")
 
     // this tests the wasm::materialize path
-    Automerge.dump(s1)
     s2 = Automerge.load(Automerge.save(s1))
     assert.strictEqual(s2.text.toString(), "🐦")
 
