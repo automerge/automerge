@@ -1,9 +1,10 @@
 use automerge::marks::{ExpandMark, Mark};
 use automerge::op_tree::B;
+use automerge::patches::TextRepresentation;
 use automerge::transaction::Transactable;
 use automerge::{
-    ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, History, ObjId,
-    ObjType, Patch, PatchAction, Prop, ReadDoc, ScalarValue, SequenceTree, Value, ROOT,
+    ActorId, AutoCommit, Automerge, AutomergeError, Change, ExpandedChange, ObjId, ObjType, Patch,
+    PatchAction, PatchLog, Prop, ReadDoc, ScalarValue, SequenceTree, Value, ROOT,
 };
 use std::fs;
 
@@ -1575,12 +1576,12 @@ fn regression_insert_opid() {
 
     let change2 = doc.get_last_local_change().unwrap().clone();
     let mut new_doc = Automerge::new();
-    let mut history = History::active();
+    let mut patch_log = PatchLog::active(TextRepresentation::String);
     new_doc
-        .apply_changes_with(vec![change1], &mut history)
+        .apply_changes_log_patches(vec![change1], &mut patch_log)
         .unwrap();
     new_doc
-        .apply_changes_with(vec![change2], &mut history)
+        .apply_changes_log_patches(vec![change2], &mut patch_log)
         .unwrap();
 
     for i in 0..=N {
@@ -1597,7 +1598,7 @@ fn regression_insert_opid() {
         );
     }
 
-    let patches = new_doc.make_patches(&mut history);
+    let patches = new_doc.make_patches(&mut patch_log);
 
     let mut expected_patches = Vec::new();
     expected_patches.push(Patch {
@@ -1664,15 +1665,15 @@ fn big_list() {
 
     let change2 = doc.get_last_local_change().unwrap().clone();
     let mut new_doc = Automerge::new();
-    let mut history = History::active();
+    let mut patch_log = PatchLog::active(TextRepresentation::String);
     new_doc
-        .apply_changes_with(vec![change1], &mut history)
+        .apply_changes_log_patches(vec![change1], &mut patch_log)
         .unwrap();
     new_doc
-        .apply_changes_with(vec![change2], &mut history)
+        .apply_changes_log_patches(vec![change2], &mut patch_log)
         .unwrap();
 
-    let patches = new_doc.make_patches(&mut history);
+    let patches = new_doc.make_patches(&mut patch_log);
     let matches = matches!(
         patches.last().unwrap(),
         Patch {

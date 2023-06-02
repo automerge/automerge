@@ -76,11 +76,11 @@ impl std::default::Default for TextRepresentation {
     }
 }
 
-impl From<TextRepresentation> for am::op_observer::TextRepresentation {
+impl From<TextRepresentation> for am::patches::TextRepresentation {
     fn from(tr: TextRepresentation) -> Self {
         match tr {
-            TextRepresentation::Array => am::op_observer::TextRepresentation::Array,
-            TextRepresentation::String => am::op_observer::TextRepresentation::String,
+            TextRepresentation::Array => am::patches::TextRepresentation::Array,
+            TextRepresentation::String => am::patches::TextRepresentation::String,
         }
     }
 }

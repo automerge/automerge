@@ -132,8 +132,8 @@ fn test_save_incremental() -> Result<(), AutomergeError> {
 
     assert!(save_b.len() < save_a.len());
 
-    let mut doc_a = Automerge::load(&save_a)?;
-    let mut doc_b = Automerge::load(&save_b)?;
+    let doc_a = Automerge::load(&save_a)?;
+    let doc_b = Automerge::load(&save_b)?;
 
     assert!(doc_a.get_all(ROOT, "baz")? == doc_b.get_all(ROOT, "baz")?);
 
@@ -1379,7 +1379,7 @@ fn load_broken_list() {
     }
     tx.commit();
     let bytes = doc.save();
-    let mut doc2 = Automerge::load(&bytes).unwrap();
+    let doc2 = Automerge::load(&bytes).unwrap();
     let bytes2 = doc2.save();
     assert_eq!(doc.text(&list).unwrap(), doc2.text(&list).unwrap());
 
@@ -1428,7 +1428,7 @@ fn load_broken_list_short() {
     }
     tx.commit();
     let bytes = doc.save();
-    let mut doc2 = Automerge::load(&bytes).unwrap();
+    let doc2 = Automerge::load(&bytes).unwrap();
     let bytes2 = doc2.save();
     assert_eq!(doc.text(&list).unwrap(), doc2.text(&list).unwrap());
 

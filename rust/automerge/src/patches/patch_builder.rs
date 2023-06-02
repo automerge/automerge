@@ -1,41 +1,16 @@
-use crate::marks::Mark;
 use core::fmt::Debug;
 
 use crate::{ObjId, Prop, ReadDoc, Value};
 
-use crate::sequence_tree::SequenceTree;
-
-mod patch;
-pub use patch::{Patch, PatchAction};
-
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum TextRepresentation {
-    Array,
-    String,
-}
-
-impl TextRepresentation {
-    pub fn is_array(&self) -> bool {
-        matches!(self, TextRepresentation::Array)
-    }
-
-    pub fn is_string(&self) -> bool {
-        matches!(self, TextRepresentation::String)
-    }
-}
-
-impl std::default::Default for TextRepresentation {
-    fn default() -> Self {
-        TextRepresentation::Array // FIXME
-    }
-}
+use super::{Patch, PatchAction};
+use crate::{marks::Mark, sequence_tree::SequenceTree};
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct OpObserver {
+pub(crate) struct PatchBuilder {
     pub(crate) patches: Vec<Patch>,
 }
 
-impl OpObserver {
+impl PatchBuilder {
     pub(crate) fn get_path<R: ReadDoc>(
         &mut self,
         doc: &R,
@@ -64,9 +39,7 @@ impl OpObserver {
     pub(crate) fn take_patches(&mut self) -> Vec<Patch> {
         std::mem::take(&mut self.patches)
     }
-}
 
-impl OpObserver {
     pub(crate) fn insert<R: ReadDoc>(
         &mut self,
         doc: &R,
@@ -255,7 +228,7 @@ impl OpObserver {
     pub(crate) fn flag_conflict<R: ReadDoc>(&mut self, _doc: &R, _objid: ObjId, _prop: Prop) {}
 }
 
-impl AsMut<OpObserver> for OpObserver {
+impl AsMut<PatchBuilder> for PatchBuilder {
     fn as_mut(&mut self) -> &mut Self {
         self
     }

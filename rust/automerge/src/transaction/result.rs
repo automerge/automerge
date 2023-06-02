@@ -1,4 +1,4 @@
-use crate::history::History;
+use crate::patches::PatchLog;
 use crate::ChangeHash;
 
 /// The result of a successful, and committed, transaction.
@@ -8,7 +8,7 @@ pub struct Success<O> {
     pub result: O,
     /// The hash of the change, will be `None` if the transaction did not create any operations
     pub hash: Option<ChangeHash>,
-    pub history: History,
+    pub patch_log: PatchLog,
 }
 
 /// The result of a failed, and rolled back, transaction.

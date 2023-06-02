@@ -4,11 +4,12 @@ use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::ops::RangeBounds;
 
+use crate::patches::TextRepresentation;
 use crate::{
     exid::ExId,
-    history::History,
     iter::{Keys, ListRange, MapRange, Values},
     marks::{Mark, MarkStateMachine},
+    patches::PatchLog,
     types::{Clock, ListEncoding, MarkData, ObjId, Op, Prop, ScalarValue},
     value::Value,
     Automerge, AutomergeError, ChangeHash, Cursor, ObjType, OpType, ReadDoc,
@@ -118,26 +119,26 @@ impl<'a> Patch<'a> {
     }
 }
 
-pub(crate) fn observe_diff(doc: &Automerge, before: &Clock, after: &Clock, history: &mut History) {
+pub(crate) fn log_diff(doc: &Automerge, before: &Clock, after: &Clock, patch_log: &mut PatchLog) {
     for (obj, typ, ops) in doc.ops().iter_objs() {
         let ops_by_key = ops.group_by(|o| o.elemid_or_key());
         let diffs = ops_by_key
             .into_iter()
             .filter_map(|(_key, key_ops)| process(key_ops, before, after));
 
-        if typ == ObjType::Text && !doc.text_as_seq() {
-            observe_text_diff(doc, history, obj, diffs)
+        if typ == ObjType::Text && matches!(patch_log.text_rep(), TextRepresentation::String) {
+            log_text_diff(doc, patch_log, obj, diffs)
         } else if typ.is_sequence() {
-            observe_list_diff(doc, history, obj, diffs);
+            log_list_diff(doc, patch_log, obj, diffs);
         } else {
-            observe_map_diff(doc, history, obj, diffs);
+            log_map_diff(doc, patch_log, obj, diffs);
         }
     }
 }
 
-fn observe_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
+fn log_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
     doc: &Automerge,
-    history: &mut History,
+    patch_log: &mut PatchLog,
     obj: &ObjId,
     patches: I,
 ) {
@@ -149,42 +150,42 @@ fn observe_list_diff<'a, I: Iterator<Item = Patch<'a>>>(
         }
         Patch::New(op) => {
             let value = op.value_at(Some(op.clock)).into();
-            history.insert(*obj, index, value, op.id, op.conflict);
+            patch_log.insert(*obj, index, value, op.id, op.conflict);
             index + 1
         }
         Patch::Update { before, after } => {
             let conflict = !before.conflict && after.conflict;
             if after.cross_visible {
                 let value = after.value_at(Some(after.clock)).into();
-                history.put_seq(*obj, index, value, after.id, conflict, true)
+                patch_log.put_seq(*obj, index, value, after.id, conflict, true)
             } else {
                 let value = after.value_at(Some(after.clock)).into();
-                history.put_seq(*obj, index, value, after.id, conflict, false)
+                patch_log.put_seq(*obj, index, value, after.id, conflict, false)
             }
             index + 1
         }
         Patch::Old { before, after } => {
             if !before.conflict && after.conflict {
-                history.flag_conflict_seq(*obj, index);
+                patch_log.flag_conflict_seq(*obj, index);
             }
             if let Some(n) = get_inc(&before, &after) {
-                history.increment_seq(*obj, index, n, after.id);
+                patch_log.increment_seq(*obj, index, n, after.id);
             }
             index + 1
         }
         Patch::Delete(_) => {
-            history.delete_seq(*obj, index, 1);
+            patch_log.delete_seq(*obj, index, 1);
             index
         }
     });
     if let Some(m) = marks.finish() {
-        history.mark(*obj, &m);
+        patch_log.mark(*obj, &m);
     }
 }
 
-fn observe_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
+fn log_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
     doc: &Automerge,
-    history: &mut History,
+    patch_log: &mut PatchLog,
     obj: &ObjId,
     patches: I,
 ) {
@@ -196,28 +197,28 @@ fn observe_text_diff<'a, I: Iterator<Item = Patch<'a>>>(
             index
         }
         Patch::New(op) => {
-            history.splice(*obj, index, op.to_str());
+            patch_log.splice(*obj, index, op.to_str());
             index + op.width(encoding)
         }
         Patch::Update { before, after } => {
-            history.delete_seq(*obj, index, before.width(encoding));
-            history.splice(*obj, index, after.to_str());
+            patch_log.delete_seq(*obj, index, before.width(encoding));
+            patch_log.splice(*obj, index, after.to_str());
             index + after.width(encoding)
         }
         Patch::Old { after, .. } => index + after.width(encoding),
         Patch::Delete(before) => {
-            history.delete_seq(*obj, index, before.width(encoding));
+            patch_log.delete_seq(*obj, index, before.width(encoding));
             index
         }
     });
     if let Some(m) = marks.finish() {
-        history.mark(*obj, &m);
+        patch_log.mark(*obj, &m);
     }
 }
 
-fn observe_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
+fn log_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
     doc: &Automerge,
-    history: &mut History,
+    patch_log: &mut PatchLog,
     obj: &ObjId,
     diffs: I,
 ) {
@@ -226,27 +227,27 @@ fn observe_map_diff<'a, I: Iterator<Item = Patch<'a>>>(
         .for_each(|(key, patch)| match patch {
             Patch::New(op) => {
                 let value = op.value_at(Some(op.clock)).into();
-                history.put_map(*obj, key, value, op.id, op.conflict, false)
+                patch_log.put_map(*obj, key, value, op.id, op.conflict, false)
             }
             Patch::Update { before, after } => {
                 let conflict = !before.conflict && after.conflict;
                 if after.cross_visible {
                     let value = after.value_at(Some(after.clock)).into();
-                    history.put_map(*obj, key, value, after.id, conflict, true)
+                    patch_log.put_map(*obj, key, value, after.id, conflict, true)
                 } else {
                     let value = after.value_at(Some(after.clock)).into();
-                    history.put_map(*obj, key, value, after.id, conflict, false)
+                    patch_log.put_map(*obj, key, value, after.id, conflict, false)
                 }
             }
             Patch::Old { before, after } => {
                 if !before.conflict && after.conflict {
-                    history.flag_conflict_map(*obj, key);
+                    patch_log.flag_conflict_map(*obj, key);
                 }
                 if let Some(n) = get_inc(&before, &after) {
-                    history.increment_map(*obj, key, n, after.id);
+                    patch_log.increment_map(*obj, key, n, after.id);
                 }
             }
-            Patch::Delete(_) => history.delete_map(*obj, key),
+            Patch::Delete(_) => patch_log.delete_map(*obj, key),
             Patch::Mark(_, _) => {}
         });
 }
