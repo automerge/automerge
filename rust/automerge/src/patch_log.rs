@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 use std::collections::HashSet;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct History {
+pub struct PatchLog {
     events: Vec<(ObjId, Event)>,
     expose: HashSet<OpId>,
     active: bool,
@@ -69,9 +69,9 @@ pub(crate) enum Event {
     },
 }
 
-impl History {
+impl PatchLog {
     pub fn new(active: bool) -> Self {
-        History {
+        PatchLog {
             active,
             expose: HashSet::default(),
             events: vec![],
@@ -79,7 +79,7 @@ impl History {
         }
     }
 
-    pub fn innactive() -> Self {
+    pub fn inactive() -> Self {
         Self::new(false)
     }
 

@@ -1,6 +1,6 @@
-use crate::history::History;
 use crate::iter::TopOps;
 pub(crate) use crate::op_set::OpSetMetadata;
+use crate::patch_log::PatchLog;
 use crate::{
     clock::Clock,
     query::{self, ChangeVisibility, Index, QueryResult, TreeQuery},
@@ -88,7 +88,13 @@ pub(crate) struct FoundOpWithObserver<'a> {
 }
 
 impl<'a> FoundOpWithObserver<'a> {
-    pub(crate) fn observe(&self, obj: &ObjMeta, op: &Op, doc: &Automerge, history: &mut History) {
+    pub(crate) fn observe(
+        &self,
+        obj: &ObjMeta,
+        op: &Op,
+        doc: &Automerge,
+        patch_log: &mut PatchLog,
+    ) {
         if op.insert {
             if op.is_mark() {
                 if let OpType::MarkEnd(_) = op.action {
@@ -96,12 +102,12 @@ impl<'a> FoundOpWithObserver<'a> {
                         &obj.id,
                         query::SeekMark::new(op.id.prev(), self.pos, obj.encoding),
                     );
-                    history.mark(obj.id, &q.marks);
+                    patch_log.mark(obj.id, &q.marks);
                 }
             } else if obj.typ == ObjType::Text {
-                history.splice(obj.id, self.index, op.to_str());
+                patch_log.splice(obj.id, self.index, op.to_str());
             } else {
-                history.insert(obj.id, self.index, op.value().into(), op.id, false);
+                patch_log.insert(obj.id, self.index, op.value().into(), op.id, false);
             }
             return;
         }
@@ -114,12 +120,14 @@ impl<'a> FoundOpWithObserver<'a> {
         if op.is_delete() {
             match (self.before, self.overwritten, self.after) {
                 (None, Some(over), None) => match key {
-                    Prop::Map(k) => history.delete_map(obj.id, &k),
-                    Prop::Seq(index) => history.delete_seq(obj.id, index, over.width(obj.encoding)),
+                    Prop::Map(k) => patch_log.delete_map(obj.id, &k),
+                    Prop::Seq(index) => {
+                        patch_log.delete_seq(obj.id, index, over.width(obj.encoding))
+                    }
                 },
                 (Some(before), Some(_), None) => {
                     let conflict = self.num_before > 1;
-                    history.put(
+                    patch_log.put(
                         obj.id,
                         &key,
                         before.value().into(),
@@ -134,7 +142,7 @@ impl<'a> FoundOpWithObserver<'a> {
             if self.after.is_none() {
                 if let Some(counter) = self.overwritten {
                     if op.overwrites(counter) {
-                        history.increment(obj.id, &key, value, op.id);
+                        patch_log.increment(obj.id, &key, value, op.id);
                     }
                 }
             }
@@ -146,13 +154,13 @@ impl<'a> FoundOpWithObserver<'a> {
                 && self.before.is_none()
                 && self.after.is_none()
             {
-                history.insert(obj.id, self.index, op.value().into(), op.id, conflict);
+                patch_log.insert(obj.id, self.index, op.value().into(), op.id, conflict);
             } else if self.after.is_some() {
                 if self.before.is_none() {
-                    history.flag_conflict(obj.id, &key);
+                    patch_log.flag_conflict(obj.id, &key);
                 }
             } else {
-                history.put(obj.id, &key, op.value().into(), op.id, conflict, false);
+                patch_log.put(obj.id, &key, op.value().into(), op.id, conflict, false);
             }
         }
     }

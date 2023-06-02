@@ -3,8 +3,8 @@ use std::borrow::Cow;
 use itertools::Itertools;
 
 use crate::{
-    history::History,
     marks::{Mark, MarkStateMachine},
+    patch_log::PatchLog,
     types::{Key, ListEncoding, ObjId, Op, OpId},
     Automerge, ObjType, OpType, Value,
 };
@@ -34,7 +34,7 @@ struct Put<'a> {
 /// Due to only notifying of visible operations the observer will only be called with `put`,
 /// `insert`, and `splice`, operations.
 
-pub(crate) fn observe_current_state(doc: &Automerge, history: &mut History) {
+pub(crate) fn observe_current_state(doc: &Automerge, patch_log: &mut PatchLog) {
     // The OpSet already exposes operations in the order they appear in the document.
     // `OpSet::iter_objs` iterates over the objects in causal order, this means that parent objects
     // will always appear before their children. Furthermore, the operations within each object are
@@ -45,19 +45,18 @@ pub(crate) fn observe_current_state(doc: &Automerge, history: &mut History) {
     // for each of those visible operations.
     for (obj, typ, ops) in doc.ops().iter_objs() {
         if typ == ObjType::Text && !doc.text_as_seq() {
-            observe_text(doc, history, obj, ops)
+            observe_text(doc, patch_log, obj, ops)
         } else if typ.is_sequence() {
-            observe_list(doc, history, obj, ops);
+            observe_list(doc, patch_log, obj, ops);
         } else {
-            observe_map(doc, history, obj, ops);
+            observe_map(doc, patch_log, obj, ops);
         }
     }
 }
 
 fn observe_text<'a, I: Iterator<Item = &'a Op>>(
     doc: &'a Automerge,
-    //observer: &mut O,
-    history: &mut History,
+    patch_log: &mut PatchLog,
     obj: &ObjId,
     ops: I,
 ) {
@@ -89,16 +88,13 @@ fn observe_text<'a, I: Iterator<Item = &'a Op>>(
             }
             state
         });
-    history.splice(*obj, 0, state.text.as_str());
-    history.mark(*obj, &state.finished);
-    //observer.splice_text(doc, exid.clone(), 0, state.text.as_str());
-    //observer.mark(doc, exid, state.finished.into_iter());
+    patch_log.splice(*obj, 0, state.text.as_str());
+    patch_log.mark(*obj, &state.finished);
 }
 
 fn observe_list<'a, I: Iterator<Item = &'a Op>>(
     doc: &'a Automerge,
-    //observer: &mut O,
-    history: &mut History,
+    patch_log: &mut PatchLog,
     obj: &ObjId,
     ops: I,
 ) {
@@ -141,12 +137,9 @@ fn observe_list<'a, I: Iterator<Item = &'a Op>>(
         })
         .for_each(|(index, (val_enum, (value, opid)))| {
             let conflict = val_enum > 0;
-            history.insert(*obj, index, value.clone().into(), opid, conflict);
-            //let tagged_value = (value, doc.id_to_exid(opid));
-            //observer.insert(doc, exid.clone(), index, tagged_value, conflict);
+            patch_log.insert(*obj, index, value.clone().into(), opid, conflict);
         });
-    history.mark(*obj, &finished);
-    ////observer.mark(doc, exid, finished.into_iter());
+    patch_log.mark(*obj, &finished);
 }
 
 fn observe_map_key<'a, I: Iterator<Item = &'a Op>>(
@@ -179,31 +172,22 @@ fn observe_map_key<'a, I: Iterator<Item = &'a Op>>(
 
 fn observe_map<'a, I: Iterator<Item = &'a Op>>(
     doc: &'a Automerge,
-    //observer: &mut O,
-    history: &mut History,
+    patch_log: &mut PatchLog,
     obj: &ObjId,
     ops: I,
 ) {
-    //let exid = doc.id_to_exid(obj.0);
     let ops_by_key = ops.group_by(|o| o.key);
     ops_by_key
         .into_iter()
         .filter_map(observe_map_key)
-        //.filter_map(|(i, put)| {
         .for_each(|(i, put)| {
-            //let tagged_value = (put.value.clone(), doc.id_to_exid(put.id));
             if let Some(prop_index) = put.key.prop_index() {
                 if let Some(key) = doc.ops().m.props.safe_get(prop_index) {
                     let conflict = i > 0;
-                    history.put_map(*obj, key, put.value.into(), put.id, conflict, false);
+                    patch_log.put_map(*obj, key, put.value.into(), put.id, conflict, false);
                 }
             }
-            //let prop = Prop::Map(key.to_string());
-            //Some((tagged_value, prop, conflict))
         });
-    //.for_each(|(tagged_value, prop, conflict)| {
-    //observer.put(doc, exid.clone(), prop, tagged_value, conflict);
-    //});
 }
 
 #[cfg(test)]
@@ -211,7 +195,7 @@ mod tests {
     use std::{borrow::Cow, fs};
 
     use crate::{
-        history::History, op_observer::TextRepresentation, transaction::Transactable, Automerge,
+        op_observer::TextRepresentation, patch_log::PatchLog, transaction::Transactable, Automerge,
         ObjType, Patch, PatchAction, Prop, Value,
     };
 
@@ -724,16 +708,16 @@ mod tests {
             fs::read("./tests/fixtures/".to_owned() + name).unwrap()
         }
 
-        let mut history = History::active();
+        let mut patch_log = PatchLog::active();
         let _doc = Automerge::load_with(
             &fixture("counter_value_is_ok.automerge"),
             crate::OnPartialLoad::Error,
             crate::storage::VerificationMode::Check,
-            &mut history,
+            &mut patch_log,
             TextRepresentation::default(),
         )
         .unwrap();
-        let p = _doc.make_patches(&mut history);
+        let p = _doc.make_patches(&mut patch_log);
 
         assert_eq!(
             Calls::from(p),

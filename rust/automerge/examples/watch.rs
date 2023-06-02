@@ -3,7 +3,7 @@ use automerge::transaction::Transactable;
 use automerge::Automerge;
 use automerge::AutomergeError;
 use automerge::ROOT;
-use automerge::{History, Patch, PatchAction};
+use automerge::{Patch, PatchAction, PatchLog};
 
 fn main() {
     let mut doc = Automerge::new();
@@ -18,9 +18,9 @@ fn main() {
             },
         )
         .unwrap();
-    get_changes(&doc, doc.make_patches(&mut result.history));
+    get_changes(&doc, doc.make_patches(&mut result.patch_log));
 
-    let mut tx = doc.transaction_with_history(History::active());
+    let mut tx = doc.transaction_with_patch_log(PatchLog::active());
     let map = tx
         .put_object(ROOT, "my new map", automerge::ObjType::Map)
         .unwrap();

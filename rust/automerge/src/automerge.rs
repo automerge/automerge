@@ -8,13 +8,13 @@ use itertools::Itertools;
 use crate::change_graph::ChangeGraph;
 use crate::columnar::Key as EncodedKey;
 use crate::exid::ExId;
-use crate::history::History;
 use crate::hydrate;
 use crate::iter::{Keys, ListRange, MapRange, Values};
 use crate::marks::{Mark, MarkStateMachine};
 use crate::op_observer::{Patch, TextRepresentation};
 use crate::op_set::OpSet;
 use crate::parents::Parents;
+use crate::patch_log::PatchLog;
 use crate::storage::{self, load, CompressConfig, VerificationMode};
 use crate::transaction::{self, CommitOptions, Failure, Success, Transaction, TransactionArgs};
 use crate::types::{
@@ -196,13 +196,13 @@ impl Automerge {
     /// Start a transaction.
     pub fn transaction(&mut self) -> Transaction<'_> {
         let args = self.transaction_args();
-        Transaction::new(self, args, History::innactive())
+        Transaction::new(self, args, PatchLog::inactive())
     }
 
-    /// Start a transaction with an observer
-    pub fn transaction_with_history(&mut self, history: History) -> Transaction<'_> {
+    /// Start a transaction which records changes in a [`PatchLog`]
+    pub fn transaction_with_patch_log(&mut self, patch_log: PatchLog) -> Transaction<'_> {
         let args = self.transaction_args();
-        Transaction::new(self, args, history)
+        Transaction::new(self, args, patch_log)
     }
 
     pub(crate) fn transaction_args(&mut self) -> TransactionArgs {
@@ -254,7 +254,7 @@ impl Automerge {
         let result = f(&mut tx);
         match result {
             Ok(result) => {
-                let (hash, history) = if let Some(c) = c {
+                let (hash, patch_log) = if let Some(c) = c {
                     let commit_options = c(&result);
                     tx.commit_with(commit_options)
                 } else {
@@ -263,7 +263,7 @@ impl Automerge {
                 Ok(Success {
                     result,
                     hash,
-                    history,
+                    patch_log,
                 })
             }
             Err(error) => Err(Failure {
@@ -300,7 +300,7 @@ impl Automerge {
         F: FnOnce(&mut Transaction<'_>) -> Result<O, E>,
         C: FnOnce(&O) -> CommitOptions,
     {
-        let mut tx = self.transaction_with_history(History::active());
+        let mut tx = self.transaction_with_patch_log(PatchLog::active());
         let result = f(&mut tx);
         match result {
             Ok(result) => {
@@ -313,7 +313,7 @@ impl Automerge {
                 Ok(Success {
                     result,
                     hash,
-                    history,
+                    patch_log: history,
                 })
             }
             Err(error) => Err(Failure {
@@ -427,7 +427,7 @@ impl Automerge {
             data,
             OnPartialLoad::Error,
             VerificationMode::Check,
-            &mut History::innactive(),
+            &mut PatchLog::inactive(),
             TextRepresentation::default(),
         )
     }
@@ -440,7 +440,7 @@ impl Automerge {
             data,
             OnPartialLoad::Error,
             VerificationMode::DontCheck,
-            &mut History::innactive(),
+            &mut PatchLog::inactive(),
             TextRepresentation::default(),
         )
     }
@@ -450,7 +450,7 @@ impl Automerge {
         data: &[u8],
         on_error: OnPartialLoad,
         mode: VerificationMode,
-        history: &mut History,
+        patch_log: &mut PatchLog,
         text_rep: TextRepresentation,
     ) -> Result<Self, AutomergeError> {
         if data.is_empty() {
@@ -538,21 +538,21 @@ impl Automerge {
                 }
             }
         }
-        if history.is_active() {
-            current_state::observe_current_state(&am, history);
+        if patch_log.is_active() {
+            current_state::observe_current_state(&am, patch_log);
         }
         Ok(am)
     }
 
-    pub fn make_patches(&self, history: &mut History) -> Vec<Patch> {
-        history.make_patches(self)
+    pub fn make_patches(&self, patch_log: &mut PatchLog) -> Vec<Patch> {
+        patch_log.make_patches(self)
     }
 
     /// convienence method for `doc.diff(&[], current_heads)`
     pub fn current_state(&self) -> Vec<Patch> {
-        let mut history = History::active();
-        current_state::observe_current_state(self, &mut history);
-        history.make_patches(self)
+        let mut patch_log = PatchLog::active();
+        current_state::observe_current_state(self, &mut patch_log);
+        patch_log.make_patches(self)
     }
 
     /// Load an incremental save of a document.
@@ -563,26 +563,26 @@ impl Automerge {
     /// The return value is the number of ops which were applied, this is not useful and will
     /// change in future.
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
-        self.load_incremental_with(data, &mut History::innactive())
+        self.load_incremental_with(data, &mut PatchLog::inactive())
     }
 
     /// Like [`Self::load_incremental`] but with an observer
     pub(crate) fn load_incremental_with(
         &mut self,
         data: &[u8],
-        history: &mut History,
+        patch_log: &mut PatchLog,
     ) -> Result<usize, AutomergeError> {
         if self.is_empty() {
             let mut doc = Self::load_with(
                 data,
                 OnPartialLoad::Ignore,
                 VerificationMode::Check,
-                &mut History::innactive(),
+                &mut PatchLog::inactive(),
                 self.text_rep,
             )?;
             doc = doc.with_actor(self.actor_id());
-            if history.is_active() {
-                current_state::observe_current_state(&doc, history);
+            if patch_log.is_active() {
+                current_state::observe_current_state(&doc, patch_log);
             }
             *self = doc;
             return Ok(self.ops.len());
@@ -595,7 +595,7 @@ impl Automerge {
             }
         };
         let start = self.ops.len();
-        self.apply_changes_with(changes, history)?;
+        self.apply_changes_with(changes, patch_log)?;
         let delta = self.ops.len() - start;
         Ok(delta)
     }
@@ -618,14 +618,14 @@ impl Automerge {
         &mut self,
         changes: impl IntoIterator<Item = Change>,
     ) -> Result<(), AutomergeError> {
-        self.apply_changes_with(changes, &mut History::innactive())
+        self.apply_changes_with(changes, &mut PatchLog::inactive())
     }
 
     /// Like [`Self::apply_changes`] but with an observer
     pub fn apply_changes_with<I: IntoIterator<Item = Change>>(
         &mut self,
         changes: I,
-        history: &mut History,
+        patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
         // Record this so we can avoid observing each individual change and instead just observe
         // the final state after all the changes have been applied. We can only do this for an
@@ -640,7 +640,7 @@ impl Automerge {
                     ));
                 }
                 if self.is_causally_ready(&c) {
-                    self.apply_change(c, history)?;
+                    self.apply_change(c, patch_log)?;
                 } else {
                     self.queue.push(c);
                 }
@@ -648,7 +648,7 @@ impl Automerge {
         }
         while let Some(c) = self.pop_next_causally_ready_change() {
             if !self.history_index.contains_key(&c.hash()) {
-                self.apply_change(c, history)?;
+                self.apply_change(c, patch_log)?;
             }
         }
         Ok(())
@@ -657,12 +657,12 @@ impl Automerge {
     fn apply_change(
         &mut self,
         change: Change,
-        history: &mut History,
+        patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
         let ops = self.import_ops(&change);
         self.update_history(change, ops.len());
         for (obj, op) in ops {
-            self.insert_op(&obj, op, history)?;
+            self.insert_op(&obj, op, patch_log)?;
         }
         Ok(())
     }
@@ -743,14 +743,14 @@ impl Automerge {
 
     /// Takes all the changes in `other` which are not in `self` and applies them
     pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
-        self.merge_with(other, &mut History::innactive())
+        self.merge_with(other, &mut PatchLog::inactive())
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
     pub fn merge_with(
         &mut self,
         other: &mut Self,
-        history: &mut History,
+        patch_log: &mut PatchLog,
     ) -> Result<Vec<ChangeHash>, AutomergeError> {
         // TODO: Make this fallible and figure out how to do this transactionally
         let changes = self
@@ -759,7 +759,7 @@ impl Automerge {
             .cloned()
             .collect::<Vec<_>>();
         tracing::trace!(changes=?changes.iter().map(|c| c.hash()).collect::<Vec<_>>(), "merging new changes");
-        self.apply_changes_with(changes, history)?;
+        self.apply_changes_with(changes, patch_log)?;
         Ok(self.get_heads())
     }
 
@@ -1050,12 +1050,12 @@ impl Automerge {
         &mut self,
         obj: &ObjId,
         op: Op,
-        history: &mut History,
+        patch_log: &mut PatchLog,
     ) -> Result<(), AutomergeError> {
-        let (pos, succ) = if history.is_active() {
+        let (pos, succ) = if patch_log.is_active() {
             let obj = self.get_obj_meta(*obj)?;
             let found = self.ops.find_op_with_observer(&obj, &op);
-            found.observe(&obj, &op, self, history);
+            found.observe(&obj, &op, self, patch_log);
             (found.pos, found.succ)
         } else {
             let found = self.ops.find_op_without_observer(obj, &op);
@@ -1076,10 +1076,10 @@ impl Automerge {
     pub fn diff(&self, before_heads: &[ChangeHash], after_heads: &[ChangeHash]) -> Vec<Patch> {
         let before = self.clock_at(before_heads);
         let after = self.clock_at(after_heads);
-        let mut history = History::active();
-        diff::observe_diff(self, &before, &after, &mut history);
-        history.heads = Some(after_heads.to_vec());
-        history.make_patches(self)
+        let mut patch_log = PatchLog::active();
+        diff::observe_diff(self, &before, &after, &mut patch_log);
+        patch_log.heads = Some(after_heads.to_vec());
+        patch_log.make_patches(self)
     }
 
     pub fn set_text_rep(&mut self, text_rep: TextRepresentation) {
