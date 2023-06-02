@@ -7,8 +7,9 @@ use crate::text_value::TextValue;
 
 /// A change to the current state of the document
 ///
-/// [`Patch`]es are obtained from a [`PatchLog`] which has been passed to any of the various
-/// methods which mutate a document and add incremental changes to the [`PatchLog`]
+/// [`Patch`]es are obtained from a [`PatchLog`](super::PatchLog) which has been passed to any of
+/// the various methods which mutate a document and add incremental changes to the
+/// [`PatchLog`](super::PatchLog)
 #[derive(Debug, Clone, PartialEq)]
 pub struct Patch {
     /// The object this patch modifies
@@ -29,7 +30,7 @@ pub enum PatchAction {
         value: (Value<'static>, ObjId),
         /// Whether there is a conflict at this key. If there is a conflict this patch represents
         /// the "winning" value of the conflict. The conflicting values can be obtained with
-        /// [`ReadDoc::get_all`]
+        /// [`crate::ReadDoc::get_all`]
         conflict: bool,
     },
     /// An index in a sequence was updated
@@ -40,14 +41,14 @@ pub enum PatchAction {
         value: (Value<'static>, ObjId),
         /// Whether there is a conflict at this index. If there is a conflict this patch represents
         /// the "winning" value of the conflict. The conflicting values can be obtained with
-        /// [`ReadDoc::get_all`]
+        /// [`crate::ReadDoc::get_all`]
         conflict: bool,
     },
     /// One or more elements were inserted into a sequence
     Insert {
         index: usize,
-        /// The values that were inserted, in order that they appear. As with [`PutMap`] and
-        /// [`PutSeq`] the object ID is only meaningful for `Value::Obj` values
+        /// The values that were inserted, in order that they appear. As with [`Self::PutMap`] and
+        /// [`Self::PutSeq`] the object ID is only meaningful for `Value::Obj` values
         values: SequenceTree<(Value<'static>, ObjId)>,
         conflict: bool,
     },
